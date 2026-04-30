@@ -16,6 +16,9 @@ import { notificationsRouter } from './routes/notifications';
 import { aiRouter } from './routes/ai';
 import { documentsRouter } from './routes/documents';
 import { openapiRouter } from './routes/openapi';
+import { imagesRouter } from './routes/images';
+import { moodBoardsRouter } from './routes/moodboards';
+import { listingPhotosRouter } from './routes/listing-photos';
 
 export type Bindings = {
   DB: D1Database;
@@ -54,6 +57,9 @@ app.route('/api/health', healthRouter);
 app.route('/api/notifications', notificationsRouter);
 app.route('/api/ai', aiRouter);
 app.route('/api/documents', documentsRouter);
+app.route('/api/images', imagesRouter);
+app.route('/api/moodboards', moodBoardsRouter);
+app.route('/api/listing-photos', listingPhotosRouter);
 app.route('/', openapiRouter);
 
 export { app };
