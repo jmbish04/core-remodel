@@ -7,7 +7,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import type { D1Database, Ai } from '@cloudflare/workers-types';
+import type { D1Database, Ai, VectorizeIndex, R2Bucket, KVNamespace } from '@cloudflare/workers-types';
 import { authRouter } from './routes/auth';
 import { dashboardRouter } from './routes/dashboard';
 import { threadsRouter } from './routes/threads';
@@ -20,8 +20,12 @@ import { openapiRouter } from './routes/openapi';
 export type Bindings = {
   DB: D1Database;
   AI: Ai;
+  VECTOR_INDEX: VectorizeIndex;
+  IMAGES_BUCKET: R2Bucket;
+  CACHE: KVNamespace;
   AI_GATEWAY_TOKEN?: string;
   CLOUDFLARE_ACCOUNT_ID?: string;
+  CLOUDFLARE_API_TOKEN?: string;
 };
 
 export type Variables = {

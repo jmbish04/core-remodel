@@ -30,6 +30,24 @@
   "ai": {
     "binding": "AI",
   },
+  "r2_buckets": [
+    {
+      "binding": "IMAGES_BUCKET",
+      "bucket_name": "remodel-images"
+    }
+  ],
+  "vectorize": [
+    {
+      "binding": "VECTOR_INDEX",
+      "index_name": "remodel-embeddings"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "placeholder"
+    }
+  ],
   "d1_databases": [
     {
       "binding": "DB",
