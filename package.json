@@ -1,7 +1,7 @@
 {
-  "name": "core-template-cfw-assets-astro-shadcn",
+  "name": "core-remodel",
   "version": "26.02.24",
-  "description": "The template helps you build apps with Astro, Tailwind CSS, and shadcn/ui.",
+  "description": "core-remodel moodboard and project management on cloudflare workers running Astro, Tailwind CSS, and shadcn/ui.",
   "license": "MIT",
   "author": {
     "name": "126colby",
@@ -9,7 +9,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/126colby/core-template-cfw-assets-astro-shadcn"
+    "url": "https://github.com/jmbish04/core-remodel"
   },
   "scripts": {
     "dev": "astro dev",
@@ -20,9 +20,9 @@
     "lint": "oxlint",
     "check": "oxlint && oxfmt",
     "db:generate": "drizzle-kit generate",
-    "migrate:local": "pnpm run db:generate && npx wrangler d1 migrations apply DB --local",
-    "migrate:remote": "pnpm run db:generate && npx wrangler d1 migrations apply DB --remote",
-    "deploy": "rm -f wrangler_deploy.log && pnpm run build && cp .assetsignore dist/.assetsignore && pnpm run migrate:remote && npx wrangler deploy > wrangler_deploy.log 2>&1",
+    "migrate:local": "pnpm run db:generate && npx wrangler@latest d1 migrations apply DB --local",
+    "migrate:remote": "pnpm run db:generate && npx wrangler@latest d1 migrations apply DB --remote",
+    "deploy": "pnpm run build && cp .assetsignore dist/.assetsignore && pnpm run migrate:remote && npx wrangler@latest deploy",
     "cf-typegen": "wrangler types"
   },
   "dependencies": {
