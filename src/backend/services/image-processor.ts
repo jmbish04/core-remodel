@@ -31,8 +31,8 @@ interface CloudflareImagesResponse {
     variants: string[];
   };
   success: boolean;
-  errors: any[];
-  messages: any[];
+  errors: unknown[];
+  messages: unknown[];
 }
 
 export class ImageProcessorService {
@@ -62,9 +62,16 @@ export class ImageProcessorService {
   private async analyzeImage(imageBlob: Blob): Promise<ImageAnalysisResult> {
     // Convert blob to base64 for AI model
     const arrayBuffer = await imageBlob.arrayBuffer();
-    const base64Image = btoa(
-      String.fromCharCode(...new Uint8Array(arrayBuffer))
-    );
+    const uint8Array = new Uint8Array(arrayBuffer);
+
+    // Convert to base64 in chunks to avoid stack overflow for large images
+    let binaryString = '';
+    const chunkSize = 8192;
+    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+      const chunk = uint8Array.subarray(i, i + chunkSize);
+      binaryString += String.fromCharCode(...chunk);
+    }
+    const base64Image = btoa(binaryString);
     const dataUrl = `data:${imageBlob.type};base64,${base64Image}`;
 
     // Use Llama Vision to analyze the image
@@ -96,10 +103,16 @@ Respond in JSON format:
     // Parse AI response
     let analysis: ImageAnalysisResult;
     try {
-      const responseText = (aiResponse as any).response || JSON.stringify(aiResponse);
+      const responseText = (aiResponse as { response?: string }).response || JSON.stringify(aiResponse);
       const jsonMatch = responseText.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
+        const parsed = JSON.parse(jsonMatch[0]) as {
+          roomType?: string;
+          keywords?: string[];
+          isInstagram?: boolean;
+          instagramAccount?: string | null;
+          instagramCaption?: string | null;
+        };
         analysis = {
           roomType: parsed.roomType || 'unknown',
           keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
@@ -173,7 +186,7 @@ Respond in JSON format:
       text: [text],
     });
 
-    const embeddings = (embeddingResponse as any).data[0];
+    const embeddings = (embeddingResponse as { data: number[][] }).data[0];
 
     // Upsert to Vectorize
     await this.vectorIndex.upsert([
@@ -281,7 +294,7 @@ Respond in JSON format:
       text: [query],
     });
 
-    const embeddings = (queryEmbedding as any).data[0];
+    const embeddings = (queryEmbedding as { data: number[][] }).data[0];
 
     // Query Vectorize
     const results = await this.vectorIndex.query(embeddings, {
