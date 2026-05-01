@@ -45,7 +45,13 @@
   "kv_namespaces": [
     {
       "binding": "CACHE",
-      "id": "placeholder"
+      "id": "b421459ad06e4ce995a59a95137fdee7",
+      "remote": true
+    },
+    {
+      "binding": "SESSIONS",
+      "id": "72cb78531333479db9f2c5252ac286a6",
+      "remote": true
     }
   ],
   "d1_databases": [
