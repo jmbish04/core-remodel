@@ -3,8 +3,6 @@
  */
 
 import { Hono } from 'hono';
-import { z } from 'zod';
-import { zValidator } from '@hono/zod-validator';
 import type { Bindings } from '../index';
 import { ImageProcessorService } from '../../services/image-processor';
 import { drizzle } from 'drizzle-orm/d1';
@@ -23,7 +21,7 @@ imagesRouter.post('/upload', async (c) => {
     const files: File[] = [];
 
     // Extract all files from form data
-    for (const [key, value] of formData.entries()) {
+    for (const [_key, value] of formData.entries()) {
       if (value instanceof File) {
         files.push(value);
       }
