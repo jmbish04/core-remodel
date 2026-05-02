@@ -1,5 +1,5 @@
 {
-  "name": "core-template-cfw-assets-astro-shadcn",
+  "name": "core-remodel",
   "main": "dist/_worker.js/index.js",
   "compatibility_date": "2026-03-09",
   "compatibility_flags": ["nodejs_compat"],
