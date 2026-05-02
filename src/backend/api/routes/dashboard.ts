@@ -2,23 +2,25 @@
  * @fileoverview Dashboard API routes
  */
 
-import { Hono } from 'hono';
-import { drizzle } from 'drizzle-orm/d1';
-import { desc, eq, and, gte } from 'drizzle-orm';
-import { dashboardMetrics } from '../../db/schema';
-import { authMiddleware } from '../middleware/auth';
-import type { Bindings, Variables } from '../index';
+import { desc, eq, and, gte } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { Hono } from "hono";
+
+import type { Bindings, Variables } from "../index";
+
+import { dashboardMetrics } from "../../db/schema";
+import { authMiddleware } from "../middleware/auth";
 
 const dashboardRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 // Apply auth middleware to all routes
-dashboardRouter.use('*', authMiddleware);
+dashboardRouter.use("*", authMiddleware);
 
 // GET /api/dashboard/metrics
-dashboardRouter.get('/metrics', async (c) => {
+dashboardRouter.get("/metrics", async (c) => {
   const db = drizzle(c.env.DB);
-  const category = c.req.query('category');
-  const limit = parseInt(c.req.query('limit') || '100');
+  const category = c.req.query("category");
+  const limit = parseInt(c.req.query("limit") || "100");
 
   try {
     let query = db.select().from(dashboardMetrics);
@@ -27,18 +29,19 @@ dashboardRouter.get('/metrics', async (c) => {
       query = query.where(eq(dashboardMetrics.category, category));
     }
 
-    const metrics = await query
-      .orderBy(desc(dashboardMetrics.timestamp))
-      .limit(limit);
+    const metrics = await query.orderBy(desc(dashboardMetrics.timestamp)).limit(limit);
 
     // Group metrics by category
-    const grouped = metrics.reduce((acc, metric) => {
-      if (!acc[metric.category]) {
-        acc[metric.category] = [];
-      }
-      acc[metric.category].push(metric);
-      return acc;
-    }, {} as Record<string, typeof metrics>);
+    const grouped = metrics.reduce(
+      (acc, metric) => {
+        if (!acc[metric.category]) {
+          acc[metric.category] = [];
+        }
+        acc[metric.category].push(metric);
+        return acc;
+      },
+      {} as Record<string, typeof metrics>,
+    );
 
     return c.json({
       metrics,
@@ -46,13 +49,13 @@ dashboardRouter.get('/metrics', async (c) => {
       total: metrics.length,
     });
   } catch (error) {
-    console.error('Error fetching dashboard metrics:', error);
-    return c.json({ error: 'Failed to fetch metrics' }, 500);
+    console.error("Error fetching dashboard metrics:", error);
+    return c.json({ error: "Failed to fetch metrics" }, 500);
   }
 });
 
 // GET /api/dashboard/summary
-dashboardRouter.get('/summary', async (c) => {
+dashboardRouter.get("/summary", async (c) => {
   const db = drizzle(c.env.DB);
 
   try {
@@ -64,27 +67,33 @@ dashboardRouter.get('/summary', async (c) => {
       .limit(1000);
 
     // Get the most recent metric for each metric name
-    const latestMetrics = allMetrics.reduce((acc, metric) => {
-      if (!acc[metric.metricName] || new Date(metric.timestamp) > new Date(acc[metric.metricName].timestamp)) {
-        acc[metric.metricName] = metric;
-      }
-      return acc;
-    }, {} as Record<string, typeof allMetrics[0]>);
+    const latestMetrics = allMetrics.reduce(
+      (acc, metric) => {
+        if (
+          !acc[metric.metricName] ||
+          new Date(metric.timestamp) > new Date(acc[metric.metricName].timestamp)
+        ) {
+          acc[metric.metricName] = metric;
+        }
+        return acc;
+      },
+      {} as Record<string, (typeof allMetrics)[0]>,
+    );
 
     return c.json({
       summary: Object.values(latestMetrics),
     });
   } catch (error) {
-    console.error('Error fetching dashboard summary:', error);
-    return c.json({ error: 'Failed to fetch summary' }, 500);
+    console.error("Error fetching dashboard summary:", error);
+    return c.json({ error: "Failed to fetch summary" }, 500);
   }
 });
 
 // GET /api/dashboard/charts/:category
-dashboardRouter.get('/charts/:category', async (c) => {
+dashboardRouter.get("/charts/:category", async (c) => {
   const db = drizzle(c.env.DB);
-  const category = c.req.param('category');
-  const days = parseInt(c.req.query('days') || '7');
+  const category = c.req.param("category");
+  const days = parseInt(c.req.query("days") || "7");
 
   try {
     const startDate = new Date();
@@ -97,8 +106,8 @@ dashboardRouter.get('/charts/:category', async (c) => {
       .where(
         and(
           eq(dashboardMetrics.category, category),
-          gte(dashboardMetrics.timestamp, startTimestamp)
-        )
+          gte(dashboardMetrics.timestamp, startTimestamp),
+        ),
       )
       .orderBy(desc(dashboardMetrics.timestamp));
 
@@ -112,8 +121,8 @@ dashboardRouter.get('/charts/:category', async (c) => {
 
     return c.json({ data: chartData });
   } catch (error) {
-    console.error('Error fetching chart data:', error);
-    return c.json({ error: 'Failed to fetch chart data' }, 500);
+    console.error("Error fetching chart data:", error);
+    return c.json({ error: "Failed to fetch chart data" }, 500);
   }
 });
 

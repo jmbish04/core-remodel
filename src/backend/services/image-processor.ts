@@ -8,10 +8,12 @@
  * - Vectorize embedding generation and storage
  */
 
-import type { Ai, VectorizeIndex, D1Database } from '@cloudflare/workers-types';
-import { drizzle } from 'drizzle-orm/d1';
-import { images } from '../db/schema';
-import { randomUUID } from 'node:crypto';
+import type { Ai, VectorizeIndex, D1Database } from "@cloudflare/workers-types";
+
+import { drizzle } from "drizzle-orm/d1";
+import { randomUUID } from "node:crypto";
+
+import { images } from "../db/schema";
 
 interface ImageAnalysisResult {
   roomType: string;
@@ -47,7 +49,7 @@ export class ImageProcessorService {
     vectorIndex: VectorizeIndex,
     db: D1Database,
     accountId: string,
-    apiToken: string
+    apiToken: string,
   ) {
     this.ai = ai;
     this.vectorIndex = vectorIndex;
@@ -65,7 +67,7 @@ export class ImageProcessorService {
     const uint8Array = new Uint8Array(arrayBuffer);
 
     // Convert to base64 in chunks to avoid stack overflow for large images
-    let binaryString = '';
+    let binaryString = "";
     const chunkSize = 8192;
     for (let i = 0; i < uint8Array.length; i += chunkSize) {
       const chunk = uint8Array.subarray(i, i + chunkSize);
@@ -90,10 +92,10 @@ Respond in JSON format:
   "instagramCaption": "string or null"
 }`;
 
-    const aiResponse = await this.ai.run('@cf/meta/llama-3.2-11b-vision-instruct', {
+    const aiResponse = await this.ai.run("@cf/meta/llama-3.2-11b-vision-instruct", {
       messages: [
         {
-          role: 'user',
+          role: "user",
           content: analysisPrompt,
         },
       ],
@@ -103,7 +105,8 @@ Respond in JSON format:
     // Parse AI response
     let analysis: ImageAnalysisResult;
     try {
-      const responseText = (aiResponse as { response?: string }).response || JSON.stringify(aiResponse);
+      const responseText =
+        (aiResponse as { response?: string }).response || JSON.stringify(aiResponse);
       const jsonMatch = responseText.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]) as {
@@ -114,7 +117,7 @@ Respond in JSON format:
           instagramCaption?: string | null;
         };
         analysis = {
-          roomType: parsed.roomType || 'unknown',
+          roomType: parsed.roomType || "unknown",
           keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
           isInstagram: parsed.isInstagram || false,
           instagramAccount: parsed.instagramAccount || undefined,
@@ -124,16 +127,16 @@ Respond in JSON format:
       } else {
         // Fallback if parsing fails
         analysis = {
-          roomType: 'unknown',
+          roomType: "unknown",
           keywords: [],
           isInstagram: false,
           needsCrop: false,
         };
       }
     } catch (error) {
-      console.error('Failed to parse AI response:', error);
+      console.error("Failed to parse AI response:", error);
       analysis = {
-        roomType: 'unknown',
+        roomType: "unknown",
         keywords: [],
         isInstagram: false,
         needsCrop: false,
@@ -148,19 +151,19 @@ Respond in JSON format:
    */
   private async uploadToCloudflareImages(
     imageBlob: Blob,
-    customId?: string
+    customId?: string,
   ): Promise<CloudflareImagesResponse> {
     const formData = new FormData();
-    formData.append('file', imageBlob);
+    formData.append("file", imageBlob);
 
     if (customId) {
-      formData.append('id', customId);
+      formData.append("id", customId);
     }
 
     const apiUrl = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/images/v1`;
 
     const response = await fetch(apiUrl, {
-      method: 'POST',
+      method: "POST",
       headers: {
         Authorization: `Bearer ${this.apiToken}`,
       },
@@ -177,12 +180,9 @@ Respond in JSON format:
   /**
    * Generate and store vector embeddings
    */
-  private async generateAndStoreEmbeddings(
-    imageId: string,
-    text: string
-  ): Promise<void> {
+  private async generateAndStoreEmbeddings(imageId: string, text: string): Promise<void> {
     // Generate embedding from keywords and room type
-    const embeddingResponse = await this.ai.run('@cf/baai/bge-base-en-v1.5', {
+    const embeddingResponse = await this.ai.run("@cf/baai/bge-base-en-v1.5", {
       text: [text],
     });
 
@@ -206,7 +206,7 @@ Respond in JSON format:
    */
   async processImage(
     file: File,
-    isListingPhoto: boolean = false
+    isListingPhoto: boolean = false,
   ): Promise<{ success: boolean; imageId: string; error?: string }> {
     try {
       const imageId = randomUUID();
@@ -218,7 +218,7 @@ Respond in JSON format:
       const originalUpload = await this.uploadToCloudflareImages(file, imageId);
 
       if (!originalUpload.success) {
-        throw new Error('Failed to upload original image');
+        throw new Error("Failed to upload original image");
       }
 
       let optimizedImageId: string | null = null;
@@ -254,7 +254,7 @@ Respond in JSON format:
       });
 
       // Step 5: Generate embeddings and store in Vectorize
-      const embeddingText = `${analysis.roomType} ${analysis.keywords.join(' ')} ${analysis.instagramCaption || ''}`;
+      const embeddingText = `${analysis.roomType} ${analysis.keywords.join(" ")} ${analysis.instagramCaption || ""}`;
       await this.generateAndStoreEmbeddings(imageId, embeddingText);
 
       return {
@@ -262,11 +262,11 @@ Respond in JSON format:
         imageId,
       };
     } catch (error) {
-      console.error('Error processing image:', error);
+      console.error("Error processing image:", error);
       return {
         success: false,
-        imageId: '',
-        error: error instanceof Error ? error.message : 'Unknown error',
+        imageId: "",
+        error: error instanceof Error ? error.message : "Unknown error",
       };
     }
   }
@@ -276,11 +276,9 @@ Respond in JSON format:
    */
   async processBulkImages(
     files: File[],
-    isListingPhoto: boolean = false
+    isListingPhoto: boolean = false,
   ): Promise<Array<{ success: boolean; imageId: string; error?: string }>> {
-    const results = await Promise.all(
-      files.map((file) => this.processImage(file, isListingPhoto))
-    );
+    const results = await Promise.all(files.map((file) => this.processImage(file, isListingPhoto)));
 
     return results;
   }
@@ -290,7 +288,7 @@ Respond in JSON format:
    */
   async searchImages(query: string, topK: number = 10) {
     // Generate embedding for query
-    const queryEmbedding = await this.ai.run('@cf/baai/bge-base-en-v1.5', {
+    const queryEmbedding = await this.ai.run("@cf/baai/bge-base-en-v1.5", {
       text: [query],
     });
 
@@ -299,7 +297,7 @@ Respond in JSON format:
     // Query Vectorize
     const results = await this.vectorIndex.query(embeddings, {
       topK,
-      returnMetadata: 'all',
+      returnMetadata: "all",
     });
 
     return results;

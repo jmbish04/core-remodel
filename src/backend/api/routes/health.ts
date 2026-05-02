@@ -2,16 +2,18 @@
  * @fileoverview Health monitoring API routes
  */
 
-import { Hono } from 'hono';
-import { drizzle } from 'drizzle-orm/d1';
-import { desc, eq } from 'drizzle-orm';
-import { healthChecks } from '../../db/schema';
-import type { Bindings } from '../index';
+import { desc, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { Hono } from "hono";
+
+import type { Bindings } from "../index";
+
+import { healthChecks } from "../../db/schema";
 
 const healthRouter = new Hono<{ Bindings: Bindings }>();
 
 // GET /api/health
-healthRouter.get('/', async (c) => {
+healthRouter.get("/", async (c) => {
   const db = drizzle(c.env.DB);
   const startTime = Date.now();
 
@@ -27,27 +29,30 @@ healthRouter.get('/', async (c) => {
       .orderBy(desc(healthChecks.timestamp))
       .limit(100);
 
-    const latestChecks = allChecks.reduce((acc, check) => {
-      if (!acc[check.serviceName]) {
-        acc[check.serviceName] = check;
-      }
-      return acc;
-    }, {} as Record<string, typeof allChecks[0]>);
+    const latestChecks = allChecks.reduce(
+      (acc, check) => {
+        if (!acc[check.serviceName]) {
+          acc[check.serviceName] = check;
+        }
+        return acc;
+      },
+      {} as Record<string, (typeof allChecks)[0]>,
+    );
 
     // Determine overall status
     const statuses = Object.values(latestChecks).map((c) => c.status);
-    let overallStatus = 'healthy';
+    let overallStatus = "healthy";
 
-    if (statuses.includes('down')) {
-      overallStatus = 'down';
-    } else if (statuses.includes('degraded')) {
-      overallStatus = 'degraded';
+    if (statuses.includes("down")) {
+      overallStatus = "down";
+    } else if (statuses.includes("degraded")) {
+      overallStatus = "degraded";
     }
 
     // Record this health check
     await db.insert(healthChecks).values({
-      serviceName: 'api',
-      status: 'healthy',
+      serviceName: "api",
+      status: "healthy",
       responseTime: dbResponseTime,
       timestamp: new Date(),
     });
@@ -59,23 +64,23 @@ healthRouter.get('/', async (c) => {
       responseTime: Date.now() - startTime,
     });
   } catch (error) {
-    console.error('Health check error:', error);
+    console.error("Health check error:", error);
     return c.json(
       {
-        status: 'down',
+        status: "down",
         timestamp: new Date().toISOString(),
-        error: 'Health check failed',
+        error: "Health check failed",
       },
-      503
+      503,
     );
   }
 });
 
 // GET /api/health/history
-healthRouter.get('/history', async (c) => {
+healthRouter.get("/history", async (c) => {
   const db = drizzle(c.env.DB);
-  const service = c.req.query('service');
-  const limit = parseInt(c.req.query('limit') || '100');
+  const service = c.req.query("service");
+  const limit = parseInt(c.req.query("limit") || "100");
 
   try {
     let query = db.select().from(healthChecks);
@@ -84,14 +89,12 @@ healthRouter.get('/history', async (c) => {
       query = query.where(eq(healthChecks.serviceName, service));
     }
 
-    const history = await query
-      .orderBy(desc(healthChecks.timestamp))
-      .limit(limit);
+    const history = await query.orderBy(desc(healthChecks.timestamp)).limit(limit);
 
     return c.json({ history });
   } catch (error) {
-    console.error('Error fetching health history:', error);
-    return c.json({ error: 'Failed to fetch health history' }, 500);
+    console.error("Error fetching health history:", error);
+    return c.json({ error: "Failed to fetch health history" }, 500);
   }
 });
 

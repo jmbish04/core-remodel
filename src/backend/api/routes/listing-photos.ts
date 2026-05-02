@@ -2,11 +2,13 @@
  * @fileoverview Listing Photos API routes
  */
 
-import { Hono } from 'hono';
-import type { Bindings } from '../index';
-import { drizzle } from 'drizzle-orm/d1';
-import { listingPhotos, aiEdits } from '../../db/schema';
-import { eq } from 'drizzle-orm';
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { Hono } from "hono";
+
+import type { Bindings } from "../index";
+
+import { listingPhotos, aiEdits } from "../../db/schema";
 
 const listingPhotosRouter = new Hono<{ Bindings: Bindings }>();
 
@@ -14,7 +16,7 @@ const listingPhotosRouter = new Hono<{ Bindings: Bindings }>();
  * GET /api/listing-photos
  * List all listing photos
  */
-listingPhotosRouter.get('/', async (c) => {
+listingPhotosRouter.get("/", async (c) => {
   try {
     const db = drizzle(c.env.DB);
     const photos = await db.select().from(listingPhotos).all();
@@ -27,10 +29,10 @@ listingPhotosRouter.get('/', async (c) => {
   } catch (error) {
     return c.json(
       {
-        error: 'Failed to list listing photos',
-        details: error instanceof Error ? error.message : 'Unknown error',
+        error: "Failed to list listing photos",
+        details: error instanceof Error ? error.message : "Unknown error",
       },
-      500
+      500,
     );
   }
 });
@@ -39,7 +41,7 @@ listingPhotosRouter.get('/', async (c) => {
  * POST /api/listing-photos
  * Add a new listing photo
  */
-listingPhotosRouter.post('/', async (c) => {
+listingPhotosRouter.post("/", async (c) => {
   try {
     const db = drizzle(c.env.DB);
     const body = await c.req.json();
@@ -47,7 +49,7 @@ listingPhotosRouter.post('/', async (c) => {
     const { cfImageId, roomName, description } = body;
 
     if (!cfImageId || !roomName) {
-      return c.json({ error: 'cfImageId and roomName are required' }, 400);
+      return c.json({ error: "cfImageId and roomName are required" }, 400);
     }
 
     const result = await db
@@ -67,10 +69,10 @@ listingPhotosRouter.post('/', async (c) => {
   } catch (error) {
     return c.json(
       {
-        error: 'Failed to create listing photo',
-        details: error instanceof Error ? error.message : 'Unknown error',
+        error: "Failed to create listing photo",
+        details: error instanceof Error ? error.message : "Unknown error",
       },
-      500
+      500,
     );
   }
 });
@@ -79,16 +81,16 @@ listingPhotosRouter.post('/', async (c) => {
  * POST /api/listing-photos/:id/edit
  * Generate an AI-edited version of a listing photo
  */
-listingPhotosRouter.post('/:id/edit', async (c) => {
+listingPhotosRouter.post("/:id/edit", async (c) => {
   try {
     const db = drizzle(c.env.DB);
-    const photoId = parseInt(c.req.param('id'));
+    const photoId = parseInt(c.req.param("id"));
     const body = await c.req.json();
 
     const { prompt } = body;
 
     if (!prompt) {
-      return c.json({ error: 'Prompt is required' }, 400);
+      return c.json({ error: "Prompt is required" }, 400);
     }
 
     // Check if listing photo exists
@@ -99,7 +101,7 @@ listingPhotosRouter.post('/:id/edit', async (c) => {
       .get();
 
     if (!listingPhoto) {
-      return c.json({ error: 'Listing photo not found' }, 404);
+      return c.json({ error: "Listing photo not found" }, 404);
     }
 
     // TODO: Implement actual AI image editing
@@ -124,17 +126,17 @@ listingPhotosRouter.post('/:id/edit', async (c) => {
 
     return c.json({
       success: true,
-      message: 'AI edit created (placeholder)',
+      message: "AI edit created (placeholder)",
       edit,
-      note: 'In production, this would generate an actual AI-edited image',
+      note: "In production, this would generate an actual AI-edited image",
     });
   } catch (error) {
     return c.json(
       {
-        error: 'Failed to create AI edit',
-        details: error instanceof Error ? error.message : 'Unknown error',
+        error: "Failed to create AI edit",
+        details: error instanceof Error ? error.message : "Unknown error",
       },
-      500
+      500,
     );
   }
 });
@@ -143,10 +145,10 @@ listingPhotosRouter.post('/:id/edit', async (c) => {
  * GET /api/listing-photos/:id/edits
  * Get all AI edits for a listing photo
  */
-listingPhotosRouter.get('/:id/edits', async (c) => {
+listingPhotosRouter.get("/:id/edits", async (c) => {
   try {
     const db = drizzle(c.env.DB);
-    const photoId = parseInt(c.req.param('id'));
+    const photoId = parseInt(c.req.param("id"));
 
     const edits = await db
       .select()
@@ -162,10 +164,10 @@ listingPhotosRouter.get('/:id/edits', async (c) => {
   } catch (error) {
     return c.json(
       {
-        error: 'Failed to get AI edits',
-        details: error instanceof Error ? error.message : 'Unknown error',
+        error: "Failed to get AI edits",
+        details: error instanceof Error ? error.message : "Unknown error",
       },
-      500
+      500,
     );
   }
 });
@@ -174,10 +176,10 @@ listingPhotosRouter.get('/:id/edits', async (c) => {
  * DELETE /api/listing-photos/:id
  * Delete a listing photo
  */
-listingPhotosRouter.delete('/:id', async (c) => {
+listingPhotosRouter.delete("/:id", async (c) => {
   try {
     const db = drizzle(c.env.DB);
-    const photoId = parseInt(c.req.param('id'));
+    const photoId = parseInt(c.req.param("id"));
 
     // Check if exists
     const existing = await db
@@ -187,7 +189,7 @@ listingPhotosRouter.delete('/:id', async (c) => {
       .get();
 
     if (!existing) {
-      return c.json({ error: 'Listing photo not found' }, 404);
+      return c.json({ error: "Listing photo not found" }, 404);
     }
 
     // Delete (cascade will handle aiEdits)
@@ -195,15 +197,15 @@ listingPhotosRouter.delete('/:id', async (c) => {
 
     return c.json({
       success: true,
-      message: 'Listing photo deleted successfully',
+      message: "Listing photo deleted successfully",
     });
   } catch (error) {
     return c.json(
       {
-        error: 'Failed to delete listing photo',
-        details: error instanceof Error ? error.message : 'Unknown error',
+        error: "Failed to delete listing photo",
+        details: error instanceof Error ? error.message : "Unknown error",
       },
-      500
+      500,
     );
   }
 });

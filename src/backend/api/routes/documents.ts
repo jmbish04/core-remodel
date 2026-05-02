@@ -2,19 +2,21 @@
  * @fileoverview Documents API routes for PlateJS integration
  */
 
-import { Hono } from 'hono';
-import { zValidator } from '@hono/zod-validator';
-import { z } from 'zod';
-import { drizzle } from 'drizzle-orm/d1';
-import { desc, eq } from 'drizzle-orm';
-import { documents } from '../../db/schema';
-import { authMiddleware } from '../middleware/auth';
-import type { Bindings, Variables } from '../index';
+import { zValidator } from "@hono/zod-validator";
+import { desc, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { Hono } from "hono";
+import { z } from "zod";
+
+import type { Bindings, Variables } from "../index";
+
+import { documents } from "../../db/schema";
+import { authMiddleware } from "../middleware/auth";
 
 const documentsRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 // Apply auth middleware
-documentsRouter.use('*', authMiddleware);
+documentsRouter.use("*", authMiddleware);
 
 const createDocumentSchema = z.object({
   title: z.string().min(1),
@@ -22,9 +24,9 @@ const createDocumentSchema = z.object({
 });
 
 // GET /api/documents
-documentsRouter.get('/', async (c) => {
+documentsRouter.get("/", async (c) => {
   const db = drizzle(c.env.DB);
-  const userId = c.get('userId')!;
+  const userId = c.get("userId")!;
 
   try {
     const userDocuments = await db
@@ -35,16 +37,16 @@ documentsRouter.get('/', async (c) => {
 
     return c.json({ documents: userDocuments });
   } catch (error) {
-    console.error('Error fetching documents:', error);
-    return c.json({ error: 'Failed to fetch documents' }, 500);
+    console.error("Error fetching documents:", error);
+    return c.json({ error: "Failed to fetch documents" }, 500);
   }
 });
 
 // POST /api/documents
-documentsRouter.post('/', zValidator('json', createDocumentSchema), async (c) => {
+documentsRouter.post("/", zValidator("json", createDocumentSchema), async (c) => {
   const db = drizzle(c.env.DB);
-  const userId = c.get('userId')!;
-  const { title, content } = c.req.valid('json');
+  const userId = c.get("userId")!;
+  const { title, content } = c.req.valid("json");
 
   try {
     const result = await db
@@ -58,16 +60,16 @@ documentsRouter.post('/', zValidator('json', createDocumentSchema), async (c) =>
 
     return c.json({ document: result[0] }, 201);
   } catch (error) {
-    console.error('Error creating document:', error);
-    return c.json({ error: 'Failed to create document' }, 500);
+    console.error("Error creating document:", error);
+    return c.json({ error: "Failed to create document" }, 500);
   }
 });
 
 // GET /api/documents/:id
-documentsRouter.get('/:id', async (c) => {
+documentsRouter.get("/:id", async (c) => {
   const db = drizzle(c.env.DB);
-  const userId = c.get('userId')!;
-  const documentId = parseInt(c.req.param('id'));
+  const userId = c.get("userId")!;
+  const documentId = parseInt(c.req.param("id"));
 
   try {
     const documentResult = await db
@@ -77,28 +79,28 @@ documentsRouter.get('/:id', async (c) => {
       .limit(1);
 
     if (documentResult.length === 0) {
-      return c.json({ error: 'Document not found' }, 404);
+      return c.json({ error: "Document not found" }, 404);
     }
 
     const document = documentResult[0];
 
     if (document.userId !== userId) {
-      return c.json({ error: 'Unauthorized' }, 403);
+      return c.json({ error: "Unauthorized" }, 403);
     }
 
     return c.json({ document });
   } catch (error) {
-    console.error('Error fetching document:', error);
-    return c.json({ error: 'Failed to fetch document' }, 500);
+    console.error("Error fetching document:", error);
+    return c.json({ error: "Failed to fetch document" }, 500);
   }
 });
 
 // PUT /api/documents/:id
-documentsRouter.put('/:id', zValidator('json', createDocumentSchema), async (c) => {
+documentsRouter.put("/:id", zValidator("json", createDocumentSchema), async (c) => {
   const db = drizzle(c.env.DB);
-  const userId = c.get('userId')!;
-  const documentId = parseInt(c.req.param('id'));
-  const { title, content } = c.req.valid('json');
+  const userId = c.get("userId")!;
+  const documentId = parseInt(c.req.param("id"));
+  const { title, content } = c.req.valid("json");
 
   try {
     // Verify ownership
@@ -109,7 +111,7 @@ documentsRouter.put('/:id', zValidator('json', createDocumentSchema), async (c) 
       .limit(1);
 
     if (documentResult.length === 0 || documentResult[0].userId !== userId) {
-      return c.json({ error: 'Document not found' }, 404);
+      return c.json({ error: "Document not found" }, 404);
     }
 
     // Update document
@@ -125,16 +127,16 @@ documentsRouter.put('/:id', zValidator('json', createDocumentSchema), async (c) 
 
     return c.json({ document: result[0] });
   } catch (error) {
-    console.error('Error updating document:', error);
-    return c.json({ error: 'Failed to update document' }, 500);
+    console.error("Error updating document:", error);
+    return c.json({ error: "Failed to update document" }, 500);
   }
 });
 
 // DELETE /api/documents/:id
-documentsRouter.delete('/:id', async (c) => {
+documentsRouter.delete("/:id", async (c) => {
   const db = drizzle(c.env.DB);
-  const userId = c.get('userId')!;
-  const documentId = parseInt(c.req.param('id'));
+  const userId = c.get("userId")!;
+  const documentId = parseInt(c.req.param("id"));
 
   try {
     // Verify ownership
@@ -145,15 +147,15 @@ documentsRouter.delete('/:id', async (c) => {
       .limit(1);
 
     if (documentResult.length === 0 || documentResult[0].userId !== userId) {
-      return c.json({ error: 'Document not found' }, 404);
+      return c.json({ error: "Document not found" }, 404);
     }
 
     await db.delete(documents).where(eq(documents.id, documentId));
 
-    return c.json({ message: 'Document deleted successfully' });
+    return c.json({ message: "Document deleted successfully" });
   } catch (error) {
-    console.error('Error deleting document:', error);
-    return c.json({ error: 'Failed to delete document' }, 500);
+    console.error("Error deleting document:", error);
+    return c.json({ error: "Failed to delete document" }, 500);
   }
 });
 
