@@ -7,7 +7,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import type { D1Database, Ai } from '@cloudflare/workers-types';
+import type { D1Database, Ai, VectorizeIndex, R2Bucket, KVNamespace } from '@cloudflare/workers-types';
 import { authRouter } from './routes/auth';
 import { dashboardRouter } from './routes/dashboard';
 import { threadsRouter } from './routes/threads';
@@ -16,12 +16,19 @@ import { notificationsRouter } from './routes/notifications';
 import { aiRouter } from './routes/ai';
 import { documentsRouter } from './routes/documents';
 import { openapiRouter } from './routes/openapi';
+import { imagesRouter } from './routes/images';
+import { moodBoardsRouter } from './routes/moodboards';
+import { listingPhotosRouter } from './routes/listing-photos';
 
 export type Bindings = {
   DB: D1Database;
   AI: Ai;
+  VECTOR_INDEX: VectorizeIndex;
+  IMAGES_BUCKET: R2Bucket;
+  CACHE: KVNamespace;
   AI_GATEWAY_TOKEN?: string;
   CLOUDFLARE_ACCOUNT_ID?: string;
+  CLOUDFLARE_API_TOKEN?: string;
 };
 
 export type Variables = {
@@ -50,6 +57,9 @@ app.route('/api/health', healthRouter);
 app.route('/api/notifications', notificationsRouter);
 app.route('/api/ai', aiRouter);
 app.route('/api/documents', documentsRouter);
+app.route('/api/images', imagesRouter);
+app.route('/api/moodboards', moodBoardsRouter);
+app.route('/api/listing-photos', listingPhotosRouter);
 app.route('/', openapiRouter);
 
 export { app };

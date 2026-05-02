@@ -134,3 +134,67 @@ export const documents = sqliteTable("documents", {
     .notNull()
     .default(sql`(unixepoch())`),
 });
+
+/**
+ * Images table for remodel mood board system
+ */
+export const images = sqliteTable("images", {
+  id: text("id").primaryKey(), // UUID
+  cfImageIdOriginal: text("cf_image_id_original").notNull(),
+  cfImageIdOptimized: text("cf_image_id_optimized"),
+  roomType: text("room_type"), // e.g., "kitchen", "bathroom", "living room"
+  isInstagram: integer("is_instagram", { mode: "boolean" }).notNull().default(false),
+  instagramAccount: text("instagram_account"),
+  instagramCaption: text("instagram_caption"),
+  metadata: text("metadata"), // JSON for keywords/structured AI response
+  isListingPhoto: integer("is_listing_photo", { mode: "boolean" }).notNull().default(false),
+  datetimeCreated: integer("datetime_created", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
+
+/**
+ * Mood boards table
+ */
+export const moodBoards = sqliteTable("mood_boards", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  name: text("name").notNull(),
+  description: text("description"),
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  backgroundColor: text("background_color").default("#ffffff"),
+  layoutState: text("layout_state"), // JSON for positions/styles
+  datetimeCreated: integer("datetime_created", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  datetimeLastModified: integer("datetime_last_modified", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
+
+/**
+ * Listing photos table - separate tracking for house stock photos
+ */
+export const listingPhotos = sqliteTable("listing_photos", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  cfImageId: text("cf_image_id").notNull(),
+  roomName: text("room_name").notNull(),
+  description: text("description"),
+  datetimeCreated: integer("datetime_created", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
+
+/**
+ * AI edits table for tracking AI-generated image modifications
+ */
+export const aiEdits = sqliteTable("ai_edits", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  originalListingId: integer("original_listing_id")
+    .notNull()
+    .references(() => listingPhotos.id, { onDelete: "cascade" }),
+  prompt: text("prompt").notNull(),
+  generatedCfImageId: text("generated_cf_image_id").notNull(),
+  datetimeCreated: integer("datetime_created", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
