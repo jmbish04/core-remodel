@@ -20,7 +20,7 @@ for (const [key, val] of Object.entries(data.images)) {
   const tagsStr = val.tags ? JSON.stringify(val.tags).replace(/'/g, "''") : "[]";
   
   // Create an INSERT statement
-  sql += `INSERT INTO image_reviews (id, filename, path, room, note, ig_account, visible_caption, tags, updated_at) VALUES ('${crypto.randomUUID()}', '${filename}', '${path}', '${room}', '${note}', '${igAccount}', '${visibleCaption}', '${tagsStr}', CURRENT_TIMESTAMP);\n`;
+  sql += `INSERT INTO image_reviews (id, filename, path, room, note, ig_account, visible_caption, tags, updated_at) VALUES ('${crypto.randomUUID()}', '${filename}', '${path}', '${room}', '${note}', '${igAccount}', '${visibleCaption}', '${tagsStr}', unixepoch());\n`;
 }
 
 fs.writeFileSync('seed.sql', sql);
