@@ -1,6 +1,6 @@
 {
-  "name": "core-template-cfw-assets-astro-shadcn",
-  "main": "dist/_worker.js/index.js",
+  "name": "core-remodel",
+  "main": "src/_worker.ts",
   "compatibility_date": "2026-03-09",
   "compatibility_flags": ["nodejs_compat"],
   "upload_source_maps": true,
@@ -13,131 +13,140 @@
       "enabled": true,
       "head_sampling_rate": 1,
       "persist": true,
-      "invocation_logs": true,
-    },
+      "invocation_logs": true},
     "traces": {
-      "enabled": false,
+      "enabled": true,
       "persist": true,
-      "head_sampling_rate": 1,
-    },
-  },
+      "head_sampling_rate": 1}},
   "assets": {
     "binding": "ASSETS",
     "directory": "./dist",
     "run_worker_first": true,
-    "not_found_handling": "none",
-  },
+    "not_found_handling": "none"},
   "ai": {
     "binding": "AI",
+    "remote": true
   },
-  "r2_buckets": [
-    {
-      "binding": "IMAGES_BUCKET",
-      "bucket_name": "remodel-images"
-    }
-  ],
+  "vars": {
+    "AI_GATEWAY_ID": "default-gateway"
+  },
   "vectorize": [
     {
       "binding": "VECTOR_INDEX",
-      "index_name": "remodel-embeddings"
+      "index_name": "remodel-embeddings",
+      "remote": true
     }
-  ],
+    ],
   "kv_namespaces": [
     {
       "binding": "CACHE",
-      "id": "b421459ad06e4ce995a59a95137fdee7",
+      "id": "93a212c747b849b19a72e4cca1e0e8bc",
       "remote": true
     },
     {
       "binding": "SESSIONS",
-      "id": "72cb78531333479db9f2c5252ac286a6",
+      "id": "af8ca150b4a7480d923be0ed30baae73",
       "remote": true
     }
-  ],
+    ],
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "core-template-cfw-assets-astro-shadcn",
-      "database_id": "d126139f-6f57-49d2-bbc4-d20bbd46bbf4",
-      "preview_database_id": "d126139f-6f57-49d2-bbc4-d20bbd46bbf4",
+      "database_name": "core-remodel",
+      "database_id": "4811af1e-202d-4b96-99e2-d98dc45c597e",
       "migrations_dir": "drizzle",
-    },
-  ],
+      "remote": true
+    }
+    ],
   "secrets_store_secrets": [
     {
       "binding": "GITHUB_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GH_TOKEN",
+      "secret_name": "GH_TOKEN"
     },
     {
       "binding": "CLOUDFLARE_ACCOUNT_ID",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_ACCOUNT_ID",
+      "secret_name": "CLOUDFLARE_ACCOUNT_ID"
     },
     {
       "binding": "CLOUDFLARE_API_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_API_TOKEN",
+      "secret_name": "CLOUDFLARE_API_TOKEN"
     },
     {
       "binding": "CLOUDFLARE_SECRETS_STORE_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_SECRETS_STORE_TOKEN",
+      "secret_name": "CLOUDFLARE_SECRETS_STORE_TOKEN"
     },
     {
       "binding": "CLOUDFLARE_WORKER_ADMIN_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_WORKER_ADMIN_TOKEN",
+      "secret_name": "CLOUDFLARE_WORKER_ADMIN_TOKEN"
     },
     {
       "binding": "CLOUDFLARE_AI_SEARCH_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_AI_SEARCH_TOKEN",
+      "secret_name": "CLOUDFLARE_AI_SEARCH_TOKEN"
     },
     {
       "binding": "CLOUDFLARE_OBSERVABILITY_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_OBSERVABILITY_TOKEN",
+      "secret_name": "CLOUDFLARE_OBSERVABILITY_TOKEN"
     },
     {
       "binding": "WORKER_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "WORKER_API_KEY",
+      "secret_name": "WORKER_API_KEY"
     },
     {
       "binding": "AGENTIC_WORKER_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "AGENTIC_WORKER_API_KEY",
+      "secret_name": "AGENTIC_WORKER_API_KEY"
     },
     {
       "binding": "AI_GATEWAY_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_AI_GATEWAY_TOKEN",
+      "secret_name": "CLOUDFLARE_AI_GATEWAY_TOKEN"
     },
     {
       "binding": "CF_BROWSER_RENDER_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_BROWSER_RENDER_TOKEN",
+      "secret_name": "CLOUDFLARE_BROWSER_RENDER_TOKEN"
     },
     {
       "binding": "JULES_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "JULES_API_KEY",
+      "secret_name": "JULES_API_KEY"
     },
     {
       "binding": "GEMINI_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_API_KEY",
+      "secret_name": "GOOGLE_API_KEY"
     },
     {
       "binding": "ANTHROPIC_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "ANTHROPIC_API_KEY",
+      "secret_name": "ANTHROPIC_API_KEY"
     },
     {
       "binding": "OPENAI_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "OPENAI_API_KEY",
-    },
-  ],
-}
+      "secret_name": "OPENAI_API_KEY"
+      }
+    ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "RENOVATION_AGENT",
+        "class_name": "RenovationAgent"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["RenovationAgent"]
+    }
+  ]
+    }

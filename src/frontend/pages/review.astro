@@ -1,0 +1,16 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { Navigation } from "@/components/Navigation";
+import { PhotoReviewApp } from "@/components/PhotoReviewApp";
+---
+
+<BaseLayout
+  title="Photo Reviews - Retrofit"
+  description="Manage photo reviews with AI-powered tagging and categorization."
+>
+  <Navigation client:load />
+  
+  <div class="pt-[1px]">
+    <PhotoReviewApp client:only="react" />
+  </div>
+</BaseLayout>

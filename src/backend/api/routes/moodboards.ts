@@ -2,19 +2,21 @@
  * @fileoverview Mood Boards API routes
  */
 
-import { Hono } from 'hono';
-import type { Bindings } from '../index';
-import { drizzle } from 'drizzle-orm/d1';
-import { moodBoards } from '../../db/schema';
-import { eq } from 'drizzle-orm';
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { Hono } from "hono";
 
-const moodBoardsRouter = new Hono<{ Bindings: Bindings }>();
+
+
+import { moodBoards } from "@backend/db";
+
+const moodBoardsRouter = new Hono<{ Bindings: Env }>();
 
 /**
  * GET /api/moodboards
  * List all mood boards
  */
-moodBoardsRouter.get('/', async (c) => {
+moodBoardsRouter.get("/", async (c) => {
   try {
     const db = drizzle(c.env.DB);
     const boards = await db.select().from(moodBoards).all();
@@ -27,10 +29,10 @@ moodBoardsRouter.get('/', async (c) => {
   } catch (error) {
     return c.json(
       {
-        error: 'Failed to list mood boards',
-        details: error instanceof Error ? error.message : 'Unknown error',
+        error: "Failed to list mood boards",
+        details: error instanceof Error ? error.message : "Unknown error",
       },
-      500
+      500,
     );
   }
 });
@@ -39,7 +41,7 @@ moodBoardsRouter.get('/', async (c) => {
  * POST /api/moodboards
  * Create a new mood board
  */
-moodBoardsRouter.post('/', async (c) => {
+moodBoardsRouter.post("/", async (c) => {
   try {
     const db = drizzle(c.env.DB);
     const body = await c.req.json();
@@ -47,7 +49,7 @@ moodBoardsRouter.post('/', async (c) => {
     const { name, description, backgroundColor } = body;
 
     if (!name) {
-      return c.json({ error: 'Name is required' }, 400);
+      return c.json({ error: "Name is required" }, 400);
     }
 
     const result = await db
@@ -55,7 +57,7 @@ moodBoardsRouter.post('/', async (c) => {
       .values({
         name,
         description: description || null,
-        backgroundColor: backgroundColor || '#ffffff',
+        backgroundColor: backgroundColor || "#ffffff",
         isActive: true,
         layoutState: JSON.stringify({ images: [] }),
       })
@@ -69,10 +71,10 @@ moodBoardsRouter.post('/', async (c) => {
   } catch (error) {
     return c.json(
       {
-        error: 'Failed to create mood board',
-        details: error instanceof Error ? error.message : 'Unknown error',
+        error: "Failed to create mood board",
+        details: error instanceof Error ? error.message : "Unknown error",
       },
-      500
+      500,
     );
   }
 });
@@ -81,19 +83,15 @@ moodBoardsRouter.post('/', async (c) => {
  * GET /api/moodboards/:id
  * Get a specific mood board
  */
-moodBoardsRouter.get('/:id', async (c) => {
+moodBoardsRouter.get("/:id", async (c) => {
   try {
     const db = drizzle(c.env.DB);
-    const boardId = parseInt(c.req.param('id'));
+    const boardId = parseInt(c.req.param("id"));
 
-    const board = await db
-      .select()
-      .from(moodBoards)
-      .where(eq(moodBoards.id, boardId))
-      .get();
+    const board = await db.select().from(moodBoards).where(eq(moodBoards.id, boardId)).get();
 
     if (!board) {
-      return c.json({ error: 'Mood board not found' }, 404);
+      return c.json({ error: "Mood board not found" }, 404);
     }
 
     return c.json({
@@ -103,10 +101,10 @@ moodBoardsRouter.get('/:id', async (c) => {
   } catch (error) {
     return c.json(
       {
-        error: 'Failed to get mood board',
-        details: error instanceof Error ? error.message : 'Unknown error',
+        error: "Failed to get mood board",
+        details: error instanceof Error ? error.message : "Unknown error",
       },
-      500
+      500,
     );
   }
 });
@@ -115,21 +113,17 @@ moodBoardsRouter.get('/:id', async (c) => {
  * PUT /api/moodboards/:id
  * Update a mood board (including layout state)
  */
-moodBoardsRouter.put('/:id', async (c) => {
+moodBoardsRouter.put("/:id", async (c) => {
   try {
     const db = drizzle(c.env.DB);
-    const boardId = parseInt(c.req.param('id'));
+    const boardId = parseInt(c.req.param("id"));
     const body = await c.req.json();
 
     // Check if board exists
-    const existing = await db
-      .select()
-      .from(moodBoards)
-      .where(eq(moodBoards.id, boardId))
-      .get();
+    const existing = await db.select().from(moodBoards).where(eq(moodBoards.id, boardId)).get();
 
     if (!existing) {
-      return c.json({ error: 'Mood board not found' }, 404);
+      return c.json({ error: "Mood board not found" }, 404);
     }
 
     // Update fields
@@ -139,28 +133,17 @@ moodBoardsRouter.put('/:id', async (c) => {
 
     if (body.name !== undefined) updates.name = body.name;
     if (body.description !== undefined) updates.description = body.description;
-    if (body.backgroundColor !== undefined)
-      updates.backgroundColor = body.backgroundColor;
+    if (body.backgroundColor !== undefined) updates.backgroundColor = body.backgroundColor;
     if (body.isActive !== undefined) updates.isActive = body.isActive;
     if (body.layoutState !== undefined) {
       updates.layoutState =
-        typeof body.layoutState === 'string'
-          ? body.layoutState
-          : JSON.stringify(body.layoutState);
+        typeof body.layoutState === "string" ? body.layoutState : JSON.stringify(body.layoutState);
     }
 
-    await db
-      .update(moodBoards)
-      .set(updates)
-      .where(eq(moodBoards.id, boardId))
-      .run();
+    await db.update(moodBoards).set(updates).where(eq(moodBoards.id, boardId)).run();
 
     // Get updated record
-    const updated = await db
-      .select()
-      .from(moodBoards)
-      .where(eq(moodBoards.id, boardId))
-      .get();
+    const updated = await db.select().from(moodBoards).where(eq(moodBoards.id, boardId)).get();
 
     return c.json({
       success: true,
@@ -169,10 +152,10 @@ moodBoardsRouter.put('/:id', async (c) => {
   } catch (error) {
     return c.json(
       {
-        error: 'Failed to update mood board',
-        details: error instanceof Error ? error.message : 'Unknown error',
+        error: "Failed to update mood board",
+        details: error instanceof Error ? error.message : "Unknown error",
       },
-      500
+      500,
     );
   }
 });
@@ -181,35 +164,31 @@ moodBoardsRouter.put('/:id', async (c) => {
  * DELETE /api/moodboards/:id
  * Delete a mood board
  */
-moodBoardsRouter.delete('/:id', async (c) => {
+moodBoardsRouter.delete("/:id", async (c) => {
   try {
     const db = drizzle(c.env.DB);
-    const boardId = parseInt(c.req.param('id'));
+    const boardId = parseInt(c.req.param("id"));
 
     // Check if board exists
-    const existing = await db
-      .select()
-      .from(moodBoards)
-      .where(eq(moodBoards.id, boardId))
-      .get();
+    const existing = await db.select().from(moodBoards).where(eq(moodBoards.id, boardId)).get();
 
     if (!existing) {
-      return c.json({ error: 'Mood board not found' }, 404);
+      return c.json({ error: "Mood board not found" }, 404);
     }
 
     await db.delete(moodBoards).where(eq(moodBoards.id, boardId)).run();
 
     return c.json({
       success: true,
-      message: 'Mood board deleted successfully',
+      message: "Mood board deleted successfully",
     });
   } catch (error) {
     return c.json(
       {
-        error: 'Failed to delete mood board',
-        details: error instanceof Error ? error.message : 'Unknown error',
+        error: "Failed to delete mood board",
+        details: error instanceof Error ? error.message : "Unknown error",
       },
-      500
+      500,
     );
   }
 });
