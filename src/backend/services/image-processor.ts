@@ -465,7 +465,7 @@ export class ImageProcessorService {
         path: deliveryUrl,
         filename,
         room: analysis.room,
-        tags: JSON.stringify(analysis.tags),
+        tags: analysis.tags,
         updatedAt: new Date(),
       };
 
