@@ -108,7 +108,7 @@ photoReviewsRouter.post("/:id", async (c) => {
 
     const updates: any = { updatedAt: new Date() };
     if (body.room !== undefined) updates.room = body.room.toLowerCase();
-    if (body.tags !== undefined) updates.tags = JSON.stringify(body.tags);
+    if (body.tags !== undefined) updates.tags = body.tags;
     if (body.note !== undefined) updates.note = body.note;
     if (body.sourceFile !== undefined) updates.sourceFile = body.sourceFile;
     if (body.imageNumber !== undefined) updates.imageNumber = body.imageNumber;
