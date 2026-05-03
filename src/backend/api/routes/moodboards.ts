@@ -6,11 +6,11 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
-import type { Bindings } from "../index";
 
-import { moodBoards } from "../../db/schema";
 
-const moodBoardsRouter = new Hono<{ Bindings: Bindings }>();
+import { moodBoards } from "@backend/db";
+
+const moodBoardsRouter = new Hono<{ Bindings: Env }>();
 
 /**
  * GET /api/moodboards

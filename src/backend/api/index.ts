@@ -4,13 +4,7 @@
  * This file sets up the main Hono application with all API routes and middleware.
  */
 
-import type {
-  D1Database,
-  Ai,
-  VectorizeIndex,
-  R2Bucket,
-  KVNamespace,
-} from "@cloudflare/workers-types";
+
 
 import { Hono } from "hono";
 import { cors } from "hono/cors";
@@ -29,17 +23,6 @@ import { openapiRouter } from "./routes/openapi";
 import { photoReviewsRouter } from "./routes/photo-reviews";
 import { threadsRouter } from "./routes/threads";
 
-export type Bindings = {
-  DB: D1Database;
-  AI: Ai;
-  VECTOR_INDEX: VectorizeIndex;
-  IMAGES_BUCKET: R2Bucket;
-  CACHE: KVNamespace;
-  AI_GATEWAY_TOKEN?: string;
-  CLOUDFLARE_ACCOUNT_ID?: string;
-  CLOUDFLARE_API_TOKEN?: string;
-};
-
 export type Variables = {
   userId?: number;
   user?: {
@@ -49,7 +32,7 @@ export type Variables = {
   };
 };
 
-const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // Middleware
 app.use("*", cors());

@@ -1,12 +1,25 @@
+/**
+ * @fileoverview Photo reviews API routes
+ *
+ * Handles the photo review workflow migrated from the Python app:
+ * - List all reviews grouped by room
+ * - Upload new photos (Cloudflare Images + AI analysis via ImageProcessorService)
+ * - Update review metadata
+ *
+ * All image storage uses Cloudflare Images. No R2.
+ * All AI analysis flows through ImageProcessorService which uses:
+ *   Vision: llama-3.2-11b-vision-instruct
+ *   Reasoning: gpt-oss-120b with json_schema structured output
+ */
+
 import { eq, asc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
-import type { Bindings } from "../index";
+import { imageReviews } from "@backend/db";
+import { ImageProcessorService } from "../../services/image-processor";
 
-import { imageReviews } from "../../db/schema";
-
-const photoReviewsRouter = new Hono<{ Bindings: Bindings }>();
+const photoReviewsRouter = new Hono<{ Bindings: Env }>();
 
 /**
  * GET /api/photo-reviews
@@ -43,7 +56,8 @@ photoReviewsRouter.get("/", async (c) => {
 
 /**
  * POST /api/photo-reviews/upload
- * Upload an image to R2, use Workers AI to tag it, save to D1
+ * Upload an image to Cloudflare Images, use Workers AI to tag it, save to D1.
+ * Delegates all processing to ImageProcessorService.
  */
 photoReviewsRouter.post("/upload", async (c) => {
   try {
@@ -54,73 +68,23 @@ photoReviewsRouter.post("/upload", async (c) => {
       return c.json({ error: "No file provided" }, 400);
     }
 
-    const fileBuffer = await file.arrayBuffer();
-    const filename = file.name;
-    const fileExtension = filename.split(".").pop();
-    const id = crypto.randomUUID();
-    const path = `uploads/${id}.${fileExtension}`;
+    // Resolve credentials
+    const accountId = await c.env.CLOUDFLARE_ACCOUNT_ID.get();
+    const apiToken = await c.env.CLOUDFLARE_API_TOKEN.get();
 
-    // Upload to R2
-    await c.env.IMAGES_BUCKET.put(path, fileBuffer, {
-      httpMetadata: { contentType: file.type },
-    });
-
-    // Run AI Vision
-    // Use llama-3.2-11b-vision-instruct
-    let room = "unassigned";
-    let tags = [];
-
-    try {
-      const aiResponse = (await c.env.AI.run("@cf/meta/llama-3.2-11b-vision-instruct", {
-        messages: [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: 'Analyze this interior design/architecture photo. Reply in JSON format with exactly two keys: "room" (a short string like "Kitchen", "Bathroom", "Living Room", or "Exterior") and "tags" (an array of strings describing styles, materials, or features).',
-              },
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:${file.type};base64,${Buffer.from(fileBuffer).toString("base64")}`,
-                },
-              },
-            ],
-          },
-        ],
-      })) as any;
-
-      // Extract JSON from response
-      const responseText = aiResponse.response;
-      // Try to parse out JSON if it's wrapped in markdown
-      const jsonMatch =
-        responseText.match(/```json\n([\s\S]*?)\n```/) || responseText.match(/{[\s\S]*}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[1] || jsonMatch[0]);
-        if (parsed.room) room = parsed.room.toLowerCase();
-        if (parsed.tags && Array.isArray(parsed.tags))
-          tags = parsed.tags.map((t: string) => t.toLowerCase());
-      }
-    } catch (aiError) {
-      console.error("AI analysis failed:", aiError);
-      // fallback to unassigned if AI fails
+    if (!accountId || !apiToken) {
+      return c.json({ error: "Cloudflare Images credentials not configured" }, 500);
     }
 
-    // Save to D1
-    const db = drizzle(c.env.DB);
-    const newRecord = {
-      id,
-      path,
-      filename,
-      room,
-      tags: JSON.stringify(tags),
-      updatedAt: new Date(),
-    };
+    // Delegate to ImageProcessorService
+    const processor = new ImageProcessorService(c.env, accountId, apiToken);
+    const result = await processor.processPhotoReview(file);
 
-    await db.insert(imageReviews).values(newRecord).run();
+    if (!result.success) {
+      return c.json({ error: result.error || "Processing failed" }, 500);
+    }
 
-    return c.json({ success: true, image: newRecord });
+    return c.json({ success: true, image: result.record });
   } catch (error) {
     console.error("Upload error:", error);
     return c.json({ error: "Failed to upload and process image" }, 500);
@@ -161,25 +125,8 @@ photoReviewsRouter.post("/:id", async (c) => {
   }
 });
 
-/**
- * GET /api/photo-reviews/image/:path
- * Serve the image directly from R2
- */
-photoReviewsRouter.get("/image/:path{.*}", async (c) => {
-  const path = c.req.param("path");
-  try {
-    const object = await c.env.IMAGES_BUCKET.get(path);
-    if (!object) {
-      return new Response("Not found", { status: 404 });
-    }
-    const headers = new Headers();
-    object.writeHttpMetadata(headers);
-    headers.set("etag", object.httpEtag);
-
-    return new Response(object.body, { headers });
-  } catch (err) {
-    return new Response("Error retrieving image", { status: 500 });
-  }
-});
+// Note: The /image/:path endpoint has been removed.
+// Images should be served directly from Cloudflare Images via the client using:
+// https://imagedelivery.net/<ACCOUNT_HASH>/<IMAGE_ID>/<VARIANT>
 
 export { photoReviewsRouter };

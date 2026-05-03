@@ -6,12 +6,12 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
-import type { Bindings } from "../index";
 
-import { images } from "../../db/schema";
+
+import { images } from "@backend/db";
 import { ImageProcessorService } from "../../services/image-processor";
 
-const imagesRouter = new Hono<{ Bindings: Bindings }>();
+const imagesRouter = new Hono<{ Bindings: Env }>();
 
 /**
  * POST /api/images/upload
@@ -34,8 +34,8 @@ imagesRouter.post("/upload", async (c) => {
     }
 
     // Check for account credentials
-    const accountId = c.env.CLOUDFLARE_ACCOUNT_ID;
-    const apiToken = c.env.CLOUDFLARE_API_TOKEN;
+    const accountId = await c.env.CLOUDFLARE_ACCOUNT_ID.get();
+    const apiToken = await c.env.CLOUDFLARE_API_TOKEN.get();
 
     if (!accountId || !apiToken) {
       return c.json({ error: "Cloudflare credentials not configured" }, 500);
@@ -43,9 +43,7 @@ imagesRouter.post("/upload", async (c) => {
 
     // Initialize image processor service
     const processor = new ImageProcessorService(
-      c.env.AI,
-      c.env.VECTOR_INDEX,
-      c.env.DB,
+      c.env,
       accountId,
       apiToken,
     );
@@ -258,17 +256,15 @@ imagesRouter.post("/search", async (c) => {
       return c.json({ error: "Query is required" }, 400);
     }
 
-    const accountId = c.env.CLOUDFLARE_ACCOUNT_ID;
-    const apiToken = c.env.CLOUDFLARE_API_TOKEN;
+    const accountId = await c.env.CLOUDFLARE_ACCOUNT_ID.get();
+    const apiToken = await c.env.CLOUDFLARE_API_TOKEN.get();
 
     if (!accountId || !apiToken) {
       return c.json({ error: "Cloudflare credentials not configured" }, 500);
     }
 
     const processor = new ImageProcessorService(
-      c.env.AI,
-      c.env.VECTOR_INDEX,
-      c.env.DB,
+      c.env,
       accountId,
       apiToken,
     );

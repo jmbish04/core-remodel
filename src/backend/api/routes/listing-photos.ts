@@ -6,11 +6,11 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
-import type { Bindings } from "../index";
 
-import { listingPhotos, aiEdits } from "../../db/schema";
 
-const listingPhotosRouter = new Hono<{ Bindings: Bindings }>();
+import { listingPhotos, aiEdits } from "@backend/db";
+
+const listingPhotosRouter = new Hono<{ Bindings: Env }>();
 
 /**
  * GET /api/listing-photos

@@ -6,11 +6,11 @@ import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
-import type { Bindings } from "../index";
 
-import { healthChecks } from "../../db/schema";
 
-const healthRouter = new Hono<{ Bindings: Bindings }>();
+import { healthChecks } from "@backend/db";
+
+const healthRouter = new Hono<{ Bindings: Env }>();
 
 // GET /api/health
 healthRouter.get("/", async (c) => {
@@ -83,13 +83,18 @@ healthRouter.get("/history", async (c) => {
   const limit = parseInt(c.req.query("limit") || "100");
 
   try {
-    let query = db.select().from(healthChecks);
-
-    if (service) {
-      query = query.where(eq(healthChecks.serviceName, service));
-    }
-
-    const history = await query.orderBy(desc(healthChecks.timestamp)).limit(limit);
+    const history = service
+      ? await db
+          .select()
+          .from(healthChecks)
+          .where(eq(healthChecks.serviceName, service))
+          .orderBy(desc(healthChecks.timestamp))
+          .limit(limit)
+      : await db
+          .select()
+          .from(healthChecks)
+          .orderBy(desc(healthChecks.timestamp))
+          .limit(limit);
 
     return c.json({ history });
   } catch (error) {

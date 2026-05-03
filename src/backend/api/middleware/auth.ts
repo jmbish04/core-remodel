@@ -3,16 +3,10 @@
  */
 
 import type { Context, Next } from "hono";
-
-import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
-
-import type { Bindings, Variables } from "../index";
-
-import { sessions, users } from "../../db/schema";
+import type { Variables } from "../index";
 
 export async function authMiddleware(
-  c: Context<{ Bindings: Bindings; Variables: Variables }>,
+  c: Context<{ Bindings: Env; Variables: Variables }>,
   next: Next,
 ) {
   const authHeader = c.req.header("Authorization");
@@ -22,36 +16,20 @@ export async function authMiddleware(
   }
 
   const token = authHeader.substring(7);
-  const db = drizzle(c.env.DB);
 
   try {
-    const sessionResult = await db
-      .select({
-        userId: sessions.userId,
-        expiresAt: sessions.expiresAt,
-        email: users.email,
-        name: users.name,
-      })
-      .from(sessions)
-      .innerJoin(users, eq(sessions.userId, users.id))
-      .where(eq(sessions.token, token))
-      .limit(1);
-
-    if (sessionResult.length === 0) {
+    const validToken = await c.env.WORKER_API_KEY.get();
+    
+    if (token !== validToken) {
       return c.json({ error: "Invalid session" }, 401);
     }
 
-    const session = sessionResult[0];
-
-    if (session.expiresAt * 1000 < Date.now()) {
-      return c.json({ error: "Session expired" }, 401);
-    }
-
-    c.set("userId", session.userId);
+    // There is only 1 user in the system. Populate context to satisfy Variable types.
+    c.set("userId", 1);
     c.set("user", {
-      id: session.userId,
-      email: session.email,
-      name: session.name,
+      id: 1,
+      email: "admin@local.host",
+      name: "Admin",
     });
 
     await next();

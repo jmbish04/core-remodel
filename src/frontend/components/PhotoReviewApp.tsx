@@ -40,7 +40,7 @@ export function PhotoReviewApp() {
     setLoading(true);
     try {
       const res = await fetch("/api/photo-reviews");
-      const data = await res.json();
+      const data = (await res.json()) as { images?: ImageRecord[]; groups?: ImageGroup[] };
       if (data.images && data.groups) {
         setImages(data.images);
         setGroups(data.groups);
@@ -89,10 +89,10 @@ export function PhotoReviewApp() {
         method: "POST",
         body: formData,
       });
-      const data = await res.json();
+      const data = (await res.json()) as { success?: boolean; image?: ImageRecord; error?: string };
       if (data.success) {
         await fetchImages();
-        setSelectedImage(data.image); // Auto select new upload
+        if (data.image) setSelectedImage(data.image);
       } else {
         alert(data.error || "Failed to upload");
       }
@@ -129,10 +129,10 @@ export function PhotoReviewApp() {
         }),
       });
 
-      const data = await res.json();
+      const data = (await res.json()) as { success?: boolean; image?: ImageRecord };
       if (data.success) {
         await fetchImages();
-        setSelectedImage(data.image);
+        if (data.image) setSelectedImage(data.image);
       }
     } catch (err) {
       console.error("Save error:", err);
@@ -262,7 +262,7 @@ export function PhotoReviewApp() {
                           }`}
                         >
                           <img
-                            src={`/api/photo-reviews/image/${img.path}`}
+                            src={img.path.startsWith('http') ? img.path : `/images/${img.path}`}
                             alt={img.filename}
                             loading="lazy"
                             className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"

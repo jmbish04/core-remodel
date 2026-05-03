@@ -6,12 +6,12 @@ import { desc, eq, and } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
-import type { Bindings, Variables } from "../index";
+import type { Variables } from "../index";
 
-import { notifications } from "../../db/schema";
+import { notifications } from "@backend/db";
 import { authMiddleware } from "../middleware/auth";
 
-const notificationsRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+const notificationsRouter = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // Apply auth middleware
 notificationsRouter.use("*", authMiddleware);
@@ -23,13 +23,19 @@ notificationsRouter.get("/", async (c) => {
   const unreadOnly = c.req.query("unreadOnly") === "true";
 
   try {
-    let query = db.select().from(notifications).where(eq(notifications.userId, userId));
-
-    if (unreadOnly) {
-      query = query.where(and(eq(notifications.userId, userId), eq(notifications.isRead, false)));
-    }
-
-    const userNotifications = await query.orderBy(desc(notifications.createdAt)).limit(100);
+    const userNotifications = unreadOnly
+      ? await db
+          .select()
+          .from(notifications)
+          .where(and(eq(notifications.userId, userId), eq(notifications.isRead, false)))
+          .orderBy(desc(notifications.createdAt))
+          .limit(100)
+      : await db
+          .select()
+          .from(notifications)
+          .where(eq(notifications.userId, userId))
+          .orderBy(desc(notifications.createdAt))
+          .limit(100);
 
     const unreadCount = userNotifications.filter((n) => !n.isRead).length;
 

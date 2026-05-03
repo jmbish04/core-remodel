@@ -6,11 +6,11 @@ import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 
-import type { Bindings, Variables } from "../index";
+import type { Variables } from "../index";
 
 import { authMiddleware } from "../middleware/auth";
 
-const aiRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+const aiRouter = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // Apply auth middleware
 aiRouter.use("*", authMiddleware);
@@ -61,7 +61,7 @@ aiRouter.post("/chat/stream", zValidator("json", chatSchema), async (c) => {
       stream: true,
     });
 
-    return new Response(stream, {
+    return new Response(stream as unknown as ReadableStream, {
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",

@@ -2,20 +2,89 @@
  * @fileoverview Image processing service with AI analysis and Cloudflare Images integration
  *
  * This service handles:
- * - Bulk image uploads
- * - Workers AI vision analysis (room detection, Instagram UI detection)
- * - Cloudflare Images upload (original + optimized)
- * - Vectorize embedding generation and storage
+ * - Single and bulk image uploads to Cloudflare Images
+ * - Workers AI vision analysis via llama-3.2-11b-vision (room detection, Instagram UI detection)
+ * - Structured reasoning via gpt-oss-120b with json_schema (tag enrichment, metadata extraction)
+ * - Vectorize embedding generation and semantic search
+ *
+ * Model strategy:
+ *   Vision: @cf/meta/llama-3.2-11b-vision-instruct (multimodal analysis)
+ *   Reasoning: @cf/openai/gpt-oss-120b with response_format json_schema (structured output)
+ *   Embeddings: @cf/baai/bge-base-en-v1.5
  */
 
-import type { Ai, VectorizeIndex, D1Database } from "@cloudflare/workers-types";
-
 import { drizzle } from "drizzle-orm/d1";
-import { randomUUID } from "node:crypto";
+import { images, imageReviews } from "@backend/db";
+import { WorkersAIProvider } from "@backend/ai/providers/workers-ai";
+import { modelRegistry } from "@backend/ai/models/index";
 
-import { images } from "../db/schema";
+// ---------------------------------------------------------------------------
+// JSON Schemas for structured output (gpt-oss-120b json_schema mode)
+// ---------------------------------------------------------------------------
 
-interface ImageAnalysisResult {
+/**
+ * JSON Schema that gpt-oss-120b uses via response_format: { type: "json_schema" }
+ * to return deterministic, parseable structured data.
+ */
+const IMAGE_ANALYSIS_SCHEMA = {
+  name: "image_analysis",
+  strict: true,
+  schema: {
+    type: "object",
+    properties: {
+      roomType: {
+        type: "string",
+        description: "The room or area type, e.g. kitchen, bathroom, living room, bedroom, backyard, exterior, hallway, office",
+      },
+      keywords: {
+        type: "array",
+        items: { type: "string" },
+        description: "5-10 keywords describing style, materials, colors, and features",
+      },
+      isInstagram: {
+        type: "boolean",
+        description: "Whether the image appears to be an Instagram screenshot with UI elements",
+      },
+      instagramAccount: {
+        type: ["string", "null"],
+        description: "Instagram account handle if detected, null otherwise",
+      },
+      instagramCaption: {
+        type: ["string", "null"],
+        description: "Instagram caption text if detected, null otherwise",
+      },
+    },
+    required: ["roomType", "keywords", "isInstagram", "instagramAccount", "instagramCaption"],
+    additionalProperties: false,
+  },
+} as const;
+
+const PHOTO_REVIEW_SCHEMA = {
+  name: "photo_review_analysis",
+  strict: true,
+  schema: {
+    type: "object",
+    properties: {
+      room: {
+        type: "string",
+        description: "The room or area type in lowercase, e.g. kitchen, bathroom, living room, bedroom, backyard",
+      },
+      tags: {
+        type: "array",
+        items: { type: "string" },
+        description: "5-10 lowercase tags describing styles, materials, colors, and features",
+      },
+    },
+    required: ["room", "tags"],
+    additionalProperties: false,
+  },
+} as const;
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface ImageAnalysisResult {
   roomType: string;
   keywords: string[];
   isInstagram: boolean;
@@ -24,7 +93,12 @@ interface ImageAnalysisResult {
   needsCrop: boolean;
 }
 
-interface CloudflareImagesResponse {
+export interface PhotoReviewAnalysis {
+  room: string;
+  tags: string[];
+}
+
+export interface CloudflareImagesResponse {
   result: {
     id: string;
     filename: string;
@@ -37,7 +111,20 @@ interface CloudflareImagesResponse {
   messages: unknown[];
 }
 
+export interface ProcessImageResult {
+  success: boolean;
+  imageId: string;
+  deliveryUrl?: string;
+  analysis?: ImageAnalysisResult;
+  error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Service
+// ---------------------------------------------------------------------------
+
 export class ImageProcessorService {
+  private provider: WorkersAIProvider;
   private ai: Ai;
   private vectorIndex: VectorizeIndex;
   private db: D1Database;
@@ -45,111 +132,146 @@ export class ImageProcessorService {
   private apiToken: string;
 
   constructor(
-    ai: Ai,
-    vectorIndex: VectorizeIndex,
-    db: D1Database,
+    env: Env,
     accountId: string,
     apiToken: string,
   ) {
-    this.ai = ai;
-    this.vectorIndex = vectorIndex;
-    this.db = db;
+    this.provider = new WorkersAIProvider(env);
+    this.ai = env.AI;
+    this.vectorIndex = env.VECTOR_INDEX;
+    this.db = env.DB;
     this.accountId = accountId;
     this.apiToken = apiToken;
   }
 
+  // -------------------------------------------------------------------------
+  // Vision analysis — llama-3.2-11b-vision-instruct
+  // -------------------------------------------------------------------------
+
   /**
-   * Analyze image using Workers AI Llama Vision model
+   * Analyze an image with the vision model to extract a raw text description.
+   * The vision model doesn't support json_schema, so we get free-text back.
    */
-  private async analyzeImage(imageBlob: Blob): Promise<ImageAnalysisResult> {
-    // Convert blob to base64 for AI model
-    const arrayBuffer = await imageBlob.arrayBuffer();
-    const uint8Array = new Uint8Array(arrayBuffer);
-
-    // Convert to base64 in chunks to avoid stack overflow for large images
-    let binaryString = "";
-    const chunkSize = 8192;
-    for (let i = 0; i < uint8Array.length; i += chunkSize) {
-      const chunk = uint8Array.subarray(i, i + chunkSize);
-      binaryString += String.fromCharCode(...chunk);
-    }
-    const base64Image = btoa(binaryString);
-    const dataUrl = `data:${imageBlob.type};base64,${base64Image}`;
-
-    // Use Llama Vision to analyze the image
-    const analysisPrompt = `Analyze this image and provide:
-1. Room type (e.g., kitchen, bathroom, living room, bedroom, backyard, exterior)
-2. 5-10 relevant keywords describing the style, colors, and features
-3. Whether this is an Instagram screenshot (look for UI elements like username, likes, comments)
-4. If Instagram: extract the account handle and caption text
-
-Respond in JSON format:
-{
-  "roomType": "string",
-  "keywords": ["string"],
-  "isInstagram": boolean,
-  "instagramAccount": "string or null",
-  "instagramCaption": "string or null"
-}`;
-
-    const aiResponse = await this.ai.run("@cf/meta/llama-3.2-11b-vision-instruct", {
+  async describeImage(imageDataUrl: string): Promise<string> {
+    const result = await this.provider.invokeModel(modelRegistry.vision, {
       messages: [
         {
           role: "user",
-          content: analysisPrompt,
+          content: [
+            {
+              type: "text",
+              text: [
+                "Analyze this interior design/architecture photo thoroughly.",
+                "Describe: 1) What room or space this is (kitchen, bathroom, living room, bedroom, backyard, exterior, etc.)",
+                "2) Style elements, materials, colors, textures visible",
+                "3) Whether this appears to be an Instagram screenshot (look for UI: username bar, likes, comments, story ring)",
+                "4) If Instagram: the account handle and any visible caption text",
+                "Be specific and detailed.",
+              ].join("\n"),
+            },
+            {
+              type: "image_url",
+              image_url: { url: imageDataUrl },
+            },
+          ],
         },
       ],
-      image: [dataUrl],
+      max_tokens: 1024,
     });
 
-    // Parse AI response
-    let analysis: ImageAnalysisResult;
-    try {
-      const responseText =
-        (aiResponse as { response?: string }).response || JSON.stringify(aiResponse);
-      const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]) as {
-          roomType?: string;
-          keywords?: string[];
-          isInstagram?: boolean;
-          instagramAccount?: string | null;
-          instagramCaption?: string | null;
-        };
-        analysis = {
-          roomType: parsed.roomType || "unknown",
-          keywords: Array.isArray(parsed.keywords) ? parsed.keywords : [],
-          isInstagram: parsed.isInstagram || false,
-          instagramAccount: parsed.instagramAccount || undefined,
-          instagramCaption: parsed.instagramCaption || undefined,
-          needsCrop: parsed.isInstagram || false,
-        };
-      } else {
-        // Fallback if parsing fails
-        analysis = {
-          roomType: "unknown",
-          keywords: [],
-          isInstagram: false,
-          needsCrop: false,
-        };
-      }
-    } catch (error) {
-      console.error("Failed to parse AI response:", error);
-      analysis = {
-        roomType: "unknown",
-        keywords: [],
-        isInstagram: false,
-        needsCrop: false,
-      };
-    }
+    return result.response;
+  }
 
-    return analysis;
+  // -------------------------------------------------------------------------
+  // Structured reasoning — gpt-oss-120b with json_schema
+  // -------------------------------------------------------------------------
+
+  /**
+   * Parse a vision model's free-text description into structured data using
+   * gpt-oss-120b with response_format: { type: "json_schema" }.
+   *
+   * This ensures deterministic JSON output without regex hacks.
+   */
+  async analyzeImage(imageDataUrl: string): Promise<ImageAnalysisResult> {
+    // Step 1: Get raw description from vision model
+    const visionDescription = await this.describeImage(imageDataUrl);
+
+    // Step 2: Pass description to gpt-oss-120b with json_schema for structured extraction
+    const structured = (await this.provider.invokeStructured(modelRegistry.extract, {
+      messages: [
+        {
+          role: "system",
+          content: "You are an expert interior design analyst. Extract structured metadata from the provided image description. Always respond with valid JSON matching the schema.",
+        },
+        {
+          role: "user",
+          content: `Analyze the following image description and extract structured metadata:\n\n${visionDescription}`,
+        },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: IMAGE_ANALYSIS_SCHEMA,
+      },
+    })) as {
+      roomType: string;
+      keywords: string[];
+      isInstagram: boolean;
+      instagramAccount: string | null;
+      instagramCaption: string | null;
+    };
+
+    return {
+      roomType: structured.roomType || "unknown",
+      keywords: Array.isArray(structured.keywords) ? structured.keywords : [],
+      isInstagram: structured.isInstagram || false,
+      instagramAccount: structured.instagramAccount || undefined,
+      instagramCaption: structured.instagramCaption || undefined,
+      needsCrop: structured.isInstagram || false,
+    };
   }
 
   /**
-   * Upload image to Cloudflare Images
+   * Lightweight analysis for photo-reviews: returns room + tags only.
+   * Uses vision → structured reasoning pipeline.
    */
-  private async uploadToCloudflareImages(
+  async analyzePhotoReview(imageDataUrl: string): Promise<PhotoReviewAnalysis> {
+    // Step 1: Vision description
+    const visionDescription = await this.describeImage(imageDataUrl);
+
+    // Step 2: Structured extraction with json_schema
+    const structured = (await this.provider.invokeStructured(modelRegistry.extract, {
+      messages: [
+        {
+          role: "system",
+          content: "You are an interior design photo analyst. Extract the room type and descriptive tags from the image description. Return lowercase values.",
+        },
+        {
+          role: "user",
+          content: `Extract the room type and tags from this image description:\n\n${visionDescription}`,
+        },
+      ],
+      response_format: {
+        type: "json_schema",
+        json_schema: PHOTO_REVIEW_SCHEMA,
+      },
+    })) as { room: string; tags: string[] };
+
+    return {
+      room: (structured.room || "unassigned").toLowerCase(),
+      tags: Array.isArray(structured.tags)
+        ? structured.tags.map((t: string) => t.toLowerCase())
+        : [],
+    };
+  }
+
+  // -------------------------------------------------------------------------
+  // Cloudflare Images upload
+  // -------------------------------------------------------------------------
+
+  /**
+   * Upload an image to Cloudflare Images and return the API response.
+   */
+  async uploadToCloudflareImages(
     imageBlob: Blob,
     customId?: string,
   ): Promise<CloudflareImagesResponse> {
@@ -178,60 +300,105 @@ Respond in JSON format:
   }
 
   /**
-   * Generate and store vector embeddings
+   * Get the delivery URL from a Cloudflare Images upload response.
    */
-  private async generateAndStoreEmbeddings(imageId: string, text: string): Promise<void> {
-    // Generate embedding from keywords and room type
+  getDeliveryUrl(uploadResponse: CloudflareImagesResponse, fallbackId: string): string {
+    if (uploadResponse.result.variants && uploadResponse.result.variants.length > 0) {
+      return uploadResponse.result.variants[0];
+    }
+    return `https://imagedelivery.net/${this.accountId}/${fallbackId}/public`;
+  }
+
+  // -------------------------------------------------------------------------
+  // Embeddings — Vectorize
+  // -------------------------------------------------------------------------
+
+  /**
+   * Generate and store vector embeddings for semantic search.
+   */
+  async generateAndStoreEmbeddings(imageId: string, text: string): Promise<void> {
     const embeddingResponse = await this.ai.run("@cf/baai/bge-base-en-v1.5", {
       text: [text],
     });
 
     const embeddings = (embeddingResponse as { data: number[][] }).data[0];
 
-    // Upsert to Vectorize
     await this.vectorIndex.upsert([
       {
         id: imageId,
         values: embeddings,
-        metadata: {
-          imageId,
-          text,
-        },
+        metadata: { imageId, text },
       },
     ]);
   }
 
   /**
-   * Process a single image through the full pipeline
+   * Search images by semantic similarity.
    */
+  async searchImages(query: string, topK: number = 10) {
+    const queryEmbedding = await this.ai.run("@cf/baai/bge-base-en-v1.5", {
+      text: [query],
+    });
+
+    const embeddings = (queryEmbedding as { data: number[][] }).data[0];
+
+    return await this.vectorIndex.query(embeddings, {
+      topK,
+      returnMetadata: "all",
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Utility: Convert file to base64 data URL
+  // -------------------------------------------------------------------------
+
+  static async fileToDataUrl(file: File | Blob): Promise<string> {
+    const arrayBuffer = await file.arrayBuffer();
+    const uint8Array = new Uint8Array(arrayBuffer);
+
+    // Convert to base64 in chunks to avoid stack overflow for large images
+    let binaryString = "";
+    const chunkSize = 8192;
+    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+      const chunk = uint8Array.subarray(i, i + chunkSize);
+      binaryString += String.fromCharCode(...chunk);
+    }
+
+    const base64Image = btoa(binaryString);
+    const mimeType = file instanceof File ? file.type : "image/jpeg";
+    return `data:${mimeType};base64,${base64Image}`;
+  }
+
+  // -------------------------------------------------------------------------
+  // Full pipeline: process a single image (images table)
+  // -------------------------------------------------------------------------
+
   async processImage(
     file: File,
     isListingPhoto: boolean = false,
-  ): Promise<{ success: boolean; imageId: string; error?: string }> {
+  ): Promise<ProcessImageResult> {
     try {
-      const imageId = randomUUID();
+      const imageId = crypto.randomUUID();
+      const dataUrl = await ImageProcessorService.fileToDataUrl(file);
 
-      // Step 1: Analyze image with AI
-      const analysis = await this.analyzeImage(file);
+      // Step 1: Analyze image with vision → structured reasoning
+      const analysis = await this.analyzeImage(dataUrl);
 
-      // Step 2: Upload original to Cloudflare Images
-      const originalUpload = await this.uploadToCloudflareImages(file, imageId);
+      // Step 2: Upload to Cloudflare Images
+      const uploadResponse = await this.uploadToCloudflareImages(file, imageId);
 
-      if (!originalUpload.success) {
+      if (!uploadResponse.success) {
         throw new Error("Failed to upload original image");
       }
 
-      let optimizedImageId: string | null = null;
+      const deliveryUrl = this.getDeliveryUrl(uploadResponse, imageId);
 
-      // Step 3: If Instagram, crop and upload optimized version
+      let optimizedImageId: string | null = null;
       if (analysis.needsCrop && analysis.isInstagram) {
-        // For now, we'll skip the cropping logic and just store the original
-        // In production, you'd use Cloudflare Images transformations or Workers AI
-        // to detect and crop out the Instagram UI
-        optimizedImageId = originalUpload.result.id;
+        optimizedImageId = uploadResponse.result.id;
       }
 
-      // Step 4: Store in D1
+      // Step 3: Store in D1
       const dbClient = drizzle(this.db);
       const metadata = {
         keywords: analysis.keywords,
@@ -243,7 +410,7 @@ Respond in JSON format:
 
       await dbClient.insert(images).values({
         id: imageId,
-        cfImageIdOriginal: originalUpload.result.id,
+        cfImageIdOriginal: uploadResponse.result.id,
         cfImageIdOptimized: optimizedImageId,
         roomType: analysis.roomType,
         isInstagram: analysis.isInstagram,
@@ -253,14 +420,11 @@ Respond in JSON format:
         isListingPhoto,
       });
 
-      // Step 5: Generate embeddings and store in Vectorize
+      // Step 4: Generate embeddings
       const embeddingText = `${analysis.roomType} ${analysis.keywords.join(" ")} ${analysis.instagramCaption || ""}`;
       await this.generateAndStoreEmbeddings(imageId, embeddingText);
 
-      return {
-        success: true,
-        imageId,
-      };
+      return { success: true, imageId, deliveryUrl, analysis };
     } catch (error) {
       console.error("Error processing image:", error);
       return {
@@ -271,35 +435,60 @@ Respond in JSON format:
     }
   }
 
-  /**
-   * Process multiple images in bulk
-   */
+  // -------------------------------------------------------------------------
+  // Full pipeline: process a photo review upload (image_reviews table)
+  // -------------------------------------------------------------------------
+
+  async processPhotoReview(
+    file: File,
+  ): Promise<{ success: boolean; record?: Record<string, unknown>; error?: string }> {
+    try {
+      const id = crypto.randomUUID();
+      const filename = file.name;
+      const dataUrl = await ImageProcessorService.fileToDataUrl(file);
+
+      // Step 1: Upload to Cloudflare Images
+      const uploadResponse = await this.uploadToCloudflareImages(file, id);
+      if (!uploadResponse.success) {
+        throw new Error("Failed to upload to Cloudflare Images");
+      }
+
+      const deliveryUrl = this.getDeliveryUrl(uploadResponse, id);
+
+      // Step 2: Analyze with vision → structured reasoning
+      const analysis = await this.analyzePhotoReview(dataUrl);
+
+      // Step 3: Save to D1
+      const db = drizzle(this.db);
+      const newRecord = {
+        id,
+        path: deliveryUrl,
+        filename,
+        room: analysis.room,
+        tags: JSON.stringify(analysis.tags),
+        updatedAt: new Date(),
+      };
+
+      await db.insert(imageReviews).values(newRecord).run();
+
+      return { success: true, record: newRecord };
+    } catch (error) {
+      console.error("Photo review processing error:", error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : "Unknown error",
+      };
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Bulk processing
+  // -------------------------------------------------------------------------
+
   async processBulkImages(
     files: File[],
     isListingPhoto: boolean = false,
-  ): Promise<Array<{ success: boolean; imageId: string; error?: string }>> {
-    const results = await Promise.all(files.map((file) => this.processImage(file, isListingPhoto)));
-
-    return results;
-  }
-
-  /**
-   * Search images by semantic similarity
-   */
-  async searchImages(query: string, topK: number = 10) {
-    // Generate embedding for query
-    const queryEmbedding = await this.ai.run("@cf/baai/bge-base-en-v1.5", {
-      text: [query],
-    });
-
-    const embeddings = (queryEmbedding as { data: number[][] }).data[0];
-
-    // Query Vectorize
-    const results = await this.vectorIndex.query(embeddings, {
-      topK,
-      returnMetadata: "all",
-    });
-
-    return results;
+  ): Promise<ProcessImageResult[]> {
+    return Promise.all(files.map((file) => this.processImage(file, isListingPhoto)));
   }
 }

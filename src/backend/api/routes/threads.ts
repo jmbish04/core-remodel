@@ -8,12 +8,12 @@ import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
 
-import type { Bindings, Variables } from "../index";
+import type { Variables } from "../index";
 
-import { threads, messages } from "../../db/schema";
+import { threads, messages } from "@backend/db";
 import { authMiddleware } from "../middleware/auth";
 
-const threadsRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+const threadsRouter = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // Apply auth middleware
 threadsRouter.use("*", authMiddleware);

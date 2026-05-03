@@ -8,11 +8,9 @@ import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
 
-import type { Bindings } from "../index";
+import { users, sessions } from "@backend/db";
 
-import { users, sessions } from "../../db/schema";
-
-const authRouter = new Hono<{ Bindings: Bindings }>();
+const authRouter = new Hono<{ Bindings: Env }>();
 
 // Validation schemas
 const loginSchema = z.object({

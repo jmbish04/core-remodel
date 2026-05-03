@@ -6,12 +6,12 @@ import { desc, eq, and, gte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
-import type { Bindings, Variables } from "../index";
+import type { Variables } from "../index";
 
-import { dashboardMetrics } from "../../db/schema";
+import { dashboardMetrics } from "@backend/db";
 import { authMiddleware } from "../middleware/auth";
 
-const dashboardRouter = new Hono<{ Bindings: Bindings; Variables: Variables }>();
+const dashboardRouter = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 // Apply auth middleware to all routes
 dashboardRouter.use("*", authMiddleware);
@@ -23,13 +23,18 @@ dashboardRouter.get("/metrics", async (c) => {
   const limit = parseInt(c.req.query("limit") || "100");
 
   try {
-    let query = db.select().from(dashboardMetrics);
-
-    if (category) {
-      query = query.where(eq(dashboardMetrics.category, category));
-    }
-
-    const metrics = await query.orderBy(desc(dashboardMetrics.timestamp)).limit(limit);
+    const metrics = category
+      ? await db
+          .select()
+          .from(dashboardMetrics)
+          .where(eq(dashboardMetrics.category, category))
+          .orderBy(desc(dashboardMetrics.timestamp))
+          .limit(limit)
+      : await db
+          .select()
+          .from(dashboardMetrics)
+          .orderBy(desc(dashboardMetrics.timestamp))
+          .limit(limit);
 
     // Group metrics by category
     const grouped = metrics.reduce(
@@ -106,7 +111,7 @@ dashboardRouter.get("/charts/:category", async (c) => {
       .where(
         and(
           eq(dashboardMetrics.category, category),
-          gte(dashboardMetrics.timestamp, startTimestamp),
+          gte(dashboardMetrics.timestamp, startDate),
         ),
       )
       .orderBy(desc(dashboardMetrics.timestamp));

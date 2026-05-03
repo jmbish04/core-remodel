@@ -6,9 +6,9 @@ import { swaggerUI } from "@hono/swagger-ui";
 import { apiReference } from "@scalar/hono-api-reference";
 import { Hono } from "hono";
 
-import type { Bindings } from "../index";
 
-const openapiRouter = new Hono<{ Bindings: Bindings }>();
+
+const openapiRouter = new Hono<{ Bindings: Env }>();
 
 // OpenAPI specification
 const openApiSpec = {
@@ -155,10 +155,11 @@ openapiRouter.get("/swagger", swaggerUI({ url: "/openapi.json" }));
 openapiRouter.get(
   "/scalar",
   apiReference({
+    // @ts-expect-error - Scalar types are not resolving properly due to missing client-side-rendering types
     spec: {
       url: "/openapi.json",
     },
-    theme: "dark",
+    theme: "moon",
   }),
 );
 
