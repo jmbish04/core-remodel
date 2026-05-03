@@ -317,7 +317,7 @@ export class ImageProcessorService {
    * Generate and store vector embeddings for semantic search.
    */
   async generateAndStoreEmbeddings(imageId: string, text: string): Promise<void> {
-    const embeddingResponse = await this.ai.run("@cf/baai/bge-base-en-v1.5", {
+    const embeddingResponse = await this.ai.run(modelRegistry.embed.id as any, {
       text: [text],
     });
 
