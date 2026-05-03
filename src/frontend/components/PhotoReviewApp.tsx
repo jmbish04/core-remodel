@@ -328,7 +328,7 @@ export function PhotoReviewApp() {
             {/* Image Preview */}
             <div className="w-full bg-zinc-100 dark:bg-zinc-950 flex items-center justify-center overflow-hidden border-b border-zinc-200 dark:border-zinc-800">
               <img
-                src={`/api/photo-reviews/image/${selectedImage.path}`}
+                src={selectedImage.path}
                 alt="Selected"
                 className="max-h-64 object-contain"
               />
