@@ -27,6 +27,8 @@ export function PhotoReviewApp() {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<ImageRecord | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number } | null>(null);
 
   // Panel form state
   const [panelRoom, setPanelRoom] = useState("");
@@ -78,30 +80,86 @@ export function PhotoReviewApp() {
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files || e.target.files.length === 0) return;
+    await uploadFiles(Array.from(e.target.files));
+  };
 
-    const file = e.target.files[0];
-    const formData = new FormData();
-    formData.append("file", file);
+  const uploadFiles = async (files: File[]) => {
+    if (files.length === 0) return;
 
     setUploading(true);
-    try {
-      const res = await fetch("/api/photo-reviews/upload", {
-        method: "POST",
-        body: formData,
-      });
-      const data = (await res.json()) as { success?: boolean; image?: ImageRecord; error?: string };
-      if (data.success) {
-        await fetchImages();
-        if (data.image) setSelectedImage(data.image);
-      } else {
-        alert(data.error || "Failed to upload");
+    setUploadProgress({ current: 0, total: files.length });
+
+    let successCount = 0;
+    let lastUploadedImage: ImageRecord | null = null;
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const formData = new FormData();
+      formData.append("file", file);
+
+      try {
+        const res = await fetch("/api/photo-reviews/upload", {
+          method: "POST",
+          body: formData,
+        });
+        const data = (await res.json()) as { success?: boolean; image?: ImageRecord; error?: string };
+        if (data.success) {
+          successCount++;
+          if (data.image) lastUploadedImage = data.image;
+        } else {
+          console.error(`Failed to upload ${file.name}:`, data.error);
+        }
+      } catch (err) {
+        console.error(`Upload error for ${file.name}:`, err);
       }
-    } catch (err) {
-      console.error("Upload error:", err);
-      alert("Upload failed");
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+
+      setUploadProgress({ current: i + 1, total: files.length });
+    }
+
+    await fetchImages();
+    if (lastUploadedImage) setSelectedImage(lastUploadedImage);
+
+    setUploading(false);
+    setUploadProgress(null);
+
+    if (fileInputRef.current) fileInputRef.current.value = "";
+
+    if (successCount < files.length) {
+      alert(`Uploaded ${successCount} of ${files.length} files successfully.`);
+    }
+  };
+
+  const handleDragEnter = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Only set to false if we're leaving the main drop zone
+    if (e.currentTarget === e.target) {
+      setIsDragging(false);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = Array.from(e.dataTransfer.files).filter(file =>
+      file.type.startsWith('image/')
+    );
+
+    if (files.length > 0) {
+      await uploadFiles(files);
     }
   };
 
@@ -157,7 +215,24 @@ export function PhotoReviewApp() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] bg-zinc-50 dark:bg-zinc-950 overflow-hidden text-zinc-900 dark:text-zinc-100">
+    <div
+      className="flex h-[calc(100vh-4rem)] bg-zinc-50 dark:bg-zinc-950 overflow-hidden text-zinc-900 dark:text-zinc-100"
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
+      {/* Drag and Drop Overlay */}
+      {isDragging && (
+        <div className="fixed inset-0 z-50 bg-blue-500/20 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+          <div className="bg-white dark:bg-zinc-900 p-8 rounded-2xl shadow-2xl border-4 border-dashed border-blue-500 pointer-events-none">
+            <Upload className="w-16 h-16 text-blue-500 mx-auto mb-4" />
+            <p className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">Drop photos here</p>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-2">Upload multiple images at once</p>
+          </div>
+        </div>
+      )}
+
       {/* Left Main Content */}
       <div
         className={`flex-1 flex flex-col h-full overflow-hidden transition-all ${selectedImage ? "mr-96" : ""}`}
@@ -185,6 +260,7 @@ export function PhotoReviewApp() {
               onChange={handleFileChange}
               className="hidden"
               accept="image/*"
+              multiple
             />
             <button
               onClick={handleUploadClick}
@@ -194,12 +270,12 @@ export function PhotoReviewApp() {
               {uploading ? (
                 <>
                   <RefreshCw className="w-5 h-5 animate-spin" />
-                  Analyzing...
+                  {uploadProgress ? `Uploading ${uploadProgress.current}/${uploadProgress.total}...` : "Analyzing..."}
                 </>
               ) : (
                 <>
                   <Upload className="w-5 h-5" />
-                  Upload Photo
+                  Upload Photos
                 </>
               )}
             </button>
@@ -222,14 +298,14 @@ export function PhotoReviewApp() {
                 No photos yet
               </h3>
               <p className="mt-2 text-center max-w-sm">
-                Upload some photos to get started. Workers AI will automatically identify the room
-                and generate tags.
+                Upload photos to get started. Workers AI will automatically identify the room
+                and generate tags. You can upload multiple photos at once or drag and drop them.
               </p>
               <button
                 onClick={handleUploadClick}
                 className="mt-6 px-6 py-2.5 bg-zinc-900 dark:bg-white text-white dark:text-zinc-900 rounded-md font-medium shadow-sm hover:ring-2 hover:ring-offset-2 hover:ring-zinc-900 dark:hover:ring-white transition-all"
               >
-                Upload First Photo
+                Upload Photos
               </button>
             </div>
           ) : (
