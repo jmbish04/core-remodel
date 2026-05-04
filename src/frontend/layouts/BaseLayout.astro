@@ -9,12 +9,13 @@ const { title, description, ogImage } = Astro.props;
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <HeadSEO title={title} description={description} ogImage={ogImage} />
     <script is:inline>
       (() => {
         try {
+          // Enforce dark theme by default
           const stored = localStorage.getItem("theme");
           const prefersDark = window.matchMedia(
             "(prefers-color-scheme: dark)",

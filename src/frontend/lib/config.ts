@@ -17,19 +17,20 @@ export type SiteConfig = {
 };
 
 export const siteConfig: SiteConfig = {
-  name: "Astro shadcn/ui template",
-  description: "The template helps you build apps with Astro, Tailwind CSS, and shadcn/ui.",
-  url: "https://astro-shadcn-ui-template.vercel.app",
+  name: "Remodel Mood Board",
+  description: "AI-powered image management and mood board creation for your home renovation projects",
+  url: "https://core-remodel.hacolby.workers.dev",
   author: {
-    name: "AREA44",
-    url: "https://github.com/area44",
+    name: "core-remodel",
+    url: "https://github.com/jmbish04/core-remodel",
   },
   links: {
-    github: "https://github.com/area44/astro-shadcn-ui-template",
+    github: "https://github.com/jmbish04/core-remodel",
   },
   navItems: [
-    { href: "https://astro.build", label: "Astro", external: true },
-    { href: "https://tailwindcss.com", label: "Tailwind CSS", external: true },
-    { href: "https://ui.shadcn.com", label: "shadcn/ui", external: true },
+    { href: "/gallery", label: "Gallery" },
+    { href: "/moodboards", label: "Mood Boards" },
+    { href: "/review", label: "Review" },
+    { href: "/listing-photos", label: "Listing Photos" },
   ],
 };
