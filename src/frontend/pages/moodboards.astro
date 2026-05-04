@@ -7,61 +7,61 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
   description="Create and manage mood boards for your renovation projects"
 >
   <main class="container mx-auto px-4 py-8">
-    <div className="mb-8 flex items-center justify-between">
+    <div class="mb-8 flex items-center justify-between">
       <div>
-        <h1 className="text-3xl font-bold mb-2">Mood Boards</h1>
-        <p className="text-muted-foreground">Organize your design inspiration with drag-and-drop boards</p>
+        <h1 class="text-3xl font-bold mb-2">Mood Boards</h1>
+        <p class="text-muted-foreground">Organize your design inspiration with drag-and-drop boards</p>
       </div>
       <button
         id="create-board-btn"
-        className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+        class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
       >
         + Create Board
       </button>
     </div>
 
-    <div id="boards-grid" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-      <p className="col-span-full text-sm text-muted-foreground">Loading mood boards...</p>
+    <div id="boards-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+      <p class="col-span-full text-sm text-muted-foreground">Loading mood boards...</p>
     </div>
 
-    <div id="create-modal" className="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-background rounded-lg p-6 max-w-md w-full mx-4">
-        <h2 className="text-xl font-semibold mb-4">Create New Mood Board</h2>
-        <form id="create-form" className="space-y-4">
+    <div id="create-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+      <div class="bg-background rounded-lg p-6 max-w-md w-full mx-4">
+        <h2 class="text-xl font-semibold mb-4">Create New Mood Board</h2>
+        <form id="create-form" class="space-y-4">
           <div>
-            <label htmlFor="board-name" className="block text-sm font-medium mb-2">
+            <label for="board-name" class="block text-sm font-medium mb-2">
               Board Name
             </label>
             <input
               type="text"
               id="board-name"
               required
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              class="w-full rounded-md border bg-background px-3 py-2 text-sm"
               placeholder="e.g., Kitchen Remodel"
             />
           </div>
           <div>
-            <label htmlFor="board-description" className="block text-sm font-medium mb-2">
+            <label for="board-description" class="block text-sm font-medium mb-2">
               Description
             </label>
             <textarea
               id="board-description"
               rows={3}
-              className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+              class="w-full rounded-md border bg-background px-3 py-2 text-sm"
               placeholder="Optional description..."
             ></textarea>
           </div>
-          <div className="flex gap-2 justify-end">
+          <div class="flex gap-2 justify-end">
             <button
               type="button"
               id="cancel-btn"
-              className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
+              class="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+              class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
             >
               Create
             </button>

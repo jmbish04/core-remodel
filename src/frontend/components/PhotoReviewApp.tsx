@@ -160,12 +160,13 @@ export function PhotoReviewApp() {
     toast.success(`Added ${acceptedFiles.length} file(s) to upload queue`);
   }, []);
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+  const { getRootProps, getInputProps, isDragActive, open: openFileDialog } = useDropzone({
     onDrop,
     accept: {
       "image/*": [".png", ".jpg", ".jpeg", ".gif", ".webp"],
     },
     multiple: true,
+    noClick: true,
   });
 
   // Remove staged file
@@ -372,7 +373,7 @@ export function PhotoReviewApp() {
             </p>
           </div>
 
-          <div className="flex gap-4">
+          <div className="flex gap-3">
             <button
               onClick={fetchImages}
               className="p-2.5 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 transition-colors"
@@ -380,25 +381,41 @@ export function PhotoReviewApp() {
             >
               <RefreshCw className={`w-5 h-5 ${loading ? "animate-spin text-zinc-400" : ""}`} />
             </button>
+            <Button
+              onClick={openFileDialog}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+              disabled={uploading}
+            >
+              <Upload className="w-4 h-4 mr-2" />
+              Upload Photos
+            </Button>
           </div>
         </header>
 
-        {/* Main Content Area */}
-        <div className="flex-1 overflow-y-auto p-6 scroll-smooth">
-          {/* Dropzone Area */}
+        {/* Main Content Area — the whole area is a drop zone (drag anywhere to add photos) */}
+        <div {...getRootProps()} className="flex-1 overflow-y-auto p-6 scroll-smooth outline-none">
+          {/* Hidden file input for dropzone */}
+          <input {...getInputProps()} />
+
+          {/* Drag-over overlay when dragging onto the window */}
+          {isDragActive && (
+            <div className="fixed inset-0 z-50 bg-blue-500/20 border-4 border-blue-500 border-dashed flex items-center justify-center pointer-events-none">
+              <div className="text-center">
+                <Upload className="w-16 h-16 mx-auto mb-4 text-blue-500" />
+                <p className="text-xl font-medium text-blue-700 dark:text-blue-300">Drop photos here</p>
+              </div>
+            </div>
+          )}
+
+          {/* Dropzone Area — shown only when no staged files and no images yet */}
           {stagedFiles.length === 0 && images.length === 0 && !loading && (
             <div
-              {...getRootProps()}
-              className={`border-2 border-dashed rounded-xl p-12 text-center transition-colors cursor-pointer ${
-                isDragActive
-                  ? "border-blue-500 bg-blue-50 dark:bg-blue-950/20"
-                  : "border-zinc-300 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-600"
-              }`}
+              className="border-2 border-dashed rounded-xl p-12 text-center transition-colors cursor-pointer border-zinc-300 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-600"
+              onClick={openFileDialog}
             >
-              <input {...getInputProps()} />
               <Upload className="w-16 h-16 mx-auto mb-4 text-zinc-400" />
               <h3 className="text-xl font-medium mb-2">
-                {isDragActive ? "Drop photos here" : "Upload Photos"}
+                Upload Photos
               </h3>
               <p className="text-sm text-zinc-500 dark:text-zinc-400">
                 Drag and drop images here, or click to browse
@@ -415,16 +432,10 @@ export function PhotoReviewApp() {
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-lg font-semibold">Staged Files ({stagedFiles.length})</h2>
                 <div className="flex gap-2">
-                  <div
-                    {...getRootProps()}
-                    className="inline-block"
-                  >
-                    <input {...getInputProps()} />
-                    <Button variant="outline" size="sm">
-                      <Upload className="w-4 h-4 mr-2" />
-                      Add More
-                    </Button>
-                  </div>
+                  <Button variant="outline" size="sm" onClick={openFileDialog}>
+                    <Upload className="w-4 h-4 mr-2" />
+                    Add More
+                  </Button>
                   <Button
                     onClick={uploadStagedFiles}
                     disabled={uploading}
@@ -501,9 +512,8 @@ export function PhotoReviewApp() {
                 Upload photos to get started. Workers AI will automatically identify the room
                 and generate tags. You can upload multiple photos at once or drag and drop them.
               </p>
-              <div {...getRootProps()}>
-                <input {...getInputProps()} />
-                <Button className="bg-zinc-900 dark:bg-white text-white dark:text-zinc-900">
+              <div>
+                <Button className="bg-zinc-900 dark:bg-white text-white dark:text-zinc-900" onClick={openFileDialog}>
                   <Upload className="w-4 h-4 mr-2" />
                   Upload Photos
                 </Button>

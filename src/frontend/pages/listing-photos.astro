@@ -7,18 +7,18 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
   description="Manage house listing photos with AI-powered editing capabilities"
 >
   <main class="container mx-auto px-4 py-8">
-    <div className="mb-8">
-      <h1 className="text-3xl font-bold mb-2">Listing Photos</h1>
-      <p className="text-muted-foreground">House stock photos with AI editing capabilities</p>
+    <div class="mb-8">
+      <h1 class="text-3xl font-bold mb-2">Listing Photos</h1>
+      <p class="text-muted-foreground">House stock photos with AI editing capabilities</p>
     </div>
 
-    <div className="grid gap-6">
-      <div className="rounded-lg border bg-card p-6">
-        <h2 className="text-xl font-semibold mb-4">Upload Listing Photo</h2>
-        <form id="upload-listing-form" className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div class="grid gap-6">
+      <div class="rounded-lg border bg-card p-6">
+        <h2 class="text-xl font-semibold mb-4">Upload Listing Photo</h2>
+        <form id="upload-listing-form" class="space-y-4">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label htmlFor="listing-file" className="block text-sm font-medium mb-2">
+              <label for="listing-file" class="block text-sm font-medium mb-2">
                 Photo
               </label>
               <input
@@ -26,35 +26,35 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
                 id="listing-file"
                 accept="image/*"
                 required
-                className="block w-full text-sm text-foreground file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
+                class="block w-full text-sm text-foreground file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
               />
             </div>
             <div>
-              <label htmlFor="room-type" className="block text-sm font-medium mb-2">
+              <label for="room-type" class="block text-sm font-medium mb-2">
                 Room Type
               </label>
               <input
                 type="text"
                 id="room-type"
                 required
-                className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+                class="w-full rounded-md border bg-background px-3 py-2 text-sm"
                 placeholder="e.g., Living Room, Kitchen"
               />
             </div>
           </div>
           <button
             type="submit"
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
           >
             Upload Photo
           </button>
         </form>
       </div>
 
-      <div className="rounded-lg border bg-card p-6">
-        <h2 className="text-xl font-semibold mb-4">Your Listing Photos</h2>
-        <div id="listing-grid" className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-          <p className="col-span-full text-sm text-muted-foreground">Loading listing photos...</p>
+      <div class="rounded-lg border bg-card p-6">
+        <h2 class="text-xl font-semibold mb-4">Your Listing Photos</h2>
+        <div id="listing-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+          <p class="col-span-full text-sm text-muted-foreground">Loading listing photos...</p>
         </div>
       </div>
     </div>
