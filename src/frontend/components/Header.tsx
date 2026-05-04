@@ -50,7 +50,7 @@ export function Header() {
             className="flex items-center gap-2 mr-4"
           >
             <HomeIcon className="size-5" />
-            <span className="text-lg font-bold">Remodel Mood Board</span>
+            <span className="text-lg font-bold">{siteConfig.name}</span>
           </a>
 
           <MainNav className="hidden lg:flex" />
