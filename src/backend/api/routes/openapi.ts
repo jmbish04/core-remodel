@@ -168,4 +168,36 @@ openapiRouter.get("/docs", (c) => {
   return c.redirect("/scalar");
 });
 
+// GET /context - application context information
+openapiRouter.get("/context", (c) => {
+  return c.json({
+    application: "Remodel Mood Board",
+    description: "AI-powered image management and mood board creation for home renovation projects",
+    version: "1.0.0",
+    features: [
+      "AI Image Analysis with Workers AI",
+      "Mood Board Creation and Management",
+      "Photo Review and Tagging",
+      "Listing Photos with AI Editing",
+      "Semantic Search with Vectorize",
+    ],
+    infrastructure: {
+      platform: "Cloudflare Workers",
+      database: "D1 (SQLite)",
+      storage: "R2 Bucket",
+      ai: "Workers AI",
+      vector: "Vectorize Index",
+      cache: "KV Namespace",
+    },
+    endpoints: {
+      api: "/api",
+      docs: "/docs",
+      openapi: "/openapi.json",
+      swagger: "/swagger",
+      scalar: "/scalar",
+      health: "/api/health",
+    },
+  });
+});
+
 export { openapiRouter };
