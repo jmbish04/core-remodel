@@ -14,14 +14,18 @@ const openapiRouter = new Hono<{ Bindings: Env }>();
 const openApiSpec = {
   openapi: "3.1.0",
   info: {
-    title: "Core Template API",
+    title: "Remodel Mood Board API",
     version: "1.0.0",
-    description: "API documentation for Cloudflare Workers AI powered application",
+    description: "API documentation for Remodel Mood Board - AI-powered image management and mood board creation for home renovation projects",
   },
   servers: [
     {
       url: "/api",
       description: "API Server",
+    },
+    {
+      url: "/",
+      description: "Root Server (for /context endpoint)",
     },
   ],
   paths: {
@@ -132,6 +136,55 @@ const openApiSpec = {
         },
       },
     },
+    "/context": {
+      get: {
+        summary: "Get application context information",
+        tags: ["System"],
+        responses: {
+          "200": {
+            description: "Application context retrieved successfully",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    application: { type: "string", example: "Remodel Mood Board" },
+                    description: { type: "string" },
+                    version: { type: "string", example: "1.0.0" },
+                    features: {
+                      type: "array",
+                      items: { type: "string" },
+                    },
+                    infrastructure: {
+                      type: "object",
+                      properties: {
+                        platform: { type: "string", example: "Cloudflare Workers" },
+                        database: { type: "string", example: "D1 (SQLite)" },
+                        storage: { type: "string", example: "R2 Bucket" },
+                        ai: { type: "string", example: "Workers AI" },
+                        vector: { type: "string", example: "Vectorize Index" },
+                        cache: { type: "string", example: "KV Namespace" },
+                      },
+                    },
+                    endpoints: {
+                      type: "object",
+                      properties: {
+                        api: { type: "string", example: "/api" },
+                        docs: { type: "string", example: "/docs" },
+                        openapi: { type: "string", example: "/openapi.json" },
+                        swagger: { type: "string", example: "/swagger" },
+                        scalar: { type: "string", example: "/scalar" },
+                        health: { type: "string", example: "/api/health" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
   },
   components: {
     securitySchemes: {
@@ -166,6 +219,38 @@ openapiRouter.get(
 // GET /docs - redirect to scalar
 openapiRouter.get("/docs", (c) => {
   return c.redirect("/scalar");
+});
+
+// GET /context - application context information
+openapiRouter.get("/context", (c) => {
+  return c.json({
+    application: "Remodel Mood Board",
+    description: "AI-powered image management and mood board creation for home renovation projects",
+    version: "1.0.0",
+    features: [
+      "AI Image Analysis with Workers AI",
+      "Mood Board Creation and Management",
+      "Photo Review and Tagging",
+      "Listing Photos with AI Editing",
+      "Semantic Search with Vectorize",
+    ],
+    infrastructure: {
+      platform: "Cloudflare Workers",
+      database: "D1 (SQLite)",
+      storage: "R2 Bucket",
+      ai: "Workers AI",
+      vector: "Vectorize Index",
+      cache: "KV Namespace",
+    },
+    endpoints: {
+      api: "/api",
+      docs: "/docs",
+      openapi: "/openapi.json",
+      swagger: "/swagger",
+      scalar: "/scalar",
+      health: "/api/health",
+    },
+  });
 });
 
 export { openapiRouter };

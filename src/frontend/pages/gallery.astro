@@ -1,28 +1,26 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
-import { Navigation } from "@/components/Navigation";
 ---
 
 <BaseLayout
   title="Gallery - Remodel Mood Board"
   description="Browse and manage your renovation images with AI-powered analysis"
 >
-  <Navigation client:load />
-  <main className="container mx-auto px-4 py-8">
-    <div className="mb-8">
-      <h1 className="text-3xl font-bold mb-2">Image Gallery</h1>
-      <p className="text-muted-foreground">AI-powered image management for your renovation projects</p>
+  <main class="container mx-auto px-4 py-8">
+    <div class="mb-8">
+      <h1 class="text-3xl font-bold mb-2">Image Gallery</h1>
+      <p class="text-muted-foreground">AI-powered image management for your renovation projects</p>
     </div>
 
-    <div className="grid gap-6">
-      <div className="rounded-lg border bg-card p-6">
-        <h2 className="text-xl font-semibold mb-4">Upload Images</h2>
-        <p className="text-sm text-muted-foreground mb-4">
+    <div class="grid gap-6">
+      <div class="rounded-lg border bg-card p-6">
+        <h2 class="text-xl font-semibold mb-4">Upload Images</h2>
+        <p class="text-sm text-muted-foreground mb-4">
           Upload images to analyze with AI. We'll detect room types, extract keywords, and identify Instagram screenshots.
         </p>
-        <form id="upload-form" className="space-y-4">
+        <form id="upload-form" class="space-y-4">
           <div>
-            <label htmlFor="file-input" className="block text-sm font-medium mb-2">
+            <label for="file-input" class="block text-sm font-medium mb-2">
               Select Images
             </label>
             <input
@@ -30,22 +28,22 @@ import { Navigation } from "@/components/Navigation";
               id="file-input"
               multiple
               accept="image/*"
-              className="block w-full text-sm text-foreground file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
+              class="block w-full text-sm text-foreground file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
             />
           </div>
           <button
             type="submit"
-            className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
+            class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
           >
             Upload & Analyze
           </button>
         </form>
       </div>
 
-      <div className="rounded-lg border bg-card p-6">
-        <h2 className="text-xl font-semibold mb-4">Your Images</h2>
-        <div id="gallery-grid" className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          <p className="col-span-full text-sm text-muted-foreground">Loading images...</p>
+      <div class="rounded-lg border bg-card p-6">
+        <h2 class="text-xl font-semibold mb-4">Your Images</h2>
+        <div id="gallery-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+          <p class="col-span-full text-sm text-muted-foreground">Loading images...</p>
         </div>
       </div>
     </div>

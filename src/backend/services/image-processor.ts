@@ -8,9 +8,9 @@
  * - Vectorize embedding generation and semantic search
  *
  * Model strategy:
- *   Vision: @cf/meta/llama-3.2-11b-vision-instruct (multimodal analysis)
- *   Reasoning: @cf/openai/gpt-oss-120b with response_format json_schema (structured output)
- *   Embeddings: @cf/baai/bge-base-en-v1.5
+ * Vision: @cf/meta/llama-3.2-11b-vision-instruct (multimodal analysis)
+ * Reasoning: @cf/openai/gpt-oss-120b with response_format json_schema (structured output)
+ * Embeddings: @cf/baai/bge-base-en-v1.5
  */
 
 import { drizzle } from "drizzle-orm/d1";
@@ -160,14 +160,12 @@ export class ImageProcessorService {
           content: [
             {
               type: "text",
-              text: [
-                "Analyze this interior design/architecture photo thoroughly.",
-                "Describe: 1) What room or space this is (kitchen, bathroom, living room, bedroom, backyard, exterior, etc.)",
-                "2) Style elements, materials, colors, textures visible",
-                "3) Whether this appears to be an Instagram screenshot (look for UI: username bar, likes, comments, story ring)",
-                "4) If Instagram: the account handle and any visible caption text",
-                "Be specific and detailed.",
-              ].join("\n"),
+              text: `Analyze this interior design/architecture photo thoroughly.
+Describe: 1) What room or space this is (kitchen, bathroom, living room, bedroom, backyard, exterior, etc.)
+2) Style elements, materials, colors, textures visible
+3) Whether this appears to be an Instagram screenshot (look for UI: username bar, likes, comments, story ring)
+4) If Instagram: the account handle and any visible caption text
+Be specific and detailed.`,
             },
             {
               type: "image_url",
@@ -201,7 +199,7 @@ export class ImageProcessorService {
       messages: [
         {
           role: "system",
-          content: "You are an expert interior design analyst. Extract structured metadata from the provided image description. Always respond with valid JSON matching the schema.",
+          content: `You are an expert interior design analyst. Extract structured metadata from the provided image description. Always respond with valid JSON matching the schema.`,
         },
         {
           role: "user",
@@ -243,7 +241,7 @@ export class ImageProcessorService {
       messages: [
         {
           role: "system",
-          content: "You are an interior design photo analyst. Extract the room type and descriptive tags from the image description. Return lowercase values.",
+          content: `You are an interior design photo analyst. Extract the room type and descriptive tags from the image description. Return lowercase values.`,
         },
         {
           role: "user",
@@ -270,33 +268,55 @@ export class ImageProcessorService {
 
   /**
    * Upload an image to Cloudflare Images and return the API response.
+   * Implements exponential backoff to handle transient 429s.
    */
   async uploadToCloudflareImages(
     imageBlob: Blob,
     customId?: string,
+    filename?: string
   ): Promise<CloudflareImagesResponse> {
     const formData = new FormData();
-    formData.append("file", imageBlob);
+    formData.append("file", imageBlob, filename || "image.jpg");
 
     if (customId) {
       formData.append("id", customId);
     }
 
     const apiUrl = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/images/v1`;
+    let lastErrorText = "";
 
-    const response = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${this.apiToken}`,
-      },
-      body: formData,
-    });
+    // 3 Retry loop to weather 429s and 5xx
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+        },
+        body: formData,
+      });
 
-    if (!response.ok) {
-      throw new Error(`Failed to upload to Cloudflare Images: ${response.statusText}`);
+      if (response.ok) {
+        return await response.json();
+      }
+
+      const errorText = await response.text();
+      lastErrorText = errorText;
+
+      // Retry on 429 Too Many Requests or 5xx Server Errors
+      if (response.status === 429 || response.status >= 500) {
+        console.warn(`[Images API] ${response.status} Error (Attempt ${attempt}/3):`, errorText);
+        if (attempt < 3) {
+          // Exponential backoff
+          await new Promise((resolve) => setTimeout(resolve, attempt * 1500));
+          continue;
+        }
+      }
+
+      // 4xx bad requests hit this immediately
+      throw new Error(`Failed to upload to Cloudflare Images (${response.status}): ${errorText}`);
     }
 
-    return await response.json();
+    throw new Error(`Failed to upload to Cloudflare Images after 3 attempts. Last error: ${lastErrorText}`);
   }
 
   /**
@@ -349,11 +369,10 @@ export class ImageProcessorService {
   }
 
   // -------------------------------------------------------------------------
-  // Utility: Convert file to base64 data URL
+  // Utility: Convert ArrayBuffer to base64 data URL
   // -------------------------------------------------------------------------
 
-  static async fileToDataUrl(file: File | Blob): Promise<string> {
-    const arrayBuffer = await file.arrayBuffer();
+  static arrayBufferToDataUrl(arrayBuffer: ArrayBuffer, mimeType: string): string {
     const uint8Array = new Uint8Array(arrayBuffer);
 
     // Convert to base64 in chunks to avoid stack overflow for large images
@@ -365,7 +384,6 @@ export class ImageProcessorService {
     }
 
     const base64Image = btoa(binaryString);
-    const mimeType = file instanceof File ? file.type : "image/jpeg";
     return `data:${mimeType};base64,${base64Image}`;
   }
 
@@ -379,13 +397,21 @@ export class ImageProcessorService {
   ): Promise<ProcessImageResult> {
     try {
       const imageId = crypto.randomUUID();
-      const dataUrl = await ImageProcessorService.fileToDataUrl(file);
+      const mimeType = file.type || "image/jpeg";
+      const filename = file.name || "image.jpg";
+
+      // CRITICAL FIX: Extract stream exactly ONCE
+      const arrayBuffer = await file.arrayBuffer();
+
+      // Reconstruct fresh payload for APIs to avoid stream consumption 400/429s
+      const imageBlob = new Blob([arrayBuffer], { type: mimeType });
+      const dataUrl = ImageProcessorService.arrayBufferToDataUrl(arrayBuffer, mimeType);
 
       // Step 1: Analyze image with vision → structured reasoning
       const analysis = await this.analyzeImage(dataUrl);
 
       // Step 2: Upload to Cloudflare Images
-      const uploadResponse = await this.uploadToCloudflareImages(file, imageId);
+      const uploadResponse = await this.uploadToCloudflareImages(imageBlob, imageId, filename);
 
       if (!uploadResponse.success) {
         throw new Error("Failed to upload original image");
@@ -444,11 +470,18 @@ export class ImageProcessorService {
   ): Promise<{ success: boolean; record?: Record<string, unknown>; error?: string }> {
     try {
       const id = crypto.randomUUID();
-      const filename = file.name;
-      const dataUrl = await ImageProcessorService.fileToDataUrl(file);
+      const filename = file.name || "review.jpg";
+      const mimeType = file.type || "image/jpeg";
+
+      // CRITICAL FIX: Extract stream exactly ONCE
+      const arrayBuffer = await file.arrayBuffer();
+
+      // Reconstruct fresh payload for APIs to avoid stream consumption 400/429s
+      const imageBlob = new Blob([arrayBuffer], { type: mimeType });
+      const dataUrl = ImageProcessorService.arrayBufferToDataUrl(arrayBuffer, mimeType);
 
       // Step 1: Upload to Cloudflare Images
-      const uploadResponse = await this.uploadToCloudflareImages(file, id);
+      const uploadResponse = await this.uploadToCloudflareImages(imageBlob, id, filename);
       if (!uploadResponse.success) {
         throw new Error("Failed to upload to Cloudflare Images");
       }
@@ -489,6 +522,17 @@ export class ImageProcessorService {
     files: File[],
     isListingPhoto: boolean = false,
   ): Promise<ProcessImageResult[]> {
-    return Promise.all(files.map((file) => this.processImage(file, isListingPhoto)));
+    const results: ProcessImageResult[] = [];
+    
+    // CRITICAL FIX: Evaluate iteratively, not via Promise.all()
+    // Resolving concurrently immediately trips the Cloudflare REST API 429 threshold
+    for (const file of files) {
+      const result = await this.processImage(file, isListingPhoto);
+      results.push(result);
+      // Brief pause between uploads to allow edge tokens to refill
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    
+    return results;
   }
 }
