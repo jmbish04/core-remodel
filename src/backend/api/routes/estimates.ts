@@ -638,140 +638,158 @@ estimatesRouter.post("/intake/confirm", async (c) => {
       return c.json({ error: "Estimate not found" }, 404);
     }
 
-    await db
-      .update(estimateRevisions)
-      .set({
-        estimateStatusId:
-          typeof body.estimateStatusId === "number" ? body.estimateStatusId : revision.estimateStatusId,
-        statusNotes:
-          typeof body.statusNotes === "string" || body.statusNotes === null
-            ? body.statusNotes
-            : revision.statusNotes,
-        aiRationale:
-          typeof body.aiRationale === "string" || body.aiRationale === null
-            ? body.aiRationale
-            : revision.aiRationale,
-        dateEstimate:
-          typeof body.dateEstimate === "string" && body.dateEstimate.trim()
-            ? new Date(body.dateEstimate)
-            : revision.dateEstimate,
-        totalAmountCents:
-          typeof body.totalAmountCents === "number" ? body.totalAmountCents : revision.totalAmountCents,
-        totalTaxCents: typeof body.totalTaxCents === "number" ? body.totalTaxCents : revision.totalTaxCents,
-        depositAmountCents:
-          typeof body.depositAmountCents === "number" ? body.depositAmountCents : revision.depositAmountCents,
-        warrantyDetails:
-          typeof body.warrantyDetails === "string" || body.warrantyDetails === null
-            ? body.warrantyDetails
-            : revision.warrantyDetails,
-        cancellationDetails:
-          typeof body.cancellationDetails === "string" || body.cancellationDetails === null
-            ? body.cancellationDetails
-            : revision.cancellationDetails,
-        isDraft: body.submit ? false : true,
-        changeSource: body.submit ? "submit" : "confirm",
-        datetimeUpdated: new Date(),
-      })
-      .where(eq(estimateRevisions.id, draftRevisionId))
-      .run();
-
-    if ("estimateCompanyId" in body) {
-      await db
-        .update(estimates)
-        .set({
-          estimateCompanyId:
-            typeof body.estimateCompanyId === "number" ? body.estimateCompanyId : null,
-          datetimeUpdated: new Date(),
-        })
-        .where(eq(estimates.id, estimate.id))
-        .run();
-    }
-
-    await db.delete(estimateLineItems).where(eq(estimateLineItems.estimateRevisionId, draftRevisionId)).run();
     const lineItems = Array.isArray(body.lineItems) ? body.lineItems : [];
-    for (const lineItem of lineItems) {
-      if (!lineItem.description || !lineItem.description.trim()) continue;
-      await db.insert(estimateLineItems).values({
-        estimateRevisionId: draftRevisionId,
-        itemCode: lineItem.itemCode?.trim() || null,
-        description: lineItem.description.trim(),
-        qty:
-          typeof lineItem.qty === "number" && Number.isFinite(lineItem.qty)
-            ? lineItem.qty
-            : null,
-        uom: lineItem.uom?.trim() || null,
-        unitCostCents:
-          typeof lineItem.unitCostCents === "number" ? lineItem.unitCostCents : null,
-        lineTotalCents:
-          typeof lineItem.lineTotalCents === "number" ? lineItem.lineTotalCents : null,
-        taxCents: typeof lineItem.taxCents === "number" ? lineItem.taxCents : null,
-        notes: lineItem.notes?.trim() || null,
-        datetimeCreated: new Date(),
-        datetimeUpdated: new Date(),
-      });
-    }
-
-    await db.delete(estimateRoomMappings).where(eq(estimateRoomMappings.estimateRevisionId, draftRevisionId)).run();
     const roomIds = Array.isArray(body.roomIds) ? body.roomIds : [];
-    for (const roomId of roomIds) {
-      if (!Number.isFinite(roomId)) continue;
-      await db.insert(estimateRoomMappings).values({
-        estimateRevisionId: draftRevisionId,
-        roomId,
-        datetimeCreated: new Date(),
-      });
-    }
 
-    if (Array.isArray(body.propValues)) {
-      for (const prop of body.propValues) {
-        const property = (prop.property || "").trim();
-        if (!property) continue;
-        const typeRow = await db
-          .select()
-          .from(estimatePropKeyTypes)
-          .where(eq(estimatePropKeyTypes.property, property))
-          .get();
-        if (!typeRow) continue;
-        await db
-          .insert(estimatePropValues)
-          .values({
-            estimateRevisionId: draftRevisionId,
-            estimateDocumentId: null,
-            property,
-            estimatePropKeyTypeId: typeRow.id,
-            workerAiExtractedValue: prop.workerAiExtractedValue || null,
-            intakeFormValue: prop.intakeFormValue || null,
-            isUserOverridden: true,
-            datetimeCreated: new Date(),
-            datetimeUpdated: new Date(),
+    await db.transaction(async (tx) => {
+      const now = new Date();
+      await tx
+        .update(estimateRevisions)
+        .set({
+          estimateStatusId:
+            typeof body.estimateStatusId === "number" ? body.estimateStatusId : revision.estimateStatusId,
+          statusNotes:
+            typeof body.statusNotes === "string" || body.statusNotes === null
+              ? body.statusNotes
+              : revision.statusNotes,
+          aiRationale:
+            typeof body.aiRationale === "string" || body.aiRationale === null
+              ? body.aiRationale
+              : revision.aiRationale,
+          dateEstimate:
+            typeof body.dateEstimate === "string" && body.dateEstimate.trim()
+              ? new Date(body.dateEstimate)
+              : revision.dateEstimate,
+          totalAmountCents:
+            typeof body.totalAmountCents === "number" ? body.totalAmountCents : revision.totalAmountCents,
+          totalTaxCents: typeof body.totalTaxCents === "number" ? body.totalTaxCents : revision.totalTaxCents,
+          depositAmountCents:
+            typeof body.depositAmountCents === "number" ? body.depositAmountCents : revision.depositAmountCents,
+          warrantyDetails:
+            typeof body.warrantyDetails === "string" || body.warrantyDetails === null
+              ? body.warrantyDetails
+              : revision.warrantyDetails,
+          cancellationDetails:
+            typeof body.cancellationDetails === "string" || body.cancellationDetails === null
+              ? body.cancellationDetails
+              : revision.cancellationDetails,
+          isDraft: body.submit ? false : true,
+          changeSource: body.submit ? "submit" : "confirm",
+          datetimeUpdated: now,
+        })
+        .where(eq(estimateRevisions.id, draftRevisionId))
+        .run();
+
+      if ("estimateCompanyId" in body) {
+        await tx
+          .update(estimates)
+          .set({
+            estimateCompanyId:
+              typeof body.estimateCompanyId === "number" ? body.estimateCompanyId : null,
+            datetimeUpdated: now,
           })
+          .where(eq(estimates.id, estimate.id))
           .run();
       }
-    }
 
-    await db.insert(estimateRevisionSnapshots).values({
-      estimateRevisionId: draftRevisionId,
-      snapshotType: body.submit ? "submitted" : "confirmed",
-      snapshotJson: JSON.stringify(body),
-      createdBy: body.createdBy?.trim() || "system",
-      datetimeCreated: new Date(),
+      await tx
+        .delete(estimateLineItems)
+        .where(eq(estimateLineItems.estimateRevisionId, draftRevisionId))
+        .run();
+      const lineItemValues = lineItems
+        .filter((lineItem) => lineItem.description && lineItem.description.trim())
+        .map((lineItem) => ({
+          estimateRevisionId: draftRevisionId,
+          itemCode: lineItem.itemCode?.trim() || null,
+          description: (lineItem.description || "").trim(),
+          qty:
+            typeof lineItem.qty === "number" && Number.isFinite(lineItem.qty)
+              ? lineItem.qty
+              : null,
+          uom: lineItem.uom?.trim() || null,
+          unitCostCents:
+            typeof lineItem.unitCostCents === "number" ? lineItem.unitCostCents : null,
+          lineTotalCents:
+            typeof lineItem.lineTotalCents === "number" ? lineItem.lineTotalCents : null,
+          taxCents: typeof lineItem.taxCents === "number" ? lineItem.taxCents : null,
+          notes: lineItem.notes?.trim() || null,
+          datetimeCreated: now,
+          datetimeUpdated: now,
+        }));
+      if (lineItemValues.length > 0) {
+        await tx.insert(estimateLineItems).values(lineItemValues).run();
+      }
+
+      await tx
+        .delete(estimateRoomMappings)
+        .where(eq(estimateRoomMappings.estimateRevisionId, draftRevisionId))
+        .run();
+      const roomMappingValues = roomIds
+        .filter((roomId) => Number.isFinite(roomId))
+        .map((roomId) => ({
+          estimateRevisionId: draftRevisionId,
+          roomId,
+          datetimeCreated: now,
+        }));
+      if (roomMappingValues.length > 0) {
+        await tx.insert(estimateRoomMappings).values(roomMappingValues).run();
+      }
+
+      if (Array.isArray(body.propValues)) {
+        for (const prop of body.propValues) {
+          const property = (prop.property || "").trim();
+          if (!property) continue;
+          const typeRow = await tx
+            .select()
+            .from(estimatePropKeyTypes)
+            .where(eq(estimatePropKeyTypes.property, property))
+            .get();
+          if (!typeRow) continue;
+          await tx
+            .insert(estimatePropValues)
+            .values({
+              estimateRevisionId: draftRevisionId,
+              estimateDocumentId: null,
+              property,
+              estimatePropKeyTypeId: typeRow.id,
+              workerAiExtractedValue: prop.workerAiExtractedValue || null,
+              intakeFormValue: prop.intakeFormValue || null,
+              isUserOverridden: true,
+              datetimeCreated: now,
+              datetimeUpdated: now,
+            })
+            .run();
+        }
+      }
+
+      await tx.insert(estimateRevisionSnapshots).values({
+        estimateRevisionId: draftRevisionId,
+        snapshotType: body.submit ? "submitted" : "confirmed",
+        snapshotJson: JSON.stringify(body),
+        createdBy: body.createdBy?.trim() || "system",
+        datetimeCreated: now,
+      });
+
+      await tx.insert(estimateSourceEvents).values({
+        estimateRevisionId: draftRevisionId,
+        estimateDocumentId: null,
+        sourceType: "wizard",
+        eventType: body.submit ? "submit" : "confirm",
+        payloadJson: JSON.stringify({
+          roomCount: roomMappingValues.length,
+          lineItemCount: lineItemValues.length,
+        }),
+        datetimeCreated: now,
+      });
+
+      if (body.submit) {
+        await markAsCurrentRevision(
+          tx as ReturnType<typeof drizzle>,
+          estimate.id,
+          draftRevisionId,
+        );
+      }
     });
-
-    await db.insert(estimateSourceEvents).values({
-      estimateRevisionId: draftRevisionId,
-      estimateDocumentId: null,
-      sourceType: "wizard",
-      eventType: body.submit ? "submit" : "confirm",
-      payloadJson: JSON.stringify({
-        roomCount: roomIds.length,
-        lineItemCount: lineItems.length,
-      }),
-      datetimeCreated: new Date(),
-    });
-
-    if (body.submit) {
-      await markAsCurrentRevision(db, estimate.id, draftRevisionId);
-    }
 
     try {
       await publishRealtimeEvent(c.env, estimate.scenarioId ? `scenario:${estimate.scenarioId}` : "home", {

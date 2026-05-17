@@ -2,11 +2,30 @@ import { Hono } from "hono";
 
 const artifactsRouter = new Hono<{ Bindings: Env }>();
 
+function parseArtifactKey(rawPath: string): string | null {
+  const withoutLeadingSlash = rawPath.replace(/^\/+/, "");
+  if (!withoutLeadingSlash) {
+    return null;
+  }
+  if (
+    withoutLeadingSlash.includes("..") ||
+    withoutLeadingSlash.includes("\\") ||
+    withoutLeadingSlash.includes("//")
+  ) {
+    return null;
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9/_\-.]*$/.test(withoutLeadingSlash)) {
+    return null;
+  }
+  return withoutLeadingSlash;
+}
+
 artifactsRouter.get("/*", async (c) => {
   try {
     const path = c.req.path.replace(/^\/api\/artifacts\//, "");
-    const key = decodeURIComponent(path);
-    if (!key || key.includes("..")) {
+    const decodedPath = decodeURIComponent(path);
+    const key = parseArtifactKey(decodedPath);
+    if (!key) {
       return c.json({ error: "Invalid artifact key" }, 400);
     }
     const object = await c.env.ARTIFACTS_BUCKET.get(key);
@@ -32,4 +51,3 @@ artifactsRouter.get("/*", async (c) => {
 });
 
 export { artifactsRouter };
-

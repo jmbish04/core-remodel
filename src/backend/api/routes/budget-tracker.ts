@@ -1,4 +1,4 @@
-import { desc, eq, inArray, max } from "drizzle-orm";
+import { desc, eq, inArray, max, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import {
@@ -116,119 +116,124 @@ async function replaceBudgetTrackerItemRevision(
   activeItemId: number,
   patch: BudgetTrackerPatch,
 ): Promise<{ previousId: number; nextId: number; trackId: string }> {
-  const now = new Date();
-  const current = await db
-    .select()
-    .from(budgetTrackerItems)
-    .where(eq(budgetTrackerItems.id, activeItemId))
-    .get();
-  if (!current) {
-    throw new Error("Budget tracker item not found");
-  }
-  if (!current.isActive) {
-    throw new Error("Only active revisions can be updated");
-  }
+  return db.transaction(async (tx) => {
+    const now = new Date();
+    const current = await tx
+      .select()
+      .from(budgetTrackerItems)
+      .where(eq(budgetTrackerItems.id, activeItemId))
+      .get();
+    if (!current) {
+      throw new Error("Budget tracker item not found");
+    }
+    if (!current.isActive) {
+      throw new Error("Only active revisions can be updated");
+    }
 
-  const nextRevisionNumber = await getNextTrackRevisionNumber(db, current.trackId);
-  const inserted = await db
-    .insert(budgetTrackerItems)
-    .values({
-      trackId: current.trackId,
-      revisionNumber: nextRevisionNumber,
-      isActive: true,
-      isDraft: patch.isDraft ?? current.isDraft,
-      itemType: normalizeString(patch.itemType) || current.itemType,
-      executionClass: normalizeString(patch.executionClass) || current.executionClass,
-      optionGroup:
-        patch.optionGroup === null
-          ? null
-          : normalizeString(patch.optionGroup) || current.optionGroup,
-      optionKey:
-        patch.optionKey === null
-          ? null
-          : normalizeString(patch.optionKey) || current.optionKey,
-      title: normalizeString(patch.title) || current.title,
-      description:
-        patch.description === null
-          ? null
-          : normalizeString(patch.description) || current.description,
-      status: normalizeString(patch.status) || current.status,
-      riskLevel: normalizeString(patch.riskLevel) || current.riskLevel,
-      isBottleneck:
-        typeof patch.isBottleneck === "boolean"
-          ? patch.isBottleneck
-          : current.isBottleneck,
-      bottleneckReason:
-        patch.bottleneckReason === null
-          ? null
-          : normalizeString(patch.bottleneckReason) || current.bottleneckReason,
-      estimatedLowCents:
-        patch.estimatedLowCents === null
-          ? null
-          : parseCents(patch.estimatedLowCents) ?? current.estimatedLowCents,
-      estimatedHighCents:
-        patch.estimatedHighCents === null
-          ? null
-          : parseCents(patch.estimatedHighCents) ?? current.estimatedHighCents,
-      scenarioId:
-        patch.scenarioId === null
-          ? null
-          : normalizeString(patch.scenarioId) || current.scenarioId,
-      owner: patch.owner === null ? null : normalizeString(patch.owner) || current.owner,
-      aiRationale:
-        patch.aiRationale === null
-          ? null
-          : normalizeString(patch.aiRationale) || current.aiRationale,
-      changeSource:
-        normalizeString(patch.changeSource) ||
-        normalizeString(current.changeSource) ||
-        "manual",
-      changedBy:
-        patch.changedBy === null
-          ? null
-          : normalizeString(patch.changedBy) || current.changedBy,
-      datetimeCreated: now,
-      datetimeUpdated: now,
-    })
-    .returning();
-  const next = inserted[0];
-
-  await db
-    .update(budgetTrackerItems)
-    .set({
-      isActive: false,
-      replacedByItemId: next.id,
-      replacedAt: now,
-      datetimeUpdated: now,
-    })
-    .where(eq(budgetTrackerItems.id, current.id))
-    .run();
-
-  const existingRoomMappings = await db
-    .select()
-    .from(budgetTrackerItemRooms)
-    .where(eq(budgetTrackerItemRooms.budgetTrackerItemId, current.id))
-    .all();
-
-  let nextRoomIds = existingRoomMappings.map((row) => row.roomId);
-  if (Array.isArray(patch.roomIds)) {
-    nextRoomIds = patch.roomIds.filter((value) => Number.isFinite(value));
-  }
-  if (nextRoomIds.length > 0) {
-    await db.insert(budgetTrackerItemRooms).values(
-      nextRoomIds.map((roomId) => ({
-        budgetTrackerItemId: next.id,
-        roomId,
-        datetimeCreated: now,
-      })),
+    const nextRevisionNumber = await getNextTrackRevisionNumber(
+      tx as ReturnType<typeof drizzle>,
+      current.trackId,
     );
-  }
+    const inserted = await tx
+      .insert(budgetTrackerItems)
+      .values({
+        trackId: current.trackId,
+        revisionNumber: nextRevisionNumber,
+        isActive: true,
+        isDraft: patch.isDraft ?? current.isDraft,
+        itemType: normalizeString(patch.itemType) || current.itemType,
+        executionClass: normalizeString(patch.executionClass) || current.executionClass,
+        optionGroup:
+          patch.optionGroup === null
+            ? null
+            : normalizeString(patch.optionGroup) || current.optionGroup,
+        optionKey:
+          patch.optionKey === null
+            ? null
+            : normalizeString(patch.optionKey) || current.optionKey,
+        title: normalizeString(patch.title) || current.title,
+        description:
+          patch.description === null
+            ? null
+            : normalizeString(patch.description) || current.description,
+        status: normalizeString(patch.status) || current.status,
+        riskLevel: normalizeString(patch.riskLevel) || current.riskLevel,
+        isBottleneck:
+          typeof patch.isBottleneck === "boolean"
+            ? patch.isBottleneck
+            : current.isBottleneck,
+        bottleneckReason:
+          patch.bottleneckReason === null
+            ? null
+            : normalizeString(patch.bottleneckReason) || current.bottleneckReason,
+        estimatedLowCents:
+          patch.estimatedLowCents === null
+            ? null
+            : parseCents(patch.estimatedLowCents) ?? current.estimatedLowCents,
+        estimatedHighCents:
+          patch.estimatedHighCents === null
+            ? null
+            : parseCents(patch.estimatedHighCents) ?? current.estimatedHighCents,
+        scenarioId:
+          patch.scenarioId === null
+            ? null
+            : normalizeString(patch.scenarioId) || current.scenarioId,
+        owner: patch.owner === null ? null : normalizeString(patch.owner) || current.owner,
+        aiRationale:
+          patch.aiRationale === null
+            ? null
+            : normalizeString(patch.aiRationale) || current.aiRationale,
+        changeSource:
+          normalizeString(patch.changeSource) ||
+          normalizeString(current.changeSource) ||
+          "manual",
+        changedBy:
+          patch.changedBy === null
+            ? null
+            : normalizeString(patch.changedBy) || current.changedBy,
+        datetimeCreated: now,
+        datetimeUpdated: now,
+      })
+      .returning();
+    const next = inserted[0];
 
-  return {
-    previousId: current.id,
-    nextId: next.id,
-    trackId: current.trackId,
-  };
+    await tx
+      .update(budgetTrackerItems)
+      .set({
+        isActive: false,
+        replacedByItemId: next.id,
+        replacedAt: now,
+        datetimeUpdated: now,
+      })
+      .where(eq(budgetTrackerItems.id, current.id))
+      .run();
+
+    const existingRoomMappings = await tx
+      .select()
+      .from(budgetTrackerItemRooms)
+      .where(eq(budgetTrackerItemRooms.budgetTrackerItemId, current.id))
+      .all();
+
+    let nextRoomIds = existingRoomMappings.map((row) => row.roomId);
+    if (Array.isArray(patch.roomIds)) {
+      nextRoomIds = patch.roomIds.filter((value) => Number.isFinite(value));
+    }
+    if (nextRoomIds.length > 0) {
+      await tx.insert(budgetTrackerItemRooms).values(
+        nextRoomIds.map((roomId) => ({
+          budgetTrackerItemId: next.id,
+          roomId,
+          datetimeCreated: now,
+        })),
+      );
+    }
+
+    return {
+      previousId: current.id,
+      nextId: next.id,
+      trackId: current.trackId,
+    };
+  });
 }
 
 async function getNextExpenseRevisionNumber(
@@ -250,99 +255,104 @@ async function replaceBudgetExpenseRevision(
   activeExpenseId: number,
   patch: BudgetExpensePatch,
 ): Promise<{ previousId: number; nextId: number; trackId: string }> {
-  const now = new Date();
-  const current = await db
-    .select()
-    .from(budgetExpenseEntries)
-    .where(eq(budgetExpenseEntries.id, activeExpenseId))
-    .get();
-  if (!current) {
-    throw new Error("Budget expense item not found");
-  }
-  if (!current.isActive) {
-    throw new Error("Only active expense revisions can be updated");
-  }
+  return db.transaction(async (tx) => {
+    const now = new Date();
+    const current = await tx
+      .select()
+      .from(budgetExpenseEntries)
+      .where(eq(budgetExpenseEntries.id, activeExpenseId))
+      .get();
+    if (!current) {
+      throw new Error("Budget expense item not found");
+    }
+    if (!current.isActive) {
+      throw new Error("Only active expense revisions can be updated");
+    }
 
-  const item = normalizeString(patch.item) || current.item;
-  const category = normalizeString(patch.category) || current.category;
-  const amountCents =
-    patch.amountCents === null
-      ? current.amountCents
-      : parseCents(patch.amountCents) ?? current.amountCents;
+    const item = normalizeString(patch.item) || current.item;
+    const category = normalizeString(patch.category) || current.category;
+    const amountCents =
+      patch.amountCents === null
+        ? current.amountCents
+        : parseCents(patch.amountCents) ?? current.amountCents;
 
-  const nextRevisionNumber = await getNextExpenseRevisionNumber(db, current.trackId);
-  const inserted = await db
-    .insert(budgetExpenseEntries)
-    .values({
+    const nextRevisionNumber = await getNextExpenseRevisionNumber(
+      tx as ReturnType<typeof drizzle>,
+      current.trackId,
+    );
+    const inserted = await tx
+      .insert(budgetExpenseEntries)
+      .values({
+        trackId: current.trackId,
+        revisionNumber: nextRevisionNumber,
+        isActive: true,
+        isDraft: patch.isDraft ?? current.isDraft,
+        item,
+        category,
+        amountCents,
+        vendorName:
+          patch.vendorName === null
+            ? null
+            : normalizeString(patch.vendorName) || current.vendorName,
+        scenarioId:
+          patch.scenarioId === null
+            ? null
+            : normalizeString(patch.scenarioId) || current.scenarioId,
+        optionGroup:
+          patch.optionGroup === null
+            ? null
+            : normalizeString(patch.optionGroup) || current.optionGroup,
+        optionKey:
+          patch.optionKey === null
+            ? null
+            : normalizeString(patch.optionKey) || current.optionKey,
+        sourceType:
+          patch.sourceType === null
+            ? current.sourceType
+            : normalizeString(patch.sourceType) || current.sourceType,
+        sourceRef:
+          patch.sourceRef === null
+            ? null
+            : normalizeString(patch.sourceRef) || current.sourceRef,
+        dateIncurred:
+          patch.dateIncurred === null
+            ? null
+            : parseTimestamp(patch.dateIncurred) || current.dateIncurred,
+        notes:
+          patch.notes === null
+            ? null
+            : normalizeString(patch.notes) || current.notes,
+        changeSource:
+          normalizeString(patch.changeSource) ||
+          normalizeString(current.changeSource) ||
+          "manual",
+        changedBy:
+          patch.changedBy === null
+            ? null
+            : normalizeString(patch.changedBy) || current.changedBy,
+        datetimeCreated: now,
+        datetimeUpdated: now,
+      })
+      .returning();
+    const next = inserted[0];
+
+    await tx
+      .update(budgetExpenseEntries)
+      .set({
+        isActive: false,
+        replacedByExpenseId: next.id,
+        replacedAt: now,
+        datetimeUpdated: now,
+      })
+      .where(eq(budgetExpenseEntries.id, current.id))
+      .run();
+
+    return {
+      previousId: current.id,
+      nextId: next.id,
       trackId: current.trackId,
-      revisionNumber: nextRevisionNumber,
-      isActive: true,
-      isDraft: patch.isDraft ?? current.isDraft,
-      item,
-      category,
-      amountCents,
-      vendorName:
-        patch.vendorName === null
-          ? null
-          : normalizeString(patch.vendorName) || current.vendorName,
-      scenarioId:
-        patch.scenarioId === null
-          ? null
-          : normalizeString(patch.scenarioId) || current.scenarioId,
-      optionGroup:
-        patch.optionGroup === null
-          ? null
-          : normalizeString(patch.optionGroup) || current.optionGroup,
-      optionKey:
-        patch.optionKey === null
-          ? null
-          : normalizeString(patch.optionKey) || current.optionKey,
-      sourceType:
-        patch.sourceType === null
-          ? current.sourceType
-          : normalizeString(patch.sourceType) || current.sourceType,
-      sourceRef:
-        patch.sourceRef === null
-          ? null
-          : normalizeString(patch.sourceRef) || current.sourceRef,
-      dateIncurred:
-        patch.dateIncurred === null
-          ? null
-          : parseTimestamp(patch.dateIncurred) || current.dateIncurred,
-      notes:
-        patch.notes === null
-          ? null
-          : normalizeString(patch.notes) || current.notes,
-      changeSource:
-        normalizeString(patch.changeSource) ||
-        normalizeString(current.changeSource) ||
-        "manual",
-      changedBy:
-        patch.changedBy === null
-          ? null
-          : normalizeString(patch.changedBy) || current.changedBy,
-      datetimeCreated: now,
-      datetimeUpdated: now,
-    })
-    .returning();
-  const next = inserted[0];
-
-  await db
-    .update(budgetExpenseEntries)
-    .set({
-      isActive: false,
-      replacedByExpenseId: next.id,
-      replacedAt: now,
-      datetimeUpdated: now,
-    })
-    .where(eq(budgetExpenseEntries.id, current.id))
-    .run();
-
-  return {
-    previousId: current.id,
-    nextId: next.id,
-    trackId: current.trackId,
-  };
+    };
+  });
 }
 
 budgetTrackerRouter.get("/items", async (c) => {
@@ -631,13 +641,12 @@ budgetTrackerRouter.put("/project-info", async (c) => {
     };
     const rows = Array.isArray(body.rows) ? body.rows : [];
     const db = drizzle(c.env.DB);
-    let updated = 0;
-    for (const row of rows) {
+    const now = new Date();
+    const upsertRows = rows.flatMap((row) => {
       const infoKey = normalizeString(row.infoKey);
-      if (!infoKey) continue;
-      await db
-        .insert(budgetProjectInfo)
-        .values({
+      if (!infoKey) return [];
+      return [
+        {
           infoKey,
           infoLabel: normalizeString(row.infoLabel) || infoKey,
           infoValue:
@@ -645,23 +654,28 @@ budgetTrackerRouter.put("/project-info", async (c) => {
               ? null
               : normalizeString(row.infoValue),
           notes: row.notes === null ? null : normalizeString(row.notes),
-          datetimeCreated: new Date(),
-          datetimeUpdated: new Date(),
-        })
+          datetimeCreated: now,
+          datetimeUpdated: now,
+        },
+      ];
+    });
+
+    if (upsertRows.length > 0) {
+      await db
+        .insert(budgetProjectInfo)
+        .values(upsertRows)
         .onConflictDoUpdate({
           target: budgetProjectInfo.infoKey,
           set: {
-            infoLabel: normalizeString(row.infoLabel) || infoKey,
-            infoValue:
-              row.infoValue === null
-                ? null
-                : normalizeString(row.infoValue),
-            notes: row.notes === null ? null : normalizeString(row.notes),
-            datetimeUpdated: new Date(),
+            infoLabel: sql`excluded.info_label`,
+            infoValue: sql`excluded.info_value`,
+            notes: sql`excluded.notes`,
+            datetimeUpdated: sql`excluded.datetime_updated`,
           },
-        });
-      updated += 1;
+        })
+        .run();
     }
+    const updated = upsertRows.length;
     await emitBudgetRealtime(c.env, {
       event: "budget.project_info.updated",
       updated,

@@ -520,6 +520,106 @@ function extractCloudflareImageId(value: string | null | undefined): string | nu
   return trimmed;
 }
 
+type CloudflareCredentials = Awaited<
+  ReturnType<typeof resolveCloudflareImagesCredentials>
+>;
+
+async function hydrateMissingDeliveryTokensForImages(params: {
+  db: ReturnType<typeof drizzle>;
+  credentials: CloudflareCredentials;
+  sourceImages: Array<typeof images.$inferSelect>;
+}): Promise<{ updatedCount: number }> {
+  const { db, credentials, sourceImages } = params;
+  if (!credentials.accountId || credentials.apiTokens.length === 0) {
+    return { updatedCount: 0 };
+  }
+
+  let updatedCount = 0;
+  for (const image of sourceImages) {
+    if (
+      hasDeliveryToken(image.cfImageIdOptimized) ||
+      hasDeliveryToken(image.cfImageIdOriginal)
+    ) {
+      continue;
+    }
+
+    const candidateImageId = image.cfImageIdOptimized || image.cfImageIdOriginal;
+    if (!candidateImageId) {
+      continue;
+    }
+
+    let deliveryUrl: string | null = null;
+    for (const token of credentials.apiTokens) {
+      const response = await fetch(
+        `https://api.cloudflare.com/client/v4/accounts/${credentials.accountId}/images/v1/${candidateImageId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+
+      if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          continue;
+        }
+        break;
+      }
+
+      const payload = (await response.json()) as {
+        success?: boolean;
+        result?: { variants?: string[] };
+      };
+      if (!payload.success) {
+        continue;
+      }
+
+      deliveryUrl = payload.result?.variants?.[0] || null;
+      if (deliveryUrl) {
+        break;
+      }
+    }
+
+    if (!deliveryUrl) {
+      continue;
+    }
+
+    const deliveryToken = extractDeliveryTokenFromUrl(deliveryUrl);
+    if (!deliveryToken) {
+      continue;
+    }
+
+    let nextMetadata: string | null = image.metadata;
+    try {
+      const parsed = image.metadata
+        ? (JSON.parse(image.metadata) as Record<string, unknown>)
+        : {};
+      nextMetadata = JSON.stringify({
+        ...parsed,
+        deliveryUrl,
+        deliveryToken,
+      });
+    } catch {
+      nextMetadata = JSON.stringify({
+        deliveryUrl,
+        deliveryToken,
+      });
+    }
+
+    await db
+      .update(images)
+      .set({
+        cfImageIdOriginal: deliveryToken,
+        metadata: nextMetadata,
+      })
+      .where(eq(images.id, image.id))
+      .run();
+    updatedCount += 1;
+  }
+
+  return { updatedCount };
+}
+
 /**
  * POST /api/images/upload
  * Upload images with AI analysis
@@ -1115,114 +1215,6 @@ imagesRouter.get("/", async (c) => {
       photoCategory: normalizePhotoCategory(image.photoCategory, image.isListingPhoto),
     }));
 
-    const credentials = await resolveCloudflareImagesCredentials(c.env);
-
-    if (credentials.accountId && credentials.apiTokens.length > 0) {
-      filtered = await Promise.all(
-        filtered.map(async (image) => {
-          const normalizedCategory = normalizePhotoCategory(
-            image.photoCategory,
-            image.isListingPhoto,
-          );
-
-          if (image.photoCategory !== normalizedCategory) {
-            await db
-              .update(images)
-              .set({ photoCategory: normalizedCategory })
-              .where(eq(images.id, image.id))
-              .run();
-            image = { ...image, photoCategory: normalizedCategory };
-          }
-
-          if (hasDeliveryToken(image.cfImageIdOptimized) || hasDeliveryToken(image.cfImageIdOriginal)) {
-            return image;
-          }
-
-          const candidateImageId = image.cfImageIdOptimized || image.cfImageIdOriginal;
-          if (!candidateImageId) {
-            return image;
-          }
-
-          try {
-            let deliveryUrl: string | null = null;
-
-            for (const token of credentials.apiTokens) {
-              const response = await fetch(
-                `https://api.cloudflare.com/client/v4/accounts/${credentials.accountId}/images/v1/${candidateImageId}`,
-                {
-                  headers: {
-                    Authorization: `Bearer ${token}`,
-                  },
-                },
-              );
-
-              if (!response.ok) {
-                if (response.status === 401 || response.status === 403) {
-                  continue;
-                }
-                break;
-              }
-
-              const payload = (await response.json()) as {
-                success?: boolean;
-                result?: { variants?: string[] };
-              };
-
-              if (!payload.success) {
-                continue;
-              }
-
-              deliveryUrl = payload.result?.variants?.[0] || null;
-              if (deliveryUrl) {
-                break;
-              }
-            }
-
-            if (!deliveryUrl) {
-              return image;
-            }
-
-            const deliveryToken = extractDeliveryTokenFromUrl(deliveryUrl);
-            if (!deliveryToken) {
-              return image;
-            }
-
-            let nextMetadata: string | null = image.metadata;
-            try {
-              const parsed = image.metadata ? (JSON.parse(image.metadata) as Record<string, unknown>) : {};
-              nextMetadata = JSON.stringify({
-                ...parsed,
-                deliveryUrl,
-                deliveryToken,
-              });
-            } catch {
-              nextMetadata = JSON.stringify({
-                deliveryUrl,
-                deliveryToken,
-              });
-            }
-
-            await db
-              .update(images)
-              .set({
-                cfImageIdOriginal: deliveryToken,
-                metadata: nextMetadata,
-              })
-              .where(eq(images.id, image.id))
-              .run();
-
-            return {
-              ...image,
-              cfImageIdOriginal: deliveryToken,
-              metadata: nextMetadata,
-            };
-          } catch {
-            return image;
-          }
-        }),
-      );
-    }
-
     const filteredImageIds = filtered.map((image) => image.id);
     const inspirationalMappings =
       filteredImageIds.length > 0
@@ -1286,6 +1278,46 @@ imagesRouter.get("/", async (c) => {
     return c.json(
       {
         error: "Failed to list images",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * POST /api/images/maintenance/resolve-delivery-tokens
+ * Resolve missing imagedelivery tokens outside of GET/list requests.
+ */
+imagesRouter.post("/maintenance/resolve-delivery-tokens", async (c) => {
+  try {
+    const body = (await c.req.json().catch(() => ({}))) as {
+      imageIds?: string[];
+    };
+    const db = drizzle(c.env.DB);
+    const targetIds = Array.isArray(body.imageIds)
+      ? body.imageIds.map((value) => String(value).trim()).filter(Boolean)
+      : [];
+    const sourceImages =
+      targetIds.length > 0
+        ? await db.select().from(images).where(inArray(images.id, targetIds)).all()
+        : await db.select().from(images).all();
+    const credentials = await resolveCloudflareImagesCredentials(c.env);
+    const result = await hydrateMissingDeliveryTokensForImages({
+      db,
+      credentials,
+      sourceImages,
+    });
+
+    return c.json({
+      success: true,
+      scannedCount: sourceImages.length,
+      updatedCount: result.updatedCount,
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to resolve image delivery tokens",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       500,

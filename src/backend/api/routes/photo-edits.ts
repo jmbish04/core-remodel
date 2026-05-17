@@ -40,6 +40,14 @@ interface ImageMetadata {
   };
 }
 
+interface CloudflareImagesUploadResponse {
+  success: boolean;
+  result?: {
+    id?: string;
+    variants?: string[];
+  };
+}
+
 function extractDeliveryTokenFromUrl(deliveryUrl: string): string | null {
   const parts = deliveryUrl.split("/").filter(Boolean);
   if (parts.length < 4) {
@@ -187,7 +195,8 @@ photoEditsRouter.post(
       },
     );
 
-    const cfImagesData = (await cfImagesRes.json()) as { success: boolean; result?: { variants?: string[] } };
+    const cfImagesData =
+      (await cfImagesRes.json()) as CloudflareImagesUploadResponse;
 
     if (!cfImagesData.success) {
       return c.json({ error: "Failed to persist output to Cloudflare Images." }, 500);
