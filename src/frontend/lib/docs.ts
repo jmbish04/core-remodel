@@ -305,7 +305,7 @@ const homeownersPages: DocsPageDefinition[] = [
     status: "planned",
     summary: "Planned guidance for the upcoming room questionnaire that surfaces build questions before they become costly misses.",
     overview:
-      "This guide documents the intended questionnaire workflow that you described for the product. It is included now so the documentation suite explains the coming collaboration model even before the standalone questionnaire page is fully shipped.",
+      "This guide documents the intended questionnaire workflow for the product. It is included now so the documentation suite explains the coming collaboration model even before the standalone questionnaire page is fully shipped.",
     highlights: [
       "The questionnaire is meant to be room-aware, not a giant one-time form.",
       "Answers should help contractors catch hidden scope, wiring, blocking, and finish implications.",

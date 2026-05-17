@@ -278,10 +278,10 @@ export function AppSidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [uploadsPendingCount, setUploadsPendingCount] = useState(0);
   const [currentHash, setCurrentHash] = useState("");
-  const currentPath = useMemo(
-    () => (typeof window === "undefined" ? "/" : window.location.pathname),
-    [],
-  );
+  const currentPath = useMemo(() => {
+    const path = typeof window === "undefined" ? "/" : window.location.pathname;
+    return path.replace(/\/+$/, "") || "/";
+  }, []);
 
   useEffect(() => {
     const syncHash = () => {
