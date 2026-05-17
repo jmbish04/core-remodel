@@ -11,7 +11,7 @@ We are implementing a highly optimized, structural, and parameter-driven Questio
 > **Jules Annotation (End-to-End User Journey Trace):**
 > 1. **Homeowner Lands:** Visits `/questionnaire`. The page dynamically loads categories from D1.
 > 2. **AI Copilot Setup:** The sidebar initializes. A `scheduled()` worker has already populated `checklist_room_mappings`. The Copilot says: "I noticed you're doing a kitchen remodel. Should we start with the Plumbing section?"
-> 3. **Drafting:** The user navigates to `/questionnaire/plumbing`. They check some boxes. The Hono API (`POST /api/questionnaire/answers`) saves with `isDraft: true`.
+> 3. **Drafting:** The user navigates to `/questionnaire/plumbing`. They check some boxes. The Hono API (`POST /api/construction-checklist/answers`) saves with `isDraft: true`.
 > 4. **AI Recommendation & Telemetry:** The user sees a room widget showing "AI suggested: Pot filler". The user clicks "Confirm". The `checklist_room_mappings` status changes to `user_confirmed`.
 > 5. **Budget Link:** The user selects "Island Sink". The API creates a shadow budget item in `budget_tracker_items`.
 > 6. **Contractor Printout:** The user finalizes and shares `/questionnaire/print`. The contractor views the 8.5x11 formatted page, sees the "Island Sink" line item, and drops an inline comment: "Do you have the exact dimensions for the sink cutout?"
@@ -24,10 +24,10 @@ We are implementing a highly optimized, structural, and parameter-driven Questio
 ## Complete Functional Requirements
 
 > **Jules Annotation (D1 Schema & Routing - Pillar 1):**
-> **D1 Schema (`src/backend/db/schema/questionnaire/index.ts`):**
+> **D1 Schema (`src/backend/db/schema/home/questionnaire.ts`):**
 > ```typescript
-> export const questionnaireCategories = sqliteTable("questionnaire_categories", {
->   id: text("id").primaryKey(),
+> export const checklistSections = sqliteTable("checklist_sections", {
+>   id: integer("id").primaryKey({ autoIncrement: true }),
 >   slug: text("slug").notNull().unique(), // e.g., 'mep-low-voltage'
 >   title: text("title").notNull(),
 >   description: text("description"), // Explains section stakes
@@ -35,23 +35,16 @@ We are implementing a highly optimized, structural, and parameter-driven Questio
 >   order: integer("order").notNull().default(0),
 > });
 >
-> export const questions = sqliteTable("questions", {
->   id: text("id").primaryKey(),
->   categoryId: text("category_id").references(() => questionnaireCategories.id),
+> export const checklistQuestions = sqliteTable("checklist_questions", {
+>   id: integer("id").primaryKey({ autoIncrement: true }),
+>   sectionId: integer("section_id").notNull().references(() => checklistSections.id, { onDelete: 'cascade' }),
 >   text: text("text").notNull(),
 >   type: text("type").notNull(), // 'boolean', 'text', 'multiple_choice'
 >   order: integer("order").notNull().default(0),
 > });
->
-> export const options = sqliteTable("options", {
->   id: text("id").primaryKey(),
->   questionId: text("question_id").references(() => questions.id),
->   text: text("text").notNull(),
->   triggersBudgetItem: boolean("triggers_budget_item").default(false),
-> });
 > ```
-> **Hono Route (`/api/questionnaire/:slug`):**
-> Validates `slug` via Zod. Joins categories, questions, and options.
+> **Hono Route (`/api/construction-checklist/sections/:slug`):**
+> Validates `slug` via Zod. Joins sections and questions.
 > **Astro Route (`src/frontend/pages/questionnaire/[section_slug].astro`):**
 > Dynamic route generating static paths or using SSR to fetch the structured JSON payload. Employs `shadcn/ui` Cards for the sub-categories.
 
@@ -62,7 +55,7 @@ We are implementing a highly optimized, structural, and parameter-driven Questio
 
 > **Jules Annotation (AI Integration - Pillar 2):**
 > **Hono Route Configurations:**
-> A new WebSocket or SSE endpoint at `/api/copilot/chat` utilizing `@assistant-ui/react-ai-sdk` and `@ai-sdk/react`.
+> Implement an AI Copilot chat route at `/api/construction-checklist/copilot/chat` utilizing `@assistant-ui/react-ai-sdk` and `@ai-sdk/react`.
 > The context payload will inject `env.DB.query` summaries for current rooms and budgets before passing context to `env.AI`.
 > Tool calling (`ai` sdk functions) mapped to Hono endpoints to draft answers and update the database explicitly when the user accepts.
 > **Stitch Discovery:**
