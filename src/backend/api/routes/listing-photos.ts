@@ -8,7 +8,10 @@ import { Hono } from "hono";
 
 
 
-import { listingPhotos, aiEdits } from "@backend/db";
+import { aiEdits, listingPhotos, rooms } from "@backend/db";
+import { ensureHomeCatalogSeed } from "@backend/services/home-catalog";
+import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
+import { ImageProcessorService } from "../../services/image-processor";
 
 const listingPhotosRouter = new Hono<{ Bindings: Env }>();
 
@@ -44,20 +47,108 @@ listingPhotosRouter.get("/", async (c) => {
 listingPhotosRouter.post("/", async (c) => {
   try {
     const db = drizzle(c.env.DB);
-    const body = await c.req.json();
+    await ensureHomeCatalogSeed(c.env);
+    const contentType = c.req.header("content-type") || "";
 
-    const { cfImageId, roomName, description } = body;
+    let imageId: string | null = null;
+    let cfImageId = "";
+    let roomId: number | null = null;
+    let roomName = "";
+    let description: string | null = null;
 
-    if (!cfImageId || !roomName) {
-      return c.json({ error: "cfImageId and roomName are required" }, 400);
+    if (contentType.includes("multipart/form-data")) {
+      const formData = await c.req.formData();
+      const file = formData.get("file");
+      const roomIdInput = formData.get("roomId");
+      const descriptionInput = formData.get("description");
+
+      if (!(file instanceof File)) {
+        return c.json({ error: "file is required" }, 400);
+      }
+
+      const parsedRoomId =
+        typeof roomIdInput === "string" ? Number(roomIdInput.trim()) : NaN;
+      if (!Number.isFinite(parsedRoomId)) {
+        return c.json({ error: "roomId is required" }, 400);
+      }
+
+      const selectedRoom = await db
+        .select()
+        .from(rooms)
+        .where(eq(rooms.id, Math.trunc(parsedRoomId)))
+        .get();
+
+      if (!selectedRoom) {
+        return c.json({ error: "Selected room not found" }, 404);
+      }
+      roomId = selectedRoom.id;
+      roomName = selectedRoom.roomName;
+
+      const credentials = await resolveCloudflareImagesCredentials(c.env);
+      if (!credentials.accountId || credentials.apiTokens.length === 0) {
+        return c.json({ error: "Cloudflare credentials not configured" }, 500);
+      }
+
+      const processor = new ImageProcessorService(
+        c.env,
+        credentials.accountId,
+        credentials.apiTokens[0],
+        {
+          fallbackApiTokens: credentials.apiTokens.slice(1),
+        },
+      );
+      const result = await processor.processImage(file, true, "listing", {
+        roomAssignment: {
+          roomId,
+          roomType: roomName,
+        },
+      });
+      if (!result.success || !result.imageId || !result.deliveryUrl) {
+        return c.json({ error: result.error || "Failed to upload listing image" }, 500);
+      }
+      imageId = result.imageId;
+
+      const deliveryParts = result.deliveryUrl.split("/").filter(Boolean);
+      cfImageId =
+        deliveryParts.length >= 4
+          ? `${deliveryParts[2]}/${deliveryParts[3]}`
+          : result.imageId;
+      description =
+        typeof descriptionInput === "string" && descriptionInput.trim().length > 0
+          ? descriptionInput.trim()
+          : null;
+    } else {
+      const body = await c.req.json();
+      imageId = body.imageId || null;
+      cfImageId = body.cfImageId || "";
+      roomId = Number(body.roomId);
+      if (!Number.isFinite(roomId)) {
+        return c.json({ error: "roomId is required" }, 400);
+      }
+      const selectedRoom = await db
+        .select()
+        .from(rooms)
+        .where(eq(rooms.id, Math.trunc(roomId)))
+        .get();
+      if (!selectedRoom) {
+        return c.json({ error: "Selected room not found" }, 404);
+      }
+      roomName = selectedRoom.roomName;
+      description = body.description || null;
+    }
+
+    if (!cfImageId || !roomName || !roomId) {
+      return c.json({ error: "cfImageId and roomId are required" }, 400);
     }
 
     const result = await db
       .insert(listingPhotos)
       .values({
+        imageId,
         cfImageId,
+        roomId,
         roomName,
-        description: description || null,
+        description,
       })
       .returning()
       .get();

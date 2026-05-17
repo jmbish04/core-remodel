@@ -3,7 +3,7 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
 ---
 
 <BaseLayout
-  title="Mood Boards - Remodel Mood Board"
+  title="Mood Boards - 126 Colby - Remodel Mission Control"
   description="Create and manage mood boards for your renovation projects"
 >
   <main class="container mx-auto px-4 py-8">
@@ -11,6 +11,7 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
       <div>
         <h1 class="text-3xl font-bold mb-2">Mood Boards</h1>
         <p class="text-muted-foreground">Organize your design inspiration with drag-and-drop boards</p>
+        <p id="boards-feedback" class="mt-2 text-sm text-muted-foreground"></p>
       </div>
       <button
         id="create-board-btn"
@@ -72,6 +73,32 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
   </main>
 
   <script>
+    function slugifyMoodboard(name: string, id: number) {
+      const slug = name
+        .toLowerCase()
+        .trim()
+        .replace(/['"]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '');
+      return slug || `board-${id}`;
+    }
+
+    function formatBoardDate(value: unknown) {
+      if (!value) return 'Unknown';
+      const date = new Date(value as string | number | Date);
+      if (Number.isNaN(date.getTime())) return 'Unknown';
+      return date.toLocaleDateString();
+    }
+
+    function setBoardFeedback(message: string, tone: 'muted' | 'destructive' = 'muted') {
+      const feedback = document.getElementById('boards-feedback');
+      if (!feedback) return;
+      feedback.textContent = message;
+      feedback.className = tone === 'destructive'
+        ? 'mt-2 text-sm text-destructive'
+        : 'mt-2 text-sm text-muted-foreground';
+    }
+
     // Load mood boards
     async function loadBoards() {
       try {
@@ -83,20 +110,25 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
 
         if (!data.moodBoards || data.moodBoards.length === 0) {
           grid.innerHTML = '<p class="col-span-full text-sm text-muted-foreground">No mood boards yet. Create one to get started!</p>';
+          setBoardFeedback('');
           return;
         }
 
         grid.innerHTML = data.moodBoards.map((board: any) => `
-          <a href="/moodboards/${board.id}" class="group block rounded-lg border bg-card p-6 transition-colors hover:bg-muted/50">
+          <a href="/moodboards/${slugifyMoodboard(board.name, board.id)}" class="group block rounded-lg border bg-card p-6 transition-colors hover:bg-muted/50">
             <h3 class="text-lg font-semibold mb-2">${board.name}</h3>
             <p class="text-sm text-muted-foreground mb-4">${board.description || 'No description'}</p>
             <div class="text-xs text-muted-foreground">
-              Created ${new Date(board.createdAt).toLocaleDateString()}
+              Created ${formatBoardDate(board.datetimeCreated)}
             </div>
           </a>
         `).join('');
+        setBoardFeedback('');
       } catch (error) {
-        console.error('Failed to load mood boards:', error);
+        setBoardFeedback(
+          error instanceof Error ? error.message : 'Failed to load mood boards.',
+          'destructive',
+        );
         const grid = document.getElementById('boards-grid');
         if (grid) {
           grid.innerHTML = '<p class="col-span-full text-sm text-destructive">Failed to load mood boards. Please try again.</p>';
@@ -147,13 +179,20 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
           modal.classList.add('hidden');
           nameInput.value = '';
           descInput.value = '';
+          setBoardFeedback('Mood board created.');
           loadBoards();
         } catch (error) {
-          console.error('Create error:', error);
-          alert('Failed to create mood board. Please try again.');
+          setBoardFeedback(
+            error instanceof Error ? error.message : 'Failed to create mood board.',
+            'destructive',
+          );
         }
       });
     }
+
+    window.addEventListener('global-upload-complete', () => {
+      loadBoards();
+    });
 
     // Load boards on page load
     loadBoards();

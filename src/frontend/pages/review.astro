@@ -1,13 +1,18 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
-import { PhotoReviewApp } from "@/components/PhotoReviewApp";
+import { PhotoLibraryApp } from "@/components/PhotoLibraryApp";
 ---
 
 <BaseLayout
-  title="Photo Reviews - Remodel Mood Board"
+  title="Photo Reviews - 126 Colby - Remodel Mission Control"
   description="Manage photo reviews with AI-powered tagging and categorization."
 >
   <div class="pt-[1px]">
-    <PhotoReviewApp client:only="react" />
+    <PhotoLibraryApp
+      client:only="react"
+      category="inspirational"
+      title="Photo Reviews"
+      reviewMode={true}
+    />
   </div>
 </BaseLayout>

@@ -1,13 +1,17 @@
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
+import { rooms } from "../home/rooms";
 
 /**
  * Images table for remodel mood board system
  */
 export const images = sqliteTable("images", {
   id: text("id").primaryKey(), // UUID
+  displayName: text("display_name"),
   cfImageIdOriginal: text("cf_image_id_original").notNull(),
   cfImageIdOptimized: text("cf_image_id_optimized"),
+  photoCategory: text("photo_category").notNull().default("inspirational"), // inspirational | listing | ai_render
+  roomId: integer("room_id").references(() => rooms.id, { onDelete: "set null" }),
   roomType: text("room_type"), // e.g., "kitchen", "bathroom", "living room"
   isInstagram: integer("is_instagram", { mode: "boolean" }).notNull().default(false),
   instagramAccount: text("instagram_account"),

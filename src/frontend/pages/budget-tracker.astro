@@ -1,0 +1,20 @@
+---
+import { BudgetTrackerApp } from "@/components/BudgetTrackerApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Budget Tracker - 126 Colby Remodel Mission Control"
+  description="Mirror budget scenarios and decision gates across D1 and Google Sheets with revision-safe tracking."
+>
+  <main class="container mx-auto px-4 py-8">
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold tracking-tight">Budget Tracker</h1>
+      <p class="mt-2 text-sm text-muted-foreground">
+        Scenario budgeting, bottleneck tracking, and Google Sheets mirrored tabs for planning and decision control.
+      </p>
+    </div>
+
+    <BudgetTrackerApp client:only="react" />
+  </main>
+</BaseLayout>

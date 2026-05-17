@@ -17,8 +17,8 @@ export type SiteConfig = {
 };
 
 export const siteConfig: SiteConfig = {
-  name: "Remodel Mood Board",
-  description: "AI-powered image management and mood board creation for your home renovation projects",
+  name: "126 Colby - Remodel Mission Control",
+  description: "Contractor-first mission control for remodel planning, inspiration, listing photos, and AI design decisions.",
   url: "https://core-remodel.hacolby.workers.dev",
   author: {
     name: "core-remodel",
@@ -28,9 +28,17 @@ export const siteConfig: SiteConfig = {
     github: "https://github.com/jmbish04/core-remodel",
   },
   navItems: [
+    { href: "/budget-tracker", label: "Budget Tracker" },
+    { href: "/estimates", label: "Estimates" },
+    { href: "/contracts", label: "Contracts" },
+    { href: "/uploads", label: "Uploads" },
+    { href: "/supporting-docs", label: "Supporting Docs" },
     { href: "/gallery", label: "Gallery" },
     { href: "/moodboards", label: "Mood Boards" },
     { href: "/review", label: "Review" },
     { href: "/listing-photos", label: "Listing Photos" },
+    { href: "/photo-edits", label: "Photo Edits" },
+    { href: "/decision-room", label: "Decision Room" },
+    { href: "/admin", label: "Admin" },
   ],
 };

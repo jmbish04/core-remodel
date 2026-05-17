@@ -18,6 +18,10 @@ import { Agent, callable, type Connection } from "agents";
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { WorkersAIProvider } from "@backend/ai/providers/workers-ai";
 import { modelRegistry } from "@backend/ai/models";
+import {
+  getCloudflareImagesTokenCandidates,
+  resolveCloudflareImagesCredentials,
+} from "@backend/utils/secrets";
 import { type RenovationAgentState, RENOVATION_ADVICE_SCHEMA } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -94,14 +98,21 @@ export class RenovationAgent extends Agent<Env, RenovationAgentState> {
   // -------------------------------------------------------------------------
 
   private async getProcessor(): Promise<ImageProcessorService> {
-    const accountId = await this.env.CLOUDFLARE_ACCOUNT_ID.get();
-    const apiToken = await this.env.CLOUDFLARE_API_TOKEN.get();
-
-    if (!accountId || !apiToken) {
-      throw new Error("Cloudflare credentials not configured (CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_TOKEN)");
+    const credentials = await resolveCloudflareImagesCredentials(this.env);
+    if (!credentials.accountId || credentials.apiTokens.length === 0) {
+      throw new Error(
+        "Cloudflare Images credentials not configured (CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_IMAGES_STREAM_TOKEN).",
+      );
     }
 
-    return new ImageProcessorService(this.env, accountId, apiToken);
+    return new ImageProcessorService(
+      this.env,
+      credentials.accountId,
+      credentials.apiTokens[0],
+      {
+        fallbackApiTokens: credentials.apiTokens.slice(1),
+      },
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -277,10 +288,12 @@ export class RenovationAgent extends Agent<Env, RenovationAgentState> {
     }
 
     try {
-      const apiToken = await this.env.CLOUDFLARE_API_TOKEN.get();
-      if (!apiToken) issues.push("CLOUDFLARE_API_TOKEN not set");
+      const tokens = await getCloudflareImagesTokenCandidates(this.env);
+      if (tokens.length === 0) {
+        issues.push("No Cloudflare Images token configured");
+      }
     } catch {
-      issues.push("Failed to read CLOUDFLARE_API_TOKEN");
+      issues.push("Failed to read Cloudflare Images token");
     }
 
     return {

@@ -5,24 +5,30 @@ import { Button } from "@/components/ui/button";
 
 type Theme = "light" | "dark";
 
-function getInitialTheme(): Theme {
-  if (typeof window === "undefined") return "light";
-
-  const stored = localStorage.getItem("theme") as Theme | null;
-  if (stored === "light" || stored === "dark") return stored;
-
-  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-}
-
 export const ThemeToggle: React.FC = () => {
-  const [theme, setTheme] = React.useState<Theme>(getInitialTheme);
+  const [theme, setTheme] = React.useState<Theme>("dark");
+  const [mounted, setMounted] = React.useState(false);
 
   React.useEffect(() => {
+    const stored = localStorage.getItem("theme") as Theme | null;
+    if (stored === "light" || stored === "dark") {
+      setTheme(stored);
+    } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
+      setTheme("dark");
+    } else {
+      setTheme("light");
+    }
+    setMounted(true);
+  }, []);
+
+  React.useEffect(() => {
+    if (!mounted) return;
     document.documentElement.classList.toggle("dark", theme === "dark");
     localStorage.setItem("theme", theme);
-  }, [theme]);
+  }, [mounted, theme]);
 
   React.useEffect(() => {
+    if (!mounted) return;
     const media = window.matchMedia("(prefers-color-scheme: dark)");
 
     const listener = () => {
@@ -33,7 +39,7 @@ export const ThemeToggle: React.FC = () => {
 
     media.addEventListener("change", listener);
     return () => media.removeEventListener("change", listener);
-  }, []);
+  }, [mounted]);
 
   const toggleTheme = () => {
     setTheme((t) => (t === "dark" ? "light" : "dark"));

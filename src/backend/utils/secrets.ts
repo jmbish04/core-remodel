@@ -1,0 +1,81 @@
+/**
+ * Shared secret helpers for Cloudflare Images credentials.
+ *
+ * Priority order for Images token selection:
+ * 1) CLOUDFLARE_IMAGES_STREAM_TOKEN
+ * 2) CLOUDFLARE_API_TOKEN (legacy fallback)
+ * 3) CLOUDFLARE_WORKER_ADMIN_TOKEN (legacy fallback)
+ * 4) CLOUDFLARE_WRANGLER_API_TOKEN (last-resort fallback)
+ */
+
+const IMAGE_TOKEN_BINDINGS = [
+  "CLOUDFLARE_IMAGES_STREAM_TOKEN",
+  "CLOUDFLARE_API_TOKEN",
+  "CLOUDFLARE_WORKER_ADMIN_TOKEN",
+  "CLOUDFLARE_WRANGLER_API_TOKEN",
+] as const;
+
+type ImageTokenBindingName = (typeof IMAGE_TOKEN_BINDINGS)[number];
+
+type EnvWithOptionalImageBindings = Env &
+  Partial<Record<ImageTokenBindingName, SecretsStoreSecret>>;
+
+async function readSecretValue(
+  secret: SecretsStoreSecret | null | undefined,
+): Promise<string> {
+  if (!secret) {
+    return "";
+  }
+
+  try {
+    return (await secret.get())?.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
+function getOptionalBinding(
+  env: Env,
+  binding: ImageTokenBindingName,
+): SecretsStoreSecret | undefined {
+  return (env as EnvWithOptionalImageBindings)[binding];
+}
+
+export async function getCloudflareAccountId(env: Env): Promise<string | null> {
+  const value = await readSecretValue(env.CLOUDFLARE_ACCOUNT_ID);
+  return value.length > 0 ? value : null;
+}
+
+export async function getCloudflareImagesTokenCandidates(env: Env): Promise<string[]> {
+  const values = await Promise.all(
+    IMAGE_TOKEN_BINDINGS.map(async (binding) =>
+      readSecretValue(getOptionalBinding(env, binding)),
+    ),
+  );
+
+  return Array.from(
+    new Set(values.filter((value): value is string => value.length > 0)),
+  );
+}
+
+export async function getCloudflareImagesToken(env: Env): Promise<string> {
+  const [firstToken] = await getCloudflareImagesTokenCandidates(env);
+  if (!firstToken) {
+    throw new Error(
+      "Cloudflare Images token not configured. Expected CLOUDFLARE_IMAGES_STREAM_TOKEN (or fallback token).",
+    );
+  }
+  return firstToken;
+}
+
+export async function resolveCloudflareImagesCredentials(env: Env): Promise<{
+  accountId: string | null;
+  apiTokens: string[];
+}> {
+  const [accountId, apiTokens] = await Promise.all([
+    getCloudflareAccountId(env),
+    getCloudflareImagesTokenCandidates(env),
+  ]);
+
+  return { accountId, apiTokens };
+}

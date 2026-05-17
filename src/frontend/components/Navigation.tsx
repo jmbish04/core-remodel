@@ -19,7 +19,7 @@ export function Navigation() {
       <div className="container mx-auto flex items-center justify-between px-4 py-3">
         <div className="flex items-center gap-6">
           <a href="/" className="text-xl font-bold text-primary">
-            Remodel Mood Board
+            126 Colby - Remodel Mission Control
           </a>
           <div className="flex items-center gap-4">
             {navItems.map((item) => (

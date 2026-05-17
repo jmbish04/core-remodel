@@ -1,0 +1,20 @@
+---
+import { PhotoEditSessionsApp } from "@/components/PhotoEditSessionsApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="In-Photo Editing - 126 Colby - Remodel Mission Control"
+  description="Create tracked AI photo-edit sessions with revision history."
+>
+  <main class="container mx-auto px-4 py-8">
+    <div class="mb-8">
+      <h1 class="mb-2 text-3xl font-bold">In-Photo Editing</h1>
+      <p class="text-muted-foreground">
+        Run iterative edits against source photos and keep full revision history linked in D1.
+      </p>
+    </div>
+
+    <PhotoEditSessionsApp client:only="react" />
+  </main>
+</BaseLayout>

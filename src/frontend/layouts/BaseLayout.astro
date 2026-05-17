@@ -2,8 +2,10 @@
 import { cn } from "@/lib/utils";
 
 import HeadSEO from "@/components/HeadSEO.astro";
-import { Header } from "@/components/Header";
+import { AppSidebar } from "@/components/AppSidebar";
 import { Footer } from "@/components/Footer";
+import { VisitorActivityTracker } from "@/components/VisitorActivityTracker";
+import { Toaster } from "sonner";
 
 const { title, description, ogImage } = Astro.props;
 ---
@@ -28,15 +30,21 @@ const { title, description, ogImage } = Astro.props;
   </head>
   <body
     class={cn(
-      "group/body overscroll-none antialiased [--footer-height:calc(var(--spacing)*14)] [--header-height:calc(var(--spacing)*14)] xl:[--footer-height:calc(var(--spacing)*24)]",
+      "group/body overscroll-none antialiased [--footer-height:calc(var(--spacing)*14)] xl:[--footer-height:calc(var(--spacing)*24)]",
     )}
   >
-    <div class="bg-background relative z-10 flex min-h-svh flex-col">
-      <Header client:load />
-      <main class="flex flex-1 flex-col">
-        <slot />
-      </main>
-      <Footer />
+    <div class="bg-background relative z-10 min-h-svh">
+      <AppSidebar client:only="react" />
+      <div class="flex min-h-svh md:pl-64">
+        <div class="flex min-h-svh flex-1 flex-col">
+          <div class="flex-1">
+            <slot />
+          </div>
+          <VisitorActivityTracker client:only="react" />
+          <Toaster client:only="react" position="top-right" richColors theme="dark" />
+          <Footer />
+        </div>
+      </div>
     </div>
   </body>
 </html>
