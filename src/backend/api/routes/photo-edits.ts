@@ -187,7 +187,7 @@ photoEditsRouter.post(
       },
     );
 
-    const cfImagesData = (await cfImagesRes.json()) as any;
+    const cfImagesData = (await cfImagesRes.json()) as { success: boolean; result?: { variants?: string[] } };
 
     if (!cfImagesData.success) {
       return c.json({ error: "Failed to persist output to Cloudflare Images." }, 500);
