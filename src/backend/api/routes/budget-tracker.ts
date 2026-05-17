@@ -1431,6 +1431,18 @@ budgetTrackerRouter.post("/bootstrap-homeowner-plan", async (c) => {
   }
 });
 
+budgetTrackerRouter.get("/realtime", async (c) => {
+  const upgradeHeader = c.req.header("Upgrade");
+  if (upgradeHeader !== "websocket") {
+    return c.json({ error: "Expected WebSocket upgrade" }, 400);
+  }
+
+  const id = c.env.ESTIMATE_COLLAB.idFromName("budget");
+  const stub = c.env.ESTIMATE_COLLAB.get(id);
+
+  return stub.fetch(c.req.raw);
+});
+
 export { budgetTrackerRouter };
 
 // --- AppsScript Integration Routes ---
