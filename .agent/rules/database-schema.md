@@ -3,6 +3,7 @@
 ## ORM: Drizzle (D1 / SQLite)
 
 This project uses Drizzle ORM exclusively for D1 database interactions.
+For runtime validation around table models, use `drizzle-zod` (`createInsertSchema`, `createSelectSchema`) alongside Drizzle table definitions.
 
 ## Schema Organization
 

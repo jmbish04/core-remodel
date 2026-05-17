@@ -1,132 +1,20 @@
 ---
+import { FloorplanGalleryApp } from "@/components/FloorplanGalleryApp";
 import BaseLayout from "@/layouts/BaseLayout.astro";
 ---
 
 <BaseLayout
-  title="Gallery - Remodel Mood Board"
-  description="Browse and manage your renovation images with AI-powered analysis"
+  title="Gallery - 126 Colby - Remodel Mission Control"
+  description="Floorplan-first listing gallery with room-level photo groups."
 >
-  <main class="container mx-auto px-4 py-8">
+  <main class="container mx-auto px-4 py-8 pb-12">
     <div class="mb-8">
-      <h1 class="text-3xl font-bold mb-2">Image Gallery</h1>
-      <p class="text-muted-foreground">AI-powered image management for your renovation projects</p>
+      <h1 class="mb-2 text-3xl font-bold">Image Gallery</h1>
+      <p class="text-muted-foreground">
+        Start from the floorplan, click room dots, and review mapped listing photos by room.
+      </p>
     </div>
 
-    <div class="grid gap-6">
-      <div class="rounded-lg border bg-card p-6">
-        <h2 class="text-xl font-semibold mb-4">Upload Images</h2>
-        <p class="text-sm text-muted-foreground mb-4">
-          Upload images to analyze with AI. We'll detect room types, extract keywords, and identify Instagram screenshots.
-        </p>
-        <form id="upload-form" class="space-y-4">
-          <div>
-            <label for="file-input" class="block text-sm font-medium mb-2">
-              Select Images
-            </label>
-            <input
-              type="file"
-              id="file-input"
-              multiple
-              accept="image/*"
-              class="block w-full text-sm text-foreground file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
-            />
-          </div>
-          <button
-            type="submit"
-            class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90"
-          >
-            Upload & Analyze
-          </button>
-        </form>
-      </div>
-
-      <div class="rounded-lg border bg-card p-6">
-        <h2 class="text-xl font-semibold mb-4">Your Images</h2>
-        <div id="gallery-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-          <p class="col-span-full text-sm text-muted-foreground">Loading images...</p>
-        </div>
-      </div>
-    </div>
+    <FloorplanGalleryApp client:only="react" />
   </main>
-
-  <script>
-    // Load images on page load
-    async function loadImages() {
-      try {
-        const response = await fetch('/api/images');
-        const data = await response.json();
-
-        const grid = document.getElementById('gallery-grid');
-        if (!grid) return;
-
-        if (!data.images || data.images.length === 0) {
-          grid.innerHTML = '<p class="col-span-full text-sm text-muted-foreground">No images yet. Upload some to get started!</p>';
-          return;
-        }
-
-        grid.innerHTML = data.images.map((img: any) => `
-          <div class="group relative aspect-square overflow-hidden rounded-lg border bg-muted">
-            <img
-              src="https://imagedelivery.net/${img.cfImageId}/public"
-              alt="${img.roomType || 'Image'}"
-              class="h-full w-full object-cover transition-transform group-hover:scale-105"
-            />
-            <div class="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent opacity-0 transition-opacity group-hover:opacity-100">
-              <div class="absolute bottom-0 left-0 right-0 p-3 text-white">
-                <p class="text-xs font-medium">${img.roomType || 'Unknown'}</p>
-                ${img.isInstagram ? '<p class="text-xs opacity-80">Instagram</p>' : ''}
-              </div>
-            </div>
-          </div>
-        `).join('');
-      } catch (error) {
-        console.error('Failed to load images:', error);
-        const grid = document.getElementById('gallery-grid');
-        if (grid) {
-          grid.innerHTML = '<p class="col-span-full text-sm text-destructive">Failed to load images. Please try again.</p>';
-        }
-      }
-    }
-
-    // Handle image upload
-    const uploadForm = document.getElementById('upload-form');
-    if (uploadForm) {
-      uploadForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const fileInput = document.getElementById('file-input') as HTMLInputElement;
-        const files = fileInput.files;
-
-        if (!files || files.length === 0) {
-          alert('Please select at least one image');
-          return;
-        }
-
-        const formData = new FormData();
-        for (let i = 0; i < files.length; i++) {
-          formData.append('images', files[i]);
-        }
-
-        try {
-          const response = await fetch('/api/images/upload', {
-            method: 'POST',
-            body: formData,
-          });
-
-          if (!response.ok) {
-            throw new Error('Upload failed');
-          }
-
-          alert('Images uploaded successfully!');
-          fileInput.value = '';
-          loadImages(); // Reload gallery
-        } catch (error) {
-          console.error('Upload error:', error);
-          alert('Failed to upload images. Please try again.');
-        }
-      });
-    }
-
-    // Load images when page loads
-    loadImages();
-  </script>
 </BaseLayout>

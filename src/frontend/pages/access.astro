@@ -1,0 +1,13 @@
+---
+import { AccessGateApp } from "@/components/AccessGateApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Secure Access - 126 Colby - Remodel Mission Control"
+  description="Authenticate to access protected project workspaces."
+>
+  <main class="container mx-auto px-4 py-8">
+    <AccessGateApp client:only="react" />
+  </main>
+</BaseLayout>

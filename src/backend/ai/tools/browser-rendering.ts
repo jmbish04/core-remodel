@@ -203,7 +203,7 @@ export async function uploadPdfToR2(
   pdfBuffer: ArrayBuffer,
   metadata?: Record<string, string>,
 ): Promise<string> {
-  await env.R2_FILES_BUCKET.put(key, pdfBuffer, {
+  await env.ARTIFACTS_BUCKET.put(key, pdfBuffer, {
     httpMetadata: { contentType: "application/pdf" },
     customMetadata: metadata,
   });

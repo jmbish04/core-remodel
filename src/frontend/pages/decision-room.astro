@@ -1,0 +1,20 @@
+---
+import { DecisionRoomApp } from "@/components/DecisionRoomApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Decision Room - 126 Colby - Remodel Mission Control"
+  description="Room-level remodel decisions with camera anchors, comparisons, and promoted final candidates."
+>
+  <main class="container mx-auto px-4 py-8">
+    <div class="mb-8">
+      <h1 class="mb-2 text-3xl font-bold">Decision Room</h1>
+      <p class="text-muted-foreground">
+        Compare listing photos, inspiration, and AI renders by room for contractor-ready decisions.
+      </p>
+    </div>
+
+    <DecisionRoomApp client:only="react" />
+  </main>
+</BaseLayout>

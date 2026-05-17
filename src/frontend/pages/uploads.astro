@@ -1,0 +1,17 @@
+---
+import { UniversalUploadApp } from "@/components/UniversalUploadApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Uploads - 126 Colby - Remodel Mission Control"
+  description="Universal image upload for inspiration and listing photos"
+>
+  <main class="container mx-auto px-4 py-8">
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold">Uploads</h1>
+    </div>
+
+    <UniversalUploadApp client:only="react" />
+  </main>
+</BaseLayout>

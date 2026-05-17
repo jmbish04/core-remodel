@@ -17,6 +17,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
 import { imageReviews } from "@backend/db";
+import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { ImageProcessorService } from "../../services/image-processor";
 
 const photoReviewsRouter = new Hono<{ Bindings: Env }>();
@@ -69,15 +70,21 @@ photoReviewsRouter.post("/upload", async (c) => {
     }
 
     // Resolve credentials
-    const accountId = await c.env.CLOUDFLARE_ACCOUNT_ID.get();
-    const apiToken = await c.env.CLOUDFLARE_API_TOKEN.get();
+    const credentials = await resolveCloudflareImagesCredentials(c.env);
 
-    if (!accountId || !apiToken) {
+    if (!credentials.accountId || credentials.apiTokens.length === 0) {
       return c.json({ error: "Cloudflare Images credentials not configured" }, 500);
     }
 
     // Delegate to ImageProcessorService
-    const processor = new ImageProcessorService(c.env, accountId, apiToken);
+    const processor = new ImageProcessorService(
+      c.env,
+      credentials.accountId,
+      credentials.apiTokens[0],
+      {
+        fallbackApiTokens: credentials.apiTokens.slice(1),
+      },
+    );
     const result = await processor.processPhotoReview(file);
 
     if (!result.success) {

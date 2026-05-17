@@ -12,6 +12,20 @@ import { moodBoards } from "@backend/db";
 
 const moodBoardsRouter = new Hono<{ Bindings: Env }>();
 
+function slugifyMoodboardName(name: string): string {
+  return name
+    .toLowerCase()
+    .trim()
+    .replace(/['"]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function buildMoodboardSlug(board: { id: number; name: string }): string {
+  const slug = slugifyMoodboardName(board.name);
+  return slug || `board-${board.id}`;
+}
+
 /**
  * GET /api/moodboards
  * List all mood boards
@@ -72,6 +86,59 @@ moodBoardsRouter.post("/", async (c) => {
     return c.json(
       {
         error: "Failed to create mood board",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * GET /api/moodboards/resolve/:identifier
+ * Resolve either a numeric ID or slug to a mood board record
+ */
+moodBoardsRouter.get("/resolve/:identifier", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const identifier = c.req.param("identifier").trim().toLowerCase();
+
+    if (!identifier) {
+      return c.json({ error: "Identifier is required" }, 400);
+    }
+
+    let board:
+      | (typeof moodBoards.$inferSelect)
+      | undefined;
+
+    if (/^\d+$/.test(identifier)) {
+      const boardId = parseInt(identifier, 10);
+      board = await db.select().from(moodBoards).where(eq(moodBoards.id, boardId)).get();
+    } else {
+      const boards = await db.select().from(moodBoards).all();
+      board = boards.find((candidate) => {
+        const canonicalSlug = buildMoodboardSlug(candidate);
+        const plainNameSlug = slugifyMoodboardName(candidate.name);
+        return identifier === canonicalSlug || identifier === plainNameSlug;
+      });
+    }
+
+    if (!board) {
+      return c.json({ error: "Mood board not found" }, 404);
+    }
+
+    const canonicalSlug = buildMoodboardSlug(board);
+
+    return c.json({
+      success: true,
+      moodBoard: board,
+      canonicalSlug,
+      canonicalPath: `/moodboards/${canonicalSlug}`,
+      isCanonical: identifier === canonicalSlug,
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to resolve mood board",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       500,

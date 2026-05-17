@@ -138,6 +138,7 @@ const openApiSpec = {
     },
     "/context": {
       get: {
+        operationId: "getApplicationContext",
         summary: "Get application context information",
         tags: ["System"],
         responses: {
@@ -181,6 +182,532 @@ const openApiSpec = {
                 },
               },
             },
+          },
+        },
+      },
+    },
+    "/estimate-statuses": {
+      get: {
+        operationId: "listEstimateStatuses",
+        summary: "List estimate status options",
+        tags: ["Estimates"],
+        responses: {
+          "200": {
+            description: "Estimate statuses retrieved",
+          },
+        },
+      },
+    },
+    "/estimate-companies": {
+      get: {
+        operationId: "listEstimateCompanies",
+        summary: "List estimate companies",
+        tags: ["Estimates"],
+        responses: {
+          "200": {
+            description: "Estimate companies retrieved",
+          },
+        },
+      },
+      post: {
+        operationId: "createEstimateCompany",
+        summary: "Create estimate company",
+        tags: ["Estimates"],
+        responses: {
+          "201": {
+            description: "Estimate company created",
+          },
+        },
+      },
+    },
+    "/estimate-contacts": {
+      get: {
+        operationId: "listEstimateContacts",
+        summary: "List estimate company contacts",
+        tags: ["Estimates"],
+        responses: {
+          "200": {
+            description: "Estimate contacts retrieved",
+          },
+        },
+      },
+      post: {
+        operationId: "createEstimateContact",
+        summary: "Create estimate company contact",
+        tags: ["Estimates"],
+        responses: {
+          "201": {
+            description: "Estimate contact created",
+          },
+        },
+      },
+    },
+    "/estimates": {
+      get: {
+        operationId: "listEstimates",
+        summary: "List estimates with latest revisions",
+        tags: ["Estimates"],
+        responses: {
+          "200": {
+            description: "Estimates retrieved",
+          },
+        },
+      },
+    },
+    "/estimates/drafts": {
+      post: {
+        operationId: "createEstimateDraft",
+        summary: "Create estimate draft",
+        tags: ["Estimates"],
+        responses: {
+          "201": {
+            description: "Estimate draft created",
+          },
+        },
+      },
+    },
+    "/estimates/drafts/{id}/autosave": {
+      patch: {
+        operationId: "autosaveEstimateDraft",
+        summary: "Autosave estimate draft wizard state",
+        tags: ["Estimates"],
+        responses: {
+          "200": {
+            description: "Estimate draft autosaved",
+          },
+        },
+      },
+    },
+    "/estimates/intake/source": {
+      post: {
+        operationId: "processEstimateSource",
+        summary: "Process source input and run structured extraction",
+        tags: ["Estimates"],
+        responses: {
+          "200": {
+            description: "Source processed",
+          },
+        },
+      },
+    },
+    "/estimates/intake/extract": {
+      post: {
+        operationId: "extractEstimateStructuredData",
+        summary: "Run structured extraction from estimate source text",
+        tags: ["Estimates"],
+        responses: {
+          "200": {
+            description: "Estimate extraction completed",
+          },
+        },
+      },
+    },
+    "/estimates/intake/confirm": {
+      post: {
+        operationId: "confirmEstimateIntake",
+        summary: "Confirm intake details and save/submit revision",
+        tags: ["Estimates"],
+        responses: {
+          "200": {
+            description: "Estimate intake confirmed",
+          },
+        },
+      },
+    },
+    "/estimates/{id}/revisions": {
+      get: {
+        operationId: "listEstimateRevisions",
+        summary: "List all estimate revisions",
+        tags: ["Estimates"],
+        responses: {
+          "200": {
+            description: "Estimate revisions retrieved",
+          },
+        },
+      },
+      post: {
+        operationId: "createEstimateRevision",
+        summary: "Create a new estimate revision",
+        tags: ["Estimates"],
+        responses: {
+          "201": {
+            description: "Estimate revision created",
+          },
+        },
+      },
+    },
+    "/estimates/{id}/revisions/{revisionId}": {
+      get: {
+        operationId: "getEstimateRevisionDetail",
+        summary: "Get estimate revision details with line items and sources",
+        tags: ["Estimates"],
+        responses: {
+          "200": {
+            description: "Estimate revision detail retrieved",
+          },
+        },
+      },
+    },
+    "/estimate-companies/{id}": {
+      patch: {
+        operationId: "updateEstimateCompany",
+        summary: "Update estimate company details",
+        tags: ["Estimates"],
+        responses: {
+          "200": {
+            description: "Estimate company updated",
+          },
+        },
+      },
+    },
+    "/estimate-contacts/{id}": {
+      patch: {
+        operationId: "updateEstimateContact",
+        summary: "Update estimate company contact details",
+        tags: ["Estimates"],
+        responses: {
+          "200": {
+            description: "Estimate contact updated",
+          },
+        },
+      },
+    },
+    "/estimate-contacts/mapping-queue": {
+      get: {
+        operationId: "listEstimateContactMappingQueue",
+        summary: "List contacts that need company mapping",
+        tags: ["Estimates"],
+        responses: {
+          "200": {
+            description: "Mapping queue retrieved",
+          },
+        },
+      },
+    },
+    "/estimate-contacts/resolve-by-domain": {
+      post: {
+        operationId: "resolveEstimateContactsByDomain",
+        summary: "Resolve unmapped contacts using email domain matching",
+        tags: ["Estimates"],
+        responses: {
+          "200": {
+            description: "Domain mapping run completed",
+          },
+        },
+      },
+    },
+    "/contracts": {
+      get: {
+        operationId: "listContracts",
+        summary: "List contracts with latest revisions",
+        tags: ["Contracts"],
+        responses: {
+          "200": {
+            description: "Contracts retrieved",
+          },
+        },
+      },
+    },
+    "/contracts/drafts/{id}/autosave": {
+      patch: {
+        operationId: "autosaveContractDraft",
+        summary: "Autosave contract draft revision",
+        tags: ["Contracts"],
+        responses: {
+          "200": {
+            description: "Contract draft autosaved",
+          },
+        },
+      },
+    },
+    "/contracts/{id}/revisions": {
+      get: {
+        operationId: "listContractRevisions",
+        summary: "List contract revisions",
+        tags: ["Contracts"],
+        responses: {
+          "200": {
+            description: "Contract revisions retrieved",
+          },
+        },
+      },
+      post: {
+        operationId: "createContractRevision",
+        summary: "Create contract revision",
+        tags: ["Contracts"],
+        responses: {
+          "201": {
+            description: "Contract revision created",
+          },
+        },
+      },
+    },
+    "/contracts/{id}/risks": {
+      get: {
+        operationId: "getContractRisks",
+        summary: "Get latest contract risk findings",
+        tags: ["Contracts"],
+        responses: {
+          "200": {
+            description: "Contract risks retrieved",
+          },
+        },
+      },
+    },
+    "/contracts/{id}/payment-milestones": {
+      get: {
+        operationId: "getContractPaymentMilestones",
+        summary: "Get latest contract payment milestones",
+        tags: ["Contracts"],
+        responses: {
+          "200": {
+            description: "Contract payment milestones retrieved",
+          },
+        },
+      },
+    },
+    "/contracts/{id}/revisions/{revisionId}/documents": {
+      post: {
+        operationId: "ingestContractDocument",
+        summary: "Ingest and extract a contract source document",
+        tags: ["Contracts"],
+        responses: {
+          "200": {
+            description: "Contract source ingested",
+          },
+        },
+      },
+    },
+    "/contracts/{id}/revisions/{revisionId}/analyze": {
+      post: {
+        operationId: "analyzeContractRevision",
+        summary: "Analyze contract revision for risk and negotiation findings",
+        tags: ["Contracts"],
+        responses: {
+          "200": {
+            description: "Contract analysis completed",
+          },
+        },
+      },
+    },
+    "/contracts/drafts": {
+      post: {
+        operationId: "createContractDraft",
+        summary: "Create contract draft",
+        tags: ["Contracts"],
+        responses: {
+          "201": {
+            description: "Contract draft created",
+          },
+        },
+      },
+    },
+    "/budget-tracker/items": {
+      get: {
+        operationId: "listBudgetTrackerItems",
+        summary: "List active budget tracker items",
+        tags: ["Budget Tracker"],
+        responses: {
+          "200": {
+            description: "Budget tracker items retrieved",
+          },
+        },
+      },
+      post: {
+        operationId: "createBudgetTrackerItem",
+        summary: "Create a new budget tracker item",
+        tags: ["Budget Tracker"],
+        responses: {
+          "201": {
+            description: "Budget tracker item created",
+          },
+        },
+      },
+    },
+    "/budget-tracker/overview": {
+      get: {
+        operationId: "getBudgetTrackerOverview",
+        summary: "Get budget tracker overview with planned, actual, and fund status",
+        tags: ["Budget Tracker"],
+        responses: {
+          "200": {
+            description: "Budget tracker overview retrieved",
+          },
+        },
+      },
+    },
+    "/budget-tracker/project-info": {
+      get: {
+        operationId: "listBudgetProjectInfo",
+        summary: "List budget project information fields",
+        tags: ["Budget Tracker"],
+        responses: {
+          "200": {
+            description: "Project info retrieved",
+          },
+        },
+      },
+      put: {
+        operationId: "upsertBudgetProjectInfo",
+        summary: "Upsert budget project information fields",
+        tags: ["Budget Tracker"],
+        responses: {
+          "200": {
+            description: "Project info upserted",
+          },
+        },
+      },
+    },
+    "/budget-tracker/financial-status": {
+      get: {
+        operationId: "getBudgetFinancialStatus",
+        summary: "Get budget financial status summary and accounts",
+        tags: ["Budget Tracker"],
+        responses: {
+          "200": {
+            description: "Financial status retrieved",
+          },
+        },
+      },
+    },
+    "/budget-tracker/financial-accounts": {
+      put: {
+        operationId: "upsertBudgetFinancialAccounts",
+        summary: "Upsert budget funding accounts",
+        tags: ["Budget Tracker"],
+        responses: {
+          "200": {
+            description: "Financial accounts upserted",
+          },
+        },
+      },
+    },
+    "/budget-tracker/expenses": {
+      get: {
+        operationId: "listBudgetExpenses",
+        summary: "List active budget itemized expenses",
+        tags: ["Budget Tracker"],
+        responses: {
+          "200": {
+            description: "Expenses retrieved",
+          },
+        },
+      },
+      post: {
+        operationId: "createBudgetExpense",
+        summary: "Create a new budget expense entry",
+        tags: ["Budget Tracker"],
+        responses: {
+          "201": {
+            description: "Expense created",
+          },
+        },
+      },
+    },
+    "/budget-tracker/expenses/{id}": {
+      patch: {
+        operationId: "reviseBudgetExpense",
+        summary: "Create a revision for an active budget expense entry",
+        tags: ["Budget Tracker"],
+        responses: {
+          "200": {
+            description: "Expense revised",
+          },
+        },
+      },
+    },
+    "/budget-tracker/variance-options": {
+      get: {
+        operationId: "getBudgetVarianceOptions",
+        summary: "Get variance option comparison totals",
+        tags: ["Budget Tracker"],
+        responses: {
+          "200": {
+            description: "Variance options retrieved",
+          },
+        },
+      },
+    },
+    "/budget-tracker/items/{trackId}/revisions": {
+      get: {
+        operationId: "listBudgetTrackerItemRevisions",
+        summary: "List revisions for a budget tracker track",
+        tags: ["Budget Tracker"],
+        responses: {
+          "200": {
+            description: "Budget tracker revisions retrieved",
+          },
+        },
+      },
+    },
+    "/budget-tracker/items/{id}": {
+      patch: {
+        operationId: "reviseBudgetTrackerItem",
+        summary: "Create a revision for an active budget tracker item",
+        tags: ["Budget Tracker"],
+        responses: {
+          "200": {
+            description: "Budget tracker item revised",
+          },
+        },
+      },
+    },
+    "/budget-tracker/bootstrap-homeowner-plan": {
+      post: {
+        operationId: "bootstrapHomeownerBudgetPlan",
+        summary: "Seed homeowner remodel budget starter rows",
+        tags: ["Budget Tracker"],
+        responses: {
+          "200": {
+            description: "Homeowner plan seeded",
+          },
+        },
+      },
+    },
+    "/sync/google-sheets/template": {
+      get: {
+        operationId: "getGoogleSheetsTemplate",
+        summary: "Get mirrored Google Sheets tab template metadata",
+        tags: ["Sync"],
+        responses: {
+          "200": {
+            description: "Template metadata retrieved",
+          },
+        },
+      },
+    },
+    "/sync/google-sheets/status": {
+      get: {
+        operationId: "getGoogleSheetsSyncStatus",
+        summary: "Get Google Sheets sync status",
+        tags: ["Sync"],
+        responses: {
+          "200": {
+            description: "Sync status retrieved",
+          },
+        },
+      },
+    },
+    "/sync/google-sheets/pull": {
+      post: {
+        operationId: "requestGoogleSheetsPull",
+        summary: "Request Google Sheets pull sync",
+        tags: ["Sync"],
+        responses: {
+          "200": {
+            description: "Pull sync requested",
+          },
+        },
+      },
+    },
+    "/sync/google-sheets/push": {
+      post: {
+        operationId: "requestGoogleSheetsPush",
+        summary: "Request Google Sheets push sync",
+        tags: ["Sync"],
+        responses: {
+          "200": {
+            description: "Push sync requested",
           },
         },
       },
