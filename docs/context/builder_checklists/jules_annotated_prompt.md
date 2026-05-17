@@ -8,6 +8,14 @@ JULES: This is the prompt copied from `docs/context/builder_checklists/prompt_ch
 ## Context & Vision
 We are implementing a highly optimized, structural, and parameter-driven Questionnaire and Contractor Briefing ecosystem into "126 Colby - Remodel Mission Control". This system acts as a one-stop communication portal between homeowners and contractors to eliminate ambiguity regarding existing conditions, trade coordination, and design specs.
 
+> **Jules Annotation (End-to-End User Journey Trace):**
+> 1. **Homeowner Lands:** Visits `/questionnaire`. The page dynamically loads categories from D1.
+> 2. **AI Copilot Setup:** The sidebar initializes. A `scheduled()` worker has already populated `checklist_room_mappings`. The Copilot says: "I noticed you're doing a kitchen remodel. Should we start with the Plumbing section?"
+> 3. **Drafting:** The user navigates to `/questionnaire/plumbing`. They check some boxes. The Hono API (`POST /api/questionnaire/answers`) saves with `isDraft: true`.
+> 4. **AI Recommendation & Telemetry:** The user sees a room widget showing "AI suggested: Pot filler". The user clicks "Confirm". The `checklist_room_mappings` status changes to `user_confirmed`.
+> 5. **Budget Link:** The user selects "Island Sink". The API creates a shadow budget item in `budget_tracker_items`.
+> 6. **Contractor Printout:** The user finalizes and shares `/questionnaire/print`. The contractor views the 8.5x11 formatted page, sees the "Island Sink" line item, and drops an inline comment: "Do you have the exact dimensions for the sink cutout?"
+
 ## Strict Architectural & Aesthetic Mandates
 1. Stack & Baseline: Cloudflare Workers, Astro SSR, Hono routing, Drizzle ORM on D1, React, and Shadcn UI.
 2. The Monolith Design System: Dark theme anchored in pure contrast boundaries. Base background color must utilize oklch(0.145 0 0) cleanly with zero traditional borders. Use explicit borders via 'ring-1 ring-border/40' or 'border-border/40' or translucent surfaces over solid divisions.
@@ -15,16 +23,70 @@ We are implementing a highly optimized, structural, and parameter-driven Questio
 
 ## Complete Functional Requirements
 
+> **Jules Annotation (D1 Schema & Routing - Pillar 1):**
+> **D1 Schema (`src/backend/db/schema/questionnaire/index.ts`):**
+> ```typescript
+> export const questionnaireCategories = sqliteTable("questionnaire_categories", {
+>   id: text("id").primaryKey(),
+>   slug: text("slug").notNull().unique(), // e.g., 'mep-low-voltage'
+>   title: text("title").notNull(),
+>   description: text("description"), // Explains section stakes
+>   icon: text("icon"), // micro-icon identifier
+>   order: integer("order").notNull().default(0),
+> });
+>
+> export const questions = sqliteTable("questions", {
+>   id: text("id").primaryKey(),
+>   categoryId: text("category_id").references(() => questionnaireCategories.id),
+>   text: text("text").notNull(),
+>   type: text("type").notNull(), // 'boolean', 'text', 'multiple_choice'
+>   order: integer("order").notNull().default(0),
+> });
+>
+> export const options = sqliteTable("options", {
+>   id: text("id").primaryKey(),
+>   questionId: text("question_id").references(() => questions.id),
+>   text: text("text").notNull(),
+>   triggersBudgetItem: boolean("triggers_budget_item").default(false),
+> });
+> ```
+> **Hono Route (`/api/questionnaire/:slug`):**
+> Validates `slug` via Zod. Joins categories, questions, and options.
+> **Astro Route (`src/frontend/pages/questionnaire/[section_slug].astro`):**
+> Dynamic route generating static paths or using SSR to fetch the structured JSON payload. Employs `shadcn/ui` Cards for the sub-categories.
+
 ### 1. Dynamic Parameter-Driven Questionnaire Layout
 - Section Routing: Replace flat questionnaires with a dynamic param architecture inside Astro and Hono. Homeowners must not be overwhelmed with raw questions. Break down criteria into major structural categories (e.g., "Mechanical, Electrical, Plumbing, & Low Voltage Infrastructure") served via dynamic paths (`/questionnaire/[section_slug]`).
 - Categories are read dynamically from D1, automatically functional on the frontend without dedicated route sheets per section. 
 - Section landing views must include detailed informational helper summaries describing the mechanical or envelope stakes, mapping out sub-sections as borderless card grids utilizing fine typography, distinct titles, and clean micro-icons. Clicking a card initiates the individual question surveys.
+
+> **Jules Annotation (AI Integration - Pillar 2):**
+> **Hono Route Configurations:**
+> A new WebSocket or SSE endpoint at `/api/copilot/chat` utilizing `@assistant-ui/react-ai-sdk` and `@ai-sdk/react`.
+> The context payload will inject `env.DB.query` summaries for current rooms and budgets before passing context to `env.AI`.
+> Tool calling (`ai` sdk functions) mapped to Hono endpoints to draft answers and update the database explicitly when the user accepts.
+> **Stitch Discovery:**
+> We can build an extended `assistant-ui` message component that renders inline Shadcn forms directly in the chat to accept AI suggestions.
 
 ### 2. Embedded AI Assistant Integration (assistant-ui + Agents SDK)
 - Questionnaires must expose a slide-over modal containing an assistant-ui view hooked into a Cloudflare Agents SDK React component routing back to env.AI.run().
 - The AI agent must be pre-loaded with the full state of the renovation (rooms initialized, description logs, active budget entries, site constraints).
 - The agent must guide the user dynamically through relevant sections, explicitly generating direct hyper-links to recommended questionnaire pages.
 - The assistant can draft high-fidelity text answers that homeowners can adopt instantly or iterate on. With the user's explicit verification button, the agent can perform cross-RPC updates to D1 via the Hono API in real-time.
+
+> **Jules Annotation (Error Handling - Pillar 3):**
+> **React/Astro Layout:**
+> Implement a global `ErrorBoundary` and an Axios/Fetch interceptor.
+> On error, dispatch to a custom global state (e.g., using Zustand or React Context) that renders a `shadcn` `Alert` component.
+> **Data Parsing Schema:**
+> ```typescript
+> const ErrorTraceSchema = z.object({
+>   route: z.string(),
+>   params: z.record(z.unknown()),
+>   stackTrace: z.string(),
+>   timestamp: z.string()
+> });
+> ```
 
 ### 3. Fail-Safe Client Alerts (Exclusively Shadcn)
 - All sync successes must flash a temporary, borderless Shadcn Alert component (never native chrome window alerts).
