@@ -1,19 +1,8 @@
-Review of the previous pass reveals that several critical systems and user journeys from your scoping logs, Jules' annotations, and cross-thread requirements were missed or oversimplified.
-
-### What Was Missing or Truncated:
-
-1. **Interactive Floor Plan Dot Navigation Engine:** The initial files omitted the primary navigation component explicitly requested—an interactive architectural floor plan with hot-spot dots/pins that highlight targeted renovation spaces and click-through directly into a specific Room Viewport.
-2. **Material Selection & Trade Discount Feedback Arrays:** The schema and endpoints lacked the exact database structures needed to manage quotes and materials (e.g., specific tile lines from a supplier) alongside a dedicated channel for contractors to submit alternative recommendations or trade discounts.
-3. **Advanced AI Reinforcement Learning and Retention History:** To ensure the background worker never re-injects user-disassociated rooms or questions, an explicit human-in-the-loop tracking database structure with absolute inversion states (`ai_suggested`, `user_confirmed`, `user_disassociated`) was required but lacked granular mechanics.
-4. **JS Float Rounding Mitigation (Cents Hard-Enforcement):** The financial mapping tables did not strictly adhere to integer-based storage (cents) to avoid standard floating-point calculation bugs.
-5. **Worker AI Operational Run Logs & Health Suites:** The worker infrastructure lacked health suite tracking logs to monitor cron operations, timestamps, and model chain-of-thought metrics.
-
-The master blueprint below has been updated to include these missing features. It provides the full end-to-end prompt for your coding agent (Stitch/Codex), leveraging its **Stitch UX skills and Shoogle component searches** to build a comprehensive communication portal.
-
----
-
-```text
 # Master Blueprint: AI-Augmented Questionnaire, Interactive Floor Plan, & Contractor Deal Portal
+
+### Reference the following files as context:
+ - `docs/context/builder_checklists/jules_research_influenced_ux_prompt_v2.md`
+ - `docs/context/builder_checklists/jules_research_prompt.md` > `docs/research/features/reno_checklist.md`
 
 ## 1. Operational Persona & System Mandate
 You are a Senior Systems Engineer implementing an enterprise-grade, asynchronous planning and communication platform for "126 Colby - Remodel Mission Control". This system establishes an immutable source of truth bridging homeowner desires and field crew execution.
@@ -902,11 +891,11 @@ Coordinate deployment of database tables, parametric routes, vector mapping over
 
 ```
 
-```
+
 
 ***
 
-### Antigravity Implementation Plan Summary
+### Implementation Plan Summary
 
 To execute this architecture sequence cleanly, follow this prioritized workspace loop:
 
@@ -916,4 +905,4 @@ Your operational loop is mapped inside `.agent/workflows/implement-feature.md` [
 #### 2. Local Rules Consolidation
 Review your existing configurations within `.agent/rules/` first, and then merge the updated instructions [cite: 2026-02-10]. No orphan files are allowed. Enforce strict **cents integer tracking**, **HITL state preservation history**, and **Monolith borderless contrast layout standards** across all software development components [cite: 2026-02-08, 2026-02-10].
 
-```
+
