@@ -14,7 +14,7 @@ for file in data.get("files", []):
     ext = ".js" if type_ == "server_js" else ".html" if type_ == "html" else ".json"
     filename = f"src/appsscript/src/{name}{ext}"
 
-    with open(filename, "w") as out:
+    with open(filename, "w", encoding="utf-8") as out:
         out.write(source)
 
 print("Files extracted.")
