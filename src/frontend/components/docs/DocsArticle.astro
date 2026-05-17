@@ -1,0 +1,135 @@
+---
+import type { DocsPageDefinition } from "@/lib/docs";
+
+const { page } = Astro.props as { page: DocsPageDefinition };
+
+const statusLabel = page.status === "planned" ? "Planned" : "Live";
+const statusClass = page.status === "planned"
+  ? "border-amber-400/30 bg-amber-500/10 text-amber-200"
+  : "border-emerald-400/30 bg-emerald-500/10 text-emerald-200";
+---
+
+<article class="container mx-auto px-4 py-8 pb-14">
+  <div class="overflow-hidden rounded-[2rem] border border-border/60 bg-card/70 shadow-[0_24px_90px_-48px_rgba(0,0,0,0.7)]">
+    <div class="border-b border-border/50 bg-linear-to-br from-primary/12 via-primary/5 to-transparent px-6 py-8 lg:px-10">
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="rounded-full border border-border/60 bg-background/70 px-3 py-1 text-[0.7rem] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+          {page.audienceLabel}
+        </span>
+        <span class:list={["rounded-full border px-3 py-1 text-[0.7rem] font-semibold uppercase tracking-[0.24em]", statusClass]}>
+          {statusLabel}
+        </span>
+      </div>
+
+      <h1 class="mt-5 max-w-4xl text-4xl font-semibold tracking-tight text-balance lg:text-5xl">
+        {page.title}
+      </h1>
+      <p class="mt-4 max-w-3xl text-base leading-7 text-muted-foreground lg:text-lg">
+        {page.overview}
+      </p>
+
+      <div class="mt-6 flex flex-wrap gap-2">
+        {page.sections.map((section) => (
+          <a
+            href={`#${section.id}`}
+            class="rounded-full border border-border/60 bg-background/70 px-3 py-1.5 text-sm text-foreground transition hover:border-primary/40 hover:bg-primary/10"
+          >
+            {section.title}
+          </a>
+        ))}
+      </div>
+
+      <div class="mt-8 grid gap-3 lg:grid-cols-3">
+        {page.actions.map((action) => (
+          <a
+            href={action.href}
+            class="rounded-2xl border border-border/60 bg-background/75 p-4 transition hover:border-primary/40 hover:bg-primary/10"
+          >
+            <div class="text-sm font-semibold text-foreground">{action.label}</div>
+            <div class="mt-1 text-sm leading-6 text-muted-foreground">{action.description}</div>
+          </a>
+        ))}
+      </div>
+    </div>
+
+    <div class="px-6 py-8 lg:px-10">
+      <div class="grid gap-4 lg:grid-cols-3">
+        {page.highlights.map((highlight) => (
+          <div class="rounded-2xl border border-border/50 bg-background/50 p-4">
+            <p class="text-sm leading-6 text-foreground">{highlight}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  </div>
+
+  <div class="mt-8 space-y-6">
+    {page.sections.map((section, index) => {
+      const noteTone = section.note?.tone === "planned"
+        ? "border-amber-400/30 bg-amber-500/10 text-amber-100"
+        : "border-primary/20 bg-primary/10 text-primary";
+
+      return (
+        <section id={section.id} class="scroll-mt-24 rounded-[1.75rem] border border-border/60 bg-card/70 p-6 lg:p-8">
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="rounded-full border border-border/50 bg-background/60 px-3 py-1 text-[0.7rem] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+              Section {index + 1}
+            </span>
+          </div>
+
+          <div class="mt-4 grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+            <div>
+              <h2 class="text-2xl font-semibold tracking-tight">{section.title}</h2>
+              <p class="mt-2 max-w-3xl text-base leading-7 text-muted-foreground">{section.summary}</p>
+
+              <div class="mt-5 space-y-4 text-sm leading-7 text-foreground/90">
+                {section.paragraphs.map((paragraph) => (
+                  <p>{paragraph}</p>
+                ))}
+              </div>
+
+              {section.bullets && section.bullets.length > 0 ? (
+                <ul class="mt-5 space-y-2 text-sm leading-6 text-foreground/90">
+                  {section.bullets.map((bullet) => (
+                    <li class="flex gap-3">
+                      <span class="mt-2 h-1.5 w-1.5 rounded-full bg-primary"></span>
+                      <span>{bullet}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+
+            <aside class="space-y-4">
+              {section.note ? (
+                <div class:list={["rounded-2xl border p-4", noteTone]}>
+                  <p class="text-sm font-semibold">{section.note.title}</p>
+                  <p class="mt-2 text-sm leading-6 opacity-90">{section.note.body}</p>
+                </div>
+              ) : null}
+
+              {section.actions && section.actions.length > 0 ? (
+                <div class="rounded-2xl border border-border/50 bg-background/60 p-4">
+                  <p class="text-sm font-semibold text-foreground">Related surfaces</p>
+                  <div class="mt-3 space-y-3">
+                    {section.actions.map((action) => (
+                      <a
+                        href={action.href}
+                        class="block rounded-xl border border-border/50 bg-card/70 p-3 transition hover:border-primary/40 hover:bg-primary/10"
+                      >
+                        <div class="text-sm font-medium">{action.label}</div>
+                        <div class="mt-1 text-sm leading-6 text-muted-foreground">
+                          {action.description}
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </aside>
+          </div>
+        </section>
+      );
+    })}
+  </div>
+</article>

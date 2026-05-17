@@ -33,10 +33,10 @@ const handler: ExportedHandler<Env> = {
     // Handle API routes with Hono
     if (
       url.pathname.startsWith("/api/") ||
+      url.pathname === "/api-docs" ||
       url.pathname === "/openapi.json" ||
       url.pathname === "/swagger" ||
       url.pathname === "/scalar" ||
-      url.pathname === "/docs" ||
       url.pathname === "/context"
     ) {
       return honoApp.fetch(request, env, ctx);

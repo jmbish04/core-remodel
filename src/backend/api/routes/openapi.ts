@@ -172,6 +172,7 @@ const openApiSpec = {
                       properties: {
                         api: { type: "string", example: "/api" },
                         docs: { type: "string", example: "/docs" },
+                        apiDocs: { type: "string", example: "/api-docs" },
                         openapi: { type: "string", example: "/openapi.json" },
                         swagger: { type: "string", example: "/swagger" },
                         scalar: { type: "string", example: "/scalar" },
@@ -743,8 +744,8 @@ openapiRouter.get(
   }),
 );
 
-// GET /docs - redirect to scalar
-openapiRouter.get("/docs", (c) => {
+// GET /api-docs - redirect to scalar
+openapiRouter.get("/api-docs", (c) => {
   return c.redirect("/scalar");
 });
 
@@ -772,6 +773,7 @@ openapiRouter.get("/context", (c) => {
     endpoints: {
       api: "/api",
       docs: "/docs",
+      apiDocs: "/api-docs",
       openapi: "/openapi.json",
       swagger: "/swagger",
       scalar: "/scalar",
