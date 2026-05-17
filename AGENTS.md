@@ -138,6 +138,14 @@ Use the configured TSConfig path aliases. Never use deep relative imports (`../.
   const data = (await res.json()) as { images: ImageReview[] };
   ```
 
+### 7. Frontend Documentation
+
+- `/docs` is reserved for the frontend documentation suite, not the API reference redirect.
+- API reference entrypoints live at `/api-docs`, `/scalar`, `/swagger`, and `/openapi.json`.
+- Documentation content source of truth lives in `src/frontend/lib/docs.ts`.
+- The docs overview and guide routes live in `src/frontend/pages/docs/index.astro` and `src/frontend/pages/docs/[...slug].astro`.
+- The shared sidebar renders docs navigation and in-page section anchors from the same docs definitions. If you add or rename docs sections, keep the section IDs in `src/frontend/lib/docs.ts` aligned with the rendered headings.
+
 ---
 
 ## Key Commands
