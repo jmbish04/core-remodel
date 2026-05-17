@@ -1,20 +1,33 @@
-# Feature: Multi-Turn Image Editing Revision Tree
+# Workflow: Monolith Integration, Clasp, Row-Versioned D1 Tracking Engine, and Agents SDK Sidebar Sync
 
 ## Objective
-Implement a robust image editing pipeline utilizing Gemini 3 Pro Image Preview routed entirely through Cloudflare AI Gateway. This pipeline must support a localized multi-turn revision tree (forking) backed by D1, and multi-image compositing (up to 14 references).
+Integrate, modularize, and migrate an existing standalone Google Apps Script renovation budgeting project into the `core-remodel` repository using `clasp` management, GitHub Actions CI/CD workflows, a versioned D1 database layer via Drizzle ORM, Hono sync API routes, and a stateful WebSocket agent using the Cloudflare Agents SDK.
 
-## Steps
-1. **Schema Generation:**
-   - Create/Update `src/backend/db/schema/images/image_edit_revisions.ts`.
-   - Run `pnpm run db:generate` followed by `pnpm run migrate:local` / `migrate:remote`.
-2. **Service Layer Implementation:**
-   - Create `src/backend/services/image-processor.ts`.
-   - Ensure the `@google/genai` dependency is installed (`npm install @google/genai`).
-   - Validate `baseUrl` logic targeting the Cloudflare AI Gateway `google-ai-studio` endpoint.
-3. **API Route Implementation:**
-   - Create/Update `src/backend/api/routes/photo-edits.ts`.
-   - Implement the `zValidator` to enforce up to 14 multi-modal image arrays.
-   - Implement the direct `fetch()` call to the Cloudflare Images API using the output base64 data.
-   - Insert the resulting D1 revision record.
-4. **Environment Check:**
-   - Ensure `src/env.d.ts` correctly registers `GEMINI_API_KEY`, `CLOUDFLARE_ACCOUNT_ID`, `AI_GATEWAY_ID`, and `CF_IMAGES_TOKEN`.
+## Implementation Steps
+
+### Phase 1: Tooling Scaffolding & CI/CD Layout
+1. Create directory paths under `src/appsscript/`.
+2. Configure `.clasp.json` inside the directory using the current spreadsheet target ID.
+3. Establish an `appsscript.json` manifest specifying runtime parameters (`V8`, timezone context, Stackdriver).
+4. Create `.github/workflows/deploy-appsscript.yml` linking to branch main updates using repository secret parameters (`CLASP_TOKEN`) to run automated `clasp push` tasks.
+
+### Phase 2: Relational Schema & Migration Pipeline (D1 / Drizzle)
+1. Design schema modules at `src/backend/db/schema/home/budget_tracking.ts`.
+2. Map tables: `budget_rows` (with string format unique IDs `brId_${id}` to prevent spreadsheet numerical conversion errors), `budget_row_revisions` (tracking mathematical string values and raw formula expressions like `=SUM(...)`), and `sync_sessions` tracking transport payloads.
+3. Execute database structural updates using `pnpm run db:generate`. Run migrations remotely across cloud targets via `pnpm wrangler d1 migrations apply --remote`.
+
+### Phase 3: Core API Infrastructure (Hono Sync Routes)
+1. Add Hono endpoint routes inside `src/backend/api/routes/budget-tracker.ts`.
+2. Write `GET /api/budget/pull` pulling active rows joined to their latest revision numbers.
+3. Write `POST /api/budget/push` wrapping batch calculations inside strict database transaction logic blocks, tracking operational update sessions, and updating omitted records to `is_active = false`.
+
+### Phase 4: Apps Script Refactor & Visual Diff Compilation Engine
+1. Rebuild `budget.js` to execute external api calls using `UrlFetchApp`.
+2. Implement cell validation loops comparing sheet metrics against database payload vectors.
+3. Code conditional formatting markers painting inactive rows red, changed values yellow, and appending delta changes to a clean `Sync Logs` page using the formatting rule: `field: oldVal -> newVal`.
+
+### Phase 5: Stateful Cloudflare Agent Setup & Sidebar Integration
+1. Implement a stateful agent class extending the platform `Agent` class under `src/backend/ai/agents/BudgetAgent/index.ts`.
+2. Configure wrangler endpoints mapping real-time WebSocket protocol upgrades down to the class context.
+3. Refactor `Sidebar.html` using Monolith styling schemas to process streaming feedback tokens and fire interactive quick-action buttons.
+4. Integrate the structural automation framework: create custom server tool definitions that write payload strings over WebSockets, enabling the client sidebar tool to execute `google.script.run` spreadsheet tasks and push confirmations back up to the edge agent.
