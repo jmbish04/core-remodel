@@ -1,0 +1,11 @@
+---
+import { BudgetReconciliationApp } from "@/components/BudgetReconciliationApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Budget Reconciliation - Phase 2 CSV Import"
+  description="Import and reconcile remodelum.com CSV exports with AI-powered validation and delta analysis."
+>
+  <BudgetReconciliationApp client:only="react" />
+</BaseLayout>

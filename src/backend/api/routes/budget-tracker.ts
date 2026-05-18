@@ -1431,4 +1431,139 @@ budgetTrackerRouter.post("/bootstrap-homeowner-plan", async (c) => {
   }
 });
 
+budgetTrackerRouter.get("/realtime", async (c) => {
+  const upgradeHeader = c.req.header("Upgrade");
+  if (upgradeHeader !== "websocket") {
+    return c.json({ error: "Expected WebSocket upgrade" }, 400);
+  }
+
+  const id = c.env.ESTIMATE_COLLAB.idFromName("budget");
+  const stub = c.env.ESTIMATE_COLLAB.get(id);
+
+  return stub.fetch(c.req.raw);
+});
+
 export { budgetTrackerRouter };
+
+// --- AppsScript Integration Routes ---
+import { budgetRows, budgetRowRevisions, syncSessions } from '../../db/schema/home/budget_tracking';
+
+budgetTrackerRouter.get('/appsscript/pull', async (c) => {
+  const db_instance = drizzle(c.env.DB);
+  const activeRows = await db_instance.select().from(budgetRows).where(eq(budgetRows.isActive, true));
+
+  // Fetch latest revision for each active row
+  const rowsWithRevisions = await Promise.all(activeRows.map(async (row) => {
+    const latestRevision = await db_instance.select()
+      .from(budgetRowRevisions)
+      .where(eq(budgetRowRevisions.budgetRowId, row.id))
+      .orderBy(desc(budgetRowRevisions.createdAt))
+      .limit(1)
+      .get();
+
+    return {
+      ...row,
+      costExpression: latestRevision?.costExpression || '0',
+    };
+  }));
+
+  // Create a sync session
+  const sessionId = crypto.randomUUID();
+  await db_instance.insert(syncSessions).values({
+    id: sessionId,
+    type: 'PULL_SYNC',
+    timestamp: new Date(),
+    payload: JSON.stringify(rowsWithRevisions),
+  });
+
+  return c.json({ data: rowsWithRevisions, sessionId });
+});
+
+budgetTrackerRouter.post('/appsscript/push', async (c) => {
+  const body = await c.req.json();
+  const incomingRecords: any[] = body.data;
+  const db_instance = drizzle(c.env.DB);
+
+  if (!Array.isArray(incomingRecords)) {
+    return c.json({ error: 'Invalid payload, expected array in data field' }, 400);
+  }
+
+  const sessionId = crypto.randomUUID();
+
+  // We don't have transaction support for D1 via tx wrapper cleanly mapped in this env setup directly
+  // Emulating batch / individual statements as transactions aren't always fully available in this drizzle-orm/d1 version
+
+  // 1. Create a sync session
+  await db_instance.insert(syncSessions).values({
+    id: sessionId,
+    type: 'PUSH_UPDATE',
+    timestamp: new Date(),
+    payload: JSON.stringify(incomingRecords),
+  });
+
+  const incomingRowIds = incomingRecords.map(r => r.id).filter(id => id);
+
+  // 2. Identify missing items: set is_active = false for IDs in DB not in incoming payload
+  const existingActiveRows = await db_instance.select().from(budgetRows).where(eq(budgetRows.isActive, true));
+  const activeRowIds = existingActiveRows.map(r => r.id);
+
+  const missingIds = activeRowIds.filter(id => !incomingRowIds.includes(id));
+  if (missingIds.length > 0) {
+    await db_instance.update(budgetRows)
+      .set({ isActive: false })
+      .where(inArray(budgetRows.id, missingIds));
+  }
+
+  // 3. Process incoming records
+  for (const record of incomingRecords) {
+    // Upsert budget_row
+    const existingRow = existingActiveRows.find(r => r.id === record.id);
+
+    if (!existingRow) {
+      // Insert new row
+      await db_instance.insert(budgetRows).values({
+        id: record.id,
+        category: record.category || 'Uncategorized',
+        itemName: record.itemName || 'New Item',
+        description: record.description || '',
+        isActive: true,
+      }).onConflictDoUpdate({
+         target: budgetRows.id,
+         set: {
+           category: record.category || 'Uncategorized',
+           itemName: record.itemName || 'New Item',
+           description: record.description || '',
+           isActive: true,
+         }
+      });
+    } else {
+      // Update existing row if metadata changed
+      if (existingRow.category !== record.category || existingRow.itemName !== record.itemName || existingRow.description !== record.description) {
+          await db_instance.update(budgetRows).set({
+              category: record.category || existingRow.category,
+              itemName: record.itemName || existingRow.itemName,
+              description: record.description || existingRow.description,
+          }).where(eq(budgetRows.id, record.id));
+      }
+    }
+
+    // Check if revision needs to be added (value changed)
+    const latestRevision = await db_instance.select()
+      .from(budgetRowRevisions)
+      .where(eq(budgetRowRevisions.budgetRowId, record.id))
+      .orderBy(desc(budgetRowRevisions.createdAt))
+      .limit(1)
+      .get();
+
+    if (!latestRevision || latestRevision.costExpression !== record.costExpression) {
+      await db_instance.insert(budgetRowRevisions).values({
+        budgetRowId: record.id,
+        costExpression: record.costExpression || '0',
+        sessionId: sessionId,
+        createdAt: new Date(),
+      });
+    }
+  }
+
+  return c.json({ success: true, sessionId });
+});
