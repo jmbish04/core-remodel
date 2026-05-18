@@ -17,7 +17,8 @@ function syncAndCompileBudget() {
     "Overview & Portfolio Matrix",
     "Dimensions & Material Specs",
     "The Baseline (No-Matter-What)",
-    "Scenario A",
+    "Scenario A - Kitchen Upstairs",
+    "Scenario B - Kitchen Downstairs",
   ];
 
   var syncLogsSheet = ss.getSheetByName("Sync Logs");
