@@ -1,5 +1,6 @@
 import { Home, Menu } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
+
 import { Icons } from "@/components/Icons";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Badge } from "@/components/ui/badge";
@@ -58,12 +59,7 @@ function SidebarLinks({
 }) {
   return (
     <nav className="space-y-1" aria-label="Main navigation">
-      <NavLink
-        href="/"
-        label="Home"
-        active={currentPath === "/"}
-        onNavigate={onNavigate}
-      />
+      <NavLink href="/" label="Home" active={currentPath === "/"} onNavigate={onNavigate} />
       {siteConfig.navItems.map((item) => (
         <NavLink
           key={item.href}
@@ -182,7 +178,9 @@ export function AppSidebar() {
 
       <div className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b border-border/40 bg-background/90 px-3 backdrop-blur md:hidden">
         <Dialog open={mobileOpen} onOpenChange={setMobileOpen}>
-          <DialogTrigger render={<Button size="icon-sm" variant="ghost" aria-label="Open navigation menu" />}>
+          <DialogTrigger
+            render={<Button size="icon-sm" variant="ghost" aria-label="Open navigation menu" />}
+          >
             <Menu className="size-4" />
           </DialogTrigger>
           <DialogContent className="left-0 top-0 h-svh w-[88vw] max-w-xs translate-x-0 translate-y-0 rounded-none border-r border-border/40 p-0">

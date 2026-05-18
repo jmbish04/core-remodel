@@ -95,9 +95,7 @@ async function uploadScreenshotToImages(
   };
 
   // Return the /public variant URL
-  return (
-    payload.result.variants.find((v) => v.endsWith("/public")) ?? payload.result.variants[0]
-  );
+  return payload.result.variants.find((v) => v.endsWith("/public")) ?? payload.result.variants[0];
 }
 
 // ---------------------------------------------------------------------------
@@ -184,9 +182,7 @@ export async function capturePdf(env: Env, url: string): Promise<ArrayBuffer> {
   });
 
   if (!response.ok) {
-    throw new Error(
-      `Browser Rendering /pdf failed: ${response.status} ${await response.text()}`,
-    );
+    throw new Error(`Browser Rendering /pdf failed: ${response.status} ${await response.text()}`);
   }
 
   return response.arrayBuffer();
@@ -269,9 +265,7 @@ export async function extractJson<T = unknown>(
   });
 
   if (!response.ok) {
-    throw new Error(
-      `Browser Rendering /json failed: ${response.status} ${await response.text()}`,
-    );
+    throw new Error(`Browser Rendering /json failed: ${response.status} ${await response.text()}`);
   }
 
   const payload = (await response.json()) as { success: boolean; result: T };

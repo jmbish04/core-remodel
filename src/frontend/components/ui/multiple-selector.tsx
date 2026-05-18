@@ -1,5 +1,6 @@
 import { Check, ChevronDown, Plus, Search, X } from "lucide-react";
 import React from "react";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -32,7 +33,11 @@ export interface MultipleSelectorProps {
   createLabel?: string;
   onCreateOption?: (
     label: string,
-  ) => Promise<MultipleSelectorOption | null | undefined> | MultipleSelectorOption | null | undefined;
+  ) =>
+    | Promise<MultipleSelectorOption | null | undefined>
+    | MultipleSelectorOption
+    | null
+    | undefined;
 }
 
 export function MultipleSelector(props: MultipleSelectorProps) {
@@ -141,17 +146,11 @@ export function MultipleSelector(props: MultipleSelectorProps) {
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           render={
-            <Button
-              variant="outline"
-              className="w-full justify-between"
-              disabled={disabled}
-            />
+            <Button variant="outline" className="w-full justify-between" disabled={disabled} />
           }
         >
           <span className="truncate text-left">
-            {selectedOptions.length > 0
-              ? `${selectedOptions.length} selected`
-              : placeholder}
+            {selectedOptions.length > 0 ? `${selectedOptions.length} selected` : placeholder}
           </span>
           <ChevronDown className="ml-2 size-4" />
         </PopoverTrigger>

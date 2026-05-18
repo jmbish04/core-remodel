@@ -40,13 +40,9 @@ export class GoogleDriveClient {
   /**
    * List all non-trashed files inside a folder.
    */
-  async listFilesInFolder(
-    folderIdInput: string,
-  ): Promise<{ id: string; name: string }[]> {
+  async listFilesInFolder(folderIdInput: string): Promise<{ id: string; name: string }[]> {
     const folderId = extractGoogleId(folderIdInput);
-    const query = encodeURIComponent(
-      `'${folderId}' in parents and trashed = false`,
-    );
+    const query = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
     const res = await this.driveFetch<{
       files: { id: string; name: string }[];
     }>(`/files?q=${query}&fields=files(id,name)`);
@@ -62,12 +58,12 @@ export class GoogleDriveClient {
     orderBy = "modifiedTime desc",
   ): Promise<{ id: string; name: string; modifiedTime?: string }[]> {
     const folderId = extractGoogleId(folderIdInput);
-    const query = encodeURIComponent(
-      `'${folderId}' in parents and trashed = false`,
-    );
+    const query = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
     const res = await this.driveFetch<{
       files: { id: string; name: string; modifiedTime?: string }[];
-    }>(`/files?q=${query}&orderBy=${encodeURIComponent(orderBy)}&fields=files(id,name,modifiedTime)`);
+    }>(
+      `/files?q=${query}&orderBy=${encodeURIComponent(orderBy)}&fields=files(id,name,modifiedTime)`,
+    );
     return res.files || [];
   }
 
@@ -115,9 +111,7 @@ export class GoogleDriveClient {
     htmlContent: string,
     parentFolderIdInput?: string,
   ): Promise<{ id: string; name: string; webViewLink?: string }> {
-    const parentFolderId = parentFolderIdInput
-      ? extractGoogleId(parentFolderIdInput)
-      : undefined;
+    const parentFolderId = parentFolderIdInput ? extractGoogleId(parentFolderIdInput) : undefined;
 
     const boundary = "-------314159265358979323846";
     const delimiter = `\r\n--${boundary}\r\n`;
@@ -169,10 +163,7 @@ export class GoogleDriveClient {
    * Internal fetch wrapper for Drive v3 API calls.
    * Handles auth injection, content-type defaults, and 204 (No Content) responses.
    */
-  private async driveFetch<T = unknown>(
-    path: string,
-    init: RequestInit = {},
-  ): Promise<T> {
+  private async driveFetch<T = unknown>(path: string, init: RequestInit = {}): Promise<T> {
     const token = await getServiceAccountAccessToken(this.env, [DRIVE_SCOPE]);
     const headers = new Headers(init.headers);
     headers.set("authorization", `Bearer ${token}`);
@@ -181,15 +172,13 @@ export class GoogleDriveClient {
       headers.set("content-type", "application/json");
     }
 
-    const response = await fetch(
-      `https://www.googleapis.com/drive/v3${path}`,
-      { ...init, headers },
-    );
+    const response = await fetch(`https://www.googleapis.com/drive/v3${path}`, {
+      ...init,
+      headers,
+    });
 
     if (!response.ok) {
-      throw new Error(
-        `Google Drive API failed: ${response.status} ${await response.text()}`,
-      );
+      throw new Error(`Google Drive API failed: ${response.status} ${await response.text()}`);
     }
 
     // DELETE returns 204 No Content

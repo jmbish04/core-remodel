@@ -1,13 +1,7 @@
-import {
-  Camera,
-  Check,
-  Compass,
-  MapPinned,
-  RefreshCw,
-  Sparkles,
-} from "lucide-react";
+import { Camera, Check, Compass, MapPinned, RefreshCw, Sparkles } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+
 import { ImageCompareSlider } from "@/components/ImageCompareSlider";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -243,9 +237,7 @@ export function DecisionRoomApp() {
       "";
 
     setCompareListingId((current) =>
-      roomData.listingImages.some((image) => image.id === current)
-        ? current
-        : listingDefault,
+      roomData.listingImages.some((image) => image.id === current) ? current : listingDefault,
     );
     setCompareInspirationId((current) =>
       roomData.inspirationalImages.some((image) => image.id === current)
@@ -286,7 +278,9 @@ export function DecisionRoomApp() {
   }, [payload?.rooms]);
 
   const compareListing = compareListingId ? listingImageMap.get(compareListingId) || null : null;
-  const compareInspiration = compareInspirationId ? listingImageMap.get(compareInspirationId) || null : null;
+  const compareInspiration = compareInspirationId
+    ? listingImageMap.get(compareInspirationId) || null
+    : null;
   const compareRender = compareRenderId ? listingImageMap.get(compareRenderId) || null : null;
   const renderCompareOptions = useMemo(() => {
     if (!roomData) {
@@ -336,64 +330,73 @@ export function DecisionRoomApp() {
     };
   }, [refresh]);
 
-  const updateImageMetadata = useCallback(async (
-    image: ImageRecord,
-    updater: (metadata: ImageMetadata) => ImageMetadata,
-    options?: { roomType?: string | null },
-  ) => {
-    const current = parseMetadata(image.metadata);
-    const nextMetadata = updater(current);
+  const updateImageMetadata = useCallback(
+    async (
+      image: ImageRecord,
+      updater: (metadata: ImageMetadata) => ImageMetadata,
+      options?: { roomType?: string | null },
+    ) => {
+      const current = parseMetadata(image.metadata);
+      const nextMetadata = updater(current);
 
-    const response = await fetch(`/api/images/${image.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        roomType: options?.roomType ?? image.roomType ?? null,
-        photoCategory: image.photoCategory,
-        metadata: nextMetadata,
-      }),
-    });
-    const payloadUpdate = (await response.json()) as { error?: string };
-    if (!response.ok) {
-      throw new Error(payloadUpdate.error || "Failed to update image metadata");
-    }
-  }, []);
-
-  const togglePromoted = useCallback(async (image: ImageRecord) => {
-    try {
-      await updateImageMetadata(image, (metadata) => {
-        const promoted = !metadata.decision?.promoted;
-        return {
-          ...metadata,
-          decision: {
-            promoted,
-            stage: metadata.decision?.stage || "candidate",
-            label: metadata.decision?.label,
-          },
-        };
+      const response = await fetch(`/api/images/${image.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          roomType: options?.roomType ?? image.roomType ?? null,
+          photoCategory: image.photoCategory,
+          metadata: nextMetadata,
+        }),
       });
-      await refresh();
-      toast.success("Decision flag updated");
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to update decision flag");
-    }
-  }, [refresh, updateImageMetadata]);
+      const payloadUpdate = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        throw new Error(payloadUpdate.error || "Failed to update image metadata");
+      }
+    },
+    [],
+  );
 
-  const openCameraEditor = useCallback((image: ImageRecord) => {
-    const metadata = parseMetadata(image.metadata);
-    const camera = metadata.camera || {};
-    setCameraEditorImage(image);
-    setCameraEditorState({
-      floor: typeof camera.floor === "number" ? camera.floor : selectedFloor,
-      x: typeof camera.x === "number" ? camera.x : 50,
-      y: typeof camera.y === "number" ? camera.y : 50,
-      direction: typeof camera.direction === "number" ? camera.direction : 0,
-      label: camera.label || "",
-      note: metadata.note || "",
-      stage: metadata.decision?.stage || "candidate",
-      promoted: metadata.decision?.promoted || false,
-    });
-  }, [selectedFloor]);
+  const togglePromoted = useCallback(
+    async (image: ImageRecord) => {
+      try {
+        await updateImageMetadata(image, (metadata) => {
+          const promoted = !metadata.decision?.promoted;
+          return {
+            ...metadata,
+            decision: {
+              promoted,
+              stage: metadata.decision?.stage || "candidate",
+              label: metadata.decision?.label,
+            },
+          };
+        });
+        await refresh();
+        toast.success("Decision flag updated");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to update decision flag");
+      }
+    },
+    [refresh, updateImageMetadata],
+  );
+
+  const openCameraEditor = useCallback(
+    (image: ImageRecord) => {
+      const metadata = parseMetadata(image.metadata);
+      const camera = metadata.camera || {};
+      setCameraEditorImage(image);
+      setCameraEditorState({
+        floor: typeof camera.floor === "number" ? camera.floor : selectedFloor,
+        x: typeof camera.x === "number" ? camera.x : 50,
+        y: typeof camera.y === "number" ? camera.y : 50,
+        direction: typeof camera.direction === "number" ? camera.direction : 0,
+        label: camera.label || "",
+        note: metadata.note || "",
+        stage: metadata.decision?.stage || "candidate",
+        promoted: metadata.decision?.promoted || false,
+      });
+    },
+    [selectedFloor],
+  );
 
   const saveCameraEditor = useCallback(async () => {
     if (!cameraEditorImage) return;
@@ -445,9 +448,7 @@ export function DecisionRoomApp() {
       <Card className="ring-1 ring-border/40">
         <CardHeader>
           <CardTitle>Decision Room</CardTitle>
-          <CardDescription>
-            No room-level decision data is available yet.
-          </CardDescription>
+          <CardDescription>No room-level decision data is available yet.</CardDescription>
         </CardHeader>
       </Card>
     );
@@ -456,9 +457,7 @@ export function DecisionRoomApp() {
   const promotedSessions = roomData.sessions.filter(
     (session) => session.status === "candidate" || session.status === "final_candidate",
   );
-  const floorCameraPoints = roomData.cameraPoints.filter(
-    (point) => point.floor === selectedFloor,
-  );
+  const floorCameraPoints = roomData.cameraPoints.filter((point) => point.floor === selectedFloor);
 
   return (
     <>
@@ -485,7 +484,12 @@ export function DecisionRoomApp() {
 
           <CardContent className="grid gap-4 md:grid-cols-4">
             <div className="space-y-1">
-              <label htmlFor="decision-room-room" className="text-xs uppercase text-muted-foreground">Room</label>
+              <label
+                htmlFor="decision-room-room"
+                className="text-xs uppercase text-muted-foreground"
+              >
+                Room
+              </label>
               <select
                 id="decision-room-room"
                 value={selectedRoom}
@@ -493,13 +497,20 @@ export function DecisionRoomApp() {
                 className="w-full rounded-md border border-border/50 bg-background px-3 py-2 text-sm"
               >
                 {roomNames.map((room) => (
-                  <option key={room} value={room}>{room}</option>
+                  <option key={room} value={room}>
+                    {room}
+                  </option>
                 ))}
               </select>
             </div>
 
             <div className="space-y-1">
-              <label htmlFor="decision-room-floor" className="text-xs uppercase text-muted-foreground">Floor</label>
+              <label
+                htmlFor="decision-room-floor"
+                className="text-xs uppercase text-muted-foreground"
+              >
+                Floor
+              </label>
               <select
                 id="decision-room-floor"
                 value={selectedFloor}
@@ -507,13 +518,20 @@ export function DecisionRoomApp() {
                 className="w-full rounded-md border border-border/50 bg-background px-3 py-2 text-sm"
               >
                 {(payload?.floors || [1]).map((floor) => (
-                  <option key={floor} value={floor}>Floor {floor}</option>
+                  <option key={floor} value={floor}>
+                    Floor {floor}
+                  </option>
                 ))}
               </select>
             </div>
 
             <div className="space-y-1 md:col-span-2">
-              <label htmlFor="decision-room-floorplan" className="text-xs uppercase text-muted-foreground">Floorplan Image URL (Optional)</label>
+              <label
+                htmlFor="decision-room-floorplan"
+                className="text-xs uppercase text-muted-foreground"
+              >
+                Floorplan Image URL (Optional)
+              </label>
               <input
                 id="decision-room-floorplan"
                 value={floorplanImageUrl}
@@ -534,7 +552,8 @@ export function DecisionRoomApp() {
                   Floorplan Camera Map
                 </CardTitle>
                 <CardDescription>
-                  Place camera viewpoints from listing photos to map where each comparison angle comes from.
+                  Place camera viewpoints from listing photos to map where each comparison angle
+                  comes from.
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -571,9 +590,7 @@ export function DecisionRoomApp() {
                       <span className="flex size-8 items-center justify-center rounded-full bg-primary text-primary-foreground shadow">
                         <Camera className="size-4" />
                       </span>
-                      <span
-                        className="absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition group-hover:opacity-100"
-                      >
+                      <span className="absolute left-1/2 top-full mt-1 -translate-x-1/2 whitespace-nowrap rounded bg-black/70 px-1.5 py-0.5 text-[10px] text-white opacity-0 transition group-hover:opacity-100">
                         {point.label}
                       </span>
                     </button>
@@ -592,7 +609,12 @@ export function DecisionRoomApp() {
               <CardContent className="space-y-4">
                 <div className="grid gap-3 md:grid-cols-3">
                   <div className="space-y-1">
-                    <label htmlFor="compare-listing" className="text-xs uppercase text-muted-foreground">Listing</label>
+                    <label
+                      htmlFor="compare-listing"
+                      className="text-xs uppercase text-muted-foreground"
+                    >
+                      Listing
+                    </label>
                     <select
                       id="compare-listing"
                       value={compareListingId}
@@ -607,7 +629,12 @@ export function DecisionRoomApp() {
                     </select>
                   </div>
                   <div className="space-y-1">
-                    <label htmlFor="compare-inspiration" className="text-xs uppercase text-muted-foreground">Inspiration</label>
+                    <label
+                      htmlFor="compare-inspiration"
+                      className="text-xs uppercase text-muted-foreground"
+                    >
+                      Inspiration
+                    </label>
                     <select
                       id="compare-inspiration"
                       value={compareInspirationId}
@@ -623,7 +650,12 @@ export function DecisionRoomApp() {
                     </select>
                   </div>
                   <div className="space-y-1">
-                    <label htmlFor="compare-render" className="text-xs uppercase text-muted-foreground">Render</label>
+                    <label
+                      htmlFor="compare-render"
+                      className="text-xs uppercase text-muted-foreground"
+                    >
+                      Render
+                    </label>
                     <select
                       id="compare-render"
                       value={compareRenderId}
@@ -687,7 +719,8 @@ export function DecisionRoomApp() {
               <CardContent className="space-y-3">
                 {roomData.promotedImages.length === 0 && promotedSessions.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
-                    No promoted items yet. Promote listing/inspiration/render images or mark sessions as candidate.
+                    No promoted items yet. Promote listing/inspiration/render images or mark
+                    sessions as candidate.
                   </p>
                 ) : (
                   <>
@@ -723,7 +756,8 @@ export function DecisionRoomApp() {
                   Listing Camera Anchors
                 </CardTitle>
                 <CardDescription>
-                  Set camera marker position and direction so the team can connect each listing angle to design decisions.
+                  Set camera marker position and direction so the team can connect each listing
+                  angle to design decisions.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -793,18 +827,25 @@ export function DecisionRoomApp() {
                           value={session.status}
                           onChange={async (event) => {
                             try {
-                              const response = await fetch(`/api/photo-edits/sessions/${session.id}`, {
-                                method: "PATCH",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({ status: event.target.value }),
-                              });
+                              const response = await fetch(
+                                `/api/photo-edits/sessions/${session.id}`,
+                                {
+                                  method: "PATCH",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({ status: event.target.value }),
+                                },
+                              );
                               const patchPayload = (await response.json()) as { error?: string };
                               if (!response.ok) {
                                 throw new Error(patchPayload.error || "Failed to update status");
                               }
                               await refresh();
                             } catch (error) {
-                              toast.error(error instanceof Error ? error.message : "Failed to update session status");
+                              toast.error(
+                                error instanceof Error
+                                  ? error.message
+                                  : "Failed to update session status",
+                              );
                             }
                           }}
                           className="rounded-md border border-border/50 bg-background px-2 py-1 text-xs"
@@ -821,7 +862,10 @@ export function DecisionRoomApp() {
                           .slice()
                           .sort((a, b) => a.revisionNumber - b.revisionNumber)
                           .map((revision) => (
-                            <div key={revision.id} className="rounded border border-border/40 bg-muted/10 px-2 py-1">
+                            <div
+                              key={revision.id}
+                              className="rounded border border-border/40 bg-muted/10 px-2 py-1"
+                            >
                               <p className="text-xs font-medium">
                                 r{revision.revisionNumber} →{" "}
                                 {getImageDisplayName(revision.outputImage)}
@@ -841,7 +885,10 @@ export function DecisionRoomApp() {
         </div>
       </div>
 
-      <Dialog open={cameraEditorImage !== null} onOpenChange={(open) => !open && setCameraEditorImage(null)}>
+      <Dialog
+        open={cameraEditorImage !== null}
+        onOpenChange={(open) => !open && setCameraEditorImage(null)}
+      >
         <DialogContent className="max-w-xl">
           <DialogHeader>
             <DialogTitle>Camera Marker Editor</DialogTitle>
@@ -851,7 +898,9 @@ export function DecisionRoomApp() {
             <div className="space-y-4">
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1">
-                  <label htmlFor="camera-floor" className="text-xs uppercase text-muted-foreground">Floor</label>
+                  <label htmlFor="camera-floor" className="text-xs uppercase text-muted-foreground">
+                    Floor
+                  </label>
                   <input
                     id="camera-floor"
                     type="number"
@@ -866,7 +915,12 @@ export function DecisionRoomApp() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label htmlFor="camera-direction" className="text-xs uppercase text-muted-foreground">Direction (degrees)</label>
+                  <label
+                    htmlFor="camera-direction"
+                    className="text-xs uppercase text-muted-foreground"
+                  >
+                    Direction (degrees)
+                  </label>
                   <input
                     id="camera-direction"
                     type="number"
@@ -881,7 +935,9 @@ export function DecisionRoomApp() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label htmlFor="camera-x" className="text-xs uppercase text-muted-foreground">X Position (%)</label>
+                  <label htmlFor="camera-x" className="text-xs uppercase text-muted-foreground">
+                    X Position (%)
+                  </label>
                   <input
                     id="camera-x"
                     type="number"
@@ -896,7 +952,9 @@ export function DecisionRoomApp() {
                   />
                 </div>
                 <div className="space-y-1">
-                  <label htmlFor="camera-y" className="text-xs uppercase text-muted-foreground">Y Position (%)</label>
+                  <label htmlFor="camera-y" className="text-xs uppercase text-muted-foreground">
+                    Y Position (%)
+                  </label>
                   <input
                     id="camera-y"
                     type="number"
@@ -913,7 +971,9 @@ export function DecisionRoomApp() {
               </div>
 
               <div className="space-y-1">
-                <label htmlFor="camera-label" className="text-xs uppercase text-muted-foreground">Marker Label</label>
+                <label htmlFor="camera-label" className="text-xs uppercase text-muted-foreground">
+                  Marker Label
+                </label>
                 <input
                   id="camera-label"
                   value={cameraEditorState.label}
@@ -928,7 +988,9 @@ export function DecisionRoomApp() {
               </div>
 
               <div className="space-y-1">
-                <label htmlFor="camera-stage" className="text-xs uppercase text-muted-foreground">Decision Stage</label>
+                <label htmlFor="camera-stage" className="text-xs uppercase text-muted-foreground">
+                  Decision Stage
+                </label>
                 <select
                   id="camera-stage"
                   value={cameraEditorState.stage}
@@ -947,7 +1009,9 @@ export function DecisionRoomApp() {
               </div>
 
               <div className="space-y-1">
-                <label htmlFor="camera-notes" className="text-xs uppercase text-muted-foreground">Notes</label>
+                <label htmlFor="camera-notes" className="text-xs uppercase text-muted-foreground">
+                  Notes
+                </label>
                 <textarea
                   id="camera-notes"
                   value={cameraEditorState.note}
@@ -977,7 +1041,11 @@ export function DecisionRoomApp() {
               </label>
 
               <div className="flex justify-end gap-2">
-                <Button variant="outline" onClick={() => setCameraEditorImage(null)} disabled={savingCamera}>
+                <Button
+                  variant="outline"
+                  onClick={() => setCameraEditorImage(null)}
+                  disabled={savingCamera}
+                >
                   Cancel
                 </Button>
                 <Button onClick={saveCameraEditor} disabled={savingCamera} className="gap-2">

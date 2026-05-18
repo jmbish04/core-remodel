@@ -89,7 +89,7 @@ export class WorkersAIProvider implements AIProvider {
     const snippet = JSON.stringify(result)?.slice(0, 300);
     throw new Error(
       `Structured output: unable to extract JSON from ${model.id}. ` +
-      `Keys: [${keys}]. Raw (truncated): ${snippet}`,
+        `Keys: [${keys}]. Raw (truncated): ${snippet}`,
     );
   }
 

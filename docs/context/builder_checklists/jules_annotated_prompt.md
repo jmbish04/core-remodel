@@ -2,7 +2,7 @@ JULES: This is the prompt copied from `docs/context/builder_checklists/prompt_ch
 
 ---
 
-```text
+````text
 # Senior Systems Architect Blueprint: Dynamic Questionnaire & Contractor Portal Implementation
 
 ## Context & Vision
@@ -50,7 +50,7 @@ We are implementing a highly optimized, structural, and parameter-driven Questio
 
 ### 1. Dynamic Parameter-Driven Questionnaire Layout
 - Section Routing: Replace flat questionnaires with a dynamic param architecture inside Astro and Hono. Homeowners must not be overwhelmed with raw questions. Break down criteria into major structural categories (e.g., "Mechanical, Electrical, Plumbing, & Low Voltage Infrastructure") served via dynamic paths (`/questionnaire/[section_slug]`).
-- Categories are read dynamically from D1, automatically functional on the frontend without dedicated route sheets per section. 
+- Categories are read dynamically from D1, automatically functional on the frontend without dedicated route sheets per section.
 - Section landing views must include detailed informational helper summaries describing the mechanical or envelope stakes, mapping out sub-sections as borderless card grids utilizing fine typography, distinct titles, and clean micro-icons. Clicking a card initiates the individual question surveys.
 
 > **Jules Annotation (AI Integration - Pillar 2):**
@@ -207,7 +207,7 @@ export const checklistCronRuns = sqliteTable("checklist_cron_runs", {
     .default(sql`(unixepoch())`),
 });
 
-```
+````
 
 ### File 2: Hono API Router for Advanced Questionnaires
 
@@ -224,41 +224,76 @@ import {
   checklistRoomMappings,
   contractorQuestionComments,
   budgetTrackerItems,
-  rooms
+  rooms,
 } from "@backend/db";
 
 const constructionChecklistRouter = new Hono<{ Bindings: Env }>();
 
 constructionChecklistRouter.get("/sections", async (c) => {
   const db = drizzle(c.env.DB);
-  const sections = await db.select().from(checklistSections).orderBy(asc(checklistSections.sortOrder)).all();
+  const sections = await db
+    .select()
+    .from(checklistSections)
+    .orderBy(asc(checklistSections.sortOrder))
+    .all();
   return c.json({ success: true, sections });
 });
 
 constructionChecklistRouter.get("/sections/:slug", async (c) => {
   const db = drizzle(c.env.DB);
   const slug = c.req.param("slug");
-  
-  const section = await db.select().from(checklistSections).where(eq(checklistSections.slug, slug)).get();
-  if (!section) return c.json({ success: false, error: "Section template parameters not found" }, 404);
 
-  const questions = await db.select().from(checklistQuestions).where(eq(checklistQuestions.sectionId, section.id)).orderBy(asc(checklistQuestions.sortOrder)).all();
-  const questionIds = questions.map(q => q.id);
+  const section = await db
+    .select()
+    .from(checklistSections)
+    .where(eq(checklistSections.slug, slug))
+    .get();
+  if (!section)
+    return c.json({ success: false, error: "Section template parameters not found" }, 404);
 
-  const activeAnswers = questionIds.length > 0 
-    ? await db.select().from(checklistAnswers).where(and(eq(checklistAnswers.isActive, true), inArray(checklistAnswers.questionId, questionIds))).all()
-    : [];
+  const questions = await db
+    .select()
+    .from(checklistQuestions)
+    .where(eq(checklistQuestions.sectionId, section.id))
+    .orderBy(asc(checklistQuestions.sortOrder))
+    .all();
+  const questionIds = questions.map((q) => q.id);
 
-  const activeMappings = questionIds.length > 0
-    ? await db.select().from(checklistRoomMappings).where(inArray(checklistRoomMappings.questionId, questionIds)).all()
-    : [];
+  const activeAnswers =
+    questionIds.length > 0
+      ? await db
+          .select()
+          .from(checklistAnswers)
+          .where(
+            and(
+              eq(checklistAnswers.isActive, true),
+              inArray(checklistAnswers.questionId, questionIds),
+            ),
+          )
+          .all()
+      : [];
 
-  return c.json({ success: true, section, questions, answers: activeAnswers, mappings: activeMappings });
+  const activeMappings =
+    questionIds.length > 0
+      ? await db
+          .select()
+          .from(checklistRoomMappings)
+          .where(inArray(checklistRoomMappings.questionId, questionIds))
+          .all()
+      : [];
+
+  return c.json({
+    success: true,
+    section,
+    questions,
+    answers: activeAnswers,
+    mappings: activeMappings,
+  });
 });
 
 constructionChecklistRouter.post("/answers", async (c) => {
   const db = drizzle(c.env.DB);
-  const body = await c.req.json() as {
+  const body = (await c.req.json()) as {
     trackId?: string;
     questionId: number;
     scenarioId?: string | null;
@@ -273,51 +308,74 @@ constructionChecklistRouter.post("/answers", async (c) => {
   const targetTrackId = body.trackId || crypto.randomUUID();
 
   // Find previous version to perform version progression increment
-  const previous = await db.select().from(checklistAnswers).where(and(eq(checklistAnswers.trackId, targetTrackId), eq(checklistAnswers.isActive, true))).get();
+  const previous = await db
+    .select()
+    .from(checklistAnswers)
+    .where(and(eq(checklistAnswers.trackId, targetTrackId), eq(checklistAnswers.isActive, true)))
+    .get();
   const nextVersion = previous ? previous.version + 1 : 1;
 
   if (previous) {
-    await db.update(checklistAnswers).set({ isActive: false, datetimeUpdated: now }).where(eq(checklistAnswers.id, previous.id)).run();
+    await db
+      .update(checklistAnswers)
+      .set({ isActive: false, datetimeUpdated: now })
+      .where(eq(checklistAnswers.id, previous.id))
+      .run();
   }
 
-  const inserted = await db.insert(checklistAnswers).values({
-    trackId: targetTrackId,
-    questionId: body.questionId,
-    scenarioId: body.scenarioId || null,
-    isChecked: body.isChecked,
-    notes: body.notes || null,
-    selectionValue: body.selectionValue || null,
-    version: nextVersion,
-    isActive: true,
-    isDraft: body.isDraft,
-    changeSource: "portal_submission",
-    changedBy: body.changedBy || "homeowner",
-    datetimeCreated: now,
-    datetimeUpdated: now,
-  }).returning();
+  const inserted = await db
+    .insert(checklistAnswers)
+    .values({
+      trackId: targetTrackId,
+      questionId: body.questionId,
+      scenarioId: body.scenarioId || null,
+      isChecked: body.isChecked,
+      notes: body.notes || null,
+      selectionValue: body.selectionValue || null,
+      version: nextVersion,
+      isActive: true,
+      isDraft: body.isDraft,
+      changeSource: "portal_submission",
+      changedBy: body.changedBy || "homeowner",
+      datetimeCreated: now,
+      datetimeUpdated: now,
+    })
+    .returning();
 
   // Automatic centralized Budget item line execution trigger logic
-  const question = await db.select().from(checklistQuestions).where(eq(checklistQuestions.id, body.questionId)).get();
+  const question = await db
+    .select()
+    .from(checklistQuestions)
+    .where(eq(checklistQuestions.id, body.questionId))
+    .get();
   if (question?.defaultBudgetImpactJson && body.isChecked && !body.isDraft) {
     try {
-      const impact = JSON.parse(question.defaultBudgetImpactJson) as { title: string; low: number; high: number; class?: string };
-      await db.insert(budgetTrackerItems).values({
-        trackId: crypto.randomUUID(),
-        revisionNumber: 1,
-        isActive: true,
-        isDraft: false,
-        itemType: "project",
-        executionClass: impact.class || "must_now",
-        title: `[Spec Trigger] ${impact.title}`,
-        status: "open",
-        estimatedLowCents: impact.low,
-        estimatedHighCents: impact.high,
-        scenarioId: body.scenarioId || null,
-        changeSource: "checklist_auto_trigger",
-        changedBy: "system_ai",
-        datetimeCreated: now,
-        datetimeUpdated: now,
-      }).run();
+      const impact = JSON.parse(question.defaultBudgetImpactJson) as {
+        title: string;
+        low: number;
+        high: number;
+        class?: string;
+      };
+      await db
+        .insert(budgetTrackerItems)
+        .values({
+          trackId: crypto.randomUUID(),
+          revisionNumber: 1,
+          isActive: true,
+          isDraft: false,
+          itemType: "project",
+          executionClass: impact.class || "must_now",
+          title: `[Spec Trigger] ${impact.title}`,
+          status: "open",
+          estimatedLowCents: impact.low,
+          estimatedHighCents: impact.high,
+          scenarioId: body.scenarioId || null,
+          changeSource: "checklist_auto_trigger",
+          changedBy: "system_ai",
+          datetimeCreated: now,
+          datetimeUpdated: now,
+        })
+        .run();
     } catch (e) {
       console.error("Budget pipeline automation failed:", e);
     }
@@ -328,32 +386,35 @@ constructionChecklistRouter.post("/answers", async (c) => {
 
 constructionChecklistRouter.post("/mappings/feedback", async (c) => {
   const db = drizzle(c.env.DB);
-  const body = await c.req.json() as {
+  const body = (await c.req.json()) as {
     questionId: number;
     roomId: number;
     status: "user_confirmed" | "user_disassociated";
     aiRationale?: string;
   };
 
-  await db.insert(checklistRoomMappings).values({
-    questionId: body.questionId,
-    roomId: body.roomId,
-    aiRationale: body.aiRationale || "Manual homeowner adjustment override",
-    associationStatus: body.status,
-    datetimeUpdated: new Date()
-  }).onConflictDoUpdate({
-    target: [checklistRoomMappings.questionId, checklistRoomMappings.roomId] as any,
-    set: {
+  await db
+    .insert(checklistRoomMappings)
+    .values({
+      questionId: body.questionId,
+      roomId: body.roomId,
+      aiRationale: body.aiRationale || "Manual homeowner adjustment override",
       associationStatus: body.status,
-      datetimeUpdated: new Date()
-    }
-  }).run();
+      datetimeUpdated: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [checklistRoomMappings.questionId, checklistRoomMappings.roomId] as any,
+      set: {
+        associationStatus: body.status,
+        datetimeUpdated: new Date(),
+      },
+    })
+    .run();
 
   return c.json({ success: true });
 });
 
 export { constructionChecklistRouter };
-
 ```
 
 ### File 3: Dynamic Questionnaire Component Suite with Feedback Architecture
@@ -417,7 +478,7 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
     setSyncError(null);
     try {
       const res = await fetch(`/api/construction-checklist/sections/${sectionSlug}`);
-      const data = await res.json() as {
+      const data = (await res.json()) as {
         success: boolean;
         section: Section;
         questions: Question[];
@@ -425,19 +486,21 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
         mappings: Mapping[];
         error?: string;
       };
-      if (!res.ok || !data.success) throw new Error(data.error || "Server responded with error status");
-      
+      if (!res.ok || !data.success)
+        throw new Error(data.error || "Server responded with error status");
+
       setSection(data.section);
       setQuestions(data.questions);
       setMappings(data.mappings);
-      
+
       const answerMap: Record<number, Answer> = {};
       for (const ans of data.answers) {
         answerMap[ans.questionId] = ans;
       }
       setAnswers(answerMap);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Unknown data hook tracing validation failure";
+      const msg =
+        err instanceof Error ? err.message : "Unknown data hook tracing validation failure";
       const promptBlock = `Please fix this core-remodel pipeline failure. Endpoint: /api/construction-checklist/sections/${sectionSlug}. Trace: ${msg}`;
       setSyncError({ msg, prompt: promptBlock });
     } finally {
@@ -449,7 +512,12 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
     fetchSectionData();
   }, [fetchSectionData]);
 
-  const commitAnswer = async (questionId: number, isChecked: boolean, notes: string | null, isDraft: boolean) => {
+  const commitAnswer = async (
+    questionId: number,
+    isChecked: boolean,
+    notes: string | null,
+    isDraft: boolean,
+  ) => {
     const current = answers[questionId];
     const payload = {
       trackId: current?.trackId,
@@ -466,14 +534,20 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await res.json() as { success: boolean; answer: Answer; error?: string };
+      const data = (await res.json()) as { success: boolean; answer: Answer; error?: string };
       if (!res.ok || !data.success) throw new Error(data.error || "Write payload rejection");
-      
-      setAnswers(prev => ({ ...prev, [questionId]: data.answer }));
-      toast.success(isDraft ? "Draft response updated dynamically" : "Specification committed to building logs");
+
+      setAnswers((prev) => ({ ...prev, [questionId]: data.answer }));
+      toast.success(
+        isDraft ? "Draft response updated dynamically" : "Specification committed to building logs",
+      );
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Network failure executing answer update commit";
-      setSyncError({ msg, prompt: `Please investigate and resolve following questionnaire update failure:\n\n${msg}` });
+      const msg =
+        err instanceof Error ? err.message : "Network failure executing answer update commit";
+      setSyncError({
+        msg,
+        prompt: `Please investigate and resolve following questionnaire update failure:\n\n${msg}`,
+      });
     }
   };
 
@@ -500,13 +574,21 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
   return (
     <div className="space-y-6 max-w-5xl mx-auto px-2">
       {syncError && (
-        <Alert variant="destructive" className="border border-destructive/50 bg-destructive/10 text-destructive rounded-xl">
+        <Alert
+          variant="destructive"
+          className="border border-destructive/50 bg-destructive/10 text-destructive rounded-xl"
+        >
           <AlertCircle className="size-4" />
           <AlertTitle>Server Transmission Interrupted</AlertTitle>
           <AlertDescription className="space-y-3">
             <p className="text-xs text-balance opacity-90">{syncError.msg}</p>
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs border-destructive/30 hover:bg-destructive/20" onClick={copyPromptToClipboard}>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 text-xs border-destructive/30 hover:bg-destructive/20"
+                onClick={copyPromptToClipboard}
+              >
                 <Copy className="size-3.5" />
                 {copied ? "Copied Prompt Context" : "Copy Agent Fix Prompt"}
               </Button>
@@ -531,19 +613,36 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
       <div className="space-y-4">
         {questions.map((question) => {
           const ans = answers[question.id] || { isChecked: false, notes: "", isDraft: true };
-          const linkedRooms = mappings.filter(m => m.questionId === question.id && m.associationStatus !== "user_disassociated");
+          const linkedRooms = mappings.filter(
+            (m) => m.questionId === question.id && m.associationStatus !== "user_disassociated",
+          );
 
           return (
-            <Card key={question.id} className="bg-card/30 border-0 ring-1 ring-border/40 rounded-xl overflow-hidden transition-all hover:ring-border/80 shadow-none">
+            <Card
+              key={question.id}
+              className="bg-card/30 border-0 ring-1 ring-border/40 rounded-xl overflow-hidden transition-all hover:ring-border/80 shadow-none"
+            >
               <CardContent className="p-5 space-y-4">
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-1 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs font-mono tracking-wider text-muted-foreground opacity-60">{question.code}</span>
-                      {ans.isChecked && !ans.isDraft && <Badge className="bg-emerald-500/10 text-emerald-400 border-0 rounded-full text-[10px]">Verified Spec</Badge>}
-                      {ans.isDraft && (ans.isChecked || (ans.notes && ans.notes.length > 0)) && <Badge className="bg-amber-500/10 text-amber-400 border-0 rounded-full text-[10px]">Draft Saved</Badge>}
+                      <span className="text-xs font-mono tracking-wider text-muted-foreground opacity-60">
+                        {question.code}
+                      </span>
+                      {ans.isChecked && !ans.isDraft && (
+                        <Badge className="bg-emerald-500/10 text-emerald-400 border-0 rounded-full text-[10px]">
+                          Verified Spec
+                        </Badge>
+                      )}
+                      {ans.isDraft && (ans.isChecked || (ans.notes && ans.notes.length > 0)) && (
+                        <Badge className="bg-amber-500/10 text-amber-400 border-0 rounded-full text-[10px]">
+                          Draft Saved
+                        </Badge>
+                      )}
                     </div>
-                    <h3 className="text-sm font-medium text-foreground leading-relaxed">{question.questionText}</h3>
+                    <h3 className="text-sm font-medium text-foreground leading-relaxed">
+                      {question.questionText}
+                    </h3>
                     {question.considerations && (
                       <p className="text-xs text-muted-foreground flex items-center gap-1.5 pt-0.5">
                         <HelpCircle className="size-3.5 text-muted-foreground" />
@@ -553,7 +652,9 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
                   </div>
                   <Switch
                     checked={ans.isChecked}
-                    onCheckedChange={(checked) => commitAnswer(question.id, checked, ans.notes, ans.isDraft)}
+                    onCheckedChange={(checked) =>
+                      commitAnswer(question.id, checked, ans.notes, ans.isDraft)
+                    }
                   />
                 </div>
 
@@ -562,7 +663,12 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
                     <Home className="size-3.5 text-muted-foreground" />
                     <span className="text-muted-foreground mr-1">AI-Mapped Scope:</span>
                     {linkedRooms.map((map) => (
-                      <Badge key={map.roomId} variant="secondary" className="text-[11px] rounded-sm bg-muted/40 font-normal border-0" title={map.aiRationale || ""}>
+                      <Badge
+                        key={map.roomId}
+                        variant="secondary"
+                        className="text-[11px] rounded-sm bg-muted/40 font-normal border-0"
+                        title={map.aiRationale || ""}
+                      >
                         Room #{map.roomId}
                       </Badge>
                     ))}
@@ -574,13 +680,28 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
                     className="h-8 text-xs bg-background/40 border-input/40 focus-visible:ring-1"
                     placeholder="Enter bespoke configuration notes, fixture counts, or execution preferences..."
                     value={ans.notes || ""}
-                    onChange={(e) => setAnswers(prev => ({ ...prev, [question.id]: { ...ans, notes: e.target.value } }))}
+                    onChange={(e) =>
+                      setAnswers((prev) => ({
+                        ...prev,
+                        [question.id]: { ...ans, notes: e.target.value },
+                      }))
+                    }
                   />
-                  <Button size="sm" variant="outline" className="h-8 text-xs gap-1" onClick={() => commitAnswer(question.id, ans.isChecked, ans.notes, false)}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs gap-1"
+                    onClick={() => commitAnswer(question.id, ans.isChecked, ans.notes, false)}
+                  >
                     <Save className="size-3.5" />
                     Commit
                   </Button>
-                  <Button size="sm" variant="ghost" className="h-8 text-xs text-muted-foreground" onClick={() => commitAnswer(question.id, ans.isChecked, ans.notes, true)}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 text-xs text-muted-foreground"
+                    onClick={() => commitAnswer(question.id, ans.isChecked, ans.notes, true)}
+                  >
                     Save Draft
                   </Button>
                 </div>
@@ -592,7 +713,6 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
     </div>
   );
 }
-
 ```
 
 ### File 4: Clean Print Engine for Microsoft Word Layout Mapping
@@ -616,7 +736,10 @@ interface ChecklistPrintViewProps {
   projectName?: string;
 }
 
-export function ChecklistPrintView({ completedItems, projectName = "126 Colby Remodel" }: ChecklistPrintViewProps) {
+export function ChecklistPrintView({
+  completedItems,
+  projectName = "126 Colby Remodel",
+}: ChecklistPrintViewProps) {
   const handleTriggerPrintLifecycle = () => {
     if (typeof window !== "undefined") {
       window.print();
@@ -629,9 +752,15 @@ export function ChecklistPrintView({ completedItems, projectName = "126 Colby Re
       <div className="mb-6 flex justify-between items-center bg-gray-100 p-3 rounded border border-gray-300 print:hidden font-sans">
         <div>
           <h4 className="text-sm font-bold text-gray-800">Word-Formatted Specification Export</h4>
-          <p className="text-xs text-gray-500">Optimized layout mapping strictly for physical standard 8.5x11 records.</p>
+          <p className="text-xs text-gray-500">
+            Optimized layout mapping strictly for physical standard 8.5x11 records.
+          </p>
         </div>
-        <button type="button" onClick={handleTriggerPrintLifecycle} className="bg-black text-white px-4 py-1.5 text-xs font-medium rounded hover:bg-gray-800 transition-all shadow-sm">
+        <button
+          type="button"
+          onClick={handleTriggerPrintLifecycle}
+          className="bg-black text-white px-4 py-1.5 text-xs font-medium rounded hover:bg-gray-800 transition-all shadow-sm"
+        >
           Print Blueprint Document
         </button>
       </div>
@@ -639,17 +768,27 @@ export function ChecklistPrintView({ completedItems, projectName = "126 Colby Re
       {/* Structured Word Layout Shell */}
       <div className="space-y-6 print:space-y-4">
         <div className="text-center border-b-2 border-black pb-4">
-          <h1 className="text-2xl font-bold uppercase tracking-tight font-serif m-0">{projectName}</h1>
-          <p className="text-sm italic text-gray-600 mt-1">Unified Architectural & Trade Questionnaire Responses</p>
-          <p className="text-xs text-gray-400 mt-0.5">Generated Trace: {new Date().toLocaleDateString()}</p>
+          <h1 className="text-2xl font-bold uppercase tracking-tight font-serif m-0">
+            {projectName}
+          </h1>
+          <p className="text-sm italic text-gray-600 mt-1">
+            Unified Architectural & Trade Questionnaire Responses
+          </p>
+          <p className="text-xs text-gray-400 mt-0.5">
+            Generated Trace: {new Date().toLocaleDateString()}
+          </p>
         </div>
 
         {completedItems.length === 0 ? (
-          <p className="text-center italic text-gray-500 py-12 font-sans text-sm">No verified specifications or homeowner responses have been committed to this timeline record yet.</p>
+          <p className="text-center italic text-gray-500 py-12 font-sans text-sm">
+            No verified specifications or homeowner responses have been committed to this timeline
+            record yet.
+          </p>
         ) : (
           <div className="space-y-6">
             {completedItems.map((item, index) => {
-              const showCategoryHeader = index === 0 || completedItems[index - 1].categoryName !== item.categoryName;
+              const showCategoryHeader =
+                index === 0 || completedItems[index - 1].categoryName !== item.categoryName;
               return (
                 <div key={`${item.code}-${index}`} className="space-y-2 break-inside-avoid">
                   {showCategoryHeader && (
@@ -663,19 +802,26 @@ export function ChecklistPrintView({ completedItems, projectName = "126 Colby Re
                       {item.text}
                     </p>
                     <p className="m-0 text-xs text-gray-800 font-sans pl-6">
-                      <span className="font-bold uppercase text-gray-500 text-[10px] mr-1.5">Response:</span> 
+                      <span className="font-bold uppercase text-gray-500 text-[10px] mr-1.5">
+                        Response:
+                      </span>
                       Confirmed / Verified Selection
                     </p>
                     {item.notes && (
                       <p className="m-0 text-xs text-gray-600 italic pl-6 font-sans border-l border-gray-200 py-0.5">
-                        <span className="font-bold not-italic uppercase text-gray-500 text-[10px] mr-1.5 block not-italic">Homeowner Notes:</span>
+                        <span className="font-bold not-italic uppercase text-gray-500 text-[10px] mr-1.5 block not-italic">
+                          Homeowner Notes:
+                        </span>
                         "{item.notes}"
                       </p>
                     )}
-                    
+
                     {/* Contractor Feedback Line (Allows handwriting or drop commentary placeholders) */}
                     <div className="mt-1 pt-2 pb-1 border-b border-dashed border-gray-200 pl-6 font-sans text-[11px] text-gray-400 flex justify-between items-center">
-                      <span>Contractor Log Review Commentary: __________________________________________________________________</span>
+                      <span>
+                        Contractor Log Review Commentary:
+                        __________________________________________________________________
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -686,7 +832,9 @@ export function ChecklistPrintView({ completedItems, projectName = "126 Colby Re
       </div>
 
       {/* Global Print Media Directives Injected into Virtual Node */}
-      <style dangerouslySetInnerHTML={{ __html: `
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
         @media print {
           body {
             background: white !important;
@@ -700,11 +848,12 @@ export function ChecklistPrintView({ completedItems, projectName = "126 Colby Re
             margin: 0.75in;
           }
         }
-      `}} />
+      `,
+        }}
+      />
     </div>
   );
 }
-
 ```
 
 ---
@@ -718,7 +867,7 @@ When executing these files, make sure to:
 3. Keep the Hono router fully documented so that the OpenAPI specs update correctly inside `/openapi.json`.
 4. Fully update `agents.md` documenting the new tables, cron tracking structures, feedback flag states, and automatic configuration line item behaviors.
 
-```
+````
 
 ***
 
@@ -740,4 +889,4 @@ The follow-up execution matrix specifies the rule integration map for your works
 - Append a core requirement mandate: Questionnaire inputs and answer revisions must leverage absolute revision progression via new rows.
 - Ensure all alerts utilize structural elements derived from Shadcn UI exclusively without creating isolated sheets or introducing orphan configuration sheets.
 
-```
+````

@@ -1,7 +1,7 @@
+import { estimateCompanies, estimateCompanyContacts } from "@backend/db";
 import { asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
-import { estimateCompanies, estimateCompanyContacts } from "@backend/db";
 
 const estimateContactsRouter = new Hono<{ Bindings: Env }>();
 
@@ -16,7 +16,11 @@ estimateContactsRouter.get("/", async (c) => {
           .where(eq(estimateCompanyContacts.mappingStatus, "needs_mapping"))
           .orderBy(asc(estimateCompanyContacts.name))
           .all()
-      : await db.select().from(estimateCompanyContacts).orderBy(asc(estimateCompanyContacts.name)).all();
+      : await db
+          .select()
+          .from(estimateCompanyContacts)
+          .orderBy(asc(estimateCompanyContacts.name))
+          .all();
     return c.json({ contacts: rows });
   } catch (error) {
     return c.json(

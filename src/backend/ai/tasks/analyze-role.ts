@@ -15,12 +15,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { getDb } from "../../db";
-import {
-  globalConfig,
-  roleAlignmentScores,
-  roleAnalyses,
-  roles,
-} from "../../db/schema";
+import { globalConfig, roleAlignmentScores, roleAnalyses, roles } from "../../db/schema";
 import { generateStructuredOutput } from "../providers";
 import { consultNotebook } from "../tools/notebooklm";
 import { getActiveBullets } from "./draft";
@@ -140,11 +135,11 @@ export async function analyzeRole(env: Env, roleId: string): Promise<string> {
 
   const notebookLmPrompt = getConfig(
     "notebooklm_prompt",
-    "Based on my 13 years of performance reviews, accomplishments, and career history, what specific evidence supports my qualification for the following {{label}}s?\n\n{{itemsList}}\n\nFor each item, cite specific examples, metrics, or achievements from my career history. If there is no direct evidence, note the gap honestly."
+    "Based on my 13 years of performance reviews, accomplishments, and career history, what specific evidence supports my qualification for the following {{label}}s?\n\n{{itemsList}}\n\nFor each item, cite specific examples, metrics, or achievements from my career history. If there is no direct evidence, note the gap honestly.",
   );
   const compensationBaseline = getConfig(
     "compensation_baseline",
-    "Previous role at Google: $176,000 base salary"
+    "Previous role at Google: $176,000 base salary",
   );
   const careerStories = getConfig("career_stories", "");
 
@@ -153,7 +148,11 @@ export async function analyzeRole(env: Env, roleId: string): Promise<string> {
   const typeGroups = groupBy(allItems, (item) => item.type);
 
   for (const [type, items] of Object.entries(typeGroups)) {
-    const query = buildNotebookQuery(type, items.map((i) => i.content), notebookLmPrompt);
+    const query = buildNotebookQuery(
+      type,
+      items.map((i) => i.content),
+      notebookLmPrompt,
+    );
     try {
       const consultation = await consultNotebook(env, query);
       evidenceByType[type] = consultation.answer;
@@ -165,9 +164,10 @@ export async function analyzeRole(env: Env, roleId: string): Promise<string> {
   // Step 4: Load resume bullets
 
   const bullets = await getActiveBullets(env);
-  const bulletsContext = bullets.length > 0
-    ? bullets.map((b) => `[${b.category}] ${b.content}`).join("\n")
-    : "(No resume bullets available)";
+  const bulletsContext =
+    bullets.length > 0
+      ? bullets.map((b) => `[${b.category}] ${b.content}`).join("\n")
+      : "(No resume bullets available)";
 
   // Step 5: Score with gpt-oss-120b
   const analysis = await generateStructuredOutput(env, {
@@ -242,9 +242,7 @@ export async function analyzeRole(env: Env, roleId: string): Promise<string> {
 /**
  * Extract job posting text from the role's metadata or roleInstructions.
  */
-function extractJobContent(
-  role: typeof roles.$inferSelect,
-): string | null {
+function extractJobContent(role: typeof roles.$inferSelect): string | null {
   const meta = role.metadata;
 
   // Try metadata.jobDescription first, then metadata.rawHtml/rawText
@@ -275,9 +273,7 @@ function buildNotebookQuery(type: string, items: string[], promptTemplate: strin
   const label = type.replace(/_/g, " ");
   const itemsList = items.map((item, i) => `${i + 1}. ${item}`).join("\n");
 
-  return promptTemplate
-    .replace("{{label}}", label)
-    .replace("{{itemsList}}", itemsList);
+  return promptTemplate.replace("{{label}}", label).replace("{{itemsList}}", itemsList);
 }
 
 /**
@@ -331,17 +327,10 @@ function buildScoringUserPrompt(
   ];
 
   if (careerStories) {
-    sections.push(
-      "## Career Stories",
-      careerStories,
-      ""
-    );
+    sections.push("## Career Stories", careerStories, "");
   }
 
-  sections.push(
-    "## Verified Resume Accomplishments",
-    bulletsContext
-  );
+  sections.push("## Verified Resume Accomplishments", bulletsContext);
 
   if (role.salaryMin || role.salaryMax) {
     sections.push(

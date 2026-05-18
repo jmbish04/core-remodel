@@ -1,6 +1,6 @@
 import { Check, Crop, FileText, Loader2, Upload, X } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
-import { UploadsMappingPanel } from "@/components/UploadsMappingPanel";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,6 +17,7 @@ import {
   FileUploadList,
   FileUploadTrigger,
 } from "@/components/ui/file-upload";
+import { UploadsMappingPanel } from "@/components/UploadsMappingPanel";
 import { cn } from "@/lib/utils";
 
 type UploadTarget = "inspirational" | "listing";
@@ -37,8 +38,7 @@ interface MappingSummary {
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_FILES = 30;
 
-const getFileKey = (file: File) =>
-  `${file.name}-${file.size}-${file.type}-${file.lastModified}`;
+const getFileKey = (file: File) => `${file.name}-${file.size}-${file.type}-${file.lastModified}`;
 
 function createImageFromFile(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -381,12 +381,14 @@ export function UniversalUploadApp() {
         <CardHeader>
           <CardTitle className="text-base">Supporting Documents Workflow</CardTitle>
           <CardDescription>
-            Store PDFs, screenshots, and videos as revision-safe records mapped to rooms and vision branches.
+            Store PDFs, screenshots, and videos as revision-safe records mapped to rooms and vision
+            branches.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-muted-foreground">
-            Use the dedicated workspace to track immutable references like blueprints and branch-specific artifacts.
+            Use the dedicated workspace to track immutable references like blueprints and
+            branch-specific artifacts.
           </p>
           <a href="/supporting-docs">
             <Button variant="outline" className="gap-2">
@@ -397,7 +399,10 @@ export function UniversalUploadApp() {
         </CardContent>
       </Card>
 
-      <Dialog open={cropModalOpen} onOpenChange={(open) => (open ? setCropModalOpen(true) : closeCropModal())}>
+      <Dialog
+        open={cropModalOpen}
+        onOpenChange={(open) => (open ? setCropModalOpen(true) : closeCropModal())}
+      >
         <DialogContent className="max-w-4xl">
           <DialogHeader>
             <DialogTitle>Crop Upload</DialogTitle>
@@ -414,9 +419,7 @@ export function UniversalUploadApp() {
                   withGrid
                   onCropChange={(crop) => setCropState((prev) => ({ ...prev, crop }))}
                   onZoomChange={(zoom) => setCropState((prev) => ({ ...prev, zoom }))}
-                  onRotationChange={(rotation) =>
-                    setCropState((prev) => ({ ...prev, rotation }))
-                  }
+                  onRotationChange={(rotation) => setCropState((prev) => ({ ...prev, rotation }))}
                   onCropAreaChange={(_, areaPixels) =>
                     setCropState((prev) => ({ ...prev, areaPixels }))
                   }
@@ -447,7 +450,9 @@ export function UniversalUploadApp() {
               </label>
 
               <label className="space-y-2 text-sm">
-                <span className="text-muted-foreground">Rotation ({Math.round(cropState.rotation)}°)</span>
+                <span className="text-muted-foreground">
+                  Rotation ({Math.round(cropState.rotation)}°)
+                </span>
                 <input
                   type="range"
                   min={0}

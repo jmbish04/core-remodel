@@ -5,18 +5,14 @@
  * to Cloudflare Images and D1.
  */
 
+import { imageEditRevisions, imageEditSessions, images } from "@backend/db";
+import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
+import { zValidator } from "@hono/zod-validator";
 import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
-import { zValidator } from "@hono/zod-validator";
 
-import {
-  imageEditRevisions,
-  imageEditSessions,
-  images,
-} from "@backend/db";
-import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { ImageProcessorService, processImageEdit } from "../../services/image-processor";
 
 const photoEditsRouter = new Hono<{ Bindings: Env }>();
@@ -123,10 +119,12 @@ function parseImageMetadata(raw: string | null | undefined): ImageMetadata {
   }
 }
 
-function normalizeImageCategory(
-  image: typeof images.$inferSelect,
-): ImageCategory {
-  if (image.photoCategory === "listing" || image.photoCategory === "inspirational" || image.photoCategory === "ai_render") {
+function normalizeImageCategory(image: typeof images.$inferSelect): ImageCategory {
+  if (
+    image.photoCategory === "listing" ||
+    image.photoCategory === "inspirational" ||
+    image.photoCategory === "ai_render"
+  ) {
     return image.photoCategory;
   }
   return image.isListingPhoto ? "listing" : "inspirational";
@@ -179,9 +177,7 @@ photoEditsRouter.post(
 
     // 2. Convert base64 to Blob and Upload directly to Cloudflare Images
     const formData = new FormData();
-    const imageBlob = await (
-      await fetch(`data:image/jpeg;base64,${editedImageBase64}`)
-    ).blob();
+    const imageBlob = await (await fetch(`data:image/jpeg;base64,${editedImageBase64}`)).blob();
     formData.append("file", imageBlob, "edited-remodel.jpg");
 
     const cfImagesRes = await fetch(
@@ -195,8 +191,7 @@ photoEditsRouter.post(
       },
     );
 
-    const cfImagesData =
-      (await cfImagesRes.json()) as CloudflareImagesUploadResponse;
+    const cfImagesData = (await cfImagesRes.json()) as CloudflareImagesUploadResponse;
 
     if (!cfImagesData.success) {
       return c.json({ error: "Failed to persist output to Cloudflare Images." }, 500);
@@ -210,18 +205,21 @@ photoEditsRouter.post(
 
     // 3. Store the revision branch in D1
     const revisionId = crypto.randomUUID();
-    await db.insert(imageEditRevisions).values({
-      id: revisionId,
-      sessionId: body.sessionId,
-      parentId: body.parentId,
-      prompt: body.prompt,
-      startingImageUrl: body.startingImageUrl,
-      outputImageUrl,
-      metadata: JSON.stringify({
-        model: "gemini-3-pro-image-preview",
-        inputCount: body.images.length,
-      }),
-    }).run();
+    await db
+      .insert(imageEditRevisions)
+      .values({
+        id: revisionId,
+        sessionId: body.sessionId,
+        parentId: body.parentId,
+        prompt: body.prompt,
+        startingImageUrl: body.startingImageUrl,
+        outputImageUrl,
+        metadata: JSON.stringify({
+          model: "gemini-3-pro-image-preview",
+          inputCount: body.images.length,
+        }),
+      })
+      .run();
 
     return c.json({
       success: true,
@@ -440,9 +438,7 @@ photoEditsRouter.get("/sessions/:sessionId", async (c) => {
       .where(eq(imageEditRevisions.sessionId, sessionId))
       .all();
 
-    const revisionsSorted = [...revisions].sort(
-      (a, b) => a.revisionNumber - b.revisionNumber,
-    );
+    const revisionsSorted = [...revisions].sort((a, b) => a.revisionNumber - b.revisionNumber);
 
     const sourceImage = session.sourceImageId
       ? await db.select().from(images).where(eq(images.id, session.sourceImageId)).get()
@@ -455,7 +451,7 @@ photoEditsRouter.get("/sessions/:sessionId", async (c) => {
         .select()
         .from(images)
         .where(eq(images.id, revision.outputImageId))
-      .get();
+        .get();
       if (outputImage) {
         outputImageMap.set(revision.outputImageId, outputImage);
       }
@@ -479,7 +475,7 @@ photoEditsRouter.get("/sessions/:sessionId", async (c) => {
       revisions: revisionsSorted.map((revision) => ({
         ...revision,
         sourceImage: revision.sourceImageId
-          ? sourceImageMap.get(revision.sourceImageId) ?? null
+          ? (sourceImageMap.get(revision.sourceImageId) ?? null)
           : null,
         outputImage: outputImageMap.get(revision.outputImageId) ?? null,
       })),
@@ -520,9 +516,9 @@ photoEditsRouter.get("/decision-room", async (c) => {
 
     interface RoomBucket {
       room: string;
-      listingImages: typeof images.$inferSelect[];
-      inspirationalImages: typeof images.$inferSelect[];
-      aiRenderImages: typeof images.$inferSelect[];
+      listingImages: (typeof images.$inferSelect)[];
+      inspirationalImages: (typeof images.$inferSelect)[];
+      aiRenderImages: (typeof images.$inferSelect)[];
       promotedImages: Array<typeof images.$inferSelect & { metadataParsed: ImageMetadata }>;
       cameraPoints: Array<{
         imageId: string;
@@ -593,11 +589,7 @@ photoEditsRouter.get("/decision-room", async (c) => {
       }
 
       const camera = metadataParsed.camera;
-      if (
-        camera &&
-        typeof camera.x === "number" &&
-        typeof camera.y === "number"
-      ) {
+      if (camera && typeof camera.x === "number" && typeof camera.y === "number") {
         const floor = typeof camera.floor === "number" ? camera.floor : 1;
         floorSet.add(floor);
         bucket.cameraPoints.push({
@@ -625,9 +617,7 @@ photoEditsRouter.get("/decision-room", async (c) => {
         : null;
 
       const room =
-        sessionSourceImage?.roomType?.trim() ||
-        lastOutputImage?.roomType?.trim() ||
-        "unassigned";
+        sessionSourceImage?.roomType?.trim() || lastOutputImage?.roomType?.trim() || "unassigned";
       const bucket = ensureRoom(room);
 
       bucket.sessions.push({
@@ -663,8 +653,7 @@ photoEditsRouter.get("/decision-room", async (c) => {
         promotedImages: room.promotedImages,
         sessions: room.sessions.sort(
           (a, b) =>
-            new Date(b.datetimeLastModified).getTime() -
-            new Date(a.datetimeLastModified).getTime(),
+            new Date(b.datetimeLastModified).getTime() - new Date(a.datetimeLastModified).getTime(),
         ),
         cameraPoints: room.cameraPoints,
       }));
@@ -775,11 +764,7 @@ photoEditsRouter.post("/sessions/:sessionId/revisions", async (c) => {
       return c.json({ error: "Source image is required" }, 400);
     }
 
-    const sourceImage = await db
-      .select()
-      .from(images)
-      .where(eq(images.id, sourceImageId))
-      .get();
+    const sourceImage = await db.select().from(images).where(eq(images.id, sourceImageId)).get();
 
     if (!sourceImage) {
       return c.json({ error: "Source image not found" }, 404);
@@ -816,11 +801,9 @@ photoEditsRouter.post("/sessions/:sessionId/revisions", async (c) => {
       const generatedBytes = await toImageBytes(aiPayload);
       const generatedBlob = new Blob([generatedBytes], { type: "image/png" });
 
-      uploadFile = new File(
-        [generatedBlob],
-        `render-${sessionId}-${Date.now()}.png`,
-        { type: "image/png" },
-      );
+      uploadFile = new File([generatedBlob], `render-${sessionId}-${Date.now()}.png`, {
+        type: "image/png",
+      });
     }
 
     const processor = new ImageProcessorService(
@@ -853,10 +836,7 @@ photoEditsRouter.post("/sessions/:sessionId/revisions", async (c) => {
       .where(eq(imageEditRevisions.sessionId, sessionId))
       .all();
     const revisionNumber =
-      revisionRows.reduce(
-        (maxValue, row) => Math.max(maxValue, row.revisionNumber),
-        0,
-      ) + 1;
+      revisionRows.reduce((maxValue, row) => Math.max(maxValue, row.revisionNumber), 0) + 1;
 
     const roomType = roomTypeInput || sourceImage.roomType || "unassigned";
 
@@ -931,11 +911,7 @@ photoEditsRouter.post("/sessions/:sessionId/revisions", async (c) => {
       .where(eq(imageEditRevisions.id, revisionId))
       .get();
 
-    const outputImage = await db
-      .select()
-      .from(images)
-      .where(eq(images.id, outputImageId))
-      .get();
+    const outputImage = await db.select().from(images).where(eq(images.id, outputImageId)).get();
 
     return c.json({
       success: true,

@@ -1,5 +1,3 @@
-import { and, count, desc, eq, inArray, max } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
 import {
   budgetExpenseEntries,
   budgetFundingAccounts,
@@ -24,19 +22,13 @@ import {
   rooms,
   scenarioRoomPlans,
 } from "@backend/db";
+import { and, count, desc, eq, inArray, max } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 
 export type SheetColumn = {
   key: string;
   label: string;
-  type:
-    | "text"
-    | "currency_cents"
-    | "number"
-    | "boolean"
-    | "date"
-    | "datetime"
-    | "id"
-    | "enum";
+  type: "text" | "currency_cents" | "number" | "boolean" | "date" | "datetime" | "id" | "enum";
   writable: boolean;
   description?: string;
 };
@@ -120,7 +112,12 @@ export const GOOGLE_SHEETS_WORKBOOK_TEMPLATE: WorkbookTabDefinition[] = [
     columns: [
       { key: "category", label: "Category", type: "text", writable: false },
       { key: "item_count", label: "Item Count", type: "number", writable: false },
-      { key: "total_amount_cents", label: "Total (cents)", type: "currency_cents", writable: false },
+      {
+        key: "total_amount_cents",
+        label: "Total (cents)",
+        type: "currency_cents",
+        writable: false,
+      },
     ],
   },
   {
@@ -132,13 +129,33 @@ export const GOOGLE_SHEETS_WORKBOOK_TEMPLATE: WorkbookTabDefinition[] = [
       { key: "option_key", label: "Option Key", type: "text", writable: false },
       { key: "item_count", label: "Item Count", type: "number", writable: false },
       { key: "base_low_cents", label: "Base Low (cents)", type: "currency_cents", writable: false },
-      { key: "base_high_cents", label: "Base High (cents)", type: "currency_cents", writable: false },
+      {
+        key: "base_high_cents",
+        label: "Base High (cents)",
+        type: "currency_cents",
+        writable: false,
+      },
       { key: "low_sum_cents", label: "Low Sum (cents)", type: "currency_cents", writable: false },
       { key: "high_sum_cents", label: "High Sum (cents)", type: "currency_cents", writable: false },
-      { key: "projected_total_low_cents", label: "Projected Low (cents)", type: "currency_cents", writable: false },
-      { key: "projected_total_high_cents", label: "Projected High (cents)", type: "currency_cents", writable: false },
+      {
+        key: "projected_total_low_cents",
+        label: "Projected Low (cents)",
+        type: "currency_cents",
+        writable: false,
+      },
+      {
+        key: "projected_total_high_cents",
+        label: "Projected High (cents)",
+        type: "currency_cents",
+        writable: false,
+      },
       { key: "expense_count", label: "Expenses Count", type: "number", writable: false },
-      { key: "expense_total_cents", label: "Expenses Total (cents)", type: "currency_cents", writable: false },
+      {
+        key: "expense_total_cents",
+        label: "Expenses Total (cents)",
+        type: "currency_cents",
+        writable: false,
+      },
       { key: "status_mix", label: "Status Mix", type: "text", writable: false },
     ],
   },
@@ -164,8 +181,18 @@ export const GOOGLE_SHEETS_WORKBOOK_TEMPLATE: WorkbookTabDefinition[] = [
       { key: "description", label: "Description", type: "text", writable: true },
       { key: "scenario_id", label: "Scenario ID", type: "id", writable: true },
       { key: "room_ids", label: "Room IDs", type: "text", writable: true },
-      { key: "estimated_low_cents", label: "Est. Low (cents)", type: "currency_cents", writable: true },
-      { key: "estimated_high_cents", label: "Est. High (cents)", type: "currency_cents", writable: true },
+      {
+        key: "estimated_low_cents",
+        label: "Est. Low (cents)",
+        type: "currency_cents",
+        writable: true,
+      },
+      {
+        key: "estimated_high_cents",
+        label: "Est. High (cents)",
+        type: "currency_cents",
+        writable: true,
+      },
       { key: "owner", label: "Owner", type: "text", writable: true },
       { key: "ai_rationale", label: "AI Rationale", type: "text", writable: true },
       { key: "change_source", label: "Change Source", type: "text", writable: true },
@@ -185,7 +212,12 @@ export const GOOGLE_SHEETS_WORKBOOK_TEMPLATE: WorkbookTabDefinition[] = [
       { key: "risk_level", label: "Risk", type: "enum", writable: false },
       { key: "bottleneck_reason", label: "Why It Matters", type: "text", writable: false },
       { key: "estimated_low_cents", label: "Low (cents)", type: "currency_cents", writable: false },
-      { key: "estimated_high_cents", label: "High (cents)", type: "currency_cents", writable: false },
+      {
+        key: "estimated_high_cents",
+        label: "High (cents)",
+        type: "currency_cents",
+        writable: false,
+      },
     ],
   },
   {
@@ -196,8 +228,18 @@ export const GOOGLE_SHEETS_WORKBOOK_TEMPLATE: WorkbookTabDefinition[] = [
       { key: "scenario_id", label: "Scenario ID", type: "id", writable: false },
       { key: "scenario_name", label: "Scenario Name", type: "text", writable: false },
       { key: "status", label: "Status", type: "enum", writable: false },
-      { key: "budget_low_cents", label: "Budget Low (cents)", type: "currency_cents", writable: false },
-      { key: "budget_high_cents", label: "Budget High (cents)", type: "currency_cents", writable: false },
+      {
+        key: "budget_low_cents",
+        label: "Budget Low (cents)",
+        type: "currency_cents",
+        writable: false,
+      },
+      {
+        key: "budget_high_cents",
+        label: "Budget High (cents)",
+        type: "currency_cents",
+        writable: false,
+      },
       { key: "room_plan_count", label: "Room Plan Count", type: "number", writable: false },
       { key: "decision_notes", label: "Decision Notes", type: "text", writable: false },
     ],
@@ -230,9 +272,19 @@ export const GOOGLE_SHEETS_WORKBOOK_TEMPLATE: WorkbookTabDefinition[] = [
       { key: "is_draft", label: "Is Draft", type: "boolean", writable: false },
       { key: "is_latest", label: "Is Latest", type: "boolean", writable: false },
       { key: "status_notes", label: "Status Notes", type: "text", writable: false },
-      { key: "total_amount_cents", label: "Total (cents)", type: "currency_cents", writable: false },
+      {
+        key: "total_amount_cents",
+        label: "Total (cents)",
+        type: "currency_cents",
+        writable: false,
+      },
       { key: "total_tax_cents", label: "Tax (cents)", type: "currency_cents", writable: false },
-      { key: "deposit_amount_cents", label: "Deposit (cents)", type: "currency_cents", writable: false },
+      {
+        key: "deposit_amount_cents",
+        label: "Deposit (cents)",
+        type: "currency_cents",
+        writable: false,
+      },
       { key: "updated_at", label: "Updated At", type: "datetime", writable: false },
     ],
   },
@@ -248,8 +300,18 @@ export const GOOGLE_SHEETS_WORKBOOK_TEMPLATE: WorkbookTabDefinition[] = [
       { key: "description", label: "Description", type: "text", writable: false },
       { key: "qty", label: "Qty", type: "number", writable: false },
       { key: "uom", label: "UOM", type: "text", writable: false },
-      { key: "unit_cost_cents", label: "Unit Cost (cents)", type: "currency_cents", writable: false },
-      { key: "line_total_cents", label: "Line Total (cents)", type: "currency_cents", writable: false },
+      {
+        key: "unit_cost_cents",
+        label: "Unit Cost (cents)",
+        type: "currency_cents",
+        writable: false,
+      },
+      {
+        key: "line_total_cents",
+        label: "Line Total (cents)",
+        type: "currency_cents",
+        writable: false,
+      },
       { key: "tax_cents", label: "Tax (cents)", type: "currency_cents", writable: false },
     ],
   },
@@ -285,9 +347,19 @@ export const GOOGLE_SHEETS_WORKBOOK_TEMPLATE: WorkbookTabDefinition[] = [
       { key: "status_name", label: "Status", type: "text", writable: false },
       { key: "is_draft", label: "Is Draft", type: "boolean", writable: false },
       { key: "is_latest", label: "Is Latest", type: "boolean", writable: false },
-      { key: "total_amount_cents", label: "Total (cents)", type: "currency_cents", writable: false },
+      {
+        key: "total_amount_cents",
+        label: "Total (cents)",
+        type: "currency_cents",
+        writable: false,
+      },
       { key: "total_tax_cents", label: "Tax (cents)", type: "currency_cents", writable: false },
-      { key: "deposit_amount_cents", label: "Deposit (cents)", type: "currency_cents", writable: false },
+      {
+        key: "deposit_amount_cents",
+        label: "Deposit (cents)",
+        type: "currency_cents",
+        writable: false,
+      },
       { key: "change_source", label: "Change Source", type: "text", writable: false },
       { key: "created_by", label: "Created By", type: "text", writable: false },
       { key: "created_at", label: "Created At", type: "datetime", writable: false },
@@ -325,7 +397,12 @@ export const GOOGLE_SHEETS_WORKBOOK_TEMPLATE: WorkbookTabDefinition[] = [
       { key: "revision_number", label: "Revision #", type: "number", writable: false },
       { key: "is_active", label: "Is Active", type: "boolean", writable: false },
       { key: "is_draft", label: "Is Draft", type: "boolean", writable: false },
-      { key: "replaced_by_revision_id", label: "Replaced By Revision", type: "id", writable: false },
+      {
+        key: "replaced_by_revision_id",
+        label: "Replaced By Revision",
+        type: "id",
+        writable: false,
+      },
       { key: "replaced_at", label: "Replaced At", type: "datetime", writable: false },
       { key: "item_type", label: "Item Type", type: "text", writable: false },
       { key: "execution_class", label: "Execution Class", type: "text", writable: false },
@@ -334,8 +411,18 @@ export const GOOGLE_SHEETS_WORKBOOK_TEMPLATE: WorkbookTabDefinition[] = [
       { key: "is_bottleneck", label: "Bottleneck", type: "boolean", writable: false },
       { key: "title", label: "Title", type: "text", writable: false },
       { key: "scenario_id", label: "Scenario ID", type: "id", writable: false },
-      { key: "estimated_low_cents", label: "Est. Low (cents)", type: "currency_cents", writable: false },
-      { key: "estimated_high_cents", label: "Est. High (cents)", type: "currency_cents", writable: false },
+      {
+        key: "estimated_low_cents",
+        label: "Est. Low (cents)",
+        type: "currency_cents",
+        writable: false,
+      },
+      {
+        key: "estimated_high_cents",
+        label: "Est. High (cents)",
+        type: "currency_cents",
+        writable: false,
+      },
       { key: "change_source", label: "Change Source", type: "text", writable: false },
       { key: "changed_by", label: "Changed By", type: "text", writable: false },
       { key: "updated_at", label: "Updated At", type: "datetime", writable: false },
@@ -351,7 +438,12 @@ export const GOOGLE_SHEETS_WORKBOOK_TEMPLATE: WorkbookTabDefinition[] = [
       { key: "revision_number", label: "Revision #", type: "number", writable: false },
       { key: "is_active", label: "Is Active", type: "boolean", writable: false },
       { key: "is_draft", label: "Is Draft", type: "boolean", writable: false },
-      { key: "replaced_by_revision_id", label: "Replaced By Revision", type: "id", writable: false },
+      {
+        key: "replaced_by_revision_id",
+        label: "Replaced By Revision",
+        type: "id",
+        writable: false,
+      },
       { key: "replaced_at", label: "Replaced At", type: "datetime", writable: false },
       { key: "item", label: "Item", type: "text", writable: false },
       { key: "category", label: "Category", type: "text", writable: false },
@@ -514,7 +606,9 @@ function toBool(value: unknown): boolean {
   if (typeof value === "number") return value !== 0;
   if (typeof value === "string") {
     const normalized = value.trim().toLowerCase();
-    return normalized === "true" || normalized === "1" || normalized === "y" || normalized === "yes";
+    return (
+      normalized === "true" || normalized === "1" || normalized === "y" || normalized === "yes"
+    );
   }
   return false;
 }
@@ -645,7 +739,10 @@ async function expenseRowHash(row: {
   );
 }
 
-async function nextBudgetRevisionNumber(db: ReturnType<typeof drizzle>, trackId: string): Promise<number> {
+async function nextBudgetRevisionNumber(
+  db: ReturnType<typeof drizzle>,
+  trackId: string,
+): Promise<number> {
   const row = await db
     .select({ revision: max(budgetTrackerItems.revisionNumber) })
     .from(budgetTrackerItems)
@@ -654,7 +751,10 @@ async function nextBudgetRevisionNumber(db: ReturnType<typeof drizzle>, trackId:
   return (row?.revision || 0) + 1;
 }
 
-async function nextExpenseRevisionNumber(db: ReturnType<typeof drizzle>, trackId: string): Promise<number> {
+async function nextExpenseRevisionNumber(
+  db: ReturnType<typeof drizzle>,
+  trackId: string,
+): Promise<number> {
   const row = await db
     .select({ revision: max(budgetExpenseEntries.revisionNumber) })
     .from(budgetExpenseEntries)
@@ -669,14 +769,54 @@ export async function buildGoogleSheetsWorkbook(env: Env): Promise<WorkbookPaylo
   const cursor = generatedAt.toISOString();
 
   const projectInfoDefaults = [
-    { infoKey: "project_name", infoLabel: "Project name", infoValue: "126 Colby Remodel", notes: null as string | null },
-    { infoKey: "project_description", infoLabel: "Project description", infoValue: null as string | null, notes: null as string | null },
-    { infoKey: "contractor_name", infoLabel: "Contractor", infoValue: null as string | null, notes: null as string | null },
-    { infoKey: "license_number", infoLabel: "Licensed/Bonded number", infoValue: null as string | null, notes: null as string | null },
-    { infoKey: "contact_name", infoLabel: "Contact name", infoValue: null as string | null, notes: null as string | null },
-    { infoKey: "website", infoLabel: "Website", infoValue: null as string | null, notes: null as string | null },
-    { infoKey: "phone", infoLabel: "Phone", infoValue: null as string | null, notes: null as string | null },
-    { infoKey: "address", infoLabel: "Address", infoValue: null as string | null, notes: null as string | null },
+    {
+      infoKey: "project_name",
+      infoLabel: "Project name",
+      infoValue: "126 Colby Remodel",
+      notes: null as string | null,
+    },
+    {
+      infoKey: "project_description",
+      infoLabel: "Project description",
+      infoValue: null as string | null,
+      notes: null as string | null,
+    },
+    {
+      infoKey: "contractor_name",
+      infoLabel: "Contractor",
+      infoValue: null as string | null,
+      notes: null as string | null,
+    },
+    {
+      infoKey: "license_number",
+      infoLabel: "Licensed/Bonded number",
+      infoValue: null as string | null,
+      notes: null as string | null,
+    },
+    {
+      infoKey: "contact_name",
+      infoLabel: "Contact name",
+      infoValue: null as string | null,
+      notes: null as string | null,
+    },
+    {
+      infoKey: "website",
+      infoLabel: "Website",
+      infoValue: null as string | null,
+      notes: null as string | null,
+    },
+    {
+      infoKey: "phone",
+      infoLabel: "Phone",
+      infoValue: null as string | null,
+      notes: null as string | null,
+    },
+    {
+      infoKey: "address",
+      infoLabel: "Address",
+      infoValue: null as string | null,
+      notes: null as string | null,
+    },
   ];
 
   const projectInfoRowsDb = await db
@@ -937,7 +1077,11 @@ export async function buildGoogleSheetsWorkbook(env: Env): Promise<WorkbookPaylo
       is_active: company.isActive,
     }));
 
-  const estimateRows = await db.select().from(estimates).orderBy(desc(estimates.datetimeUpdated)).all();
+  const estimateRows = await db
+    .select()
+    .from(estimates)
+    .orderBy(desc(estimates.datetimeUpdated))
+    .all();
   const estimateById = new Map(estimateRows.map((row) => [row.id, row]));
   const estimateStatusRows = await db.select().from(estimateStatuses).all();
   const estimateStatusById = new Map(estimateStatusRows.map((row) => [row.id, row]));
@@ -1009,7 +1153,9 @@ export async function buildGoogleSheetsWorkbook(env: Env): Promise<WorkbookPaylo
           .where(inArray(estimateLineItems.estimateRevisionId, latestEstimateRevisionIds))
           .all()
       : [];
-  const estimateIdByRevisionId = new Map(latestEstimateRevisions.map((row) => [row.id, row.estimateId]));
+  const estimateIdByRevisionId = new Map(
+    latestEstimateRevisions.map((row) => [row.id, row.estimateId]),
+  );
   const estimateLineItemRows: WorkbookRow[] = latestLineItems.map((item) => ({
     line_item_id: item.id,
     estimate_id: estimateIdByRevisionId.get(item.estimateRevisionId) || null,
@@ -1023,7 +1169,11 @@ export async function buildGoogleSheetsWorkbook(env: Env): Promise<WorkbookPaylo
     tax_cents: item.taxCents,
   }));
 
-  const contractRows = await db.select().from(contracts).orderBy(desc(contracts.datetimeUpdated)).all();
+  const contractRows = await db
+    .select()
+    .from(contracts)
+    .orderBy(desc(contracts.datetimeUpdated))
+    .all();
   const contractById = new Map(contractRows.map((row) => [row.id, row]));
   const contractStatusRows = await db.select().from(contractStatuses).all();
   const contractStatusById = new Map(contractStatusRows.map((row) => [row.id, row]));
@@ -1040,7 +1190,9 @@ export async function buildGoogleSheetsWorkbook(env: Env): Promise<WorkbookPaylo
   const latestContractRevisionByContractId = new Map(
     latestContractRevisions.map((revision) => [revision.contractId, revision]),
   );
-  const contractIdByRevisionId = new Map(allContractRevisions.map((row) => [row.id, row.contractId]));
+  const contractIdByRevisionId = new Map(
+    allContractRevisions.map((row) => [row.id, row.contractId]),
+  );
   const contractsLatestRows: WorkbookRow[] = contractRows.map((contract) => {
     const revision = latestContractRevisionByContractId.get(contract.id);
     return {
@@ -1716,7 +1868,9 @@ export async function applyGoogleSheetsWorkbookPush(
     const active = await db
       .select()
       .from(budgetExpenseEntries)
-      .where(and(eq(budgetExpenseEntries.trackId, trackId), eq(budgetExpenseEntries.isActive, true)))
+      .where(
+        and(eq(budgetExpenseEntries.trackId, trackId), eq(budgetExpenseEntries.isActive, true)),
+      )
       .get();
 
     if (!active) {

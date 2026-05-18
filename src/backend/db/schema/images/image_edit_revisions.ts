@@ -1,7 +1,8 @@
 import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import { images } from "./images";
+
 import { imageEditSessions } from "./image_edit_sessions";
+import { images } from "./images";
 
 export const imageEditRevisions = sqliteTable("image_edit_revisions", {
   id: text("id").primaryKey(),
@@ -12,9 +13,7 @@ export const imageEditRevisions = sqliteTable("image_edit_revisions", {
   prompt: text("prompt").notNull(),
   startingImageUrl: text("starting_image_url").notNull(),
   outputImageUrl: text("output_image_url").notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" }).default(
-    sql`(strftime('%s', 'now'))`,
-  ),
+  createdAt: integer("created_at", { mode: "timestamp" }).default(sql`(strftime('%s', 'now'))`),
 
   // Backward-compatible fields retained for existing photo edit session consumers.
   sourceImageId: text("source_image_id").references(() => images.id, {
@@ -26,7 +25,5 @@ export const imageEditRevisions = sqliteTable("image_edit_revisions", {
   model: text("model"),
   revisionNumber: integer("revision_number"),
   metadata: text("metadata"),
-  datetimeCreated: integer("datetime_created", { mode: "timestamp" }).default(
-    sql`(unixepoch())`,
-  ),
+  datetimeCreated: integer("datetime_created", { mode: "timestamp" }).default(sql`(unixepoch())`),
 });

@@ -2,6 +2,7 @@
  * @fileoverview Documents API routes for PlateJS integration
  */
 
+import { documents } from "@backend/db";
 import { zValidator } from "@hono/zod-validator";
 import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -10,7 +11,6 @@ import { z } from "zod";
 
 import type { Variables } from "../index";
 
-import { documents } from "@backend/db";
 import { authMiddleware } from "../middleware/auth";
 
 const documentsRouter = new Hono<{ Bindings: Env; Variables: Variables }>();

@@ -1,7 +1,7 @@
-import fs from 'fs';
-import crypto from 'crypto';
+import crypto from "crypto";
+import fs from "fs";
 
-const data = JSON.parse(fs.readFileSync('../image_reviews.json', 'utf8'));
+const data = JSON.parse(fs.readFileSync("../image_reviews.json", "utf8"));
 
 let sql = `
 -- Auto-generated seed file from image_reviews.json
@@ -18,10 +18,10 @@ for (const [key, val] of Object.entries(data.images)) {
   const igAccount = val.igAccount ? val.igAccount.replace(/'/g, "''") : "";
   const visibleCaption = val.visibleCaption ? val.visibleCaption.replace(/'/g, "''") : "";
   const tagsStr = val.tags ? JSON.stringify(val.tags).replace(/'/g, "''") : "[]";
-  
+
   // Create an INSERT statement
   sql += `INSERT INTO image_reviews (id, filename, path, room, note, ig_account, visible_caption, tags, updated_at) VALUES ('${crypto.randomUUID()}', '${filename}', '${path}', '${room}', '${note}', '${igAccount}', '${visibleCaption}', '${tagsStr}', unixepoch());\n`;
 }
 
-fs.writeFileSync('seed.sql', sql);
-console.log('Generated seed.sql with ' + Object.keys(data.images).length + ' records');
+fs.writeFileSync("seed.sql", sql);
+console.log("Generated seed.sql with " + Object.keys(data.images).length + " records");

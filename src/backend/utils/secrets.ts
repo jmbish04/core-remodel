@@ -20,9 +20,7 @@ type ImageTokenBindingName = (typeof IMAGE_TOKEN_BINDINGS)[number];
 type EnvWithOptionalImageBindings = Env &
   Partial<Record<ImageTokenBindingName, SecretsStoreSecret>>;
 
-async function readSecretValue(
-  secret: SecretsStoreSecret | null | undefined,
-): Promise<string> {
+async function readSecretValue(secret: SecretsStoreSecret | null | undefined): Promise<string> {
   if (!secret) {
     return "";
   }
@@ -48,14 +46,10 @@ export async function getCloudflareAccountId(env: Env): Promise<string | null> {
 
 export async function getCloudflareImagesTokenCandidates(env: Env): Promise<string[]> {
   const values = await Promise.all(
-    IMAGE_TOKEN_BINDINGS.map(async (binding) =>
-      readSecretValue(getOptionalBinding(env, binding)),
-    ),
+    IMAGE_TOKEN_BINDINGS.map(async (binding) => readSecretValue(getOptionalBinding(env, binding))),
   );
 
-  return Array.from(
-    new Set(values.filter((value): value is string => value.length > 0)),
-  );
+  return Array.from(new Set(values.filter((value): value is string => value.length > 0)));
 }
 
 export async function getCloudflareImagesToken(env: Env): Promise<string> {

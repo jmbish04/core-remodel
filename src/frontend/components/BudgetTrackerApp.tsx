@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -328,7 +329,11 @@ export function BudgetTrackerApp() {
       if (flashChanges && nextWorkbook && workbookRef.current) {
         const definitions = nextTabs || tabsRef.current;
         if (definitions.length > 0) {
-          const changedKeys = computeChangedCellKeys(workbookRef.current, nextWorkbook, definitions);
+          const changedKeys = computeChangedCellKeys(
+            workbookRef.current,
+            nextWorkbook,
+            definitions,
+          );
           flashCells(changedKeys);
         }
       }
@@ -473,11 +478,26 @@ export function BudgetTrackerApp() {
     return workbookForRender.tabs[activeTabDefinition.tab] || [];
   }, [activeTabDefinition, workbookForRender?.tabs]);
 
-  const decisionGateRows = useMemo(() => workbookForRender?.tabs?.Decision_Gates || [], [workbookForRender?.tabs]);
-  const budgetSummaryRows = useMemo(() => workbookForRender?.tabs?.Budget_Summary || [], [workbookForRender?.tabs]);
-  const financialStatusRows = useMemo(() => workbookForRender?.tabs?.Financial_Status || [], [workbookForRender?.tabs]);
-  const varianceRows = useMemo(() => workbookForRender?.tabs?.Variance_Options || [], [workbookForRender?.tabs]);
-  const categorySummaryRows = useMemo(() => workbookForRender?.tabs?.Category_Summary || [], [workbookForRender?.tabs]);
+  const decisionGateRows = useMemo(
+    () => workbookForRender?.tabs?.Decision_Gates || [],
+    [workbookForRender?.tabs],
+  );
+  const budgetSummaryRows = useMemo(
+    () => workbookForRender?.tabs?.Budget_Summary || [],
+    [workbookForRender?.tabs],
+  );
+  const financialStatusRows = useMemo(
+    () => workbookForRender?.tabs?.Financial_Status || [],
+    [workbookForRender?.tabs],
+  );
+  const varianceRows = useMemo(
+    () => workbookForRender?.tabs?.Variance_Options || [],
+    [workbookForRender?.tabs],
+  );
+  const categorySummaryRows = useMemo(
+    () => workbookForRender?.tabs?.Category_Summary || [],
+    [workbookForRender?.tabs],
+  );
 
   const allottedFunds = useMemo(
     () =>
@@ -521,7 +541,9 @@ export function BudgetTrackerApp() {
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${protocol}://${window.location.host}/api/realtime/estimates?room=home`);
+    const ws = new WebSocket(
+      `${protocol}://${window.location.host}/api/realtime/estimates?room=home`,
+    );
 
     ws.onmessage = (event) => {
       try {
@@ -556,7 +578,12 @@ export function BudgetTrackerApp() {
   }, [refreshFromRealtime]);
 
   const updateCell = useCallback(
-    (tab: WorkbookTabDefinition, rowIndex: number, column: SheetColumn, nextValue: WorkbookRow[string]) => {
+    (
+      tab: WorkbookTabDefinition,
+      rowIndex: number,
+      column: SheetColumn,
+      nextValue: WorkbookRow[string],
+    ) => {
       setDraftWorkbook((current) => {
         if (!current) return current;
         const next = deepCloneWorkbook(current);
@@ -682,7 +709,9 @@ export function BudgetTrackerApp() {
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            {hasUnsavedChanges ? <Badge variant="secondary">Unsaved: {Object.keys(dirtyCells).length}</Badge> : null}
+            {hasUnsavedChanges ? (
+              <Badge variant="secondary">Unsaved: {Object.keys(dirtyCells).length}</Badge>
+            ) : null}
             <Button onClick={bootstrapPlan} disabled={bootstrapping} variant="secondary">
               {bootstrapping ? (
                 <>
@@ -709,7 +738,11 @@ export function BudgetTrackerApp() {
                 </>
               )}
             </Button>
-            <Button onClick={discardEdits} disabled={!hasUnsavedChanges || saving} variant="outline">
+            <Button
+              onClick={discardEdits}
+              disabled={!hasUnsavedChanges || saving}
+              variant="outline"
+            >
               <Undo2 className="mr-2 size-4" />
               Discard
             </Button>
@@ -772,7 +805,10 @@ export function BudgetTrackerApp() {
           <CardContent className="space-y-2 text-sm">
             <p className="font-medium">{decisionGateRows.length} active gate(s)</p>
             {decisionGateRows.slice(0, 3).map((row, index) => (
-              <div key={`${row.track_id || "gate"}-${index}`} className="rounded-md bg-muted/25 p-2 ring-1 ring-border/30">
+              <div
+                key={`${row.track_id || "gate"}-${index}`}
+                className="rounded-md bg-muted/25 p-2 ring-1 ring-border/30"
+              >
                 <p className="text-xs font-medium">{String(row.title || "Untitled gate")}</p>
                 <p className="text-xs text-muted-foreground">{String(row.status || "open")}</p>
               </div>
@@ -790,8 +826,13 @@ export function BudgetTrackerApp() {
               <p className="text-muted-foreground">No summary rows yet.</p>
             ) : (
               budgetSummaryRows.map((row, index) => (
-                <div key={`${row.execution_class || "summary"}-${index}`} className="rounded-md bg-muted/25 p-2 ring-1 ring-border/30">
-                  <p className="text-xs font-medium">{String(row.execution_class || "unclassified")}</p>
+                <div
+                  key={`${row.execution_class || "summary"}-${index}`}
+                  className="rounded-md bg-muted/25 p-2 ring-1 ring-border/30"
+                >
+                  <p className="text-xs font-medium">
+                    {String(row.execution_class || "unclassified")}
+                  </p>
                   <p className="text-xs text-muted-foreground">
                     {formatCellValue("currency_cents", row.low_sum_cents)} to{" "}
                     {formatCellValue("currency_cents", row.high_sum_cents)}
@@ -800,7 +841,8 @@ export function BudgetTrackerApp() {
               ))
             )}
             <p className="pt-1 text-xs text-muted-foreground">
-              {varianceRows.length} variance option path(s) tracked · {categorySummaryRows.length} expense category bucket(s)
+              {varianceRows.length} variance option path(s) tracked · {categorySummaryRows.length}{" "}
+              expense category bucket(s)
             </p>
           </CardContent>
         </Card>
@@ -826,7 +868,11 @@ export function BudgetTrackerApp() {
                 onClick={() => setActiveTab(tab.tab)}
               >
                 {tab.label}
-                {tab.writable ? <Badge className="ml-2" variant="secondary">Editable</Badge> : null}
+                {tab.writable ? (
+                  <Badge className="ml-2" variant="secondary">
+                    Editable
+                  </Badge>
+                ) : null}
               </Button>
             ))}
           </div>
@@ -848,7 +894,10 @@ export function BudgetTrackerApp() {
                   <thead className="bg-muted/40">
                     <tr>
                       {activeTabDefinition.columns.map((column) => (
-                        <th key={column.key} className="whitespace-nowrap border-b border-border/50 px-3 py-2 font-semibold">
+                        <th
+                          key={column.key}
+                          className="whitespace-nowrap border-b border-border/50 px-3 py-2 font-semibold"
+                        >
                           {column.label}
                         </th>
                       ))}
@@ -866,13 +915,24 @@ export function BudgetTrackerApp() {
                       </tr>
                     ) : (
                       activeRows.map((row, rowIndex) => (
-                        <tr key={`${activeTabDefinition.tab}-${String(row.track_id || row.revision_id || rowIndex)}`} className="border-b border-border/40 align-top">
+                        <tr
+                          key={`${activeTabDefinition.tab}-${String(row.track_id || row.revision_id || rowIndex)}`}
+                          className="border-b border-border/40 align-top"
+                        >
                           {activeTabDefinition.columns.map((column) => {
-                            const rowIdentity = getRowIdentity(activeTabDefinition.tab, row, rowIndex);
+                            const rowIdentity = getRowIdentity(
+                              activeTabDefinition.tab,
+                              row,
+                              rowIndex,
+                            );
                             const writable = isCellWritable(activeTabDefinition, row, column);
-                            const dirty = dirtyCells[`${activeTabDefinition.tab}:${rowIndex}:${column.key}`] === true;
+                            const dirty =
+                              dirtyCells[`${activeTabDefinition.tab}:${rowIndex}:${column.key}`] ===
+                              true;
                             const flashed =
-                              flashedCells[`${activeTabDefinition.tab}:${rowIdentity}:${column.key}`] === true;
+                              flashedCells[
+                                `${activeTabDefinition.tab}:${rowIdentity}:${column.key}`
+                              ] === true;
 
                             if (!writable) {
                               return (
@@ -883,19 +943,31 @@ export function BudgetTrackerApp() {
                                     flashed && "bg-amber-300/25",
                                   )}
                                 >
-                                  <div className="line-clamp-3">{formatCellValue(column.type, row[column.key])}</div>
+                                  <div className="line-clamp-3">
+                                    {formatCellValue(column.type, row[column.key])}
+                                  </div>
                                 </td>
                               );
                             }
 
                             if (column.type === "boolean") {
                               return (
-                                <td key={`${rowIndex}-${column.key}`} className="max-w-[360px] px-3 py-2 text-foreground/90">
+                                <td
+                                  key={`${rowIndex}-${column.key}`}
+                                  className="max-w-[360px] px-3 py-2 text-foreground/90"
+                                >
                                   <label className="inline-flex items-center gap-2 text-xs">
                                     <input
                                       type="checkbox"
                                       checked={row[column.key] === true}
-                                      onChange={(event) => updateCell(activeTabDefinition, rowIndex, column, event.currentTarget.checked)}
+                                      onChange={(event) =>
+                                        updateCell(
+                                          activeTabDefinition,
+                                          rowIndex,
+                                          column,
+                                          event.currentTarget.checked,
+                                        )
+                                      }
                                     />
                                     {row[column.key] === true ? "Yes" : "No"}
                                   </label>
@@ -905,12 +977,17 @@ export function BudgetTrackerApp() {
 
                             if (column.type === "currency_cents") {
                               return (
-                                <td key={`${rowIndex}-${column.key}`} className="max-w-[360px] px-3 py-2 text-foreground/90">
+                                <td
+                                  key={`${rowIndex}-${column.key}`}
+                                  className="max-w-[360px] px-3 py-2 text-foreground/90"
+                                >
                                   <div className="space-y-1">
                                     <Input
                                       value={formatCentsInput(row[column.key])}
                                       onChange={(event) => {
-                                        const parsed = parseCurrencyInputToCents(event.currentTarget.value);
+                                        const parsed = parseCurrencyInputToCents(
+                                          event.currentTarget.value,
+                                        );
                                         updateCell(activeTabDefinition, rowIndex, column, parsed);
                                       }}
                                       placeholder="0.00"
@@ -919,20 +996,35 @@ export function BudgetTrackerApp() {
                                         flashed && "bg-amber-300/25",
                                       )}
                                     />
-                                    <p className="text-[10px] text-muted-foreground">Dollar input, stored as cents.</p>
+                                    <p className="text-[10px] text-muted-foreground">
+                                      Dollar input, stored as cents.
+                                    </p>
                                   </div>
                                 </td>
                               );
                             }
 
                             return (
-                              <td key={`${rowIndex}-${column.key}`} className="max-w-[360px] px-3 py-2 text-foreground/90">
+                              <td
+                                key={`${rowIndex}-${column.key}`}
+                                className="max-w-[360px] px-3 py-2 text-foreground/90"
+                              >
                                 <Input
-                                  value={row[column.key] === null || row[column.key] === undefined ? "" : String(row[column.key])}
+                                  value={
+                                    row[column.key] === null || row[column.key] === undefined
+                                      ? ""
+                                      : String(row[column.key])
+                                  }
                                   onChange={(event) => {
                                     const textValue = event.currentTarget.value;
-                                    const normalizedValue = textValue.trim().length === 0 ? null : textValue;
-                                    updateCell(activeTabDefinition, rowIndex, column, normalizedValue);
+                                    const normalizedValue =
+                                      textValue.trim().length === 0 ? null : textValue;
+                                    updateCell(
+                                      activeTabDefinition,
+                                      rowIndex,
+                                      column,
+                                      normalizedValue,
+                                    );
                                   }}
                                   className={cn(
                                     dirty && "border-amber-500/60",
@@ -952,7 +1044,9 @@ export function BudgetTrackerApp() {
           ) : (
             <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
               <p className="font-medium">No tab metadata loaded yet.</p>
-              <p className="mt-1 text-muted-foreground">Use “Pull From D1” to initialize workbook tabs.</p>
+              <p className="mt-1 text-muted-foreground">
+                Use “Pull From D1” to initialize workbook tabs.
+              </p>
             </div>
           )}
         </CardContent>
@@ -964,12 +1058,17 @@ export function BudgetTrackerApp() {
             <AlertTriangle className="size-4 text-muted-foreground" />
             Reference Sheets Reviewed
           </CardTitle>
-          <CardDescription>These informed the mirrored tab strategy for this tracker.</CardDescription>
+          <CardDescription>
+            These informed the mirrored tab strategy for this tracker.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2 text-sm">
           {referenceSheets && referenceSheets.length > 0 ? (
             referenceSheets.map((sheet) => (
-              <div key={sheet.spreadsheetId} className="rounded-md bg-muted/20 p-3 ring-1 ring-border/30">
+              <div
+                key={sheet.spreadsheetId}
+                className="rounded-md bg-muted/20 p-3 ring-1 ring-border/30"
+              >
                 <p className="font-medium">{sheet.title}</p>
                 <p className="mt-1 text-muted-foreground">{sheet.notes}</p>
               </div>

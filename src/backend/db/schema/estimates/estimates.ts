@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+
 import { remodelScenarios } from "../home/remodel_scenarios";
 import { rooms } from "../home/rooms";
 
@@ -212,9 +213,7 @@ export const estimatePropValues = sqliteTable("estimate_prop_values", {
     .references(() => estimatePropKeyTypes.id, { onDelete: "cascade" }),
   workerAiExtractedValue: text("workerai_extracted_value"),
   intakeFormValue: text("intake_form_value"),
-  isUserOverridden: integer("is_user_overridden", { mode: "boolean" })
-    .notNull()
-    .default(false),
+  isUserOverridden: integer("is_user_overridden", { mode: "boolean" }).notNull().default(false),
   datetimeCreated: integer("datetime_created", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),
@@ -238,4 +237,3 @@ export const estimateSyncState = sqliteTable("estimate_sync_state", {
     .notNull()
     .default(sql`(unixepoch())`),
 });
-

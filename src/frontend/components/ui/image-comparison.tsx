@@ -1,4 +1,5 @@
 import React from "react";
+
 import { ImageCompareSlider } from "@/components/ImageCompareSlider";
 
 export interface ImageComparisonProps {

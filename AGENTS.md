@@ -56,6 +56,7 @@ Per [Cloudflare's official guidance](https://developers.cloudflare.com/workers/l
   - A global `interface Env extends Cloudflare.Env {}` for use everywhere
 
 **tsconfig.json must look like:**
+
 ```json
 {
   "compilerOptions": {
@@ -65,6 +66,7 @@ Per [Cloudflare's official guidance](https://developers.cloudflare.com/workers/l
 ```
 
 **After changing `wrangler.jsonc` bindings, always run:**
+
 ```bash
 pnpm run cf-typegen  # → wrangler types
 ```
@@ -113,14 +115,14 @@ import { imageReviews } from "../../../db/schema/images/image_reviews";
 
 Use the configured TSConfig path aliases. Never use deep relative imports (`../../../`):
 
-| Alias | Resolves To |
-|-------|-------------|
-| `@backend/db` | `src/backend/db/schema/index.ts` |
-| `@backend/db/*` | `src/backend/db/*` |
-| `@backend/api/*` | `src/backend/api/*` |
-| `@backend/ai/*` | `src/backend/ai/*` |
-| `@backend/services/*` | `src/backend/services/*` |
-| `@frontend/*` | `src/frontend/*` |
+| Alias                 | Resolves To                      |
+| --------------------- | -------------------------------- |
+| `@backend/db`         | `src/backend/db/schema/index.ts` |
+| `@backend/db/*`       | `src/backend/db/*`               |
+| `@backend/api/*`      | `src/backend/api/*`              |
+| `@backend/ai/*`       | `src/backend/ai/*`               |
+| `@backend/services/*` | `src/backend/services/*`         |
+| `@frontend/*`         | `src/frontend/*`                 |
 
 ### 5. API Routes (Hono)
 
@@ -142,30 +144,30 @@ Use the configured TSConfig path aliases. Never use deep relative imports (`../.
 
 ## Key Commands
 
-| Task | Command |
-|------|---------|
-| Dev server | `pnpm run dev` |
-| Build | `pnpm run build` |
-| Generate DB migrations | `pnpm run db:generate` |
-| Apply migrations (local) | `pnpm run migrate:local` |
+| Task                      | Command                   |
+| ------------------------- | ------------------------- |
+| Dev server                | `pnpm run dev`            |
+| Build                     | `pnpm run build`          |
+| Generate DB migrations    | `pnpm run db:generate`    |
+| Apply migrations (local)  | `pnpm run migrate:local`  |
 | Apply migrations (remote) | `pnpm run migrate:remote` |
-| Seed DB (remote) | `pnpm run db:seed` |
-| Regenerate Env types | `pnpm run cf-typegen` |
-| Full deploy | `pnpm run deploy` |
+| Seed DB (remote)          | `pnpm run db:seed`        |
+| Regenerate Env types      | `pnpm run cf-typegen`     |
+| Full deploy               | `pnpm run deploy`         |
 
 ---
 
 ## Bindings (from wrangler.jsonc)
 
-| Binding | Type | Purpose |
-|---------|------|---------|
-| `DB` | D1Database | Primary SQLite database |
-| `IMAGES_BUCKET` | R2Bucket | Image storage |
-| `AI` | Ai | Workers AI inference |
-| `CACHE` | KVNamespace | General caching |
-| `SESSIONS` | KVNamespace | Session storage |
-| `VECTOR_INDEX` | VectorizeIndex | Embedding search |
-| `ASSETS` | Fetcher | Astro SSR static assets |
+| Binding                 | Type               | Purpose                 |
+| ----------------------- | ------------------ | ----------------------- |
+| `DB`                    | D1Database         | Primary SQLite database |
+| `IMAGES_BUCKET`         | R2Bucket           | Image storage           |
+| `AI`                    | Ai                 | Workers AI inference    |
+| `CACHE`                 | KVNamespace        | General caching         |
+| `SESSIONS`              | KVNamespace        | Session storage         |
+| `VECTOR_INDEX`          | VectorizeIndex     | Embedding search        |
+| `ASSETS`                | Fetcher            | Astro SSR static assets |
 | `*_API_KEY` / `*_TOKEN` | SecretsStoreSecret | Various API credentials |
 
 ---

@@ -1,6 +1,3 @@
-import { asc, eq, inArray } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
-import { Hono } from "hono";
 import {
   images,
   remodelScenarios,
@@ -12,6 +9,9 @@ import {
   visionPlanNodes,
 } from "@backend/db";
 import { ensureHomeCatalogSeed } from "@backend/services/home-catalog";
+import { asc, eq, inArray } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { Hono } from "hono";
 
 const visionNodesRouter = new Hono<{ Bindings: Env }>();
 
@@ -114,10 +114,7 @@ async function replaceNodeMappings(
   const supportingDocumentIds = params.supportingDocumentIds || [];
 
   await Promise.all([
-    db
-      .delete(visionNodeRoomMappings)
-      .where(eq(visionNodeRoomMappings.visionNodeId, nodeId))
-      .run(),
+    db.delete(visionNodeRoomMappings).where(eq(visionNodeRoomMappings.visionNodeId, nodeId)).run(),
     db
       .delete(visionNodeImageMappings)
       .where(eq(visionNodeImageMappings.visionNodeId, nodeId))
@@ -169,10 +166,7 @@ async function replaceNodeMappings(
   }
 }
 
-async function buildVisionNodePayload(
-  db: ReturnType<typeof drizzle>,
-  scenarioId?: string,
-) {
+async function buildVisionNodePayload(db: ReturnType<typeof drizzle>, scenarioId?: string) {
   const nodeRows = scenarioId
     ? await db
         .select()
@@ -214,9 +208,7 @@ async function buildVisionNodePayload(
 
   const roomIds = Array.from(new Set(roomMappings.map((row) => row.roomId)));
   const imageIds = Array.from(new Set(imageMappings.map((row) => row.imageId)));
-  const documentIds = Array.from(
-    new Set(documentMappings.map((row) => row.supportingDocumentId)),
-  );
+  const documentIds = Array.from(new Set(documentMappings.map((row) => row.supportingDocumentId)));
 
   const [roomRows, imageRows, documentRows] = await Promise.all([
     roomIds.length > 0 ? db.select().from(rooms).where(inArray(rooms.id, roomIds)).all() : [],
@@ -235,10 +227,7 @@ async function buildVisionNodePayload(
   const documentById = new Map(documentRows.map((row) => [row.id, row]));
 
   const roomIdsByNodeId = new Map<string, number[]>();
-  const imageRefsByNodeId = new Map<
-    string,
-    Array<{ imageId: string; relationType: string }>
-  >();
+  const imageRefsByNodeId = new Map<string, Array<{ imageId: string; relationType: string }>>();
   const documentIdsByNodeId = new Map<string, string[]>();
 
   for (const row of roomMappings) {
@@ -248,7 +237,11 @@ async function buildVisionNodePayload(
   }
   for (const row of imageMappings) {
     const next = imageRefsByNodeId.get(row.visionNodeId) || [];
-    if (!next.some((entry) => entry.imageId === row.imageId && entry.relationType === row.relationType)) {
+    if (
+      !next.some(
+        (entry) => entry.imageId === row.imageId && entry.relationType === row.relationType,
+      )
+    ) {
       next.push({
         imageId: row.imageId,
         relationType: row.relationType,
@@ -425,7 +418,12 @@ visionNodesRouter.post("/", async (c) => {
       const imageRows = await db
         .select()
         .from(images)
-        .where(inArray(images.id, imageRefs.map((ref) => ref.imageId)))
+        .where(
+          inArray(
+            images.id,
+            imageRefs.map((ref) => ref.imageId),
+          ),
+        )
         .all();
       if (imageRows.length !== imageRefs.length) {
         return c.json({ error: "One or more imageRefs.imageId values are invalid" }, 404);
@@ -445,11 +443,12 @@ visionNodesRouter.post("/", async (c) => {
         parentId,
         scenarioId,
         title,
-        summary:
-          typeof body.summary === "string" ? body.summary.trim() || null : null,
+        summary: typeof body.summary === "string" ? body.summary.trim() || null : null,
         nodeType: normalizeNodeType(body.nodeType),
         status: normalizeNodeStatus(body.status),
-        estimatedCostCents: Number.isFinite(estimatedCostCentsRaw) ? Math.trunc(estimatedCostCentsRaw) : null,
+        estimatedCostCents: Number.isFinite(estimatedCostCentsRaw)
+          ? Math.trunc(estimatedCostCentsRaw)
+          : null,
         sortOrder: Number.isFinite(sortOrderRaw) ? Math.trunc(sortOrderRaw) : 0,
         thumbnailImageId:
           typeof body.thumbnailImageId === "string" && body.thumbnailImageId.trim().length > 0
@@ -577,11 +576,7 @@ visionNodesRouter.patch("/:id", async (c) => {
       updates.metadata = metadata ? JSON.stringify(metadata) : null;
     }
 
-    await db
-      .update(visionPlanNodes)
-      .set(updates)
-      .where(eq(visionPlanNodes.id, nodeId))
-      .run();
+    await db.update(visionPlanNodes).set(updates).where(eq(visionPlanNodes.id, nodeId)).run();
 
     const roomIdsProvided = Object.prototype.hasOwnProperty.call(body, "roomIds");
     const imageRefsProvided = Object.prototype.hasOwnProperty.call(body, "imageRefs");
@@ -635,7 +630,12 @@ visionNodesRouter.patch("/:id", async (c) => {
         const imageRows = await db
           .select()
           .from(images)
-          .where(inArray(images.id, imageRefs.map((ref) => ref.imageId)))
+          .where(
+            inArray(
+              images.id,
+              imageRefs.map((ref) => ref.imageId),
+            ),
+          )
           .all();
         if (imageRows.length !== imageRefs.length) {
           return c.json({ error: "One or more imageRefs.imageId values are invalid" }, 404);
@@ -659,9 +659,7 @@ visionNodesRouter.patch("/:id", async (c) => {
         .all();
 
       await replaceNodeMappings(db, nodeId, {
-        roomIds: roomIdsProvided
-          ? roomIds
-          : currentRoomMappings.map((row) => row.roomId),
+        roomIds: roomIdsProvided ? roomIds : currentRoomMappings.map((row) => row.roomId),
         imageRefs: imageRefsProvided
           ? imageRefs
           : currentImageMappings.map((row) => ({
@@ -674,7 +672,10 @@ visionNodesRouter.patch("/:id", async (c) => {
       });
     }
 
-    const scenarioId = typeof updates.scenarioId === "string" ? updates.scenarioId : existing.scenarioId || undefined;
+    const scenarioId =
+      typeof updates.scenarioId === "string"
+        ? updates.scenarioId
+        : existing.scenarioId || undefined;
     const payload = await buildVisionNodePayload(db, scenarioId || undefined);
     const updatedNode = payload.nodes.find((node) => node.id === nodeId) || null;
 
@@ -697,7 +698,11 @@ visionNodesRouter.get("/:id", async (c) => {
   try {
     const db = drizzle(c.env.DB);
     const nodeId = c.req.param("id");
-    const node = await db.select().from(visionPlanNodes).where(eq(visionPlanNodes.id, nodeId)).get();
+    const node = await db
+      .select()
+      .from(visionPlanNodes)
+      .where(eq(visionPlanNodes.id, nodeId))
+      .get();
     if (!node) {
       return c.json({ error: "Vision node not found" }, 404);
     }
@@ -750,7 +755,11 @@ visionNodesRouter.delete("/:id", async (c) => {
   try {
     const db = drizzle(c.env.DB);
     const nodeId = c.req.param("id");
-    const node = await db.select().from(visionPlanNodes).where(eq(visionPlanNodes.id, nodeId)).get();
+    const node = await db
+      .select()
+      .from(visionPlanNodes)
+      .where(eq(visionPlanNodes.id, nodeId))
+      .get();
     if (!node) {
       return c.json({ error: "Vision node not found" }, 404);
     }
@@ -763,7 +772,8 @@ visionNodesRouter.delete("/:id", async (c) => {
     if (children.length > 0) {
       return c.json(
         {
-          error: "Cannot delete a node that still has children. Re-parent or delete descendants first.",
+          error:
+            "Cannot delete a node that still has children. Re-parent or delete descendants first.",
         },
         409,
       );

@@ -13,12 +13,12 @@
  * Embeddings: @cf/baai/bge-base-en-v1.5
  */
 
-import { drizzle } from "drizzle-orm/d1";
-import { and, eq } from "drizzle-orm";
-import { GoogleGenAI } from "@google/genai";
-import { images, imageReviews } from "@backend/db";
-import { WorkersAIProvider } from "@backend/ai/providers/workers-ai";
 import { modelRegistry } from "@backend/ai/models/index";
+import { WorkersAIProvider } from "@backend/ai/providers/workers-ai";
+import { images, imageReviews } from "@backend/db";
+import { GoogleGenAI } from "@google/genai";
+import { and, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 
 // ---------------------------------------------------------------------------
 // JSON Schemas for structured output (gpt-oss-120b json_schema mode)
@@ -36,7 +36,8 @@ const IMAGE_ANALYSIS_SCHEMA = {
     properties: {
       roomType: {
         type: "string",
-        description: "The room or area type, e.g. kitchen, bathroom, living room, bedroom, backyard, exterior, hallway, office",
+        description:
+          "The room or area type, e.g. kitchen, bathroom, living room, bedroom, backyard, exterior, hallway, office",
       },
       keywords: {
         type: "array",
@@ -59,7 +60,8 @@ const IMAGE_ANALYSIS_SCHEMA = {
       visibleElements: {
         type: "array",
         items: { type: "string" },
-        description: "Major visible elements or focal zones such as sink wall, vanity, island, shower, window",
+        description:
+          "Major visible elements or focal zones such as sink wall, vanity, island, shower, window",
       },
       isInstagram: {
         type: "boolean",
@@ -97,7 +99,8 @@ const PHOTO_REVIEW_SCHEMA = {
     properties: {
       room: {
         type: "string",
-        description: "The room or area type in lowercase, e.g. kitchen, bathroom, living room, bedroom, backyard",
+        description:
+          "The room or area type in lowercase, e.g. kitchen, bathroom, living room, bedroom, backyard",
       },
       tags: {
         type: "array",
@@ -185,9 +188,7 @@ function normalizePhotoCategory(
 }
 
 function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-    value,
-  );
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function deriveDisplayName(filename: string): string {
@@ -223,9 +224,7 @@ function ensureUniqueDisplayName(name: string, existingNames: string[]): string 
   const normalized = sanitizeDisplayName(name);
   const base = normalized || "Untitled photo";
   const existing = new Set(
-    existingNames
-      .map((entry) => entry.trim().toLowerCase())
-      .filter((entry) => entry.length > 0),
+    existingNames.map((entry) => entry.trim().toLowerCase()).filter((entry) => entry.length > 0),
   );
 
   if (!existing.has(base.toLowerCase())) {
@@ -263,9 +262,7 @@ function buildAiPrefillPayload(
 
   const contextParts = [
     analysis.styleTheme ? `style theme ${analysis.styleTheme}` : null,
-    analysis.materials.length > 0
-      ? `materials ${analysis.materials.slice(0, 3).join(", ")}`
-      : null,
+    analysis.materials.length > 0 ? `materials ${analysis.materials.slice(0, 3).join(", ")}` : null,
     analysis.visibleElements.length > 0
       ? `visible elements ${analysis.visibleElements.slice(0, 3).join(", ")}`
       : null,
@@ -283,7 +280,9 @@ function buildAiPrefillPayload(
 
   const noteValue = [
     analysis.styleTheme ? `Theme: ${analysis.styleTheme}` : null,
-    analysis.materials.length > 0 ? `Materials: ${analysis.materials.slice(0, 4).join(", ")}` : null,
+    analysis.materials.length > 0
+      ? `Materials: ${analysis.materials.slice(0, 4).join(", ")}`
+      : null,
     analysis.visibleElements.length > 0
       ? `Focus: ${analysis.visibleElements.slice(0, 4).join(", ")}`
       : null,
@@ -303,8 +302,7 @@ function buildAiPrefillPayload(
     },
     displayName: {
       value: displayName,
-      rationale:
-        "Suggested from room context and focal elements to provide a unique review label.",
+      rationale: "Suggested from room context and focal elements to provide a unique review label.",
     },
   };
 }
@@ -475,13 +473,8 @@ ${visionDescription}`,
       roomType: structured.roomType || "unknown",
       keywords: Array.isArray(structured.keywords) ? structured.keywords : [],
       suggestedDisplayName:
-        typeof structured.suggestedDisplayName === "string"
-          ? structured.suggestedDisplayName
-          : "",
-      styleTheme:
-        typeof structured.styleTheme === "string"
-          ? structured.styleTheme
-          : "",
+        typeof structured.suggestedDisplayName === "string" ? structured.suggestedDisplayName : "",
+      styleTheme: typeof structured.styleTheme === "string" ? structured.styleTheme : "",
       materials: Array.isArray(structured.materials)
         ? structured.materials.map((item) => String(item).trim()).filter(Boolean)
         : [],
@@ -590,9 +583,7 @@ ${visionDescription}`,
     const apiUrl =
       options?.endpoint ||
       `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/images/v1`;
-    const tokens = options?.authTokenOverride
-      ? [options.authTokenOverride]
-      : this.apiTokens;
+    const tokens = options?.authTokenOverride ? [options.authTokenOverride] : this.apiTokens;
     const maxAttempts = Math.max(1, options?.maxAttempts ?? 3);
     let lastError: Error | null = null;
 
@@ -761,18 +752,11 @@ ${visionDescription}`,
         referenceMetadata: options?.namingHints?.referenceMetadata || [],
       });
       const assignedRoomType =
-        options?.roomAssignment?.roomType?.trim() ||
-        analysis.roomType ||
-        "unknown";
+        options?.roomAssignment?.roomType?.trim() || analysis.roomType || "unknown";
       const assignedRoomId =
-        typeof options?.roomAssignment?.roomId === "number"
-          ? options.roomAssignment.roomId
-          : null;
+        typeof options?.roomAssignment?.roomId === "number" ? options.roomAssignment.roomId : null;
       const roomLabel = toTitleCase(
-        assignedRoomType
-          .replace(/[_-]+/g, " ")
-          .replace(/\s+/g, " ")
-          .trim(),
+        assignedRoomType.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim(),
       );
 
       const roomContextDisplayNames = new Set<string>(
@@ -780,7 +764,11 @@ ${visionDescription}`,
           .map((value) => value.trim())
           .filter(Boolean),
       );
-      if (roomContextDisplayNames.size === 0 && normalizedCategory === "listing" && assignedRoomId) {
+      if (
+        roomContextDisplayNames.size === 0 &&
+        normalizedCategory === "listing" &&
+        assignedRoomId
+      ) {
         const existingListingNames = await dbClient
           .select({
             displayName: images.displayName,
@@ -926,9 +914,7 @@ ${visionDescription}`,
       const roomLabel = toTitleCase(analysis.room || "Inspiration");
       const primaryTag = analysis.tags[0] ? toTitleCase(analysis.tags[0]) : "";
       const displayName = ensureUniqueDisplayName(
-        sanitizeDisplayName(
-          primaryTag ? `${roomLabel} ${primaryTag}` : `${roomLabel} inspiration`,
-        ),
+        sanitizeDisplayName(primaryTag ? `${roomLabel} ${primaryTag}` : `${roomLabel} inspiration`),
         [],
       );
 
@@ -962,8 +948,7 @@ ${visionDescription}`,
             aiPrefill: {
               tags: analysis.tags.map((tag) => ({
                 value: tag,
-                rationale:
-                  "Selected by Workers AI from visual features in this inspiration image.",
+                rationale: "Selected by Workers AI from visual features in this inspiration image.",
               })),
               note: {
                 value: "",
@@ -972,8 +957,7 @@ ${visionDescription}`,
               },
               roomType: {
                 value: analysis.room,
-                rationale:
-                  "Workers AI inferred room type from dominant fixtures and spatial cues.",
+                rationale: "Workers AI inferred room type from dominant fixtures and spatial cues.",
               },
               displayName: {
                 value: displayName,
@@ -1044,7 +1028,7 @@ ${visionDescription}`,
       // Brief pause between uploads to allow edge tokens to refill
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
-    
+
     return results;
   }
 }

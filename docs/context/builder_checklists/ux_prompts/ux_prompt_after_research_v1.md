@@ -12,9 +12,9 @@ All engineering operations must build upon our Cloudflare edge native stack: Clo
 
 ## 2. Monolith Aesthetic & Architectural Mandates
 
-* **Theme Anchor:** Strict premium dark theme using `oklch(0.145 0 0)` for the master document background.
-* **Borders & Separation:** Eliminate traditional, harsh line borders. Express surfaces and card containers using subtle translucent canvas differences or layout boundary lines formatted exactly with `ring-1 ring-border/40` or `border-border/40` over solid grid divisions.
-* **Code Completeness:** You are a Senior Systems Engineer. You must output every single component, route file, utility, and database schema from start to finish without shortcuts, truncation, or placeholder comments (`// ... rest of code`). Every file must be a zero-modification, one-click copy-paste deployment.
+- **Theme Anchor:** Strict premium dark theme using `oklch(0.145 0 0)` for the master document background.
+- **Borders & Separation:** Eliminate traditional, harsh line borders. Express surfaces and card containers using subtle translucent canvas differences or layout boundary lines formatted exactly with `ring-1 ring-border/40` or `border-border/40` over solid grid divisions.
+- **Code Completeness:** You are a Senior Systems Engineer. You must output every single component, route file, utility, and database schema from start to finish without shortcuts, truncation, or placeholder comments (`// ... rest of code`). Every file must be a zero-modification, one-click copy-paste deployment.
 
 ---
 
@@ -30,7 +30,7 @@ All engineering operations must build upon our Cloudflare edge native stack: Clo
 ### Journey B: Embedded Conversational Copilot & D1 State Modifications
 
 1. While iterating on forms, the user opens a slide-over modal containing an `assistant-ui` panel hooked into the Cloudflare Agents SDK.
-2. The copilot pulls a full state summary of the renovation (D1 room dimensions, R2 blueprint text extracts, active estimate logs). The assistant says: *"Justin, based on the scope for the downstairs kitchen, running a mid-wall electrical drop for a TV display here is highly recommended. Should I log that specification?"*
+2. The copilot pulls a full state summary of the renovation (D1 room dimensions, R2 blueprint text extracts, active estimate logs). The assistant says: _"Justin, based on the scope for the downstairs kitchen, running a mid-wall electrical drop for a TV display here is highly recommended. Should I log that specification?"_
 3. The assistant drafts a complete candidate response. The user reviews the copy in-line, edits the text, and hits a distinct "Confirm and Update" interface. The agent makes an RPC update via Hono, committing the answer to D1.
 4. The chat response displays a functional, clickable deep-link button pointing directly to the target questionnaire section page for fast client navigation.
 
@@ -52,7 +52,7 @@ All engineering operations must build upon our Cloudflare edge native stack: Clo
 1. A contractor logs in and enters a specific Room Viewport. They are greeted by a clear layout section indexing every confirmed questionnaire answer mapped to that specific footprint.
 2. The contractor opens the master specification readout route (`/questionnaire/print`). This screen completely suppresses all empty or unanswered questions, rendering only active, committed selections.
 3. The layout applies specific print-media CSS directives to match a standard 8.5" x 11" page layout, rendering exactly like a crisp, professional Microsoft Word document (clean typography, clear line spacing, and strong section breaks).
-4. Next to each response line on the print layout, an interactive comment loop node is present. Contractors can click directly inline to add detailed questions or trade notes back to the homeowner (e.g., *"Justin, specify if this hidden low-voltage conduit needs to support HDMI 2.1 runs or pure fiber"*).
+4. Next to each response line on the print layout, an interactive comment loop node is present. Contractors can click directly inline to add detailed questions or trade notes back to the homeowner (e.g., _"Justin, specify if this hidden low-voltage conduit needs to support HDMI 2.1 runs or pure fiber"_).
 
 ---
 
@@ -114,22 +114,29 @@ export const checklistAnswers = sqliteTable("checklist_answers", {
     .default(sql`(unixepoch())`),
 });
 
-export const checklistRoomMappings = sqliteTable("checklist_room_mappings", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  questionId: integer("question_id")
-    .notNull()
-    .references(() => checklistQuestions.id, { onDelete: "cascade" }),
-  roomId: integer("room_id")
-    .notNull()
-    .references(() => rooms.id, { onDelete: "cascade" }),
-  aiRationale: text("ai_rationale"),
-  associationStatus: text("association_status").notNull().default("ai_suggested"), // ai_suggested | user_confirmed | user_disassociated
-  datetimeUpdated: integer("datetime_updated", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (table) => ({
-  questionRoomUnique: uniqueIndex("checklist_room_mappings_unique").on(table.questionId, table.roomId),
-}));
+export const checklistRoomMappings = sqliteTable(
+  "checklist_room_mappings",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    questionId: integer("question_id")
+      .notNull()
+      .references(() => checklistQuestions.id, { onDelete: "cascade" }),
+    roomId: integer("room_id")
+      .notNull()
+      .references(() => rooms.id, { onDelete: "cascade" }),
+    aiRationale: text("ai_rationale"),
+    associationStatus: text("association_status").notNull().default("ai_suggested"), // ai_suggested | user_confirmed | user_disassociated
+    datetimeUpdated: integer("datetime_updated", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => ({
+    questionRoomUnique: uniqueIndex("checklist_room_mappings_unique").on(
+      table.questionId,
+      table.roomId,
+    ),
+  }),
+);
 
 export const contractorQuestionComments = sqliteTable("contractor_question_comments", {
   id: text("id").primaryKey(), // UUID string
@@ -149,7 +156,6 @@ export const checklistCronRuns = sqliteTable("checklist_cron_runs", {
     .notNull()
     .default(sql`(unixepoch())`),
 });
-
 ```
 
 ---
@@ -170,7 +176,7 @@ import {
   checklistRoomMappings,
   contractorQuestionComments,
   budgetTrackerItems,
-  rooms
+  rooms,
 } from "@backend/db";
 
 const constructionChecklistRouter = new Hono<{ Bindings: Env }>();
@@ -183,19 +189,23 @@ const AnswerSubmissionSchema = z.object({
   notes: z.string().nullable().optional(),
   selectionValue: z.string().nullable().optional(),
   isDraft: z.boolean().default(false),
-  changedBy: z.string().default("homeowner")
+  changedBy: z.string().default("homeowner"),
 });
 
 const FeedbackMappingSchema = z.object({
   questionId: z.number().int(),
   roomId: z.number().int(),
   status: z.enum(["user_confirmed", "user_disassociated"]),
-  aiRationale: z.string().optional()
+  aiRationale: z.string().optional(),
 });
 
 constructionChecklistRouter.get("/sections", async (c) => {
   const db = drizzle(c.env.DB);
-  const sections = await db.select().from(checklistSections).orderBy(asc(checklistSections.sortOrder)).all();
+  const sections = await db
+    .select()
+    .from(checklistSections)
+    .orderBy(asc(checklistSections.sortOrder))
+    .all();
   return c.json({ success: true, sections });
 });
 
@@ -203,21 +213,51 @@ constructionChecklistRouter.get("/sections/:slug", async (c) => {
   const db = drizzle(c.env.DB);
   const slug = c.req.param("slug");
 
-  const section = await db.select().from(checklistSections).where(eq(checklistSections.slug, slug)).get();
+  const section = await db
+    .select()
+    .from(checklistSections)
+    .where(eq(checklistSections.slug, slug))
+    .get();
   if (!section) return c.json({ success: false, error: "Target checklist section not found" }, 404);
 
-  const questions = await db.select().from(checklistQuestions).where(eq(checklistQuestions.sectionId, section.id)).orderBy(asc(checklistQuestions.sortOrder)).all();
-  const questionIds = questions.map(q => q.id);
+  const questions = await db
+    .select()
+    .from(checklistQuestions)
+    .where(eq(checklistQuestions.sectionId, section.id))
+    .orderBy(asc(checklistQuestions.sortOrder))
+    .all();
+  const questionIds = questions.map((q) => q.id);
 
-  const activeAnswers = questionIds.length > 0
-    ? await db.select().from(checklistAnswers).where(and(eq(checklistAnswers.isActive, true), inArray(checklistAnswers.questionId, questionIds))).all()
-    : [];
+  const activeAnswers =
+    questionIds.length > 0
+      ? await db
+          .select()
+          .from(checklistAnswers)
+          .where(
+            and(
+              eq(checklistAnswers.isActive, true),
+              inArray(checklistAnswers.questionId, questionIds),
+            ),
+          )
+          .all()
+      : [];
 
-  const activeMappings = questionIds.length > 0
-    ? await db.select().from(checklistRoomMappings).where(inArray(checklistRoomMappings.questionId, questionIds)).all()
-    : [];
+  const activeMappings =
+    questionIds.length > 0
+      ? await db
+          .select()
+          .from(checklistRoomMappings)
+          .where(inArray(checklistRoomMappings.questionId, questionIds))
+          .all()
+      : [];
 
-  return c.json({ success: true, section, questions, answers: activeAnswers, mappings: activeMappings });
+  return c.json({
+    success: true,
+    section,
+    questions,
+    answers: activeAnswers,
+    mappings: activeMappings,
+  });
 });
 
 constructionChecklistRouter.post("/answers", async (c) => {
@@ -226,58 +266,84 @@ constructionChecklistRouter.post("/answers", async (c) => {
   const parsed = AnswerSubmissionSchema.safeParse(payload);
 
   if (!parsed.success) {
-    return c.json({ success: false, error: "Validation layout break", details: parsed.error.format() }, 400);
+    return c.json(
+      { success: false, error: "Validation layout break", details: parsed.error.format() },
+      400,
+    );
   }
 
   const body = parsed.data;
   const now = new Date();
   const targetTrackId = body.trackId || crypto.randomUUID();
 
-  const previous = await db.select().from(checklistAnswers).where(and(eq(checklistAnswers.trackId, targetTrackId), eq(checklistAnswers.isActive, true))).get();
+  const previous = await db
+    .select()
+    .from(checklistAnswers)
+    .where(and(eq(checklistAnswers.trackId, targetTrackId), eq(checklistAnswers.isActive, true)))
+    .get();
   const nextVersion = previous ? previous.version + 1 : 1;
 
   if (previous) {
-    await db.update(checklistAnswers).set({ isActive: false, datetimeUpdated: now }).where(eq(checklistAnswers.id, previous.id)).run();
+    await db
+      .update(checklistAnswers)
+      .set({ isActive: false, datetimeUpdated: now })
+      .where(eq(checklistAnswers.id, previous.id))
+      .run();
   }
 
-  const [inserted] = await db.insert(checklistAnswers).values({
-    trackId: targetTrackId,
-    questionId: body.questionId,
-    scenarioId: body.scenarioId || null,
-    isChecked: body.isChecked,
-    notes: body.notes || null,
-    selectionValue: body.selectionValue || null,
-    version: nextVersion,
-    isActive: true,
-    isDraft: body.isDraft,
-    changeSource: "portal_submission",
-    changedBy: body.changedBy,
-    datetimeCreated: now,
-    datetimeUpdated: now,
-  }).returning();
+  const [inserted] = await db
+    .insert(checklistAnswers)
+    .values({
+      trackId: targetTrackId,
+      questionId: body.questionId,
+      scenarioId: body.scenarioId || null,
+      isChecked: body.isChecked,
+      notes: body.notes || null,
+      selectionValue: body.selectionValue || null,
+      version: nextVersion,
+      isActive: true,
+      isDraft: body.isDraft,
+      changeSource: "portal_submission",
+      changedBy: body.changedBy,
+      datetimeCreated: now,
+      datetimeUpdated: now,
+    })
+    .returning();
 
   // Automatic entry tracking into budget tables when checkbox is cleanly committed
-  const question = await db.select().from(checklistQuestions).where(eq(checklistQuestions.id, body.questionId)).get();
+  const question = await db
+    .select()
+    .from(checklistQuestions)
+    .where(eq(checklistQuestions.id, body.questionId))
+    .get();
   if (question?.defaultBudgetImpactJson && body.isChecked && !body.isDraft) {
     try {
-      const impact = JSON.parse(question.defaultBudgetImpactJson) as { title: string; low: number; high: number; class?: string };
-      await db.insert(budgetTrackerItems).values({
-        trackId: crypto.randomUUID(),
-        revisionNumber: 1,
-        isActive: true,
-        isDraft: false,
-        itemType: "project",
-        executionClass: impact.class || "must_now",
-        title: `[Checklist Spec] ${impact.title}`,
-        status: "open",
-        estimatedLowCents: impact.low,
-        estimatedHighCents: impact.high,
-        scenarioId: body.scenarioId || null,
-        changeSource: "checklist_sync",
-        changedBy: "system_ai",
-        datetimeCreated: now,
-        datetimeUpdated: now,
-      }).run();
+      const impact = JSON.parse(question.defaultBudgetImpactJson) as {
+        title: string;
+        low: number;
+        high: number;
+        class?: string;
+      };
+      await db
+        .insert(budgetTrackerItems)
+        .values({
+          trackId: crypto.randomUUID(),
+          revisionNumber: 1,
+          isActive: true,
+          isDraft: false,
+          itemType: "project",
+          executionClass: impact.class || "must_now",
+          title: `[Checklist Spec] ${impact.title}`,
+          status: "open",
+          estimatedLowCents: impact.low,
+          estimatedHighCents: impact.high,
+          scenarioId: body.scenarioId || null,
+          changeSource: "checklist_sync",
+          changedBy: "system_ai",
+          datetimeCreated: now,
+          datetimeUpdated: now,
+        })
+        .run();
     } catch (e) {
       console.error("Failed executing automated checklist budget cascade:", e);
     }
@@ -292,29 +358,35 @@ constructionChecklistRouter.post("/mappings/feedback", async (c) => {
   const parsed = FeedbackMappingSchema.safeParse(payload);
 
   if (!parsed.success) {
-    return c.json({ success: false, error: "Feedback parameters rejected", details: parsed.error.format() }, 400);
+    return c.json(
+      { success: false, error: "Feedback parameters rejected", details: parsed.error.format() },
+      400,
+    );
   }
 
   const body = parsed.data;
-  await db.insert(checklistRoomMappings).values({
-    questionId: body.questionId,
-    roomId: body.roomId,
-    aiRationale: body.aiRationale || "Manual layout change via user override",
-    associationStatus: body.status,
-    datetimeUpdated: new Date()
-  }).onConflictDoUpdate({
-    target: [checklistRoomMappings.questionId, checklistRoomMappings.roomId] as any,
-    set: {
+  await db
+    .insert(checklistRoomMappings)
+    .values({
+      questionId: body.questionId,
+      roomId: body.roomId,
+      aiRationale: body.aiRationale || "Manual layout change via user override",
       associationStatus: body.status,
-      datetimeUpdated: new Date()
-    }
-  }).run();
+      datetimeUpdated: new Date(),
+    })
+    .onConflictDoUpdate({
+      target: [checklistRoomMappings.questionId, checklistRoomMappings.roomId] as any,
+      set: {
+        associationStatus: body.status,
+        datetimeUpdated: new Date(),
+      },
+    })
+    .run();
 
   return c.json({ success: true });
 });
 
 export { constructionChecklistRouter };
-
 ```
 
 ---
@@ -325,7 +397,17 @@ Design the dynamic workspace client layout inside `src/frontend/components/Const
 
 ```tsx
 import React, { useEffect, useState, useCallback } from "react";
-import { Loader2, Check, HelpCircle, AlertCircle, Copy, Save, Home, Info, MessageSquare } from "lucide-react";
+import {
+  Loader2,
+  Check,
+  HelpCircle,
+  AlertCircle,
+  Copy,
+  Save,
+  Home,
+  Info,
+  MessageSquare,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -380,7 +462,7 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
     setSyncError(null);
     try {
       const res = await fetch(`/api/construction-checklist/sections/${sectionSlug}`);
-      const data = await res.json() as {
+      const data = (await res.json()) as {
         success: boolean;
         section: Section;
         questions: Question[];
@@ -389,11 +471,11 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
         error?: string;
       };
       if (!res.ok || !data.success) throw new Error(data.error || "Server connection error");
-      
+
       setSection(data.section);
       setQuestions(data.questions);
       setMappings(data.mappings);
-      
+
       const answerMap: Record<number, Answer> = {};
       for (const ans of data.answers) {
         answerMap[ans.questionId] = ans;
@@ -412,7 +494,12 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
     fetchSectionData();
   }, [fetchSectionData]);
 
-  const handleUpdateResponse = async (questionId: number, isChecked: boolean, notes: string | null, isDraft: boolean) => {
+  const handleUpdateResponse = async (
+    questionId: number,
+    isChecked: boolean,
+    notes: string | null,
+    isDraft: boolean,
+  ) => {
     const current = answers[questionId];
     const payload = {
       trackId: current?.trackId,
@@ -429,18 +516,27 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await res.json() as { success: boolean; answer: Answer; error?: string };
+      const data = (await res.json()) as { success: boolean; answer: Answer; error?: string };
       if (!res.ok || !data.success) throw new Error(data.error || "Edge sync execution error");
-      
-      setAnswers(prev => ({ ...prev, [questionId]: data.answer }));
-      toast.success(isDraft ? "Draft state logged successfully" : "Specification final verification saved");
+
+      setAnswers((prev) => ({ ...prev, [questionId]: data.answer }));
+      toast.success(
+        isDraft ? "Draft state logged successfully" : "Specification final verification saved",
+      );
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Checklist state save exception";
-      setSyncError({ msg, prompt: `Please investigate and resolve following questionnaire update failure:\n\n${msg}` });
+      setSyncError({
+        msg,
+        prompt: `Please investigate and resolve following questionnaire update failure:\n\n${msg}`,
+      });
     }
   };
 
-  const handleManualMappingOverride = async (questionId: number, roomId: number, disassociate: boolean) => {
+  const handleManualMappingOverride = async (
+    questionId: number,
+    roomId: number,
+    disassociate: boolean,
+  ) => {
     const nextStatus = disassociate ? "user_disassociated" : "user_confirmed";
     try {
       const res = await fetch("/api/construction-checklist/mappings/feedback", {
@@ -448,9 +544,15 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ questionId, roomId, status: nextStatus }),
       });
-      const data = await res.json() as { success: boolean };
+      const data = (await res.json()) as { success: boolean };
       if (res.ok && data.success) {
-        setMappings(prev => prev.map(m => m.questionId === questionId && m.roomId === roomId ? { ...m, associationStatus: nextStatus } : m));
+        setMappings((prev) =>
+          prev.map((m) =>
+            m.questionId === questionId && m.roomId === roomId
+              ? { ...m, associationStatus: nextStatus }
+              : m,
+          ),
+        );
         toast.success("AI room feedback telemetry logged");
       }
     } catch {
@@ -481,13 +583,21 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
   return (
     <div className="space-y-6 max-w-5xl mx-auto px-4">
       {syncError && (
-        <Alert variant="destructive" className="border border-destructive/50 bg-destructive/10 text-destructive rounded-xl">
+        <Alert
+          variant="destructive"
+          className="border border-destructive/50 bg-destructive/10 text-destructive rounded-xl"
+        >
           <AlertCircle className="size-4" />
           <AlertTitle>Specification Pipeline Interrupted</AlertTitle>
           <AlertDescription className="space-y-3">
             <p className="text-xs font-light opacity-90">{syncError.msg}</p>
             <div className="flex items-center gap-2">
-              <Button size="sm" variant="outline" className="h-8 gap-1.5 text-xs border-destructive/30 hover:bg-destructive/20" onClick={copyPromptToClipboard}>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5 text-xs border-destructive/30 hover:bg-destructive/20"
+                onClick={copyPromptToClipboard}
+              >
                 <Copy className="size-3.5" />
                 {copied ? "Copied Prompt" : "Copy Agent Instruction Prompt"}
               </Button>
@@ -499,7 +609,9 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
       {section && (
         <div className="space-y-2 border-b border-border/10 pb-4">
           <h1 className="text-2xl font-bold tracking-tight text-foreground">{section.name}</h1>
-          <p className="text-sm text-muted-foreground font-light leading-relaxed">{section.description}</p>
+          <p className="text-sm text-muted-foreground font-light leading-relaxed">
+            {section.description}
+          </p>
           {section.helperText && (
             <div className="mt-3 flex gap-2.5 rounded-lg bg-card/60 p-3 ring-1 ring-border/20 text-xs text-muted-foreground leading-normal">
               <Info className="size-4 shrink-0 text-foreground mt-0.5" />
@@ -512,19 +624,36 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
       <div className="space-y-4">
         {questions.map((question) => {
           const ans = answers[question.id] || { isChecked: false, notes: "", isDraft: true };
-          const activeRooms = mappings.filter(m => m.questionId === question.id && m.associationStatus !== "user_disassociated");
+          const activeRooms = mappings.filter(
+            (m) => m.questionId === question.id && m.associationStatus !== "user_disassociated",
+          );
 
           return (
-            <Card key={question.id} className="bg-card/20 border-0 ring-1 ring-border/40 rounded-xl overflow-hidden transition-all hover:ring-border/80 shadow-none">
+            <Card
+              key={question.id}
+              className="bg-card/20 border-0 ring-1 ring-border/40 rounded-xl overflow-hidden transition-all hover:ring-border/80 shadow-none"
+            >
               <CardContent className="p-5 space-y-4">
                 <div className="flex items-start justify-between gap-4">
                   <div className="space-y-1 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs font-mono tracking-wider text-muted-foreground/60">{question.code}</span>
-                      {ans.isChecked && !ans.isDraft && <Badge className="bg-emerald-500/10 text-emerald-400 border-0 rounded-full text-[10px]">Verified Head Spec</Badge>}
-                      {ans.isDraft && (ans.isChecked || (ans.notes && ans.notes.length > 0)) && <Badge className="bg-amber-500/10 text-amber-400 border-0 rounded-full text-[10px]">Draft Saved</Badge>}
+                      <span className="text-xs font-mono tracking-wider text-muted-foreground/60">
+                        {question.code}
+                      </span>
+                      {ans.isChecked && !ans.isDraft && (
+                        <Badge className="bg-emerald-500/10 text-emerald-400 border-0 rounded-full text-[10px]">
+                          Verified Head Spec
+                        </Badge>
+                      )}
+                      {ans.isDraft && (ans.isChecked || (ans.notes && ans.notes.length > 0)) && (
+                        <Badge className="bg-amber-500/10 text-amber-400 border-0 rounded-full text-[10px]">
+                          Draft Saved
+                        </Badge>
+                      )}
                     </div>
-                    <h3 className="text-sm font-medium text-foreground leading-relaxed">{question.questionText}</h3>
+                    <h3 className="text-sm font-medium text-foreground leading-relaxed">
+                      {question.questionText}
+                    </h3>
                     {question.considerations && (
                       <p className="text-xs text-muted-foreground flex items-center gap-1.5 pt-0.5 font-light">
                         <HelpCircle className="size-3.5 text-muted-foreground/80" />
@@ -534,18 +663,31 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
                   </div>
                   <Switch
                     checked={ans.isChecked}
-                    onCheckedChange={(checked) => handleUpdateResponse(question.id, checked, ans.notes, ans.isDraft)}
+                    onCheckedChange={(checked) =>
+                      handleUpdateResponse(question.id, checked, ans.notes, ans.isDraft)
+                    }
                   />
                 </div>
 
                 {activeRooms.length > 0 && (
                   <div className="flex flex-wrap items-center gap-2 pt-1 text-xs border-t border-border/10 pt-3">
                     <Home className="size-3.5 text-muted-foreground" />
-                    <span className="text-muted-foreground font-light">Linked Space Boundaries:</span>
+                    <span className="text-muted-foreground font-light">
+                      Linked Space Boundaries:
+                    </span>
                     {activeRooms.map((map) => (
-                      <div key={map.roomId} className="inline-flex items-center gap-1 rounded bg-muted/30 pl-2 pr-1 py-0.5 text-[11px] text-foreground">
+                      <div
+                        key={map.roomId}
+                        className="inline-flex items-center gap-1 rounded bg-muted/30 pl-2 pr-1 py-0.5 text-[11px] text-foreground"
+                      >
                         <span>Room #{map.roomId}</span>
-                        <button type="button" className="text-muted-foreground hover:text-destructive rounded px-0.5" onClick={() => handleManualMappingOverride(question.id, map.roomId, true)}>×</button>
+                        <button
+                          type="button"
+                          className="text-muted-foreground hover:text-destructive rounded px-0.5"
+                          onClick={() => handleManualMappingOverride(question.id, map.roomId, true)}
+                        >
+                          ×
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -556,13 +698,32 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
                     className="h-8 text-xs bg-background/30 border-input/40 focus-visible:ring-1"
                     placeholder="Provide detailed construction parameters, brand keys, or trade installation notes..."
                     value={ans.notes || ""}
-                    onChange={(e) => setAnswers(prev => ({ ...prev, [question.id]: { ...ans, notes: e.target.value } }))}
+                    onChange={(e) =>
+                      setAnswers((prev) => ({
+                        ...prev,
+                        [question.id]: { ...ans, notes: e.target.value },
+                      }))
+                    }
                   />
-                  <Button size="sm" variant="outline" className="h-8 text-xs gap-1 shadow-none" onClick={() => handleUpdateResponse(question.id, ans.isChecked, ans.notes, false)}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-xs gap-1 shadow-none"
+                    onClick={() =>
+                      handleUpdateResponse(question.id, ans.isChecked, ans.notes, false)
+                    }
+                  >
                     <Save className="size-3.5" />
                     Commit Verification
                   </Button>
-                  <Button size="sm" variant="ghost" className="h-8 text-xs text-muted-foreground hover:text-foreground" onClick={() => handleUpdateResponse(question.id, ans.isChecked, ans.notes, true)}>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() =>
+                      handleUpdateResponse(question.id, ans.isChecked, ans.notes, true)
+                    }
+                  >
                     Save Draft
                   </Button>
                 </div>
@@ -574,7 +735,6 @@ export function ConstructionChecklistApp({ sectionSlug }: { sectionSlug: string 
     </div>
   );
 }
-
 ```
 
 ---
@@ -592,12 +752,12 @@ import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/
 
 <BaseLayout title="System Playbooks - Documentation Workspace">
   <div class="grid gap-6 lg:grid-cols-[18rem_1fr] max-w-7xl mx-auto px-4 py-8 bg-background">
-    
+
     <aside class="space-y-4">
       <div className="text-xs font-mono font-bold uppercase tracking-widest text-muted-foreground opacity-60 px-2">Project Playbooks</div>
       <div class="space-y-1">
         <a href="#overview" class="block rounded-md px-3 py-1.5 text-xs font-semibold uppercase text-foreground bg-secondary/40">Overview</a>
-        
+
         <div class="pt-2 border-t border-border/10 space-y-1">
           <p class="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/80 px-3">Homeowner Manual</p>
           <a href="#homeowner-specs" class="block rounded-md px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted/30">Entering Specifications</a>
@@ -667,15 +827,16 @@ At the very end of your build cycle, you must update the core Antigravity config
 # Antigravity Implementation Plan
 
 ## Workflow Specifications: .agent/workflows/implement-feature.md
+
 - Step 1: Database Migration — Run a full code compilation verification of `src/backend/db/schema/home/questionnaire.ts` to log all relations and schema indexes edge-to-edge.
 - Step 2: D1 Active Sync — Run the migration pipeline to append newly introduced tables safely.
 - Step 3: Server Routing Architecture — Establish and layer the new questionnaire parameter routing handlers in Hono.
 - Step 4: Frontend Assembly — Construct the dynamic Astro page layout shells and the React client apps matching the pure Monolith design layer guidelines.
 
 ## Rule Updates: .agent/rules/
+
 - BEFORE writing any code or updating variables, the agent must review the existing file assets within `.agent/rules/` first.
 - Merge and consolidate the following rule expansions directly inside the existing rule layers (do not generate orphan rule sheets):
-  * *Relational Check Restriction:* All questionnaire interactions must operate strictly within the single `checklist_` naming schema bounds to eliminate duplicate or orphaned tracking structures.
-  * *Alert & Trace Enforcement:* For client confirmations or background sync fail traces, leverage components extracted from the Shadcn UI library exclusively. Standard web window/chrome notification blocks are fundamentally forbidden.
-
+  - _Relational Check Restriction:_ All questionnaire interactions must operate strictly within the single `checklist_` naming schema bounds to eliminate duplicate or orphaned tracking structures.
+  - _Alert & Trace Enforcement:_ For client confirmations or background sync fail traces, leverage components extracted from the Shadcn UI library exclusively. Standard web window/chrome notification blocks are fundamentally forbidden.
 ```

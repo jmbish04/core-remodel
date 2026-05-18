@@ -17,12 +17,11 @@
  * the live NotebookLM page using the session cookies.
  */
 
-import { eq } from "drizzle-orm";
-import { NotebookLMClient, type AskResult } from "notebooklm-sdk";
-
 import { getDb } from "@backend/db";
 import { globalConfig } from "@backend/db/schema";
 import { getNotebookLMCookies } from "@backend/utils/secrets";
+import { eq } from "drizzle-orm";
+import { NotebookLMClient, type AskResult } from "notebooklm-sdk";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -74,10 +73,7 @@ export class SessionExpiredError extends Error {
  *          and source references.
  * @throws {SessionExpiredError} if the SDK fails due to expired session cookies.
  */
-export async function consultNotebook(
-  env: Env,
-  query: string,
-): Promise<NotebookConsultation> {
+export async function consultNotebook(env: Env, query: string): Promise<NotebookConsultation> {
   const [client, notebookId, rules] = await Promise.all([
     createNotebookClient(env),
     env.CAREER_NOTEBOOKLM_ID,
@@ -124,14 +120,11 @@ async function createNotebookClient(env: Env): Promise<NotebookLMClient> {
   if (!cookieString || cookieString.length < 10) {
     throw new Error(
       "NOTEBOOKLM_COOKIES is empty or missing. " +
-      "Run: npx wrangler secret put NOTEBOOKLM_COOKIES",
+        "Run: npx wrangler secret put NOTEBOOKLM_COOKIES",
     );
   }
 
-  return NotebookLMClient.connect(
-    { cookies: cookieString },
-    { timeoutMs: 30_000 },
-  );
+  return NotebookLMClient.connect({ cookies: cookieString }, { timeoutMs: 30_000 });
 }
 
 /**

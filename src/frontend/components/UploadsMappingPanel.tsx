@@ -1,5 +1,6 @@
 import { Check, Loader2, RefreshCcw } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -82,9 +83,7 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
     inspirational: [],
   });
   const [catalogFloors, setCatalogFloors] = useState<CatalogFloor[]>([]);
-  const [selectedByCategory, setSelectedByCategory] = useState<
-    Record<MappingCategory, string[]>
-  >({
+  const [selectedByCategory, setSelectedByCategory] = useState<Record<MappingCategory, string[]>>({
     listing: [],
     inspirational: [],
   });
@@ -186,15 +185,12 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
     void refreshData();
   }, [refreshData, refreshToken]);
 
-  const setSelectedForCategory = useCallback(
-    (category: MappingCategory, nextIds: string[]) => {
-      setSelectedByCategory((current) => ({
-        ...current,
-        [category]: nextIds,
-      }));
-    },
-    [],
-  );
+  const setSelectedForCategory = useCallback((category: MappingCategory, nextIds: string[]) => {
+    setSelectedByCategory((current) => ({
+      ...current,
+      [category]: nextIds,
+    }));
+  }, []);
 
   const toggleSelect = useCallback(
     (imageId: string) => {
@@ -281,9 +277,7 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
   );
 
   const selectedCountLabel =
-    selectedIds.length === 1
-      ? "1 photo selected"
-      : `${selectedIds.length} photos selected`;
+    selectedIds.length === 1 ? "1 photo selected" : `${selectedIds.length} photos selected`;
 
   return (
     <Card className="ring-1 ring-border/40">
@@ -351,9 +345,7 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
 
         {activeCategory === "inspirational" && (
           <div className="space-y-2 rounded-lg bg-muted/20 p-3 ring-1 ring-border/30">
-            <p className="text-sm font-medium">
-              Multi-room apply for selected inspiration photos
-            </p>
+            <p className="text-sm font-medium">Multi-room apply for selected inspiration photos</p>
             <MultipleSelector
               title="Select rooms"
               placeholder="Choose one or more rooms"
@@ -369,10 +361,7 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
               <Button
                 size="sm"
                 disabled={
-                  applying ||
-                  loading ||
-                  selectedIds.length === 0 ||
-                  inspirationRoomIds.length === 0
+                  applying || loading || selectedIds.length === 0 || inspirationRoomIds.length === 0
                 }
                 onClick={() =>
                   void applyMapping(
@@ -401,9 +390,7 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
           <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <p className="text-sm font-medium">
-                  Pending photos ({pendingImages.length})
-                </p>
+                <p className="text-sm font-medium">Pending photos ({pendingImages.length})</p>
                 <p className="text-xs text-muted-foreground">{selectedCountLabel}</p>
               </div>
               <div className="grid max-h-[34rem] gap-3 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3">
@@ -462,7 +449,10 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
               <p className="text-sm font-medium">Drop zone: rooms by floor</p>
               <div className="max-h-[34rem] space-y-3 overflow-y-auto pr-1">
                 {catalogFloors.map((floor) => (
-                  <section key={floor.id} className="space-y-2 rounded-lg border border-border/40 p-2">
+                  <section
+                    key={floor.id}
+                    className="space-y-2 rounded-lg border border-border/40 p-2"
+                  >
                     <h4 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
                       {floor.name}
                     </h4>
@@ -483,8 +473,7 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
                             if (ids.length === 0) {
                               return;
                             }
-                            const roomIds =
-                              activeCategory === "listing" ? [room.id] : [room.id];
+                            const roomIds = activeCategory === "listing" ? [room.id] : [room.id];
                             void applyMapping(activeCategory, ids, roomIds);
                           }}
                           className={cn(

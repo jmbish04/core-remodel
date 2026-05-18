@@ -11,7 +11,7 @@ function deleteSheetsByMatchingNames_(ss, sheetsToClear) {
     return false;
   }
   var existingSheets = ss.getSheets();
-  existingSheets.forEach(function(sheet) {
+  existingSheets.forEach(function (sheet) {
     var sheetName = sheet.getName();
     if (sheetsToClear.includes(sheetName)) {
       try {

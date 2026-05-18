@@ -1,5 +1,6 @@
 import { Building2, CheckCircle2, Crop, Loader2, Upload, XCircle } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+
 import { Button } from "@/components/ui/button";
 import { Cropper, CropperArea, CropperImage, type CropperAreaData } from "@/components/ui/cropper";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -55,8 +56,7 @@ interface CatalogRoom {
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_FILES = 25;
 
-const getFileKey = (file: File) =>
-  `${file.name}-${file.size}-${file.type}-${file.lastModified}`;
+const getFileKey = (file: File) => `${file.name}-${file.size}-${file.type}-${file.lastModified}`;
 
 function createImageFromFile(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -162,10 +162,7 @@ export function GlobalUploadWidget() {
   const [selectedRoomId, setSelectedRoomId] = useState("");
 
   const lowerFloor = useMemo(
-    () =>
-      catalogFloors.find((floor) => floor.key === "lower_level") ||
-      catalogFloors[0] ||
-      null,
+    () => catalogFloors.find((floor) => floor.key === "lower_level") || catalogFloors[0] || null,
     [catalogFloors],
   );
   const upperFloor = useMemo(
@@ -181,10 +178,7 @@ export function GlobalUploadWidget() {
     return selectedFloor?.rooms ?? [];
   }, [catalogFloors, selectedFloorKey]);
   const selectedListingRoom = useMemo(
-    () =>
-      listingRoomsForSelectedFloor.find(
-        (room) => room.id === Number(selectedRoomId),
-      ) || null,
+    () => listingRoomsForSelectedFloor.find((room) => room.id === Number(selectedRoomId)) || null,
     [listingRoomsForSelectedFloor, selectedRoomId],
   );
 
@@ -370,9 +364,7 @@ export function GlobalUploadWidget() {
       const payload = (await response.json()) as UploadResponse;
 
       if (!response.ok || !payload.success) {
-        throw new Error(
-          payload.error ?? payload.message ?? `Upload failed (${response.status})`,
-        );
+        throw new Error(payload.error ?? payload.message ?? `Upload failed (${response.status})`);
       }
 
       const results = payload.results ?? [];
@@ -567,9 +559,7 @@ export function GlobalUploadWidget() {
                   </Button>
                 </div>
 
-                {status && (
-                  <p className={cn("mt-2 text-xs", statusClassName)}>{status.message}</p>
-                )}
+                {status && <p className={cn("mt-2 text-xs", statusClassName)}>{status.message}</p>}
 
                 <FileUploadList className="mt-3 max-h-56 overflow-y-auto pr-1">
                   {files.map((file) => (
@@ -616,7 +606,10 @@ export function GlobalUploadWidget() {
         </div>
       </div>
 
-      <Dialog open={cropModalOpen} onOpenChange={(open) => (open ? setCropModalOpen(true) : closeCropModal())}>
+      <Dialog
+        open={cropModalOpen}
+        onOpenChange={(open) => (open ? setCropModalOpen(true) : closeCropModal())}
+      >
         <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>Crop Before Upload</DialogTitle>
@@ -656,7 +649,9 @@ export function GlobalUploadWidget() {
                 </label>
 
                 <label className="space-y-2 text-sm">
-                  <span className="text-muted-foreground">Rotation ({Math.round(cropRotation)}°)</span>
+                  <span className="text-muted-foreground">
+                    Rotation ({Math.round(cropRotation)}°)
+                  </span>
                   <input
                     type="range"
                     min={0}

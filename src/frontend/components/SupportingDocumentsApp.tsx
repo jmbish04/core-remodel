@@ -1,15 +1,7 @@
-import {
-  Check,
-  FileText,
-  GitBranch,
-  Loader2,
-  Plus,
-  RefreshCw,
-  Save,
-  Upload,
-} from "lucide-react";
+import { Check, FileText, GitBranch, Loader2, Plus, RefreshCw, Save, Upload } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,14 +29,7 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
-type SourceType =
-  | "pdf"
-  | "image"
-  | "video"
-  | "screenshot"
-  | "url"
-  | "text"
-  | "other";
+type SourceType = "pdf" | "image" | "video" | "screenshot" | "url" | "text" | "other";
 
 type WorkspaceTab = "documents" | "vision";
 
@@ -284,91 +269,94 @@ export function SupportingDocumentsApp() {
     [visionNodes],
   );
 
-  const loadAllData = useCallback(async (setLoadingState: boolean) => {
-    if (setLoadingState) {
-      setLoading(true);
-    } else {
-      setRefreshing(true);
-    }
-    try {
-      const [docRes, catalogRes, scenarioRes, nodeRes] = await Promise.all([
-        fetch("/api/supporting-documents"),
-        fetch("/api/rooms/catalog"),
-        fetch("/api/rooms/scenarios"),
-        fetch("/api/vision-nodes"),
-      ]);
-      const docPayload = (await docRes.json()) as {
-        success?: boolean;
-        documents?: SupportingDocumentRecord[];
-      };
-      const catalogPayload = (await catalogRes.json()) as {
-        success?: boolean;
-        floors?: Array<{
-          key: string;
-          name: string;
-          rooms?: CatalogRoom[];
-        }>;
-      };
-      const scenarioPayload = (await scenarioRes.json()) as {
-        success?: boolean;
-        scenarios?: ScenarioRecord[];
-      };
-      const nodePayload = (await nodeRes.json()) as {
-        success?: boolean;
-        nodes?: VisionNodeRecord[];
-        tree?: VisionNodeTreeRecord[];
-      };
+  const loadAllData = useCallback(
+    async (setLoadingState: boolean) => {
+      if (setLoadingState) {
+        setLoading(true);
+      } else {
+        setRefreshing(true);
+      }
+      try {
+        const [docRes, catalogRes, scenarioRes, nodeRes] = await Promise.all([
+          fetch("/api/supporting-documents"),
+          fetch("/api/rooms/catalog"),
+          fetch("/api/rooms/scenarios"),
+          fetch("/api/vision-nodes"),
+        ]);
+        const docPayload = (await docRes.json()) as {
+          success?: boolean;
+          documents?: SupportingDocumentRecord[];
+        };
+        const catalogPayload = (await catalogRes.json()) as {
+          success?: boolean;
+          floors?: Array<{
+            key: string;
+            name: string;
+            rooms?: CatalogRoom[];
+          }>;
+        };
+        const scenarioPayload = (await scenarioRes.json()) as {
+          success?: boolean;
+          scenarios?: ScenarioRecord[];
+        };
+        const nodePayload = (await nodeRes.json()) as {
+          success?: boolean;
+          nodes?: VisionNodeRecord[];
+          tree?: VisionNodeTreeRecord[];
+        };
 
-      if (!docRes.ok || !docPayload.success) {
-        throw new Error("Failed to load supporting documents");
-      }
-      if (!catalogRes.ok || !catalogPayload.success) {
-        throw new Error("Failed to load rooms catalog");
-      }
-      if (!scenarioRes.ok || !scenarioPayload.success) {
-        throw new Error("Failed to load scenarios");
-      }
-      if (!nodeRes.ok || !nodePayload.success) {
-        throw new Error("Failed to load vision nodes");
-      }
+        if (!docRes.ok || !docPayload.success) {
+          throw new Error("Failed to load supporting documents");
+        }
+        if (!catalogRes.ok || !catalogPayload.success) {
+          throw new Error("Failed to load rooms catalog");
+        }
+        if (!scenarioRes.ok || !scenarioPayload.success) {
+          throw new Error("Failed to load scenarios");
+        }
+        if (!nodeRes.ok || !nodePayload.success) {
+          throw new Error("Failed to load vision nodes");
+        }
 
-      const nextDocs = docPayload.documents || [];
-      const nextRooms =
-        (catalogPayload.floors || []).flatMap((floor) =>
-          (floor.rooms || []).map((room) => ({
-            ...room,
-            floorKey: floor.key,
-            floorName: floor.name,
-          })),
-        ) || [];
-      const nextScenarios = scenarioPayload.scenarios || [];
-      const nextNodes = nodePayload.nodes || [];
-      const nextTree = nodePayload.tree || [];
+        const nextDocs = docPayload.documents || [];
+        const nextRooms =
+          (catalogPayload.floors || []).flatMap((floor) =>
+            (floor.rooms || []).map((room) => ({
+              ...room,
+              floorKey: floor.key,
+              floorName: floor.name,
+            })),
+          ) || [];
+        const nextScenarios = scenarioPayload.scenarios || [];
+        const nextNodes = nodePayload.nodes || [];
+        const nextTree = nodePayload.tree || [];
 
-      setDocs(nextDocs);
-      setRooms(nextRooms);
-      setScenarios(nextScenarios);
-      setVisionNodes(nextNodes);
-      setVisionTree(nextTree);
+        setDocs(nextDocs);
+        setRooms(nextRooms);
+        setScenarios(nextScenarios);
+        setVisionNodes(nextNodes);
+        setVisionTree(nextTree);
 
-      if (!selectedDocId && nextDocs.length > 0) {
-        setSelectedDocId(nextDocs[0].id);
-      } else if (selectedDocId && !nextDocs.some((doc) => doc.id === selectedDocId)) {
-        setSelectedDocId(nextDocs[0]?.id || null);
+        if (!selectedDocId && nextDocs.length > 0) {
+          setSelectedDocId(nextDocs[0].id);
+        } else if (selectedDocId && !nextDocs.some((doc) => doc.id === selectedDocId)) {
+          setSelectedDocId(nextDocs[0]?.id || null);
+        }
+
+        if (!selectedNodeId && nextNodes.length > 0) {
+          setSelectedNodeId(nextNodes[0].id);
+        } else if (selectedNodeId && !nextNodes.some((node) => node.id === selectedNodeId)) {
+          setSelectedNodeId(nextNodes[0]?.id || null);
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to load supporting workspace");
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-
-      if (!selectedNodeId && nextNodes.length > 0) {
-        setSelectedNodeId(nextNodes[0].id);
-      } else if (selectedNodeId && !nextNodes.some((node) => node.id === selectedNodeId)) {
-        setSelectedNodeId(nextNodes[0]?.id || null);
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load supporting workspace");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [selectedDocId, selectedNodeId]);
+    },
+    [selectedDocId, selectedNodeId],
+  );
 
   useEffect(() => {
     void loadAllData(true);
@@ -467,66 +455,69 @@ export function SupportingDocumentsApp() {
     uploadVisionNodeIds,
   ]);
 
-  const saveSelectedDocument = useCallback(async (createRevision: boolean) => {
-    if (!selectedDoc) return;
-    const title = editTitle.trim();
-    if (!title) {
-      toast.error("Title is required");
-      return;
-    }
+  const saveSelectedDocument = useCallback(
+    async (createRevision: boolean) => {
+      if (!selectedDoc) return;
+      const title = editTitle.trim();
+      if (!title) {
+        toast.error("Title is required");
+        return;
+      }
 
-    setSavingDoc(true);
-    try {
-      const response = await fetch(`/api/supporting-documents/${selectedDoc.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title,
-          description: editDescription.trim() || null,
-          tags: editTags.trim()
-            ? editTags
-                .split(",")
-                .map((entry) => entry.trim())
-                .filter(Boolean)
-            : [],
-          aiRationale: editAiRationale.trim() || null,
-          isFactRecord: editIsFactRecord,
-          roomIds: editRoomIds.map((value) => Number(value)),
-          scenarioIds: editScenarioIds,
-          visionNodeIds: editVisionNodeIds,
-          createRevision,
-        }),
-      });
-      const payload = (await response.json()) as {
-        success?: boolean;
-        error?: string;
-        document?: SupportingDocumentRecord;
-      };
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.error || "Failed to save document");
+      setSavingDoc(true);
+      try {
+        const response = await fetch(`/api/supporting-documents/${selectedDoc.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title,
+            description: editDescription.trim() || null,
+            tags: editTags.trim()
+              ? editTags
+                  .split(",")
+                  .map((entry) => entry.trim())
+                  .filter(Boolean)
+              : [],
+            aiRationale: editAiRationale.trim() || null,
+            isFactRecord: editIsFactRecord,
+            roomIds: editRoomIds.map((value) => Number(value)),
+            scenarioIds: editScenarioIds,
+            visionNodeIds: editVisionNodeIds,
+            createRevision,
+          }),
+        });
+        const payload = (await response.json()) as {
+          success?: boolean;
+          error?: string;
+          document?: SupportingDocumentRecord;
+        };
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Failed to save document");
+        }
+        toast.success(createRevision ? "Created new document revision" : "Saved document");
+        await loadAllData(false);
+        if (payload.document?.id) {
+          setSelectedDocId(payload.document.id);
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to save document");
+      } finally {
+        setSavingDoc(false);
       }
-      toast.success(createRevision ? "Created new document revision" : "Saved document");
-      await loadAllData(false);
-      if (payload.document?.id) {
-        setSelectedDocId(payload.document.id);
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save document");
-    } finally {
-      setSavingDoc(false);
-    }
-  }, [
-    editAiRationale,
-    editDescription,
-    editIsFactRecord,
-    editRoomIds,
-    editScenarioIds,
-    editTags,
-    editTitle,
-    editVisionNodeIds,
-    loadAllData,
-    selectedDoc,
-  ]);
+    },
+    [
+      editAiRationale,
+      editDescription,
+      editIsFactRecord,
+      editRoomIds,
+      editScenarioIds,
+      editTags,
+      editTitle,
+      editVisionNodeIds,
+      loadAllData,
+      selectedDoc,
+    ],
+  );
 
   const createVisionNode = useCallback(async () => {
     const title = newNodeTitle.trim();
@@ -609,11 +600,21 @@ export function SupportingDocumentsApp() {
         <div>
           <h2 className="text-2xl font-semibold">Supporting Documents</h2>
           <p className="text-sm text-muted-foreground">
-            Index immutable facts, map artifacts to rooms and branches, and keep revision history intact.
+            Index immutable facts, map artifacts to rooms and branches, and keep revision history
+            intact.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => void loadAllData(false)} disabled={refreshing}>
-          {refreshing ? <Loader2 className="mr-2 size-4 animate-spin" /> : <RefreshCw className="mr-2 size-4" />}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void loadAllData(false)}
+          disabled={refreshing}
+        >
+          {refreshing ? (
+            <Loader2 className="mr-2 size-4 animate-spin" />
+          ) : (
+            <RefreshCw className="mr-2 size-4" />
+          )}
           Refresh
         </Button>
       </div>
@@ -644,7 +645,9 @@ export function SupportingDocumentsApp() {
           type="button"
           className={cn(
             "rounded px-3 py-1.5 text-sm font-medium",
-            tab === "documents" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
+            tab === "documents"
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground",
           )}
           onClick={() => setTab("documents")}
         >
@@ -668,18 +671,30 @@ export function SupportingDocumentsApp() {
             <CardHeader>
               <CardTitle className="text-base">Upload Supporting Artifacts</CardTitle>
               <CardDescription>
-                Upload PDFs, images, videos, and screenshot references. Apply room/scenario/branch mappings in one pass.
+                Upload PDFs, images, videos, and screenshot references. Apply room/scenario/branch
+                mappings in one pass.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="grid gap-4 lg:grid-cols-2">
                 <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Title (optional override)</p>
-                  <Input value={uploadTitle} onChange={(event) => setUploadTitle(event.target.value)} placeholder="1971 Structural Blueprint - Sheet A5" />
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Title (optional override)
+                  </p>
+                  <Input
+                    value={uploadTitle}
+                    onChange={(event) => setUploadTitle(event.target.value)}
+                    placeholder="1971 Structural Blueprint - Sheet A5"
+                  />
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Source Type</p>
-                  <Select value={uploadSourceType} onValueChange={(value) => setUploadSourceType(value as SourceType)}>
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Source Type
+                  </p>
+                  <Select
+                    value={uploadSourceType}
+                    onValueChange={(value) => setUploadSourceType(value as SourceType)}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Select source type" />
                     </SelectTrigger>
@@ -697,7 +712,9 @@ export function SupportingDocumentsApp() {
               </div>
 
               <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Description</p>
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Description
+                </p>
                 <Textarea
                   value={uploadDescription}
                   onChange={(event) => setUploadDescription(event.target.value)}
@@ -708,18 +725,32 @@ export function SupportingDocumentsApp() {
 
               <div className="grid gap-4 lg:grid-cols-2">
                 <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tags</p>
-                  <Input value={uploadTags} onChange={(event) => setUploadTags(event.target.value)} placeholder="structure, footing, kitchen-wall, permit" />
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Tags
+                  </p>
+                  <Input
+                    value={uploadTags}
+                    onChange={(event) => setUploadTags(event.target.value)}
+                    placeholder="structure, footing, kitchen-wall, permit"
+                  />
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">AI Rationale (optional)</p>
-                  <Input value={uploadAiRationale} onChange={(event) => setUploadAiRationale(event.target.value)} placeholder="Why this was linked to these rooms/branches." />
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    AI Rationale (optional)
+                  </p>
+                  <Input
+                    value={uploadAiRationale}
+                    onChange={(event) => setUploadAiRationale(event.target.value)}
+                    placeholder="Why this was linked to these rooms/branches."
+                  />
                 </div>
               </div>
 
               <div className="grid gap-4 lg:grid-cols-3">
                 <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Rooms</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Rooms
+                  </p>
                   <MultipleSelector
                     title="Select rooms"
                     placeholder="Map rooms"
@@ -729,7 +760,9 @@ export function SupportingDocumentsApp() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Scenarios</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Scenarios
+                  </p>
                   <MultipleSelector
                     title="Select scenarios"
                     placeholder="Map scenarios"
@@ -739,7 +772,9 @@ export function SupportingDocumentsApp() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Vision Branch Nodes</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Vision Branch Nodes
+                  </p>
                   <MultipleSelector
                     title="Select branch nodes"
                     placeholder="Map nodes"
@@ -765,18 +800,28 @@ export function SupportingDocumentsApp() {
                   <Upload className="size-8 text-muted-foreground" />
                   <div>
                     <p className="text-sm font-medium">Drop supporting files</p>
-                    <p className="text-xs text-muted-foreground">PDF, image, video, and screenshot artifacts are supported.</p>
+                    <p className="text-xs text-muted-foreground">
+                      PDF, image, video, and screenshot artifacts are supported.
+                    </p>
                   </div>
                   <FileUploadTrigger asChild>
-                    <Button size="sm" variant="secondary">Browse Files</Button>
+                    <Button size="sm" variant="secondary">
+                      Browse Files
+                    </Button>
                   </FileUploadTrigger>
                 </FileUploadDropzone>
 
                 <div className="flex items-center justify-between">
                   <FileUploadClear asChild>
-                    <Button variant="ghost" size="sm" disabled={uploading}>Clear</Button>
+                    <Button variant="ghost" size="sm" disabled={uploading}>
+                      Clear
+                    </Button>
                   </FileUploadClear>
-                  <Button size="sm" onClick={() => void uploadDocuments()} disabled={uploading || files.length === 0}>
+                  <Button
+                    size="sm"
+                    onClick={() => void uploadDocuments()}
+                    disabled={uploading || files.length === 0}
+                  >
                     {uploading ? (
                       <>
                         <Loader2 className="mr-2 size-4 animate-spin" />
@@ -793,7 +838,11 @@ export function SupportingDocumentsApp() {
 
                 <FileUploadList className="max-h-56 overflow-y-auto pr-1">
                   {files.map((file) => (
-                    <FileUploadItem key={`${file.name}-${file.size}-${file.lastModified}`} value={file} className="gap-3 rounded-lg border-border/40 bg-card/60 px-3 py-2">
+                    <FileUploadItem
+                      key={`${file.name}-${file.size}-${file.lastModified}`}
+                      value={file}
+                      className="gap-3 rounded-lg border-border/40 bg-card/60 px-3 py-2"
+                    >
                       <FileUploadItemPreview className="size-12 rounded-md ring-1 ring-border/40" />
                       <FileUploadItemMetadata size="sm" />
                       <FileUploadItemDelete />
@@ -808,7 +857,9 @@ export function SupportingDocumentsApp() {
             <Card className="ring-1 ring-border/40">
               <CardHeader>
                 <CardTitle className="text-base">Document Index</CardTitle>
-                <CardDescription>Searchable source-of-truth records with revision-safe history.</CardDescription>
+                <CardDescription>
+                  Searchable source-of-truth records with revision-safe history.
+                </CardDescription>
               </CardHeader>
               <CardContent className="max-h-[34rem] space-y-2 overflow-y-auto pr-1">
                 {docs.map((doc) => {
@@ -819,7 +870,9 @@ export function SupportingDocumentsApp() {
                       type="button"
                       className={cn(
                         "w-full rounded-md border p-3 text-left",
-                        selected ? "border-primary bg-primary/10" : "border-border/50 hover:bg-muted/20",
+                        selected
+                          ? "border-primary bg-primary/10"
+                          : "border-border/50 hover:bg-muted/20",
                       )}
                       onClick={() => setSelectedDocId(doc.id)}
                     >
@@ -830,12 +883,17 @@ export function SupportingDocumentsApp() {
                         </Badge>
                       </div>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        {doc.sourceType} • rev {doc.revisionNumber} • updated {formatDate(doc.datetimeUpdated)}
+                        {doc.sourceType} • rev {doc.revisionNumber} • updated{" "}
+                        {formatDate(doc.datetimeUpdated)}
                       </p>
                       {doc.roomLabels?.length ? (
                         <div className="mt-2 flex flex-wrap gap-1">
                           {doc.roomLabels.slice(0, 4).map((label) => (
-                            <Badge key={`${doc.id}-${label}`} variant="secondary" className="text-[10px]">
+                            <Badge
+                              key={`${doc.id}-${label}`}
+                              variant="secondary"
+                              className="text-[10px]"
+                            >
                               {label}
                             </Badge>
                           ))}
@@ -860,26 +918,51 @@ export function SupportingDocumentsApp() {
                 ) : (
                   <>
                     <div className="space-y-2">
-                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Title</p>
-                      <Input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} />
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Title
+                      </p>
+                      <Input
+                        value={editTitle}
+                        onChange={(event) => setEditTitle(event.target.value)}
+                      />
                     </div>
                     <div className="space-y-2">
-                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Description</p>
-                      <Textarea value={editDescription} onChange={(event) => setEditDescription(event.target.value)} rows={3} />
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Description
+                      </p>
+                      <Textarea
+                        value={editDescription}
+                        onChange={(event) => setEditDescription(event.target.value)}
+                        rows={3}
+                      />
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div className="space-y-2">
-                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tags</p>
-                        <Input value={editTags} onChange={(event) => setEditTags(event.target.value)} placeholder="comma separated tags" />
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Tags
+                        </p>
+                        <Input
+                          value={editTags}
+                          onChange={(event) => setEditTags(event.target.value)}
+                          placeholder="comma separated tags"
+                        />
                       </div>
                       <div className="space-y-2">
-                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">AI Rationale</p>
-                        <Input value={editAiRationale} onChange={(event) => setEditAiRationale(event.target.value)} placeholder="Why this mapping/change exists" />
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          AI Rationale
+                        </p>
+                        <Input
+                          value={editAiRationale}
+                          onChange={(event) => setEditAiRationale(event.target.value)}
+                          placeholder="Why this mapping/change exists"
+                        />
                       </div>
                     </div>
                     <div className="grid gap-3 sm:grid-cols-3">
                       <div className="space-y-2">
-                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Rooms</p>
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Rooms
+                        </p>
                         <MultipleSelector
                           title="Select rooms"
                           placeholder="Map rooms"
@@ -889,7 +972,9 @@ export function SupportingDocumentsApp() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Scenarios</p>
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Scenarios
+                        </p>
                         <MultipleSelector
                           title="Select scenarios"
                           placeholder="Map scenarios"
@@ -899,7 +984,9 @@ export function SupportingDocumentsApp() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Vision Nodes</p>
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Vision Nodes
+                        </p>
                         <MultipleSelector
                           title="Select vision nodes"
                           placeholder="Map nodes"
@@ -912,7 +999,9 @@ export function SupportingDocumentsApp() {
                     <div className="flex items-center justify-between rounded-lg border border-border/50 bg-muted/20 px-3 py-2">
                       <div>
                         <p className="text-sm font-medium">Fact record</p>
-                        <p className="text-xs text-muted-foreground">Use for immutable references and source facts.</p>
+                        <p className="text-xs text-muted-foreground">
+                          Use for immutable references and source facts.
+                        </p>
                       </div>
                       <Switch checked={editIsFactRecord} onCheckedChange={setEditIsFactRecord} />
                     </div>
@@ -941,11 +1030,23 @@ export function SupportingDocumentsApp() {
 
                     <div className="grid gap-2 sm:grid-cols-2">
                       <Button onClick={() => void saveSelectedDocument(false)} disabled={savingDoc}>
-                        {savingDoc ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Save className="mr-2 size-4" />}
+                        {savingDoc ? (
+                          <Loader2 className="mr-2 size-4 animate-spin" />
+                        ) : (
+                          <Save className="mr-2 size-4" />
+                        )}
                         Save In Place
                       </Button>
-                      <Button variant="outline" onClick={() => void saveSelectedDocument(true)} disabled={savingDoc}>
-                        {savingDoc ? <Loader2 className="mr-2 size-4 animate-spin" /> : <GitBranch className="mr-2 size-4" />}
+                      <Button
+                        variant="outline"
+                        onClick={() => void saveSelectedDocument(true)}
+                        disabled={savingDoc}
+                      >
+                        {savingDoc ? (
+                          <Loader2 className="mr-2 size-4 animate-spin" />
+                        ) : (
+                          <GitBranch className="mr-2 size-4" />
+                        )}
                         Create Revision
                       </Button>
                     </div>
@@ -966,16 +1067,31 @@ export function SupportingDocumentsApp() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Title</p>
-                <Input value={newNodeTitle} onChange={(event) => setNewNodeTitle(event.target.value)} placeholder="Kitchen Downstairs - Living Room Side" />
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Title
+                </p>
+                <Input
+                  value={newNodeTitle}
+                  onChange={(event) => setNewNodeTitle(event.target.value)}
+                  placeholder="Kitchen Downstairs - Living Room Side"
+                />
               </div>
               <div className="space-y-2">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Summary</p>
-                <Textarea value={newNodeSummary} onChange={(event) => setNewNodeSummary(event.target.value)} rows={3} placeholder="Pros, constraints, and dependencies for this branch." />
+                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Summary
+                </p>
+                <Textarea
+                  value={newNodeSummary}
+                  onChange={(event) => setNewNodeSummary(event.target.value)}
+                  rows={3}
+                  placeholder="Pros, constraints, and dependencies for this branch."
+                />
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Node Type</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Node Type
+                  </p>
                   <Select value={newNodeType} onValueChange={setNewNodeType}>
                     <SelectTrigger>
                       <SelectValue />
@@ -990,7 +1106,9 @@ export function SupportingDocumentsApp() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Status</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Status
+                  </p>
                   <Select value={newNodeStatus} onValueChange={setNewNodeStatus}>
                     <SelectTrigger>
                       <SelectValue />
@@ -1007,8 +1125,13 @@ export function SupportingDocumentsApp() {
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Scenario</p>
-                  <Select value={newNodeScenarioId || "none"} onValueChange={(value) => setNewNodeScenarioId(value === "none" ? "" : value)}>
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Scenario
+                  </p>
+                  <Select
+                    value={newNodeScenarioId || "none"}
+                    onValueChange={(value) => setNewNodeScenarioId(value === "none" ? "" : value)}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Optional scenario link" />
                     </SelectTrigger>
@@ -1023,8 +1146,13 @@ export function SupportingDocumentsApp() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Parent Node</p>
-                  <Select value={newNodeParentId || "none"} onValueChange={(value) => setNewNodeParentId(value === "none" ? "" : value)}>
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Parent Node
+                  </p>
+                  <Select
+                    value={newNodeParentId || "none"}
+                    onValueChange={(value) => setNewNodeParentId(value === "none" ? "" : value)}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder="Optional parent" />
                     </SelectTrigger>
@@ -1041,11 +1169,19 @@ export function SupportingDocumentsApp() {
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Estimated Cost (USD)</p>
-                  <Input value={newNodeCost} onChange={(event) => setNewNodeCost(event.target.value)} placeholder="45000" />
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Estimated Cost (USD)
+                  </p>
+                  <Input
+                    value={newNodeCost}
+                    onChange={(event) => setNewNodeCost(event.target.value)}
+                    placeholder="45000"
+                  />
                 </div>
                 <div className="space-y-2">
-                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Rooms</p>
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Rooms
+                  </p>
                   <MultipleSelector
                     title="Select rooms"
                     placeholder="Link rooms"
@@ -1056,8 +1192,16 @@ export function SupportingDocumentsApp() {
                 </div>
               </div>
 
-              <Button onClick={() => void createVisionNode()} disabled={creatingNode} className="w-full">
-                {creatingNode ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Plus className="mr-2 size-4" />}
+              <Button
+                onClick={() => void createVisionNode()}
+                disabled={creatingNode}
+                className="w-full"
+              >
+                {creatingNode ? (
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                ) : (
+                  <Plus className="mr-2 size-4" />
+                )}
                 Create Vision Node
               </Button>
             </CardContent>
@@ -1076,7 +1220,12 @@ export function SupportingDocumentsApp() {
                   <p className="text-sm text-muted-foreground">No vision branches yet.</p>
                 ) : (
                   visionTree.map((node) => (
-                    <DocumentNode key={node.id} node={node} selectedNodeId={selectedNodeId} onSelect={setSelectedNodeId} />
+                    <DocumentNode
+                      key={node.id}
+                      node={node}
+                      selectedNodeId={selectedNodeId}
+                      onSelect={setSelectedNodeId}
+                    />
                   ))
                 )}
               </CardContent>
@@ -1103,17 +1252,23 @@ export function SupportingDocumentsApp() {
                     ) : null}
                     <div className="grid gap-2 sm:grid-cols-2">
                       <div className="rounded-md border border-border/50 px-3 py-2">
-                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Type</p>
+                        <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                          Type
+                        </p>
                         <p className="text-sm">{selectedNode.nodeType}</p>
                       </div>
                       <div className="rounded-md border border-border/50 px-3 py-2">
-                        <p className="text-xs uppercase tracking-wide text-muted-foreground">Estimated Cost</p>
+                        <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                          Estimated Cost
+                        </p>
                         <p className="text-sm">{formatCurrency(selectedNode.estimatedCostCents)}</p>
                       </div>
                     </div>
 
                     <div className="space-y-1">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Linked Rooms</p>
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Linked Rooms
+                      </p>
                       <div className="flex flex-wrap gap-1.5">
                         {selectedNode.roomLabels.length === 0 ? (
                           <span className="text-xs text-muted-foreground">No rooms linked.</span>
@@ -1128,10 +1283,14 @@ export function SupportingDocumentsApp() {
                     </div>
 
                     <div className="space-y-1">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Linked Documents</p>
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Linked Documents
+                      </p>
                       <div className="space-y-1.5">
                         {selectedNode.supportingDocuments.length === 0 ? (
-                          <p className="text-xs text-muted-foreground">No supporting documents mapped.</p>
+                          <p className="text-xs text-muted-foreground">
+                            No supporting documents mapped.
+                          </p>
                         ) : (
                           selectedNode.supportingDocuments.map((doc) => (
                             <button
@@ -1154,7 +1313,9 @@ export function SupportingDocumentsApp() {
                     </div>
 
                     <div className="space-y-1">
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">Reference Images</p>
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                        Reference Images
+                      </p>
                       {selectedNode.imageRefs.length === 0 ? (
                         <p className="text-xs text-muted-foreground">No images linked.</p>
                       ) : (
@@ -1163,14 +1324,23 @@ export function SupportingDocumentsApp() {
                             if (!entry.image) return null;
                             const imageUrl = resolveImageUrl(entry.image);
                             return (
-                              <div key={`node-image-${entry.imageId}-${entry.relationType}`} className="overflow-hidden rounded-md border border-border/50">
+                              <div
+                                key={`node-image-${entry.imageId}-${entry.relationType}`}
+                                className="overflow-hidden rounded-md border border-border/50"
+                              >
                                 {/* biome-ignore lint/performance/noImgElement: external image delivery URLs are expected */}
-                                <img src={imageUrl} alt={entry.image.displayName || "Node image"} className="aspect-[4/3] w-full object-cover" />
+                                <img
+                                  src={imageUrl}
+                                  alt={entry.image.displayName || "Node image"}
+                                  className="aspect-[4/3] w-full object-cover"
+                                />
                                 <div className="px-2 py-1.5">
                                   <p className="truncate text-xs font-medium">
                                     {entry.image.displayName || "Untitled image"}
                                   </p>
-                                  <p className="text-[10px] text-muted-foreground">{entry.relationType}</p>
+                                  <p className="text-[10px] text-muted-foreground">
+                                    {entry.relationType}
+                                  </p>
                                 </div>
                               </div>
                             );

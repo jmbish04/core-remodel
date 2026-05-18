@@ -1,7 +1,7 @@
+import { estimateStatuses } from "@backend/db";
 import { asc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
-import { estimateStatuses } from "@backend/db";
 
 const estimateStatusesRouter = new Hono<{ Bindings: Env }>();
 
@@ -51,7 +51,11 @@ estimateStatusesRouter.get("/", async (c) => {
   try {
     await ensureEstimateStatuses(c.env);
     const db = drizzle(c.env.DB);
-    const rows = await db.select().from(estimateStatuses).orderBy(asc(estimateStatuses.sortOrder)).all();
+    const rows = await db
+      .select()
+      .from(estimateStatuses)
+      .orderBy(asc(estimateStatuses.sortOrder))
+      .all();
     return c.json({ statuses: rows });
   } catch (error) {
     return c.json(
@@ -65,4 +69,3 @@ estimateStatusesRouter.get("/", async (c) => {
 });
 
 export { estimateStatusesRouter, ensureEstimateStatuses };
-

@@ -27,9 +27,7 @@ import type { ScrapedPage } from "./browser-rendering";
 const GREENHOUSE_PATTERN =
   /^https?:\/\/(?:job-boards|boards)\.greenhouse\.io\/(?:embed\/job_app\?.*?(?:token=([^&]+).*?id=([^&]+)|id=([^&]+).*?token=([^&]+))|([^/]+)\/jobs\/(\d+))/i;
 
-export function parseGreenhouseUrl(
-  url: string,
-): { boardToken: string; jobId: string } | null {
+export function parseGreenhouseUrl(url: string): { boardToken: string; jobId: string } | null {
   const match = url.match(GREENHOUSE_PATTERN);
   if (!match) return null;
 
@@ -92,9 +90,7 @@ export async function scrapeGreenhouseJob(
 
   const response = await fetch(apiUrl);
   if (!response.ok) {
-    throw new Error(
-      `Greenhouse API returned ${response.status} for ${boardToken}/jobs/${jobId}`,
-    );
+    throw new Error(`Greenhouse API returned ${response.status} for ${boardToken}/jobs/${jobId}`);
   }
 
   const job = (await response.json()) as GreenhouseJobResponse;
@@ -108,9 +104,7 @@ export async function scrapeGreenhouseJob(
     `Company: ${job.company_name ?? boardToken}`,
     `Job Title: ${job.title}`,
     `Location: ${job.location?.name ?? "Not specified"}`,
-    job.departments?.length
-      ? `Department: ${job.departments.map((d) => d.name).join(", ")}`
-      : "",
+    job.departments?.length ? `Department: ${job.departments.map((d) => d.name).join(", ")}` : "",
     `Job URL: ${job.absolute_url}`,
     "",
     text,

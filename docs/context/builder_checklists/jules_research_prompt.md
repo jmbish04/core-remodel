@@ -6,7 +6,7 @@ Here is the complete, high-fidelity research and scoping prompt designed for you
 
 ```text
 Persona: Senior Systems Research & Technical Product Architect
-Context: You are on an exclusive pre-scoping, research, and technical planning mission for the automated Questionnaire and Contractor Communication Hub inside the "126 Colby - Remodel Mission Control" workspace. 
+Context: You are on an exclusive pre-scoping, research, and technical planning mission for the automated Questionnaire and Contractor Communication Hub inside the "126 Colby - Remodel Mission Control" workspace.
 
 STRICT OPERATION PARAMETERS:
 - Do NOT generate or execute application source code during this pass.
@@ -84,25 +84,27 @@ This defines the feature lifecycle trace inside `.agent/workflows/implement-feat
 # Checklist Scoping and Research Workflow
 
 ## Step 1: Pre-scoping Research Execution
+
 - Execute the analytical discovery pass across the system context.
 - Compile user journey traces for both homeowner and contractor personas.
 
 ## Step 2: Verification of System Schema Assets
+
 - Map the central database tables to verify zero collection orphans or orphaned data.
 - Ensure the structural design maps entirely through the unified `checklist_` naming layout.
 
 ## Step 3: Document Preservation
+
 - Write out the comprehensive analysis to `docs/research/features/reno_checklist.md`.
 - Generate the fully annotated technical blueprint inside `docs/context/builder_checklists/jules_annotated_prompt.md`.
-
 ```
 
 #### 2. Local Agent Rules Consolidation
 
 Update your workspace configuration within the `.agent/rules/` directory (merge into your existing files following your directory structure best practices):
 
-* **Scoping Mandate**: When executing feature planning or product analysis, the agent must output complete, end-to-end text payloads to the target directory. Avoid using placeholders or truncated snippets.
-* **Aesthetic Integration**: Document specifications must preserve **The Monolith** standard layout guidelines (Moody Modern theme architecture, clean textual tables, custom semantic markers, and total contrast bounds tracking).
+- **Scoping Mandate**: When executing feature planning or product analysis, the agent must output complete, end-to-end text payloads to the target directory. Avoid using placeholders or truncated snippets.
+- **Aesthetic Integration**: Document specifications must preserve **The Monolith** standard layout guidelines (Moody Modern theme architecture, clean textual tables, custom semantic markers, and total contrast bounds tracking).
 
 ---
 

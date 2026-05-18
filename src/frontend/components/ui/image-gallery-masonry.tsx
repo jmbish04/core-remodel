@@ -1,7 +1,9 @@
 import React from "react";
+
+import type { ImageGalleryItem } from "@/components/ui/image-gallery";
+
 import { LazyImage } from "@/components/lazy-image";
 import { cn } from "@/lib/utils";
-import type { ImageGalleryItem } from "@/components/ui/image-gallery";
 
 export interface ImageGalleryMasonryProps {
   items: ImageGalleryItem[];

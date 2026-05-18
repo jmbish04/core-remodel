@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+
 import { images } from "./images";
 
 export const imageTags = sqliteTable("image_tags", {

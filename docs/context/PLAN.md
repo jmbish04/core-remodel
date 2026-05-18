@@ -1,7 +1,9 @@
 ## Expanded Plan: Estimates + Contracts Intelligence System for Core-Remodel
 
 ### Summary
+
 Build a new `estimates + contracts` subsystem in the existing single Cloudflare Worker, with:
+
 1. wizard-style intake with autosaving drafts,
 2. multi-source ingestion (file, URL, verbal/text),
 3. Workers AI structured extraction with user-confirmed values tracking,
@@ -14,6 +16,7 @@ Build a new `estimates + contracts` subsystem in the existing single Cloudflare 
 ### Implementation Changes
 
 #### 1) Data Model (D1/Drizzle) for Estimates
+
 - `estimate_companies`
   - `id`, `name`, `business_type`, `website`, `email`, `phone`, `address`, `cslb_license_number`, `is_active`, timestamps.
 - `estimate_company_contacts`
@@ -40,6 +43,7 @@ Build a new `estimates + contracts` subsystem in the existing single Cloudflare 
   - `id`, `estimate_revision_id`, `estimate_document_id`, `property`, `estimate_prop_key_type_id`, `workerai_extracted_value`, `intake_form_value`, `is_user_overridden`, timestamps.
 
 #### 2) Data Model for Contracts (Parallel Family)
+
 - `contracts`
   - `id`, `scenario_id` nullable, `estimate_company_id`, `linked_estimate_id` nullable, `current_revision_id`, `contract_required`, `is_active`, timestamps.
 - `contract_statuses`
@@ -62,11 +66,13 @@ Build a new `estimates + contracts` subsystem in the existing single Cloudflare 
   - links email/events to contractual obligations and warnings.
 
 #### 3) Worker Bindings and Type Safety
+
 - Add dedicated R2 binding for estimate/contract artifacts in `wrangler.jsonc`.
 - Regenerate Cloudflare env types with `pnpm run cf-typegen`.
 - Keep all schema exports centralized via `src/backend/db/schema/index.ts`.
 
 #### 4) Intake + Extraction Pipeline
+
 - Step 1 (`Source of estimation`) requires exactly one source mode:
   - document upload,
   - URL input,
@@ -80,6 +86,7 @@ Build a new `estimates + contracts` subsystem in the existing single Cloudflare 
 - Pre-fill Step 2 fields from structured extraction and persist user overrides separately.
 
 #### 5) Estimate Wizard UX
+
 - New Estimates viewport:
   - lists latest submitted estimates,
   - draft intakes in progress,
@@ -98,6 +105,7 @@ Build a new `estimates + contracts` subsystem in the existing single Cloudflare 
   - “view revisions” modal with full history and source artifacts.
 
 #### 6) Realtime System
+
 - Add dedicated Durable Object channel for estimate/contract collaboration updates.
 - Broadcast events:
   - draft autosaved,
@@ -110,6 +118,7 @@ Build a new `estimates + contracts` subsystem in the existing single Cloudflare 
   - temporary yellow flash for changed cells.
 
 #### 7) APIs (Public Interface Additions)
+
 - Estimates:
   - `GET /api/estimates`
   - `POST /api/estimates/drafts`
@@ -142,6 +151,7 @@ Build a new `estimates + contracts` subsystem in the existing single Cloudflare 
   - add operationIds for all new methods, expose in `/openapi.json`, `/docs`, `/scalar`, `/swagger`.
 
 #### 8) Contracts Monitoring + Bad-Faith Risk Guardrails
+
 - Contractor/subcontractor path uses strict contract gating.
 - Payment milestone claims must reference milestone completion criteria + evidence.
 - AI contract analyzer produces:
@@ -156,6 +166,7 @@ Build a new `estimates + contracts` subsystem in the existing single Cloudflare 
   - attach event to contract/estimate timeline.
 
 #### 9) Google Sheets Interop
+
 - Use explicit mapping columns in sheet:
   - `estimate_id`, `revision_id`, `revision_number`, `is_draft`, `is_latest`, timestamps, sync hash.
 - Conflict strategy:
@@ -164,6 +175,7 @@ Build a new `estimates + contracts` subsystem in the existing single Cloudflare 
 - Apps Script companion performs pull/push with idempotency keys and last-sync cursor.
 
 ### Research Execution Sub-Plan and Leverage
+
 - `Comcast/react-data-grid` and `iddan/react-spreadsheet` for spreadsheet-like editing interaction patterns.
 - `cabljac/do-d` for Cloudflare Durable Object websocket/hybrid state coordination pattern.
 - `theoephraim/node-google-spreadsheet` for robust TS row/cell sync operations.
@@ -174,6 +186,7 @@ Build a new `estimates + contracts` subsystem in the existing single Cloudflare 
   - public-read sheet APIs (`opensheet`) for production bidirectional sync.
 
 ### Test Plan
+
 - Migration tests:
   - all new tables, FKs, indices, uniqueness, nullable rules.
 - Revision invariants:
@@ -195,6 +208,7 @@ Build a new `estimates + contracts` subsystem in the existing single Cloudflare 
   - contractor contract review + negotiation + payment milestone progression.
 
 ### Assumptions and Defaults
+
 - `Hybrid scope` is implemented with optional `scenario_id` and explicit room mappings.
 - Autosave uses mutable draft row plus immutable snapshot/event rows.
 - Mixed strictness:

@@ -1,13 +1,8 @@
+import { remodelScenarios, roomActionItems, rooms, scenarioRoomPlans } from "@backend/db";
+import { ensureHomeCatalogSeed, getHomeCatalog } from "@backend/services/home-catalog";
 import { and, asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
-import {
-  remodelScenarios,
-  roomActionItems,
-  rooms,
-  scenarioRoomPlans,
-} from "@backend/db";
-import { ensureHomeCatalogSeed, getHomeCatalog } from "@backend/services/home-catalog";
 
 const roomsRouter = new Hono<{ Bindings: Env }>();
 
@@ -95,10 +90,8 @@ roomsRouter.post("/scenarios", async (c) => {
         id,
         name,
         description: body.description?.trim() || null,
-        budgetLowCents:
-          typeof body.budgetLowCents === "number" ? body.budgetLowCents : null,
-        budgetHighCents:
-          typeof body.budgetHighCents === "number" ? body.budgetHighCents : null,
+        budgetLowCents: typeof body.budgetLowCents === "number" ? body.budgetLowCents : null,
+        budgetHighCents: typeof body.budgetHighCents === "number" ? body.budgetHighCents : null,
         datetimeCreated: now,
         datetimeUpdated: now,
       })
@@ -170,9 +163,7 @@ roomsRouter.post("/scenarios/:scenarioId/plans", async (c) => {
         proposedUse,
         stage: body.stage?.trim() || "considering",
         estimatedCostCents:
-          typeof body.estimatedCostCents === "number"
-            ? body.estimatedCostCents
-            : null,
+          typeof body.estimatedCostCents === "number" ? body.estimatedCostCents : null,
         notes: body.notes?.trim() || null,
         datetimeCreated: now,
         datetimeUpdated: now,
@@ -225,10 +216,7 @@ roomsRouter.get("/:roomId/action-items", async (c) => {
           .select()
           .from(roomActionItems)
           .where(
-            and(
-              eq(roomActionItems.roomId, roomId),
-              eq(roomActionItems.scenarioId, scenarioId),
-            ),
+            and(eq(roomActionItems.roomId, roomId), eq(roomActionItems.scenarioId, scenarioId)),
           )
           .orderBy(asc(roomActionItems.datetimeCreated))
           .all()
@@ -293,23 +281,15 @@ roomsRouter.post("/:roomId/action-items", async (c) => {
         details: body.details?.trim() || null,
         status: body.status?.trim() || "open",
         priority:
-          typeof body.priority === "number" && Number.isFinite(body.priority)
-            ? body.priority
-            : 2,
+          typeof body.priority === "number" && Number.isFinite(body.priority) ? body.priority : 2,
         estimatedCostCents:
-          typeof body.estimatedCostCents === "number"
-            ? body.estimatedCostCents
-            : null,
+          typeof body.estimatedCostCents === "number" ? body.estimatedCostCents : null,
         datetimeCreated: now,
         datetimeUpdated: now,
       })
       .run();
 
-    const created = await db
-      .select()
-      .from(roomActionItems)
-      .where(eq(roomActionItems.id, id))
-      .get();
+    const created = await db.select().from(roomActionItems).where(eq(roomActionItems.id, id)).get();
 
     return c.json({ success: true, item: created }, 201);
   } catch (error) {

@@ -55,9 +55,7 @@
       "indexes": {
         "users_email_unique": {
           "name": "users_email_unique",
-          "columns": [
-            "email"
-          ],
+          "columns": ["email"],
           "isUnique": true
         }
       },
@@ -108,9 +106,7 @@
       "indexes": {
         "sessions_token_unique": {
           "name": "sessions_token_unique",
-          "columns": [
-            "token"
-          ],
+          "columns": ["token"],
           "isUnique": true
         }
       },
@@ -119,12 +115,8 @@
           "name": "sessions_user_id_users_id_fk",
           "tableFrom": "sessions",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -231,12 +223,8 @@
           "name": "threads_user_id_users_id_fk",
           "tableFrom": "threads",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -297,12 +285,8 @@
           "name": "messages_thread_id_threads_id_fk",
           "tableFrom": "messages",
           "tableTo": "threads",
-          "columnsFrom": [
-            "thread_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["thread_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -423,12 +407,8 @@
           "name": "notifications_user_id_users_id_fk",
           "tableFrom": "notifications",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -490,12 +470,8 @@
           "name": "documents_user_id_users_id_fk",
           "tableFrom": "documents",
           "tableTo": "users",
-          "columnsFrom": [
-            "user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["user_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -677,12 +653,8 @@
           "name": "estimate_company_contacts_estimate_company_id_estimate_companies_id_fk",
           "tableFrom": "estimate_company_contacts",
           "tableTo": "estimate_companies",
-          "columnsFrom": [
-            "estimate_company_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["estimate_company_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -779,12 +751,8 @@
           "name": "estimate_documents_estimate_revision_id_estimate_revisions_id_fk",
           "tableFrom": "estimate_documents",
           "tableTo": "estimate_revisions",
-          "columnsFrom": [
-            "estimate_revision_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["estimate_revision_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -888,12 +856,8 @@
           "name": "estimate_line_items_estimate_revision_id_estimate_revisions_id_fk",
           "tableFrom": "estimate_line_items",
           "tableTo": "estimate_revisions",
-          "columnsFrom": [
-            "estimate_revision_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["estimate_revision_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -953,9 +917,7 @@
       "indexes": {
         "estimate_prop_key_types_property_unique": {
           "name": "estimate_prop_key_types_property_unique",
-          "columns": [
-            "property"
-          ],
+          "columns": ["property"],
           "isUnique": true
         }
       },
@@ -1046,12 +1008,8 @@
           "name": "estimate_prop_values_estimate_revision_id_estimate_revisions_id_fk",
           "tableFrom": "estimate_prop_values",
           "tableTo": "estimate_revisions",
-          "columnsFrom": [
-            "estimate_revision_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["estimate_revision_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1059,12 +1017,8 @@
           "name": "estimate_prop_values_estimate_document_id_estimate_documents_id_fk",
           "tableFrom": "estimate_prop_values",
           "tableTo": "estimate_documents",
-          "columnsFrom": [
-            "estimate_document_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["estimate_document_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -1072,12 +1026,8 @@
           "name": "estimate_prop_values_estimate_prop_key_type_id_estimate_prop_key_types_id_fk",
           "tableFrom": "estimate_prop_values",
           "tableTo": "estimate_prop_key_types",
-          "columnsFrom": [
-            "estimate_prop_key_type_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["estimate_prop_key_type_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1139,12 +1089,8 @@
           "name": "estimate_revision_snapshots_estimate_revision_id_estimate_revisions_id_fk",
           "tableFrom": "estimate_revision_snapshots",
           "tableTo": "estimate_revisions",
-          "columnsFrom": [
-            "estimate_revision_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["estimate_revision_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1301,12 +1247,8 @@
           "name": "estimate_revisions_estimate_id_estimates_id_fk",
           "tableFrom": "estimate_revisions",
           "tableTo": "estimates",
-          "columnsFrom": [
-            "estimate_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["estimate_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1314,12 +1256,8 @@
           "name": "estimate_revisions_estimate_status_id_estimate_statuses_id_fk",
           "tableFrom": "estimate_revisions",
           "tableTo": "estimate_statuses",
-          "columnsFrom": [
-            "estimate_status_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["estimate_status_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1366,12 +1304,8 @@
           "name": "estimate_room_mappings_estimate_revision_id_estimate_revisions_id_fk",
           "tableFrom": "estimate_room_mappings",
           "tableTo": "estimate_revisions",
-          "columnsFrom": [
-            "estimate_revision_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["estimate_revision_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1379,12 +1313,8 @@
           "name": "estimate_room_mappings_room_id_rooms_id_fk",
           "tableFrom": "estimate_room_mappings",
           "tableTo": "rooms",
-          "columnsFrom": [
-            "room_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["room_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1452,12 +1382,8 @@
           "name": "estimate_source_events_estimate_revision_id_estimate_revisions_id_fk",
           "tableFrom": "estimate_source_events",
           "tableTo": "estimate_revisions",
-          "columnsFrom": [
-            "estimate_revision_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["estimate_revision_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1465,12 +1391,8 @@
           "name": "estimate_source_events_estimate_document_id_estimate_documents_id_fk",
           "tableFrom": "estimate_source_events",
           "tableTo": "estimate_documents",
-          "columnsFrom": [
-            "estimate_document_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["estimate_document_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1538,9 +1460,7 @@
       "indexes": {
         "estimate_statuses_name_unique": {
           "name": "estimate_statuses_name_unique",
-          "columns": [
-            "name"
-          ],
+          "columns": ["name"],
           "isUnique": true
         }
       },
@@ -1685,12 +1605,8 @@
           "name": "estimates_scenario_id_remodel_scenarios_id_fk",
           "tableFrom": "estimates",
           "tableTo": "remodel_scenarios",
-          "columnsFrom": [
-            "scenario_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["scenario_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -1698,12 +1614,8 @@
           "name": "estimates_estimate_company_id_estimate_companies_id_fk",
           "tableFrom": "estimates",
           "tableTo": "estimate_companies",
-          "columnsFrom": [
-            "estimate_company_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["estimate_company_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -1779,12 +1691,8 @@
           "name": "contract_clause_findings_contract_revision_id_contract_revisions_id_fk",
           "tableFrom": "contract_clause_findings",
           "tableTo": "contract_revisions",
-          "columnsFrom": [
-            "contract_revision_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["contract_revision_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1868,12 +1776,8 @@
           "name": "contract_documents_contract_revision_id_contract_revisions_id_fk",
           "tableFrom": "contract_documents",
           "tableTo": "contract_revisions",
-          "columnsFrom": [
-            "contract_revision_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["contract_revision_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -1956,12 +1860,8 @@
           "name": "contract_monitoring_events_contract_id_contracts_id_fk",
           "tableFrom": "contract_monitoring_events",
           "tableTo": "contracts",
-          "columnsFrom": [
-            "contract_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["contract_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -1969,12 +1869,8 @@
           "name": "contract_monitoring_events_contract_revision_id_contract_revisions_id_fk",
           "tableFrom": "contract_monitoring_events",
           "tableTo": "contract_revisions",
-          "columnsFrom": [
-            "contract_revision_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["contract_revision_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -1982,12 +1878,8 @@
           "name": "contract_monitoring_events_related_estimate_id_estimates_id_fk",
           "tableFrom": "contract_monitoring_events",
           "tableTo": "estimates",
-          "columnsFrom": [
-            "related_estimate_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["related_estimate_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -2063,12 +1955,8 @@
           "name": "contract_negotiation_items_contract_revision_id_contract_revisions_id_fk",
           "tableFrom": "contract_negotiation_items",
           "tableTo": "contract_revisions",
-          "columnsFrom": [
-            "contract_revision_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["contract_revision_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2166,12 +2054,8 @@
           "name": "contract_payment_milestones_contract_revision_id_contract_revisions_id_fk",
           "tableFrom": "contract_payment_milestones",
           "tableTo": "contract_revisions",
-          "columnsFrom": [
-            "contract_revision_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["contract_revision_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2279,12 +2163,8 @@
           "name": "contract_revisions_contract_id_contracts_id_fk",
           "tableFrom": "contract_revisions",
           "tableTo": "contracts",
-          "columnsFrom": [
-            "contract_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["contract_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -2292,12 +2172,8 @@
           "name": "contract_revisions_contract_status_id_contract_statuses_id_fk",
           "tableFrom": "contract_revisions",
           "tableTo": "contract_statuses",
-          "columnsFrom": [
-            "contract_status_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["contract_status_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -2365,9 +2241,7 @@
       "indexes": {
         "contract_statuses_name_unique": {
           "name": "contract_statuses_name_unique",
-          "columns": [
-            "name"
-          ],
+          "columns": ["name"],
           "isUnique": true
         }
       },
@@ -2450,12 +2324,8 @@
           "name": "contract_timeline_milestones_contract_revision_id_contract_revisions_id_fk",
           "tableFrom": "contract_timeline_milestones",
           "tableTo": "contract_revisions",
-          "columnsFrom": [
-            "contract_revision_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["contract_revision_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2531,12 +2401,8 @@
           "name": "contract_warranty_terms_contract_revision_id_contract_revisions_id_fk",
           "tableFrom": "contract_warranty_terms",
           "tableTo": "contract_revisions",
-          "columnsFrom": [
-            "contract_revision_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["contract_revision_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -2621,12 +2487,8 @@
           "name": "contracts_scenario_id_remodel_scenarios_id_fk",
           "tableFrom": "contracts",
           "tableTo": "remodel_scenarios",
-          "columnsFrom": [
-            "scenario_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["scenario_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -2634,12 +2496,8 @@
           "name": "contracts_estimate_company_id_estimate_companies_id_fk",
           "tableFrom": "contracts",
           "tableTo": "estimate_companies",
-          "columnsFrom": [
-            "estimate_company_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["estimate_company_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -2647,12 +2505,8 @@
           "name": "contracts_linked_estimate_id_estimates_id_fk",
           "tableFrom": "contracts",
           "tableTo": "estimates",
-          "columnsFrom": [
-            "linked_estimate_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["linked_estimate_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -2718,9 +2572,7 @@
       "indexes": {
         "floors_key_unique": {
           "name": "floors_key_unique",
-          "columns": [
-            "key"
-          ],
+          "columns": ["key"],
           "isUnique": true
         }
       },
@@ -2863,9 +2715,7 @@
       "indexes": {
         "rooms_room_code_unique": {
           "name": "rooms_room_code_unique",
-          "columns": [
-            "room_code"
-          ],
+          "columns": ["room_code"],
           "isUnique": true
         }
       },
@@ -2874,12 +2724,8 @@
           "name": "rooms_floor_id_floors_id_fk",
           "tableFrom": "rooms",
           "tableTo": "floors",
-          "columnsFrom": [
-            "floor_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["floor_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3052,12 +2898,8 @@
           "name": "scenario_room_plans_scenario_id_remodel_scenarios_id_fk",
           "tableFrom": "scenario_room_plans",
           "tableTo": "remodel_scenarios",
-          "columnsFrom": [
-            "scenario_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["scenario_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3065,12 +2907,8 @@
           "name": "scenario_room_plans_room_id_rooms_id_fk",
           "tableFrom": "scenario_room_plans",
           "tableTo": "rooms",
-          "columnsFrom": [
-            "room_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["room_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3177,12 +3015,8 @@
           "name": "room_action_items_room_id_rooms_id_fk",
           "tableFrom": "room_action_items",
           "tableTo": "rooms",
-          "columnsFrom": [
-            "room_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["room_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3190,12 +3024,8 @@
           "name": "room_action_items_scenario_id_remodel_scenarios_id_fk",
           "tableFrom": "room_action_items",
           "tableTo": "remodel_scenarios",
-          "columnsFrom": [
-            "scenario_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["scenario_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -3376,12 +3206,8 @@
           "name": "budget_expense_entries_scenario_id_remodel_scenarios_id_fk",
           "tableFrom": "budget_expense_entries",
           "tableTo": "remodel_scenarios",
-          "columnsFrom": [
-            "scenario_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["scenario_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -3448,9 +3274,7 @@
       "indexes": {
         "budget_funding_accounts_account_key_unique": {
           "name": "budget_funding_accounts_account_key_unique",
-          "columns": [
-            "account_key"
-          ],
+          "columns": ["account_key"],
           "isUnique": true
         }
       },
@@ -3516,9 +3340,7 @@
       "indexes": {
         "budget_project_info_info_key_unique": {
           "name": "budget_project_info_info_key_unique",
-          "columns": [
-            "info_key"
-          ],
+          "columns": ["info_key"],
           "isUnique": true
         }
       },
@@ -3565,12 +3387,8 @@
           "name": "budget_tracker_item_rooms_budget_tracker_item_id_budget_tracker_items_id_fk",
           "tableFrom": "budget_tracker_item_rooms",
           "tableTo": "budget_tracker_items",
-          "columnsFrom": [
-            "budget_tracker_item_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["budget_tracker_item_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -3578,12 +3396,8 @@
           "name": "budget_tracker_item_rooms_room_id_rooms_id_fk",
           "tableFrom": "budget_tracker_item_rooms",
           "tableTo": "rooms",
-          "columnsFrom": [
-            "room_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["room_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -3794,12 +3608,8 @@
           "name": "budget_tracker_items_scenario_id_remodel_scenarios_id_fk",
           "tableFrom": "budget_tracker_items",
           "tableTo": "remodel_scenarios",
-          "columnsFrom": [
-            "scenario_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["scenario_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -3879,9 +3689,7 @@
       "indexes": {
         "google_sheet_sync_events_idempotency_key_unique": {
           "name": "google_sheet_sync_events_idempotency_key_unique",
-          "columns": [
-            "idempotency_key"
-          ],
+          "columns": ["idempotency_key"],
           "isUnique": true
         }
       },
@@ -4127,12 +3935,8 @@
           "name": "visitor_events_visitor_id_visitor_sessions_id_fk",
           "tableFrom": "visitor_events",
           "tableTo": "visitor_sessions",
-          "columnsFrom": [
-            "visitor_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["visitor_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -4245,12 +4049,8 @@
           "name": "images_room_id_rooms_id_fk",
           "tableFrom": "images",
           "tableTo": "rooms",
-          "columnsFrom": [
-            "room_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["room_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -4294,10 +4094,7 @@
       "indexes": {
         "inspirational_image_rooms_image_room_unique": {
           "name": "inspirational_image_rooms_image_room_unique",
-          "columns": [
-            "image_id",
-            "room_id"
-          ],
+          "columns": ["image_id", "room_id"],
           "isUnique": true
         }
       },
@@ -4306,12 +4103,8 @@
           "name": "inspirational_image_rooms_image_id_images_id_fk",
           "tableFrom": "inspirational_image_rooms",
           "tableTo": "images",
-          "columnsFrom": [
-            "image_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["image_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -4319,12 +4112,8 @@
           "name": "inspirational_image_rooms_room_id_rooms_id_fk",
           "tableFrom": "inspirational_image_rooms",
           "tableTo": "rooms",
-          "columnsFrom": [
-            "room_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["room_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -4392,12 +4181,8 @@
           "name": "listing_photos_image_id_images_id_fk",
           "tableFrom": "listing_photos",
           "tableTo": "images",
-          "columnsFrom": [
-            "image_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["image_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -4405,12 +4190,8 @@
           "name": "listing_photos_room_id_rooms_id_fk",
           "tableFrom": "listing_photos",
           "tableTo": "rooms",
-          "columnsFrom": [
-            "room_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["room_id"],
+          "columnsTo": ["id"],
           "onDelete": "restrict",
           "onUpdate": "no action"
         }
@@ -4464,12 +4245,8 @@
           "name": "ai_edits_original_listing_id_listing_photos_id_fk",
           "tableFrom": "ai_edits",
           "tableTo": "listing_photos",
-          "columnsFrom": [
-            "original_listing_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["original_listing_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }
@@ -4704,12 +4481,8 @@
           "name": "image_edit_sessions_source_image_id_images_id_fk",
           "tableFrom": "image_edit_sessions",
           "tableTo": "images",
-          "columnsFrom": [
-            "source_image_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_image_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         }
@@ -4791,12 +4564,8 @@
           "name": "image_edit_revisions_session_id_image_edit_sessions_id_fk",
           "tableFrom": "image_edit_revisions",
           "tableTo": "image_edit_sessions",
-          "columnsFrom": [
-            "session_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["session_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         },
@@ -4804,12 +4573,8 @@
           "name": "image_edit_revisions_source_image_id_images_id_fk",
           "tableFrom": "image_edit_revisions",
           "tableTo": "images",
-          "columnsFrom": [
-            "source_image_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["source_image_id"],
+          "columnsTo": ["id"],
           "onDelete": "set null",
           "onUpdate": "no action"
         },
@@ -4817,12 +4582,8 @@
           "name": "image_edit_revisions_output_image_id_images_id_fk",
           "tableFrom": "image_edit_revisions",
           "tableTo": "images",
-          "columnsFrom": [
-            "output_image_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
+          "columnsFrom": ["output_image_id"],
+          "columnsTo": ["id"],
           "onDelete": "cascade",
           "onUpdate": "no action"
         }

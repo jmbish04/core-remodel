@@ -2,13 +2,13 @@
  * @fileoverview Notifications API routes
  */
 
+import { notifications } from "@backend/db";
 import { desc, eq, and } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
 import type { Variables } from "../index";
 
-import { notifications } from "@backend/db";
 import { authMiddleware } from "../middleware/auth";
 
 const notificationsRouter = new Hono<{ Bindings: Env; Variables: Variables }>();
