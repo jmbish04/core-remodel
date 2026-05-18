@@ -1,4 +1,11 @@
 {
   "scriptId": "1sbGgwBTk-0F3FmDFCX8CGKnRu9CgdMve2kkyUrM5P8t09qpEpqcmSVXg",
-  "rootDir": "./src"
+  "rootDir": "./src",
+  "filePushOrder": [
+    "Code.js",
+    "Utils.js",
+    "Budget.js",
+    "Sidebar.html",
+    "cicd.js"
+  ]  
 }
