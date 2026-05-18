@@ -7,6 +7,7 @@ function onOpen() {
     .addItem("Show Sidebar", "showSidebar")
     .addItem("Pull & Sync Database", "syncAndCompileBudget")
     .addItem("Push Current State", "pushCurrentStateToDatabase")
+    .addItem('Export Selected Tab as JSON', 'exportActiveTabAsJson')
     .addToUi();
 }
 
