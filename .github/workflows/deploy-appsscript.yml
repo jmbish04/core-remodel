@@ -5,31 +5,26 @@ on:
       - main
     paths:
       - 'src/appsscript/**'
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
-
+        uses: actions/checkout@v6
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
-
+          node-version: '24'
       - name: Install Dependencies
         run: |
           npm ci
           npm install -g @google/clasp
-
-      # cat ~/.clasprc.json | pbcopy
+          # cat ~/.clasprc.json | pbcopy
       - name: Authenticate Clasp
         run: |
           echo "$CLASP_JSON" > ~/.clasprc.json
         env:
-          CLASP_TOKEN: ${{ secrets.CLASP_JSON }}
-
+          CLASP_JSON: ${{ secrets.CLASP_JSON }}
       - name: Push Code to Apps Script
         run: |
           cd src/appsscript
