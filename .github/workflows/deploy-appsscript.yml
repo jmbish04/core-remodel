@@ -14,20 +14,23 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '20'
 
-      - name: Install Clasp
-        run: npm install -g @google/clasp
+      - name: Install Dependencies
+        run: |
+          npm ci
+          npm install -g @google/clasp
 
+      # cat ~/.clasprc.json | pbcopy
       - name: Authenticate Clasp
         run: |
-          echo "$CLASP_TOKEN" > ~/.clasprc.json
+          echo "$CLASP_JSON" > ~/.clasprc.json
         env:
-          CLASP_TOKEN: ${{ secrets.CLASP_TOKEN }}
+          CLASP_TOKEN: ${{ secrets.CLASP_JSON }}
 
-      - name: Push Apps Script
+      - name: Push Code to Apps Script
         run: |
           cd src/appsscript
-          clasp push
+          clasp push --force
