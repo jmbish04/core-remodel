@@ -1447,7 +1447,6 @@ export { budgetTrackerRouter };
 
 // --- AppsScript Integration Routes ---
 import { budgetRows, budgetRowRevisions, syncSessions } from '../../db/schema/home/budget_tracking';
-import { v4 as uuidv4 } from 'uuid';
 
 budgetTrackerRouter.get('/appsscript/pull', async (c) => {
   const db_instance = drizzle(c.env.DB);
@@ -1469,7 +1468,7 @@ budgetTrackerRouter.get('/appsscript/pull', async (c) => {
   }));
 
   // Create a sync session
-  const sessionId = uuidv4();
+  const sessionId = crypto.randomUUID();
   await db_instance.insert(syncSessions).values({
     id: sessionId,
     type: 'PULL_SYNC',
@@ -1489,7 +1488,7 @@ budgetTrackerRouter.post('/appsscript/push', async (c) => {
     return c.json({ error: 'Invalid payload, expected array in data field' }, 400);
   }
 
-  const sessionId = uuidv4();
+  const sessionId = crypto.randomUUID();
 
   // We don't have transaction support for D1 via tx wrapper cleanly mapped in this env setup directly
   // Emulating batch / individual statements as transactions aren't always fully available in this drizzle-orm/d1 version
