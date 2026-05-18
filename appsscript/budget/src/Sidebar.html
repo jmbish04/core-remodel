@@ -1,189 +1,814 @@
-<!DOCTYPE html>
+<!doctype html>
 <html>
   <head>
-    <base target="_top">
+    <base target="_top" />
+    <title>Renovation Agent</title>
     <style>
-      /* The Monolith Design System Aesthetic Framework */
+      :root {
+        --primary-color: #0f766e;
+        --bg-color: #f4f7f9;
+        --surface-color: #ffffff;
+        --text-color: #1f2937;
+        --muted-color: #64748b;
+        --border-color: #dbe3ea;
+      }
+      html,
       body {
         margin: 0;
-        padding: 16px;
-        background-color: #12111A;
-        color: #E2E1E6;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        font-size: 13px;
-        line-height: 1.5;
+        padding: 0;
+        height: 100%;
+        font-family:
+          "Inter",
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
+        color: var(--text-color);
+        background: var(--bg-color);
       }
-      .panel-title {
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 1.5px;
-        font-weight: 700;
-        color: #8F8C9C;
-        margin-bottom: 16px;
-        border-bottom: 1px solid #252330;
-        padding-bottom: 8px;
-      }
-      #chat-container {
-        height: calc(100vh - 140px);
-        overflow-y: auto;
-        padding-right: 4px;
-        margin-bottom: 12px;
-      }
-      .message {
-        margin-bottom: 12px;
-        padding: 10px 12px;
-        border-radius: 4px;
-        max-width: 90%;
-        word-wrap: break-word;
-      }
-      .user {
-        background-color: #252330;
-        color: #FFFFFF;
-        margin-left: auto;
-        border-bottom-right-radius: 0px;
-      }
-      .agent {
-        background-color: #1C1A27;
-        color: #E2E1E6;
-        margin-right: auto;
-        border-bottom-left-radius: 0px;
-      }
-      .log-entry {
-        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
-        font-size: 11px;
-        color: #A09EAD;
-        background-color: #171520;
-        padding: 6px 8px;
-        border-radius: 2px;
-        margin-bottom: 8px;
-        border-left: 2px solid #5A4E85;
-      }
-      .input-wrapper {
+      body {
         display: flex;
-        background-color: #1C1A27;
-        border-radius: 4px;
-        padding: 4px;
-        position: fixed;
-        bottom: 16px;
-        left: 16px;
-        right: 16px;
+        flex-direction: column;
+        overflow: hidden;
       }
-      textarea {
-        flex-grow: 1;
-        background: transparent;
-        border: none;
-        color: #FFFFFF;
-        resize: none;
-        height: 24px;
-        padding: 4px;
-        font-family: inherit;
+      #status-bar {
+        background: var(--surface-color);
+        border-bottom: 1px solid var(--border-color);
+        padding: 10px 12px;
+        display: flex;
+        justify-content: space-between;
+        font-size: 12px;
+        color: var(--muted-color);
+      }
+      #ui-container {
+        flex: 1;
+        overflow-y: auto;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      #input-area {
+        background: var(--surface-color);
+        border-top: 1px solid var(--border-color);
+        padding: 10px;
+      }
+      #input-area-inner {
+        display: flex;
+        gap: 8px;
+      }
+      #user-input {
+        flex: 1;
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
         font-size: 13px;
-      }
-      textarea:focus {
+        padding: 10px 12px;
         outline: none;
       }
-      button {
-        background-color: #38334A;
+      #user-input:focus {
+        border-color: var(--primary-color);
+      }
+      #send-btn {
         border: none;
-        color: #FFFFFF;
-        padding: 4px 12px;
-        border-radius: 3px;
-        font-weight: 600;
+        border-radius: 10px;
+        padding: 0 14px;
+        font-weight: 700;
+        background: var(--primary-color);
+        color: #fff;
         cursor: pointer;
-        font-size: 11px;
-        text-transform: uppercase;
       }
-      button:hover {
-        background-color: #4C4564;
-      }
-      button:disabled {
-        background-color: #22202B;
-        color: #555361;
+      #send-btn:disabled {
+        background: #9ca3af;
         cursor: not-allowed;
       }
-      /* Custom Scrollbar */
-      ::-webkit-scrollbar { width: 4px; }
-      ::-webkit-scrollbar-track { background: transparent; }
-      ::-webkit-scrollbar-thumb { background: #2D2B3A; border-radius: 2px; }
+      #loading-overlay {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(255, 255, 255, 0.72);
+        z-index: 20;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .spinner {
+        width: 34px;
+        height: 34px;
+        border-radius: 50%;
+        border: 4px solid #d1d5db;
+        border-top-color: var(--primary-color);
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .loading-text {
+        font-size: 13px;
+        color: #334155;
+        font-weight: 600;
+      }
+      .a2ui-surface {
+        width: 100%;
+      }
+      .a2ui-column {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .a2ui-row {
+        display: flex;
+        flex-direction: row;
+        gap: 10px;
+        align-items: flex-start;
+      }
+      .a2ui-card {
+        background: var(--surface-color);
+        border: 1px solid var(--border-color);
+        border-radius: 12px;
+        padding: 12px;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+      }
+      .a2ui-text {
+        margin: 0;
+        line-height: 1.45;
+        word-break: break-word;
+      }
+      .a2ui-text-h1 {
+        font-size: 20px;
+        font-weight: 800;
+      }
+      .a2ui-text-h2 {
+        font-size: 18px;
+        font-weight: 700;
+      }
+      .a2ui-text-h3 {
+        font-size: 15px;
+        font-weight: 700;
+      }
+      .a2ui-text-body {
+        font-size: 13px;
+        color: #334155;
+      }
+      .a2ui-image {
+        width: 100%;
+        border-radius: 8px;
+        display: block;
+        object-fit: cover;
+      }
+      .a2ui-button {
+        border: none;
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 12px;
+        font-weight: 700;
+        cursor: pointer;
+        background: #e2e8f0;
+        color: #0f172a;
+      }
+      .a2ui-button-primary {
+        background: var(--primary-color);
+        color: #fff;
+      }
+      .a2ui-input-group {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .a2ui-label {
+        font-size: 12px;
+        color: #334155;
+        font-weight: 600;
+      }
+      .a2ui-textfield {
+        border: 1px solid var(--border-color);
+        border-radius: 8px;
+        padding: 8px 10px;
+        font-size: 13px;
+      }
+      .a2ui-checkbox-container {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .a2ui-divider {
+        border: 0;
+        border-top: 1px solid var(--border-color);
+        margin: 6px 0;
+      }
+      .welcome-card {
+        background: #ecfeff;
+        border: 1px solid #99f6e4;
+        border-radius: 12px;
+        padding: 12px;
+      }
+      .welcome-card h3 {
+        margin: 0 0 6px;
+        color: #0f766e;
+        font-size: 15px;
+      }
+      .welcome-card p {
+        margin: 0;
+        color: #115e59;
+        font-size: 12px;
+      }
+      .log-item {
+        margin: 0;
+        font-size: 11px;
+        color: #64748b;
+      }
     </style>
   </head>
   <body>
-
-    <div class="panel-title">Renovation Core Agent</div>
-    <div id="chat-container">
-      <div class="message agent">System loaded. Provide operational directions regarding your remodeling matrix parameters.</div>
+    <div id="loading-overlay">
+      <div class="spinner"></div>
+      <div class="loading-text">Processing request...</div>
     </div>
 
-    <div class="input-wrapper">
-      <textarea id="prompt-input" placeholder="Instruct the engine..."></textarea>
-      <button id="send-btn" onclick="submitQuery()">Execute</button>
+    <div id="status-bar">
+      <span id="status-text">Ready</span>
+      <span id="api-label">Worker API connected</span>
+    </div>
+
+    <div id="ui-container">
+      <div class="welcome-card" id="welcome-msg">
+        <h3>Renovation Agent A2UI</h3>
+        <p>Ask for room plans, budget options, or task sequencing. The response renders as A2UI cards.</p>
+      </div>
+    </div>
+
+    <div id="input-area">
+      <div id="input-area-inner">
+        <input id="user-input" type="text" placeholder="Ask the renovation agent..." />
+        <button id="send-btn" onclick="handleSend()">Send</button>
+      </div>
     </div>
 
     <script>
+      var APP_CONFIG = {
+        chatApiUrl: (function() {
+          var templated = "<?= chatApiUrl ?>";
+          if (!templated || templated.indexOf("<?") === 0) {
+            return "https://core-remodel.hacolby.workers.dev/api/ai/chat";
+          }
+          return templated;
+        })(),
+        chatStreamApiUrl: (function() {
+          var templated = "<?= chatStreamApiUrl ?>";
+          if (!templated || templated.indexOf("<?") === 0) {
+            return "https://core-remodel.hacolby.workers.dev/api/ai/chat/stream";
+          }
+          return templated;
+        })(),
+      };
+
       var conversationHistory = [];
+      var appState = { surfaces: {}, activeSurfaceId: null };
 
-      function appendMessage(role, text) {
-        var container = document.getElementById('chat-container');
-        var msgDiv = document.createElement('div');
-        msgDiv.className = 'message ' + role;
-        msgDiv.innerText = text;
-        container.appendChild(msgDiv);
-        container.scrollTop = container.scrollHeight;
+      function setStatus(message) {
+        document.getElementById("status-text").textContent = message;
       }
 
-      function appendLog(logText) {
-        var container = document.getElementById('chat-container');
-        var logDiv = document.createElement('div');
-        logDiv.className = 'log-entry';
-        logDiv.innerText = "🔧 " + logText;
-        container.appendChild(logDiv);
-        container.scrollTop = container.scrollHeight;
+      function setLoading(isLoading, label) {
+        var overlay = document.getElementById("loading-overlay");
+        var input = document.getElementById("user-input");
+        var button = document.getElementById("send-btn");
+        var loadingText = overlay.querySelector(".loading-text");
+
+        input.disabled = isLoading;
+        button.disabled = isLoading;
+        if (label) loadingText.textContent = label;
+        overlay.style.display = isLoading ? "flex" : "none";
       }
 
-      function submitQuery() {
-        var inputEl = document.getElementById('prompt-input');
-        var btnEl = document.getElementById('send-btn');
-        var query = inputEl.value.trim();
-        
-        if (!query) return;
+      function hideWelcomeCard() {
+        var welcome = document.getElementById("welcome-msg");
+        if (welcome) welcome.style.display = "none";
+      }
 
-        inputEl.value = '';
-        inputEl.disabled = true;
-        btnEl.disabled = true;
+      function parseMarkdownText(text) {
+        if (!text) return "";
+        var html = String(text)
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+        html = html.replace(
+          /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+          '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
+        );
+        return html.replace(/\n/g, "<br>");
+      }
 
-        appendMessage('user', query);
+      function parseValue(entry) {
+        if (!entry || typeof entry !== "object") return null;
+        if (entry.valueString !== undefined) return entry.valueString;
+        if (entry.valueNumber !== undefined) return entry.valueNumber;
+        if (entry.valueBoolean !== undefined) return entry.valueBoolean;
 
-        google.script.run
-          .withSuccessHandler(function(responseJSON) {
-            var data = JSON.parse(responseJSON);
-            
-            // Render tool logs if any were run during processing loops
-            if (data.executionLogs && data.executionLogs.length > 0) {
-              data.executionLogs.forEach(function(log) {
-                appendLog(log);
-              });
+        if (Array.isArray(entry.valueMap)) {
+          var mapLooksKeyed = entry.valueMap.some(function(item) {
+            return item && typeof item === "object" && Object.prototype.hasOwnProperty.call(item, "key");
+          });
+
+          if (mapLooksKeyed) {
+            var obj = {};
+            entry.valueMap.forEach(function(item, idx) {
+              var key = item.key || String(idx);
+              obj[key] = parseValue(item);
+            });
+
+            var numericKeys = Object.keys(obj).every(function(k) {
+              return /^\d+$/.test(k) || /^item/i.test(k);
+            });
+            if (numericKeys) {
+              return Object.keys(obj)
+                .sort(function(a, b) {
+                  var av = parseInt(a.replace(/^\D+/g, ""), 10) || 0;
+                  var bv = parseInt(b.replace(/^\D+/g, ""), 10) || 0;
+                  return av - bv;
+                })
+                .map(function(k) {
+                  return obj[k];
+                });
+            }
+            return obj;
+          }
+
+          return entry.valueMap.map(function(item) {
+            return parseValue(item);
+          });
+        }
+
+        return null;
+      }
+
+      function resolvePath(surfaceId, path) {
+        if (!path) return null;
+        var normalized = path.charAt(0) === "/" ? path.slice(1) : path;
+        if (!normalized) return appState.surfaces[surfaceId].data;
+
+        var parts = normalized.split("/");
+        var current = appState.surfaces[surfaceId].data;
+        for (var i = 0; i < parts.length; i += 1) {
+          if (current == null) return null;
+          var token = parts[i];
+          if (Array.isArray(current) && /^\d+$/.test(token)) {
+            current = current[parseInt(token, 10)];
+          } else {
+            current = current[token];
+          }
+        }
+        return current;
+      }
+
+      function joinPath(base, append) {
+        if (!base) return append;
+        if (!append) return base;
+        if (append.charAt(0) === "/") return append;
+        var normalized = base.charAt(base.length - 1) === "/" ? base.slice(0, -1) : base;
+        return normalized + "/" + append;
+      }
+
+      function applyA2Update(update) {
+        var surfaceId =
+          (update.beginRendering && update.beginRendering.surfaceId) ||
+          (update.surfaceUpdate && update.surfaceUpdate.surfaceId) ||
+          (update.dataModelUpdate && update.dataModelUpdate.surfaceId) ||
+          "default";
+
+        appState.activeSurfaceId = surfaceId;
+        if (!appState.surfaces[surfaceId]) {
+          appState.surfaces[surfaceId] = {
+            data: {},
+            components: {},
+            rootId: null,
+          };
+        }
+
+        var surface = appState.surfaces[surfaceId];
+
+        if (update.beginRendering) {
+          surface.rootId = update.beginRendering.root || surface.rootId;
+          var styles = update.beginRendering.styles || {};
+          if (styles.primaryColor) {
+            document.documentElement.style.setProperty("--primary-color", styles.primaryColor);
+          }
+        }
+
+        if (update.surfaceUpdate && Array.isArray(update.surfaceUpdate.components)) {
+          update.surfaceUpdate.components.forEach(function(componentDef) {
+            surface.components[componentDef.id] = componentDef;
+          });
+        }
+
+        if (update.dataModelUpdate && Array.isArray(update.dataModelUpdate.contents)) {
+          update.dataModelUpdate.contents.forEach(function(entry) {
+            surface.data[entry.key] = parseValue(entry);
+          });
+        }
+      }
+
+      function renderChildren(surfaceId, children, hostEl, contextPath) {
+        if (!children) return;
+
+        if (Array.isArray(children.explicitList)) {
+          children.explicitList.forEach(function(childId) {
+            var child = renderComponent(surfaceId, childId, contextPath);
+            if (child) hostEl.appendChild(child);
+          });
+        }
+
+        if (children.template) {
+          var template = children.template;
+          var dataPath = joinPath(contextPath, template.dataBinding);
+          var listData = resolvePath(surfaceId, dataPath);
+          if (!listData) return;
+
+          var entries = Array.isArray(listData) ? listData : Object.keys(listData).map(function(k) {
+            return listData[k];
+          });
+
+          entries.forEach(function(_item, index) {
+            var itemPath = Array.isArray(listData) ? joinPath(dataPath, String(index)) : joinPath(dataPath, Object.keys(listData)[index]);
+            var child = renderComponent(surfaceId, template.componentId, itemPath);
+            if (child) hostEl.appendChild(child);
+          });
+        }
+      }
+
+      function collectActionContext(surfaceId, contextPath, actionContext) {
+        if (!Array.isArray(actionContext)) return {};
+        var context = {};
+        actionContext.forEach(function(item) {
+          if (!item || !item.key || !item.value) return;
+          if (item.value.literalString !== undefined) {
+            context[item.key] = item.value.literalString;
+            return;
+          }
+          if (item.value.path) {
+            context[item.key] = resolvePath(surfaceId, joinPath(contextPath, item.value.path));
+          }
+        });
+        return context;
+      }
+
+      function renderComponent(surfaceId, componentId, contextPath) {
+        var surface = appState.surfaces[surfaceId];
+        var definition = surface.components[componentId];
+        if (!definition || !definition.component) return null;
+
+        var type = Object.keys(definition.component)[0];
+        var props = definition.component[type] || {};
+        var el = document.createElement("div");
+        if (definition.weight) {
+          el.style.flex = String(definition.weight);
+        }
+
+        try {
+          if (type === "Column") {
+            el.className = "a2ui-column";
+            renderChildren(surfaceId, props.children, el, contextPath);
+            return el;
+          }
+
+          if (type === "Row") {
+            el.className = "a2ui-row";
+            if (props.alignment) el.style.alignItems = props.alignment;
+            renderChildren(surfaceId, props.children, el, contextPath);
+            return el;
+          }
+
+          if (type === "List") {
+            el.className = props.direction === "horizontal" ? "a2ui-row" : "a2ui-column";
+            renderChildren(surfaceId, props.children, el, contextPath);
+            return el;
+          }
+
+          if (type === "Card") {
+            el.className = "a2ui-card";
+            if (props.child) {
+              var cardChild = renderComponent(surfaceId, props.child, contextPath);
+              if (cardChild) el.appendChild(cardChild);
+            }
+            return el;
+          }
+
+          if (type === "Divider") {
+            var hr = document.createElement("hr");
+            hr.className = "a2ui-divider";
+            return hr;
+          }
+
+          if (type === "Text") {
+            var hint = props.usageHint || "body";
+            el.className = "a2ui-text a2ui-text-" + hint;
+            var text = "";
+            if (props.text) {
+              if (props.text.literalString !== undefined) {
+                text = props.text.literalString;
+              } else if (props.text.path) {
+                text = resolvePath(surfaceId, joinPath(contextPath, props.text.path));
+              }
+            }
+            el.innerHTML = parseMarkdownText(text || "");
+            return el;
+          }
+
+          if (type === "Image") {
+            var img = document.createElement("img");
+            img.className = "a2ui-image";
+            var src = "";
+            if (props.url) {
+              if (props.url.literalString !== undefined) {
+                src = props.url.literalString;
+              } else if (props.url.path) {
+                src = resolvePath(surfaceId, joinPath(contextPath, props.url.path));
+              }
+            }
+            img.src = src || "https://via.placeholder.com/600x320?text=No+Image";
+            if (props.width) img.style.width = props.width;
+            if (props.height) img.style.height = props.height;
+            el.appendChild(img);
+            return el;
+          }
+
+          if (type === "TextField") {
+            var wrapper = document.createElement("div");
+            wrapper.className = "a2ui-input-group";
+            var label = document.createElement("label");
+            label.className = "a2ui-label";
+            label.textContent = (props.label && props.label.literalString) || "Input";
+            var input = document.createElement("input");
+            input.className = "a2ui-textfield a2ui-input-field";
+            input.type = props.type || "text";
+            input.dataset.label = label.textContent;
+            if (props.text && props.text.path) {
+              input.value = resolvePath(surfaceId, joinPath(contextPath, props.text.path)) || "";
+            }
+            wrapper.appendChild(label);
+            wrapper.appendChild(input);
+            return wrapper;
+          }
+
+          if (type === "DateTimeInput") {
+            var dateWrap = document.createElement("div");
+            dateWrap.className = "a2ui-input-group";
+            var dateLabel = document.createElement("label");
+            dateLabel.className = "a2ui-label";
+            dateLabel.textContent = (props.label && props.label.literalString) || "Date & Time";
+            var dateInput = document.createElement("input");
+            dateInput.className = "a2ui-textfield a2ui-input-field";
+            dateInput.type = "datetime-local";
+            dateInput.dataset.label = dateLabel.textContent;
+            dateWrap.appendChild(dateLabel);
+            dateWrap.appendChild(dateInput);
+            return dateWrap;
+          }
+
+          if (type === "Checkbox") {
+            var checkWrap = document.createElement("label");
+            checkWrap.className = "a2ui-checkbox-container";
+            var checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.className = "a2ui-checkbox";
+            checkbox.dataset.type = "checkbox";
+            if (props.value) {
+              if (props.value.literalString !== undefined) {
+                checkbox.value = props.value.literalString;
+              } else if (props.value.path) {
+                checkbox.value = resolvePath(surfaceId, joinPath(contextPath, props.value.path)) || "";
+              }
+            }
+            var checkLabel = document.createElement("span");
+            checkLabel.className = "a2ui-checkbox-label";
+            checkLabel.textContent = (props.label && props.label.literalString) || "Select";
+            checkWrap.appendChild(checkbox);
+            checkWrap.appendChild(checkLabel);
+            return checkWrap;
+          }
+
+          if (type === "Button") {
+            var button = document.createElement("button");
+            button.className = "a2ui-button" + (props.primary ? " a2ui-button-primary" : "");
+
+            if (props.child) {
+              var labelComponent = renderComponent(surfaceId, props.child, contextPath);
+              button.textContent = labelComponent ? labelComponent.textContent : "Action";
+            } else {
+              button.textContent = "Action";
             }
 
-            appendMessage('agent', data.finalResponse);
-            conversationHistory = data.updatedHistory;
+            button.addEventListener("click", function() {
+              var actionName = props.action && props.action.name ? props.action.name : "ui_action";
+              var context = collectActionContext(surfaceId, contextPath, props.action && props.action.context);
+              var inputs = Array.prototype.slice.call(document.querySelectorAll(".a2ui-input-field")).map(function(node) {
+                return {
+                  label: node.dataset.label || "input",
+                  value: node.type === "checkbox" ? String(node.checked) : node.value,
+                };
+              });
 
-            inputEl.disabled = false;
-            btnEl.disabled = false;
-            inputEl.focus();
-          })
-          .withFailureHandler(function(err) {
-            appendMessage('agent', "Fatal Context Error: " + err.message);
-            inputEl.disabled = false;
-            btnEl.disabled = false;
-          })
-          .handleAgentChat(query, JSON.stringify(conversationHistory));
+              var prompt = [
+                "Action triggered:",
+                actionName,
+                "Context:",
+                JSON.stringify(context),
+                "Inputs:",
+                JSON.stringify(inputs),
+                "Please apply this action and return updated a2ui JSON.",
+              ].join("\n");
+
+              sendMessage(prompt, "Applying action...");
+            });
+
+            return button;
+          }
+        } catch (error) {
+          el.textContent = "Render error in component: " + type + " (" + error.message + ")";
+          return el;
+        }
+
+        return null;
       }
 
-      // Handle Enter Key Execution (Shift+Enter for lines)
-      document.getElementById('prompt-input').addEventListener('keydown', function(e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          submitQuery();
+      function renderAppState() {
+        var container = document.getElementById("ui-container");
+        container.innerHTML = "";
+
+        var surfaceId = appState.activeSurfaceId;
+        if (!surfaceId) return;
+
+        var surface = appState.surfaces[surfaceId];
+        if (!surface || !surface.rootId) return;
+
+        var root = renderComponent(surfaceId, surface.rootId, "");
+        if (!root) return;
+
+        var surfaceEl = document.createElement("div");
+        surfaceEl.className = "a2ui-surface";
+        surfaceEl.appendChild(root);
+        container.appendChild(surfaceEl);
+      }
+
+      function renderA2UiMessages(messages) {
+        hideWelcomeCard();
+
+        var updates = Array.isArray(messages) ? messages : [messages];
+        updates.forEach(function(update) {
+          if (update && typeof update === "object") applyA2Update(update);
+        });
+        renderAppState();
+      }
+
+      function renderExecutionLogs(logs) {
+        if (!logs || !logs.length) return;
+        var container = document.getElementById("ui-container");
+        logs.forEach(function(log) {
+          var p = document.createElement("p");
+          p.className = "log-item";
+          p.textContent = "• " + log;
+          container.appendChild(p);
+        });
+      }
+
+      function fallbackLocalResponse(query) {
+        return {
+          text: "Local preview mode: google.script.run is unavailable for file:// pages.",
+          uiJson: [
+            {
+              beginRendering: {
+                surfaceId: "default",
+                root: "root-column",
+                styles: {
+                  primaryColor: "#0f766e",
+                },
+              },
+            },
+            {
+              surfaceUpdate: {
+                surfaceId: "default",
+                components: [
+                  {
+                    id: "root-column",
+                    component: {
+                      Column: {
+                        children: {
+                          explicitList: ["title-text", "body-card"],
+                        },
+                      },
+                    },
+                  },
+                  {
+                    id: "title-text",
+                    component: {
+                      Text: {
+                        usageHint: "h2",
+                        text: { path: "title" },
+                      },
+                    },
+                  },
+                  {
+                    id: "body-card",
+                    component: {
+                      Card: {
+                        child: "body-text",
+                      },
+                    },
+                  },
+                  {
+                    id: "body-text",
+                    component: {
+                      Text: {
+                        usageHint: "body",
+                        text: { path: "body" },
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+            {
+              dataModelUpdate: {
+                surfaceId: "default",
+                path: "/",
+                contents: [
+                  { key: "title", valueString: "A2UI Preview" },
+                  {
+                    key: "body",
+                    valueString:
+                      "Your prompt was: " + query + "\n\nOpen this from Google Sheets Sidebar to use the live worker API.",
+                  },
+                ],
+              },
+            },
+          ],
+          updatedHistory: conversationHistory,
+          executionLogs: [],
+        };
+      }
+
+      function sendMessage(query, statusText) {
+        var input = document.getElementById("user-input");
+        if (!query) return;
+
+        setStatus(statusText || "Processing...");
+        setLoading(true, statusText || "Processing...");
+
+        if (!window.google || !google.script || !google.script.run) {
+          var local = fallbackLocalResponse(query);
+          renderA2UiMessages(local.uiJson);
+          setLoading(false);
+          setStatus("Preview mode");
+          return;
+        }
+
+        google.script.run
+          .withSuccessHandler(function(response) {
+            setLoading(false);
+            setStatus("Ready");
+
+            if (response && response.updatedHistory) {
+              conversationHistory = response.updatedHistory;
+            }
+
+            if (response && response.uiJson) {
+              renderA2UiMessages(response.uiJson);
+            } else if (response && response.text) {
+              renderA2UiMessages(fallbackLocalResponse(response.text).uiJson);
+            }
+
+            renderExecutionLogs(response && response.executionLogs ? response.executionLogs : []);
+            input.focus();
+          })
+          .withFailureHandler(function(error) {
+            setLoading(false);
+            setStatus("Error");
+            renderA2UiMessages(
+              fallbackLocalResponse(
+                "Request failed: " + (error && error.message ? error.message : "Unknown error"),
+              ).uiJson,
+            );
+          })
+          .processUserRequest(query, JSON.stringify(conversationHistory), APP_CONFIG.chatApiUrl);
+      }
+
+      function handleSend() {
+        var input = document.getElementById("user-input");
+        var value = input.value.trim();
+        if (!value) return;
+        input.value = "";
+        sendMessage(value, "Querying worker...");
+      }
+
+      document.getElementById("user-input").addEventListener("keydown", function(event) {
+        if (event.key === "Enter" && !event.shiftKey) {
+          event.preventDefault();
+          handleSend();
         }
       });
     </script>

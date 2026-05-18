@@ -7,16 +7,21 @@
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('Architect Engine')
-    .addItem('Open Renovation Agent', 'showSidebar')
+    .addItem('Open A2UI Renovation Agent', 'showSidebar')
     .addItem('Export Selected Tab as JSON', 'exportActiveTabAsJson')
     .addToUi();
 }
 
 // Inject and Display Sidebar Canvas
 function showSidebar() {
-  var html = HtmlService.createTemplateFromFile('Sidebar')
+  var template = HtmlService.createTemplateFromFile('Sidebar');
+  var apiConfig = getApiConfig();
+  template.chatApiUrl = apiConfig.chatApiUrl;
+  template.chatStreamApiUrl = apiConfig.chatStreamApiUrl;
+
+  var html = template
     .evaluate()
-    .setTitle('Renovation Agent Core')
+    .setTitle('A2UI Renovation Agent')
     .setWidth(400);
   SpreadsheetApp.getUi().showSidebar(html);
 }
