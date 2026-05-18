@@ -56,6 +56,9 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use("*", cors());
 app.use("*", logger());
 app.use("/api/admin/*", requireAccessAuth);
+app.use("/api/images/upload", requireAccessAuth);
+app.use("/api/planning", requireAccessAuth);
+app.use("/api/planning/*", requireAccessAuth);
 
 // Health check
 app.get("/api/ping", (c) => c.json({ status: "ok", timestamp: Date.now() }));

@@ -750,59 +750,67 @@ imagesRouter.post("/upload", async (c) => {
           uploadFingerprint,
         });
 
-        await db
-          .insert(images)
-          .values({
-            id: imageId,
-            displayName,
-            cfImageIdOriginal: deliveryToken,
-            cfImageIdOptimized: null,
-            photoCategory,
-            roomId: photoCategory === "listing" ? selectedRoom?.id ?? null : null,
-            roomType: roomHint,
-            metadata: initialMetadata,
-            isListingPhoto: photoCategory === "listing",
-            sourceFilename: uploadFingerprint.sourceFilename,
-            sourceFilenameNormalized: uploadFingerprint.sourceFilenameNormalized,
-            sourceFileSize: uploadFingerprint.sourceFileSize,
-            sourceFileMd5: uploadFingerprint.sourceFileMd5,
-          })
-          .run();
-
-        if (photoCategory === "inspirational" && selectedInspirationalRoomIds.length > 0) {
-          await db
-            .insert(inspirationalImageRooms)
-            .values(
-              selectedInspirationalRoomIds.map((roomId) => ({
-                imageId,
-                roomId,
-              })),
-            )
-            .onConflictDoNothing()
+        const insertedImage = await db.transaction(async (tx) => {
+          await tx
+            .insert(images)
+            .values({
+              id: imageId,
+              displayName,
+              cfImageIdOriginal: deliveryToken,
+              cfImageIdOptimized: null,
+              photoCategory,
+              roomId: photoCategory === "listing" ? selectedRoom?.id ?? null : null,
+              roomType: roomHint,
+              metadata: initialMetadata,
+              isListingPhoto: photoCategory === "listing",
+              sourceFilename: uploadFingerprint.sourceFilename,
+              sourceFilenameNormalized: uploadFingerprint.sourceFilenameNormalized,
+              sourceFileSize: uploadFingerprint.sourceFileSize,
+              sourceFileMd5: uploadFingerprint.sourceFileMd5,
+            })
             .run();
-        }
 
-        await db
-          .insert(imageUploadStaging)
-          .values({
-            imageId,
-            photoCategory: mappingCategory,
-            mappingStatus: mappedOnUpload ? "mapped" : "pending",
-            processingStatus: "queued",
-            workflowInstanceId,
-            processingError: null,
-          })
-          .onConflictDoUpdate({
-            target: imageUploadStaging.imageId,
-            set: {
+          if (photoCategory === "inspirational" && selectedInspirationalRoomIds.length > 0) {
+            await tx
+              .insert(inspirationalImageRooms)
+              .values(
+                selectedInspirationalRoomIds.map((roomId) => ({
+                  imageId,
+                  roomId,
+                })),
+              )
+              .onConflictDoNothing()
+              .run();
+          }
+
+          await tx
+            .insert(imageUploadStaging)
+            .values({
+              imageId,
               photoCategory: mappingCategory,
               mappingStatus: mappedOnUpload ? "mapped" : "pending",
               processingStatus: "queued",
               workflowInstanceId,
               processingError: null,
-            },
-          })
-          .run();
+            })
+            .onConflictDoUpdate({
+              target: imageUploadStaging.imageId,
+              set: {
+                photoCategory: mappingCategory,
+                mappingStatus: mappedOnUpload ? "mapped" : "pending",
+                processingStatus: "queued",
+                workflowInstanceId,
+                processingError: null,
+              },
+            })
+            .run();
+
+          return tx
+            .select()
+            .from(images)
+            .where(eq(images.id, imageId))
+            .get();
+        });
 
         const workflowParams: ImageProcessingWorkflowParams = {
           imageId,
@@ -838,12 +846,6 @@ imagesRouter.post("/upload", async (c) => {
           });
           continue;
         }
-
-        const insertedImage = await db
-          .select()
-          .from(images)
-          .where(eq(images.id, imageId))
-          .get();
 
         results.push({
           success: true,

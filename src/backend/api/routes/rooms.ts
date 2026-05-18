@@ -454,61 +454,60 @@ async function upsertRoomSummary(
     datetimeGenerated?: Date | null;
   },
 ) {
-  const existing = await db
-    .select()
-    .from(roomAiSummaries)
-    .where(eq(roomAiSummaries.roomId, roomId))
-    .get();
   const now = new Date();
+  const nextValues: Partial<typeof roomAiSummaries.$inferInsert> = {
+    datetimeUpdated: now,
+  };
+  const insertValues: typeof roomAiSummaries.$inferInsert = {
+    roomId,
+    representativeImageId: null,
+    summaryMarkdown: null,
+    summaryJson: null,
+    lastUserPrompt: null,
+    lastVoiceTranscript: null,
+    model: null,
+    datetimeCreated: now,
+    datetimeUpdated: now,
+    datetimeGenerated: null,
+  };
 
-  if (!existing) {
-    await db
-      .insert(roomAiSummaries)
-      .values({
-        roomId,
-        representativeImageId:
-          updates.representativeImageId === undefined ? null : updates.representativeImageId,
-        summaryMarkdown:
-          updates.summaryMarkdown === undefined ? null : updates.summaryMarkdown,
-        summaryJson: updates.summaryJson === undefined ? null : updates.summaryJson,
-        lastUserPrompt:
-          updates.lastUserPrompt === undefined ? null : updates.lastUserPrompt,
-        lastVoiceTranscript:
-          updates.lastVoiceTranscript === undefined ? null : updates.lastVoiceTranscript,
-        model: updates.model === undefined ? null : updates.model,
-        datetimeCreated: now,
-        datetimeUpdated: now,
-        datetimeGenerated:
-          updates.datetimeGenerated === undefined ? null : updates.datetimeGenerated,
-      })
-      .run();
-  } else {
-    const nextValues: Record<string, unknown> = {
-      datetimeUpdated: now,
-    };
-    if (updates.representativeImageId !== undefined) {
-      nextValues.representativeImageId = updates.representativeImageId;
-    }
-    if (updates.summaryMarkdown !== undefined) {
-      nextValues.summaryMarkdown = updates.summaryMarkdown;
-    }
-    if (updates.summaryJson !== undefined) {
-      nextValues.summaryJson = updates.summaryJson;
-    }
-    if (updates.lastUserPrompt !== undefined) {
-      nextValues.lastUserPrompt = updates.lastUserPrompt;
-    }
-    if (updates.lastVoiceTranscript !== undefined) {
-      nextValues.lastVoiceTranscript = updates.lastVoiceTranscript;
-    }
-    if (updates.model !== undefined) {
-      nextValues.model = updates.model;
-    }
-    if (updates.datetimeGenerated !== undefined) {
-      nextValues.datetimeGenerated = updates.datetimeGenerated;
-    }
-    await db.update(roomAiSummaries).set(nextValues).where(eq(roomAiSummaries.roomId, roomId)).run();
+  if (updates.representativeImageId !== undefined) {
+    nextValues.representativeImageId = updates.representativeImageId;
+    insertValues.representativeImageId = updates.representativeImageId;
   }
+  if (updates.summaryMarkdown !== undefined) {
+    nextValues.summaryMarkdown = updates.summaryMarkdown;
+    insertValues.summaryMarkdown = updates.summaryMarkdown;
+  }
+  if (updates.summaryJson !== undefined) {
+    nextValues.summaryJson = updates.summaryJson;
+    insertValues.summaryJson = updates.summaryJson;
+  }
+  if (updates.lastUserPrompt !== undefined) {
+    nextValues.lastUserPrompt = updates.lastUserPrompt;
+    insertValues.lastUserPrompt = updates.lastUserPrompt;
+  }
+  if (updates.lastVoiceTranscript !== undefined) {
+    nextValues.lastVoiceTranscript = updates.lastVoiceTranscript;
+    insertValues.lastVoiceTranscript = updates.lastVoiceTranscript;
+  }
+  if (updates.model !== undefined) {
+    nextValues.model = updates.model;
+    insertValues.model = updates.model;
+  }
+  if (updates.datetimeGenerated !== undefined) {
+    nextValues.datetimeGenerated = updates.datetimeGenerated;
+    insertValues.datetimeGenerated = updates.datetimeGenerated;
+  }
+
+  await db
+    .insert(roomAiSummaries)
+    .values(insertValues)
+    .onConflictDoUpdate({
+      target: roomAiSummaries.roomId,
+      set: nextValues,
+    })
+    .run();
 
   return db
     .select()
@@ -537,6 +536,9 @@ roomsRouter.get("/catalog", async (c) => {
 });
 
 roomsRouter.get("/code/:roomCode/detail", async (c) => {
+  const accessError = await ensureAccess(c);
+  if (accessError) return accessError;
+
   try {
     const roomCode = c.req.param("roomCode");
     const detail = await loadRoomDetail(c.env, roomCode);

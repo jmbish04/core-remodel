@@ -726,95 +726,96 @@ async function persistPropertyRecords(
   rows: ExtractedPermitRow[],
 ): Promise<void> {
   const db = drizzle(env.DB);
+  await db.transaction(async (tx) => {
+    for (const row of rows) {
+      const sanitizedRaw = pruneVolatileRow(row.rawData);
+      const changeSeed = stableSortObject({
+        dataset: row.dataset,
+        permitIdentifier: row.permitIdentifier,
+        applicationNumber: row.applicationNumber,
+        permitNumber: row.permitNumber,
+        permitType: row.permitType,
+        permitStatus: row.permitStatus,
+        statusCategory: row.statusCategory,
+        propertyAddress: row.propertyAddress,
+        block: row.block,
+        lot: row.lot,
+        contactName: row.contactName,
+        contactRole: row.contactRole,
+        issuedDate: row.issuedDate,
+        expiresDate: row.expiresDate,
+        closedDate: row.closedDate,
+        latitude: row.latitude,
+        longitude: row.longitude,
+        isClosed: row.isClosed,
+        rawData: sanitizedRaw,
+      });
+      const changeHash = await sha256(JSON.stringify(changeSeed));
 
-  for (const row of rows) {
-    const sanitizedRaw = pruneVolatileRow(row.rawData);
-    const changeSeed = stableSortObject({
-      dataset: row.dataset,
-      permitIdentifier: row.permitIdentifier,
-      applicationNumber: row.applicationNumber,
-      permitNumber: row.permitNumber,
-      permitType: row.permitType,
-      permitStatus: row.permitStatus,
-      statusCategory: row.statusCategory,
-      propertyAddress: row.propertyAddress,
-      block: row.block,
-      lot: row.lot,
-      contactName: row.contactName,
-      contactRole: row.contactRole,
-      issuedDate: row.issuedDate,
-      expiresDate: row.expiresDate,
-      closedDate: row.closedDate,
-      latitude: row.latitude,
-      longitude: row.longitude,
-      isClosed: row.isClosed,
-      rawData: sanitizedRaw,
-    });
-    const changeHash = await sha256(JSON.stringify(changeSeed));
+      const existing = await tx
+        .select()
+        .from(permitsRecords)
+        .where(eq(permitsRecords.recordKey, row.recordKey))
+        .get();
 
-    const existing = await db
-      .select()
-      .from(permitsRecords)
-      .where(eq(permitsRecords.recordKey, row.recordKey))
-      .get();
+      const changed = !existing || existing.changeHash !== changeHash;
+      const now = new Date();
 
-    const changed = !existing || existing.changeHash !== changeHash;
-    const now = new Date();
-
-    const values = {
-      id: existing?.id || crypto.randomUUID(),
-      dataset: dataset.key,
-      recordKey: row.recordKey,
-      permitIdentifier: row.permitIdentifier,
-      applicationNumber: row.applicationNumber,
-      permitNumber: row.permitNumber,
-      permitType: row.permitType,
-      permitStatus: row.permitStatus,
-      statusCategory: row.statusCategory,
-      propertyAddress: row.propertyAddress,
-      block: row.block,
-      lot: row.lot,
-      contactName: row.contactName,
-      contactRole: row.contactRole,
-      issuedDate: row.issuedDate,
-      expiresDate: row.expiresDate,
-      closedDate: row.closedDate,
-      latitude: row.latitude,
-      longitude: row.longitude,
-      isPropertyPermit: isTargetPropertyMatch(row),
-      isClosed: row.isClosed,
-      changeHash,
-      lastChangedAt: changed ? now : existing?.lastChangedAt || null,
-      latestRunId: runId,
-      rawData: JSON.stringify(sanitizedRaw),
-      datetimeUpdated: now,
-    };
-
-    await db
-      .insert(permitsRecords)
-      .values({
-        ...values,
-        datetimeCreated: existing?.datetimeCreated || now,
-      })
-      .onConflictDoUpdate({
-        target: permitsRecords.recordKey,
-        set: values,
-      })
-      .run();
-
-    await db
-      .insert(permitsRecordRevisions)
-      .values({
-        id: crypto.randomUUID(),
-        runId,
+      const values = {
+        id: existing?.id || crypto.randomUUID(),
         dataset: dataset.key,
         recordKey: row.recordKey,
+        permitIdentifier: row.permitIdentifier,
+        applicationNumber: row.applicationNumber,
         permitNumber: row.permitNumber,
+        permitType: row.permitType,
         permitStatus: row.permitStatus,
+        statusCategory: row.statusCategory,
+        propertyAddress: row.propertyAddress,
+        block: row.block,
+        lot: row.lot,
+        contactName: row.contactName,
+        contactRole: row.contactRole,
+        issuedDate: row.issuedDate,
+        expiresDate: row.expiresDate,
+        closedDate: row.closedDate,
+        latitude: row.latitude,
+        longitude: row.longitude,
+        isPropertyPermit: isTargetPropertyMatch(row),
+        isClosed: row.isClosed,
+        changeHash,
+        lastChangedAt: changed ? now : existing?.lastChangedAt || null,
+        latestRunId: runId,
         rawData: JSON.stringify(sanitizedRaw),
-      })
-      .run();
-  }
+        datetimeUpdated: now,
+      };
+
+      await tx
+        .insert(permitsRecords)
+        .values({
+          ...values,
+          datetimeCreated: existing?.datetimeCreated || now,
+        })
+        .onConflictDoUpdate({
+          target: permitsRecords.recordKey,
+          set: values,
+        })
+        .run();
+
+      await tx
+        .insert(permitsRecordRevisions)
+        .values({
+          id: crypto.randomUUID(),
+          runId,
+          dataset: dataset.key,
+          recordKey: row.recordKey,
+          permitNumber: row.permitNumber,
+          permitStatus: row.permitStatus,
+          rawData: JSON.stringify(sanitizedRaw),
+        })
+        .run();
+    }
+  });
 }
 
 async function refreshPermitContacts(env: Env): Promise<Array<typeof permitsContacts.$inferSelect>> {
@@ -1009,104 +1010,125 @@ async function syncContactActivity(
 
   const windowStartIso = getContactActivityWindowStartIso();
   const yearStartIso = getYearStartIso();
+  await Promise.all(
+    monitoredContacts.map(async (contact) => {
+      const identifiers = getIdentifiersForContact(propertyRows, contact.contactName);
+      const datasetsToSync = DATASETS.filter((row) => row.includeInContactSync);
+      const seenKeys = new Set<string>();
 
-  for (const contact of monitoredContacts) {
-    const identifiers = getIdentifiersForContact(propertyRows, contact.contactName);
-    const contactActivityRows: ExtractedPermitRow[] = [];
-    const seenKeys = new Set<string>();
+      const datasetResults = await Promise.all(
+        datasetsToSync.map(async (dataset) => {
+          const metadata = await fetchDatasetMetadata(dataset.datasetId);
+          const identifierChunks = chunkArray(identifiers, 40);
+          const chunks = identifierChunks.length > 0 ? identifierChunks : [[]];
 
-    for (const dataset of DATASETS.filter((row) => row.includeInContactSync)) {
-      const metadata = await fetchDatasetMetadata(dataset.datasetId);
-      const identifierChunks = chunkArray(identifiers, 40);
+          const chunkRows = await Promise.all(
+            chunks.map(async (chunk) => {
+              const whereByIdentifier = buildIdentifierWhere(metadata, chunk);
+              try {
+                const rawRows = whereByIdentifier
+                  ? await fetchSodaRows(
+                      dataset.datasetId,
+                      {
+                        $where: whereByIdentifier,
+                        $order: ":id DESC",
+                      },
+                      2000,
+                    )
+                  : await (async () => {
+                      const whereByContact = buildContactWhere(metadata, contact.contactName);
+                      if (whereByContact) {
+                        return fetchSodaRows(
+                          dataset.datasetId,
+                          {
+                            $where: whereByContact,
+                            $order: ":id DESC",
+                          },
+                          2000,
+                        );
+                      }
+                      return fetchSodaRows(
+                        dataset.datasetId,
+                        {
+                          $q: contact.contactName,
+                          $order: ":id DESC",
+                        },
+                        1200,
+                      );
+                    })();
 
-      for (const chunk of identifierChunks.length > 0 ? identifierChunks : [[]]) {
-        let rawRows: SodaRow[] = [];
-        const whereByIdentifier = buildIdentifierWhere(metadata, chunk);
-        try {
-          if (whereByIdentifier) {
-            rawRows = await fetchSodaRows(
-              dataset.datasetId,
-              {
-                $where: whereByIdentifier,
-                $order: ":id DESC",
-              },
-              2000,
-            );
-          } else {
-            const whereByContact = buildContactWhere(metadata, contact.contactName);
-            if (whereByContact) {
-              rawRows = await fetchSodaRows(
-                dataset.datasetId,
-                {
-                  $where: whereByContact,
-                  $order: ":id DESC",
-                },
-                2000,
-              );
-            } else {
-              rawRows = await fetchSodaRows(
-                dataset.datasetId,
-                {
-                  $q: contact.contactName,
-                  $order: ":id DESC",
-                },
-                1200,
-              );
+                return rawRows
+                  .map((row) => extractPermitRow(dataset.key, row, metadata))
+                  .filter((row) => isWithinMonitoringWindow(row, windowStartIso, yearStartIso));
+              } catch {
+                return [] as ExtractedPermitRow[];
+              }
+            }),
+          );
+
+          const dedupedRows: ExtractedPermitRow[] = [];
+          for (const extractedRows of chunkRows) {
+            for (const row of extractedRows) {
+              const key = `${contact.contactName}:${row.recordKey}`;
+              if (seenKeys.has(key)) continue;
+              seenKeys.add(key);
+              dedupedRows.push(row);
             }
           }
-        } catch {
-          rawRows = [];
-        }
 
-        const extractedRows = rawRows
-          .map((row) => extractPermitRow(dataset.key, row, metadata))
-          .filter((row) => isWithinMonitoringWindow(row, windowStartIso, yearStartIso));
+          return {
+            dataset,
+            rows: dedupedRows,
+          };
+        }),
+      );
 
-        for (const row of extractedRows) {
-          const key = `${contact.contactName}:${row.recordKey}`;
-          if (seenKeys.has(key)) continue;
-          seenKeys.add(key);
-          contactActivityRows.push(row);
-        }
-      }
+      await Promise.all(
+        datasetResults.map(async ({ dataset, rows }) => {
+          const runId = await createSyncRun(env, {
+            runType: "contact",
+            queryLabel: `${contact.contactName} ${dataset.label} activity`,
+            sourceDataset: dataset.datasetId,
+            status: "success",
+            resultCount: rows.length,
+            aiSummary: `Tracked ${contact.contactName} against ${dataset.label}.`,
+            rawPayload: rows.slice(0, 20).map((row) => row.rawData),
+          });
 
-      const runId = await createSyncRun(env, {
-        runType: "contact",
-        queryLabel: `${contact.contactName} ${dataset.label} activity`,
-        sourceDataset: dataset.datasetId,
-        status: "success",
-        resultCount: contactActivityRows.length,
-        aiSummary: `Tracked ${contact.contactName} against ${dataset.label}.`,
-        rawPayload: contactActivityRows.slice(0, 20).map((row) => row.rawData),
-      });
+          if (rows.length === 0) {
+            return;
+          }
 
-      for (const row of contactActivityRows) {
-        const insertId = crypto.randomUUID();
-        await db
-          .insert(permitsContactActivity)
-          .values({
-            id: insertId,
-            contactName: contact.contactName,
-            dataset: row.dataset,
-            recordKey: row.recordKey,
-            permitIdentifier: row.permitIdentifier,
-            applicationNumber: row.applicationNumber,
-            permitNumber: row.permitNumber,
-            permitType: row.permitType,
-            permitStatus: row.permitStatus,
-            statusCategory: row.statusCategory,
-            propertyAddress: row.propertyAddress,
-            issuedDate: row.issuedDate,
-            closedDate: row.closedDate,
-            latitude: row.latitude,
-            longitude: row.longitude,
-            runId,
-            rawData: JSON.stringify(pruneVolatileRow(row.rawData)),
-          })
-          .run();
-      }
-    }
-  }
+          await db.transaction(async (tx) => {
+            for (const row of rows) {
+              await tx
+                .insert(permitsContactActivity)
+                .values({
+                  id: crypto.randomUUID(),
+                  contactName: contact.contactName,
+                  dataset: row.dataset,
+                  recordKey: row.recordKey,
+                  permitIdentifier: row.permitIdentifier,
+                  applicationNumber: row.applicationNumber,
+                  permitNumber: row.permitNumber,
+                  permitType: row.permitType,
+                  permitStatus: row.permitStatus,
+                  statusCategory: row.statusCategory,
+                  propertyAddress: row.propertyAddress,
+                  issuedDate: row.issuedDate,
+                  closedDate: row.closedDate,
+                  latitude: row.latitude,
+                  longitude: row.longitude,
+                  runId,
+                  rawData: JSON.stringify(pruneVolatileRow(row.rawData)),
+                })
+                .run();
+            }
+          });
+        }),
+      );
+    }),
+  );
 }
 
 async function computeOverdueTaskSignals(env: Env): Promise<{
@@ -1371,53 +1393,53 @@ async function refreshContactInsights(env: Env): Promise<void> {
   const contactRows = await db.select().from(permitsContacts).all();
   const activityRows = await db.select().from(permitsContactActivity).all();
   const overdueSignals = await computeOverdueTaskSignals(env);
+  const monitoredContacts = contactRows.filter((contact) => Boolean(contact.isMonitored));
 
-  for (const contact of contactRows) {
-    if (!contact.isMonitored) {
-      continue;
-    }
-    const metrics = computeContactMetrics(activityRows, contact.contactName);
-    const insight = await generateContactInsight(
-      env,
-      contact.contactName,
-      metrics,
-      overdueSignals.overdueTasks,
-    );
+  await Promise.all(
+    monitoredContacts.map(async (contact) => {
+      const metrics = computeContactMetrics(activityRows, contact.contactName);
+      const insight = await generateContactInsight(
+        env,
+        contact.contactName,
+        metrics,
+        overdueSignals.overdueTasks,
+      );
 
-    const existing = await db
-      .select()
-      .from(permitsContactInsights)
-      .where(eq(permitsContactInsights.contactName, contact.contactName))
-      .get();
+      const existing = await db
+        .select()
+        .from(permitsContactInsights)
+        .where(eq(permitsContactInsights.contactName, contact.contactName))
+        .get();
 
-    const now = new Date();
-    await db
-      .insert(permitsContactInsights)
-      .values({
-        id: existing?.id || crypto.randomUUID(),
-        contactName: contact.contactName,
-        riskLevel: insight.riskLevel,
-        summary: insight.summary,
-        highlights: JSON.stringify(insight.highlights),
-        metrics: JSON.stringify(insight.metrics),
-        model: "@cf/meta/llama-3.1-8b-instruct",
-        lastRunId: null,
-        datetimeCreated: existing?.datetimeCreated || now,
-        datetimeUpdated: now,
-      })
-      .onConflictDoUpdate({
-        target: permitsContactInsights.contactName,
-        set: {
+      const now = new Date();
+      await db
+        .insert(permitsContactInsights)
+        .values({
+          id: existing?.id || crypto.randomUUID(),
+          contactName: contact.contactName,
           riskLevel: insight.riskLevel,
           summary: insight.summary,
           highlights: JSON.stringify(insight.highlights),
           metrics: JSON.stringify(insight.metrics),
           model: "@cf/meta/llama-3.1-8b-instruct",
+          lastRunId: null,
+          datetimeCreated: existing?.datetimeCreated || now,
           datetimeUpdated: now,
-        },
-      })
-      .run();
-  }
+        })
+        .onConflictDoUpdate({
+          target: permitsContactInsights.contactName,
+          set: {
+            riskLevel: insight.riskLevel,
+            summary: insight.summary,
+            highlights: JSON.stringify(insight.highlights),
+            metrics: JSON.stringify(insight.metrics),
+            model: "@cf/meta/llama-3.1-8b-instruct",
+            datetimeUpdated: now,
+          },
+        })
+        .run();
+    }),
+  );
 }
 
 export async function runPermitSync(env: Env): Promise<{
