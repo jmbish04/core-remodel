@@ -1,5 +1,5 @@
 
-const API_BASE_URL = "https://core-remodel-api.example.com/api/budget/appsscript"; // Replace with actual domain later
+const API_BASE_URL = "https://core-remodel.hacolby.workers.dev/api/sync/google-sheets"; // Replace with actual domain later
 
 function onOpen() {
   var ui = SpreadsheetApp.getUi();
@@ -14,7 +14,7 @@ function onOpen() {
 function showSidebar() {
   var html = HtmlService.createHtmlOutputFromFile("Sidebar")
     .setTitle("Renovation Agent")
-    .setWidth(350);
+    .setWidth(550);
   SpreadsheetApp.getUi().showSidebar(html);
 }
 
