@@ -19,6 +19,7 @@ Phase 2 extends the Apps Script integration with a comprehensive CSV ingestion s
 **Endpoint**: `POST /api/budget-tracker/csv-ingestion`
 
 **Request Schema**:
+
 ```typescript
 {
   rows: Array<{
@@ -36,6 +37,7 @@ Phase 2 extends the Apps Script integration with a comprehensive CSV ingestion s
 ```
 
 **Response Schema**:
+
 ```typescript
 {
   success: boolean;
@@ -55,6 +57,7 @@ Phase 2 extends the Apps Script integration with a comprehensive CSV ingestion s
 ```
 
 **Features**:
+
 - Full Zod validation for type safety
 - OpenAPI documentation via `@hono/zod-openapi`
 - Transaction isolation for batch operations
@@ -66,12 +69,14 @@ Phase 2 extends the Apps Script integration with a comprehensive CSV ingestion s
 The delta analysis engine compares incoming CSV rows against existing D1 records:
 
 **Delta States**:
+
 - `new` - Item doesn't exist in database
 - `updated` - Item exists but has changes
 - `unchanged` - Item exists with identical values
 - `conflict` - Item has conflicting changes (reserved for future use)
 
 **Process**:
+
 1. Parse and validate CSV rows with Zod
 2. For each row, query D1 for matching records (by item name)
 3. Compare fields and detect changes
@@ -84,6 +89,7 @@ The delta analysis engine compares incoming CSV rows against existing D1 records
 Uses `@cf/meta/llama-3.1-8b-instruct` to validate budget items:
 
 **Validation Checks**:
+
 - Is this a reasonable budget item?
 - Is the category appropriate?
 - Is the cost reasonable for this type of item?
@@ -91,6 +97,7 @@ Uses `@cf/meta/llama-3.1-8b-instruct` to validate budget items:
 - Provide rationale for assessment
 
 **AI Response**:
+
 ```typescript
 {
   validated: boolean;
@@ -108,6 +115,7 @@ Uses `@cf/meta/llama-3.1-8b-instruct` to validate budget items:
 Upgrades to WebSocket connection using the existing `ESTIMATE_COLLAB` Durable Object with room name "budget".
 
 **Event Broadcasting**:
+
 - `csv.ingestion.completed` - Fired after successful CSV import
 - `budget.item.created` - New item created
 - `budget.item.revised` - Item updated
@@ -119,6 +127,7 @@ Upgrades to WebSocket connection using the existing `ESTIMATE_COLLAB` Durable Ob
 #### Budget Reconciliation Workspace (`src/frontend/components/BudgetReconciliationApp.tsx`)
 
 **Features**:
+
 - CSV file upload with drag-and-drop
 - Real-time WebSocket connection for live updates
 - Dry-run mode to preview changes before applying
@@ -136,6 +145,7 @@ Upgrades to WebSocket connection using the existing `ESTIMATE_COLLAB` Durable Ob
 ## Database Schema
 
 Uses existing schemas:
+
 - `budgetTrackerItems` - Main budget line items with revision tracking
 - `budgetExpenseEntries` - Actual expenses with revision tracking
 - `budgetRows` - Apps Script sync schema (simple)
@@ -146,6 +156,7 @@ Uses existing schemas:
 ### 1. Export CSV from remodelum.com
 
 Ensure CSV has the following columns:
+
 - `Type` - "expense" or project type
 - `Category` - Budget category
 - `Name` - Item name/title
@@ -170,6 +181,7 @@ The realtime telemetry panel shows all budget events as they occur across the sy
 Full OpenAPI documentation is available at `/` (root) via Scalar API Reference.
 
 The CSV ingestion endpoint is fully documented with:
+
 - Request/response schemas
 - Example payloads
 - Error responses
@@ -184,6 +196,7 @@ await db.batch([...operations]);
 ```
 
 **Revision Tracking**:
+
 - All updates create new revisions instead of modifying existing records
 - Previous revisions are marked inactive with `replacedAt` timestamp
 - Full audit trail maintained

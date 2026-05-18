@@ -1,11 +1,10 @@
-import { Hono } from "hono";
-
 import {
   clearAccessCookie,
   isRequestAuthenticated,
   setAccessCookie,
   validatePasswordAgainstWorkerKey,
 } from "@backend/utils/access";
+import { Hono } from "hono";
 
 const accessRouter = new Hono<{ Bindings: Env }>();
 

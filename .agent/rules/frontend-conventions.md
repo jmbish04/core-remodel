@@ -2,14 +2,15 @@
 
 ## File Types & Attribute Rules
 
-| File Extension | Attribute Style | Example |
-|---------------|----------------|---------|
-| `.astro` | HTML attributes | `class="..."`, `for="..."` |
-| `.tsx` (React) | JSX attributes | `className="..."`, `htmlFor="..."` |
+| File Extension | Attribute Style | Example                            |
+| -------------- | --------------- | ---------------------------------- |
+| `.astro`       | HTML attributes | `class="..."`, `for="..."`         |
+| `.tsx` (React) | JSX attributes  | `className="..."`, `htmlFor="..."` |
 
 ## Astro Islands
 
 React components in `.astro` pages require client directives:
+
 ```astro
 <PhotoReviewApp client:load />     <!-- Hydrate immediately -->
 <Gallery client:visible />          <!-- Hydrate when visible -->
@@ -18,6 +19,7 @@ React components in `.astro` pages require client directives:
 ## Typing API Responses
 
 Always type `fetch` responses explicitly in React components:
+
 ```typescript
 // ✅ CORRECT
 const data = (await res.json()) as { images: ImageReview[] };
@@ -29,6 +31,7 @@ const data = await res.json();
 ## Import Aliases
 
 Use `@frontend/*` for frontend imports:
+
 ```typescript
 import { Button } from "@frontend/components/ui/button";
 ```

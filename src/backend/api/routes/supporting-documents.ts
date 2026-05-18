@@ -1,6 +1,3 @@
-import { desc, eq, inArray } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
-import { Hono } from "hono";
 import {
   remodelScenarios,
   rooms,
@@ -11,17 +8,13 @@ import {
   visionPlanNodes,
 } from "@backend/db";
 import { ensureHomeCatalogSeed } from "@backend/services/home-catalog";
+import { desc, eq, inArray } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { Hono } from "hono";
 
 const supportingDocumentsRouter = new Hono<{ Bindings: Env }>();
 
-type SourceType =
-  | "pdf"
-  | "image"
-  | "video"
-  | "screenshot"
-  | "url"
-  | "text"
-  | "other";
+type SourceType = "pdf" | "image" | "video" | "screenshot" | "url" | "text" | "other";
 
 function parseStringArray(value: unknown): string[] {
   if (!value) return [];
@@ -213,9 +206,7 @@ async function loadDocumentMappings(
   ]);
 
   const uniqueRoomIds = Array.from(new Set(roomMappings.map((row) => row.roomId)));
-  const uniqueScenarioIds = Array.from(
-    new Set(scenarioMappings.map((row) => row.scenarioId)),
-  );
+  const uniqueScenarioIds = Array.from(new Set(scenarioMappings.map((row) => row.scenarioId)));
   const uniqueNodeIds = Array.from(new Set(nodeMappings.map((row) => row.visionNodeId)));
 
   const [roomRows, scenarioRows, nodeRows] = await Promise.all([
@@ -541,13 +532,10 @@ supportingDocumentsRouter.post("/", async (c) => {
         title,
         sourceType,
         mimeType: typeof body.mimeType === "string" ? body.mimeType.trim() || null : null,
-        r2ObjectKey:
-          typeof body.r2ObjectKey === "string" ? body.r2ObjectKey.trim() || null : null,
+        r2ObjectKey: typeof body.r2ObjectKey === "string" ? body.r2ObjectKey.trim() || null : null,
         r2Url: typeof body.r2Url === "string" ? body.r2Url.trim() || null : null,
-        externalUrl:
-          typeof body.externalUrl === "string" ? body.externalUrl.trim() || null : null,
-        description:
-          typeof body.description === "string" ? body.description.trim() || null : null,
+        externalUrl: typeof body.externalUrl === "string" ? body.externalUrl.trim() || null : null,
+        description: typeof body.description === "string" ? body.description.trim() || null : null,
         tagsJson: tags.length > 0 ? JSON.stringify(tags) : null,
         metadata: metadata ? JSON.stringify(metadata) : null,
         isActive: parseBoolean(body.isActive, true),
@@ -555,8 +543,7 @@ supportingDocumentsRouter.post("/", async (c) => {
         revisionNumber,
         revisionOfId,
         replacedById: null,
-        aiRationale:
-          typeof body.aiRationale === "string" ? body.aiRationale.trim() || null : null,
+        aiRationale: typeof body.aiRationale === "string" ? body.aiRationale.trim() || null : null,
         datetimeCreated: createdAt || now,
         datetimeUpdated: updatedAt || now,
       })
@@ -687,17 +674,14 @@ supportingDocumentsRouter.post("/upload", async (c) => {
         mimeType: file.type || null,
         r2ObjectKey: objectKey,
         r2Url: `/api/artifacts/${objectKey}`,
-        externalUrl:
-          typeof externalUrlRaw === "string" ? externalUrlRaw.trim() || null : null,
-        description:
-          typeof descriptionRaw === "string" ? descriptionRaw.trim() || null : null,
+        externalUrl: typeof externalUrlRaw === "string" ? externalUrlRaw.trim() || null : null,
+        description: typeof descriptionRaw === "string" ? descriptionRaw.trim() || null : null,
         tagsJson: tags.length > 0 ? JSON.stringify(tags) : null,
         metadata: metadata ? JSON.stringify(metadata) : null,
         isFactRecord,
         isActive: true,
         revisionNumber: 1,
-        aiRationale:
-          typeof aiRationaleRaw === "string" ? aiRationaleRaw.trim() || null : null,
+        aiRationale: typeof aiRationaleRaw === "string" ? aiRationaleRaw.trim() || null : null,
         datetimeCreated: now,
         datetimeUpdated: now,
       })
@@ -808,7 +792,10 @@ supportingDocumentsRouter.patch("/:id", async (c) => {
         updates.title = title;
       }
       if (body.sourceType !== undefined) {
-        updates.sourceType = normalizeSourceType(body.sourceType, normalizeSourceType(existing.sourceType));
+        updates.sourceType = normalizeSourceType(
+          body.sourceType,
+          normalizeSourceType(existing.sourceType),
+        );
       }
       if (body.description !== undefined) {
         updates.description =
@@ -846,9 +833,7 @@ supportingDocumentsRouter.patch("/:id", async (c) => {
       if (roomIdsProvided || scenarioIdsProvided || visionNodeIdsProvided) {
         const currentMappings = await loadDocumentMappings(db, [documentId]);
         await replaceDocumentMappings(db, documentId, {
-          roomIds: roomIdsProvided
-            ? roomIds
-            : currentMappings.roomIdsByDoc.get(documentId) || [],
+          roomIds: roomIdsProvided ? roomIds : currentMappings.roomIdsByDoc.get(documentId) || [],
           scenarioIds: scenarioIdsProvided
             ? scenarioIds
             : currentMappings.scenarioIdsByDoc.get(documentId) || [],
@@ -895,7 +880,8 @@ supportingDocumentsRouter.patch("/:id", async (c) => {
 
     const nextId = crypto.randomUUID();
     const now = new Date();
-    const tags = body.tags !== undefined ? parseStringArray(body.tags) : parseStringArray(existing.tagsJson);
+    const tags =
+      body.tags !== undefined ? parseStringArray(body.tags) : parseStringArray(existing.tagsJson);
     const nextMetadata =
       body.metadata !== undefined
         ? parseJsonObject(body.metadata)

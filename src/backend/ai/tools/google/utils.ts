@@ -16,10 +16,10 @@ const GOOGLE_ID_REGEX = /\/(?:d|folders|projects)\/([a-zA-Z0-9_-]{25,})(?:\/|\?|
 /**
  * Safely extracts a Google Drive/Docs file or folder ID from a full URL.
  * If the input is already a bare ID, it is returned trimmed.
- * 
+ *
  * Safely extracts a Google Drive, Docs, Sheets, Slides, or Apps Script ID.
- * Targets the specific /d/ or /folders/ or id= markers and grabs the subsequent 
- * valid ID string while ignoring trailing path segments or query params. 
+ * Targets the specific /d/ or /folders/ or id= markers and grabs the subsequent
+ * valid ID string while ignoring trailing path segments or query params.
  *
  * Supported URL patterns:
  * - `https://docs.google.com/document/d/{ID}/...`
@@ -32,7 +32,7 @@ const GOOGLE_ID_REGEX = /\/(?:d|folders|projects)\/([a-zA-Z0-9_-]{25,})(?:\/|\?|
  */
 export function extractGoogleId(input: string): string {
   if (!input) return "";
-  
+
   const trimmed = input.trim();
 
   // 1. Performance Guard: If it looks like a bare ID, return immediately

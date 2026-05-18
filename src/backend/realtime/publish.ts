@@ -14,4 +14,3 @@ export async function publishRealtimeEvent(
     body: JSON.stringify(payload),
   });
 }
-

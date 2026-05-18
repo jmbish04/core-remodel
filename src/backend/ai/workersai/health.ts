@@ -31,7 +31,11 @@ export async function checkAIGateway(env: Env): Promise<ModuleResult> {
   const start = Date.now();
   try {
     if (!env.AI_GATEWAY_ID) {
-      return { status: "fail", latencyMs: Date.now() - start, error: "AI_GATEWAY_ID not configured" };
+      return {
+        status: "fail",
+        latencyMs: Date.now() - start,
+        error: "AI_GATEWAY_ID not configured",
+      };
     }
     const result = await env.AI.run(
       env.DEFAULT_MODEL_EMBEDDING as any,

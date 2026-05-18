@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -56,11 +57,12 @@ function formatDate(value: string | null): string {
 
 function getUpdateLabel(update: RecentUpdate): string {
   const room = update.roomType?.trim() || "Unassigned room";
-  const category = update.photoCategory === "listing"
-    ? "Listing"
-    : update.photoCategory === "ai_render"
-      ? "AI Render"
-      : "Inspiration";
+  const category =
+    update.photoCategory === "listing"
+      ? "Listing"
+      : update.photoCategory === "ai_render"
+        ? "AI Render"
+        : "Inspiration";
   return `${category} · ${room}`;
 }
 
@@ -152,8 +154,8 @@ export function HomeMissionControlApp() {
         <CardHeader>
           <CardTitle className="text-2xl">Contractor Briefing Hub</CardTitle>
           <CardDescription>
-            This workspace is the single source of truth for existing conditions, design intent,
-            and iterative decisions for 126 Colby.
+            This workspace is the single source of truth for existing conditions, design intent, and
+            iterative decisions for 126 Colby.
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-3">
@@ -194,9 +196,13 @@ export function HomeMissionControlApp() {
               <div className="space-y-3">
                 {updates.slice(0, 12).map((update) => (
                   <div key={update.id} className="rounded-lg bg-muted/20 p-3 ring-1 ring-border/30">
-                    <p className="text-sm font-medium">{update.displayName?.trim() || "Untitled photo"}</p>
+                    <p className="text-sm font-medium">
+                      {update.displayName?.trim() || "Untitled photo"}
+                    </p>
                     <p className="text-xs text-muted-foreground">{getUpdateLabel(update)}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{formatDate(update.datetimeCreated)}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {formatDate(update.datetimeCreated)}
+                    </p>
                   </div>
                 ))}
               </div>
@@ -232,7 +238,10 @@ export function HomeMissionControlApp() {
             )}
 
             {authenticated ? (
-              <form className="space-y-3 rounded-xl bg-muted/20 p-3 ring-1 ring-border/30" onSubmit={postMessage}>
+              <form
+                className="space-y-3 rounded-xl bg-muted/20 p-3 ring-1 ring-border/30"
+                onSubmit={postMessage}
+              >
                 <Input
                   placeholder="Message title"
                   value={title}

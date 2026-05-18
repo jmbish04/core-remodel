@@ -1,4 +1,5 @@
 import React from "react";
+
 import { cn } from "@/lib/utils";
 
 export interface BentoImageItem {
@@ -28,12 +29,7 @@ export function GridBento(props: GridBentoProps) {
   const { items, selectedId, onSelect, className } = props;
 
   return (
-    <div
-      className={cn(
-        "grid grid-cols-1 gap-4 sm:grid-cols-3 auto-rows-[8rem]",
-        className,
-      )}
-    >
+    <div className={cn("grid grid-cols-1 gap-4 sm:grid-cols-3 auto-rows-[8rem]", className)}>
       {items.map((item, index) => {
         const isSelected = selectedId === item.id;
         const variant = BENTO_VARIANTS[index % BENTO_VARIANTS.length];

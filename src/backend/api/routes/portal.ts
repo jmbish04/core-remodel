@@ -1,18 +1,12 @@
-import { desc, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
-import { Hono } from "hono";
-
-import {
-  homeownerMessages,
-  images,
-  visitorEvents,
-  visitorSessions,
-} from "@backend/db";
+import { homeownerMessages, images, visitorEvents, visitorSessions } from "@backend/db";
 import {
   getVisitorCookieFromRequest,
   isRequestAuthenticated,
   setVisitorCookie,
 } from "@backend/utils/access";
+import { desc, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { Hono } from "hono";
 
 const portalRouter = new Hono<{ Bindings: Env }>();
 
@@ -73,12 +67,7 @@ portalRouter.get("/home", async (c) => {
 
     const [activeMessages, recentImages] = await Promise.all([
       listActiveHomeownerMessages(c.env),
-      db
-        .select()
-        .from(images)
-        .orderBy(desc(images.datetimeCreated))
-        .limit(24)
-        .all(),
+      db.select().from(images).orderBy(desc(images.datetimeCreated)).limit(24).all(),
     ]);
 
     const recentUpdates = recentImages.map((image) => ({

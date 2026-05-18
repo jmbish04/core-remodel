@@ -1,10 +1,12 @@
 import { Image as ImageIcon, Loader2, MapPinned } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ImageGallery } from "@/components/ui/image-gallery";
+
+import { SpatialRoomViewer } from "@/components/SpatialRoomViewer";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ImageGallery } from "@/components/ui/image-gallery";
 import { cn } from "@/lib/utils";
 
 type FloorKey = "lower_level" | "upper_level";
@@ -96,72 +98,75 @@ export function FloorplanGalleryApp() {
   const [selectedFloor, setSelectedFloor] = useState<FloorKey>("lower_level");
   const [selectedRoomId, setSelectedRoomId] = useState<number | null>(null);
 
-  const fetchData = useCallback(async (setLoadingState: boolean) => {
-    if (setLoadingState) {
-      setLoading(true);
-    } else {
-      setRefreshing(true);
-    }
+  const fetchData = useCallback(
+    async (setLoadingState: boolean) => {
+      if (setLoadingState) {
+        setLoading(true);
+      } else {
+        setRefreshing(true);
+      }
 
-    try {
-      const [catalogRes, listingRes] = await Promise.all([
-        fetch("/api/rooms/catalog"),
-        fetch("/api/images?photoCategory=listing"),
-      ]);
+      try {
+        const [catalogRes, listingRes] = await Promise.all([
+          fetch("/api/rooms/catalog"),
+          fetch("/api/images?photoCategory=listing"),
+        ]);
 
-      const catalogPayload = (await catalogRes.json()) as {
-        success?: boolean;
-        floors?: Array<{
-          id: number;
-          key: FloorKey;
-          name: string;
-          levelOrder: number;
-          rooms?: Array<{
+        const catalogPayload = (await catalogRes.json()) as {
+          success?: boolean;
+          floors?: Array<{
             id: number;
-            floorId: number;
-            roomCode: string;
-            roomName: string;
-            displayName: string;
+            key: FloorKey;
+            name: string;
+            levelOrder: number;
+            rooms?: Array<{
+              id: number;
+              floorId: number;
+              roomCode: string;
+              roomName: string;
+              displayName: string;
+            }>;
           }>;
-        }>;
-      };
-      const listingPayload = (await listingRes.json()) as {
-        success?: boolean;
-        images?: ListingImage[];
-      };
+        };
+        const listingPayload = (await listingRes.json()) as {
+          success?: boolean;
+          images?: ListingImage[];
+        };
 
-      if (!catalogRes.ok || !catalogPayload.success) {
-        throw new Error("Failed to load room catalog");
+        if (!catalogRes.ok || !catalogPayload.success) {
+          throw new Error("Failed to load room catalog");
+        }
+        if (!listingRes.ok || !listingPayload.success) {
+          throw new Error("Failed to load listing photos");
+        }
+
+        const nextFloors: CatalogFloor[] = (catalogPayload.floors || []).map((floor) => ({
+          id: floor.id,
+          key: floor.key,
+          name: floor.name,
+          levelOrder: floor.levelOrder,
+          rooms: (floor.rooms || []).map((room) => ({
+            ...room,
+            floorKey: floor.key,
+            floorName: floor.name,
+          })),
+        }));
+
+        setFloors(nextFloors);
+        setListingImages((listingPayload.images || []).filter((image) => Boolean(image.roomId)));
+
+        if (!nextFloors.some((floor) => floor.key === selectedFloor)) {
+          setSelectedFloor(nextFloors[0]?.key || "lower_level");
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to load gallery data");
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-      if (!listingRes.ok || !listingPayload.success) {
-        throw new Error("Failed to load listing photos");
-      }
-
-      const nextFloors: CatalogFloor[] = (catalogPayload.floors || []).map((floor) => ({
-        id: floor.id,
-        key: floor.key,
-        name: floor.name,
-        levelOrder: floor.levelOrder,
-        rooms: (floor.rooms || []).map((room) => ({
-          ...room,
-          floorKey: floor.key,
-          floorName: floor.name,
-        })),
-      }));
-
-      setFloors(nextFloors);
-      setListingImages((listingPayload.images || []).filter((image) => Boolean(image.roomId)));
-
-      if (!nextFloors.some((floor) => floor.key === selectedFloor)) {
-        setSelectedFloor(nextFloors[0]?.key || "lower_level");
-      }
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load gallery data");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [selectedFloor]);
+    },
+    [selectedFloor],
+  );
 
   useEffect(() => {
     void fetchData(true);
@@ -181,15 +186,9 @@ export function FloorplanGalleryApp() {
     };
   }, [fetchData]);
 
-  const rooms = useMemo(
-    () => floors.flatMap((floor) => floor.rooms),
-    [floors],
-  );
+  const rooms = useMemo(() => floors.flatMap((floor) => floor.rooms), [floors]);
 
-  const roomById = useMemo(
-    () => new Map(rooms.map((room) => [room.id, room])),
-    [rooms],
-  );
+  const roomById = useMemo(() => new Map(rooms.map((room) => [room.id, room])), [rooms]);
 
   const listingByRoomId = useMemo(() => {
     const map = new Map<number, ListingImage[]>();
@@ -226,7 +225,9 @@ export function FloorplanGalleryApp() {
   );
 
   const fallbackSelectedRoomId = useMemo(() => {
-    const firstWithPhotos = floorRooms.find((room) => (listingByRoomId.get(room.id) || []).length > 0);
+    const firstWithPhotos = floorRooms.find(
+      (room) => (listingByRoomId.get(room.id) || []).length > 0,
+    );
     return firstWithPhotos?.id || floorRooms[0]?.id || null;
   }, [floorRooms, listingByRoomId]);
 
@@ -257,8 +258,17 @@ export function FloorplanGalleryApp() {
             Start from the plan, click a room dot, and review all listing photos for that room.
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => void fetchData(false)} disabled={refreshing}>
-          {refreshing ? <Loader2 className="mr-2 size-4 animate-spin" /> : <MapPinned className="mr-2 size-4" />}
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => void fetchData(false)}
+          disabled={refreshing}
+        >
+          {refreshing ? (
+            <Loader2 className="mr-2 size-4 animate-spin" />
+          ) : (
+            <MapPinned className="mr-2 size-4" />
+          )}
           Refresh
         </Button>
       </div>
@@ -341,7 +351,9 @@ export function FloorplanGalleryApp() {
 
         <Card className="ring-1 ring-border/40">
           <CardHeader>
-            <CardTitle className="text-base">Rooms on {selectedFloor === "lower_level" ? "Lower Level" : "Upper Level"}</CardTitle>
+            <CardTitle className="text-base">
+              Rooms on {selectedFloor === "lower_level" ? "Lower Level" : "Upper Level"}
+            </CardTitle>
             <CardDescription>Select a room to preview its listing set</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
@@ -354,7 +366,9 @@ export function FloorplanGalleryApp() {
                   type="button"
                   className={cn(
                     "flex w-full items-center justify-between rounded-md border px-3 py-2 text-left",
-                    selected ? "border-primary bg-primary/10" : "border-border/60 hover:bg-muted/20",
+                    selected
+                      ? "border-primary bg-primary/10"
+                      : "border-border/60 hover:bg-muted/20",
                   )}
                   onClick={() => setSelectedRoomId(room.id)}
                 >
@@ -378,17 +392,15 @@ export function FloorplanGalleryApp() {
           {selectedRoomImages.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border/50 px-4 py-8 text-center">
               <ImageIcon className="mx-auto mb-2 size-5 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">No listing photos are mapped to this room yet.</p>
+              <p className="text-sm text-muted-foreground">
+                No listing photos are mapped to this room yet.
+              </p>
             </div>
           ) : (
-            <ImageGallery
-              items={selectedRoomImages.map((image) => ({
-                id: image.id,
-                src: resolveImageUrl(image),
-                title: image.displayName?.trim() || selectedRoom?.displayName || "Listing photo",
-                subtitle: formatDate(image.datetimeCreated),
-                badge: selectedRoom?.displayName || "",
-              }))}
+            <SpatialRoomViewer
+              images={selectedRoomImages}
+              resolveImageUrl={resolveImageUrl}
+              roomName={selectedRoom?.displayName}
             />
           )}
         </CardContent>

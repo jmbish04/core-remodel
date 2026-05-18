@@ -1,21 +1,13 @@
-import {
-  Crop,
-  Home,
-  Images,
-  LayoutGrid,
-  List,
-  Loader2,
-  RefreshCw,
-  Trash2,
-} from "lucide-react";
+import { Crop, Home, Images, LayoutGrid, List, Loader2, RefreshCw, Trash2 } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { ImagePreview } from "@/components/ui/image-preview";
-import { ImageGallery } from "@/components/ui/image-gallery";
-import { GridBento } from "@/components/ui/grid-bento";
+
 import { Button } from "@/components/ui/button";
 import { Cropper, CropperArea, CropperImage, type CropperAreaData } from "@/components/ui/cropper";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { GridBento } from "@/components/ui/grid-bento";
+import { ImageGallery } from "@/components/ui/image-gallery";
+import { ImagePreview } from "@/components/ui/image-preview";
 
 type ViewMode = "bento" | "gallery" | "list";
 
@@ -107,10 +99,7 @@ function buildViewImage(image: ImageRecord): ViewImageRecord {
     ? image.roomLabels.map((value) => String(value))
     : [];
   const resolvedRoom = roomLabels[0] || image.roomType?.trim() || "unassigned";
-  const fallbackName =
-    resolvedRoom === "unassigned"
-      ? "Untitled photo"
-      : `${resolvedRoom} photo`;
+  const fallbackName = resolvedRoom === "unassigned" ? "Untitled photo" : `${resolvedRoom} photo`;
 
   return {
     raw: image,
@@ -312,7 +301,10 @@ export function ImagesGridEditor(props: ImagesGridEditorProps) {
         isListingPhoto?: boolean;
       }>;
 
-      if (customEvent.detail?.target !== "images" && customEvent.detail?.target !== "photo-reviews") {
+      if (
+        customEvent.detail?.target !== "images" &&
+        customEvent.detail?.target !== "photo-reviews"
+      ) {
         return;
       }
 
@@ -673,7 +665,10 @@ export function ImagesGridEditor(props: ImagesGridEditorProps) {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={editModalOpen} onOpenChange={(open) => (open ? setEditModalOpen(true) : closeCropEditor())}>
+      <Dialog
+        open={editModalOpen}
+        onOpenChange={(open) => (open ? setEditModalOpen(true) : closeCropEditor())}
+      >
         <DialogContent className="max-w-4xl">
           <DialogHeader>
             <DialogTitle>Crop Uploaded Image</DialogTitle>
@@ -690,27 +685,19 @@ export function ImagesGridEditor(props: ImagesGridEditorProps) {
                   withGrid
                   onCropChange={(crop) => setCropState((prev) => ({ ...prev, crop }))}
                   onZoomChange={(zoom) => setCropState((prev) => ({ ...prev, zoom }))}
-                  onRotationChange={(rotation) =>
-                    setCropState((prev) => ({ ...prev, rotation }))
-                  }
+                  onRotationChange={(rotation) => setCropState((prev) => ({ ...prev, rotation }))}
                   onCropAreaChange={(_, areaPixels) =>
                     setCropState((prev) => ({ ...prev, areaPixels }))
                   }
                 >
-                  <CropperImage
-                    src={editingImage.path}
-                    alt="Crop target"
-                    crossOrigin="anonymous"
-                  />
+                  <CropperImage src={editingImage.path} alt="Crop target" crossOrigin="anonymous" />
                   <CropperArea />
                 </Cropper>
               </div>
 
               <div className="grid gap-4 md:grid-cols-2">
                 <label className="space-y-2 text-sm">
-                  <span className="text-muted-foreground">
-                    Zoom ({cropState.zoom.toFixed(2)}x)
-                  </span>
+                  <span className="text-muted-foreground">Zoom ({cropState.zoom.toFixed(2)}x)</span>
                   <input
                     type="range"
                     min={1}

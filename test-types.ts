@@ -4,5 +4,5 @@ export const handler: ExportedHandler<Cloudflare.Env> = {
     env.DB; // Should be D1Database
     env.ASSETS; // Should be Fetcher
     return new Response();
-  }
-}
+  },
+};

@@ -3,6 +3,7 @@
  */
 
 import type { Context, Next } from "hono";
+
 import type { Variables } from "../index";
 
 export async function authMiddleware(
@@ -19,7 +20,7 @@ export async function authMiddleware(
 
   try {
     const validToken = await c.env.WORKER_API_KEY.get();
-    
+
     if (token !== validToken) {
       return c.json({ error: "Invalid session" }, 401);
     }

@@ -1,5 +1,6 @@
-import { deleteCookie, setCookie } from "hono/cookie";
 import type { Context, MiddlewareHandler } from "hono";
+
+import { deleteCookie, setCookie } from "hono/cookie";
 
 export const ACCESS_COOKIE_NAME = "remodel_access";
 export const VISITOR_COOKIE_NAME = "remodel_visitor";
@@ -102,10 +103,7 @@ export function clearAccessCookie(c: Context<{ Bindings: Env }>): void {
   });
 }
 
-export function setVisitorCookie(
-  c: Context<{ Bindings: Env }>,
-  visitorId: string,
-): void {
+export function setVisitorCookie(c: Context<{ Bindings: Env }>, visitorId: string): void {
   const secure = c.req.url.startsWith("https://");
   setCookie(c, VISITOR_COOKIE_NAME, visitorId, {
     httpOnly: true,
@@ -116,10 +114,7 @@ export function setVisitorCookie(
   });
 }
 
-export const requireAccessAuth: MiddlewareHandler<{ Bindings: Env }> = async (
-  c,
-  next,
-) => {
+export const requireAccessAuth: MiddlewareHandler<{ Bindings: Env }> = async (c, next) => {
   const authenticated = await isRequestAuthenticated(c.req.raw, c.env);
   if (!authenticated) {
     return c.json({ error: "Unauthorized" }, 401);

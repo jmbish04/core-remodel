@@ -16,7 +16,10 @@
 - **Never** define manual `Bindings` or `Env` interfaces in route files
   ```typescript
   // ❌ FORBIDDEN
-  interface Bindings { DB: D1Database; AI: Ai; }
+  interface Bindings {
+    DB: D1Database;
+    AI: Ai;
+  }
   ```
 - **Never** have both `@cloudflare/workers-types` and `worker-configuration.d.ts` loaded simultaneously — they declare conflicting runtime types causing `Request` type mismatches
 
@@ -46,6 +49,7 @@
 ## Why This Matters
 
 The `@cloudflare/workers-types` npm package and `worker-configuration.d.ts` both declare ~13,000 lines of identical Cloudflare runtime globals (`Request`, `Response`, `D1Database`, `ExportedHandler`, etc.) but at potentially different versions. Loading both creates:
+
 - `Request<IncomingRequestCfProperties>` vs `Request<CfProperties>` conflicts
 - Duplicate interface declarations that confuse TypeScript
 - IDE errors like "Property 'DB' does not exist on type 'Env'"

@@ -1,13 +1,7 @@
+import { homeownerMessages, images, visitorEvents, visitorSessions } from "@backend/db";
 import { desc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
-
-import {
-  homeownerMessages,
-  images,
-  visitorEvents,
-  visitorSessions,
-} from "@backend/db";
 
 const adminRouter = new Hono<{ Bindings: Env }>();
 
@@ -29,7 +23,12 @@ adminRouter.get("/overview", async (c) => {
     const [sessionRows, eventRows, messageRows, uploadRows] = await Promise.all([
       db.select().from(visitorSessions).orderBy(desc(visitorSessions.lastSeenAt)).limit(200).all(),
       db.select().from(visitorEvents).orderBy(desc(visitorEvents.datetimeCreated)).limit(800).all(),
-      db.select().from(homeownerMessages).orderBy(desc(homeownerMessages.datetimeCreated)).limit(100).all(),
+      db
+        .select()
+        .from(homeownerMessages)
+        .orderBy(desc(homeownerMessages.datetimeCreated))
+        .limit(100)
+        .all(),
       db.select().from(images).orderBy(desc(images.datetimeCreated)).limit(100).all(),
     ]);
 

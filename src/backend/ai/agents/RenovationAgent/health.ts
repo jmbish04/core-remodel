@@ -1,5 +1,6 @@
-import type { RenovationAgent } from "./index";
 import { getAgentByName } from "agents";
+
+import type { RenovationAgent } from "./index";
 
 interface ModuleResult {
   status: string;

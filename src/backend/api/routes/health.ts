@@ -2,13 +2,10 @@
  * @fileoverview Health monitoring API routes
  */
 
+import { healthChecks } from "@backend/db";
 import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
-
-
-
-import { healthChecks } from "@backend/db";
 
 const healthRouter = new Hono<{ Bindings: Env }>();
 
@@ -90,11 +87,7 @@ healthRouter.get("/history", async (c) => {
           .where(eq(healthChecks.serviceName, service))
           .orderBy(desc(healthChecks.timestamp))
           .limit(limit)
-      : await db
-          .select()
-          .from(healthChecks)
-          .orderBy(desc(healthChecks.timestamp))
-          .limit(limit);
+      : await db.select().from(healthChecks).orderBy(desc(healthChecks.timestamp)).limit(limit);
 
     return c.json({ history });
   } catch (error) {

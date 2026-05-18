@@ -1,6 +1,7 @@
 import { Clock3, FilePenLine, Loader2, PlusCircle, RefreshCw } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -148,7 +149,9 @@ export function EstimatesApp() {
     const loadDetail = async () => {
       setLoadingRevisionDetail(true);
       try {
-        const response = await fetch(`/api/estimates/${activeEstimateId}/revisions/${selectedRevisionId}`);
+        const response = await fetch(
+          `/api/estimates/${activeEstimateId}/revisions/${selectedRevisionId}`,
+        );
         const data = (await response.json()) as RevisionDetail & { error?: string };
         if (!response.ok) {
           throw new Error(data.error || "Failed to load revision detail");
@@ -165,7 +168,9 @@ export function EstimatesApp() {
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${protocol}://${window.location.host}/api/realtime/estimates?room=home`);
+    const ws = new WebSocket(
+      `${protocol}://${window.location.host}/api/realtime/estimates?room=home`,
+    );
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(String(event.data || "{}")) as {
@@ -268,10 +273,11 @@ export function EstimatesApp() {
                         {estimate.company?.name || "Unassigned company"} · Estimate #{estimate.id}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        Revision {estimate.currentRevision?.revisionNumber || "—"} ·
-                        {" "}
+                        Revision {estimate.currentRevision?.revisionNumber || "—"} ·{" "}
                         {estimate.currentRevision?.isDraft ? "Draft" : "Submitted"} · Updated{" "}
-                        {formatDate(estimate.currentRevision?.datetimeUpdated || estimate.datetimeUpdated)}
+                        {formatDate(
+                          estimate.currentRevision?.datetimeUpdated || estimate.datetimeUpdated,
+                        )}
                       </p>
                     </div>
                     <p className="text-sm font-medium">
@@ -279,11 +285,7 @@ export function EstimatesApp() {
                     </p>
                   </div>
                   <div className="mt-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => openRevisions(estimate.id)}
-                    >
+                    <Button variant="outline" size="sm" onClick={() => openRevisions(estimate.id)}>
                       <FilePenLine className="mr-2 size-4" />
                       View Revisions
                     </Button>
@@ -305,7 +307,10 @@ export function EstimatesApp() {
                 <p className="text-xs text-muted-foreground">No active drafts.</p>
               ) : (
                 drafts.slice(0, 12).map((draft) => (
-                  <div key={draft.id} className="rounded-md bg-amber-500/10 p-2 ring-1 ring-amber-500/30">
+                  <div
+                    key={draft.id}
+                    className="rounded-md bg-amber-500/10 p-2 ring-1 ring-amber-500/30"
+                  >
                     <p className="text-xs font-medium">Estimate #{draft.estimateId}</p>
                     <p className="text-xs text-muted-foreground">
                       Rev {draft.revisionNumber} · {formatDate(draft.datetimeUpdated)}
@@ -327,8 +332,12 @@ export function EstimatesApp() {
               ) : (
                 recentlyUpdated.slice(0, 12).map((row) => (
                   <div key={row.id} className="rounded-md bg-muted/20 p-2 ring-1 ring-border/30">
-                    <p className="text-xs font-medium">Estimate #{row.estimateId} · Rev {row.revisionNumber}</p>
-                    <p className="text-xs text-muted-foreground">{formatDate(row.datetimeUpdated)}</p>
+                    <p className="text-xs font-medium">
+                      Estimate #{row.estimateId} · Rev {row.revisionNumber}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {formatDate(row.datetimeUpdated)}
+                    </p>
                   </div>
                 ))
               )}
@@ -373,11 +382,15 @@ export function EstimatesApp() {
                   <div className="grid gap-2 md:grid-cols-2">
                     <div>
                       <p className="text-xs text-muted-foreground">Total</p>
-                      <p className="font-medium">{formatCurrency(revisionDetail.revision.totalAmountCents)}</p>
+                      <p className="font-medium">
+                        {formatCurrency(revisionDetail.revision.totalAmountCents)}
+                      </p>
                     </div>
                     <div>
                       <p className="text-xs text-muted-foreground">Tax</p>
-                      <p className="font-medium">{formatCurrency(revisionDetail.revision.totalTaxCents)}</p>
+                      <p className="font-medium">
+                        {formatCurrency(revisionDetail.revision.totalTaxCents)}
+                      </p>
                     </div>
                   </div>
 
@@ -397,10 +410,14 @@ export function EstimatesApp() {
                         <p className="text-xs text-muted-foreground">No line items.</p>
                       ) : (
                         revisionDetail.lineItems.map((lineItem) => (
-                          <div key={lineItem.id} className="rounded border border-border/40 bg-muted/20 p-2">
+                          <div
+                            key={lineItem.id}
+                            className="rounded border border-border/40 bg-muted/20 p-2"
+                          >
                             <p className="font-medium">{lineItem.description}</p>
                             <p className="text-xs text-muted-foreground">
-                              {lineItem.qty || "—"} {lineItem.uom || ""} · {formatCurrency(lineItem.lineTotalCents)}
+                              {lineItem.qty || "—"} {lineItem.uom || ""} ·{" "}
+                              {formatCurrency(lineItem.lineTotalCents)}
                             </p>
                           </div>
                         ))
@@ -415,14 +432,22 @@ export function EstimatesApp() {
                         <p className="text-xs text-muted-foreground">No documents.</p>
                       ) : (
                         revisionDetail.documents.map((document) => (
-                          <div key={document.id} className="rounded border border-border/40 bg-muted/20 p-2">
+                          <div
+                            key={document.id}
+                            className="rounded border border-border/40 bg-muted/20 p-2"
+                          >
                             <p className="text-xs font-medium">{document.sourceType}</p>
                             {document.r2Url ? (
                               <a href={document.r2Url} className="text-xs text-primary underline">
                                 Open artifact
                               </a>
                             ) : document.sourceUrl ? (
-                              <a href={document.sourceUrl} className="text-xs text-primary underline" target="_blank" rel="noreferrer">
+                              <a
+                                href={document.sourceUrl}
+                                className="text-xs text-primary underline"
+                                target="_blank"
+                                rel="noreferrer"
+                              >
                                 Open source URL
                               </a>
                             ) : (

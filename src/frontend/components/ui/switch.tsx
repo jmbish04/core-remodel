@@ -1,24 +1,18 @@
 "use client";
 
 import * as React from "react";
+
 import { cn } from "@/lib/utils";
 
-interface SwitchProps
-  extends Omit<
-    React.ButtonHTMLAttributes<HTMLButtonElement>,
-    "role" | "aria-checked" | "onChange"
-  > {
+interface SwitchProps extends Omit<
+  React.ButtonHTMLAttributes<HTMLButtonElement>,
+  "role" | "aria-checked" | "onChange"
+> {
   checked?: boolean;
   onCheckedChange?: (checked: boolean) => void;
 }
 
-function Switch({
-  className,
-  checked = false,
-  onCheckedChange,
-  disabled,
-  ...props
-}: SwitchProps) {
+function Switch({ className, checked = false, onCheckedChange, disabled, ...props }: SwitchProps) {
   return (
     <button
       type="button"

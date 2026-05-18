@@ -1,6 +1,7 @@
 import { Activity, Clock3, Eye, Loader2, MousePointerClick, Route } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 interface AdminOverview {
@@ -85,9 +86,7 @@ export function AdminDashboardApp() {
 
   if (!payload || !summary) {
     return (
-      <p className="py-12 text-sm text-muted-foreground">
-        No admin data is currently available.
-      </p>
+      <p className="py-12 text-sm text-muted-foreground">No admin data is currently available.</p>
     );
   }
 
@@ -157,7 +156,10 @@ export function AdminDashboardApp() {
               <p className="text-sm text-muted-foreground">No page-view data yet.</p>
             ) : (
               payload.topPaths.map((item) => (
-                <div key={item.path} className="flex items-center justify-between rounded-md bg-muted/20 px-3 py-2 ring-1 ring-border/30">
+                <div
+                  key={item.path}
+                  className="flex items-center justify-between rounded-md bg-muted/20 px-3 py-2 ring-1 ring-border/30"
+                >
                   <p className="truncate text-sm">{item.path}</p>
                   <p className="text-xs text-muted-foreground">{item.views} views</p>
                 </div>
@@ -176,7 +178,10 @@ export function AdminDashboardApp() {
               <p className="text-sm text-muted-foreground">No uploads recorded yet.</p>
             ) : (
               payload.recentUploads.map((upload) => (
-                <div key={upload.id} className="rounded-md bg-muted/20 px-3 py-2 ring-1 ring-border/30">
+                <div
+                  key={upload.id}
+                  className="rounded-md bg-muted/20 px-3 py-2 ring-1 ring-border/30"
+                >
                   <p className="text-sm font-medium">{upload.name?.trim() || "Untitled photo"}</p>
                   <p className="text-xs text-muted-foreground">
                     {upload.category} · {upload.roomType || "unassigned"}
@@ -199,8 +204,13 @@ export function AdminDashboardApp() {
             <p className="text-sm text-muted-foreground">No visitor events yet.</p>
           ) : (
             payload.recentEvents.slice(0, 80).map((event) => (
-              <div key={event.id} className="rounded-md bg-muted/20 px-3 py-2 ring-1 ring-border/30">
-                <p className="text-sm font-medium">{event.eventType} · {event.path}</p>
+              <div
+                key={event.id}
+                className="rounded-md bg-muted/20 px-3 py-2 ring-1 ring-border/30"
+              >
+                <p className="text-sm font-medium">
+                  {event.eventType} · {event.path}
+                </p>
                 <p className="text-xs text-muted-foreground">
                   {event.element ? `${event.element} · ` : ""}
                   {event.durationMs ? `${Math.round(event.durationMs / 1000)}s` : ""}

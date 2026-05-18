@@ -45,10 +45,7 @@ export function Header() {
         <div className="flex h-(--header-height) items-center **:data-[slot=separator]:h-4! 3xl:fixed:container">
           <MobileNav className="flex lg:hidden" />
 
-          <a
-            href="/"
-            className="flex items-center gap-2 mr-4"
-          >
+          <a href="/" className="flex items-center gap-2 mr-4">
             <HomeIcon className="size-5" />
             <span className="text-lg font-bold">{siteConfig.name}</span>
           </a>

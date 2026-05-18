@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
+
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -190,7 +191,10 @@ export function EstimateIntakeWizardApp() {
     ]);
 
     const statusData = (await statusRes.json()) as { statuses: EstimateStatus[]; error?: string };
-    const companyData = (await companiesRes.json()) as { companies: EstimateCompany[]; error?: string };
+    const companyData = (await companiesRes.json()) as {
+      companies: EstimateCompany[];
+      error?: string;
+    };
     const roomsData = (await roomsRes.json()) as {
       rooms: Array<{ id: number; roomName: string; displayName?: string }>;
       error?: string;
@@ -542,7 +546,9 @@ export function EstimateIntakeWizardApp() {
         <Card className="ring-1 ring-border/40">
           <CardHeader>
             <CardTitle className="text-base">Intake Steps</CardTitle>
-            <CardDescription>Follow the wizard to capture and submit estimate details.</CardDescription>
+            <CardDescription>
+              Follow the wizard to capture and submit estimate details.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
             {STEPS.map((stepItem) => (
@@ -569,12 +575,19 @@ export function EstimateIntakeWizardApp() {
         <Card className="ring-1 ring-border/40">
           <CardContent className="space-y-1 p-3 text-xs text-muted-foreground">
             <p>
-              Draft revision: <span className="font-medium text-foreground">{draftRevisionId || "Not created yet"}</span>
+              Draft revision:{" "}
+              <span className="font-medium text-foreground">
+                {draftRevisionId || "Not created yet"}
+              </span>
             </p>
             <p>
               Autosave:{" "}
               <span className="font-medium text-foreground">
-                {autoSaving ? "Saving..." : lastAutoSavedAt ? `Saved at ${lastAutoSavedAt}` : "Waiting"}
+                {autoSaving
+                  ? "Saving..."
+                  : lastAutoSavedAt
+                    ? `Saved at ${lastAutoSavedAt}`
+                    : "Waiting"}
               </span>
             </p>
           </CardContent>
@@ -587,7 +600,8 @@ export function EstimateIntakeWizardApp() {
             <CardHeader>
               <CardTitle>1) Source of Estimate</CardTitle>
               <CardDescription>
-                Choose one source mode. The source will be processed and AI extraction will prefill step 2.
+                Choose one source mode. The source will be processed and AI extraction will prefill
+                step 2.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-5">
@@ -780,7 +794,9 @@ export function EstimateIntakeWizardApp() {
                         setFormState((current) => ({
                           ...current,
                           createCompany: event.target.checked,
-                          estimateCompanyId: event.target.checked ? null : current.estimateCompanyId,
+                          estimateCompanyId: event.target.checked
+                            ? null
+                            : current.estimateCompanyId,
                         }))
                       }
                     />
@@ -811,7 +827,10 @@ export function EstimateIntakeWizardApp() {
                       onChange={(event) =>
                         setFormState((current) => ({
                           ...current,
-                          companyDraft: { ...current.companyDraft, businessType: event.target.value },
+                          companyDraft: {
+                            ...current.companyDraft,
+                            businessType: event.target.value,
+                          },
                         }))
                       }
                     />
@@ -851,7 +870,10 @@ export function EstimateIntakeWizardApp() {
                       onChange={(event) =>
                         setFormState((current) => ({
                           ...current,
-                          companyDraft: { ...current.companyDraft, cslbLicenseNumber: event.target.value },
+                          companyDraft: {
+                            ...current.companyDraft,
+                            cslbLicenseNumber: event.target.value,
+                          },
                         }))
                       }
                     />
@@ -871,7 +893,8 @@ export function EstimateIntakeWizardApp() {
                 </Card>
               ) : selectedCompany ? (
                 <div className="rounded-md border border-border/40 bg-muted/20 p-3 text-xs text-muted-foreground">
-                  Selected company: <span className="font-medium text-foreground">{selectedCompany.name}</span>
+                  Selected company:{" "}
+                  <span className="font-medium text-foreground">{selectedCompany.name}</span>
                 </div>
               ) : null}
 
@@ -891,7 +914,10 @@ export function EstimateIntakeWizardApp() {
                   <Input
                     value={formState.totalAmountCents}
                     onChange={(event) =>
-                      setFormState((current) => ({ ...current, totalAmountCents: event.target.value }))
+                      setFormState((current) => ({
+                        ...current,
+                        totalAmountCents: event.target.value,
+                      }))
                     }
                   />
                 </div>
@@ -920,7 +946,10 @@ export function EstimateIntakeWizardApp() {
                   placeholder="Cancellation details"
                   value={formState.cancellationDetails}
                   onChange={(event) =>
-                    setFormState((current) => ({ ...current, cancellationDetails: event.target.value }))
+                    setFormState((current) => ({
+                      ...current,
+                      cancellationDetails: event.target.value,
+                    }))
                   }
                 />
               </div>
@@ -929,12 +958,17 @@ export function EstimateIntakeWizardApp() {
                 <p className="text-sm font-medium">Line items</p>
                 <div className="space-y-2">
                   {formState.lineItems.map((lineItem, index) => (
-                    <div key={`${index}-${lineItem.description}`} className="rounded-md border border-border/40 bg-muted/20 p-3">
+                    <div
+                      key={`${index}-${lineItem.description}`}
+                      className="rounded-md border border-border/40 bg-muted/20 p-3"
+                    >
                       <div className="grid gap-2 md:grid-cols-4">
                         <Input
                           placeholder="Code"
                           value={lineItem.itemCode}
-                          onChange={(event) => handleLineItemChange(index, "itemCode", event.target.value)}
+                          onChange={(event) =>
+                            handleLineItemChange(index, "itemCode", event.target.value)
+                          }
                         />
                         <Input
                           placeholder="Description"
@@ -946,12 +980,16 @@ export function EstimateIntakeWizardApp() {
                         <Input
                           placeholder="Qty"
                           value={lineItem.qty}
-                          onChange={(event) => handleLineItemChange(index, "qty", event.target.value)}
+                          onChange={(event) =>
+                            handleLineItemChange(index, "qty", event.target.value)
+                          }
                         />
                         <Input
                           placeholder="UOM"
                           value={lineItem.uom}
-                          onChange={(event) => handleLineItemChange(index, "uom", event.target.value)}
+                          onChange={(event) =>
+                            handleLineItemChange(index, "uom", event.target.value)
+                          }
                         />
                         <Input
                           placeholder="Unit cents"
@@ -970,12 +1008,16 @@ export function EstimateIntakeWizardApp() {
                         <Input
                           placeholder="Tax cents"
                           value={lineItem.taxCents}
-                          onChange={(event) => handleLineItemChange(index, "taxCents", event.target.value)}
+                          onChange={(event) =>
+                            handleLineItemChange(index, "taxCents", event.target.value)
+                          }
                         />
                         <Input
                           placeholder="Notes"
                           value={lineItem.notes}
-                          onChange={(event) => handleLineItemChange(index, "notes", event.target.value)}
+                          onChange={(event) =>
+                            handleLineItemChange(index, "notes", event.target.value)
+                          }
                         />
                       </div>
                     </div>
@@ -999,7 +1041,10 @@ export function EstimateIntakeWizardApp() {
                 <p className="text-sm font-medium">Room mappings</p>
                 <div className="grid gap-2 md:grid-cols-2">
                   {rooms.map((room) => (
-                    <label key={room.id} className="inline-flex items-center gap-2 rounded border border-border/40 bg-muted/20 px-2 py-1 text-xs">
+                    <label
+                      key={room.id}
+                      className="inline-flex items-center gap-2 rounded border border-border/40 bg-muted/20 px-2 py-1 text-xs"
+                    >
                       <input
                         type="checkbox"
                         checked={formState.roomIds.includes(room.id)}
@@ -1040,9 +1085,12 @@ export function EstimateIntakeWizardApp() {
             </CardHeader>
             <CardContent className="space-y-4 text-sm">
               <div className="rounded-md border border-border/40 bg-muted/20 p-3">
-                <p className="font-medium">Estimate #{estimateId || "new"} · Draft revision #{draftRevisionId || "pending"}</p>
+                <p className="font-medium">
+                  Estimate #{estimateId || "new"} · Draft revision #{draftRevisionId || "pending"}
+                </p>
                 <p className="text-xs text-muted-foreground">
-                  Business type: {formState.businessType || "—"} · Status ID: {formState.estimateStatusId || "—"}
+                  Business type: {formState.businessType || "—"} · Status ID:{" "}
+                  {formState.estimateStatusId || "—"}
                 </p>
               </div>
               <div className="grid gap-3 md:grid-cols-3">

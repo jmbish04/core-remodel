@@ -134,10 +134,7 @@ type ExtractedColors = {
  * @param companyUrl - URL of the company website (e.g. "https://stripe.com")
  * @returns Brand color palette with primary + accent hex values
  */
-export async function extractBrandColors(
-  env: Env,
-  companyUrl: string,
-): Promise<BrandColorPalette> {
+export async function extractBrandColors(env: Env, companyUrl: string): Promise<BrandColorPalette> {
   try {
     // Normalize URL
     const url = companyUrl.startsWith("http") ? companyUrl : `https://${companyUrl}`;
@@ -194,11 +191,7 @@ export async function extractBrandColors(
  * Filters out near-white, near-black, and invalid hex values.
  */
 function findBestBrandColor(colors: ExtractedColors): string | null {
-  const candidates = [
-    colors.primary_color,
-    colors.accent_color,
-    colors.secondary_color,
-  ];
+  const candidates = [colors.primary_color, colors.accent_color, colors.secondary_color];
 
   for (const hex of candidates) {
     if (!hex || !isValidHex(hex)) continue;

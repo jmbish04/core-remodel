@@ -18,7 +18,8 @@ export type SiteConfig = {
 
 export const siteConfig: SiteConfig = {
   name: "126 Colby - Remodel Mission Control",
-  description: "Contractor-first mission control for remodel planning, inspiration, listing photos, and AI design decisions.",
+  description:
+    "Contractor-first mission control for remodel planning, inspiration, listing photos, and AI design decisions.",
   url: "https://core-remodel.hacolby.workers.dev",
   author: {
     name: "core-remodel",

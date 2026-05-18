@@ -1,31 +1,11 @@
-import {
-  Building2,
-  Check,
-  Crop,
-  Loader2,
-  Plus,
-  RefreshCw,
-  Sparkles,
-} from "lucide-react";
+import { Building2, Check, Crop, Loader2, Plus, RefreshCw, Sparkles } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+
 import { ImageCompareSlider } from "@/components/ImageCompareSlider";
-import { ImagePreview } from "@/components/ui/image-preview";
-import { MultipleSelector } from "@/components/ui/multiple-selector";
-import {
-  Stepper,
-  StepperContent,
-  StepperDescription,
-  StepperIndicator,
-  StepperItem,
-  StepperList,
-  StepperNext,
-  StepperPrev,
-  StepperTitle,
-  StepperTrigger,
-} from "@/components/ui/stepper";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Cropper, CropperArea, CropperImage, type CropperAreaData } from "@/components/ui/cropper";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   FileUpload,
@@ -38,7 +18,8 @@ import {
   FileUploadList,
   FileUploadTrigger,
 } from "@/components/ui/file-upload";
-import { Cropper, CropperArea, CropperImage, type CropperAreaData } from "@/components/ui/cropper";
+import { ImagePreview } from "@/components/ui/image-preview";
+import { MultipleSelector } from "@/components/ui/multiple-selector";
 import {
   Select,
   SelectContent,
@@ -46,6 +27,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Stepper,
+  StepperContent,
+  StepperDescription,
+  StepperIndicator,
+  StepperItem,
+  StepperList,
+  StepperNext,
+  StepperPrev,
+  StepperTitle,
+  StepperTrigger,
+} from "@/components/ui/stepper";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 
@@ -110,8 +103,7 @@ interface CropState {
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_FILES = 1;
 
-const fileKey = (file: File) =>
-  `${file.name}-${file.size}-${file.type}-${file.lastModified}`;
+const fileKey = (file: File) => `${file.name}-${file.size}-${file.type}-${file.lastModified}`;
 
 function parseMetadata(raw: string | null | undefined): { deliveryUrl?: string } {
   if (!raw) return {};
@@ -280,10 +272,7 @@ export function PhotoEditSessionsApp() {
   }, [cropTargetPreview]);
 
   const lowerFloor = useMemo(
-    () =>
-      catalogFloors.find((floor) => floor.key === "lower_level") ||
-      catalogFloors[0] ||
-      null,
+    () => catalogFloors.find((floor) => floor.key === "lower_level") || catalogFloors[0] || null,
     [catalogFloors],
   );
   const upperFloor = useMemo(
@@ -555,9 +544,7 @@ export function PhotoEditSessionsApp() {
   }, [wizardSelectedSourceImageIds]);
 
   const selectedWizardRoom = useMemo(
-    () =>
-      catalogRooms.find((room) => room.id === Number(wizardSelectedRoomId)) ||
-      null,
+    () => catalogRooms.find((room) => room.id === Number(wizardSelectedRoomId)) || null,
     [catalogRooms, wizardSelectedRoomId],
   );
   const wizardPreviewImage = useMemo(
@@ -612,84 +599,84 @@ export function PhotoEditSessionsApp() {
     return null;
   }, []);
 
-  const createSession = useCallback(async (sourceOverrideIds?: string[]) => {
-    const candidateSourceIds =
-      Array.isArray(sourceOverrideIds) && sourceOverrideIds.length > 0
-        ? sourceOverrideIds
-        : newSessionSourceImageId
-          ? [newSessionSourceImageId]
-          : [];
+  const createSession = useCallback(
+    async (sourceOverrideIds?: string[]) => {
+      const candidateSourceIds =
+        Array.isArray(sourceOverrideIds) && sourceOverrideIds.length > 0
+          ? sourceOverrideIds
+          : newSessionSourceImageId
+            ? [newSessionSourceImageId]
+            : [];
 
-    const sourceIdsToCreate = candidateSourceIds.length > 0 ? candidateSourceIds : [null];
+      const sourceIdsToCreate = candidateSourceIds.length > 0 ? candidateSourceIds : [null];
 
-    setCreatingSession(true);
-    try {
-      const createdSessionIds: string[] = [];
-      const baseName = newSessionName.trim();
+      setCreatingSession(true);
+      try {
+        const createdSessionIds: string[] = [];
+        const baseName = newSessionName.trim();
 
-      for (let index = 0; index < sourceIdsToCreate.length; index++) {
-        const sourceId = sourceIdsToCreate[index];
-        const sourceImage = sourceImages.find((image) => image.id === sourceId) || null;
-        const suffix =
-          sourceIdsToCreate.length > 1
-            ? ` · Angle ${index + 1}`
-            : "";
-        const resolvedName =
-          baseName ||
-          `${sourceImage?.displayName?.trim() || sourceImage?.roomType || "Photo Edit"}${suffix}`;
+        for (let index = 0; index < sourceIdsToCreate.length; index++) {
+          const sourceId = sourceIdsToCreate[index];
+          const sourceImage = sourceImages.find((image) => image.id === sourceId) || null;
+          const suffix = sourceIdsToCreate.length > 1 ? ` · Angle ${index + 1}` : "";
+          const resolvedName =
+            baseName ||
+            `${sourceImage?.displayName?.trim() || sourceImage?.roomType || "Photo Edit"}${suffix}`;
 
-        const response = await fetch("/api/photo-edits/sessions", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: resolvedName || undefined,
-            sourceImageId: sourceId || undefined,
-          }),
-        });
-        const payload = (await response.json()) as { session?: EditSession; error?: string };
+          const response = await fetch("/api/photo-edits/sessions", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: resolvedName || undefined,
+              sourceImageId: sourceId || undefined,
+            }),
+          });
+          const payload = (await response.json()) as { session?: EditSession; error?: string };
 
-        if (!response.ok || !payload.session) {
-          throw new Error(payload.error ?? "Failed to create session");
+          if (!response.ok || !payload.session) {
+            throw new Error(payload.error ?? "Failed to create session");
+          }
+
+          createdSessionIds.push(payload.session.id);
         }
 
-        createdSessionIds.push(payload.session.id);
-      }
+        if (newSessionRoomType.trim().length > 0) {
+          setRoomType(newSessionRoomType.trim().toLowerCase());
+        }
+        if (newSessionPromptTemplate.trim().length > 0) {
+          setPrompt(newSessionPromptTemplate.trim());
+        }
 
-      if (newSessionRoomType.trim().length > 0) {
-        setRoomType(newSessionRoomType.trim().toLowerCase());
-      }
-      if (newSessionPromptTemplate.trim().length > 0) {
-        setPrompt(newSessionPromptTemplate.trim());
-      }
+        resetSessionWizard();
+        setSessionWizardOpen(false);
+        await loadSessions();
 
-      resetSessionWizard();
-      setSessionWizardOpen(false);
-      await loadSessions();
+        const targetSessionId = createdSessionIds[0];
+        if (targetSessionId) {
+          setSelectedSessionId(targetSessionId);
+        }
 
-      const targetSessionId = createdSessionIds[0];
-      if (targetSessionId) {
-        setSelectedSessionId(targetSessionId);
+        toast.success(
+          createdSessionIds.length > 1
+            ? `Created ${createdSessionIds.length} sessions`
+            : "Session created",
+        );
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to create session");
+      } finally {
+        setCreatingSession(false);
       }
-
-      toast.success(
-        createdSessionIds.length > 1
-          ? `Created ${createdSessionIds.length} sessions`
-          : "Session created",
-      );
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to create session");
-    } finally {
-      setCreatingSession(false);
-    }
-  }, [
-    loadSessions,
-    newSessionName,
-    newSessionPromptTemplate,
-    newSessionRoomType,
-    newSessionSourceImageId,
-    resetSessionWizard,
-    sourceImages,
-  ]);
+    },
+    [
+      loadSessions,
+      newSessionName,
+      newSessionPromptTemplate,
+      newSessionRoomType,
+      newSessionSourceImageId,
+      resetSessionWizard,
+      sourceImages,
+    ],
+  );
 
   const openCropModal = useCallback((file: File) => {
     setCropTargetFile(file);
@@ -715,9 +702,7 @@ export function PhotoEditSessionsApp() {
 
     try {
       const cropped = await getCroppedFile(cropTargetFile, cropState.areaPixels);
-      setRevisionFiles((prev) =>
-        prev.map((entry) => (entry === cropTargetFile ? cropped : entry)),
-      );
+      setRevisionFiles((prev) => prev.map((entry) => (entry === cropTargetFile ? cropped : entry)));
       toast.success("Crop applied");
       closeCropModal();
     } catch (error) {
@@ -861,9 +846,7 @@ export function PhotoEditSessionsApp() {
           <Card className="ring-1 ring-border/40">
             <CardHeader className="flex flex-row items-center justify-between gap-3">
               <div>
-                <CardTitle>
-                  {selectedSession?.name || "Select a Session"}
-                </CardTitle>
+                <CardTitle>{selectedSession?.name || "Select a Session"}</CardTitle>
                 <CardDescription>
                   Track prompts, generated revisions, and image history per session.
                 </CardDescription>
@@ -893,9 +876,18 @@ export function PhotoEditSessionsApp() {
                       <span className="font-medium text-foreground">Source:</span>{" "}
                       {getImageDisplayName(sessionSourceImage)}
                     </p>
-                    <p><span className="font-medium text-foreground">Room:</span> {sessionSourceImage.roomType || "unassigned"}</p>
-                    <p><span className="font-medium text-foreground">Created:</span> {formatDate(selectedSession?.datetimeCreated)}</p>
-                    <p><span className="font-medium text-foreground">Updated:</span> {formatDate(selectedSession?.datetimeLastModified)}</p>
+                    <p>
+                      <span className="font-medium text-foreground">Room:</span>{" "}
+                      {sessionSourceImage.roomType || "unassigned"}
+                    </p>
+                    <p>
+                      <span className="font-medium text-foreground">Created:</span>{" "}
+                      {formatDate(selectedSession?.datetimeCreated)}
+                    </p>
+                    <p>
+                      <span className="font-medium text-foreground">Updated:</span>{" "}
+                      {formatDate(selectedSession?.datetimeLastModified)}
+                    </p>
                   </div>
                 </div>
               ) : (
@@ -997,7 +989,11 @@ export function PhotoEditSessionsApp() {
 
                   <FileUploadList>
                     {revisionFiles.map((file) => (
-                      <FileUploadItem key={fileKey(file)} value={file} className="gap-3 rounded-lg border-border/40 bg-card/60 px-3 py-2">
+                      <FileUploadItem
+                        key={fileKey(file)}
+                        value={file}
+                        className="gap-3 rounded-lg border-border/40 bg-card/60 px-3 py-2"
+                      >
                         <FileUploadItemPreview className="size-12 rounded-md ring-1 ring-border/40" />
                         <FileUploadItemMetadata size="sm" />
                         <Button
@@ -1031,7 +1027,11 @@ export function PhotoEditSessionsApp() {
                   </>
                 ) : (
                   <>
-                    {revisionFiles.length > 0 ? <Check className="size-4" /> : <Sparkles className="size-4" />}
+                    {revisionFiles.length > 0 ? (
+                      <Check className="size-4" />
+                    ) : (
+                      <Sparkles className="size-4" />
+                    )}
                     {revisionFiles.length > 0 ? "Upload Revision" : "Generate with Workers AI"}
                   </>
                 )}
@@ -1056,7 +1056,10 @@ export function PhotoEditSessionsApp() {
                     const sourceImage = revision.sourceImage;
                     const imageUrl = outputImage ? resolveImageUrl(outputImage) : "";
                     return (
-                      <article key={revision.id} className="overflow-hidden rounded-lg border bg-card/50 ring-1 ring-border/40">
+                      <article
+                        key={revision.id}
+                        className="overflow-hidden rounded-lg border bg-card/50 ring-1 ring-border/40"
+                      >
                         {imageUrl ? (
                           <>
                             <img
@@ -1084,8 +1087,12 @@ export function PhotoEditSessionsApp() {
                         )}
                         <div className="space-y-2 p-3">
                           <p className="text-sm font-medium">Revision {revision.revisionNumber}</p>
-                          <p className="line-clamp-3 text-xs text-muted-foreground">{revision.prompt}</p>
-                          <p className="text-[11px] text-muted-foreground">{formatDate(revision.datetimeCreated)}</p>
+                          <p className="line-clamp-3 text-xs text-muted-foreground">
+                            {revision.prompt}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {formatDate(revision.datetimeCreated)}
+                          </p>
                           {outputImage && (
                             <Button
                               variant="outline"
@@ -1252,7 +1259,9 @@ export function PhotoEditSessionsApp() {
                         />
                         <div className="space-y-1 p-2.5">
                           <p className="truncate text-sm font-medium">{name}</p>
-                          <p className="text-xs text-muted-foreground">{image.roomType || "unassigned"}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {image.roomType || "unassigned"}
+                          </p>
                           <Button
                             type="button"
                             size="sm"
@@ -1279,7 +1288,8 @@ export function PhotoEditSessionsApp() {
                   {
                     key: "layout" as const,
                     title: "Wall Layout Change",
-                    description: "Open walls, move zones, remove fixed elements, and establish a base canvas.",
+                    description:
+                      "Open walls, move zones, remove fixed elements, and establish a base canvas.",
                   },
                   {
                     key: "paint" as const,
@@ -1367,7 +1377,9 @@ export function PhotoEditSessionsApp() {
           </Stepper>
 
           <div className="flex justify-between gap-2 border-t border-border/40 pt-4">
-            <StepperPrev onClick={() => setSessionWizardStep((current) => Math.max(1, current - 1))}>
+            <StepperPrev
+              onClick={() => setSessionWizardStep((current) => Math.max(1, current - 1))}
+            >
               Back
             </StepperPrev>
 
@@ -1377,9 +1389,7 @@ export function PhotoEditSessionsApp() {
               </Button>
               {sessionWizardStep < 3 ? (
                 <StepperNext
-                  onClick={() =>
-                    setSessionWizardStep((current) => Math.min(3, current + 1))
-                  }
+                  onClick={() => setSessionWizardStep((current) => Math.min(3, current + 1))}
                   disabled={sessionWizardStep === 1 && wizardSelectedSourceImageIds.length === 0}
                 >
                   Next
@@ -1418,7 +1428,10 @@ export function PhotoEditSessionsApp() {
         />
       )}
 
-      <Dialog open={cropModalOpen} onOpenChange={(open) => (open ? setCropModalOpen(true) : closeCropModal())}>
+      <Dialog
+        open={cropModalOpen}
+        onOpenChange={(open) => (open ? setCropModalOpen(true) : closeCropModal())}
+      >
         <DialogContent className="max-w-4xl">
           <DialogHeader>
             <DialogTitle>Crop Output Image</DialogTitle>
@@ -1435,9 +1448,7 @@ export function PhotoEditSessionsApp() {
                   withGrid
                   onCropChange={(crop) => setCropState((prev) => ({ ...prev, crop }))}
                   onZoomChange={(zoom) => setCropState((prev) => ({ ...prev, zoom }))}
-                  onRotationChange={(rotation) =>
-                    setCropState((prev) => ({ ...prev, rotation }))
-                  }
+                  onRotationChange={(rotation) => setCropState((prev) => ({ ...prev, rotation }))}
                   onCropAreaChange={(_, areaPixels) =>
                     setCropState((prev) => ({ ...prev, areaPixels }))
                   }
@@ -1468,7 +1479,9 @@ export function PhotoEditSessionsApp() {
               </label>
 
               <label className="space-y-2 text-sm">
-                <span className="text-muted-foreground">Rotation ({Math.round(cropState.rotation)}°)</span>
+                <span className="text-muted-foreground">
+                  Rotation ({Math.round(cropState.rotation)}°)
+                </span>
                 <input
                   type="range"
                   min={0}

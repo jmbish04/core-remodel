@@ -1,17 +1,14 @@
-import { desc, eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
-import { Hono } from "hono";
-import {
-  estimateSyncState,
-  googleSheetSyncEvents,
-} from "@backend/db";
+import { estimateSyncState, googleSheetSyncEvents } from "@backend/db";
+import { publishRealtimeEvent } from "@backend/realtime/publish";
 import {
   applyGoogleSheetsWorkbookPush,
   buildGoogleSheetsWorkbook,
   GOOGLE_SHEETS_WORKBOOK_TEMPLATE,
   REFERENCE_SHEET_FINDINGS,
 } from "@backend/services/google-sheets-sync";
-import { publishRealtimeEvent } from "@backend/realtime/publish";
+import { desc, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { Hono } from "hono";
 
 const syncRouter = new Hono<{ Bindings: Env }>();
 
@@ -186,8 +183,7 @@ syncRouter.post("/google-sheets/push", async (c) => {
       };
     };
 
-    const idempotencyKey =
-      body.idempotencyKey?.trim() || c.req.header("x-idempotency-key")?.trim();
+    const idempotencyKey = body.idempotencyKey?.trim() || c.req.header("x-idempotency-key")?.trim();
     if (!idempotencyKey) {
       return c.json(
         {
@@ -213,13 +209,8 @@ syncRouter.post("/google-sheets/push", async (c) => {
       .set({
         lastPushAt: now,
         cursorValue:
-          body.cursorValue?.trim() ||
-          body.workbook?.meta?.cursor?.trim() ||
-          state.cursorValue,
-        syncHash:
-          body.syncHash?.trim() ||
-          body.workbook?.meta?.syncHash?.trim() ||
-          state.syncHash,
+          body.cursorValue?.trim() || body.workbook?.meta?.cursor?.trim() || state.cursorValue,
+        syncHash: body.syncHash?.trim() || body.workbook?.meta?.syncHash?.trim() || state.syncHash,
         notes: body.notes?.trim() || "Applied Google Sheets push payload",
         datetimeUpdated: now,
       })

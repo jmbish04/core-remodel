@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronUp, Info, ZoomIn, ZoomOut } from "lucide-react";
 import React, { useMemo, useState } from "react";
+
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
@@ -58,7 +59,8 @@ export function ImagePreview(props: ImagePreviewProps) {
 
   const metadataObject = useMemo(() => normalizeMetadata(metadata), [metadata]);
   const metadataEntries = useMemo(
-    () => Object.entries(metadataObject).filter(([, value]) => value !== null && value !== undefined),
+    () =>
+      Object.entries(metadataObject).filter(([, value]) => value !== null && value !== undefined),
     [metadataObject],
   );
 
@@ -130,7 +132,11 @@ export function ImagePreview(props: ImagePreviewProps) {
               >
                 <Info className="size-4" />
                 Metadata
-                {showMetadata ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+                {showMetadata ? (
+                  <ChevronUp className="size-4" />
+                ) : (
+                  <ChevronDown className="size-4" />
+                )}
               </Button>
             )}
 
@@ -144,9 +150,7 @@ export function ImagePreview(props: ImagePreviewProps) {
                   <div key={key}>
                     <dt className="font-medium text-foreground">{key}</dt>
                     <dd className="text-muted-foreground">
-                      {typeof value === "object"
-                        ? JSON.stringify(value)
-                        : String(value)}
+                      {typeof value === "object" ? JSON.stringify(value) : String(value)}
                     </dd>
                   </div>
                 ))}

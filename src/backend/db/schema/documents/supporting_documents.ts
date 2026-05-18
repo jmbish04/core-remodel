@@ -1,8 +1,9 @@
 import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
-import { images } from "../images/images";
+
 import { remodelScenarios } from "../home/remodel_scenarios";
 import { rooms } from "../home/rooms";
+import { images } from "../images/images";
 
 /**
  * Canonical supporting-document records used across remodel planning.

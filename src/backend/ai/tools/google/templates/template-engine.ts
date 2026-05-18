@@ -22,9 +22,9 @@
 
 import Mustache from "mustache";
 
-import { RESUME_HTML_TEMPLATE } from "./resume-template";
-import { COVER_LETTER_HTML_TEMPLATE } from "./cover-letter-template";
 import { CANDIDATE_INFO } from "./constants";
+import { COVER_LETTER_HTML_TEMPLATE } from "./cover-letter-template";
+import { RESUME_HTML_TEMPLATE } from "./resume-template";
 import {
   buildBaseStyles,
   buildResumeStyles,
@@ -64,10 +64,7 @@ export function loadCoverLetterTemplate(): string {
  * The `CANDIDATE_INFO` constants are automatically merged into the view
  * so static personal fields are always available without explicit passing.
  */
-export function renderTemplate(
-  template: string,
-  data: Record<string, unknown>,
-): string {
+export function renderTemplate(template: string, data: Record<string, unknown>): string {
   const view = { ...CANDIDATE_INFO, ...data };
   return Mustache.render(template, view);
 }
@@ -75,15 +72,10 @@ export function renderTemplate(
 /**
  * Convenience: load + render in one call with default styling.
  */
-export function renderDocumentTemplate(
-  type: TemplateType,
-  data: Record<string, unknown>,
-): string {
+export function renderDocumentTemplate(type: TemplateType, data: Record<string, unknown>): string {
   const template = type === "resume" ? loadResumeTemplate() : loadCoverLetterTemplate();
   const styles =
-    type === "resume"
-      ? BASE_STYLES + RESUME_STYLES
-      : BASE_STYLES + COVER_LETTER_STYLES;
+    type === "resume" ? BASE_STYLES + RESUME_STYLES : BASE_STYLES + COVER_LETTER_STYLES;
 
   return renderTemplate(template, { ...data, STYLES: styles });
 }

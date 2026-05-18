@@ -1,10 +1,12 @@
 import type { HealthStepResult, TemplateIds } from "@backend/health/types";
+
+import { eq } from "drizzle-orm";
+
 import { GoogleDocsClient } from "@/ai/tools/google/docs";
 import { GoogleDriveClient } from "@/ai/tools/google/drive";
 import { renderDocumentTemplate } from "@/ai/tools/google/templates/template-engine";
 import { getDb } from "@/db";
 import { globalConfig } from "@/db/schema";
-import { eq } from "drizzle-orm";
 
 /**
  * Read template_ids config from D1 global_config.
@@ -82,7 +84,9 @@ export async function checkGoogleDrive(
     );
     const deleteFails = deleteResults.filter((r) => r.status === "rejected");
     if (deleteFails.length > 0) {
-      console.log(`[health] ${deleteFails.length}/${previousDocIds.length} delete(s) failed (expected for stale IDs)`);
+      console.log(
+        `[health] ${deleteFails.length}/${previousDocIds.length} delete(s) failed (expected for stale IDs)`,
+      );
     }
 
     // 4. HTML templatize path: render template → create doc
@@ -121,7 +125,9 @@ export async function checkGoogleDrive(
         issues.push(`Resume template copy error: ${e instanceof Error ? e.message : String(e)}`);
       }
     } else {
-      skipped.push("resume_template_copy (template_ids.resume is empty — configure at /config → Template IDs)");
+      skipped.push(
+        "resume_template_copy (template_ids.resume is empty — configure at /config → Template IDs)",
+      );
     }
 
     // 6. Template copy path: cover letter template
@@ -135,10 +141,14 @@ export async function checkGoogleDrive(
         createdDocIds.push(copiedDoc.id);
         if (copiedDoc.webViewLink) createdDocUrls.push(copiedDoc.webViewLink);
       } catch (e) {
-        issues.push(`Cover letter template copy error: ${e instanceof Error ? e.message : String(e)}`);
+        issues.push(
+          `Cover letter template copy error: ${e instanceof Error ? e.message : String(e)}`,
+        );
       }
     } else {
-      skipped.push("cover_letter_template_copy (template_ids.coverLetter is empty — configure at /config → Template IDs)");
+      skipped.push(
+        "cover_letter_template_copy (template_ids.coverLetter is empty — configure at /config → Template IDs)",
+      );
     }
   } catch (e) {
     // Client instantiation or auth failed — critical error

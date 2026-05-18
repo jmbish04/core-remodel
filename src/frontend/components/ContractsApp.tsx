@@ -1,6 +1,7 @@
 import { AlertTriangle, Loader2, PlusCircle, RefreshCw, ShieldCheck } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -24,7 +25,12 @@ interface ContractRecord {
 
 interface ContractsPayload {
   contracts: ContractRecord[];
-  drafts: Array<{ id: number; contractId: number; revisionNumber: number; datetimeUpdated: string | null }>;
+  drafts: Array<{
+    id: number;
+    contractId: number;
+    revisionNumber: number;
+    datetimeUpdated: string | null;
+  }>;
 }
 
 function formatDate(value: string | null | undefined): string {
@@ -39,10 +45,14 @@ export function ContractsApp() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [analysisLoadingByContractId, setAnalysisLoadingByContractId] = useState<Record<number, boolean>>({});
+  const [analysisLoadingByContractId, setAnalysisLoadingByContractId] = useState<
+    Record<number, boolean>
+  >({});
   const [ingestDialogOpen, setIngestDialogOpen] = useState(false);
   const [activeContract, setActiveContract] = useState<ContractRecord | null>(null);
-  const [ingestSourceType, setIngestSourceType] = useState<"pdf" | "photo" | "url" | "free_text">("pdf");
+  const [ingestSourceType, setIngestSourceType] = useState<"pdf" | "photo" | "url" | "free_text">(
+    "pdf",
+  );
   const [ingestSourceUrl, setIngestSourceUrl] = useState("");
   const [ingestSourceText, setIngestSourceText] = useState("");
   const [ingestFile, setIngestFile] = useState<File | null>(null);
@@ -106,31 +116,31 @@ export function ContractsApp() {
     }
   }, [loadContracts]);
 
-  const runRiskAnalysis = useCallback(
-    async (contract: ContractRecord) => {
-      const revisionId = contract.currentRevision?.id;
-      if (!revisionId) {
-        toast.error("No revision found to analyze");
-        return;
-      }
-      setAnalysisLoadingByContractId((current) => ({ ...current, [contract.id]: true }));
-      try {
-        const response = await fetch(`/api/contracts/${contract.id}/revisions/${revisionId}/analyze`, {
+  const runRiskAnalysis = useCallback(async (contract: ContractRecord) => {
+    const revisionId = contract.currentRevision?.id;
+    if (!revisionId) {
+      toast.error("No revision found to analyze");
+      return;
+    }
+    setAnalysisLoadingByContractId((current) => ({ ...current, [contract.id]: true }));
+    try {
+      const response = await fetch(
+        `/api/contracts/${contract.id}/revisions/${revisionId}/analyze`,
+        {
           method: "POST",
-        });
-        const data = (await response.json()) as { findingsCount?: number; error?: string };
-        if (!response.ok) {
-          throw new Error(data.error || "Failed to run contract analysis");
-        }
-        toast.success(`Contract analysis complete (${data.findingsCount || 0} findings)`);
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Failed to run contract analysis");
-      } finally {
-        setAnalysisLoadingByContractId((current) => ({ ...current, [contract.id]: false }));
+        },
+      );
+      const data = (await response.json()) as { findingsCount?: number; error?: string };
+      if (!response.ok) {
+        throw new Error(data.error || "Failed to run contract analysis");
       }
-    },
-    [],
-  );
+      toast.success(`Contract analysis complete (${data.findingsCount || 0} findings)`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to run contract analysis");
+    } finally {
+      setAnalysisLoadingByContractId((current) => ({ ...current, [contract.id]: false }));
+    }
+  }, []);
 
   const openIngestDialog = useCallback((contract: ContractRecord) => {
     setActiveContract(contract);
@@ -198,13 +208,7 @@ export function ContractsApp() {
     } finally {
       setIngesting(false);
     }
-  }, [
-    activeContract,
-    ingestFile,
-    ingestSourceText,
-    ingestSourceType,
-    ingestSourceUrl,
-  ]);
+  }, [activeContract, ingestFile, ingestSourceText, ingestSourceType, ingestSourceUrl]);
 
   const contracts = useMemo(() => payload?.contracts || [], [payload?.contracts]);
   const drafts = useMemo(() => payload?.drafts || [], [payload?.drafts]);
@@ -225,7 +229,8 @@ export function ContractsApp() {
           <div>
             <CardTitle className="text-2xl">Contracts Workspace</CardTitle>
             <CardDescription>
-              Track contractor/subcontractor contracts, revisions, risk findings, and payment controls.
+              Track contractor/subcontractor contracts, revisions, risk findings, and payment
+              controls.
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
@@ -338,9 +343,16 @@ export function ContractsApp() {
               <p className="text-xs text-muted-foreground">No draft revisions.</p>
             ) : (
               drafts.map((draft) => (
-                <div key={draft.id} className="rounded-md bg-amber-500/10 p-2 ring-1 ring-amber-500/30">
-                  <p className="text-xs font-medium">Contract #{draft.contractId} · Rev {draft.revisionNumber}</p>
-                  <p className="text-xs text-muted-foreground">{formatDate(draft.datetimeUpdated)}</p>
+                <div
+                  key={draft.id}
+                  className="rounded-md bg-amber-500/10 p-2 ring-1 ring-amber-500/30"
+                >
+                  <p className="text-xs font-medium">
+                    Contract #{draft.contractId} · Rev {draft.revisionNumber}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {formatDate(draft.datetimeUpdated)}
+                  </p>
                 </div>
               ))
             )}
@@ -424,7 +436,11 @@ export function ContractsApp() {
             )}
 
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setIngestDialogOpen(false)} disabled={ingesting}>
+              <Button
+                variant="outline"
+                onClick={() => setIngestDialogOpen(false)}
+                disabled={ingesting}
+              >
                 Cancel
               </Button>
               <Button onClick={submitIngest} disabled={ingesting}>

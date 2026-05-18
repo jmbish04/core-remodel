@@ -1,11 +1,8 @@
-import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
-import { drizzle } from "drizzle-orm/d1";
-import { eq, and, desc } from "drizzle-orm";
-import {
-  budgetTrackerItems,
-  budgetExpenseEntries,
-} from "@backend/db";
+import { budgetTrackerItems, budgetExpenseEntries } from "@backend/db";
 import { publishRealtimeEvent } from "@backend/realtime/publish";
+import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
+import { eq, and, desc } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 
 const csvRouter = new OpenAPIHono<{ Bindings: Env }>();
 
@@ -72,7 +69,7 @@ const CSVIngestionResponseSchema = z.object({
       z.object({
         rowIndex: z.number(),
         error: z.string(),
-      })
+      }),
     )
     .optional(),
 });
@@ -95,7 +92,7 @@ function normalizeString(input: unknown): string | null {
 
 async function validateWithWorkersAI(
   env: Env,
-  row: z.infer<typeof RemodelumCSVRowSchema>
+  row: z.infer<typeof RemodelumCSVRowSchema>,
 ): Promise<z.infer<typeof DeltaResultSchema>["aiValidation"]> {
   try {
     const prompt = `Analyze this budget line item and provide validation:
@@ -166,7 +163,7 @@ async function analyzeDelta(
   row: z.infer<typeof RemodelumCSVRowSchema>,
   rowIndex: number,
   validateAI: boolean,
-  env: Env
+  env: Env,
 ): Promise<z.infer<typeof DeltaResultSchema>> {
   const itemType = normalizeString(row.Type) || "expense";
   const category = normalizeString(row.Category) || "Uncategorized";
@@ -183,9 +180,7 @@ async function analyzeDelta(
     const existingExpenses = await db
       .select()
       .from(budgetExpenseEntries)
-      .where(
-        and(eq(budgetExpenseEntries.item, itemName), eq(budgetExpenseEntries.isActive, true))
-      )
+      .where(and(eq(budgetExpenseEntries.item, itemName), eq(budgetExpenseEntries.isActive, true)))
       .all();
 
     if (existingExpenses.length === 0) {
@@ -227,12 +222,7 @@ async function analyzeDelta(
     const existingItems = await db
       .select()
       .from(budgetTrackerItems)
-      .where(
-        and(
-          eq(budgetTrackerItems.title, itemName),
-          eq(budgetTrackerItems.isActive, true)
-        )
-      )
+      .where(and(eq(budgetTrackerItems.title, itemName), eq(budgetTrackerItems.isActive, true)))
       .all();
 
     if (existingItems.length === 0) {
@@ -283,7 +273,7 @@ async function applyDelta(
   db: ReturnType<typeof drizzle>,
   delta: z.infer<typeof DeltaResultSchema>,
   sourceRef: string,
-  changedBy: string
+  changedBy: string,
 ): Promise<void> {
   const now = new Date();
   const itemType = normalizeString(delta.csvData.Type) || "expense";
@@ -486,13 +476,7 @@ csvRouter.openapi(csvIngestionRoute, async (c) => {
 
     for (let i = 0; i < body.rows.length; i++) {
       try {
-        const delta = await analyzeDelta(
-          db,
-          body.rows[i],
-          i,
-          body.validateWithAI || false,
-          c.env
-        );
+        const delta = await analyzeDelta(db, body.rows[i], i, body.validateWithAI || false, c.env);
         deltas.push(delta);
       } catch (error) {
         errors.push({
@@ -515,7 +499,7 @@ csvRouter.openapi(csvIngestionRoute, async (c) => {
       await db.batch(
         deltas
           .filter((d) => d.status === "new" || d.status === "updated")
-          .map((delta) => applyDelta(db, delta, body.sourceRef, body.changedBy))
+          .map((delta) => applyDelta(db, delta, body.sourceRef, body.changedBy)),
       );
 
       await publishRealtimeEvent(c.env, "budget", {
@@ -542,7 +526,7 @@ csvRouter.openapi(csvIngestionRoute, async (c) => {
         error: "CSV ingestion failed",
         details: error instanceof Error ? error.message : "Unknown error",
       },
-      500
+      500,
     );
   }
 });

@@ -2,12 +2,6 @@
  * @fileoverview Images API routes for remodel mood board
  */
 
-import { and, eq, inArray } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
-import { Hono } from "hono";
-
-
-
 import {
   imageUploadStaging,
   imageReviewHighlights,
@@ -21,10 +15,11 @@ import {
 } from "@backend/db";
 import { ensureHomeCatalogSeed } from "@backend/services/home-catalog";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
-import {
-  ImageProcessorService,
-  type PhotoCategory,
-} from "../../services/image-processor";
+import { and, eq, inArray } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { Hono } from "hono";
+
+import { ImageProcessorService, type PhotoCategory } from "../../services/image-processor";
 
 const imagesRouter = new Hono<{ Bindings: Env }>();
 
@@ -318,9 +313,7 @@ async function ensureTags(
   return db.select().from(imageTags).where(inArray(imageTags.slug, slugs)).all();
 }
 
-function parseAiPrefillTagRationales(
-  metadataRaw: string | null | undefined,
-): Map<string, string> {
+function parseAiPrefillTagRationales(metadataRaw: string | null | undefined): Map<string, string> {
   const map = new Map<string, string>();
   if (!metadataRaw) {
     return map;
@@ -339,8 +332,7 @@ function parseAiPrefillTagRationales(
 
     for (const tagEntry of tagsRaw) {
       const value = typeof tagEntry.value === "string" ? tagEntry.value.trim() : "";
-      const rationale =
-        typeof tagEntry.rationale === "string" ? tagEntry.rationale.trim() : "";
+      const rationale = typeof tagEntry.rationale === "string" ? tagEntry.rationale.trim() : "";
       if (!value || !rationale) {
         continue;
       }
@@ -378,7 +370,9 @@ async function getTagMappingsByImageIds(
     .all();
   const tagIds = Array.from(new Set(mappings.map((mapping) => mapping.tagId)));
   const tags =
-    tagIds.length > 0 ? await db.select().from(imageTags).where(inArray(imageTags.id, tagIds)).all() : [];
+    tagIds.length > 0
+      ? await db.select().from(imageTags).where(inArray(imageTags.id, tagIds)).all()
+      : [];
   const tagById = new Map(tags.map((tag) => [tag.id, tag]));
 
   for (const mapping of mappings) {
@@ -460,8 +454,7 @@ function extractMetadataSummary(metadataRaw: string | null | undefined): string 
     const parsed = JSON.parse(metadataRaw) as Record<string, unknown>;
     const segments: string[] = [];
 
-    const styleTheme =
-      typeof parsed.styleTheme === "string" ? parsed.styleTheme.trim() : "";
+    const styleTheme = typeof parsed.styleTheme === "string" ? parsed.styleTheme.trim() : "";
     if (styleTheme) {
       segments.push(`theme:${styleTheme}`);
     }
@@ -520,9 +513,7 @@ function extractCloudflareImageId(value: string | null | undefined): string | nu
   return trimmed;
 }
 
-type CloudflareCredentials = Awaited<
-  ReturnType<typeof resolveCloudflareImagesCredentials>
->;
+type CloudflareCredentials = Awaited<ReturnType<typeof resolveCloudflareImagesCredentials>>;
 
 async function hydrateMissingDeliveryTokensForImages(params: {
   db: ReturnType<typeof drizzle>;
@@ -536,10 +527,7 @@ async function hydrateMissingDeliveryTokensForImages(params: {
 
   let updatedCount = 0;
   for (const image of sourceImages) {
-    if (
-      hasDeliveryToken(image.cfImageIdOptimized) ||
-      hasDeliveryToken(image.cfImageIdOriginal)
-    ) {
+    if (hasDeliveryToken(image.cfImageIdOptimized) || hasDeliveryToken(image.cfImageIdOriginal)) {
       continue;
     }
 
@@ -591,9 +579,7 @@ async function hydrateMissingDeliveryTokensForImages(params: {
 
     let nextMetadata: string | null = image.metadata;
     try {
-      const parsed = image.metadata
-        ? (JSON.parse(image.metadata) as Record<string, unknown>)
-        : {};
+      const parsed = image.metadata ? (JSON.parse(image.metadata) as Record<string, unknown>) : {};
       nextMetadata = JSON.stringify({
         ...parsed,
         deliveryUrl,
@@ -750,24 +736,19 @@ imagesRouter.post("/upload", async (c) => {
       }
     }
 
-    const results = await processor.processBulkImages(
-      files,
-      isListingPhoto,
-      photoCategory,
-      {
-        roomAssignment: selectedRoom
-          ? {
-              roomId: selectedRoom.id,
-              roomType: selectedRoom.roomName,
-            }
-          : undefined,
-        namingHints: {
-          roomLabels: namingRoomLabels,
-          existingDisplayNames: namingExistingDisplayNames,
-          referenceMetadata: namingReferenceMetadata,
-        },
+    const results = await processor.processBulkImages(files, isListingPhoto, photoCategory, {
+      roomAssignment: selectedRoom
+        ? {
+            roomId: selectedRoom.id,
+            roomType: selectedRoom.roomName,
+          }
+        : undefined,
+      namingHints: {
+        roomLabels: namingRoomLabels,
+        existingDisplayNames: namingExistingDisplayNames,
+        referenceMetadata: namingReferenceMetadata,
       },
-    );
+    });
 
     const successfulImageIds = results
       .filter((result) => result.success && result.imageId)
@@ -786,19 +767,13 @@ imagesRouter.post("/upload", async (c) => {
       );
 
       if (mappingRows.length > 0) {
-        await db
-          .insert(inspirationalImageRooms)
-          .values(mappingRows)
-          .onConflictDoNothing()
-          .run();
+        await db.insert(inspirationalImageRooms).values(mappingRows).onConflictDoNothing().run();
       }
     }
 
     if (successfulImageIds.length > 0) {
       const mappedOnUpload =
-        photoCategory === "listing"
-          ? Boolean(selectedRoom)
-          : selectedInspirationalRooms.length > 0;
+        photoCategory === "listing" ? Boolean(selectedRoom) : selectedInspirationalRooms.length > 0;
       const mappingCategory = toMappingCategory(photoCategory, isListingPhoto);
       await syncImageUploadStagingRows(
         db,
@@ -835,13 +810,7 @@ imagesRouter.post("/upload", async (c) => {
         ];
         const tagRows = await ensureTags(db, tagCandidates);
         const rationaleBySlug = parseAiPrefillTagRationales(insertedRow.metadata);
-        await replaceImageTagMappings(
-          db,
-          insertedRow.id,
-          tagRows,
-          "ai_prefill",
-          rationaleBySlug,
-        );
+        await replaceImageTagMappings(db, insertedRow.id, tagRows, "ai_prefill", rationaleBySlug);
       }
     }
 
@@ -918,11 +887,7 @@ imagesRouter.get("/mapping/pending", async (c) => {
   try {
     const db = drizzle(c.env.DB);
     const categoryQuery = c.req.query("photoCategory");
-    if (
-      categoryQuery &&
-      categoryQuery !== "listing" &&
-      categoryQuery !== "inspirational"
-    ) {
+    if (categoryQuery && categoryQuery !== "listing" && categoryQuery !== "inspirational") {
       return c.json({ error: "photoCategory must be listing or inspirational" }, 400);
     }
 
@@ -1017,8 +982,7 @@ imagesRouter.post("/mapping/apply", async (c) => {
     const body = (await c.req.json()) as Record<string, unknown>;
     await ensureHomeCatalogSeed(c.env);
 
-    const categoryRaw =
-      typeof body.photoCategory === "string" ? body.photoCategory : null;
+    const categoryRaw = typeof body.photoCategory === "string" ? body.photoCategory : null;
     if (categoryRaw !== "listing" && categoryRaw !== "inspirational") {
       return c.json({ error: "photoCategory must be listing or inspirational" }, 400);
     }
@@ -1026,9 +990,7 @@ imagesRouter.post("/mapping/apply", async (c) => {
     const imageIds = Array.isArray(body.imageIds)
       ? Array.from(
           new Set(
-            body.imageIds
-              .map((value) => String(value).trim())
-              .filter((value) => value.length > 0),
+            body.imageIds.map((value) => String(value).trim()).filter((value) => value.length > 0),
           ),
         )
       : [];
@@ -1036,11 +998,7 @@ imagesRouter.post("/mapping/apply", async (c) => {
       return c.json({ error: "imageIds is required" }, 400);
     }
 
-    const targetImages = await db
-      .select()
-      .from(images)
-      .where(inArray(images.id, imageIds))
-      .all();
+    const targetImages = await db.select().from(images).where(inArray(images.id, imageIds)).all();
     if (targetImages.length !== imageIds.length) {
       return c.json({ error: "One or more images were not found" }, 404);
     }
@@ -1485,11 +1443,12 @@ imagesRouter.put("/:id", async (c) => {
       if (requestedRoomId === null || !Number.isFinite(requestedRoomId)) {
         return c.json({ error: "Invalid roomId" }, 400);
       }
-      selectedRoom = (await db
-        .select()
-        .from(rooms)
-        .where(eq(rooms.id, Math.trunc(requestedRoomId)))
-        .get()) ?? null;
+      selectedRoom =
+        (await db
+          .select()
+          .from(rooms)
+          .where(eq(rooms.id, Math.trunc(requestedRoomId)))
+          .get()) ?? null;
       if (!selectedRoom) {
         return c.json({ error: "Selected room was not found" }, 404);
       }
@@ -1499,23 +1458,18 @@ imagesRouter.put("/:id", async (c) => {
     }
 
     const roomType =
-      body.roomType ??
-      body.room ??
-      (selectedRoom ? selectedRoom.roomName : undefined);
+      body.roomType ?? body.room ?? (selectedRoom ? selectedRoom.roomName : undefined);
     if (roomType !== undefined) updates.roomType = roomType;
     if (body.instagramAccount !== undefined) updates.instagramAccount = body.instagramAccount;
     if (body.instagramCaption !== undefined) updates.instagramCaption = body.instagramCaption;
     if (body.displayName !== undefined) {
-      const normalized =
-        typeof body.displayName === "string" ? body.displayName.trim() : "";
+      const normalized = typeof body.displayName === "string" ? body.displayName.trim() : "";
       updates.displayName = normalized || null;
     }
 
     const nextCategory = normalizePhotoCategory(
       typeof body.photoCategory === "string" ? body.photoCategory : null,
-      body.isListingPhoto === true ||
-        existing.isListingPhoto ||
-        body.photoCategory === "listing",
+      body.isListingPhoto === true || existing.isListingPhoto || body.photoCategory === "listing",
     );
     if (body.photoCategory !== undefined || body.isListingPhoto !== undefined) {
       updates.photoCategory = nextCategory;
@@ -1523,9 +1477,7 @@ imagesRouter.put("/:id", async (c) => {
     }
 
     const roomIdsProvided = Object.prototype.hasOwnProperty.call(body, "roomIds");
-    const requestedInspirationalRoomIds = roomIdsProvided
-      ? parseRoomIds(body.roomIds)
-      : [];
+    const requestedInspirationalRoomIds = roomIdsProvided ? parseRoomIds(body.roomIds) : [];
     const selectedInspirationalRooms =
       requestedInspirationalRoomIds.length > 0
         ? await db
@@ -1543,28 +1495,21 @@ imagesRouter.put("/:id", async (c) => {
       return c.json({ error: "One or more selected rooms were not found" }, 404);
     }
 
-    const effectiveRoomId =
-      updates.roomId !== undefined ? updates.roomId : existing.roomId;
+    const effectiveRoomId = updates.roomId !== undefined ? updates.roomId : existing.roomId;
     const effectiveCategory =
       updates.photoCategory !== undefined
         ? String(updates.photoCategory)
         : normalizePhotoCategory(existing.photoCategory, existing.isListingPhoto);
 
     if (effectiveCategory === "listing" && !effectiveRoomId) {
-      return c.json(
-        { error: "Listing photos must be assigned to a room" },
-        400,
-      );
+      return c.json({ error: "Listing photos must be assigned to a room" }, 400);
     }
     if (
       effectiveCategory === "inspirational" &&
       roomIdsProvided &&
       requestedInspirationalRoomIds.length === 0
     ) {
-      return c.json(
-        { error: "Inspirational photos must include at least one room" },
-        400,
-      );
+      return c.json({ error: "Inspirational photos must include at least one room" }, 400);
     }
 
     let metadataObject: Record<string, unknown> = {};
@@ -1675,11 +1620,7 @@ imagesRouter.put("/:id", async (c) => {
       updates.metadata = JSON.stringify(metadataObject);
     }
 
-    if (
-      Object.keys(updates).length === 0 &&
-      nextTagRows === null &&
-      !highlightsProvided
-    ) {
+    if (Object.keys(updates).length === 0 && nextTagRows === null && !highlightsProvided) {
       return c.json({ error: "No valid fields to update" }, 400);
     }
 

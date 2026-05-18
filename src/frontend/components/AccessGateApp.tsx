@@ -1,6 +1,7 @@
 import { LockKeyhole, Loader2 } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -84,9 +85,7 @@ export function AccessGateApp() {
             <LockKeyhole className="size-5 text-muted-foreground" />
             Protected Access
           </CardTitle>
-          <CardDescription>
-            Enter the project password to open this section.
-          </CardDescription>
+          <CardDescription>Enter the project password to open this section.</CardDescription>
         </CardHeader>
         <CardContent>
           {checking ? (

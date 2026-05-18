@@ -4,20 +4,19 @@
  * This file sets up the main Hono application with all API routes and middleware.
  */
 
-
-
+import { requireAccessAuth } from "@backend/utils/access";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 
-import { aiRouter } from "./routes/ai";
 import { accessRouter } from "./routes/access";
 import { adminRouter } from "./routes/admin";
-import { authRouter } from "./routes/auth";
+import { aiRouter } from "./routes/ai";
 import { artifactsRouter } from "./routes/artifacts";
+import { authRouter } from "./routes/auth";
 import { budgetTrackerRouter } from "./routes/budget-tracker";
-import { csvRouter } from "./routes/csv-ingestion";
 import { contractsRouter } from "./routes/contracts";
+import { csvRouter } from "./routes/csv-ingestion";
 import { dashboardRouter } from "./routes/dashboard";
 import { documentsRouter } from "./routes/documents";
 import { estimateCompaniesRouter } from "./routes/estimate-companies";
@@ -34,11 +33,10 @@ import { photoEditsRouter } from "./routes/photo-edits";
 import { photoReviewsRouter } from "./routes/photo-reviews";
 import { portalRouter } from "./routes/portal";
 import { roomsRouter } from "./routes/rooms";
+import { supportingDocumentsRouter } from "./routes/supporting-documents";
 import { syncRouter } from "./routes/sync";
 import { threadsRouter } from "./routes/threads";
-import { supportingDocumentsRouter } from "./routes/supporting-documents";
 import { visionNodesRouter } from "./routes/vision-nodes";
-import { requireAccessAuth } from "@backend/utils/access";
 
 export type Variables = {
   userId?: number;

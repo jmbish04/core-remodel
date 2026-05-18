@@ -2,13 +2,12 @@
  * @fileoverview Authentication API routes
  */
 
+import { users, sessions } from "@backend/db";
 import { zValidator } from "@hono/zod-validator";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
-
-import { users, sessions } from "@backend/db";
 
 const authRouter = new Hono<{ Bindings: Env }>();
 

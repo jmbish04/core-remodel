@@ -1,6 +1,6 @@
+import { floors, rooms } from "@backend/db";
 import { asc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { floors, rooms } from "@backend/db";
 
 interface SeedFloor {
   key: string;
@@ -314,7 +314,10 @@ export async function getHomeCatalog(env: Env) {
   }
 
   const roomIndexByFloorAndName = new Map<string, number>();
-  const roomsByFloorId = new Map<number, Array<typeof roomRows[number] & { displayName: string }>>();
+  const roomsByFloorId = new Map<
+    number,
+    Array<(typeof roomRows)[number] & { displayName: string }>
+  >();
 
   for (const room of roomRows) {
     const key = `${room.floorId}::${room.roomName.toLowerCase()}`;
@@ -322,10 +325,7 @@ export async function getHomeCatalog(env: Env) {
     roomIndexByFloorAndName.set(key, currentIndex);
 
     const totalWithSameName = roomCountsByFloorAndName.get(key) || 1;
-    const displayName =
-      totalWithSameName > 1
-        ? `${room.roomName} ${currentIndex}`
-        : room.roomName;
+    const displayName = totalWithSameName > 1 ? `${room.roomName} ${currentIndex}` : room.roomName;
 
     const payload = {
       ...room,

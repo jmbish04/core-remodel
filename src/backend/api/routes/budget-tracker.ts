@@ -1,6 +1,3 @@
-import { desc, eq, inArray, max, sql } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
-import { Hono } from "hono";
 import {
   budgetExpenseEntries,
   budgetFundingAccounts,
@@ -11,6 +8,9 @@ import {
   rooms,
 } from "@backend/db";
 import { publishRealtimeEvent } from "@backend/realtime/publish";
+import { desc, eq, inArray, max, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { Hono } from "hono";
 
 const budgetTrackerRouter = new Hono<{ Bindings: Env }>();
 
@@ -83,10 +83,7 @@ function parseTimestamp(input: unknown): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-async function emitBudgetRealtime(
-  env: Env,
-  payload: Record<string, unknown>,
-): Promise<void> {
+async function emitBudgetRealtime(env: Env, payload: Record<string, unknown>): Promise<void> {
   try {
     await publishRealtimeEvent(env, "home", {
       ...payload,
@@ -148,9 +145,7 @@ async function replaceBudgetTrackerItemRevision(
             ? null
             : normalizeString(patch.optionGroup) || current.optionGroup,
         optionKey:
-          patch.optionKey === null
-            ? null
-            : normalizeString(patch.optionKey) || current.optionKey,
+          patch.optionKey === null ? null : normalizeString(patch.optionKey) || current.optionKey,
         title: normalizeString(patch.title) || current.title,
         description:
           patch.description === null
@@ -159,9 +154,7 @@ async function replaceBudgetTrackerItemRevision(
         status: normalizeString(patch.status) || current.status,
         riskLevel: normalizeString(patch.riskLevel) || current.riskLevel,
         isBottleneck:
-          typeof patch.isBottleneck === "boolean"
-            ? patch.isBottleneck
-            : current.isBottleneck,
+          typeof patch.isBottleneck === "boolean" ? patch.isBottleneck : current.isBottleneck,
         bottleneckReason:
           patch.bottleneckReason === null
             ? null
@@ -169,11 +162,11 @@ async function replaceBudgetTrackerItemRevision(
         estimatedLowCents:
           patch.estimatedLowCents === null
             ? null
-            : parseCents(patch.estimatedLowCents) ?? current.estimatedLowCents,
+            : (parseCents(patch.estimatedLowCents) ?? current.estimatedLowCents),
         estimatedHighCents:
           patch.estimatedHighCents === null
             ? null
-            : parseCents(patch.estimatedHighCents) ?? current.estimatedHighCents,
+            : (parseCents(patch.estimatedHighCents) ?? current.estimatedHighCents),
         scenarioId:
           patch.scenarioId === null
             ? null
@@ -184,13 +177,9 @@ async function replaceBudgetTrackerItemRevision(
             ? null
             : normalizeString(patch.aiRationale) || current.aiRationale,
         changeSource:
-          normalizeString(patch.changeSource) ||
-          normalizeString(current.changeSource) ||
-          "manual",
+          normalizeString(patch.changeSource) || normalizeString(current.changeSource) || "manual",
         changedBy:
-          patch.changedBy === null
-            ? null
-            : normalizeString(patch.changedBy) || current.changedBy,
+          patch.changedBy === null ? null : normalizeString(patch.changedBy) || current.changedBy,
         datetimeCreated: now,
         datetimeUpdated: now,
       })
@@ -274,7 +263,7 @@ async function replaceBudgetExpenseRevision(
     const amountCents =
       patch.amountCents === null
         ? current.amountCents
-        : parseCents(patch.amountCents) ?? current.amountCents;
+        : (parseCents(patch.amountCents) ?? current.amountCents);
 
     const nextRevisionNumber = await getNextExpenseRevisionNumber(
       tx as ReturnType<typeof drizzle>,
@@ -303,33 +292,22 @@ async function replaceBudgetExpenseRevision(
             ? null
             : normalizeString(patch.optionGroup) || current.optionGroup,
         optionKey:
-          patch.optionKey === null
-            ? null
-            : normalizeString(patch.optionKey) || current.optionKey,
+          patch.optionKey === null ? null : normalizeString(patch.optionKey) || current.optionKey,
         sourceType:
           patch.sourceType === null
             ? current.sourceType
             : normalizeString(patch.sourceType) || current.sourceType,
         sourceRef:
-          patch.sourceRef === null
-            ? null
-            : normalizeString(patch.sourceRef) || current.sourceRef,
+          patch.sourceRef === null ? null : normalizeString(patch.sourceRef) || current.sourceRef,
         dateIncurred:
           patch.dateIncurred === null
             ? null
             : parseTimestamp(patch.dateIncurred) || current.dateIncurred,
-        notes:
-          patch.notes === null
-            ? null
-            : normalizeString(patch.notes) || current.notes,
+        notes: patch.notes === null ? null : normalizeString(patch.notes) || current.notes,
         changeSource:
-          normalizeString(patch.changeSource) ||
-          normalizeString(current.changeSource) ||
-          "manual",
+          normalizeString(patch.changeSource) || normalizeString(current.changeSource) || "manual",
         changedBy:
-          patch.changedBy === null
-            ? null
-            : normalizeString(patch.changedBy) || current.changedBy,
+          patch.changedBy === null ? null : normalizeString(patch.changedBy) || current.changedBy,
         datetimeCreated: now,
         datetimeUpdated: now,
       })
@@ -553,16 +531,8 @@ budgetTrackerRouter.get("/overview", async (c) => {
   try {
     const db = drizzle(c.env.DB);
     const [items, expenses, accounts] = await Promise.all([
-      db
-        .select()
-        .from(budgetTrackerItems)
-        .where(eq(budgetTrackerItems.isActive, true))
-        .all(),
-      db
-        .select()
-        .from(budgetExpenseEntries)
-        .where(eq(budgetExpenseEntries.isActive, true))
-        .all(),
+      db.select().from(budgetTrackerItems).where(eq(budgetTrackerItems.isActive, true)).all(),
+      db.select().from(budgetExpenseEntries).where(eq(budgetExpenseEntries.isActive, true)).all(),
       db.select().from(budgetFundingAccounts).all(),
     ]);
 
@@ -649,10 +619,7 @@ budgetTrackerRouter.put("/project-info", async (c) => {
         {
           infoKey,
           infoLabel: normalizeString(row.infoLabel) || infoKey,
-          infoValue:
-            row.infoValue === null
-              ? null
-              : normalizeString(row.infoValue),
+          infoValue: row.infoValue === null ? null : normalizeString(row.infoValue),
           notes: row.notes === null ? null : normalizeString(row.notes),
           datetimeCreated: now,
           datetimeUpdated: now,
@@ -698,11 +665,7 @@ budgetTrackerRouter.get("/financial-status", async (c) => {
     const db = drizzle(c.env.DB);
     const [accounts, expenses] = await Promise.all([
       db.select().from(budgetFundingAccounts).orderBy(budgetFundingAccounts.id).all(),
-      db
-        .select()
-        .from(budgetExpenseEntries)
-        .where(eq(budgetExpenseEntries.isActive, true))
-        .all(),
+      db.select().from(budgetExpenseEntries).where(eq(budgetExpenseEntries.isActive, true)).all(),
     ]);
     const totalAllottedCents = accounts.reduce((sumValue, row) => sumValue + row.amountCents, 0);
     const totalUsedCents = expenses.reduce((sumValue, row) => sumValue + row.amountCents, 0);
@@ -914,16 +877,18 @@ budgetTrackerRouter.get("/variance-options", async (c) => {
   try {
     const db = drizzle(c.env.DB);
     const [items, scenarios] = await Promise.all([
-      db
-        .select()
-        .from(budgetTrackerItems)
-        .where(eq(budgetTrackerItems.isActive, true))
-        .all(),
+      db.select().from(budgetTrackerItems).where(eq(budgetTrackerItems.isActive, true)).all(),
       db.select().from(remodelScenarios).all(),
     ]);
     const baseItems = items.filter((row) => row.executionClass === "must_now");
-    const baseLowCents = baseItems.reduce((sumValue, row) => sumValue + (row.estimatedLowCents || 0), 0);
-    const baseHighCents = baseItems.reduce((sumValue, row) => sumValue + (row.estimatedHighCents || 0), 0);
+    const baseLowCents = baseItems.reduce(
+      (sumValue, row) => sumValue + (row.estimatedLowCents || 0),
+      0,
+    );
+    const baseHighCents = baseItems.reduce(
+      (sumValue, row) => sumValue + (row.estimatedHighCents || 0),
+      0,
+    );
 
     const optionMap = new Map<
       string,
@@ -1163,8 +1128,7 @@ const HOMEOWNER_BOOTSTRAP_ITEMS: BootstrapItem[] = [
   },
   {
     title: "Kitchen option D: upstairs in-kind refresh",
-    description:
-      "Cost-control path: keep kitchen upstairs with limited layout changes.",
+    description: "Cost-control path: keep kitchen upstairs with limited layout changes.",
     executionClass: "option",
     status: "researching",
     riskLevel: "medium",
@@ -1175,8 +1139,7 @@ const HOMEOWNER_BOOTSTRAP_ITEMS: BootstrapItem[] = [
   },
   {
     title: "Kitchen option E: defer kitchen transformation for now",
-    description:
-      "Do minimal kitchen work now and defer full kitchen redesign to future phase.",
+    description: "Do minimal kitchen work now and defer full kitchen redesign to future phase.",
     executionClass: "option",
     status: "researching",
     riskLevel: "medium",
@@ -1215,8 +1178,7 @@ const HOMEOWNER_BOOTSTRAP_ITEMS: BootstrapItem[] = [
   },
   {
     title: "Hall bathroom remodel / relocation decision",
-    description:
-      "Evaluate keep-in-place vs relocate for Jack-and-Jill and plumbing alignment.",
+    description: "Evaluate keep-in-place vs relocate for Jack-and-Jill and plumbing alignment.",
     executionClass: "option",
     status: "researching",
     riskLevel: "high",
@@ -1370,14 +1332,54 @@ budgetTrackerRouter.post("/bootstrap-homeowner-plan", async (c) => {
     }
 
     const defaultProjectInfo = [
-      { infoKey: "project_name", infoLabel: "Project name", infoValue: "126 Colby Remodel", notes: null as string | null },
-      { infoKey: "project_description", infoLabel: "Project description", infoValue: null as string | null, notes: null as string | null },
-      { infoKey: "contractor_name", infoLabel: "Contractor", infoValue: null as string | null, notes: null as string | null },
-      { infoKey: "license_number", infoLabel: "Licensed/Bonded number", infoValue: null as string | null, notes: null as string | null },
-      { infoKey: "contact_name", infoLabel: "Contact name", infoValue: null as string | null, notes: null as string | null },
-      { infoKey: "website", infoLabel: "Website", infoValue: null as string | null, notes: null as string | null },
-      { infoKey: "phone", infoLabel: "Phone", infoValue: null as string | null, notes: null as string | null },
-      { infoKey: "address", infoLabel: "Address", infoValue: null as string | null, notes: null as string | null },
+      {
+        infoKey: "project_name",
+        infoLabel: "Project name",
+        infoValue: "126 Colby Remodel",
+        notes: null as string | null,
+      },
+      {
+        infoKey: "project_description",
+        infoLabel: "Project description",
+        infoValue: null as string | null,
+        notes: null as string | null,
+      },
+      {
+        infoKey: "contractor_name",
+        infoLabel: "Contractor",
+        infoValue: null as string | null,
+        notes: null as string | null,
+      },
+      {
+        infoKey: "license_number",
+        infoLabel: "Licensed/Bonded number",
+        infoValue: null as string | null,
+        notes: null as string | null,
+      },
+      {
+        infoKey: "contact_name",
+        infoLabel: "Contact name",
+        infoValue: null as string | null,
+        notes: null as string | null,
+      },
+      {
+        infoKey: "website",
+        infoLabel: "Website",
+        infoValue: null as string | null,
+        notes: null as string | null,
+      },
+      {
+        infoKey: "phone",
+        infoLabel: "Phone",
+        infoValue: null as string | null,
+        notes: null as string | null,
+      },
+      {
+        infoKey: "address",
+        infoLabel: "Address",
+        infoValue: null as string | null,
+        notes: null as string | null,
+      },
     ];
     for (const row of defaultProjectInfo) {
       await db
@@ -1446,32 +1448,38 @@ budgetTrackerRouter.get("/realtime", async (c) => {
 export { budgetTrackerRouter };
 
 // --- AppsScript Integration Routes ---
-import { budgetRows, budgetRowRevisions, syncSessions } from '../../db/schema/home/budget_tracking';
+import { budgetRows, budgetRowRevisions, syncSessions } from "../../db/schema/home/budget_tracking";
 
-budgetTrackerRouter.get('/appsscript/pull', async (c) => {
+budgetTrackerRouter.get("/appsscript/pull", async (c) => {
   const db_instance = drizzle(c.env.DB);
-  const activeRows = await db_instance.select().from(budgetRows).where(eq(budgetRows.isActive, true));
+  const activeRows = await db_instance
+    .select()
+    .from(budgetRows)
+    .where(eq(budgetRows.isActive, true));
 
   // Fetch latest revision for each active row
-  const rowsWithRevisions = await Promise.all(activeRows.map(async (row) => {
-    const latestRevision = await db_instance.select()
-      .from(budgetRowRevisions)
-      .where(eq(budgetRowRevisions.budgetRowId, row.id))
-      .orderBy(desc(budgetRowRevisions.createdAt))
-      .limit(1)
-      .get();
+  const rowsWithRevisions = await Promise.all(
+    activeRows.map(async (row) => {
+      const latestRevision = await db_instance
+        .select()
+        .from(budgetRowRevisions)
+        .where(eq(budgetRowRevisions.budgetRowId, row.id))
+        .orderBy(desc(budgetRowRevisions.createdAt))
+        .limit(1)
+        .get();
 
-    return {
-      ...row,
-      costExpression: latestRevision?.costExpression || '0',
-    };
-  }));
+      return {
+        ...row,
+        costExpression: latestRevision?.costExpression || "0",
+      };
+    }),
+  );
 
   // Create a sync session
   const sessionId = crypto.randomUUID();
   await db_instance.insert(syncSessions).values({
     id: sessionId,
-    type: 'PULL_SYNC',
+    type: "PULL_SYNC",
     timestamp: new Date(),
     payload: JSON.stringify(rowsWithRevisions),
   });
@@ -1479,13 +1487,13 @@ budgetTrackerRouter.get('/appsscript/pull', async (c) => {
   return c.json({ data: rowsWithRevisions, sessionId });
 });
 
-budgetTrackerRouter.post('/appsscript/push', async (c) => {
+budgetTrackerRouter.post("/appsscript/push", async (c) => {
   const body = await c.req.json();
   const incomingRecords: any[] = body.data;
   const db_instance = drizzle(c.env.DB);
 
   if (!Array.isArray(incomingRecords)) {
-    return c.json({ error: 'Invalid payload, expected array in data field' }, 400);
+    return c.json({ error: "Invalid payload, expected array in data field" }, 400);
   }
 
   const sessionId = crypto.randomUUID();
@@ -1496,20 +1504,24 @@ budgetTrackerRouter.post('/appsscript/push', async (c) => {
   // 1. Create a sync session
   await db_instance.insert(syncSessions).values({
     id: sessionId,
-    type: 'PUSH_UPDATE',
+    type: "PUSH_UPDATE",
     timestamp: new Date(),
     payload: JSON.stringify(incomingRecords),
   });
 
-  const incomingRowIds = incomingRecords.map(r => r.id).filter(id => id);
+  const incomingRowIds = incomingRecords.map((r) => r.id).filter((id) => id);
 
   // 2. Identify missing items: set is_active = false for IDs in DB not in incoming payload
-  const existingActiveRows = await db_instance.select().from(budgetRows).where(eq(budgetRows.isActive, true));
-  const activeRowIds = existingActiveRows.map(r => r.id);
+  const existingActiveRows = await db_instance
+    .select()
+    .from(budgetRows)
+    .where(eq(budgetRows.isActive, true));
+  const activeRowIds = existingActiveRows.map((r) => r.id);
 
-  const missingIds = activeRowIds.filter(id => !incomingRowIds.includes(id));
+  const missingIds = activeRowIds.filter((id) => !incomingRowIds.includes(id));
   if (missingIds.length > 0) {
-    await db_instance.update(budgetRows)
+    await db_instance
+      .update(budgetRows)
       .set({ isActive: false })
       .where(inArray(budgetRows.id, missingIds));
   }
@@ -1517,38 +1529,49 @@ budgetTrackerRouter.post('/appsscript/push', async (c) => {
   // 3. Process incoming records
   for (const record of incomingRecords) {
     // Upsert budget_row
-    const existingRow = existingActiveRows.find(r => r.id === record.id);
+    const existingRow = existingActiveRows.find((r) => r.id === record.id);
 
     if (!existingRow) {
       // Insert new row
-      await db_instance.insert(budgetRows).values({
-        id: record.id,
-        category: record.category || 'Uncategorized',
-        itemName: record.itemName || 'New Item',
-        description: record.description || '',
-        isActive: true,
-      }).onConflictDoUpdate({
-         target: budgetRows.id,
-         set: {
-           category: record.category || 'Uncategorized',
-           itemName: record.itemName || 'New Item',
-           description: record.description || '',
-           isActive: true,
-         }
-      });
+      await db_instance
+        .insert(budgetRows)
+        .values({
+          id: record.id,
+          category: record.category || "Uncategorized",
+          itemName: record.itemName || "New Item",
+          description: record.description || "",
+          isActive: true,
+        })
+        .onConflictDoUpdate({
+          target: budgetRows.id,
+          set: {
+            category: record.category || "Uncategorized",
+            itemName: record.itemName || "New Item",
+            description: record.description || "",
+            isActive: true,
+          },
+        });
     } else {
       // Update existing row if metadata changed
-      if (existingRow.category !== record.category || existingRow.itemName !== record.itemName || existingRow.description !== record.description) {
-          await db_instance.update(budgetRows).set({
-              category: record.category || existingRow.category,
-              itemName: record.itemName || existingRow.itemName,
-              description: record.description || existingRow.description,
-          }).where(eq(budgetRows.id, record.id));
+      if (
+        existingRow.category !== record.category ||
+        existingRow.itemName !== record.itemName ||
+        existingRow.description !== record.description
+      ) {
+        await db_instance
+          .update(budgetRows)
+          .set({
+            category: record.category || existingRow.category,
+            itemName: record.itemName || existingRow.itemName,
+            description: record.description || existingRow.description,
+          })
+          .where(eq(budgetRows.id, record.id));
       }
     }
 
     // Check if revision needs to be added (value changed)
-    const latestRevision = await db_instance.select()
+    const latestRevision = await db_instance
+      .select()
       .from(budgetRowRevisions)
       .where(eq(budgetRowRevisions.budgetRowId, record.id))
       .orderBy(desc(budgetRowRevisions.createdAt))
@@ -1558,7 +1581,7 @@ budgetTrackerRouter.post('/appsscript/push', async (c) => {
     if (!latestRevision || latestRevision.costExpression !== record.costExpression) {
       await db_instance.insert(budgetRowRevisions).values({
         budgetRowId: record.id,
-        costExpression: record.costExpression || '0',
+        costExpression: record.costExpression || "0",
         sessionId: sessionId,
         createdAt: new Date(),
       });

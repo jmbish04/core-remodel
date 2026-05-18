@@ -14,14 +14,15 @@
  *   Embeddings: @cf/baai/bge-base-en-v1.5
  */
 
-import { Agent, callable, type Connection } from "agents";
-import { ImageProcessorService } from "@backend/services/image-processor";
-import { WorkersAIProvider } from "@backend/ai/providers/workers-ai";
 import { modelRegistry } from "@backend/ai/models";
+import { WorkersAIProvider } from "@backend/ai/providers/workers-ai";
+import { ImageProcessorService } from "@backend/services/image-processor";
 import {
   getCloudflareImagesTokenCandidates,
   resolveCloudflareImagesCredentials,
 } from "@backend/utils/secrets";
+import { Agent, callable, type Connection } from "agents";
+
 import { type RenovationAgentState, RENOVATION_ADVICE_SCHEMA } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -105,21 +106,20 @@ export class RenovationAgent extends Agent<Env, RenovationAgentState> {
       );
     }
 
-    return new ImageProcessorService(
-      this.env,
-      credentials.accountId,
-      credentials.apiTokens[0],
-      {
-        fallbackApiTokens: credentials.apiTokens.slice(1),
-      },
-    );
+    return new ImageProcessorService(this.env, credentials.accountId, credentials.apiTokens[0], {
+      fallbackApiTokens: credentials.apiTokens.slice(1),
+    });
   }
 
   // -------------------------------------------------------------------------
   // Private: update agent state with analysis results
   // -------------------------------------------------------------------------
 
-  private updateContext(imageId: string, analysis: { roomType: string; keywords: string[] }, deliveryUrl?: string) {
+  private updateContext(
+    imageId: string,
+    analysis: { roomType: string; keywords: string[] },
+    deliveryUrl?: string,
+  ) {
     const state = this.state;
 
     state.analyzedImages.push({
@@ -218,14 +218,14 @@ export class RenovationAgent extends Agent<Env, RenovationAgentState> {
     const state = this.state;
 
     // Build context from analyzed images
-    const imageContext = state.analyzedImages.length > 0
-      ? state.analyzedImages
-          .map((img) => `- ${img.roomType}: ${img.keywords.join(", ")}`)
-          .join("\n")
-      : "No images analyzed yet.";
+    const imageContext =
+      state.analyzedImages.length > 0
+        ? state.analyzedImages
+            .map((img) => `- ${img.roomType}: ${img.keywords.join(", ")}`)
+            .join("\n")
+        : "No images analyzed yet.";
 
-    const systemPrompt =
-    `
+    const systemPrompt = `
       You are an expert interior designer and renovation consultant.
       You have been analyzing the user's inspiration photos and have accumulated deep context about their aesthetic preferences.
       

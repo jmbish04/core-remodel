@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+
 import { floors } from "./floors";
 
 /**
@@ -20,9 +21,7 @@ export const rooms = sqliteTable("rooms", {
   widthFeet: integer("width_feet"),
   widthInches: integer("width_inches"),
 
-  isLivingSpace: integer("is_living_space", { mode: "boolean" })
-    .notNull()
-    .default(true),
+  isLivingSpace: integer("is_living_space", { mode: "boolean" }).notNull().default(true),
 
   // Known room details for renovation planning.
   problemAreas: text("problem_areas"), // JSON array or freeform

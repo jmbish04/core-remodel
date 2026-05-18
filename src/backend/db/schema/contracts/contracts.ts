@@ -1,7 +1,8 @@
 import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
-import { remodelScenarios } from "../home/remodel_scenarios";
+
 import { estimateCompanies, estimates } from "../estimates/estimates";
+import { remodelScenarios } from "../home/remodel_scenarios";
 
 export const contractStatuses = sqliteTable("contract_statuses", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -186,4 +187,3 @@ export const contractMonitoringEvents = sqliteTable("contract_monitoring_events"
     .notNull()
     .default(sql`(unixepoch())`),
 });
-

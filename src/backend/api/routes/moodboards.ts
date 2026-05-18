@@ -2,13 +2,10 @@
  * @fileoverview Mood Boards API routes
  */
 
+import { moodBoards } from "@backend/db";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
-
-
-
-import { moodBoards } from "@backend/db";
 
 const moodBoardsRouter = new Hono<{ Bindings: Env }>();
 
@@ -106,9 +103,7 @@ moodBoardsRouter.get("/resolve/:identifier", async (c) => {
       return c.json({ error: "Identifier is required" }, 400);
     }
 
-    let board:
-      | (typeof moodBoards.$inferSelect)
-      | undefined;
+    let board: typeof moodBoards.$inferSelect | undefined;
 
     if (/^\d+$/.test(identifier)) {
       const boardId = parseInt(identifier, 10);

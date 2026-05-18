@@ -1,6 +1,4 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
-import { Hono } from "hono";
+import { generateStructuredOutput } from "@backend/ai/providers";
 import {
   contractClauseFindings,
   contractDocuments,
@@ -14,9 +12,11 @@ import {
   estimateCompanies,
 } from "@backend/db";
 import { publishRealtimeEvent } from "@backend/realtime/publish";
-import { generateStructuredOutput } from "@backend/ai/providers";
-import { z } from "zod";
 import { extractSourceContent } from "@backend/services/estimate-intake";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { Hono } from "hono";
+import { z } from "zod";
 
 const contractsRouter = new Hono<{ Bindings: Env }>();
 
@@ -83,7 +83,11 @@ async function getNextRevisionNumber(db: ReturnType<typeof drizzle>, contractId:
   return rows.reduce((maxValue, row) => Math.max(maxValue, row.revisionNumber), 0) + 1;
 }
 
-async function markAsCurrentRevision(db: ReturnType<typeof drizzle>, contractId: number, revisionId: number) {
+async function markAsCurrentRevision(
+  db: ReturnType<typeof drizzle>,
+  contractId: number,
+  revisionId: number,
+) {
   await db
     .update(contractRevisions)
     .set({
@@ -114,7 +118,11 @@ contractsRouter.get("/", async (c) => {
   try {
     await ensureContractStatuses(c.env);
     const db = drizzle(c.env.DB);
-    const contractRows = await db.select().from(contracts).orderBy(desc(contracts.datetimeUpdated)).all();
+    const contractRows = await db
+      .select()
+      .from(contracts)
+      .orderBy(desc(contracts.datetimeUpdated))
+      .all();
     const latestRevisions = await db
       .select()
       .from(contractRevisions)
@@ -127,7 +135,9 @@ contractsRouter.get("/", async (c) => {
       contracts: contractRows.map((contract) => ({
         ...contract,
         currentRevision: latestByContract.get(contract.id) || null,
-        company: contract.estimateCompanyId ? companyById.get(contract.estimateCompanyId) || null : null,
+        company: contract.estimateCompanyId
+          ? companyById.get(contract.estimateCompanyId) || null
+          : null,
       })),
       drafts: latestRevisions.filter((row) => row.isDraft),
     });
@@ -146,7 +156,11 @@ contractsRouter.get("/statuses", async (c) => {
   try {
     await ensureContractStatuses(c.env);
     const db = drizzle(c.env.DB);
-    const rows = await db.select().from(contractStatuses).orderBy(asc(contractStatuses.sortOrder)).all();
+    const rows = await db
+      .select()
+      .from(contractStatuses)
+      .orderBy(asc(contractStatuses.sortOrder))
+      .all();
     return c.json({ statuses: rows });
   } catch (error) {
     return c.json(
@@ -242,7 +256,11 @@ contractsRouter.patch("/drafts/:id/autosave", async (c) => {
     if (!revision) {
       return c.json({ error: "Draft revision not found" }, 404);
     }
-    const contract = await db.select().from(contracts).where(eq(contracts.id, revision.contractId)).get();
+    const contract = await db
+      .select()
+      .from(contracts)
+      .where(eq(contracts.id, revision.contractId))
+      .get();
     if (!contract) {
       return c.json({ error: "Contract not found" }, 404);
     }
@@ -250,7 +268,9 @@ contractsRouter.patch("/drafts/:id/autosave", async (c) => {
       .update(contractRevisions)
       .set({
         contractStatusId:
-          typeof body.contractStatusId === "number" ? body.contractStatusId : revision.contractStatusId,
+          typeof body.contractStatusId === "number"
+            ? body.contractStatusId
+            : revision.contractStatusId,
         statusNotes:
           typeof body.statusNotes === "string" || body.statusNotes === null
             ? body.statusNotes
@@ -289,11 +309,15 @@ contractsRouter.patch("/drafts/:id/autosave", async (c) => {
     });
 
     try {
-      await publishRealtimeEvent(c.env, contract.scenarioId ? `scenario:${contract.scenarioId}` : "home", {
-        event: "contract.draft.autosaved",
-        contractId: contract.id,
-        revisionId: revision.id,
-      });
+      await publishRealtimeEvent(
+        c.env,
+        contract.scenarioId ? `scenario:${contract.scenarioId}` : "home",
+        {
+          event: "contract.draft.autosaved",
+          contractId: contract.id,
+          revisionId: revision.id,
+        },
+      );
     } catch {
       // non-fatal
     }
@@ -406,7 +430,9 @@ contractsRouter.get("/:id/risks", async (c) => {
     const latest = await db
       .select()
       .from(contractRevisions)
-      .where(and(eq(contractRevisions.contractId, contractId), eq(contractRevisions.isLatest, true)))
+      .where(
+        and(eq(contractRevisions.contractId, contractId), eq(contractRevisions.isLatest, true)),
+      )
       .get();
     if (!latest) {
       return c.json({ findings: [] });
@@ -439,7 +465,9 @@ contractsRouter.get("/:id/payment-milestones", async (c) => {
     const latest = await db
       .select()
       .from(contractRevisions)
-      .where(and(eq(contractRevisions.contractId, contractId), eq(contractRevisions.isLatest, true)))
+      .where(
+        and(eq(contractRevisions.contractId, contractId), eq(contractRevisions.isLatest, true)),
+      )
       .get();
     if (!latest) {
       return c.json({ milestones: [] });
@@ -505,7 +533,9 @@ contractsRouter.post("/:id/revisions/:revisionId/documents", async (c) => {
     const revision = await db
       .select()
       .from(contractRevisions)
-      .where(and(eq(contractRevisions.id, revisionId), eq(contractRevisions.contractId, contractId)))
+      .where(
+        and(eq(contractRevisions.id, revisionId), eq(contractRevisions.contractId, contractId)),
+      )
       .get();
     if (!revision) {
       return c.json({ error: "Contract revision not found" }, 404);
@@ -585,8 +615,7 @@ contractsRouter.post("/:id/revisions/:revisionId/documents", async (c) => {
         contractRevisionId: revisionId,
         milestoneName: milestone.milestoneName,
         dueCriteria: milestone.dueCriteria || null,
-        amountCents:
-          typeof milestone.amountCents === "number" ? milestone.amountCents : null,
+        amountCents: typeof milestone.amountCents === "number" ? milestone.amountCents : null,
         dueStartAt: milestone.dueStartAt ? new Date(milestone.dueStartAt) : null,
         dueEndAt: milestone.dueEndAt ? new Date(milestone.dueEndAt) : null,
         completionEvidenceRequired: milestone.completionEvidenceRequired || null,
@@ -611,12 +640,16 @@ contractsRouter.post("/:id/revisions/:revisionId/documents", async (c) => {
     });
 
     try {
-      await publishRealtimeEvent(c.env, contract.scenarioId ? `scenario:${contract.scenarioId}` : "home", {
-        event: "contract.extraction.completed",
-        contractId,
-        revisionId,
-        documentId: documentInsert[0].id,
-      });
+      await publishRealtimeEvent(
+        c.env,
+        contract.scenarioId ? `scenario:${contract.scenarioId}` : "home",
+        {
+          event: "contract.extraction.completed",
+          contractId,
+          revisionId,
+          documentId: documentInsert[0].id,
+        },
+      );
     } catch {
       // non-fatal
     }
@@ -692,7 +725,9 @@ contractsRouter.post("/:id/revisions/:revisionId/analyze", async (c) => {
     const revision = await db
       .select()
       .from(contractRevisions)
-      .where(and(eq(contractRevisions.id, revisionId), eq(contractRevisions.contractId, contractId)))
+      .where(
+        and(eq(contractRevisions.id, revisionId), eq(contractRevisions.contractId, contractId)),
+      )
       .get();
     if (!revision) {
       return c.json({ error: "Contract revision not found" }, 404);
@@ -729,8 +764,16 @@ contractsRouter.post("/:id/revisions/:revisionId/analyze", async (c) => {
 
     const now = new Date();
     const findings = [
-      ...analysis.missingTerms.map((value) => ({ clauseType: "missing_term", riskLevel: "high", findingText: value })),
-      ...analysis.riskyTerms.map((value) => ({ clauseType: "risky_term", riskLevel: "high", findingText: value })),
+      ...analysis.missingTerms.map((value) => ({
+        clauseType: "missing_term",
+        riskLevel: "high",
+        findingText: value,
+      })),
+      ...analysis.riskyTerms.map((value) => ({
+        clauseType: "risky_term",
+        riskLevel: "high",
+        findingText: value,
+      })),
       ...analysis.negotiationSuggestions.map((value) => ({
         clauseType: "negotiation",
         riskLevel: "medium",

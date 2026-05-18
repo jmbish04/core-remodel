@@ -2,13 +2,13 @@
  * @fileoverview Dashboard API routes
  */
 
+import { dashboardMetrics } from "@backend/db";
 import { desc, eq, and, gte } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
 import type { Variables } from "../index";
 
-import { dashboardMetrics } from "@backend/db";
 import { authMiddleware } from "../middleware/auth";
 
 const dashboardRouter = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -109,10 +109,7 @@ dashboardRouter.get("/charts/:category", async (c) => {
       .select()
       .from(dashboardMetrics)
       .where(
-        and(
-          eq(dashboardMetrics.category, category),
-          gte(dashboardMetrics.timestamp, startDate),
-        ),
+        and(eq(dashboardMetrics.category, category), gte(dashboardMetrics.timestamp, startDate)),
       )
       .orderBy(desc(dashboardMetrics.timestamp));
 

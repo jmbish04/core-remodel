@@ -1,6 +1,6 @@
-import { z } from "zod";
 import { generateStructuredOutput } from "@backend/ai/providers";
 import { extractMarkdown, scrapeUrl } from "@backend/ai/tools/browser-rendering";
+import { z } from "zod";
 
 export const ESTIMATE_EXTRACTION_SCHEMA = z.object({
   estimateType: z.string().optional(),
@@ -346,4 +346,3 @@ export async function extractStructuredEstimate(
         : null,
   };
 }
-

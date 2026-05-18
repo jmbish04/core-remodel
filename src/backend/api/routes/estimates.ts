@@ -1,6 +1,3 @@
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
-import { Hono } from "hono";
 import {
   estimateCompanies,
   estimateDocuments,
@@ -13,17 +10,25 @@ import {
   estimates,
   estimateSourceEvents,
 } from "@backend/db";
-import { ensureEstimateStatuses } from "./estimate-statuses";
+import { publishRealtimeEvent } from "@backend/realtime/publish";
 import {
   extractSourceContent,
   extractStructuredEstimate,
   flattenStructuredProperties,
 } from "@backend/services/estimate-intake";
-import { publishRealtimeEvent } from "@backend/realtime/publish";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { Hono } from "hono";
+
+import { ensureEstimateStatuses } from "./estimate-statuses";
 
 const estimatesRouter = new Hono<{ Bindings: Env }>();
 
-async function markAsCurrentRevision(db: ReturnType<typeof drizzle>, estimateId: number, revisionId: number) {
+async function markAsCurrentRevision(
+  db: ReturnType<typeof drizzle>,
+  estimateId: number,
+  revisionId: number,
+) {
   await db
     .update(estimateRevisions)
     .set({
@@ -52,7 +57,10 @@ async function markAsCurrentRevision(db: ReturnType<typeof drizzle>, estimateId:
     .run();
 }
 
-async function getNextRevisionNumber(db: ReturnType<typeof drizzle>, estimateId: number): Promise<number> {
+async function getNextRevisionNumber(
+  db: ReturnType<typeof drizzle>,
+  estimateId: number,
+): Promise<number> {
   const rows = await db
     .select({ revisionNumber: estimateRevisions.revisionNumber })
     .from(estimateRevisions)
@@ -150,7 +158,11 @@ estimatesRouter.get("/", async (c) => {
   try {
     await ensureEstimateStatuses(c.env);
     const db = drizzle(c.env.DB);
-    const estimateRows = await db.select().from(estimates).orderBy(desc(estimates.datetimeUpdated)).all();
+    const estimateRows = await db
+      .select()
+      .from(estimates)
+      .orderBy(desc(estimates.datetimeUpdated))
+      .all();
     const latestRevisionRows = await db
       .select()
       .from(estimateRevisions)
@@ -164,12 +176,17 @@ estimatesRouter.get("/", async (c) => {
       estimates: estimateRows.map((estimate) => ({
         ...estimate,
         currentRevision: latestByEstimate.get(estimate.id) || null,
-        company: estimate.estimateCompanyId ? companyById.get(estimate.estimateCompanyId) || null : null,
+        company: estimate.estimateCompanyId
+          ? companyById.get(estimate.estimateCompanyId) || null
+          : null,
       })),
       drafts: latestRevisionRows.filter((row) => row.isDraft),
       recentlyUpdated: latestRevisionRows
         .slice()
-        .sort((a, b) => new Date(b.datetimeUpdated || 0).getTime() - new Date(a.datetimeUpdated || 0).getTime())
+        .sort(
+          (a, b) =>
+            new Date(b.datetimeUpdated || 0).getTime() - new Date(a.datetimeUpdated || 0).getTime(),
+        )
         .slice(0, 30),
     });
   } catch (error) {
@@ -297,7 +314,9 @@ estimatesRouter.patch("/drafts/:id/autosave", async (c) => {
         statusNotes:
           typeof body.statusNotes === "string" ? body.statusNotes.trim() : revision.statusNotes,
         estimateStatusId:
-          typeof body.estimateStatusId === "number" ? body.estimateStatusId : revision.estimateStatusId,
+          typeof body.estimateStatusId === "number"
+            ? body.estimateStatusId
+            : revision.estimateStatusId,
         aiRationale:
           typeof body.aiRationale === "string" || body.aiRationale === null
             ? body.aiRationale
@@ -329,12 +348,16 @@ estimatesRouter.patch("/drafts/:id/autosave", async (c) => {
     });
 
     try {
-      await publishRealtimeEvent(c.env, estimate.scenarioId ? `scenario:${estimate.scenarioId}` : "home", {
-        event: "estimate.draft.autosaved",
-        estimateId: estimate.id,
-        revisionId: revision.id,
-        at: new Date().toISOString(),
-      });
+      await publishRealtimeEvent(
+        c.env,
+        estimate.scenarioId ? `scenario:${estimate.scenarioId}` : "home",
+        {
+          event: "estimate.draft.autosaved",
+          estimateId: estimate.id,
+          revisionId: revision.id,
+          at: new Date().toISOString(),
+        },
+      );
     } catch {
       // non-fatal
     }
@@ -355,7 +378,12 @@ estimatesRouter.post("/intake/source", async (c) => {
   try {
     await ensureEstimateStatuses(c.env);
     const source = await parseSourceRequest(c);
-    const sourceType = source.sourceType as "pdf" | "photo" | "url" | "free_text" | "audio_transcript";
+    const sourceType = source.sourceType as
+      | "pdf"
+      | "photo"
+      | "url"
+      | "free_text"
+      | "audio_transcript";
     if (!["pdf", "photo", "url", "free_text", "audio_transcript"].includes(sourceType)) {
       return c.json({ error: "Invalid sourceType" }, 400);
     }
@@ -633,7 +661,11 @@ estimatesRouter.post("/intake/confirm", async (c) => {
     if (!revision) {
       return c.json({ error: "Draft revision not found" }, 404);
     }
-    const estimate = await db.select().from(estimates).where(eq(estimates.id, revision.estimateId)).get();
+    const estimate = await db
+      .select()
+      .from(estimates)
+      .where(eq(estimates.id, revision.estimateId))
+      .get();
     if (!estimate) {
       return c.json({ error: "Estimate not found" }, 404);
     }
@@ -647,7 +679,9 @@ estimatesRouter.post("/intake/confirm", async (c) => {
         .update(estimateRevisions)
         .set({
           estimateStatusId:
-            typeof body.estimateStatusId === "number" ? body.estimateStatusId : revision.estimateStatusId,
+            typeof body.estimateStatusId === "number"
+              ? body.estimateStatusId
+              : revision.estimateStatusId,
           statusNotes:
             typeof body.statusNotes === "string" || body.statusNotes === null
               ? body.statusNotes
@@ -661,10 +695,15 @@ estimatesRouter.post("/intake/confirm", async (c) => {
               ? new Date(body.dateEstimate)
               : revision.dateEstimate,
           totalAmountCents:
-            typeof body.totalAmountCents === "number" ? body.totalAmountCents : revision.totalAmountCents,
-          totalTaxCents: typeof body.totalTaxCents === "number" ? body.totalTaxCents : revision.totalTaxCents,
+            typeof body.totalAmountCents === "number"
+              ? body.totalAmountCents
+              : revision.totalAmountCents,
+          totalTaxCents:
+            typeof body.totalTaxCents === "number" ? body.totalTaxCents : revision.totalTaxCents,
           depositAmountCents:
-            typeof body.depositAmountCents === "number" ? body.depositAmountCents : revision.depositAmountCents,
+            typeof body.depositAmountCents === "number"
+              ? body.depositAmountCents
+              : revision.depositAmountCents,
           warrantyDetails:
             typeof body.warrantyDetails === "string" || body.warrantyDetails === null
               ? body.warrantyDetails
@@ -703,12 +742,9 @@ estimatesRouter.post("/intake/confirm", async (c) => {
           itemCode: lineItem.itemCode?.trim() || null,
           description: (lineItem.description || "").trim(),
           qty:
-            typeof lineItem.qty === "number" && Number.isFinite(lineItem.qty)
-              ? lineItem.qty
-              : null,
+            typeof lineItem.qty === "number" && Number.isFinite(lineItem.qty) ? lineItem.qty : null,
           uom: lineItem.uom?.trim() || null,
-          unitCostCents:
-            typeof lineItem.unitCostCents === "number" ? lineItem.unitCostCents : null,
+          unitCostCents: typeof lineItem.unitCostCents === "number" ? lineItem.unitCostCents : null,
           lineTotalCents:
             typeof lineItem.lineTotalCents === "number" ? lineItem.lineTotalCents : null,
           taxCents: typeof lineItem.taxCents === "number" ? lineItem.taxCents : null,
@@ -783,20 +819,20 @@ estimatesRouter.post("/intake/confirm", async (c) => {
       });
 
       if (body.submit) {
-        await markAsCurrentRevision(
-          tx as ReturnType<typeof drizzle>,
-          estimate.id,
-          draftRevisionId,
-        );
+        await markAsCurrentRevision(tx as ReturnType<typeof drizzle>, estimate.id, draftRevisionId);
       }
     });
 
     try {
-      await publishRealtimeEvent(c.env, estimate.scenarioId ? `scenario:${estimate.scenarioId}` : "home", {
-        event: body.submit ? "estimate.revision.submitted" : "estimate.revision.confirmed",
-        estimateId: estimate.id,
-        revisionId: draftRevisionId,
-      });
+      await publishRealtimeEvent(
+        c.env,
+        estimate.scenarioId ? `scenario:${estimate.scenarioId}` : "home",
+        {
+          event: body.submit ? "estimate.revision.submitted" : "estimate.revision.confirmed",
+          estimateId: estimate.id,
+          revisionId: draftRevisionId,
+        },
+      );
     } catch {
       // non-fatal
     }
@@ -841,8 +877,7 @@ estimatesRouter.post("/:id/revisions", async (c) => {
         revisionNumber,
         isDraft: body.isDraft ?? true,
         isLatest: true,
-        estimateStatusId:
-          typeof body.estimateStatusId === "number" ? body.estimateStatusId : null,
+        estimateStatusId: typeof body.estimateStatusId === "number" ? body.estimateStatusId : null,
         statusNotes: body.statusNotes || null,
         aiRationale: body.aiRationale || null,
         changeSource: body.changeSource || "manual_revision",
@@ -855,11 +890,15 @@ estimatesRouter.post("/:id/revisions", async (c) => {
     await markAsCurrentRevision(db, estimateId, revision.id);
 
     try {
-      await publishRealtimeEvent(c.env, estimate.scenarioId ? `scenario:${estimate.scenarioId}` : "home", {
-        event: "estimate.revision.created",
-        estimateId,
-        revisionId: revision.id,
-      });
+      await publishRealtimeEvent(
+        c.env,
+        estimate.scenarioId ? `scenario:${estimate.scenarioId}` : "home",
+        {
+          event: "estimate.revision.created",
+          estimateId,
+          revisionId: revision.id,
+        },
+      );
     } catch {
       // non-fatal
     }
@@ -912,7 +951,9 @@ estimatesRouter.get("/:id/revisions/:revisionId", async (c) => {
     const revision = await db
       .select()
       .from(estimateRevisions)
-      .where(and(eq(estimateRevisions.id, revisionId), eq(estimateRevisions.estimateId, estimateId)))
+      .where(
+        and(eq(estimateRevisions.id, revisionId), eq(estimateRevisions.estimateId, estimateId)),
+      )
       .get();
     if (!revision) {
       return c.json({ error: "Revision not found" }, 404);

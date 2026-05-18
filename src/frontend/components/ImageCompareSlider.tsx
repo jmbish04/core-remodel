@@ -1,4 +1,5 @@
 import React, { useId, useMemo, useState } from "react";
+
 import { cn } from "@/lib/utils";
 
 interface ImageCompareSliderProps {
@@ -22,14 +23,9 @@ export function ImageCompareSlider(props: ImageCompareSliderProps) {
     aspectClassName,
   } = props;
 
-  const [position, setPosition] = useState(
-    Math.min(95, Math.max(5, defaultValue)),
-  );
+  const [position, setPosition] = useState(Math.min(95, Math.max(5, defaultValue)));
   const sliderId = useId();
-  const clipPath = useMemo(
-    () => `inset(0 ${100 - position}% 0 0)`,
-    [position],
-  );
+  const clipPath = useMemo(() => `inset(0 ${100 - position}% 0 0)`, [position]);
 
   return (
     <figure className={cn("space-y-3", className)}>

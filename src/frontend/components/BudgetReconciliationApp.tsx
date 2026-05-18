@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from "react";
 import { Upload, CheckCircle, XCircle, AlertCircle, Loader2, RefreshCw } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
 
 interface CSVRow {
   Type: string;
@@ -133,7 +133,7 @@ export function BudgetReconciliationApp() {
       };
       reader.readAsText(file);
     },
-    [parseCSV]
+    [parseCSV],
   );
 
   const handleIngestion = useCallback(
@@ -166,7 +166,7 @@ export function BudgetReconciliationApp() {
         setIsProcessing(false);
       }
     },
-    [csvData, validateWithAI, selectedFile]
+    [csvData, validateWithAI, selectedFile],
   );
 
   const getStatusColor = (status: DeltaResult["status"]) => {
@@ -200,10 +200,7 @@ export function BudgetReconciliationApp() {
   };
 
   return (
-    <div
-      className="min-h-screen p-6"
-      style={{ backgroundColor: "oklch(0.145 0 0)" }}
-    >
+    <div className="min-h-screen p-6" style={{ backgroundColor: "oklch(0.145 0 0)" }}>
       <div className="mx-auto max-w-7xl space-y-6">
         {/* Header */}
         <div className="rounded-lg bg-zinc-900/50 p-6 ring-1 ring-border/40">
@@ -218,9 +215,7 @@ export function BudgetReconciliationApp() {
 
         {/* Upload Section */}
         <div className="rounded-lg bg-zinc-900/50 p-6 ring-1 ring-border/40">
-          <h2 className="mb-4 text-lg font-semibold text-zinc-50">
-            1. Upload CSV File
-          </h2>
+          <h2 className="mb-4 text-lg font-semibold text-zinc-50">1. Upload CSV File</h2>
           <div className="flex items-center gap-4">
             <label
               htmlFor="csv-upload"
@@ -236,9 +231,7 @@ export function BudgetReconciliationApp() {
               onChange={handleFileUpload}
               className="hidden"
             />
-            {selectedFile && (
-              <span className="text-sm text-zinc-400">{selectedFile.name}</span>
-            )}
+            {selectedFile && <span className="text-sm text-zinc-400">{selectedFile.name}</span>}
           </div>
           {csvData.length > 0 && (
             <div className="mt-4 rounded-md bg-zinc-800/50 p-3 ring-1 ring-border/40">
@@ -252,9 +245,7 @@ export function BudgetReconciliationApp() {
         {/* Validation Options */}
         {csvData.length > 0 && (
           <div className="rounded-lg bg-zinc-900/50 p-6 ring-1 ring-border/40">
-            <h2 className="mb-4 text-lg font-semibold text-zinc-50">
-              2. Validation Options
-            </h2>
+            <h2 className="mb-4 text-lg font-semibold text-zinc-50">2. Validation Options</h2>
             <div className="flex items-center gap-4">
               <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-400">
                 <input
@@ -347,41 +338,33 @@ export function BudgetReconciliationApp() {
         {/* Delta Details */}
         {ingestionResult && ingestionResult.deltas.length > 0 && (
           <div className="rounded-lg bg-zinc-900/50 p-6 ring-1 ring-border/40">
-            <h2 className="mb-4 text-lg font-semibold text-zinc-50">
-              Delta Analysis
-            </h2>
+            <h2 className="mb-4 text-lg font-semibold text-zinc-50">Delta Analysis</h2>
             <div className="space-y-3">
               {ingestionResult.deltas.slice(0, 50).map((delta, index) => (
-                <div
-                  key={index}
-                  className="rounded-md bg-zinc-800/50 p-4 ring-1 ring-border/40"
-                >
+                <div key={index} className="rounded-md bg-zinc-800/50 p-4 ring-1 ring-border/40">
                   <div className="flex items-start justify-between">
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
                         <span className={getStatusColor(delta.status)}>
                           {getStatusIcon(delta.status)}
                         </span>
-                        <span className="font-medium text-zinc-50">
-                          {delta.csvData.Name}
-                        </span>
+                        <span className="font-medium text-zinc-50">{delta.csvData.Name}</span>
                         <span className="rounded-full bg-zinc-700 px-2 py-0.5 text-xs text-zinc-300">
                           {delta.csvData.Type}
                         </span>
-                        <span className="text-sm text-zinc-500">
-                          {delta.csvData.Category}
-                        </span>
+                        <span className="text-sm text-zinc-500">{delta.csvData.Category}</span>
                       </div>
                       <div className="mt-1 text-sm text-zinc-400">
-                        ${typeof delta.csvData.Cost === "number" ? delta.csvData.Cost.toFixed(2) : delta.csvData.Cost}
+                        $
+                        {typeof delta.csvData.Cost === "number"
+                          ? delta.csvData.Cost.toFixed(2)
+                          : delta.csvData.Cost}
                       </div>
                       {delta.changes && delta.changes.length > 0 && (
                         <div className="mt-2 space-y-1">
                           {delta.changes.map((change, idx) => (
                             <div key={idx} className="text-xs text-zinc-500">
-                              <span className="font-medium text-yellow-400">
-                                {change.field}:
-                              </span>{" "}
+                              <span className="font-medium text-yellow-400">{change.field}:</span>{" "}
                               <span className="line-through">
                                 {JSON.stringify(change.oldValue)}
                               </span>{" "}
@@ -397,9 +380,7 @@ export function BudgetReconciliationApp() {
                             {Math.round((delta.aiValidation.categoryConfidence || 0) * 100)}%
                           </div>
                           {delta.aiValidation.rationale && (
-                            <div className="mt-1 text-zinc-400">
-                              {delta.aiValidation.rationale}
-                            </div>
+                            <div className="mt-1 text-zinc-400">{delta.aiValidation.rationale}</div>
                           )}
                         </div>
                       )}
@@ -413,9 +394,7 @@ export function BudgetReconciliationApp() {
 
         {/* Realtime Events */}
         <div className="rounded-lg bg-zinc-900/50 p-6 ring-1 ring-border/40">
-          <h2 className="mb-4 text-lg font-semibold text-zinc-50">
-            Realtime Telemetry
-          </h2>
+          <h2 className="mb-4 text-lg font-semibold text-zinc-50">Realtime Telemetry</h2>
           <div className="space-y-2">
             {realtimeEvents.length === 0 && (
               <p className="text-sm text-zinc-500">No events yet...</p>
@@ -426,9 +405,7 @@ export function BudgetReconciliationApp() {
                 className="rounded-md bg-zinc-800/50 p-3 font-mono text-xs text-zinc-400 ring-1 ring-border/40"
               >
                 <div className="text-zinc-500">{event.timestamp}</div>
-                <div className="mt-1 text-zinc-300">
-                  {event.payload.event || event.type}
-                </div>
+                <div className="mt-1 text-zinc-300">{event.payload.event || event.type}</div>
               </div>
             ))}
           </div>

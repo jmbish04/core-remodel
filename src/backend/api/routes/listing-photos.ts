@@ -2,15 +2,13 @@
  * @fileoverview Listing Photos API routes
  */
 
+import { aiEdits, listingPhotos, rooms } from "@backend/db";
+import { ensureHomeCatalogSeed } from "@backend/services/home-catalog";
+import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
-
-
-import { aiEdits, listingPhotos, rooms } from "@backend/db";
-import { ensureHomeCatalogSeed } from "@backend/services/home-catalog";
-import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { ImageProcessorService } from "../../services/image-processor";
 
 const listingPhotosRouter = new Hono<{ Bindings: Env }>();
@@ -66,8 +64,7 @@ listingPhotosRouter.post("/", async (c) => {
         return c.json({ error: "file is required" }, 400);
       }
 
-      const parsedRoomId =
-        typeof roomIdInput === "string" ? Number(roomIdInput.trim()) : NaN;
+      const parsedRoomId = typeof roomIdInput === "string" ? Number(roomIdInput.trim()) : NaN;
       if (!Number.isFinite(parsedRoomId)) {
         return c.json({ error: "roomId is required" }, 400);
       }
@@ -110,9 +107,7 @@ listingPhotosRouter.post("/", async (c) => {
 
       const deliveryParts = result.deliveryUrl.split("/").filter(Boolean);
       cfImageId =
-        deliveryParts.length >= 4
-          ? `${deliveryParts[2]}/${deliveryParts[3]}`
-          : result.imageId;
+        deliveryParts.length >= 4 ? `${deliveryParts[2]}/${deliveryParts[3]}` : result.imageId;
       description =
         typeof descriptionInput === "string" && descriptionInput.trim().length > 0
           ? descriptionInput.trim()
