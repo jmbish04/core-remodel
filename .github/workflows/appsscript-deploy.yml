@@ -1,0 +1,36 @@
+name: Deploy Script
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install clasp
+        run: npm install -g @google/clasp
+
+      - name: Create Auth and Project Config
+        run: |
+          # Write auth to the home directory
+          echo "$CLASPRC_JSON" > ~/.clasprc.json
+          # Write project config to the appsscript directory
+          echo "$CLASP_JSON" > ./appsscript/.clasp.json
+        env:
+          CLASPRC_JSON: ${{ secrets.CLASPRC_JSON }}
+          CLASP_JSON: ${{ secrets.CLASP_JSON }}
+
+      - name: Push to Google Apps Script
+        # Set the working directory to the appsscript folder
+        working-directory: ./appsscript
+        run: clasp push -f

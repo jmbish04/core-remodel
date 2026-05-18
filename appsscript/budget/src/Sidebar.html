@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      /* The Monolith Design System Aesthetic Framework */
+      body {
+        margin: 0;
+        padding: 16px;
+        background-color: #12111A;
+        color: #E2E1E6;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .panel-title {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 1.5px;
+        font-weight: 700;
+        color: #8F8C9C;
+        margin-bottom: 16px;
+        border-bottom: 1px solid #252330;
+        padding-bottom: 8px;
+      }
+      #chat-container {
+        height: calc(100vh - 140px);
+        overflow-y: auto;
+        padding-right: 4px;
+        margin-bottom: 12px;
+      }
+      .message {
+        margin-bottom: 12px;
+        padding: 10px 12px;
+        border-radius: 4px;
+        max-width: 90%;
+        word-wrap: break-word;
+      }
+      .user {
+        background-color: #252330;
+        color: #FFFFFF;
+        margin-left: auto;
+        border-bottom-right-radius: 0px;
+      }
+      .agent {
+        background-color: #1C1A27;
+        color: #E2E1E6;
+        margin-right: auto;
+        border-bottom-left-radius: 0px;
+      }
+      .log-entry {
+        font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+        font-size: 11px;
+        color: #A09EAD;
+        background-color: #171520;
+        padding: 6px 8px;
+        border-radius: 2px;
+        margin-bottom: 8px;
+        border-left: 2px solid #5A4E85;
+      }
+      .input-wrapper {
+        display: flex;
+        background-color: #1C1A27;
+        border-radius: 4px;
+        padding: 4px;
+        position: fixed;
+        bottom: 16px;
+        left: 16px;
+        right: 16px;
+      }
+      textarea {
+        flex-grow: 1;
+        background: transparent;
+        border: none;
+        color: #FFFFFF;
+        resize: none;
+        height: 24px;
+        padding: 4px;
+        font-family: inherit;
+        font-size: 13px;
+      }
+      textarea:focus {
+        outline: none;
+      }
+      button {
+        background-color: #38334A;
+        border: none;
+        color: #FFFFFF;
+        padding: 4px 12px;
+        border-radius: 3px;
+        font-weight: 600;
+        cursor: pointer;
+        font-size: 11px;
+        text-transform: uppercase;
+      }
+      button:hover {
+        background-color: #4C4564;
+      }
+      button:disabled {
+        background-color: #22202B;
+        color: #555361;
+        cursor: not-allowed;
+      }
+      /* Custom Scrollbar */
+      ::-webkit-scrollbar { width: 4px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #2D2B3A; border-radius: 2px; }
+    </style>
+  </head>
+  <body>
+
+    <div class="panel-title">Renovation Core Agent</div>
+    <div id="chat-container">
+      <div class="message agent">System loaded. Provide operational directions regarding your remodeling matrix parameters.</div>
+    </div>
+
+    <div class="input-wrapper">
+      <textarea id="prompt-input" placeholder="Instruct the engine..."></textarea>
+      <button id="send-btn" onclick="submitQuery()">Execute</button>
+    </div>
+
+    <script>
+      var conversationHistory = [];
+
+      function appendMessage(role, text) {
+        var container = document.getElementById('chat-container');
+        var msgDiv = document.createElement('div');
+        msgDiv.className = 'message ' + role;
+        msgDiv.innerText = text;
+        container.appendChild(msgDiv);
+        container.scrollTop = container.scrollHeight;
+      }
+
+      function appendLog(logText) {
+        var container = document.getElementById('chat-container');
+        var logDiv = document.createElement('div');
+        logDiv.className = 'log-entry';
+        logDiv.innerText = "🔧 " + logText;
+        container.appendChild(logDiv);
+        container.scrollTop = container.scrollHeight;
+      }
+
+      function submitQuery() {
+        var inputEl = document.getElementById('prompt-input');
+        var btnEl = document.getElementById('send-btn');
+        var query = inputEl.value.trim();
+        
+        if (!query) return;
+
+        inputEl.value = '';
+        inputEl.disabled = true;
+        btnEl.disabled = true;
+
+        appendMessage('user', query);
+
+        google.script.run
+          .withSuccessHandler(function(responseJSON) {
+            var data = JSON.parse(responseJSON);
+            
+            // Render tool logs if any were run during processing loops
+            if (data.executionLogs && data.executionLogs.length > 0) {
+              data.executionLogs.forEach(function(log) {
+                appendLog(log);
+              });
+            }
+
+            appendMessage('agent', data.finalResponse);
+            conversationHistory = data.updatedHistory;
+
+            inputEl.disabled = false;
+            btnEl.disabled = false;
+            inputEl.focus();
+          })
+          .withFailureHandler(function(err) {
+            appendMessage('agent', "Fatal Context Error: " + err.message);
+            inputEl.disabled = false;
+            btnEl.disabled = false;
+          })
+          .handleAgentChat(query, JSON.stringify(conversationHistory));
+      }
+
+      // Handle Enter Key Execution (Shift+Enter for lines)
+      document.getElementById('prompt-input').addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          submitQuery();
+        }
+      });
+    </script>
+  </body>
+</html>

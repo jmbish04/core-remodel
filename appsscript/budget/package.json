@@ -1,0 +1,14 @@
+{
+  "name": "home-remodel-budget-appsscript",
+  "version": "1.0.0",
+  "description": "Apps Script project for home remodel budget tracking",
+  "scripts": {
+    "login": "clasp login",
+    "push": "clasp push",
+    "pull": "clasp pull",
+    "deploy": "clasp deploy"
+  },
+  "dependencies": {
+    "@google/clasp": "^2.4.2"
+  }
+}
