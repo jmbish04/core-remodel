@@ -1,0 +1,20 @@
+---
+import { PlanningApp } from "@/components/PlanningApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Planning - 126 Colby - Remodel Mission Control"
+  description="Task tracker, Kanban, Gantt, and itinerary planning workspace for remodel delivery."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 text-3xl font-bold">Planning</h1>
+      <p class="text-muted-foreground">
+        Track remodel execution in table, Kanban, Gantt, and itinerary views with approval-based task updates.
+      </p>
+    </div>
+
+    <PlanningApp client:only="react" />
+  </main>
+</BaseLayout>

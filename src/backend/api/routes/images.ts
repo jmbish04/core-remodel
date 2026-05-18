@@ -2,6 +2,12 @@
  * @fileoverview Images API routes for remodel mood board
  */
 
+import { eq, inArray } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { Hono } from "hono";
+
+
+
 import {
   imageUploadStaging,
   imageReviewHighlights,
@@ -13,17 +19,24 @@ import {
   listingPhotos,
   rooms,
 } from "@backend/db";
+import {
+  buildImageUploadFingerprint,
+  buildUploadFingerprintKey,
+  findDuplicateImageByFingerprint,
+} from "@backend/services/image-deduplication";
 import { ensureHomeCatalogSeed } from "@backend/services/home-catalog";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
-import { and, eq, inArray } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
-import { Hono } from "hono";
-
-import { ImageProcessorService, type PhotoCategory } from "../../services/image-processor";
+import {
+  ImageProcessorService,
+  type PhotoCategory,
+} from "../../services/image-processor";
+import type { ImageProcessingWorkflowParams } from "../../services/image-workflow";
 
 const imagesRouter = new Hono<{ Bindings: Env }>();
 
 type HighlightType = "like" | "dislike";
+type ProcessingStatus = "queued" | "processing" | "processed" | "failed";
+type MappingCategory = "listing" | "inspirational";
 
 interface HighlightInput {
   id?: number;
@@ -34,6 +47,24 @@ interface HighlightInput {
   widthPct?: number;
   heightPct?: number;
   note?: string;
+}
+
+interface UploadProcessingState {
+  processingStatus: ProcessingStatus | null;
+  workflowInstanceId: string | null;
+  processingError: string | null;
+  processedAt: Date | null;
+}
+
+interface UploadResult {
+  success: boolean;
+  imageId: string;
+  error?: string;
+  duplicate?: boolean;
+  duplicateImageId?: string;
+  workflowInstanceId?: string;
+  processingStatus?: ProcessingStatus;
+  image?: typeof images.$inferSelect | null;
 }
 
 function slugifyTag(value: string): string {
@@ -219,8 +250,6 @@ function parseRoomIds(value: unknown): number[] {
   return Array.from(new Set(parsedValues.filter((item) => item > 0)));
 }
 
-type MappingCategory = "listing" | "inspirational";
-
 function toMappingCategory(
   rawCategory: string | null | undefined,
   isListingPhoto: boolean,
@@ -266,6 +295,9 @@ async function syncImageUploadStagingRows(
         imageId: row.imageId,
         photoCategory: row.photoCategory,
         mappingStatus: row.mapped ? "mapped" : "pending",
+        processingStatus: "processed",
+        datetimeProcessingStarted: new Date(),
+        datetimeProcessed: new Date(),
         datetimeMapped: row.mapped ? new Date() : null,
       })
       .onConflictDoUpdate({
@@ -278,6 +310,43 @@ async function syncImageUploadStagingRows(
       })
       .run();
   }
+}
+
+function buildWorkflowInstanceId(imageId: string): string {
+  return `image-processing-${imageId}`;
+}
+
+async function getUploadProcessingByImageIds(
+  db: ReturnType<typeof drizzle>,
+  imageIds: string[],
+): Promise<Map<string, UploadProcessingState>> {
+  const result = new Map<string, UploadProcessingState>();
+  if (imageIds.length === 0) {
+    return result;
+  }
+
+  const stagingRows = await db
+    .select({
+      imageId: imageUploadStaging.imageId,
+      processingStatus: imageUploadStaging.processingStatus,
+      workflowInstanceId: imageUploadStaging.workflowInstanceId,
+      processingError: imageUploadStaging.processingError,
+      processedAt: imageUploadStaging.datetimeProcessed,
+    })
+    .from(imageUploadStaging)
+    .where(inArray(imageUploadStaging.imageId, imageIds))
+    .all();
+
+  for (const row of stagingRows) {
+    result.set(row.imageId, {
+      processingStatus: (row.processingStatus as ProcessingStatus) ?? null,
+      workflowInstanceId: row.workflowInstanceId ?? null,
+      processingError: row.processingError ?? null,
+      processedAt: row.processedAt ?? null,
+    });
+  }
+
+  return result;
 }
 
 async function ensureTags(
@@ -313,37 +382,6 @@ async function ensureTags(
   return db.select().from(imageTags).where(inArray(imageTags.slug, slugs)).all();
 }
 
-function parseAiPrefillTagRationales(metadataRaw: string | null | undefined): Map<string, string> {
-  const map = new Map<string, string>();
-  if (!metadataRaw) {
-    return map;
-  }
-
-  try {
-    const metadata = JSON.parse(metadataRaw) as Record<string, unknown>;
-    const aiPrefill =
-      metadata.aiPrefill && typeof metadata.aiPrefill === "object"
-        ? (metadata.aiPrefill as Record<string, unknown>)
-        : null;
-    const tagsRaw =
-      aiPrefill?.tags && Array.isArray(aiPrefill.tags)
-        ? (aiPrefill.tags as Array<Record<string, unknown>>)
-        : [];
-
-    for (const tagEntry of tagsRaw) {
-      const value = typeof tagEntry.value === "string" ? tagEntry.value.trim() : "";
-      const rationale = typeof tagEntry.rationale === "string" ? tagEntry.rationale.trim() : "";
-      if (!value || !rationale) {
-        continue;
-      }
-      map.set(slugifyTag(value), rationale);
-    }
-    return map;
-  } catch {
-    return map;
-  }
-}
-
 function extractTagsFromMetadata(metadataRaw: string | null | undefined): string[] {
   if (!metadataRaw) return [];
   try {
@@ -370,9 +408,7 @@ async function getTagMappingsByImageIds(
     .all();
   const tagIds = Array.from(new Set(mappings.map((mapping) => mapping.tagId)));
   const tags =
-    tagIds.length > 0
-      ? await db.select().from(imageTags).where(inArray(imageTags.id, tagIds)).all()
-      : [];
+    tagIds.length > 0 ? await db.select().from(imageTags).where(inArray(imageTags.id, tagIds)).all() : [];
   const tagById = new Map(tags.map((tag) => [tag.id, tag]));
 
   for (const mapping of mappings) {
@@ -446,46 +482,6 @@ async function replaceImageTagMappings(
     .run();
 }
 
-function extractMetadataSummary(metadataRaw: string | null | undefined): string | null {
-  if (!metadataRaw) {
-    return null;
-  }
-  try {
-    const parsed = JSON.parse(metadataRaw) as Record<string, unknown>;
-    const segments: string[] = [];
-
-    const styleTheme = typeof parsed.styleTheme === "string" ? parsed.styleTheme.trim() : "";
-    if (styleTheme) {
-      segments.push(`theme:${styleTheme}`);
-    }
-
-    const materials = Array.isArray(parsed.materials)
-      ? parsed.materials.map((value) => String(value).trim()).filter(Boolean)
-      : [];
-    if (materials.length > 0) {
-      segments.push(`materials:${materials.slice(0, 4).join("|")}`);
-    }
-
-    const visibleElements = Array.isArray(parsed.visibleElements)
-      ? parsed.visibleElements.map((value) => String(value).trim()).filter(Boolean)
-      : [];
-    if (visibleElements.length > 0) {
-      segments.push(`visible:${visibleElements.slice(0, 4).join("|")}`);
-    }
-
-    const tags = Array.isArray(parsed.tags)
-      ? parsed.tags.map((value) => String(value).trim()).filter(Boolean)
-      : [];
-    if (tags.length > 0) {
-      segments.push(`tags:${tags.slice(0, 5).join("|")}`);
-    }
-
-    return segments.length > 0 ? segments.join(" ; ") : null;
-  } catch {
-    return null;
-  }
-}
-
 function extractCloudflareImageId(value: string | null | undefined): string | null {
   if (!value) {
     return null;
@@ -513,7 +509,9 @@ function extractCloudflareImageId(value: string | null | undefined): string | nu
   return trimmed;
 }
 
-type CloudflareCredentials = Awaited<ReturnType<typeof resolveCloudflareImagesCredentials>>;
+type CloudflareCredentials = Awaited<
+  ReturnType<typeof resolveCloudflareImagesCredentials>
+>;
 
 async function hydrateMissingDeliveryTokensForImages(params: {
   db: ReturnType<typeof drizzle>;
@@ -527,7 +525,10 @@ async function hydrateMissingDeliveryTokensForImages(params: {
 
   let updatedCount = 0;
   for (const image of sourceImages) {
-    if (hasDeliveryToken(image.cfImageIdOptimized) || hasDeliveryToken(image.cfImageIdOriginal)) {
+    if (
+      hasDeliveryToken(image.cfImageIdOptimized) ||
+      hasDeliveryToken(image.cfImageIdOriginal)
+    ) {
       continue;
     }
 
@@ -579,7 +580,9 @@ async function hydrateMissingDeliveryTokensForImages(params: {
 
     let nextMetadata: string | null = image.metadata;
     try {
-      const parsed = image.metadata ? (JSON.parse(image.metadata) as Record<string, unknown>) : {};
+      const parsed = image.metadata
+        ? (JSON.parse(image.metadata) as Record<string, unknown>)
+        : {};
       nextMetadata = JSON.stringify({
         ...parsed,
         deliveryUrl,
@@ -608,7 +611,7 @@ async function hydrateMissingDeliveryTokensForImages(params: {
 
 /**
  * POST /api/images/upload
- * Upload images with AI analysis
+ * Upload images and enqueue background AI analysis
  */
 imagesRouter.post("/upload", async (c) => {
   try {
@@ -678,139 +681,186 @@ imagesRouter.post("/upload", async (c) => {
       return c.json({ error: "One or more selected inspirational rooms were not found" }, 404);
     }
 
-    let namingRoomLabels: string[] = [];
-    let namingExistingDisplayNames: string[] = [];
-    let namingReferenceMetadata: string[] = [];
+    const roomHint =
+      selectedRoom?.roomName ||
+      selectedInspirationalRooms[0]?.roomName ||
+      null;
+    const mappingCategory = toMappingCategory(photoCategory, isListingPhoto);
+    const mappedOnUpload =
+      photoCategory === "listing"
+        ? Boolean(selectedRoom)
+        : selectedInspirationalRooms.length > 0;
+    const selectedInspirationalRoomIds = selectedInspirationalRooms.map((room) => room.id);
+    const results: UploadResult[] = [];
+    const requestFingerprintKeys = new Set<string>();
 
-    if (photoCategory === "listing" && selectedRoom) {
-      namingRoomLabels = [selectedRoom.roomName];
-      const siblingListings = await db
-        .select({
-          displayName: images.displayName,
-          metadata: images.metadata,
-        })
-        .from(images)
-        .where(and(eq(images.photoCategory, "listing"), eq(images.roomId, selectedRoom.id)))
-        .all();
+    for (const file of files) {
+      const imageId = crypto.randomUUID();
+      const filename = file.name || "image.jpg";
 
-      namingExistingDisplayNames = siblingListings
-        .map((row) => row.displayName?.trim() || "")
-        .filter(Boolean);
-      namingReferenceMetadata = siblingListings
-        .map((row) => extractMetadataSummary(row.metadata))
-        .filter((value): value is string => Boolean(value));
-    }
+      try {
+        const uploadFingerprint = await buildImageUploadFingerprint(file);
+        const requestFingerprintKey = buildUploadFingerprintKey(uploadFingerprint);
 
-    if (photoCategory === "inspirational" && selectedInspirationalRooms.length > 0) {
-      namingRoomLabels = selectedInspirationalRooms.map((room) => room.roomName);
-      const roomIds = selectedInspirationalRooms.map((room) => room.id);
-      const priorMappings = await db
-        .select({
-          imageId: inspirationalImageRooms.imageId,
-        })
-        .from(inspirationalImageRooms)
-        .where(inArray(inspirationalImageRooms.roomId, roomIds))
-        .all();
-      const priorImageIds = Array.from(
-        new Set(priorMappings.map((row) => row.imageId).filter(Boolean)),
-      );
-      if (priorImageIds.length > 0) {
-        const priorImages = await db
-          .select({
-            displayName: images.displayName,
-            metadata: images.metadata,
-            photoCategory: images.photoCategory,
-          })
-          .from(images)
-          .where(inArray(images.id, priorImageIds))
-          .all();
-        const inspirationalPriorImages = priorImages.filter(
-          (row) => row.photoCategory === "inspirational",
-        );
-        namingExistingDisplayNames = inspirationalPriorImages
-          .map((row) => row.displayName?.trim() || "")
-          .filter(Boolean);
-        namingReferenceMetadata = inspirationalPriorImages
-          .map((row) => extractMetadataSummary(row.metadata))
-          .filter((value): value is string => Boolean(value));
-      }
-    }
-
-    const results = await processor.processBulkImages(files, isListingPhoto, photoCategory, {
-      roomAssignment: selectedRoom
-        ? {
-            roomId: selectedRoom.id,
-            roomType: selectedRoom.roomName,
-          }
-        : undefined,
-      namingHints: {
-        roomLabels: namingRoomLabels,
-        existingDisplayNames: namingExistingDisplayNames,
-        referenceMetadata: namingReferenceMetadata,
-      },
-    });
-
-    const successfulImageIds = results
-      .filter((result) => result.success && result.imageId)
-      .map((result) => result.imageId);
-
-    if (
-      photoCategory === "inspirational" &&
-      successfulImageIds.length > 0 &&
-      selectedInspirationalRooms.length > 0
-    ) {
-      const mappingRows = successfulImageIds.flatMap((imageId) =>
-        selectedInspirationalRooms.map((room) => ({
-          imageId,
-          roomId: room.id,
-        })),
-      );
-
-      if (mappingRows.length > 0) {
-        await db.insert(inspirationalImageRooms).values(mappingRows).onConflictDoNothing().run();
-      }
-    }
-
-    if (successfulImageIds.length > 0) {
-      const mappedOnUpload =
-        photoCategory === "listing" ? Boolean(selectedRoom) : selectedInspirationalRooms.length > 0;
-      const mappingCategory = toMappingCategory(photoCategory, isListingPhoto);
-      await syncImageUploadStagingRows(
-        db,
-        successfulImageIds.map((imageId) => ({
-          imageId,
-          photoCategory: mappingCategory,
-          mapped: mappedOnUpload,
-        })),
-      );
-
-      const insertedRows = await db
-        .select({
-          id: images.id,
-          metadata: images.metadata,
-        })
-        .from(images)
-        .where(inArray(images.id, successfulImageIds))
-        .all();
-
-      for (const insertedRow of insertedRows) {
-        if (!insertedRow.metadata) {
+        if (requestFingerprintKeys.has(requestFingerprintKey)) {
+          results.push({
+            success: false,
+            imageId,
+            duplicate: true,
+            error: "Duplicate image detected in this upload batch",
+          });
           continue;
         }
-        let parsedMetadata: Record<string, unknown> = {};
-        try {
-          parsedMetadata = JSON.parse(insertedRow.metadata) as Record<string, unknown>;
-        } catch {
-          parsedMetadata = {};
+        requestFingerprintKeys.add(requestFingerprintKey);
+
+        const duplicateImage = await findDuplicateImageByFingerprint(db, uploadFingerprint);
+        if (duplicateImage) {
+          results.push({
+            success: false,
+            imageId,
+            duplicate: true,
+            duplicateImageId: duplicateImage.id,
+            error: "Duplicate image already exists",
+            image: duplicateImage,
+          });
+          continue;
         }
 
-        const tagCandidates = [
-          ...parseStringArray(parsedMetadata.tags),
-          ...parseStringArray(parsedMetadata.keywords),
-        ];
-        const tagRows = await ensureTags(db, tagCandidates);
-        const rationaleBySlug = parseAiPrefillTagRationales(insertedRow.metadata);
-        await replaceImageTagMappings(db, insertedRow.id, tagRows, "ai_prefill", rationaleBySlug);
+        const uploadResponse = await processor.uploadToCloudflareImages(
+          file,
+          undefined,
+          filename,
+        );
+        const deliveryUrl = processor.getDeliveryUrl(
+          uploadResponse,
+          uploadResponse.result.id,
+        );
+        const deliveryToken = ImageProcessorService.extractDeliveryTokenFromUrl(deliveryUrl);
+
+        if (!deliveryToken) {
+          throw new Error("Failed to derive Cloudflare Images delivery token");
+        }
+
+        const workflowInstanceId = buildWorkflowInstanceId(imageId);
+        const displayName = ImageProcessorService.deriveDisplayNameFromFilename(filename);
+        const initialMetadata = JSON.stringify({
+          deliveryUrl,
+          deliveryToken,
+          processingStatus: "queued",
+          uploadFingerprint,
+        });
+
+        const insertedImage = await db.transaction(async (tx) => {
+          await tx
+            .insert(images)
+            .values({
+              id: imageId,
+              displayName,
+              cfImageIdOriginal: deliveryToken,
+              cfImageIdOptimized: null,
+              photoCategory,
+              roomId: photoCategory === "listing" ? selectedRoom?.id ?? null : null,
+              roomType: roomHint,
+              metadata: initialMetadata,
+              isListingPhoto: photoCategory === "listing",
+              sourceFilename: uploadFingerprint.sourceFilename,
+              sourceFilenameNormalized: uploadFingerprint.sourceFilenameNormalized,
+              sourceFileSize: uploadFingerprint.sourceFileSize,
+              sourceFileMd5: uploadFingerprint.sourceFileMd5,
+            })
+            .run();
+
+          if (photoCategory === "inspirational" && selectedInspirationalRoomIds.length > 0) {
+            await tx
+              .insert(inspirationalImageRooms)
+              .values(
+                selectedInspirationalRoomIds.map((roomId) => ({
+                  imageId,
+                  roomId,
+                })),
+              )
+              .onConflictDoNothing()
+              .run();
+          }
+
+          await tx
+            .insert(imageUploadStaging)
+            .values({
+              imageId,
+              photoCategory: mappingCategory,
+              mappingStatus: mappedOnUpload ? "mapped" : "pending",
+              processingStatus: "queued",
+              workflowInstanceId,
+              processingError: null,
+            })
+            .onConflictDoUpdate({
+              target: imageUploadStaging.imageId,
+              set: {
+                photoCategory: mappingCategory,
+                mappingStatus: mappedOnUpload ? "mapped" : "pending",
+                processingStatus: "queued",
+                workflowInstanceId,
+                processingError: null,
+              },
+            })
+            .run();
+
+          return tx
+            .select()
+            .from(images)
+            .where(eq(images.id, imageId))
+            .get();
+        });
+
+        const workflowParams: ImageProcessingWorkflowParams = {
+          imageId,
+          photoCategory,
+          isListingPhoto,
+          filename,
+          roomId: selectedRoom?.id ?? null,
+          roomIds: selectedInspirationalRoomIds,
+          roomHint,
+        };
+
+        try {
+          await c.env.IMAGE_PROCESSING_WORKFLOW.create({
+            id: workflowInstanceId,
+            params: workflowParams,
+          });
+        } catch (workflowError) {
+          const message =
+            workflowError instanceof Error ? workflowError.message : "Failed to queue workflow";
+          await db
+            .update(imageUploadStaging)
+            .set({
+              processingStatus: "failed",
+              processingError: message,
+            })
+            .where(eq(imageUploadStaging.imageId, imageId))
+            .run();
+
+          results.push({
+            success: false,
+            imageId,
+            error: message,
+          });
+          continue;
+        }
+
+        results.push({
+          success: true,
+          imageId,
+          workflowInstanceId,
+          processingStatus: "queued",
+          image: insertedImage,
+        });
+      } catch (fileError) {
+        results.push({
+          success: false,
+          imageId,
+          error:
+            fileError instanceof Error ? fileError.message : "Failed to upload and queue image",
+        });
       }
     }
 
@@ -819,10 +869,10 @@ imagesRouter.post("/upload", async (c) => {
 
     return c.json({
       success: true,
-      message: `Processed ${results.length} images: ${successCount} successful, ${failureCount} failed`,
+      message: `Accepted ${successCount} image uploads for background processing with ${failureCount} failures`,
       photoCategory,
       results,
-    });
+    }, 202);
   } catch (error) {
     console.error("Upload error:", error);
     return c.json(
@@ -887,7 +937,11 @@ imagesRouter.get("/mapping/pending", async (c) => {
   try {
     const db = drizzle(c.env.DB);
     const categoryQuery = c.req.query("photoCategory");
-    if (categoryQuery && categoryQuery !== "listing" && categoryQuery !== "inspirational") {
+    if (
+      categoryQuery &&
+      categoryQuery !== "listing" &&
+      categoryQuery !== "inspirational"
+    ) {
       return c.json({ error: "photoCategory must be listing or inspirational" }, 400);
     }
 
@@ -951,6 +1005,10 @@ imagesRouter.get("/mapping/pending", async (c) => {
           roomIds,
           roomLabels,
           deliveryUrl: getImageDeliveryUrl(image),
+          processingStatus: row.processingStatus,
+          workflowInstanceId: row.workflowInstanceId,
+          processingError: row.processingError,
+          processedAt: row.datetimeProcessed,
           pendingSince: row.datetimeCreated,
         };
       })
@@ -982,7 +1040,8 @@ imagesRouter.post("/mapping/apply", async (c) => {
     const body = (await c.req.json()) as Record<string, unknown>;
     await ensureHomeCatalogSeed(c.env);
 
-    const categoryRaw = typeof body.photoCategory === "string" ? body.photoCategory : null;
+    const categoryRaw =
+      typeof body.photoCategory === "string" ? body.photoCategory : null;
     if (categoryRaw !== "listing" && categoryRaw !== "inspirational") {
       return c.json({ error: "photoCategory must be listing or inspirational" }, 400);
     }
@@ -990,7 +1049,9 @@ imagesRouter.post("/mapping/apply", async (c) => {
     const imageIds = Array.isArray(body.imageIds)
       ? Array.from(
           new Set(
-            body.imageIds.map((value) => String(value).trim()).filter((value) => value.length > 0),
+            body.imageIds
+              .map((value) => String(value).trim())
+              .filter((value) => value.length > 0),
           ),
         )
       : [];
@@ -998,7 +1059,11 @@ imagesRouter.post("/mapping/apply", async (c) => {
       return c.json({ error: "imageIds is required" }, 400);
     }
 
-    const targetImages = await db.select().from(images).where(inArray(images.id, imageIds)).all();
+    const targetImages = await db
+      .select()
+      .from(images)
+      .where(inArray(images.id, imageIds))
+      .all();
     if (targetImages.length !== imageIds.length) {
       return c.json({ error: "One or more images were not found" }, 404);
     }
@@ -1114,7 +1179,7 @@ imagesRouter.post("/mapping/apply", async (c) => {
       rooms: selectedRooms.map((room) => ({
         id: room.id,
         roomName: room.roomName,
-        displayName: room.displayName,
+        displayName: room.roomName,
       })),
     });
   } catch (error) {
@@ -1139,6 +1204,7 @@ imagesRouter.get("/", async (c) => {
     const isInstagram = c.req.query("isInstagram");
     const isListingPhoto = c.req.query("isListingPhoto");
     const photoCategory = c.req.query("photoCategory");
+    const imageIds = parseStringArray(c.req.query("ids"));
 
     let query = db.select().from(images);
 
@@ -1168,12 +1234,18 @@ imagesRouter.get("/", async (c) => {
       });
     }
 
+    if (imageIds.length > 0) {
+      const allowedIds = new Set(imageIds);
+      filtered = filtered.filter((img) => allowedIds.has(img.id));
+    }
+
     filtered = filtered.map((image) => ({
       ...image,
       photoCategory: normalizePhotoCategory(image.photoCategory, image.isListingPhoto),
     }));
 
     const filteredImageIds = filtered.map((image) => image.id);
+    const processingByImageId = await getUploadProcessingByImageIds(db, filteredImageIds);
     const inspirationalMappings =
       filteredImageIds.length > 0
         ? await db
@@ -1208,6 +1280,7 @@ imagesRouter.get("/", async (c) => {
       const roomLabels = roomIds
         .map((roomId) => roomNameById.get(roomId))
         .filter((roomName): roomName is string => typeof roomName === "string");
+      const processing = processingByImageId.get(image.id);
       const tagMappings = tagMappingsByImageId.get(image.id) || [];
       const highlights = highlightsByImageId.get(image.id) || [];
       const tagsFromMappings = tagMappings
@@ -1220,6 +1293,10 @@ imagesRouter.get("/", async (c) => {
         ...image,
         roomIds,
         roomLabels,
+        processingStatus: processing?.processingStatus ?? null,
+        workflowInstanceId: processing?.workflowInstanceId ?? null,
+        processingError: processing?.processingError ?? null,
+        processedAt: processing?.processedAt ?? null,
         tagMappings,
         tags,
         highlights,
@@ -1380,6 +1457,8 @@ imagesRouter.get("/:id", async (c) => {
         ? await db.select().from(rooms).where(inArray(rooms.id, roomIds)).all()
         : [];
     const roomLabels = roomRows.map((room) => room.roomName);
+    const processingByImageId = await getUploadProcessingByImageIds(db, [imageId]);
+    const processing = processingByImageId.get(imageId);
     const tagMappingsByImageId = await getTagMappingsByImageIds(db, [imageId]);
     const highlightsByImageId = await getHighlightsByImageIds(db, [imageId]);
     const tagMappings = tagMappingsByImageId.get(imageId) || [];
@@ -1396,6 +1475,10 @@ imagesRouter.get("/:id", async (c) => {
         ...result,
         roomIds,
         roomLabels,
+        processingStatus: processing?.processingStatus ?? null,
+        workflowInstanceId: processing?.workflowInstanceId ?? null,
+        processingError: processing?.processingError ?? null,
+        processedAt: processing?.processedAt ?? null,
         tagMappings,
         tags,
         highlights,
@@ -1443,12 +1526,11 @@ imagesRouter.put("/:id", async (c) => {
       if (requestedRoomId === null || !Number.isFinite(requestedRoomId)) {
         return c.json({ error: "Invalid roomId" }, 400);
       }
-      selectedRoom =
-        (await db
-          .select()
-          .from(rooms)
-          .where(eq(rooms.id, Math.trunc(requestedRoomId)))
-          .get()) ?? null;
+      selectedRoom = (await db
+        .select()
+        .from(rooms)
+        .where(eq(rooms.id, Math.trunc(requestedRoomId)))
+        .get()) ?? null;
       if (!selectedRoom) {
         return c.json({ error: "Selected room was not found" }, 404);
       }
@@ -1458,18 +1540,23 @@ imagesRouter.put("/:id", async (c) => {
     }
 
     const roomType =
-      body.roomType ?? body.room ?? (selectedRoom ? selectedRoom.roomName : undefined);
+      body.roomType ??
+      body.room ??
+      (selectedRoom ? selectedRoom.roomName : undefined);
     if (roomType !== undefined) updates.roomType = roomType;
     if (body.instagramAccount !== undefined) updates.instagramAccount = body.instagramAccount;
     if (body.instagramCaption !== undefined) updates.instagramCaption = body.instagramCaption;
     if (body.displayName !== undefined) {
-      const normalized = typeof body.displayName === "string" ? body.displayName.trim() : "";
+      const normalized =
+        typeof body.displayName === "string" ? body.displayName.trim() : "";
       updates.displayName = normalized || null;
     }
 
     const nextCategory = normalizePhotoCategory(
       typeof body.photoCategory === "string" ? body.photoCategory : null,
-      body.isListingPhoto === true || existing.isListingPhoto || body.photoCategory === "listing",
+      body.isListingPhoto === true ||
+        existing.isListingPhoto ||
+        body.photoCategory === "listing",
     );
     if (body.photoCategory !== undefined || body.isListingPhoto !== undefined) {
       updates.photoCategory = nextCategory;
@@ -1477,7 +1564,9 @@ imagesRouter.put("/:id", async (c) => {
     }
 
     const roomIdsProvided = Object.prototype.hasOwnProperty.call(body, "roomIds");
-    const requestedInspirationalRoomIds = roomIdsProvided ? parseRoomIds(body.roomIds) : [];
+    const requestedInspirationalRoomIds = roomIdsProvided
+      ? parseRoomIds(body.roomIds)
+      : [];
     const selectedInspirationalRooms =
       requestedInspirationalRoomIds.length > 0
         ? await db
@@ -1495,21 +1584,28 @@ imagesRouter.put("/:id", async (c) => {
       return c.json({ error: "One or more selected rooms were not found" }, 404);
     }
 
-    const effectiveRoomId = updates.roomId !== undefined ? updates.roomId : existing.roomId;
+    const effectiveRoomId =
+      updates.roomId !== undefined ? updates.roomId : existing.roomId;
     const effectiveCategory =
       updates.photoCategory !== undefined
         ? String(updates.photoCategory)
         : normalizePhotoCategory(existing.photoCategory, existing.isListingPhoto);
 
     if (effectiveCategory === "listing" && !effectiveRoomId) {
-      return c.json({ error: "Listing photos must be assigned to a room" }, 400);
+      return c.json(
+        { error: "Listing photos must be assigned to a room" },
+        400,
+      );
     }
     if (
       effectiveCategory === "inspirational" &&
       roomIdsProvided &&
       requestedInspirationalRoomIds.length === 0
     ) {
-      return c.json({ error: "Inspirational photos must include at least one room" }, 400);
+      return c.json(
+        { error: "Inspirational photos must include at least one room" },
+        400,
+      );
     }
 
     let metadataObject: Record<string, unknown> = {};
@@ -1620,7 +1716,11 @@ imagesRouter.put("/:id", async (c) => {
       updates.metadata = JSON.stringify(metadataObject);
     }
 
-    if (Object.keys(updates).length === 0 && nextTagRows === null && !highlightsProvided) {
+    if (
+      Object.keys(updates).length === 0 &&
+      nextTagRows === null &&
+      !highlightsProvided
+    ) {
       return c.json({ error: "No valid fields to update" }, 400);
     }
 
@@ -1844,6 +1944,20 @@ imagesRouter.post("/:id/replace", async (c) => {
       return c.json({ error: "No file provided" }, 400);
     }
 
+    const uploadFingerprint = await buildImageUploadFingerprint(file);
+    const duplicateImage = await findDuplicateImageByFingerprint(db, uploadFingerprint);
+    if (duplicateImage && duplicateImage.id !== imageId) {
+      return c.json(
+        {
+          error: "Duplicate image already exists",
+          duplicate: true,
+          duplicateImageId: duplicateImage.id,
+          image: duplicateImage,
+        },
+        409,
+      );
+    }
+
     const credentials = await resolveCloudflareImagesCredentials(c.env);
     if (!credentials.accountId || credentials.apiTokens.length === 0) {
       return c.json({ error: "Cloudflare credentials not configured" }, 500);
@@ -1882,6 +1996,7 @@ imagesRouter.post("/:id/replace", async (c) => {
                 deliveryUrl,
                 deliveryToken,
                 replacedAt: nowEpochSeconds,
+                uploadFingerprint,
               });
             } catch {
               return JSON.stringify({
@@ -1889,6 +2004,7 @@ imagesRouter.post("/:id/replace", async (c) => {
                 deliveryUrl,
                 deliveryToken,
                 replacedAt: nowEpochSeconds,
+                uploadFingerprint,
               });
             }
           })()
@@ -1897,6 +2013,7 @@ imagesRouter.post("/:id/replace", async (c) => {
             deliveryUrl,
             deliveryToken,
             replacedAt: nowEpochSeconds,
+            uploadFingerprint,
           });
 
     await db
@@ -1905,6 +2022,10 @@ imagesRouter.post("/:id/replace", async (c) => {
         cfImageIdOriginal: deliveryToken,
         cfImageIdOptimized: null,
         metadata: nextMetadata,
+        sourceFilename: uploadFingerprint.sourceFilename,
+        sourceFilenameNormalized: uploadFingerprint.sourceFilenameNormalized,
+        sourceFileSize: uploadFingerprint.sourceFileSize,
+        sourceFileMd5: uploadFingerprint.sourceFileMd5,
       })
       .where(eq(images.id, imageId))
       .run();
@@ -1914,6 +2035,10 @@ imagesRouter.post("/:id/replace", async (c) => {
       .update(imageReviews)
       .set({
         path: deliveryUrl,
+        filename: uploadFingerprint.sourceFilename,
+        sourceFilenameNormalized: uploadFingerprint.sourceFilenameNormalized,
+        sourceFileSize: uploadFingerprint.sourceFileSize,
+        sourceFileMd5: uploadFingerprint.sourceFileMd5,
         updatedAt: new Date(),
       })
       .where(eq(imageReviews.id, imageId))

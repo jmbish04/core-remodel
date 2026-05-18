@@ -13,12 +13,16 @@
  * Embeddings: @cf/baai/bge-base-en-v1.5
  */
 
-import { modelRegistry } from "@backend/ai/models/index";
-import { WorkersAIProvider } from "@backend/ai/providers/workers-ai";
-import { images, imageReviews } from "@backend/db";
-import { GoogleGenAI } from "@google/genai";
-import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
+import { and, eq, inArray } from "drizzle-orm";
+import { GoogleGenAI } from "@google/genai";
+import { imageTagMappings, imageTags, images, imageReviews } from "@backend/db";
+import { WorkersAIProvider } from "@backend/ai/providers/workers-ai";
+import { modelRegistry } from "@backend/ai/models/index";
+import {
+  buildImageUploadFingerprintFromBytes,
+  type ImageUploadFingerprint,
+} from "@backend/services/image-deduplication";
 
 // ---------------------------------------------------------------------------
 // JSON Schemas for structured output (gpt-oss-120b json_schema mode)
@@ -36,8 +40,7 @@ const IMAGE_ANALYSIS_SCHEMA = {
     properties: {
       roomType: {
         type: "string",
-        description:
-          "The room or area type, e.g. kitchen, bathroom, living room, bedroom, backyard, exterior, hallway, office",
+        description: "The room or area type, e.g. kitchen, bathroom, living room, bedroom, backyard, exterior, hallway, office",
       },
       keywords: {
         type: "array",
@@ -60,8 +63,7 @@ const IMAGE_ANALYSIS_SCHEMA = {
       visibleElements: {
         type: "array",
         items: { type: "string" },
-        description:
-          "Major visible elements or focal zones such as sink wall, vanity, island, shower, window",
+        description: "Major visible elements or focal zones such as sink wall, vanity, island, shower, window",
       },
       isInstagram: {
         type: "boolean",
@@ -99,8 +101,7 @@ const PHOTO_REVIEW_SCHEMA = {
     properties: {
       room: {
         type: "string",
-        description:
-          "The room or area type in lowercase, e.g. kitchen, bathroom, living room, bedroom, backyard",
+        description: "The room or area type in lowercase, e.g. kitchen, bathroom, living room, bedroom, backyard",
       },
       tags: {
         type: "array",
@@ -167,6 +168,22 @@ export interface ImageNamingHints {
   referenceMetadata?: string[];
 }
 
+export interface ImageAnalysisContext {
+  photoCategory?: PhotoCategory;
+  roomHint?: string | null;
+  roomLabels?: string[];
+  existingDisplayNames?: string[];
+  referenceMetadata?: string[];
+}
+
+export interface BuildImageMetadataOptions {
+  displayName: string;
+  assignedRoomType: string;
+  assignedRoomId?: number | null;
+  deliveryUrl?: string | null;
+  deliveryToken?: string | null;
+}
+
 export interface ProcessImageResult {
   success: boolean;
   imageId: string;
@@ -188,7 +205,9 @@ function normalizePhotoCategory(
 }
 
 function isUuid(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
 }
 
 function deriveDisplayName(filename: string): string {
@@ -224,7 +243,9 @@ function ensureUniqueDisplayName(name: string, existingNames: string[]): string 
   const normalized = sanitizeDisplayName(name);
   const base = normalized || "Untitled photo";
   const existing = new Set(
-    existingNames.map((entry) => entry.trim().toLowerCase()).filter((entry) => entry.length > 0),
+    existingNames
+      .map((entry) => entry.trim().toLowerCase())
+      .filter((entry) => entry.length > 0),
   );
 
   if (!existing.has(base.toLowerCase())) {
@@ -247,6 +268,29 @@ function normalizeTagValue(value: string): string {
     .slice(0, 48);
 }
 
+function slugifyTag(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 64);
+}
+
+function titleizeTag(value: string): string {
+  return value
+    .trim()
+    .split(/\s+/)
+    .map((segment) =>
+      segment.length > 0
+        ? `${segment.charAt(0).toUpperCase()}${segment.slice(1).toLowerCase()}`
+        : "",
+    )
+    .join(" ")
+    .trim();
+}
+
 function buildAiPrefillPayload(
   analysis: ImageAnalysisResult,
   displayName: string,
@@ -262,7 +306,9 @@ function buildAiPrefillPayload(
 
   const contextParts = [
     analysis.styleTheme ? `style theme ${analysis.styleTheme}` : null,
-    analysis.materials.length > 0 ? `materials ${analysis.materials.slice(0, 3).join(", ")}` : null,
+    analysis.materials.length > 0
+      ? `materials ${analysis.materials.slice(0, 3).join(", ")}`
+      : null,
     analysis.visibleElements.length > 0
       ? `visible elements ${analysis.visibleElements.slice(0, 3).join(", ")}`
       : null,
@@ -280,9 +326,7 @@ function buildAiPrefillPayload(
 
   const noteValue = [
     analysis.styleTheme ? `Theme: ${analysis.styleTheme}` : null,
-    analysis.materials.length > 0
-      ? `Materials: ${analysis.materials.slice(0, 4).join(", ")}`
-      : null,
+    analysis.materials.length > 0 ? `Materials: ${analysis.materials.slice(0, 4).join(", ")}` : null,
     analysis.visibleElements.length > 0
       ? `Focus: ${analysis.visibleElements.slice(0, 4).join(", ")}`
       : null,
@@ -302,7 +346,8 @@ function buildAiPrefillPayload(
     },
     displayName: {
       value: displayName,
-      rationale: "Suggested from room context and focal elements to provide a unique review label.",
+      rationale:
+        "Suggested from room context and focal elements to provide a unique review label.",
     },
   };
 }
@@ -317,7 +362,6 @@ export class ImageProcessorService {
   private vectorIndex: VectorizeIndex;
   private db: D1Database;
   private accountId: string;
-  private apiToken: string;
   private apiTokens: string[];
 
   constructor(
@@ -333,7 +377,6 @@ export class ImageProcessorService {
     this.vectorIndex = env.VECTOR_INDEX;
     this.db = env.DB;
     this.accountId = accountId;
-    this.apiToken = apiToken;
     this.apiTokens = Array.from(
       new Set(
         [apiToken, ...(options?.fallbackApiTokens || [])]
@@ -343,7 +386,7 @@ export class ImageProcessorService {
     );
   }
 
-  private static getDeliveryTokenFromUrl(deliveryUrl: string): string | null {
+  static extractDeliveryTokenFromUrl(deliveryUrl: string): string | null {
     try {
       const url = new URL(deliveryUrl);
       const segments = url.pathname.split("/").filter(Boolean);
@@ -353,6 +396,23 @@ export class ImageProcessorService {
       return `${segments[0]}/${segments[1]}`;
     } catch {
       return null;
+    }
+  }
+
+  static deriveDisplayNameFromFilename(filename: string): string {
+    return deriveDisplayName(filename);
+  }
+
+  static parseMetadata(raw: string | null | undefined): Record<string, unknown> {
+    if (!raw || raw.trim().length === 0) {
+      return {};
+    }
+
+    try {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch {
+      return {};
     }
   }
 
@@ -392,6 +452,10 @@ Be specific and detailed.`,
     return result.response;
   }
 
+  async describeImageFromDeliveryUrl(deliveryUrl: string): Promise<string> {
+    return this.describeImage(deliveryUrl);
+  }
+
   // -------------------------------------------------------------------------
   // Structured reasoning — gpt-oss-120b with json_schema
   // -------------------------------------------------------------------------
@@ -402,18 +466,10 @@ Be specific and detailed.`,
    *
    * This ensures deterministic JSON output without regex hacks.
    */
-  async analyzeImage(
-    imageDataUrl: string,
-    options?: {
-      photoCategory?: PhotoCategory;
-      roomHint?: string | null;
-      roomLabels?: string[];
-      existingDisplayNames?: string[];
-      referenceMetadata?: string[];
-    },
+  async analyzeVisionSummary(
+    visionDescription: string,
+    options?: ImageAnalysisContext,
   ): Promise<ImageAnalysisResult> {
-    // Step 1: Get raw description from vision model
-    const visionDescription = await this.describeImage(imageDataUrl);
     const roomLabels = (options?.roomLabels || []).filter(Boolean);
     const existingDisplayNames = (options?.existingDisplayNames || [])
       .map((value) => value.trim())
@@ -473,8 +529,13 @@ ${visionDescription}`,
       roomType: structured.roomType || "unknown",
       keywords: Array.isArray(structured.keywords) ? structured.keywords : [],
       suggestedDisplayName:
-        typeof structured.suggestedDisplayName === "string" ? structured.suggestedDisplayName : "",
-      styleTheme: typeof structured.styleTheme === "string" ? structured.styleTheme : "",
+        typeof structured.suggestedDisplayName === "string"
+          ? structured.suggestedDisplayName
+          : "",
+      styleTheme:
+        typeof structured.styleTheme === "string"
+          ? structured.styleTheme
+          : "",
       materials: Array.isArray(structured.materials)
         ? structured.materials.map((item) => String(item).trim()).filter(Boolean)
         : [],
@@ -486,6 +547,14 @@ ${visionDescription}`,
       instagramCaption: structured.instagramCaption || undefined,
       needsCrop: structured.isInstagram || false,
     };
+  }
+
+  async analyzeImage(
+    imageDataUrl: string,
+    options?: ImageAnalysisContext,
+  ): Promise<ImageAnalysisResult> {
+    const visionDescription = await this.describeImage(imageDataUrl);
+    return this.analyzeVisionSummary(visionDescription, options);
   }
 
   /**
@@ -583,7 +652,9 @@ ${visionDescription}`,
     const apiUrl =
       options?.endpoint ||
       `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/images/v1`;
-    const tokens = options?.authTokenOverride ? [options.authTokenOverride] : this.apiTokens;
+    const tokens = options?.authTokenOverride
+      ? [options.authTokenOverride]
+      : this.apiTokens;
     const maxAttempts = Math.max(1, options?.maxAttempts ?? 3);
     let lastError: Error | null = null;
 
@@ -656,6 +727,163 @@ ${visionDescription}`,
     return `https://imagedelivery.net/${this.accountId}/${fallbackId}/public`;
   }
 
+  deriveUniqueDisplayName(
+    suggestedDisplayName: string,
+    existingDisplayNames: string[],
+    fallbackDisplayName: string,
+  ): string {
+    return ensureUniqueDisplayName(
+      sanitizeDisplayName(suggestedDisplayName || "") ||
+        sanitizeDisplayName(fallbackDisplayName || "") ||
+        "Untitled photo",
+      existingDisplayNames,
+    );
+  }
+
+  buildImageMetadata(
+    analysis: ImageAnalysisResult,
+    options: BuildImageMetadataOptions,
+  ): Record<string, unknown> {
+    const aiPrefill = buildAiPrefillPayload(
+      analysis,
+      options.displayName,
+      options.assignedRoomType,
+    );
+
+    return {
+      tags: aiPrefill.tags.map((tag) => tag.value),
+      note: aiPrefill.note.value || "",
+      keywords: analysis.keywords,
+      styleTheme: analysis.styleTheme || null,
+      materials: analysis.materials,
+      visibleElements: analysis.visibleElements,
+      aiAnalysis: {
+        roomType: analysis.roomType,
+        isInstagram: analysis.isInstagram,
+        suggestedDisplayName: analysis.suggestedDisplayName,
+      },
+      aiPrefill,
+      assignedRoomType: options.assignedRoomType,
+      assignedRoomId: options.assignedRoomId ?? null,
+      deliveryUrl: options.deliveryUrl ?? null,
+      deliveryToken: options.deliveryToken ?? null,
+    };
+  }
+
+  mergeImageMetadata(
+    existingMetadataRaw: string | null | undefined,
+    nextMetadata: Record<string, unknown>,
+  ): string {
+    const existingMetadata = ImageProcessorService.parseMetadata(existingMetadataRaw);
+    const merged: Record<string, unknown> = {
+      ...existingMetadata,
+      ...nextMetadata,
+    };
+
+    const existingTags = existingMetadata.tags;
+    if (Array.isArray(existingTags) && existingTags.length > 0) {
+      merged.tags = existingTags;
+    }
+
+    const existingNote = existingMetadata.note;
+    if (typeof existingNote === "string" && existingNote.trim().length > 0) {
+      merged.note = existingNote;
+    }
+
+    const existingDeliveryUrl = existingMetadata.deliveryUrl;
+    if (typeof existingDeliveryUrl === "string" && existingDeliveryUrl.trim().length > 0) {
+      merged.deliveryUrl = existingDeliveryUrl;
+    }
+
+    const existingDeliveryToken = existingMetadata.deliveryToken;
+    if (
+      typeof existingDeliveryToken === "string" &&
+      existingDeliveryToken.trim().length > 0
+    ) {
+      merged.deliveryToken = existingDeliveryToken;
+    }
+
+    return JSON.stringify(merged);
+  }
+
+  async replaceAiPrefillTagMappings(
+    imageId: string,
+    tags: string[],
+    rationaleBySlug?: Map<string, string>,
+  ): Promise<{ skipped: boolean; count: number }> {
+    const dbClient = drizzle(this.db);
+    const manualMappings = await dbClient
+      .select({ id: imageTagMappings.id })
+      .from(imageTagMappings)
+      .where(
+        and(eq(imageTagMappings.imageId, imageId), eq(imageTagMappings.source, "manual")),
+      )
+      .all();
+
+    if (manualMappings.length > 0) {
+      return { skipped: true, count: 0 };
+    }
+
+    await dbClient
+      .delete(imageTagMappings)
+      .where(
+        and(eq(imageTagMappings.imageId, imageId), eq(imageTagMappings.source, "ai_prefill")),
+      )
+      .run();
+
+    const normalizedMap = new Map<string, { slug: string; label: string }>();
+    for (const rawTag of tags) {
+      const slug = slugifyTag(rawTag);
+      if (!slug) {
+        continue;
+      }
+      if (!normalizedMap.has(slug)) {
+        normalizedMap.set(slug, {
+          slug,
+          label: titleizeTag(rawTag),
+        });
+      }
+    }
+
+    const normalizedTags = Array.from(normalizedMap.values());
+    if (normalizedTags.length === 0) {
+      return { skipped: false, count: 0 };
+    }
+
+    await dbClient
+      .insert(imageTags)
+      .values(
+        normalizedTags.map((tag) => ({
+          slug: tag.slug,
+          label: tag.label,
+        })),
+      )
+      .onConflictDoNothing()
+      .run();
+
+    const slugs = normalizedTags.map((tag) => tag.slug);
+    const ensuredTags = await dbClient
+      .select()
+      .from(imageTags)
+      .where(inArray(imageTags.slug, slugs))
+      .all();
+
+    await dbClient
+      .insert(imageTagMappings)
+      .values(
+        ensuredTags.map((tagRow) => ({
+          imageId,
+          tagId: tagRow.id,
+          source: "ai_prefill" as const,
+          aiRationale: rationaleBySlug?.get(tagRow.slug) ?? null,
+        })),
+      )
+      .onConflictDoNothing()
+      .run();
+
+    return { skipped: false, count: ensuredTags.length };
+  }
+
   // -------------------------------------------------------------------------
   // Embeddings — Vectorize
   // -------------------------------------------------------------------------
@@ -663,13 +891,19 @@ ${visionDescription}`,
   /**
    * Generate and store vector embeddings for semantic search.
    */
-  async generateAndStoreEmbeddings(imageId: string, text: string): Promise<void> {
+  async generateEmbeddings(text: string): Promise<number[]> {
     const embeddingResponse = await this.ai.run(VECTOR_EMBED_MODEL as any, {
       text: [text],
     });
 
-    const embeddings = (embeddingResponse as unknown as { data: number[][] }).data[0];
+    return (embeddingResponse as unknown as { data: number[][] }).data[0];
+  }
 
+  async upsertEmbeddingVector(
+    imageId: string,
+    text: string,
+    embeddings: number[],
+  ): Promise<void> {
     await this.vectorIndex.upsert([
       {
         id: imageId,
@@ -679,15 +913,16 @@ ${visionDescription}`,
     ]);
   }
 
+  async generateAndStoreEmbeddings(imageId: string, text: string): Promise<void> {
+    const embeddings = await this.generateEmbeddings(text);
+    await this.upsertEmbeddingVector(imageId, text, embeddings);
+  }
+
   /**
    * Search images by semantic similarity.
    */
   async searchImages(query: string, topK: number = 10) {
-    const queryEmbedding = await this.ai.run(VECTOR_EMBED_MODEL as any, {
-      text: [query],
-    });
-
-    const embeddings = (queryEmbedding as unknown as { data: number[][] }).data[0];
+    const embeddings = await this.generateEmbeddings(query);
 
     return await this.vectorIndex.query(embeddings, {
       topK,
@@ -738,6 +973,12 @@ ${visionDescription}`,
 
       // CRITICAL FIX: Extract stream exactly ONCE
       const arrayBuffer = await file.arrayBuffer();
+      const uploadFingerprint = buildImageUploadFingerprintFromBytes({
+        filename,
+        sourceFileSize:
+          Number.isFinite(file.size) && file.size > 0 ? Math.trunc(file.size) : arrayBuffer.byteLength,
+        bytes: arrayBuffer,
+      });
 
       // Reconstruct fresh payload for APIs to avoid stream consumption 400/429s
       const imageBlob = new Blob([arrayBuffer], { type: mimeType });
@@ -752,11 +993,18 @@ ${visionDescription}`,
         referenceMetadata: options?.namingHints?.referenceMetadata || [],
       });
       const assignedRoomType =
-        options?.roomAssignment?.roomType?.trim() || analysis.roomType || "unknown";
+        options?.roomAssignment?.roomType?.trim() ||
+        analysis.roomType ||
+        "unknown";
       const assignedRoomId =
-        typeof options?.roomAssignment?.roomId === "number" ? options.roomAssignment.roomId : null;
+        typeof options?.roomAssignment?.roomId === "number"
+          ? options.roomAssignment.roomId
+          : null;
       const roomLabel = toTitleCase(
-        assignedRoomType.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim(),
+        assignedRoomType
+          .replace(/[_-]+/g, " ")
+          .replace(/\s+/g, " ")
+          .trim(),
       );
 
       const roomContextDisplayNames = new Set<string>(
@@ -764,11 +1012,7 @@ ${visionDescription}`,
           .map((value) => value.trim())
           .filter(Boolean),
       );
-      if (
-        roomContextDisplayNames.size === 0 &&
-        normalizedCategory === "listing" &&
-        assignedRoomId
-      ) {
+      if (roomContextDisplayNames.size === 0 && normalizedCategory === "listing" && assignedRoomId) {
         const existingListingNames = await dbClient
           .select({
             displayName: images.displayName,
@@ -810,9 +1054,9 @@ ${visionDescription}`,
         throw new Error("Failed to upload original image");
       }
 
-      const deliveryUrl = this.getDeliveryUrl(uploadResponse, imageId);
+      const deliveryUrl = this.getDeliveryUrl(uploadResponse, uploadResponse.result.id);
       const deliveryToken =
-        ImageProcessorService.getDeliveryTokenFromUrl(deliveryUrl) ||
+        ImageProcessorService.extractDeliveryTokenFromUrl(deliveryUrl) ||
         `${this.accountId}/${uploadResponse.result.id}`;
 
       let optimizedImageId: string | null = null;
@@ -820,27 +1064,13 @@ ${visionDescription}`,
         optimizedImageId = deliveryToken;
       }
 
-      const aiPrefill = buildAiPrefillPayload(analysis, displayName, assignedRoomType);
-
-      // Step 3: Store in D1
-      const metadata = {
-        tags: aiPrefill.tags.map((tag) => tag.value),
-        note: aiPrefill.note.value || "",
-        keywords: analysis.keywords,
-        styleTheme: analysis.styleTheme || null,
-        materials: analysis.materials,
-        visibleElements: analysis.visibleElements,
-        aiAnalysis: {
-          roomType: analysis.roomType,
-          isInstagram: analysis.isInstagram,
-          suggestedDisplayName: analysis.suggestedDisplayName,
-        },
-        aiPrefill,
+      const metadata = this.buildImageMetadata(analysis, {
+        displayName,
         assignedRoomType,
         assignedRoomId,
         deliveryUrl,
         deliveryToken,
-      };
+      });
 
       await dbClient.insert(images).values({
         id: imageId,
@@ -853,8 +1083,15 @@ ${visionDescription}`,
         isInstagram: analysis.isInstagram,
         instagramAccount: analysis.instagramAccount,
         instagramCaption: analysis.instagramCaption,
-        metadata: JSON.stringify(metadata),
+        metadata: JSON.stringify({
+          ...metadata,
+          uploadFingerprint,
+        }),
         isListingPhoto: normalizedCategory === "listing",
+        sourceFilename: uploadFingerprint.sourceFilename,
+        sourceFilenameNormalized: uploadFingerprint.sourceFilenameNormalized,
+        sourceFileSize: uploadFingerprint.sourceFileSize,
+        sourceFileMd5: uploadFingerprint.sourceFileMd5,
       });
 
       // Step 4: Generate embeddings
@@ -885,6 +1122,9 @@ ${visionDescription}`,
 
   async processPhotoReview(
     file: File,
+    options?: {
+      uploadFingerprint?: ImageUploadFingerprint;
+    },
   ): Promise<{ success: boolean; record?: Record<string, unknown>; error?: string }> {
     try {
       const id = crypto.randomUUID();
@@ -893,6 +1133,16 @@ ${visionDescription}`,
 
       // CRITICAL FIX: Extract stream exactly ONCE
       const arrayBuffer = await file.arrayBuffer();
+      const uploadFingerprint =
+        options?.uploadFingerprint ||
+        buildImageUploadFingerprintFromBytes({
+          filename,
+          sourceFileSize:
+            Number.isFinite(file.size) && file.size > 0
+              ? Math.trunc(file.size)
+              : arrayBuffer.byteLength,
+          bytes: arrayBuffer,
+        });
 
       // Reconstruct fresh payload for APIs to avoid stream consumption 400/429s
       const imageBlob = new Blob([arrayBuffer], { type: mimeType });
@@ -904,9 +1154,9 @@ ${visionDescription}`,
         throw new Error("Failed to upload to Cloudflare Images");
       }
 
-      const deliveryUrl = this.getDeliveryUrl(uploadResponse, id);
+      const deliveryUrl = this.getDeliveryUrl(uploadResponse, uploadResponse.result.id);
       const deliveryToken =
-        ImageProcessorService.getDeliveryTokenFromUrl(deliveryUrl) ||
+        ImageProcessorService.extractDeliveryTokenFromUrl(deliveryUrl) ||
         `${this.accountId}/${uploadResponse.result.id}`;
 
       // Step 2: Analyze with vision → structured reasoning
@@ -914,7 +1164,9 @@ ${visionDescription}`,
       const roomLabel = toTitleCase(analysis.room || "Inspiration");
       const primaryTag = analysis.tags[0] ? toTitleCase(analysis.tags[0]) : "";
       const displayName = ensureUniqueDisplayName(
-        sanitizeDisplayName(primaryTag ? `${roomLabel} ${primaryTag}` : `${roomLabel} inspiration`),
+        sanitizeDisplayName(
+          primaryTag ? `${roomLabel} ${primaryTag}` : `${roomLabel} inspiration`,
+        ),
         [],
       );
 
@@ -923,9 +1175,12 @@ ${visionDescription}`,
       const newRecord = {
         id,
         path: deliveryUrl,
-        filename,
+        filename: uploadFingerprint.sourceFilename,
         room: analysis.room,
         tags: analysis.tags,
+        sourceFilenameNormalized: uploadFingerprint.sourceFilenameNormalized,
+        sourceFileSize: uploadFingerprint.sourceFileSize,
+        sourceFileMd5: uploadFingerprint.sourceFileMd5,
         updatedAt: new Date(),
       };
 
@@ -945,10 +1200,12 @@ ${visionDescription}`,
           metadata: JSON.stringify({
             source: "photo-review",
             tags: analysis.tags,
+            uploadFingerprint,
             aiPrefill: {
               tags: analysis.tags.map((tag) => ({
                 value: tag,
-                rationale: "Selected by Workers AI from visual features in this inspiration image.",
+                rationale:
+                  "Selected by Workers AI from visual features in this inspiration image.",
               })),
               note: {
                 value: "",
@@ -957,7 +1214,8 @@ ${visionDescription}`,
               },
               roomType: {
                 value: analysis.room,
-                rationale: "Workers AI inferred room type from dominant fixtures and spatial cues.",
+                rationale:
+                  "Workers AI inferred room type from dominant fixtures and spatial cues.",
               },
               displayName: {
                 value: displayName,
@@ -969,6 +1227,10 @@ ${visionDescription}`,
             deliveryToken,
           }),
           isListingPhoto: false,
+          sourceFilename: uploadFingerprint.sourceFilename,
+          sourceFilenameNormalized: uploadFingerprint.sourceFilenameNormalized,
+          sourceFileSize: uploadFingerprint.sourceFileSize,
+          sourceFileMd5: uploadFingerprint.sourceFileMd5,
         })
         .run();
 
@@ -1028,7 +1290,7 @@ ${visionDescription}`,
       // Brief pause between uploads to allow edge tokens to refill
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
-
+    
     return results;
   }
 }

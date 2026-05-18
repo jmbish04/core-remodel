@@ -1,6 +1,6 @@
 import { Check, Crop, FileText, Loader2, Upload, X } from "lucide-react";
-import React, { useEffect, useMemo, useState } from "react";
-
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { UploadsMappingPanel } from "@/components/UploadsMappingPanel";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,7 +17,17 @@ import {
   FileUploadList,
   FileUploadTrigger,
 } from "@/components/ui/file-upload";
-import { UploadsMappingPanel } from "@/components/UploadsMappingPanel";
+import {
+  buildImageStatusUrl,
+  createTrackedUploadStateFromResult,
+  getTrackedUploadLabel,
+  getTrackedUploadMessage,
+  hasTrackedUploadsInFlight,
+  mergeTrackedUploadState,
+  type TrackedUploadState,
+  type UploadApiImageRecord,
+  type UploadApiResponse,
+} from "@/lib/image-upload-tracking";
 import { cn } from "@/lib/utils";
 
 type UploadTarget = "inspirational" | "listing";
@@ -38,7 +48,8 @@ interface MappingSummary {
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_FILES = 30;
 
-const getFileKey = (file: File) => `${file.name}-${file.size}-${file.type}-${file.lastModified}`;
+const getFileKey = (file: File) =>
+  `${file.name}-${file.size}-${file.type}-${file.lastModified}`;
 
 function createImageFromFile(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -102,6 +113,7 @@ export function UniversalUploadApp() {
   const [target, setTarget] = useState<UploadTarget>("inspirational");
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadStates, setUploadStates] = useState<Record<string, TrackedUploadState>>({});
   const [status, setStatus] = useState<string>("");
   const [mappingSummary, setMappingSummary] = useState<MappingSummary>({
     listing: 0,
@@ -132,6 +144,46 @@ export function UniversalUploadApp() {
     };
   }, [cropTargetPreview]);
 
+  useEffect(() => {
+    setUploadStates((current) => {
+      const activeKeys = new Set(files.map(getFileKey));
+      const nextEntries = Object.entries(current).filter(([key]) => activeKeys.has(key));
+      if (nextEntries.length === Object.keys(current).length) {
+        return current;
+      }
+      return Object.fromEntries(nextEntries);
+    });
+  }, [files]);
+
+  const pendingUploadCount = useMemo(
+    () =>
+      files.filter((file) => {
+        const tracked = uploadStates[getFileKey(file)];
+        return !tracked || tracked.status === "idle" || tracked.status === "failed";
+      }).length,
+    [files, uploadStates],
+  );
+  const activeProcessingCount = useMemo(
+    () =>
+      Object.values(uploadStates).filter(
+        (state) =>
+          state.status === "uploading" ||
+          state.status === "queued" ||
+          state.status === "processing",
+      ).length,
+    [uploadStates],
+  );
+  const processedCount = useMemo(
+    () =>
+      Object.values(uploadStates).filter((state) => state.status === "processed").length,
+    [uploadStates],
+  );
+  const failedCount = useMemo(
+    () =>
+      Object.values(uploadStates).filter((state) => state.status === "failed").length,
+    [uploadStates],
+  );
+
   const openCropModal = (file: File) => {
     setCropTargetFile(file);
     setCropState({
@@ -156,7 +208,18 @@ export function UniversalUploadApp() {
 
     try {
       const croppedFile = await getCroppedFile(cropTargetFile, cropState.areaPixels);
+      const oldKey = getFileKey(cropTargetFile);
+      const newKey = getFileKey(croppedFile);
       setFiles((current) => current.map((item) => (item === cropTargetFile ? croppedFile : item)));
+      setUploadStates((current) => {
+        const next = { ...current };
+        delete next[oldKey];
+        next[newKey] = {
+          status: "idle",
+          message: getTrackedUploadMessage("idle"),
+        };
+        return next;
+      });
       closeCropModal();
       setStatus(`Applied crop to ${croppedFile.name}`);
     } catch (error) {
@@ -164,18 +227,123 @@ export function UniversalUploadApp() {
     }
   };
 
+  const pollUploadStatuses = useCallback(
+    async () => {
+      const trackedEntries = Object.entries(uploadStates).filter(
+        ([, tracked]) =>
+          tracked.imageId &&
+          (tracked.status === "uploading" ||
+            tracked.status === "queued" ||
+            tracked.status === "processing"),
+      );
+
+      if (trackedEntries.length === 0) {
+        return;
+      }
+
+      try {
+        const categoryGroups = new Map<string, string[]>();
+        for (const [, tracked] of trackedEntries) {
+          const category = tracked.photoCategory || target;
+          const imageId = tracked.imageId;
+          if (!imageId) {
+            continue;
+          }
+          const ids = categoryGroups.get(category) || [];
+          ids.push(imageId);
+          categoryGroups.set(category, ids);
+        }
+
+        const imageById = new Map<string, UploadApiImageRecord>();
+        for (const [category, imageIds] of categoryGroups.entries()) {
+          const response = await fetch(buildImageStatusUrl(category, imageIds));
+          const payload = (await response.json()) as {
+            images?: UploadApiImageRecord[];
+            error?: string;
+          };
+
+          if (!response.ok) {
+            throw new Error(payload.error ?? "Failed to refresh upload status");
+          }
+
+          for (const image of Array.isArray(payload.images) ? payload.images : []) {
+            imageById.set(image.id, image);
+          }
+        }
+
+        setUploadStates((current) => {
+          const next = { ...current };
+          for (const [key, tracked] of Object.entries(current)) {
+            if (!tracked.imageId) {
+              continue;
+            }
+            const image = imageById.get(tracked.imageId);
+            if (!image) {
+              continue;
+            }
+            next[key] = mergeTrackedUploadState(tracked, image);
+          }
+          return next;
+        });
+      } catch (error) {
+        setStatus(error instanceof Error ? error.message : "Failed to refresh upload status");
+      }
+    },
+    [target, uploadStates],
+  );
+
+  useEffect(() => {
+    if (!hasTrackedUploadsInFlight(uploadStates)) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void pollUploadStatuses();
+    }, 4000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [pollUploadStatuses, uploadStates]);
+
   const uploadFiles = async () => {
     if (files.length === 0) {
       setStatus("Add files before uploading");
       return;
     }
 
+    const filesToUpload = files.filter((file) => {
+      const tracked = uploadStates[getFileKey(file)];
+      return !tracked || tracked.status === "idle" || tracked.status === "failed";
+    });
+
+    if (filesToUpload.length === 0) {
+      setStatus("All queued files are already submitted. Waiting on background processing.");
+      return;
+    }
+
     setUploading(true);
-    setStatus(`Uploading ${files.length} file${files.length === 1 ? "" : "s"}...`);
+    setUploadStates((current) => {
+      const next = { ...current };
+      for (const file of filesToUpload) {
+        next[getFileKey(file)] = {
+          ...(next[getFileKey(file)] ?? {
+            status: "idle",
+            message: getTrackedUploadMessage("idle"),
+          }),
+          status: "uploading",
+          message: getTrackedUploadMessage("uploading"),
+          processingError: null,
+          photoCategory: target,
+        };
+      }
+      return next;
+    });
+    setStatus(`Uploading ${filesToUpload.length} file${filesToUpload.length === 1 ? "" : "s"}...`);
 
     try {
       const formData = new FormData();
-      for (const file of files) {
+      for (const file of filesToUpload) {
         formData.append("files", file);
       }
 
@@ -186,11 +354,7 @@ export function UniversalUploadApp() {
         method: "POST",
         body: formData,
       });
-      const payload = (await response.json()) as {
-        success?: boolean;
-        error?: string;
-        results?: Array<{ success?: boolean }>;
-      };
+      const payload = (await response.json()) as UploadApiResponse;
 
       if (!response.ok || !payload.success) {
         throw new Error(payload.error ?? "Upload failed");
@@ -199,12 +363,26 @@ export function UniversalUploadApp() {
       const results = payload.results || [];
       const successful = results.filter((result) => result.success).length;
       const failed = results.length - successful;
-
-      setFiles([]);
+      const uploadedImageIds: string[] = [];
+      setUploadStates((current) => {
+        const next = { ...current };
+        for (const [index, file] of filesToUpload.entries()) {
+          const result = results[index] ?? {
+            success: false,
+            error: "Missing upload result from server",
+          };
+          const tracked = createTrackedUploadStateFromResult(result, target);
+          if (tracked.imageId) {
+            uploadedImageIds.push(tracked.imageId);
+          }
+          next[getFileKey(file)] = tracked;
+        }
+        return next;
+      });
       setStatus(
         failed === 0
-          ? `Uploaded ${successful} file${successful === 1 ? "" : "s"}. Map them in the queue below.`
-          : `Uploaded ${successful}/${results.length} files`,
+          ? `Accepted ${successful} file${successful === 1 ? "" : "s"} for background processing.`
+          : `Accepted ${successful}/${results.length} files. ${failed} failed.`,
       );
 
       setMappingRefreshToken((token) => token + 1);
@@ -217,6 +395,7 @@ export function UniversalUploadApp() {
             total: results.length,
             isListingPhoto: target === "listing",
             photoCategory: target,
+            uploadedImageIds,
           },
         }),
       );
@@ -225,8 +404,29 @@ export function UniversalUploadApp() {
           detail: { source: "universal-upload" },
         }),
       );
+      if (uploadedImageIds.length > 0) {
+        void pollUploadStatuses();
+      }
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : "Upload failed");
+      const message = error instanceof Error ? error.message : "Upload failed";
+      setUploadStates((current) => {
+        const next = { ...current };
+        for (const file of filesToUpload) {
+          const key = getFileKey(file);
+          next[key] = {
+            ...(next[key] ?? {
+              status: "idle",
+              message: getTrackedUploadMessage("idle"),
+            }),
+            status: "failed",
+            message,
+            processingError: message,
+            photoCategory: target,
+          };
+        }
+        return next;
+      });
+      setStatus(message);
     } finally {
       setUploading(false);
     }
@@ -286,6 +486,21 @@ export function UniversalUploadApp() {
           <FileUpload
             value={files}
             onValueChange={setFiles}
+            onAccept={(acceptedFiles) => {
+              setUploadStates((current) => {
+                const next = { ...current };
+                for (const file of acceptedFiles) {
+                  const key = getFileKey(file);
+                  if (!next[key]) {
+                    next[key] = {
+                      status: "idle",
+                      message: getTrackedUploadMessage("idle"),
+                    };
+                  }
+                }
+                return next;
+              });
+            }}
             onFileValidate={(file) => {
               if (!file.type.startsWith("image/")) {
                 return "Only image files are allowed";
@@ -318,12 +533,21 @@ export function UniversalUploadApp() {
 
             <div className="flex flex-wrap items-center justify-between gap-2">
               <FileUploadClear asChild>
-                <Button variant="ghost" size="sm" disabled={uploading}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={uploading}
+                  onClick={() => setUploadStates({})}
+                >
                   Clear Queue
                 </Button>
               </FileUploadClear>
 
-              <Button size="sm" onClick={uploadFiles} disabled={uploading || files.length === 0}>
+              <Button
+                size="sm"
+                onClick={uploadFiles}
+                disabled={uploading || pendingUploadCount === 0}
+              >
                 {uploading ? (
                   <>
                     <Loader2 className="mr-2 size-4 animate-spin" />
@@ -337,34 +561,101 @@ export function UniversalUploadApp() {
                 )}
               </Button>
             </div>
+            {files.length > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {pendingUploadCount} ready • {activeProcessingCount} running • {processedCount} processed • {failedCount} failed
+              </p>
+            ) : null}
 
             <FileUploadList className="max-h-72 overflow-y-auto pr-1">
-              {files.map((file) => (
-                <FileUploadItem
-                  key={getFileKey(file)}
-                  value={file}
-                  className="gap-3 rounded-lg border-border/40 bg-card/60 px-3 py-2"
-                >
-                  <FileUploadItemPreview className="size-12 rounded-md ring-1 ring-border/40" />
-                  <FileUploadItemMetadata size="sm" />
+              {files.map((file) => {
+                const key = getFileKey(file);
+                const tracked = uploadStates[key];
+                const canEditFile =
+                  !tracked || tracked.status === "idle" || tracked.status === "failed";
+                const rowClassName =
+                  tracked?.status === "processed"
+                    ? "border-emerald-500/40 bg-emerald-500/10"
+                    : tracked?.status === "failed"
+                      ? "border-destructive/40 bg-destructive/10"
+                      : tracked?.status === "processing"
+                        ? "border-sky-500/40 bg-sky-500/10"
+                        : tracked?.status === "queued"
+                          ? "border-amber-500/40 bg-amber-500/10"
+                          : tracked?.status === "uploading"
+                            ? "border-blue-500/40 bg-blue-500/10"
+                            : "border-border/40 bg-card/60";
+                const messageClassName =
+                  tracked?.status === "failed"
+                    ? "text-destructive"
+                    : tracked?.status === "processed"
+                      ? "text-emerald-300"
+                      : tracked?.status === "processing"
+                        ? "text-sky-300"
+                        : tracked?.status === "queued"
+                          ? "text-amber-300"
+                          : "text-muted-foreground";
 
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => openCropModal(file)}
-                    title="Crop image"
+                return (
+                  <FileUploadItem
+                    key={key}
+                    value={file}
+                    className={cn(
+                      "gap-3 rounded-lg border px-3 py-2 transition-colors",
+                      rowClassName,
+                    )}
                   >
-                    <Crop className="size-4" />
-                    <span className="sr-only">Crop {file.name}</span>
-                  </Button>
+                    <FileUploadItemPreview className="size-12 rounded-md ring-1 ring-border/40" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <FileUploadItemMetadata size="sm" />
+                        {tracked ? (
+                          <span
+                            className={cn(
+                              "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                              tracked.status === "processed"
+                                ? "bg-emerald-500/15 text-emerald-300"
+                                : tracked.status === "failed"
+                                  ? "bg-destructive/15 text-destructive"
+                                  : tracked.status === "processing"
+                                    ? "bg-sky-500/15 text-sky-300"
+                                    : tracked.status === "queued"
+                                      ? "bg-amber-500/15 text-amber-300"
+                                      : tracked.status === "uploading"
+                                        ? "bg-blue-500/15 text-blue-300"
+                                        : "bg-muted text-muted-foreground",
+                            )}
+                          >
+                            {getTrackedUploadLabel(tracked.status)}
+                          </span>
+                        ) : null}
+                      </div>
+                      {tracked ? (
+                        <p className={cn("mt-1 text-[11px]", messageClassName)}>
+                          {tracked.message}
+                        </p>
+                      ) : null}
+                    </div>
 
-                  <FileUploadItemDelete asChild>
-                    <Button variant="ghost" size="icon-sm" title="Remove file">
-                      <X className="size-4" />
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => openCropModal(file)}
+                      title="Crop image"
+                      disabled={!canEditFile}
+                    >
+                      <Crop className="size-4" />
+                      <span className="sr-only">Crop {file.name}</span>
                     </Button>
-                  </FileUploadItemDelete>
-                </FileUploadItem>
-              ))}
+
+                    <FileUploadItemDelete asChild>
+                      <Button variant="ghost" size="icon-sm" title="Remove file">
+                        <X className="size-4" />
+                      </Button>
+                    </FileUploadItemDelete>
+                  </FileUploadItem>
+                );
+              })}
             </FileUploadList>
           </FileUpload>
 
@@ -381,14 +672,12 @@ export function UniversalUploadApp() {
         <CardHeader>
           <CardTitle className="text-base">Supporting Documents Workflow</CardTitle>
           <CardDescription>
-            Store PDFs, screenshots, and videos as revision-safe records mapped to rooms and vision
-            branches.
+            Store PDFs, screenshots, and videos as revision-safe records mapped to rooms and vision branches.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-muted-foreground">
-            Use the dedicated workspace to track immutable references like blueprints and
-            branch-specific artifacts.
+            Use the dedicated workspace to track immutable references like blueprints and branch-specific artifacts.
           </p>
           <a href="/supporting-docs">
             <Button variant="outline" className="gap-2">
@@ -399,10 +688,7 @@ export function UniversalUploadApp() {
         </CardContent>
       </Card>
 
-      <Dialog
-        open={cropModalOpen}
-        onOpenChange={(open) => (open ? setCropModalOpen(true) : closeCropModal())}
-      >
+      <Dialog open={cropModalOpen} onOpenChange={(open) => (open ? setCropModalOpen(true) : closeCropModal())}>
         <DialogContent className="max-w-4xl">
           <DialogHeader>
             <DialogTitle>Crop Upload</DialogTitle>
@@ -419,7 +705,9 @@ export function UniversalUploadApp() {
                   withGrid
                   onCropChange={(crop) => setCropState((prev) => ({ ...prev, crop }))}
                   onZoomChange={(zoom) => setCropState((prev) => ({ ...prev, zoom }))}
-                  onRotationChange={(rotation) => setCropState((prev) => ({ ...prev, rotation }))}
+                  onRotationChange={(rotation) =>
+                    setCropState((prev) => ({ ...prev, rotation }))
+                  }
                   onCropAreaChange={(_, areaPixels) =>
                     setCropState((prev) => ({ ...prev, areaPixels }))
                   }
@@ -450,9 +738,7 @@ export function UniversalUploadApp() {
               </label>
 
               <label className="space-y-2 text-sm">
-                <span className="text-muted-foreground">
-                  Rotation ({Math.round(cropState.rotation)}°)
-                </span>
+                <span className="text-muted-foreground">Rotation ({Math.round(cropState.rotation)}°)</span>
                 <input
                   type="range"
                   min={0}

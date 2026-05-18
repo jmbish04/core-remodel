@@ -4,19 +4,20 @@
  * This file sets up the main Hono application with all API routes and middleware.
  */
 
-import { requireAccessAuth } from "@backend/utils/access";
+
+
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 
+import { aiRouter } from "./routes/ai";
 import { accessRouter } from "./routes/access";
 import { adminRouter } from "./routes/admin";
-import { aiRouter } from "./routes/ai";
-import { artifactsRouter } from "./routes/artifacts";
+import { adminPermitsRouter } from "./routes/admin-permits";
 import { authRouter } from "./routes/auth";
+import { artifactsRouter } from "./routes/artifacts";
 import { budgetTrackerRouter } from "./routes/budget-tracker";
 import { contractsRouter } from "./routes/contracts";
-import { csvRouter } from "./routes/csv-ingestion";
 import { dashboardRouter } from "./routes/dashboard";
 import { documentsRouter } from "./routes/documents";
 import { estimateCompaniesRouter } from "./routes/estimate-companies";
@@ -32,11 +33,13 @@ import { openapiRouter } from "./routes/openapi";
 import { photoEditsRouter } from "./routes/photo-edits";
 import { photoReviewsRouter } from "./routes/photo-reviews";
 import { portalRouter } from "./routes/portal";
+import { planningRouter } from "./routes/planning";
 import { roomsRouter } from "./routes/rooms";
-import { supportingDocumentsRouter } from "./routes/supporting-documents";
 import { syncRouter } from "./routes/sync";
 import { threadsRouter } from "./routes/threads";
+import { supportingDocumentsRouter } from "./routes/supporting-documents";
 import { visionNodesRouter } from "./routes/vision-nodes";
+import { requireAccessAuth } from "@backend/utils/access";
 
 export type Variables = {
   userId?: number;
@@ -54,6 +57,8 @@ app.use("*", cors());
 app.use("*", logger());
 app.use("/api/admin/*", requireAccessAuth);
 app.use("/api/images/upload", requireAccessAuth);
+app.use("/api/planning", requireAccessAuth);
+app.use("/api/planning/*", requireAccessAuth);
 
 // Health check
 app.get("/api/ping", (c) => c.json({ status: "ok", timestamp: Date.now() }));
@@ -62,6 +67,7 @@ app.get("/api/ping", (c) => c.json({ status: "ok", timestamp: Date.now() }));
 app.route("/api/auth", authRouter);
 app.route("/api/access", accessRouter);
 app.route("/api/admin", adminRouter);
+app.route("/api/admin/permits", adminPermitsRouter);
 app.route("/api/dashboard", dashboardRouter);
 app.route("/api/threads", threadsRouter);
 app.route("/api/health", healthRouter);
@@ -74,6 +80,7 @@ app.route("/api/listing-photos", listingPhotosRouter);
 app.route("/api/photo-reviews", photoReviewsRouter);
 app.route("/api/photo-edits", photoEditsRouter);
 app.route("/api/portal", portalRouter);
+app.route("/api/planning", planningRouter);
 app.route("/api/rooms", roomsRouter);
 app.route("/api/estimate-statuses", estimateStatusesRouter);
 app.route("/api/estimate-companies", estimateCompaniesRouter);
@@ -81,7 +88,6 @@ app.route("/api/estimate-contacts", estimateContactsRouter);
 app.route("/api/estimates", estimatesRouter);
 app.route("/api/contracts", contractsRouter);
 app.route("/api/budget-tracker", budgetTrackerRouter);
-app.route("/api/budget-tracker", csvRouter);
 app.route("/api/sync", syncRouter);
 app.route("/api/artifacts", artifactsRouter);
 app.route("/api/supporting-documents", supportingDocumentsRouter);

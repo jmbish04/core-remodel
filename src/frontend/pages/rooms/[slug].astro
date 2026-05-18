@@ -1,0 +1,15 @@
+---
+import { RoomViewApp } from "@/components/RoomViewApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+
+const roomCode = Astro.params.slug || "";
+---
+
+<BaseLayout
+  title="Room View - 126 Colby - Remodel Mission Control"
+  description="Dedicated room viewport with stored AI summary, room options, budgets, and linked records."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <RoomViewApp client:only="react" roomCode={roomCode} />
+  </main>
+</BaseLayout>

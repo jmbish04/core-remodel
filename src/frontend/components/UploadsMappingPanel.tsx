@@ -1,10 +1,18 @@
 import { Check, Loader2, RefreshCcw } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { MultipleSelector } from "@/components/ui/multiple-selector";
+import {
+  SelectablePhotoCards,
+  type SelectablePhotoCardItem,
+  type SelectablePhotoCardsDragStartPayload,
+} from "@/components/ui/selectable-photo-cards";
+import {
+  getTrackedUploadLabel,
+  type UploadProcessingStatus,
+} from "@/lib/image-upload-tracking";
 import { cn } from "@/lib/utils";
 
 type MappingCategory = "listing" | "inspirational";
@@ -37,11 +45,16 @@ interface PendingImage {
   cfImageIdOriginal: string;
   cfImageIdOptimized: string | null;
   photoCategory: MappingCategory;
+  roomId?: number | null;
   roomType: string | null;
   roomIds: number[];
   roomLabels: string[];
   pendingSince?: string | number | Date | null;
   deliveryUrl?: string | null;
+  processingStatus?: UploadProcessingStatus | null;
+  workflowInstanceId?: string | null;
+  processingError?: string | null;
+  processedAt?: string | number | Date | null;
 }
 
 interface UploadsMappingPanelProps {
@@ -83,7 +96,9 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
     inspirational: [],
   });
   const [catalogFloors, setCatalogFloors] = useState<CatalogFloor[]>([]);
-  const [selectedByCategory, setSelectedByCategory] = useState<Record<MappingCategory, string[]>>({
+  const [selectedByCategory, setSelectedByCategory] = useState<
+    Record<MappingCategory, string[]>
+  >({
     listing: [],
     inspirational: [],
   });
@@ -98,6 +113,36 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
     () => catalogFloors.flatMap((floor) => floor.rooms),
     [catalogFloors],
   );
+  const hasActiveProcessing = useMemo(
+    () =>
+      Object.values(pendingByCategory).some((images) =>
+        images.some(
+          (image) =>
+            image.processingStatus === "queued" || image.processingStatus === "processing",
+        ),
+      ),
+    [pendingByCategory],
+  );
+  const roomPendingCounts = useMemo(() => {
+    const counts = new Map<number, number>();
+
+    for (const category of ["listing", "inspirational"] as const) {
+      for (const image of pendingByCategory[category]) {
+        const mappedRoomIds = new Set<number>();
+        if (typeof image.roomId === "number") {
+          mappedRoomIds.add(image.roomId);
+        }
+        for (const roomId of image.roomIds) {
+          mappedRoomIds.add(roomId);
+        }
+        for (const roomId of mappedRoomIds) {
+          counts.set(roomId, (counts.get(roomId) || 0) + 1);
+        }
+      }
+    }
+
+    return counts;
+  }, [pendingByCategory]);
 
   const fetchCatalog = useCallback(async () => {
     const response = await fetch("/api/rooms/catalog");
@@ -185,22 +230,28 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
     void refreshData();
   }, [refreshData, refreshToken]);
 
-  const setSelectedForCategory = useCallback((category: MappingCategory, nextIds: string[]) => {
-    setSelectedByCategory((current) => ({
-      ...current,
-      [category]: nextIds,
-    }));
-  }, []);
+  useEffect(() => {
+    if (!hasActiveProcessing || applying) {
+      return;
+    }
 
-  const toggleSelect = useCallback(
-    (imageId: string) => {
-      const current = selectedByCategory[activeCategory];
-      const next = current.includes(imageId)
-        ? current.filter((id) => id !== imageId)
-        : [...current, imageId];
-      setSelectedForCategory(activeCategory, next);
+    const intervalId = window.setInterval(() => {
+      void refreshData();
+    }, 4000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [applying, hasActiveProcessing, refreshData]);
+
+  const setSelectedForCategory = useCallback(
+    (category: MappingCategory, nextIds: string[]) => {
+      setSelectedByCategory((current) => ({
+        ...current,
+        [category]: nextIds,
+      }));
     },
-    [activeCategory, selectedByCategory, setSelectedForCategory],
+    [],
   );
 
   const applyMapping = useCallback(
@@ -263,21 +314,67 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
   );
 
   const startDrag = useCallback(
-    (event: React.DragEvent<HTMLButtonElement>, imageId: string) => {
-      const current = selectedByCategory[activeCategory];
-      const ids = current.includes(imageId) ? current : [imageId];
-      if (!current.includes(imageId)) {
-        setSelectedForCategory(activeCategory, ids);
-      }
-      setDragImageIds(ids);
+    (
+      event: React.DragEvent<HTMLButtonElement>,
+      payload: SelectablePhotoCardsDragStartPayload,
+    ) => {
+      setDragImageIds(payload.selectedIds);
       event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", ids.join(","));
+      event.dataTransfer.setData("text/plain", payload.selectedIds.join(","));
     },
-    [activeCategory, selectedByCategory, setSelectedForCategory],
+    [],
   );
 
   const selectedCountLabel =
-    selectedIds.length === 1 ? "1 photo selected" : `${selectedIds.length} photos selected`;
+    selectedIds.length === 1
+      ? "1 photo selected"
+      : `${selectedIds.length} photos selected`;
+  const pendingCardItems = useMemo<SelectablePhotoCardItem[]>(() => {
+    return pendingImages.map((image) => {
+      const statusLabel = image.processingStatus
+        ? getTrackedUploadLabel(image.processingStatus)
+        : undefined;
+      const statusTone: SelectablePhotoCardItem["statusTone"] =
+        image.processingStatus === "processed"
+          ? "success"
+          : image.processingStatus === "failed"
+            ? "danger"
+            : image.processingStatus === "processing"
+              ? "info"
+              : image.processingStatus === "queued"
+                ? "warning"
+                : "default";
+      const detailText =
+        image.processingStatus === "failed" && image.processingError
+          ? image.processingError
+          : image.processingStatus === "processing"
+            ? "Workers AI is still analyzing this image."
+            : image.processingStatus === "queued"
+              ? "Waiting for workflow execution."
+              : undefined;
+
+      return {
+        id: image.id,
+        title: image.displayName || "Untitled photo",
+        imageUrl: resolveImageUrl(image),
+        alt: image.displayName || "Pending upload",
+        subtitle: image.pendingSince
+          ? `Queued ${new Date(image.pendingSince).toLocaleString()}`
+          : "Queued recently",
+        statusLabel,
+        statusTone,
+        detailText,
+        detailTone:
+          image.processingStatus === "failed"
+            ? "danger"
+            : image.processingStatus === "processing"
+              ? "info"
+              : image.processingStatus === "queued"
+                ? "warning"
+                : "default",
+      };
+    });
+  }, [pendingImages]);
 
   return (
     <Card className="ring-1 ring-border/40">
@@ -293,6 +390,9 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
             <Badge variant={summary.total > 0 ? "destructive" : "secondary"}>
               {summary.total} pending
             </Badge>
+            {hasActiveProcessing ? (
+              <Badge variant="secondary">AI processing active</Badge>
+            ) : null}
             <Button
               variant="outline"
               size="sm"
@@ -345,7 +445,9 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
 
         {activeCategory === "inspirational" && (
           <div className="space-y-2 rounded-lg bg-muted/20 p-3 ring-1 ring-border/30">
-            <p className="text-sm font-medium">Multi-room apply for selected inspiration photos</p>
+            <p className="text-sm font-medium">
+              Multi-room apply for selected inspiration photos
+            </p>
             <MultipleSelector
               title="Select rooms"
               placeholder="Choose one or more rooms"
@@ -361,7 +463,10 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
               <Button
                 size="sm"
                 disabled={
-                  applying || loading || selectedIds.length === 0 || inspirationRoomIds.length === 0
+                  applying ||
+                  loading ||
+                  selectedIds.length === 0 ||
+                  inspirationRoomIds.length === 0
                 }
                 onClick={() =>
                   void applyMapping(
@@ -389,70 +494,26 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
         ) : (
           <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
             <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium">Pending photos ({pendingImages.length})</p>
-                <p className="text-xs text-muted-foreground">{selectedCountLabel}</p>
-              </div>
-              <div className="grid max-h-[34rem] gap-3 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3">
-                {pendingImages.map((image) => {
-                  const imageUrl = resolveImageUrl(image);
-                  const selected = selectedIds.includes(image.id);
-                  return (
-                    <button
-                      key={image.id}
-                      type="button"
-                      draggable
-                      onDragStart={(event) => startDrag(event, image.id)}
-                      onDragEnd={() => {
-                        setDragImageIds([]);
-                        setHoverRoomId(null);
-                      }}
-                      onClick={() => toggleSelect(image.id)}
-                      className={cn(
-                        "overflow-hidden rounded-lg border text-left transition",
-                        selected
-                          ? "border-primary ring-2 ring-primary/40"
-                          : "border-border/60 hover:border-primary/40",
-                      )}
-                    >
-                      <div className="aspect-[4/3] w-full bg-muted/30">
-                        {imageUrl ? (
-                          <img
-                            src={imageUrl}
-                            alt={image.displayName || "Pending upload"}
-                            className="h-full w-full object-cover"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-                            Preview unavailable
-                          </div>
-                        )}
-                      </div>
-                      <div className="space-y-1 p-2">
-                        <p className="truncate text-xs font-medium">
-                          {image.displayName || "Untitled photo"}
-                        </p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {image.pendingSince
-                            ? `Queued ${new Date(image.pendingSince).toLocaleString()}`
-                            : "Queued recently"}
-                        </p>
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+              <p className="text-sm font-medium">Pending photos ({pendingImages.length})</p>
+              <SelectablePhotoCards
+                items={pendingCardItems}
+                selectedIds={selectedIds}
+                onSelectedIdsChange={(nextIds) => setSelectedForCategory(activeCategory, nextIds)}
+                onDragStart={startDrag}
+                onDragEnd={() => {
+                  setDragImageIds([]);
+                  setHoverRoomId(null);
+                }}
+                disabled={applying || loading}
+                gridClassName="max-h-[34rem] overflow-y-auto pr-1"
+              />
             </div>
 
             <div className="space-y-2">
               <p className="text-sm font-medium">Drop zone: rooms by floor</p>
               <div className="max-h-[34rem] space-y-3 overflow-y-auto pr-1">
                 {catalogFloors.map((floor) => (
-                  <section
-                    key={floor.id}
-                    className="space-y-2 rounded-lg border border-border/40 p-2"
-                  >
+                  <section key={floor.id} className="space-y-2 rounded-lg border border-border/40 p-2">
                     <h4 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
                       {floor.name}
                     </h4>
@@ -473,7 +534,8 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
                             if (ids.length === 0) {
                               return;
                             }
-                            const roomIds = activeCategory === "listing" ? [room.id] : [room.id];
+                            const roomIds =
+                              activeCategory === "listing" ? [room.id] : [room.id];
                             void applyMapping(activeCategory, ids, roomIds);
                           }}
                           className={cn(
@@ -484,7 +546,12 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
                           )}
                         >
                           <div className="flex items-center justify-between gap-2">
-                            <p className="truncate text-xs font-medium">{room.displayName}</p>
+                            <div className="flex min-w-0 items-center gap-1.5">
+                              <p className="truncate text-xs font-medium">{room.displayName}</p>
+                              <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                                {roomPendingCounts.get(room.id) || 0} queued
+                              </span>
+                            </div>
                             <Button
                               variant="ghost"
                               size="sm"

@@ -16,11 +16,16 @@ import {
 } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Cropper, CropperArea, CropperImage, type CropperAreaData } from "@/components/ui/cropper";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   FileUpload,
@@ -33,6 +38,7 @@ import {
   FileUploadList,
   FileUploadTrigger,
 } from "@/components/ui/file-upload";
+import { Cropper, CropperArea, CropperImage, type CropperAreaData } from "@/components/ui/cropper";
 import { cn } from "@/lib/utils";
 
 interface ImageRecord {
@@ -74,7 +80,8 @@ interface QueueUploadOutcome {
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 const MAX_UPLOAD_FILES = 20;
 
-const fileKey = (file: File) => `${file.name}-${file.size}-${file.type}-${file.lastModified}`;
+const fileKey = (file: File) =>
+  `${file.name}-${file.size}-${file.type}-${file.lastModified}`;
 
 const toPrompt = (params: {
   file: File;
@@ -112,7 +119,10 @@ const createImageFromFile = (file: File): Promise<HTMLImageElement> =>
     image.src = objectUrl;
   });
 
-const getCroppedFile = async (file: File, areaPixels: CropperAreaData): Promise<File> => {
+const getCroppedFile = async (
+  file: File,
+  areaPixels: CropperAreaData,
+): Promise<File> => {
   const image = await createImageFromFile(file);
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
@@ -187,6 +197,7 @@ export function PhotoReviewApp() {
   const [panelTags, setPanelTags] = useState("");
   const [panelNote, setPanelNote] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  const [deletingImageId, setDeletingImageId] = useState<string | null>(null);
 
   const cropTargetPreview = useMemo(
     () => (cropTargetFile ? URL.createObjectURL(cropTargetFile) : null),
@@ -201,7 +212,7 @@ export function PhotoReviewApp() {
     };
   }, [cropTargetPreview]);
 
-  const fetchImages = async () => {
+  const fetchImages = useCallback(async () => {
     setLoading(true);
     try {
       const res = await fetch("/api/photo-reviews");
@@ -219,11 +230,11 @@ export function PhotoReviewApp() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchImages();
-  }, []);
+    void fetchImages();
+  }, [fetchImages]);
 
   useEffect(() => {
     const onGlobalUploadComplete = (event: Event) => {
@@ -236,7 +247,7 @@ export function PhotoReviewApp() {
         target === "photo-reviews" ||
         (target === "images" && customEvent.detail?.isListingPhoto !== true)
       ) {
-        fetchImages();
+        void fetchImages();
       }
     };
 
@@ -244,7 +255,7 @@ export function PhotoReviewApp() {
     return () => {
       window.removeEventListener("global-upload-complete", onGlobalUploadComplete);
     };
-  }, []);
+  }, [fetchImages]);
 
   useEffect(() => {
     if (!selectedImage) return;
@@ -315,7 +326,9 @@ export function PhotoReviewApp() {
 
   const pendingUploadCount = useMemo(
     () =>
-      queuedFiles.filter((file) => queueUploadOutcomes[fileKey(file)]?.status !== "success").length,
+      queuedFiles.filter(
+        (file) => queueUploadOutcomes[fileKey(file)]?.status !== "success",
+      ).length,
     [queuedFiles, queueUploadOutcomes],
   );
 
@@ -362,7 +375,9 @@ export function PhotoReviewApp() {
       return next;
     });
     toast.success(
-      files.length === 1 ? `Added ${files[0]?.name}` : `Added ${files.length} files to queue`,
+      files.length === 1
+        ? `Added ${files[0]?.name}`
+        : `Added ${files.length} files to queue`,
     );
   }, []);
 
@@ -393,7 +408,9 @@ export function PhotoReviewApp() {
       const oldKey = fileKey(cropTargetFile);
       const newKey = fileKey(croppedFile);
 
-      setQueuedFiles((prev) => prev.map((item) => (item === cropTargetFile ? croppedFile : item)));
+      setQueuedFiles((prev) =>
+        prev.map((item) => (item === cropTargetFile ? croppedFile : item)),
+      );
 
       setCroppedFiles((prev) => {
         const next = new Set(prev);
@@ -458,7 +475,9 @@ export function PhotoReviewApp() {
             try {
               const errorData = JSON.parse(rawResponse) as { error?: string; message?: string };
               errorMessage =
-                errorData.error?.trim() || errorData.message?.trim() || rawResponse.trim();
+                errorData.error?.trim() ||
+                errorData.message?.trim() ||
+                rawResponse.trim();
             } catch {
               errorMessage = rawResponse.trim();
             }
@@ -530,7 +549,8 @@ export function PhotoReviewApp() {
           toast.error(`Failed ${file.name}: ${errorMessage}`);
         }
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Unexpected upload error";
+        const message =
+          error instanceof Error ? error.message : "Unexpected upload error";
         const failurePrompt = toPrompt({
           file,
           errorMessage: message,
@@ -570,7 +590,7 @@ export function PhotoReviewApp() {
     } else {
       toast.warning(`Uploaded ${successCount} of ${filesToUpload.length} files`);
     }
-  }, [queuedFiles, queueUploadOutcomes]);
+  }, [fetchImages, queuedFiles, queueUploadOutcomes]);
 
   const copyFailurePrompt = useCallback(
     async (key: string) => {
@@ -604,7 +624,9 @@ export function PhotoReviewApp() {
           };
         })
         .filter(
-          (entry) => entry.outcome?.status === "success" || entry.outcome?.status === "error",
+          (entry) =>
+            entry.outcome?.status === "success" ||
+            entry.outcome?.status === "error",
         ),
     [queuedFiles, queueUploadOutcomes],
   );
@@ -651,7 +673,36 @@ export function PhotoReviewApp() {
     } finally {
       setIsSaving(false);
     }
-  }, [panelNote, panelRoom, panelTags, selectedImage]);
+  }, [fetchImages, panelNote, panelRoom, panelTags, selectedImage]);
+
+  const deleteImage = useCallback(
+    async (image: ImageRecord) => {
+      setDeletingImageId(image.id);
+      try {
+        const response = await fetch(`/api/images/${image.id}`, {
+          method: "DELETE",
+        });
+        const payload = (await response.json()) as { error?: string };
+        if (!response.ok) {
+          throw new Error(payload.error || "Failed to delete image");
+        }
+
+        await fetchImages();
+        setSelectedImage((current) => (current?.id === image.id ? null : current));
+        toast.success("Image deleted");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to delete image");
+      } finally {
+        setDeletingImageId(null);
+      }
+    },
+    [fetchImages],
+  );
+
+  const openAiEdit = useCallback((image: ImageRecord) => {
+    const params = new URLSearchParams({ sourceImageId: image.id });
+    window.location.assign(`/photo-edits?${params.toString()}`);
+  }, []);
 
   const openZoomModal = useCallback((image: ImageRecord) => {
     setZoomedImage(image);
@@ -923,46 +974,63 @@ export function PhotoReviewApp() {
                       const isSelected = selectedImage?.id === image.id;
 
                       return (
-                        <button
-                          key={image.id}
-                          type="button"
-                          onClick={() => setSelectedImage(image)}
-                          className={cn(
-                            "group relative aspect-[4/3] overflow-hidden rounded-xl bg-muted/30 ring-1 ring-border/40 transition-all",
-                            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                            "hover:-translate-y-0.5 hover:shadow-lg",
-                            isSelected && "ring-2 ring-ring",
-                          )}
-                        >
-                          <img
-                            src={
-                              image.path.startsWith("http") ? image.path : `/images/${image.path}`
-                            }
-                            alt={image.filename}
-                            loading="lazy"
-                            className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-                          />
+                        <ContextMenu key={image.id}>
+                          <ContextMenuTrigger>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedImage(image)}
+                              className={cn(
+                                "group relative aspect-[4/3] w-full overflow-hidden rounded-xl bg-muted/30 ring-1 ring-border/40 transition-all",
+                                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                "hover:-translate-y-0.5 hover:shadow-lg",
+                                isSelected && "ring-2 ring-ring",
+                              )}
+                            >
+                              <img
+                                src={image.path.startsWith("http") ? image.path : `/images/${image.path}`}
+                                alt={image.filename}
+                                loading="lazy"
+                                className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                              />
 
-                          <div className="absolute inset-0 bg-linear-to-t from-black/75 via-black/20 to-transparent opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
+                              <div className="absolute inset-0 bg-linear-to-t from-black/75 via-black/20 to-transparent opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
 
-                          <div className="absolute bottom-2 left-2 right-2 z-10 flex flex-wrap gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                            {tags.slice(0, 3).map((tag) => (
-                              <span
-                                key={tag}
-                                className="rounded bg-black/45 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-white"
-                              >
-                                {tag}
-                              </span>
-                            ))}
-                            {tags.length > 3 && (
-                              <span className="rounded bg-black/45 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-white">
-                                +{tags.length - 3}
-                              </span>
-                            )}
-                          </div>
+                              <div className="absolute bottom-2 left-2 right-2 z-10 flex flex-wrap gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                                {tags.slice(0, 3).map((tag) => (
+                                  <span
+                                    key={tag}
+                                    className="rounded bg-black/45 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-white"
+                                  >
+                                    {tag}
+                                  </span>
+                                ))}
+                                {tags.length > 3 && (
+                                  <span className="rounded bg-black/45 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-white">
+                                    +{tags.length - 3}
+                                  </span>
+                                )}
+                              </div>
 
-                          <span className="sr-only">Open {image.filename}</span>
-                        </button>
+                              <span className="sr-only">Open {image.filename}</span>
+                            </button>
+                          </ContextMenuTrigger>
+                          <ContextMenuContent>
+                            <ContextMenuItem onClick={() => setSelectedImage(image)}>
+                              Update Metadata
+                            </ContextMenuItem>
+                            <ContextMenuItem onClick={() => openAiEdit(image)}>
+                              Edit With AI
+                            </ContextMenuItem>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem
+                              variant="destructive"
+                              disabled={deletingImageId === image.id}
+                              onClick={() => deleteImage(image)}
+                            >
+                              Delete Image
+                            </ContextMenuItem>
+                          </ContextMenuContent>
+                        </ContextMenu>
                       );
                     })}
                   </div>
@@ -998,11 +1066,7 @@ export function PhotoReviewApp() {
             <>
               <div className="flex items-center justify-center border-b border-border/40 bg-muted/20 p-4">
                 <img
-                  src={
-                    selectedImage.path.startsWith("http")
-                      ? selectedImage.path
-                      : `/images/${selectedImage.path}`
-                  }
+                  src={selectedImage.path.startsWith("http") ? selectedImage.path : `/images/${selectedImage.path}`}
                   alt={selectedImage.filename}
                   className="max-h-56 w-full rounded-lg object-contain ring-1 ring-border/40"
                 />
@@ -1072,7 +1136,11 @@ export function PhotoReviewApp() {
                     <ZoomIn className="mr-2 size-4" />
                     Zoom
                   </Button>
-                  <Button className="flex-1" onClick={saveSelectedImage} disabled={isSaving}>
+                  <Button
+                    className="flex-1"
+                    onClick={saveSelectedImage}
+                    disabled={isSaving}
+                  >
                     {isSaving ? (
                       <>
                         <RefreshCw className="mr-2 size-4 animate-spin" />
@@ -1092,13 +1160,12 @@ export function PhotoReviewApp() {
         </div>
       </aside>
 
-      <Dialog
-        open={cropModalOpen}
-        onOpenChange={(open) => (open ? setCropModalOpen(true) : closeCropModal())}
-      >
+      <Dialog open={cropModalOpen} onOpenChange={(open) => (open ? setCropModalOpen(true) : closeCropModal())}>
         <DialogContent className="max-w-4xl">
           <DialogHeader>
-            <DialogTitle>Crop {cropTargetFile?.name ?? "image"}</DialogTitle>
+            <DialogTitle>
+              Crop {cropTargetFile?.name ?? "image"}
+            </DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4">
@@ -1112,7 +1179,9 @@ export function PhotoReviewApp() {
                   withGrid
                   onCropChange={(crop) => setCropState((prev) => ({ ...prev, crop }))}
                   onZoomChange={(zoom) => setCropState((prev) => ({ ...prev, zoom }))}
-                  onRotationChange={(rotation) => setCropState((prev) => ({ ...prev, rotation }))}
+                  onRotationChange={(rotation) =>
+                    setCropState((prev) => ({ ...prev, rotation }))
+                  }
                   onCropAreaChange={(_, areaPixels) =>
                     setCropState((prev) => ({ ...prev, areaPixels }))
                   }
@@ -1143,9 +1212,7 @@ export function PhotoReviewApp() {
               </label>
 
               <label className="space-y-2 text-sm">
-                <span className="text-muted-foreground">
-                  Rotation ({Math.round(cropState.rotation)}°)
-                </span>
+                <span className="text-muted-foreground">Rotation ({Math.round(cropState.rotation)}°)</span>
                 <input
                   type="range"
                   min={0}
@@ -1186,11 +1253,7 @@ export function PhotoReviewApp() {
             {zoomedImage && (
               <div className="flex min-h-[24rem] items-center justify-center p-4">
                 <img
-                  src={
-                    zoomedImage.path.startsWith("http")
-                      ? zoomedImage.path
-                      : `/images/${zoomedImage.path}`
-                  }
+                  src={zoomedImage.path.startsWith("http") ? zoomedImage.path : `/images/${zoomedImage.path}`}
                   alt={zoomedImage.filename}
                   style={{ transform: `scale(${zoomLevel})` }}
                   className="max-w-full transition-transform"

@@ -12,12 +12,16 @@
  *   Reasoning: gpt-oss-120b with json_schema structured output
  */
 
-import { imageReviews } from "@backend/db";
-import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { eq, asc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
+import { imageReviews } from "@backend/db";
+import {
+  buildImageUploadFingerprint,
+  findDuplicateImageByFingerprint,
+} from "@backend/services/image-deduplication";
+import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { ImageProcessorService } from "../../services/image-processor";
 
 const photoReviewsRouter = new Hono<{ Bindings: Env }>();
@@ -69,6 +73,21 @@ photoReviewsRouter.post("/upload", async (c) => {
       return c.json({ error: "No file provided" }, 400);
     }
 
+    const db = drizzle(c.env.DB);
+    const uploadFingerprint = await buildImageUploadFingerprint(file);
+    const duplicateImage = await findDuplicateImageByFingerprint(db, uploadFingerprint);
+    if (duplicateImage) {
+      return c.json(
+        {
+          error: "Duplicate image already exists",
+          duplicate: true,
+          duplicateImageId: duplicateImage.id,
+          image: duplicateImage,
+        },
+        409,
+      );
+    }
+
     // Resolve credentials
     const credentials = await resolveCloudflareImagesCredentials(c.env);
 
@@ -85,7 +104,7 @@ photoReviewsRouter.post("/upload", async (c) => {
         fallbackApiTokens: credentials.apiTokens.slice(1),
       },
     );
-    const result = await processor.processPhotoReview(file);
+    const result = await processor.processPhotoReview(file, { uploadFingerprint });
 
     if (!result.success) {
       return c.json({ error: result.error || "Processing failed" }, 500);

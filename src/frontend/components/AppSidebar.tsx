@@ -1,6 +1,5 @@
-import { Home, Menu } from "lucide-react";
+import { BookOpenText, ChevronDown, Home, Menu } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
-
 import { Icons } from "@/components/Icons";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Badge } from "@/components/ui/badge";
@@ -14,7 +13,38 @@ import {
 } from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { siteConfig } from "@/lib/config";
+import { docsAudienceGroups, getDocsPageByPath } from "@/lib/docs";
 import { cn } from "@/lib/utils";
+
+type SidebarItem = {
+  href: string;
+  label: string;
+  badgeCount?: number;
+};
+
+const WORKSPACE_ITEMS: SidebarItem[] = [
+  { href: "/planning", label: "Planning" },
+  { href: "/daily-log", label: "Daily Log" },
+  { href: "/weekly-log", label: "Weekly Log" },
+  { href: "/budget-tracker", label: "Budget Tracker" },
+  { href: "/estimates", label: "Estimates" },
+  { href: "/contracts", label: "Contracts" },
+  { href: "/supporting-docs", label: "Project Records" },
+  { href: "/decision-room", label: "Decision Room" },
+  { href: "/moodboards", label: "Mood Boards" },
+];
+
+const GALLERY_ITEMS: SidebarItem[] = [
+  { href: "/floor-plan", label: "Floor Plan" },
+  { href: "/listing-photos", label: "Listing Photos" },
+  { href: "/inspiration-photos", label: "Inspiration Photos" },
+];
+
+function isPathActive(currentPath: string, href: string): boolean {
+  if (href === "/") return currentPath === "/";
+  if (href === "/admin") return currentPath === "/admin";
+  return currentPath === href || currentPath.startsWith(`${href}/`);
+}
 
 interface NavLinkProps {
   href: string;
@@ -50,38 +80,217 @@ function NavLink(props: NavLinkProps) {
 
 function SidebarLinks({
   currentPath,
+  currentHash,
   uploadsPendingCount,
+  accessAuthenticated,
   onNavigate,
 }: {
   currentPath: string;
+  currentHash: string;
   uploadsPendingCount: number;
+  accessAuthenticated: boolean;
   onNavigate?: () => void;
 }) {
-  return (
-    <nav className="space-y-1" aria-label="Main navigation">
-      <NavLink href="/" label="Home" active={currentPath === "/"} onNavigate={onNavigate} />
-      {siteConfig.navItems.map((item) => (
+  const docsPage = getDocsPageByPath(currentPath);
+  const docsActive = currentPath === "/docs" || currentPath.startsWith("/docs/");
+  const [docsOpen, setDocsOpen] = useState(docsActive);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(
+      docsAudienceGroups.map((group) => [
+        group.id,
+        docsPage ? group.id === docsPage.audience : false,
+      ]),
+    ),
+  );
+
+  useEffect(() => {
+    if (!docsActive) return;
+    setDocsOpen(true);
+    if (!docsPage) return;
+    setOpenGroups((current) => ({
+      ...current,
+      [docsPage.audience]: true,
+    }));
+  }, [docsActive, docsPage]);
+
+  const renderDocsTree = () => (
+    <div className="space-y-1">
+      <p className="px-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+        Reference
+      </p>
+      <button
+        type="button"
+        onClick={() => setDocsOpen((current) => !current)}
+        className={cn(
+          buttonVariants({ variant: docsActive ? "secondary" : "ghost", size: "sm" }),
+          "w-full justify-between",
+        )}
+        aria-expanded={docsOpen}
+      >
+        <span className="inline-flex items-center gap-2">
+          <BookOpenText className="size-4" />
+          Documentation
+        </span>
+        <ChevronDown className={cn("size-4 transition-transform", docsOpen ? "rotate-180" : "")} />
+      </button>
+
+      {docsOpen ? (
+        <div className="ml-3 space-y-2 border-l border-border/50 pl-3">
+          <a
+            href="/docs"
+            onClick={onNavigate}
+            className={cn(
+              buttonVariants({
+                variant: currentPath === "/docs" ? "secondary" : "ghost",
+                size: "sm",
+              }),
+              "w-full justify-start",
+            )}
+          >
+            Overview
+          </a>
+
+          {docsAudienceGroups.map((group) => {
+            const groupActive = docsPage?.audience === group.id;
+            const groupOpen = openGroups[group.id] ?? false;
+
+            return (
+              <div key={group.id} className="space-y-1">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setOpenGroups((current) => ({
+                      ...current,
+                      [group.id]: !groupOpen,
+                    }))}
+                  className={cn(
+                    "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs font-semibold uppercase tracking-[0.22em] text-muted-foreground transition hover:bg-muted/40 hover:text-foreground",
+                    groupActive ? "bg-muted/40 text-foreground" : "",
+                  )}
+                  aria-expanded={groupOpen}
+                >
+                  <span>{group.title}</span>
+                  <ChevronDown className={cn("size-3.5 transition-transform", groupOpen ? "rotate-180" : "")} />
+                </button>
+
+                {groupOpen ? (
+                  <div className="space-y-1">
+                    {group.pages.map((page) => {
+                      const pageActive = currentPath === page.href;
+                      return (
+                        <div key={page.href} className="space-y-1">
+                          <a
+                            href={page.href}
+                            onClick={onNavigate}
+                            className={cn(
+                              buttonVariants({
+                                variant: pageActive ? "secondary" : "ghost",
+                                size: "sm",
+                              }),
+                              "w-full justify-start text-left",
+                            )}
+                          >
+                            {page.shortTitle}
+                          </a>
+
+                          {pageActive ? (
+                            <div className="ml-3 space-y-1 border-l border-border/40 pl-3">
+                              {page.sections.map((section) => {
+                                const sectionActive = currentHash === `#${section.id}`;
+                                return (
+                                  <a
+                                    key={section.id}
+                                    href={`${page.href}#${section.id}`}
+                                    onClick={onNavigate}
+                                    className={cn(
+                                      "block rounded-md px-2 py-1 text-xs leading-5 text-muted-foreground transition hover:bg-muted/40 hover:text-foreground",
+                                      sectionActive ? "bg-muted/50 text-foreground" : "",
+                                    )}
+                                  >
+                                    {section.title}
+                                  </a>
+                                );
+                              })}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const renderSection = (label: string, items: SidebarItem[]) => (
+    <div className="space-y-1">
+      <p className="px-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+        {label}
+      </p>
+      {items.map((item) => (
         <NavLink
           key={item.href}
           href={item.href}
           label={item.label}
-          external={item.external}
-          badgeCount={item.href === "/uploads" ? uploadsPendingCount : undefined}
-          active={!item.external && currentPath.startsWith(item.href)}
+          badgeCount={item.badgeCount}
+          active={isPathActive(currentPath, item.href)}
           onNavigate={onNavigate}
         />
       ))}
+    </div>
+  );
+
+  return (
+    <nav className="space-y-4" aria-label="Main navigation">
+      <div className="space-y-1">
+        <p className="px-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
+          Home
+        </p>
+        <NavLink
+          href="/"
+          label="Mission Control"
+          active={currentPath === "/"}
+          onNavigate={onNavigate}
+        />
+      </div>
+
+      {renderSection("Workspace", WORKSPACE_ITEMS)}
+      {renderSection("Gallery", GALLERY_ITEMS)}
+
+      {accessAuthenticated ? (
+        renderSection("Admin", [
+          { href: "/admin", label: "Admin Analytics" },
+          { href: "/uploads", label: "Uploads", badgeCount: uploadsPendingCount },
+          { href: "/review", label: "Review" },
+          { href: "/photo-edits", label: "Photo Edits" },
+          { href: "/admin/supporting-docs", label: "Supporting Docs" },
+          { href: "/admin/permits", label: "House Permits" },
+          { href: "/admin/permits/contacts", label: "Contractor Permits" },
+        ])
+      ) : (
+        renderSection("Admin", [{ href: "/admin", label: "Admin" }])
+      )}
+
+      {renderDocsTree()}
     </nav>
   );
 }
 
 function SidebarContent({
   currentPath,
+  currentHash,
   uploadsPendingCount,
+  accessAuthenticated,
   onNavigate,
 }: {
   currentPath: string;
+  currentHash: string;
   uploadsPendingCount: number;
+  accessAuthenticated: boolean;
   onNavigate?: () => void;
 }) {
   return (
@@ -98,7 +307,9 @@ function SidebarContent({
       <div className="flex-1 overflow-y-auto px-2 py-3">
         <SidebarLinks
           currentPath={currentPath}
+          currentHash={currentHash}
           uploadsPendingCount={uploadsPendingCount}
+          accessAuthenticated={accessAuthenticated}
           onNavigate={onNavigate}
         />
       </div>
@@ -131,24 +342,48 @@ function SidebarContent({
 export function AppSidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [uploadsPendingCount, setUploadsPendingCount] = useState(0);
-  const currentPath = useMemo(
-    () => (typeof window === "undefined" ? "/" : window.location.pathname),
-    [],
-  );
+  const [currentHash, setCurrentHash] = useState("");
+  const [accessAuthenticated, setAccessAuthenticated] = useState(false);
+  const currentPath = useMemo(() => {
+    const path = typeof window === "undefined" ? "/" : window.location.pathname;
+    return path.replace(/\/+$/, "") || "/";
+  }, []);
+
+  useEffect(() => {
+    const syncHash = () => {
+      setCurrentHash(window.location.hash || "");
+    };
+
+    syncHash();
+    window.addEventListener("hashchange", syncHash);
+    return () => {
+      window.removeEventListener("hashchange", syncHash);
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
 
-    const fetchPendingCount = async () => {
+    const fetchSidebarState = async () => {
       try {
-        const response = await fetch("/api/images/mapping/summary");
-        const payload = (await response.json()) as {
+        const [pendingResponse, accessResponse] = await Promise.all([
+          fetch("/api/images/mapping/summary"),
+          fetch("/api/access/status", { credentials: "include" }),
+        ]);
+        const pendingPayload = (await pendingResponse.json()) as {
           success?: boolean;
           pending?: { total?: number };
         };
+        const accessPayload = (await accessResponse.json()) as {
+          success?: boolean;
+          authenticated?: boolean;
+        };
         if (!mounted) return;
-        if (response.ok && payload.success) {
-          setUploadsPendingCount(payload.pending?.total || 0);
+        if (pendingResponse.ok && pendingPayload.success) {
+          setUploadsPendingCount(pendingPayload.pending?.total || 0);
+        }
+        if (accessResponse.ok && accessPayload.success) {
+          setAccessAuthenticated(Boolean(accessPayload.authenticated));
         }
       } catch {
         // Keep sidebar resilient; no-op on badge fetch failures.
@@ -156,10 +391,10 @@ export function AppSidebar() {
     };
 
     const onSummaryUpdated = () => {
-      void fetchPendingCount();
+      void fetchSidebarState();
     };
 
-    void fetchPendingCount();
+    void fetchSidebarState();
     window.addEventListener("global-upload-complete", onSummaryUpdated);
     window.addEventListener("image-mapping-summary-updated", onSummaryUpdated);
 
@@ -173,14 +408,17 @@ export function AppSidebar() {
   return (
     <>
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 border-r border-border/40 bg-background/90 backdrop-blur md:block">
-        <SidebarContent currentPath={currentPath} uploadsPendingCount={uploadsPendingCount} />
+        <SidebarContent
+          currentPath={currentPath}
+          currentHash={currentHash}
+          uploadsPendingCount={uploadsPendingCount}
+          accessAuthenticated={accessAuthenticated}
+        />
       </aside>
 
       <div className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b border-border/40 bg-background/90 px-3 backdrop-blur md:hidden">
         <Dialog open={mobileOpen} onOpenChange={setMobileOpen}>
-          <DialogTrigger
-            render={<Button size="icon-sm" variant="ghost" aria-label="Open navigation menu" />}
-          >
+          <DialogTrigger render={<Button size="icon-sm" variant="ghost" aria-label="Open navigation menu" />}>
             <Menu className="size-4" />
           </DialogTrigger>
           <DialogContent className="left-0 top-0 h-svh w-[88vw] max-w-xs translate-x-0 translate-y-0 rounded-none border-r border-border/40 p-0">
@@ -189,7 +427,9 @@ export function AppSidebar() {
             </DialogHeader>
             <SidebarContent
               currentPath={currentPath}
+              currentHash={currentHash}
               uploadsPendingCount={uploadsPendingCount}
+              accessAuthenticated={accessAuthenticated}
               onNavigate={() => setMobileOpen(false)}
             />
           </DialogContent>

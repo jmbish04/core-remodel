@@ -3,7 +3,7 @@ import { HomeIcon, ImageIcon, LayoutGridIcon, CameraIcon } from "lucide-react";
 export function Navigation() {
   const navItems = [
     { href: "/", label: "Home", icon: HomeIcon },
-    { href: "/gallery", label: "Gallery", icon: ImageIcon },
+    { href: "/floor-plan", label: "Floor Plan", icon: ImageIcon },
     { href: "/moodboards", label: "Mood Boards", icon: LayoutGridIcon },
     { href: "/listing-photos", label: "Listing Photos", icon: CameraIcon },
   ];
