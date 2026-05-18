@@ -1,0 +1,30 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { PermitDetailApp } from "@/components/PermitsAdminApp";
+
+const permitIdentifier = Astro.params.permitIdentifier || "";
+---
+
+<BaseLayout
+  title={`Permit ${permitIdentifier} - 126 Colby - Remodel Mission Control`}
+  description="Full permit detail and revision history for 126 Colby permit intelligence."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8 flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h1 class="mb-2 text-3xl font-bold">Permit Detail</h1>
+        <p class="text-muted-foreground">
+          View all synchronized records, raw fields, and revision history for this permit identifier.
+        </p>
+      </div>
+      <a
+        href="/admin/permits"
+        class="inline-flex h-9 items-center rounded-md border border-border/60 px-3 text-sm text-muted-foreground transition hover:bg-muted/40 hover:text-foreground"
+      >
+        Back to House Permits
+      </a>
+    </div>
+
+    <PermitDetailApp permitIdentifier={permitIdentifier} client:only="react" />
+  </main>
+</BaseLayout>

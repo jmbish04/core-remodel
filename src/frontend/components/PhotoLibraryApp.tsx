@@ -15,17 +15,23 @@ import {
 } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
-
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Cropper, CropperArea, CropperImage, type CropperAreaData } from "@/components/ui/cropper";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { GridBento } from "@/components/ui/grid-bento";
-import { ImageGallery } from "@/components/ui/image-gallery";
-import { ImageGalleryMasonry } from "@/components/ui/image-gallery-masonry";
 import { ImagePreview } from "@/components/ui/image-preview";
-import { Input } from "@/components/ui/input";
+import { ImageGallery, type ImageGalleryContextAction } from "@/components/ui/image-gallery";
+import { ImageGalleryMasonry } from "@/components/ui/image-gallery-masonry";
+import { GridBento } from "@/components/ui/grid-bento";
 import { MultipleSelector, type MultipleSelectorOption } from "@/components/ui/multiple-selector";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Cropper, CropperArea, CropperImage, type CropperAreaData } from "@/components/ui/cropper";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -35,6 +41,10 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  getTrackedUploadLabel,
+  type UploadProcessingStatus,
+} from "@/lib/image-upload-tracking";
 import { cn } from "@/lib/utils";
 
 type PhotoCategory = "inspirational" | "listing";
@@ -103,6 +113,10 @@ interface ImageRecord {
   roomType?: string | null;
   metadata?: string | null;
   datetimeCreated?: string | number | Date | null;
+  processingStatus?: UploadProcessingStatus | null;
+  workflowInstanceId?: string | null;
+  processingError?: string | null;
+  processedAt?: string | number | Date | null;
 }
 
 interface CatalogFloor {
@@ -138,6 +152,10 @@ interface ViewImageRecord {
   note: string;
   createdAt: string;
   metadata: ParsedMetadata;
+  processingStatus: UploadProcessingStatus | null;
+  workflowInstanceId: string | null;
+  processingError: string | null;
+  processedAt: string | number | Date | null;
 }
 
 interface ImageGroup {
@@ -163,7 +181,8 @@ function parseMetadata(raw: string | null | undefined): ParsedMetadata {
       ? parsed.tags.map((value) => String(value).trim()).filter(Boolean)
       : [];
     const note = typeof parsed.note === "string" ? parsed.note : "";
-    const deliveryUrl = typeof parsed.deliveryUrl === "string" ? parsed.deliveryUrl : undefined;
+    const deliveryUrl =
+      typeof parsed.deliveryUrl === "string" ? parsed.deliveryUrl : undefined;
     const aiPrefill =
       parsed.aiPrefill && typeof parsed.aiPrefill === "object"
         ? (parsed.aiPrefill as AiPrefillMetadata)
@@ -218,7 +237,10 @@ function buildViewImage(image: ImageRecord): ViewImageRecord {
     : [];
 
   const primaryRoom = roomLabels[0] || image.roomType?.trim() || "unassigned";
-  const fallbackName = primaryRoom === "unassigned" ? "Untitled photo" : `${primaryRoom} photo`;
+  const fallbackName =
+    primaryRoom === "unassigned"
+      ? "Untitled photo"
+      : `${primaryRoom} photo`;
 
   return {
     raw: image,
@@ -253,6 +275,10 @@ function buildViewImage(image: ImageRecord): ViewImageRecord {
     note: metadata.note,
     createdAt: formatCreatedAt(image.datetimeCreated),
     metadata,
+    processingStatus: image.processingStatus ?? null,
+    workflowInstanceId: image.workflowInstanceId ?? null,
+    processingError: image.processingError ?? null,
+    processedAt: image.processedAt ?? null,
   };
 }
 
@@ -384,11 +410,14 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
   const [isDrawingHighlight, setIsDrawingHighlight] = useState(false);
   const [draftHighlight, setDraftHighlight] = useState<HighlightRecord | null>(null);
   const highlightSurfaceRef = useRef<HTMLDivElement | null>(null);
+  const requestedImageIdRef = useRef<string | null>(
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("imageId")
+      : null,
+  );
 
   const [replaceCropModalOpen, setReplaceCropModalOpen] = useState(false);
-  const [replaceCropTargetImage, setReplaceCropTargetImage] = useState<ViewImageRecord | null>(
-    null,
-  );
+  const [replaceCropTargetImage, setReplaceCropTargetImage] = useState<ViewImageRecord | null>(null);
   const [replaceCropState, setReplaceCropState] = useState<CropState>({
     crop: { x: 0, y: 0 },
     zoom: 1,
@@ -396,9 +425,31 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
     areaPixels: null,
   });
   const [savingReplacementCrop, setSavingReplacementCrop] = useState(false);
+  const processingCounts = useMemo(
+    () =>
+      images.reduce(
+        (counts, image) => {
+          if (image.processingStatus === "queued") {
+            counts.queued += 1;
+          } else if (image.processingStatus === "processing") {
+            counts.processing += 1;
+          } else if (image.processingStatus === "failed") {
+            counts.failed += 1;
+          }
+          return counts;
+        },
+        { queued: 0, processing: 0, failed: 0 },
+      ),
+    [images],
+  );
+  const hasActiveProcessing =
+    processingCounts.queued > 0 || processingCounts.processing > 0;
 
   const lowerFloor = useMemo(
-    () => catalogFloors.find((floor) => floor.key === "lower_level") || catalogFloors[0] || null,
+    () =>
+      catalogFloors.find((floor) => floor.key === "lower_level") ||
+      catalogFloors[0] ||
+      null,
     [catalogFloors],
   );
 
@@ -460,15 +511,18 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
 
       setImages(mapped);
       setGroups(groupByRoom(mapped));
-      if (reviewMode && mapped.length > 0 && !selectedImage) {
-        setSelectedImage(mapped[0]);
-      }
+      setSelectedImage((current) => {
+        if (!current) {
+          return reviewMode ? mapped[0] ?? null : current;
+        }
+        return mapped.find((image) => image.id === current.id) ?? (reviewMode ? mapped[0] ?? null : current);
+      });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load images");
     } finally {
       setLoading(false);
     }
-  }, [category, reviewMode, selectedImage]);
+  }, [category, reviewMode]);
 
   const refreshImages = useCallback(async () => {
     setRefreshing(true);
@@ -490,15 +544,18 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
 
       setImages(mapped);
       setGroups(groupByRoom(mapped));
-      if (reviewMode && mapped.length > 0 && !selectedImage) {
-        setSelectedImage(mapped[0]);
-      }
+      setSelectedImage((current) => {
+        if (!current) {
+          return reviewMode ? mapped[0] ?? null : current;
+        }
+        return mapped.find((image) => image.id === current.id) ?? (reviewMode ? mapped[0] ?? null : current);
+      });
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to refresh images");
     } finally {
       setRefreshing(false);
     }
-  }, [category, reviewMode, selectedImage]);
+  }, [category, reviewMode]);
 
   const fetchTagOptions = useCallback(async () => {
     setTagsLoading(true);
@@ -510,15 +567,16 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
       if (!response.ok) {
         throw new Error("Failed to load tags");
       }
-      const options = Array.isArray(payload.tags)
-        ? payload.tags
-            .map((tag) => ({
-              value: String(tag.id),
-              label: tag.label,
-              description: tag.slug,
-            }))
-            .sort((a, b) => a.label.localeCompare(b.label))
-        : [];
+      const options =
+        Array.isArray(payload.tags)
+          ? payload.tags
+              .map((tag) => ({
+                value: String(tag.id),
+                label: tag.label,
+                description: tag.slug,
+              }))
+              .sort((a, b) => a.label.localeCompare(b.label))
+          : [];
       setTagOptions(options);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load tags");
@@ -611,6 +669,20 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
   }, [category, fetchTagOptions, refreshImages]);
 
   useEffect(() => {
+    if (!hasActiveProcessing) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void refreshImages();
+    }, 4000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [hasActiveProcessing, refreshImages]);
+
+  useEffect(() => {
     if (!selectedImage) {
       return;
     }
@@ -676,10 +748,23 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
     }
   }, [images, reviewMode, selectedImage]);
 
-  const openImage = (image: ViewImageRecord) => {
+  const openImage = useCallback((image: ViewImageRecord) => {
     setSelectedImage(image);
     setPreviewOpen(false);
-  };
+  }, []);
+
+  useEffect(() => {
+    const requestedImageId = requestedImageIdRef.current;
+    if (!requestedImageId) {
+      return;
+    }
+    const matched = images.find((image) => image.id === requestedImageId);
+    if (!matched) {
+      return;
+    }
+    openImage(matched);
+    requestedImageIdRef.current = null;
+  }, [images, openImage]);
 
   const closeSelection = useCallback(() => {
     if (reviewMode) {
@@ -776,55 +861,49 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
     [highlightMode, selectedImage],
   );
 
-  const moveHighlightDraw = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      if (!isDrawingHighlight || !draftHighlight) {
-        return;
-      }
-      const surface = highlightSurfaceRef.current;
-      if (!surface) {
-        return;
-      }
-      const bounds = surface.getBoundingClientRect();
-      const xPct = clampPercent(((event.clientX - bounds.left) / bounds.width) * 100);
-      const yPct = clampPercent(((event.clientY - bounds.top) / bounds.height) * 100);
-      const nextX = Math.min(draftHighlight.xPct, xPct);
-      const nextY = Math.min(draftHighlight.yPct, yPct);
-      const nextWidth = Math.abs(xPct - draftHighlight.xPct);
-      const nextHeight = Math.abs(yPct - draftHighlight.yPct);
-      setDraftHighlight((previous) =>
-        previous
-          ? {
-              ...previous,
-              xPct: nextX,
-              yPct: nextY,
-              widthPct: clampPercent(nextWidth),
-              heightPct: clampPercent(nextHeight),
-            }
-          : null,
-      );
-    },
-    [draftHighlight, isDrawingHighlight],
-  );
+  const moveHighlightDraw = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isDrawingHighlight || !draftHighlight) {
+      return;
+    }
+    const surface = highlightSurfaceRef.current;
+    if (!surface) {
+      return;
+    }
+    const bounds = surface.getBoundingClientRect();
+    const xPct = clampPercent(((event.clientX - bounds.left) / bounds.width) * 100);
+    const yPct = clampPercent(((event.clientY - bounds.top) / bounds.height) * 100);
+    const nextX = Math.min(draftHighlight.xPct, xPct);
+    const nextY = Math.min(draftHighlight.yPct, yPct);
+    const nextWidth = Math.abs(xPct - draftHighlight.xPct);
+    const nextHeight = Math.abs(yPct - draftHighlight.yPct);
+    setDraftHighlight((previous) =>
+      previous
+        ? {
+            ...previous,
+            xPct: nextX,
+            yPct: nextY,
+            widthPct: clampPercent(nextWidth),
+            heightPct: clampPercent(nextHeight),
+          }
+        : null,
+    );
+  }, [draftHighlight, isDrawingHighlight]);
 
-  const endHighlightDraw = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      const surface = highlightSurfaceRef.current;
-      if (surface && surface.hasPointerCapture(event.pointerId)) {
-        surface.releasePointerCapture(event.pointerId);
-      }
-      if (!draftHighlight) {
-        setIsDrawingHighlight(false);
-        return;
-      }
-      if (draftHighlight.widthPct >= 1 && draftHighlight.heightPct >= 1) {
-        setPanelHighlights((previous) => [...previous, draftHighlight]);
-      }
-      setDraftHighlight(null);
+  const endHighlightDraw = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const surface = highlightSurfaceRef.current;
+    if (surface && surface.hasPointerCapture(event.pointerId)) {
+      surface.releasePointerCapture(event.pointerId);
+    }
+    if (!draftHighlight) {
       setIsDrawingHighlight(false);
-    },
-    [draftHighlight],
-  );
+      return;
+    }
+    if (draftHighlight.widthPct >= 1 && draftHighlight.heightPct >= 1) {
+      setPanelHighlights((previous) => [...previous, draftHighlight]);
+    }
+    setDraftHighlight(null);
+    setIsDrawingHighlight(false);
+  }, [draftHighlight]);
 
   const saveSelectedImage = useCallback(async () => {
     if (!selectedImage) return;
@@ -900,13 +979,23 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
     selectedImage,
   ]);
 
+  const requestDeleteImage = useCallback((image: ViewImageRecord) => {
+    setSelectedImage(image);
+    setDeleteTargetImage(image);
+    setDeleteConfirmOpen(true);
+  }, []);
+
   const requestDeleteSelectedImage = useCallback(() => {
     if (!selectedImage) {
       return;
     }
-    setDeleteTargetImage(selectedImage);
-    setDeleteConfirmOpen(true);
-  }, [selectedImage]);
+    requestDeleteImage(selectedImage);
+  }, [requestDeleteImage, selectedImage]);
+
+  const navigateToAiEdit = useCallback((image: ViewImageRecord) => {
+    const params = new URLSearchParams({ sourceImageId: image.id });
+    window.location.assign(`/photo-edits?${params.toString()}`);
+  }, []);
 
   const performDeleteImage = useCallback(async () => {
     if (!deleteTargetImage) {
@@ -1026,6 +1115,48 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
     replaceCropTargetImage,
   ]);
 
+  const imageById = useMemo(() => {
+    return new Map(images.map((image) => [image.id, image]));
+  }, [images]);
+
+  const imageContextActions = useMemo<ImageGalleryContextAction[]>(
+    () => [
+      {
+        id: "edit-metadata",
+        label: "Update Metadata",
+        onSelect: (item) => {
+          const image = imageById.get(item.id);
+          if (image) {
+            openImage(image);
+          }
+        },
+      },
+      {
+        id: "ai-edit",
+        label: "Edit With AI",
+        onSelect: (item) => {
+          const image = imageById.get(item.id);
+          if (image) {
+            navigateToAiEdit(image);
+          }
+        },
+      },
+      {
+        id: "delete-image",
+        label: "Delete Image",
+        variant: "destructive",
+        separatorBefore: true,
+        onSelect: (item) => {
+          const image = imageById.get(item.id);
+          if (image) {
+            requestDeleteImage(image);
+          }
+        },
+      },
+    ],
+    [imageById, navigateToAiEdit, openImage, requestDeleteImage],
+  );
+
   const flatItems = useMemo(
     () =>
       images.map((image) => ({
@@ -1059,6 +1190,36 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
               <p className="text-sm text-muted-foreground">
                 {images.length} photos across {groups.length} rooms
               </p>
+              {(processingCounts.queued > 0 ||
+                processingCounts.processing > 0 ||
+                processingCounts.failed > 0) && (
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {processingCounts.queued > 0 ? (
+                    <Badge
+                      variant="secondary"
+                      className="bg-amber-500/15 text-amber-300"
+                    >
+                      {processingCounts.queued} queued
+                    </Badge>
+                  ) : null}
+                  {processingCounts.processing > 0 ? (
+                    <Badge
+                      variant="secondary"
+                      className="bg-sky-500/15 text-sky-300"
+                    >
+                      {processingCounts.processing} processing
+                    </Badge>
+                  ) : null}
+                  {processingCounts.failed > 0 ? (
+                    <Badge
+                      variant="secondary"
+                      className="bg-destructive/15 text-destructive"
+                    >
+                      {processingCounts.failed} failed
+                    </Badge>
+                  ) : null}
+                </div>
+              )}
             </div>
 
             <div className="flex items-center gap-2">
@@ -1117,6 +1278,41 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
           </header>
 
           <div className="flex-1 space-y-6 overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
+            {(processingCounts.queued > 0 ||
+              processingCounts.processing > 0 ||
+              processingCounts.failed > 0) && (
+              <div className="rounded-xl border border-border/40 bg-card/50 px-4 py-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  {processingCounts.queued > 0 ? (
+                    <Badge
+                      variant="secondary"
+                      className="bg-amber-500/15 text-amber-300"
+                    >
+                      {processingCounts.queued} queued
+                    </Badge>
+                  ) : null}
+                  {processingCounts.processing > 0 ? (
+                    <Badge
+                      variant="secondary"
+                      className="bg-sky-500/15 text-sky-300"
+                    >
+                      {processingCounts.processing} processing
+                    </Badge>
+                  ) : null}
+                  {processingCounts.failed > 0 ? (
+                    <Badge
+                      variant="secondary"
+                      className="bg-destructive/15 text-destructive"
+                    >
+                      {processingCounts.failed} failed
+                    </Badge>
+                  ) : null}
+                </div>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  Newly uploaded photos refresh automatically while background analysis runs.
+                </p>
+              </div>
+            )}
             {loading && images.length === 0 ? (
               <div className="flex items-center justify-center rounded-xl bg-card/30 py-20 text-muted-foreground ring-1 ring-border/40">
                 <Loader2 className="mr-3 size-6 animate-spin" />
@@ -1156,22 +1352,40 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
                     </div>
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">
                       {images.map((image) => (
-                        <button
-                          key={`thumb-${image.id}`}
-                          type="button"
-                          onClick={() => openImage(image)}
-                          className={cn(
-                            "overflow-hidden rounded-lg border ring-1 ring-border/40",
-                            selectedImage.id === image.id && "ring-2 ring-ring",
-                          )}
-                        >
-                          {/* biome-ignore lint/performance/noImgElement: external delivery urls are expected */}
-                          <img
-                            src={image.path}
-                            alt={image.name}
-                            className="aspect-[4/3] w-full object-cover"
-                          />
-                        </button>
+                        <ContextMenu key={`thumb-${image.id}`}>
+                          <ContextMenuTrigger>
+                            <button
+                              type="button"
+                              onClick={() => openImage(image)}
+                              className={cn(
+                                "w-full overflow-hidden rounded-lg border ring-1 ring-border/40",
+                                selectedImage.id === image.id && "ring-2 ring-ring",
+                              )}
+                            >
+                              {/* biome-ignore lint/performance/noImgElement: external delivery urls are expected */}
+                              <img
+                                src={image.path}
+                                alt={image.name}
+                                className="aspect-[4/3] w-full object-cover"
+                              />
+                            </button>
+                          </ContextMenuTrigger>
+                          <ContextMenuContent>
+                            <ContextMenuItem onClick={() => openImage(image)}>
+                              Update Metadata
+                            </ContextMenuItem>
+                            <ContextMenuItem onClick={() => navigateToAiEdit(image)}>
+                              Edit With AI
+                            </ContextMenuItem>
+                            <ContextMenuSeparator />
+                            <ContextMenuItem
+                              variant="destructive"
+                              onClick={() => requestDeleteImage(image)}
+                            >
+                              Delete Image
+                            </ContextMenuItem>
+                          </ContextMenuContent>
+                        </ContextMenu>
                       ))}
                     </div>
                   </div>
@@ -1181,6 +1395,7 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
               <GridBento
                 items={flatItems}
                 selectedId={selectedImage?.id}
+                contextActions={imageContextActions}
                 onSelect={(item) => {
                   const found = images.find((entry) => entry.id === item.id);
                   if (found) openImage(found);
@@ -1190,6 +1405,7 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
               <ImageGallery
                 items={flatItems}
                 selectedId={selectedImage?.id}
+                contextActions={imageContextActions}
                 onSelect={(item) => {
                   const found = images.find((entry) => entry.id === item.id);
                   if (found) openImage(found);
@@ -1199,6 +1415,7 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
               <ImageGalleryMasonry
                 items={flatItems}
                 selectedId={selectedImage?.id}
+                contextActions={imageContextActions}
                 onSelect={(item) => {
                   const found = images.find((entry) => entry.id === item.id);
                   if (found) openImage(found);
@@ -1229,6 +1446,7 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
                         tags: image.tags,
                       }))}
                       selectedId={selectedImage?.id}
+                      contextActions={imageContextActions}
                       onSelect={(item) => {
                         const found = group.images.find((entry) => entry.id === item.id);
                         if (found) openImage(found);
@@ -1251,16 +1469,37 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
         >
           <div className="flex h-full flex-col">
             <div className="flex items-center justify-between border-b border-border/40 px-4 py-3">
-              <h2 className="truncate pr-4 text-sm font-semibold">
-                {selectedImage?.name ?? "Details"}
-              </h2>
+              <div className="min-w-0 pr-4">
+                <h2 className="truncate text-sm font-semibold">
+                  {selectedImage?.name ?? "Details"}
+                </h2>
+                {selectedImage?.processingStatus ? (
+                  <div className="mt-1 flex flex-wrap items-center gap-2">
+                    <span
+                      className={cn(
+                        "rounded-full px-2 py-0.5 text-[10px] font-medium",
+                        selectedImage.processingStatus === "processed"
+                          ? "bg-emerald-500/15 text-emerald-300"
+                          : selectedImage.processingStatus === "failed"
+                            ? "bg-destructive/15 text-destructive"
+                            : selectedImage.processingStatus === "processing"
+                              ? "bg-sky-500/15 text-sky-300"
+                              : "bg-amber-500/15 text-amber-300",
+                      )}
+                    >
+                      {getTrackedUploadLabel(selectedImage.processingStatus)}
+                    </span>
+                    {selectedImage.processingStatus === "failed" &&
+                    selectedImage.processingError ? (
+                      <span className="truncate text-[11px] text-destructive">
+                        {selectedImage.processingError}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
               {!reviewMode ? (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={closeSelection}
-                  title="Close details"
-                >
+                <Button variant="ghost" size="icon-sm" onClick={closeSelection} title="Close details">
                   <X className="size-4" />
                 </Button>
               ) : null}
@@ -1334,8 +1573,7 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
                     </label>
                     {selectedImage.metadata.aiPrefill?.displayName?.value ? (
                       <p className="text-xs text-amber-600">
-                        ✨ AI prefill rationale:{" "}
-                        {selectedImage.metadata.aiPrefill.displayName.rationale}
+                        ✨ AI prefill rationale: {selectedImage.metadata.aiPrefill.displayName.rationale}
                       </p>
                     ) : null}
                     <Input
@@ -1358,7 +1596,9 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
                           <span
                             className={cn(
                               "text-xs font-medium",
-                              !isPanelFloorUpper ? "text-foreground" : "text-muted-foreground",
+                              !isPanelFloorUpper
+                                ? "text-foreground"
+                                : "text-muted-foreground",
                             )}
                           >
                             {lowerFloor?.name ?? "Downstairs"}
@@ -1372,7 +1612,9 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
                           <span
                             className={cn(
                               "text-xs font-medium",
-                              isPanelFloorUpper ? "text-foreground" : "text-muted-foreground",
+                              isPanelFloorUpper
+                                ? "text-foreground"
+                                : "text-muted-foreground",
                             )}
                           >
                             {upperFloor?.name ?? "Upstairs"}
@@ -1387,7 +1629,9 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
                           <SelectTrigger className="w-full">
                             <SelectValue
                               placeholder={
-                                catalogLoading ? "Loading rooms..." : "Select listing room"
+                                catalogLoading
+                                  ? "Loading rooms..."
+                                  : "Select listing room"
                               }
                             />
                           </SelectTrigger>
@@ -1399,9 +1643,7 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
                             ))}
                           </SelectContent>
                         </Select>
-                        <p className="text-xs text-muted-foreground">
-                          Room is required for listing photos.
-                        </p>
+                        <p className="text-xs text-muted-foreground">Room is required for listing photos.</p>
                       </div>
                     ) : (
                       <div className="space-y-2 rounded-lg bg-muted/20 p-3 ring-1 ring-border/30">
@@ -1518,21 +1760,13 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
                       </Select>
                     </div>
                     <p className="text-xs text-muted-foreground">
-                      Drag on the image above to create a{" "}
-                      {highlightMode === "like" ? "liked" : "disliked"} region.
+                      Drag on the image above to create a {highlightMode === "like" ? "liked" : "disliked"} region.
                     </p>
                     <div className="space-y-2">
                       {panelHighlights.map((highlight, index) => (
-                        <div
-                          key={`highlight-editor-${index}`}
-                          className="rounded-md border border-border/40 p-2"
-                        >
+                        <div key={`highlight-editor-${index}`} className="rounded-md border border-border/40 p-2">
                           <div className="mb-2 flex items-center justify-between gap-2">
-                            <Badge
-                              variant={
-                                highlight.highlightType === "like" ? "default" : "destructive"
-                              }
-                            >
+                            <Badge variant={highlight.highlightType === "like" ? "default" : "destructive"}>
                               {highlight.highlightType === "like" ? "Like" : "Do Not Like"}
                             </Badge>
                             <Button
@@ -1747,11 +1981,7 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
               </div>
 
               <div className="flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  onClick={closeReplaceCropModal}
-                  disabled={savingReplacementCrop}
-                >
+                <Button variant="outline" onClick={closeReplaceCropModal} disabled={savingReplacementCrop}>
                   Cancel
                 </Button>
                 <Button onClick={saveReplacementCrop} disabled={savingReplacementCrop}>

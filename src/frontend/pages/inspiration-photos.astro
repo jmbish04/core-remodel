@@ -1,0 +1,17 @@
+---
+import { PhotoLibraryApp } from "@/components/PhotoLibraryApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Inspiration Photos - 126 Colby - Remodel Mission Control"
+  description="Manage inspiration photos with room mapping and context metadata."
+>
+  <div class="pt-[1px]">
+    <PhotoLibraryApp
+      client:only="react"
+      category="inspirational"
+      title="Inspiration Photos"
+    />
+  </div>
+</BaseLayout>

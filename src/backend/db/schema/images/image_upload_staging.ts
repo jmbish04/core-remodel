@@ -16,9 +16,14 @@ export const imageUploadStaging = sqliteTable(
       .references(() => images.id, { onDelete: "cascade" }),
     photoCategory: text("photo_category").notNull(), // listing | inspirational
     mappingStatus: text("mapping_status").notNull().default("pending"), // pending | mapped
+    processingStatus: text("processing_status").notNull().default("queued"), // queued | processing | processed | failed
+    workflowInstanceId: text("workflow_instance_id"),
+    processingError: text("processing_error"),
     datetimeCreated: integer("datetime_created", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),
+    datetimeProcessingStarted: integer("datetime_processing_started", { mode: "timestamp" }),
+    datetimeProcessed: integer("datetime_processed", { mode: "timestamp" }),
     datetimeMapped: integer("datetime_mapped", { mode: "timestamp" }),
   },
   (table) => ({

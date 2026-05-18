@@ -1,20 +1,20 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
-import { SupportingDocumentsApp } from "@/components/SupportingDocumentsApp";
+import { SupportingDocumentsLibraryApp } from "@/components/SupportingDocumentsLibraryApp";
 ---
 
 <BaseLayout
-  title="Supporting Documents - 126 Colby - Remodel Mission Control"
-  description="Track foundational references, branch-specific artifacts, and revision-safe supporting documentation."
+  title="Project Records - 126 Colby - Remodel Mission Control"
+  description="Contractor-facing view of supporting documents, room records, and branching vision nodes."
 >
   <main class="container mx-auto px-4 py-8 pb-12">
     <div class="mb-8">
-      <h1 class="mb-2 text-3xl font-bold">Supporting Documents</h1>
+      <h1 class="mb-2 text-3xl font-bold">Project Records</h1>
       <p class="text-muted-foreground">
-        Central index for blueprints, screenshots, permits, videos, and branch-linked planning references.
+        One place for contractors to review blueprints, screenshots, notes, and the active branch structure for each room.
       </p>
     </div>
 
-    <SupportingDocumentsApp client:only="react" />
+    <SupportingDocumentsLibraryApp client:only="react" />
   </main>
 </BaseLayout>

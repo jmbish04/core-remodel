@@ -1,10 +1,521 @@
-import { remodelScenarios, roomActionItems, rooms, scenarioRoomPlans } from "@backend/db";
-import { ensureHomeCatalogSeed, getHomeCatalog } from "@backend/services/home-catalog";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
+import {
+  budgetTrackerItemRooms,
+  budgetTrackerItems,
+  estimateCompanies,
+  estimateRevisions,
+  estimateRoomMappings,
+  estimateStatuses,
+  estimates,
+  images,
+  inspirationalImageRooms,
+  remodelScenarios,
+  roomActionItems,
+  roomAiSummaries,
+  rooms,
+  scenarioRoomPlans,
+  supportingDocumentRoomMappings,
+  supportingDocumentVisionNodeMappings,
+  supportingDocuments,
+  visionNodeImageMappings,
+  visionNodeRoomMappings,
+  visionPlanNodes,
+} from "@backend/db";
+import { transcribeAudioBase64 } from "@backend/services/estimate-intake";
+import { ensureHomeCatalogSeed, getHomeCatalog } from "@backend/services/home-catalog";
+import { generateRoomSummary } from "@backend/services/room-summary";
+import { isRequestAuthenticated } from "@backend/utils/access";
 
 const roomsRouter = new Hono<{ Bindings: Env }>();
+
+function parseJsonObject(value: unknown): Record<string, unknown> | null {
+  if (!value) return null;
+  if (typeof value === "object" && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function parseStringArray(value: unknown): string[] {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value.map((entry) => String(entry).trim()).filter(Boolean);
+  }
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed.map((entry) => String(entry).trim()).filter(Boolean);
+      }
+    } catch {
+      return trimmed
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+    }
+  }
+  return [];
+}
+
+function formatRoomDimensions(
+  room: Pick<
+    typeof rooms.$inferSelect,
+    "lengthFeet" | "lengthInches" | "widthFeet" | "widthInches"
+  >,
+): string | null {
+  const lengthSet =
+    typeof room.lengthFeet === "number" || typeof room.lengthInches === "number";
+  const widthSet =
+    typeof room.widthFeet === "number" || typeof room.widthInches === "number";
+  if (!lengthSet && !widthSet) return null;
+
+  const formatSide = (feet: number | null, inches: number | null) => {
+    const feetValue = typeof feet === "number" ? feet : 0;
+    const inchesValue = typeof inches === "number" ? inches : 0;
+    return `${feetValue}'${inchesValue}"`;
+  };
+
+  if (lengthSet && widthSet) {
+    return `${formatSide(room.lengthFeet, room.lengthInches)} x ${formatSide(room.widthFeet, room.widthInches)}`;
+  }
+  if (lengthSet) {
+    return formatSide(room.lengthFeet, room.lengthInches);
+  }
+  return formatSide(room.widthFeet, room.widthInches);
+}
+
+async function ensureAccess(c: Parameters<typeof roomsRouter.get>[1]) {
+  const authenticated = await isRequestAuthenticated(c.req.raw, c.env);
+  if (!authenticated) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+  return null;
+}
+
+async function loadRoomDetail(env: Env, roomCode: string) {
+  await ensureHomeCatalogSeed(env);
+  const db = drizzle(env.DB);
+  const catalog = await getHomeCatalog(env);
+  const catalogRoom = catalog.floors
+    .flatMap((floor) =>
+      floor.rooms.map((room) => ({
+        ...room,
+        floorKey: floor.key,
+        floorName: floor.name,
+      })),
+    )
+    .find((room) => room.roomCode === roomCode);
+
+  if (!catalogRoom) {
+    return null;
+  }
+
+  const roomRecord = await db.select().from(rooms).where(eq(rooms.id, catalogRoom.id)).get();
+  if (!roomRecord) {
+    return null;
+  }
+
+  const [
+    listingImages,
+    inspirationalMappings,
+    actionItems,
+    summaryRow,
+    scenarioPlanRows,
+    documentMappings,
+    nodeMappings,
+    budgetMappings,
+    estimateMappings,
+  ] = await Promise.all([
+    db
+      .select()
+      .from(images)
+      .where(and(eq(images.photoCategory, "listing"), eq(images.roomId, roomRecord.id)))
+      .orderBy(desc(images.datetimeCreated))
+      .all(),
+    db
+      .select()
+      .from(inspirationalImageRooms)
+      .where(eq(inspirationalImageRooms.roomId, roomRecord.id))
+      .all(),
+    db
+      .select()
+      .from(roomActionItems)
+      .where(eq(roomActionItems.roomId, roomRecord.id))
+      .orderBy(asc(roomActionItems.priority), desc(roomActionItems.datetimeUpdated))
+      .all(),
+    db
+      .select()
+      .from(roomAiSummaries)
+      .where(eq(roomAiSummaries.roomId, roomRecord.id))
+      .get(),
+    db
+      .select()
+      .from(scenarioRoomPlans)
+      .where(eq(scenarioRoomPlans.roomId, roomRecord.id))
+      .orderBy(desc(scenarioRoomPlans.datetimeUpdated))
+      .all(),
+    db
+      .select()
+      .from(supportingDocumentRoomMappings)
+      .where(eq(supportingDocumentRoomMappings.roomId, roomRecord.id))
+      .all(),
+    db
+      .select()
+      .from(visionNodeRoomMappings)
+      .where(eq(visionNodeRoomMappings.roomId, roomRecord.id))
+      .all(),
+    db
+      .select()
+      .from(budgetTrackerItemRooms)
+      .where(eq(budgetTrackerItemRooms.roomId, roomRecord.id))
+      .all(),
+    db
+      .select()
+      .from(estimateRoomMappings)
+      .where(eq(estimateRoomMappings.roomId, roomRecord.id))
+      .all(),
+  ]);
+
+  const inspirationImageIds = Array.from(
+    new Set(inspirationalMappings.map((mapping) => mapping.imageId)),
+  );
+  const documentIds = Array.from(
+    new Set(documentMappings.map((mapping) => mapping.supportingDocumentId)),
+  );
+  const nodeIds = Array.from(new Set(nodeMappings.map((mapping) => mapping.visionNodeId)));
+  const budgetItemIds = Array.from(
+    new Set(budgetMappings.map((mapping) => mapping.budgetTrackerItemId)),
+  );
+  const estimateRevisionIds = Array.from(
+    new Set(estimateMappings.map((mapping) => mapping.estimateRevisionId)),
+  );
+  const scenarioIds = Array.from(new Set(scenarioPlanRows.map((plan) => plan.scenarioId)));
+
+  const [
+    inspirationalImages,
+    documentRows,
+    nodeRows,
+    nodeImageRows,
+    nodeDocumentRows,
+    budgetRows,
+    estimateRevisionRows,
+    scenarioRows,
+  ] = await Promise.all([
+    inspirationImageIds.length > 0
+      ? db
+          .select()
+          .from(images)
+          .where(inArray(images.id, inspirationImageIds))
+          .orderBy(desc(images.datetimeCreated))
+          .all()
+      : Promise.resolve([]),
+    documentIds.length > 0
+      ? db
+          .select()
+          .from(supportingDocuments)
+          .where(inArray(supportingDocuments.id, documentIds))
+          .orderBy(desc(supportingDocuments.datetimeUpdated))
+          .all()
+      : Promise.resolve([]),
+    nodeIds.length > 0
+      ? db
+          .select()
+          .from(visionPlanNodes)
+          .where(inArray(visionPlanNodes.id, nodeIds))
+          .orderBy(asc(visionPlanNodes.sortOrder), asc(visionPlanNodes.datetimeCreated))
+          .all()
+      : Promise.resolve([]),
+    nodeIds.length > 0
+      ? db
+          .select()
+          .from(visionNodeImageMappings)
+          .where(inArray(visionNodeImageMappings.visionNodeId, nodeIds))
+          .all()
+      : Promise.resolve([]),
+    nodeIds.length > 0
+      ? db
+          .select()
+          .from(supportingDocumentVisionNodeMappings)
+          .where(inArray(supportingDocumentVisionNodeMappings.visionNodeId, nodeIds))
+          .all()
+      : Promise.resolve([]),
+    budgetItemIds.length > 0
+      ? db
+          .select()
+          .from(budgetTrackerItems)
+          .where(inArray(budgetTrackerItems.id, budgetItemIds))
+          .orderBy(desc(budgetTrackerItems.datetimeUpdated))
+          .all()
+      : Promise.resolve([]),
+    estimateRevisionIds.length > 0
+      ? db
+          .select()
+          .from(estimateRevisions)
+          .where(inArray(estimateRevisions.id, estimateRevisionIds))
+          .orderBy(desc(estimateRevisions.datetimeUpdated))
+          .all()
+      : Promise.resolve([]),
+    scenarioIds.length > 0
+      ? db
+          .select()
+          .from(remodelScenarios)
+          .where(inArray(remodelScenarios.id, scenarioIds))
+          .all()
+      : Promise.resolve([]),
+  ]);
+
+  const thumbnailImageIds = Array.from(
+    new Set(
+      nodeRows
+        .map((node) => node.thumbnailImageId)
+        .filter((value): value is string => typeof value === "string" && value.length > 0),
+    ),
+  );
+  const imageRefIds = Array.from(new Set(nodeImageRows.map((row) => row.imageId)));
+  const estimateIds = Array.from(new Set(estimateRevisionRows.map((revision) => revision.estimateId)));
+  const statusIds = Array.from(
+    new Set(
+      estimateRevisionRows
+        .map((revision) => revision.estimateStatusId)
+        .filter((value): value is number => typeof value === "number" && Number.isFinite(value)),
+    ),
+  );
+
+  const [nodeImageRecords, estimateRows, statusRows, childNodeRows] = await Promise.all([
+    [...thumbnailImageIds, ...imageRefIds].length > 0
+      ? db
+          .select()
+          .from(images)
+          .where(inArray(images.id, Array.from(new Set([...thumbnailImageIds, ...imageRefIds]))))
+          .all()
+      : Promise.resolve([]),
+    estimateIds.length > 0
+      ? db.select().from(estimates).where(inArray(estimates.id, estimateIds)).all()
+      : Promise.resolve([]),
+    statusIds.length > 0
+      ? db.select().from(estimateStatuses).where(inArray(estimateStatuses.id, statusIds)).all()
+      : Promise.resolve([]),
+    nodeIds.length > 0
+      ? db
+          .select()
+          .from(visionPlanNodes)
+          .where(inArray(visionPlanNodes.parentId, nodeIds))
+          .all()
+      : Promise.resolve([]),
+  ]);
+  const companyIds = Array.from(
+    new Set(
+      estimateRows
+        .map((estimate) => estimate.estimateCompanyId)
+        .filter((value): value is number => typeof value === "number" && Number.isFinite(value)),
+    ),
+  );
+  const companyRows =
+    companyIds.length > 0
+      ? await db
+          .select()
+          .from(estimateCompanies)
+          .where(inArray(estimateCompanies.id, companyIds))
+          .all()
+      : [];
+
+  const scenarioById = new Map(scenarioRows.map((scenario) => [scenario.id, scenario]));
+  const nodeImageById = new Map(nodeImageRecords.map((image) => [image.id, image]));
+  const estimateById = new Map(estimateRows.map((estimate) => [estimate.id, estimate]));
+  const companyById = new Map(companyRows.map((company) => [company.id, company]));
+  const statusById = new Map(statusRows.map((status) => [status.id, status]));
+  const childCountByParentId = new Map<string, number>();
+  for (const node of childNodeRows) {
+    if (!node.parentId) continue;
+    childCountByParentId.set(node.parentId, (childCountByParentId.get(node.parentId) || 0) + 1);
+  }
+
+  const activeBudgetRows = budgetRows.filter((row) => row.isActive);
+  const totalBudgetLowCents = activeBudgetRows.reduce(
+    (sum, item) => sum + (item.estimatedLowCents || 0),
+    0,
+  );
+  const totalBudgetHighCents = activeBudgetRows.reduce(
+    (sum, item) => sum + (item.estimatedHighCents || 0),
+    0,
+  );
+
+  const estimateCards = estimateRevisionRows.map((revision) => {
+    const estimate = estimateById.get(revision.estimateId) || null;
+    const company =
+      estimate?.estimateCompanyId && companyById.has(estimate.estimateCompanyId)
+        ? companyById.get(estimate.estimateCompanyId) || null
+        : null;
+    const status =
+      revision.estimateStatusId && statusById.has(revision.estimateStatusId)
+        ? statusById.get(revision.estimateStatusId) || null
+        : null;
+    return {
+      ...revision,
+      estimateId: revision.estimateId,
+      companyName: company?.name || null,
+      statusName: status?.name || null,
+      scenarioId: estimate?.scenarioId || null,
+    };
+  });
+
+  const representativeImage =
+    (summaryRow?.representativeImageId
+      ? listingImages.find((image) => image.id === summaryRow.representativeImageId) || null
+      : null) || listingImages[0] || null;
+
+  return {
+    room: {
+      ...roomRecord,
+      displayName: catalogRoom.displayName,
+      floorKey: catalogRoom.floorKey,
+      floorName: catalogRoom.floorName,
+      dimensionLabel: formatRoomDimensions(roomRecord),
+    },
+    summary: summaryRow
+      ? {
+          ...summaryRow,
+          summaryObject: parseJsonObject(summaryRow.summaryJson),
+        }
+      : null,
+    representativeImage,
+    listingImages,
+    inspirationalImages,
+    supportingDocuments: documentRows.map((document) => ({
+      ...document,
+      tags: parseStringArray(document.tagsJson),
+    })),
+    actionItems,
+    scenarioPlans: scenarioPlanRows.map((plan) => ({
+      ...plan,
+      scenarioName: scenarioById.get(plan.scenarioId)?.name || "Scenario",
+    })),
+    budget: {
+      items: activeBudgetRows,
+      totalBudgetLowCents,
+      totalBudgetHighCents,
+    },
+    estimates: estimateCards,
+    visionNodes: nodeRows.map((node) => {
+      const thumbnailImage =
+        (node.thumbnailImageId ? nodeImageById.get(node.thumbnailImageId) || null : null) ||
+        (nodeImageRows
+          .filter((mapping) => mapping.visionNodeId === node.id)
+          .map((mapping) => nodeImageById.get(mapping.imageId) || null)
+          .find(Boolean) || null);
+      const supportingDocumentIds = nodeDocumentRows
+        .filter((mapping) => mapping.visionNodeId === node.id)
+        .map((mapping) => mapping.supportingDocumentId);
+      const imageRefs = nodeImageRows
+        .filter((mapping) => mapping.visionNodeId === node.id)
+        .map((mapping) => ({
+          imageId: mapping.imageId,
+          relationType: mapping.relationType,
+          image: nodeImageById.get(mapping.imageId) || null,
+        }));
+
+      return {
+        ...node,
+        childCount: childCountByParentId.get(node.id) || 0,
+        supportingDocumentIds,
+        imageRefs,
+        thumbnailImage,
+      };
+    }),
+  };
+}
+
+async function upsertRoomSummary(
+  db: ReturnType<typeof drizzle>,
+  roomId: number,
+  updates: {
+    representativeImageId?: string | null;
+    summaryMarkdown?: string | null;
+    summaryJson?: string | null;
+    lastUserPrompt?: string | null;
+    lastVoiceTranscript?: string | null;
+    model?: string | null;
+    datetimeGenerated?: Date | null;
+  },
+) {
+  const existing = await db
+    .select()
+    .from(roomAiSummaries)
+    .where(eq(roomAiSummaries.roomId, roomId))
+    .get();
+  const now = new Date();
+
+  if (!existing) {
+    await db
+      .insert(roomAiSummaries)
+      .values({
+        roomId,
+        representativeImageId:
+          updates.representativeImageId === undefined ? null : updates.representativeImageId,
+        summaryMarkdown:
+          updates.summaryMarkdown === undefined ? null : updates.summaryMarkdown,
+        summaryJson: updates.summaryJson === undefined ? null : updates.summaryJson,
+        lastUserPrompt:
+          updates.lastUserPrompt === undefined ? null : updates.lastUserPrompt,
+        lastVoiceTranscript:
+          updates.lastVoiceTranscript === undefined ? null : updates.lastVoiceTranscript,
+        model: updates.model === undefined ? null : updates.model,
+        datetimeCreated: now,
+        datetimeUpdated: now,
+        datetimeGenerated:
+          updates.datetimeGenerated === undefined ? null : updates.datetimeGenerated,
+      })
+      .run();
+  } else {
+    const nextValues: Record<string, unknown> = {
+      datetimeUpdated: now,
+    };
+    if (updates.representativeImageId !== undefined) {
+      nextValues.representativeImageId = updates.representativeImageId;
+    }
+    if (updates.summaryMarkdown !== undefined) {
+      nextValues.summaryMarkdown = updates.summaryMarkdown;
+    }
+    if (updates.summaryJson !== undefined) {
+      nextValues.summaryJson = updates.summaryJson;
+    }
+    if (updates.lastUserPrompt !== undefined) {
+      nextValues.lastUserPrompt = updates.lastUserPrompt;
+    }
+    if (updates.lastVoiceTranscript !== undefined) {
+      nextValues.lastVoiceTranscript = updates.lastVoiceTranscript;
+    }
+    if (updates.model !== undefined) {
+      nextValues.model = updates.model;
+    }
+    if (updates.datetimeGenerated !== undefined) {
+      nextValues.datetimeGenerated = updates.datetimeGenerated;
+    }
+    await db.update(roomAiSummaries).set(nextValues).where(eq(roomAiSummaries.roomId, roomId)).run();
+  }
+
+  return db
+    .select()
+    .from(roomAiSummaries)
+    .where(eq(roomAiSummaries.roomId, roomId))
+    .get();
+}
 
 roomsRouter.get("/catalog", async (c) => {
   try {
@@ -18,6 +529,179 @@ roomsRouter.get("/catalog", async (c) => {
     return c.json(
       {
         error: "Failed to load room catalog",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+roomsRouter.get("/code/:roomCode/detail", async (c) => {
+  try {
+    const roomCode = c.req.param("roomCode");
+    const detail = await loadRoomDetail(c.env, roomCode);
+    if (!detail) {
+      return c.json({ error: "Room not found" }, 404);
+    }
+
+    return c.json({
+      success: true,
+      ...detail,
+      roomStats: {
+        listingPhotoCount: detail.listingImages.length,
+        inspirationPhotoCount: detail.inspirationalImages.length,
+        supportingDocumentCount: detail.supportingDocuments.length,
+        actionItemCount: detail.actionItems.length,
+        visionNodeCount: detail.visionNodes.length,
+        estimateCount: detail.estimates.length,
+      },
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to load room detail",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+roomsRouter.patch("/code/:roomCode/profile", async (c) => {
+  const accessError = await ensureAccess(c);
+  if (accessError) return accessError;
+
+  try {
+    const roomCode = c.req.param("roomCode");
+    const detail = await loadRoomDetail(c.env, roomCode);
+    if (!detail) {
+      return c.json({ error: "Room not found" }, 404);
+    }
+
+    const body = (await c.req.json()) as { representativeImageId?: string | null };
+    const representativeImageId =
+      typeof body.representativeImageId === "string" && body.representativeImageId.trim()
+        ? body.representativeImageId.trim()
+        : null;
+
+    if (
+      representativeImageId &&
+      !detail.listingImages.some((image) => image.id === representativeImageId)
+    ) {
+      return c.json({ error: "Representative image must be one of the room listing photos" }, 400);
+    }
+
+    const db = drizzle(c.env.DB);
+    const summaryRow = await upsertRoomSummary(db, detail.room.id, {
+      representativeImageId,
+    });
+
+    return c.json({
+      success: true,
+      summary: summaryRow
+        ? {
+            ...summaryRow,
+            summaryObject: parseJsonObject(summaryRow.summaryJson),
+          }
+        : null,
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to update room profile",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+roomsRouter.post("/code/:roomCode/summary", async (c) => {
+  const accessError = await ensureAccess(c);
+  if (accessError) return accessError;
+
+  try {
+    const roomCode = c.req.param("roomCode");
+    const detail = await loadRoomDetail(c.env, roomCode);
+    if (!detail) {
+      return c.json({ error: "Room not found" }, 404);
+    }
+
+    const body = (await c.req.json()) as {
+      prompt?: string;
+      audioBase64?: string | null;
+      representativeImageId?: string | null;
+    };
+
+    const prompt = body.prompt?.trim() || null;
+    const representativeImageId =
+      typeof body.representativeImageId === "string" && body.representativeImageId.trim()
+        ? body.representativeImageId.trim()
+        : detail.summary?.representativeImageId || null;
+
+    if (
+      representativeImageId &&
+      !detail.listingImages.some((image) => image.id === representativeImageId)
+    ) {
+      return c.json({ error: "Representative image must be one of the room listing photos" }, 400);
+    }
+
+    const voiceTranscript =
+      typeof body.audioBase64 === "string" && body.audioBase64.trim()
+        ? await transcribeAudioBase64(c.env, body.audioBase64.trim())
+        : null;
+
+    const generated = await generateRoomSummary(c.env, {
+      room: {
+        displayName: detail.room.displayName,
+        roomCode: detail.room.roomCode,
+        floorName: detail.room.floorName,
+        asIsUse: detail.room.asIsUse,
+        dimensionLabel: detail.room.dimensionLabel,
+        problemAreas: detail.room.problemAreas,
+        generalNotes: detail.room.generalNotes,
+        plumbingNotes: detail.room.plumbingNotes,
+        electricalNotes: detail.room.electricalNotes,
+        structuralNotes: detail.room.structuralNotes,
+        hvacNotes: detail.room.hvacNotes,
+      },
+      listingImages: detail.listingImages,
+      inspirationalImages: detail.inspirationalImages,
+      supportingDocuments: detail.supportingDocuments,
+      actionItems: detail.actionItems,
+      scenarioPlans: detail.scenarioPlans,
+      budgetItems: detail.budget.items,
+      estimates: detail.estimates,
+      visionNodes: detail.visionNodes,
+      userPrompt: prompt,
+      voiceTranscript,
+    });
+
+    const db = drizzle(c.env.DB);
+    const summaryRow = await upsertRoomSummary(db, detail.room.id, {
+      representativeImageId,
+      summaryMarkdown: generated.summaryMarkdown,
+      summaryJson: JSON.stringify(generated.summaryObject),
+      lastUserPrompt: prompt,
+      lastVoiceTranscript: voiceTranscript,
+      model: generated.model,
+      datetimeGenerated: new Date(),
+    });
+
+    return c.json({
+      success: true,
+      summary: summaryRow
+        ? {
+            ...summaryRow,
+            summaryObject: parseJsonObject(summaryRow.summaryJson),
+          }
+        : null,
+      voiceTranscript,
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to regenerate room summary",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       500,
@@ -90,8 +774,10 @@ roomsRouter.post("/scenarios", async (c) => {
         id,
         name,
         description: body.description?.trim() || null,
-        budgetLowCents: typeof body.budgetLowCents === "number" ? body.budgetLowCents : null,
-        budgetHighCents: typeof body.budgetHighCents === "number" ? body.budgetHighCents : null,
+        budgetLowCents:
+          typeof body.budgetLowCents === "number" ? body.budgetLowCents : null,
+        budgetHighCents:
+          typeof body.budgetHighCents === "number" ? body.budgetHighCents : null,
         datetimeCreated: now,
         datetimeUpdated: now,
       })
@@ -163,7 +849,9 @@ roomsRouter.post("/scenarios/:scenarioId/plans", async (c) => {
         proposedUse,
         stage: body.stage?.trim() || "considering",
         estimatedCostCents:
-          typeof body.estimatedCostCents === "number" ? body.estimatedCostCents : null,
+          typeof body.estimatedCostCents === "number"
+            ? body.estimatedCostCents
+            : null,
         notes: body.notes?.trim() || null,
         datetimeCreated: now,
         datetimeUpdated: now,
@@ -216,7 +904,10 @@ roomsRouter.get("/:roomId/action-items", async (c) => {
           .select()
           .from(roomActionItems)
           .where(
-            and(eq(roomActionItems.roomId, roomId), eq(roomActionItems.scenarioId, scenarioId)),
+            and(
+              eq(roomActionItems.roomId, roomId),
+              eq(roomActionItems.scenarioId, scenarioId),
+            ),
           )
           .orderBy(asc(roomActionItems.datetimeCreated))
           .all()
@@ -281,15 +972,23 @@ roomsRouter.post("/:roomId/action-items", async (c) => {
         details: body.details?.trim() || null,
         status: body.status?.trim() || "open",
         priority:
-          typeof body.priority === "number" && Number.isFinite(body.priority) ? body.priority : 2,
+          typeof body.priority === "number" && Number.isFinite(body.priority)
+            ? body.priority
+            : 2,
         estimatedCostCents:
-          typeof body.estimatedCostCents === "number" ? body.estimatedCostCents : null,
+          typeof body.estimatedCostCents === "number"
+            ? body.estimatedCostCents
+            : null,
         datetimeCreated: now,
         datetimeUpdated: now,
       })
       .run();
 
-    const created = await db.select().from(roomActionItems).where(eq(roomActionItems.id, id)).get();
+    const created = await db
+      .select()
+      .from(roomActionItems)
+      .where(eq(roomActionItems.id, id))
+      .get();
 
     return c.json({ success: true, item: created }, 201);
   } catch (error) {

@@ -1,0 +1,20 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { PermitsAdminApp } from "@/components/PermitsAdminApp";
+---
+
+<BaseLayout
+  title="Admin Permits - 126 Colby - Remodel Mission Control"
+  description="Admin permit intelligence dashboard for SF DBI SODA synchronization and contact tracking."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 text-3xl font-bold">House Permits Admin</h1>
+      <p class="text-muted-foreground">
+        Monitor permit updates for 126 Colby, open each permit for full detail, and route contractor activity to the intelligence view.
+      </p>
+    </div>
+
+    <PermitsAdminApp client:only="react" />
+  </main>
+</BaseLayout>
