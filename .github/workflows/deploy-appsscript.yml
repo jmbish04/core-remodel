@@ -28,6 +28,7 @@ jobs:
         run: echo "$CLASP_JSON" > ~/.clasprc.json
         env:
           CLASP_JSON: ${{ secrets.CLASP_JSON }}
+          # cat ~/.clasprc.json | jq . | pbcopy
 
       - name: Push Code to Apps Script
         run: |
