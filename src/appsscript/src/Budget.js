@@ -32,7 +32,7 @@ function syncAndCompileBudget() {
   syncLogsSheet.appendRow(["Timestamp", "Row ID", "Action", "Details"]);
 
   try {
-    var response = UrlFetchApp.fetch(API_BASE_URL + "/pull", {
+    var response = UrlFetchApp.fetch(`${API_BASE_URL}/pull`, {
       method: "get",
       muteHttpExceptions: true,
     });
@@ -173,7 +173,7 @@ function pushCurrentStateToDatabase() {
       muteHttpExceptions: true,
     };
 
-    var response = UrlFetchApp.fetch(API_BASE_URL + "/push", options);
+    var response = UrlFetchApp.fetch(`${API_BASE_URL}/push`, options);
 
     if (response.getResponseCode() === 200) {
       SpreadsheetApp.getUi().alert("Push successful. Database transaction complete.");
