@@ -1,10 +1,12 @@
 name: Deploy Apps Script
 on:
+  workflow_dispatch: # Enables the manual "Run workflow" button in GitHub Actions UI      
   push:
     branches:
       - main
     paths:
       - 'src/appsscript/**'
+  
 jobs:
   deploy:
     runs-on: ubuntu-latest
