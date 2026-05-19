@@ -1,33 +1,35 @@
 name: Deploy Apps Script
+
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
     paths:
-      - 'src/appsscript/**'
+      - 'src/appscript/**' # Triggers only when files in this folder change
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '18'
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
 
-      - name: Install Clasp
-        run: npm install -g @google/clasp
+    - name: Install Clasp
+      run: npm install -g @google/clasp
 
-      - name: Authenticate Clasp
-        run: |
-          echo "$CLASP_TOKEN" > ~/.clasprc.json
-        env:
-          CLASP_TOKEN: ${{ secrets.CLASP_TOKEN }}
+    - name: Authenticate Clasp
+      run: echo "$CLASP_JSON" > ~/.clasprc.json
+      env:
+        CLASP_JSON: ${{ secrets.CLASP_JSON }}
 
-      - name: Push Apps Script
-        run: |
-          cd src/appsscript
-          clasp push
+    - name: Push Code to Apps Script
+      run: |
+        cd src/appscript
+        clasp push --force

@@ -4,32 +4,26 @@
  * reconstructs structural dashboards via Visual Diff parser, and applies conditional formatting.
  */
 
-const API_BASE_URL = "https://core-remodel-api.example.com/api/budget/appsscript"; // Replace with actual domain later
-
-function onOpen() {
-  var ui = SpreadsheetApp.getUi();
-  ui.createMenu("Architect Engine")
-    .addItem("Show Sidebar", "showSidebar")
-    .addItem("Pull & Sync Database", "syncAndCompileBudget")
-    .addItem("Push Current State", "pushCurrentStateToDatabase")
-    .addToUi();
-}
+const API_CONFIG = getApiConfig();
 
 /**
  * Main routine: pulls data and builds dashboard, applying visual delta diffing.
  */
 function syncAndCompileBudget() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
 
   // Tabs to recreate
-  var tabsToRecreate = [
+  const tabsToRecreate = [
     "Overview & Portfolio Matrix",
     "Dimensions & Material Specs",
     "The Baseline (No-Matter-What)",
-    "Scenario A",
+    "Scenario A - Kitchen Downstairs South (Slab Cut)",
+    "Scenario B - Kitchen Downstairs North (U-Shape)",
+    "Scenario C - Kitchen Upstairs (U-Shape)", 
+    "Scenario D - Kitchen Upstairs (In-Kind, L-Shape)"    
   ];
 
-  var syncLogsSheet = ss.getSheetByName("Sync Logs");
+  let syncLogsSheet = ss.getSheetByName("Sync Logs");
 
   if (!syncLogsSheet) {
     syncLogsSheet = ss.insertSheet("Sync Logs");
@@ -38,10 +32,13 @@ function syncAndCompileBudget() {
   }
 
   syncLogsSheet.appendRow(["Timestamp", "Row ID", "Action", "Details"]);
-
+  let response;
+  
   try {
-    var response = UrlFetchApp.fetch(API_BASE_URL + "/pull", {
-      method: "get",
+    response = UrlFetchApp.fetch(`${API_CONFIG.sheetsPullApiUrl}`, {
+      method: "post",
+      contentType: "application/json",
+      payload: JSON.stringify({}),
       muteHttpExceptions: true,
     });
 
@@ -49,18 +46,19 @@ function syncAndCompileBudget() {
       throw new Error("Failed to fetch from /pull: " + response.getContentText());
     }
 
-    var data = JSON.parse(response.getContentText()).data;
+    const parsedResponse = JSON.parse(response.getContentText());
+    const data = parsedResponse.data || parsedResponse.workbook?.tabs?.["Overview & Portfolio Matrix"] || [];
 
     // Process each tab layout identically for this basic implementation as per requirement
     tabsToRecreate.forEach(function (tabName) {
-      var sheet = ss.getSheetByName(tabName) || ss.insertSheet(tabName);
+      const sheet = ss.getSheetByName(tabName) || ss.insertSheet(tabName);
 
       // Store old data for visual diffing
-      var oldDataMap = {};
+      const oldDataMap = {};
       if (sheet.getLastRow() > 1) {
-        var oldValues = sheet.getDataRange().getValues();
-        for (var i = 1; i < oldValues.length; i++) {
-          var rowId = oldValues[i][0];
+        const oldValues = sheet.getDataRange().getValues();
+        for (let i = 1; i < oldValues.length; i++) {
+          const rowId = oldValues[i][0];
           if (rowId) {
             oldDataMap[rowId] = {
               category: oldValues[i][1],
@@ -76,7 +74,7 @@ function syncAndCompileBudget() {
       sheet.clear();
       sheet.appendRow(["ID", "Category", "Item Name", "Description", "Cost Expression", "Status"]);
 
-      var rowIdx = 2;
+      let rowIdx = 2;
       data.forEach(function (record) {
         sheet.appendRow([
           record.id,
@@ -84,12 +82,12 @@ function syncAndCompileBudget() {
           record.itemName,
           record.description,
           record.costExpression,
-          record.isActive ? "Active" : "Inactive",
+          record.isActive !== false ? "Active" : "Inactive",
         ]);
 
-        var range = sheet.getRange(rowIdx, 1, 1, 6);
+        const range = sheet.getRange(rowIdx, 1, 1, 6);
 
-        if (!record.isActive) {
+        if (record.isActive === false) {
           range.setBackground("#ffcccc"); // Red for inactive
           syncLogsSheet.appendRow([
             new Date(),
@@ -98,8 +96,8 @@ function syncAndCompileBudget() {
             "Row flagged as inactive in DB",
           ]);
         } else {
-          var oldRecord = oldDataMap[record.id];
-          var isChanged = false;
+          const oldRecord = oldDataMap[record.id];
+          let isChanged = false;
 
           if (oldRecord) {
             if (oldRecord.costExpression != record.costExpression) {
@@ -139,7 +137,7 @@ function syncAndCompileBudget() {
 
     SpreadsheetApp.getUi().alert("Sync complete. Matrix tabs updated.");
   } catch (error) {
-    SpreadsheetApp.getUi().alert("Error during sync: " + error.message);
+    SpreadsheetApp.getUi().alert(`Error during sync: ${error.toString()}`);
   }
 }
 
@@ -147,23 +145,23 @@ function syncAndCompileBudget() {
  * Pushes spreadsheet cell array matrices to the /push endpoint.
  */
 function pushCurrentStateToDatabase() {
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = ss.getSheetByName("Overview & Portfolio Matrix");
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = ss.getSheetByName("Overview & Portfolio Matrix");
 
   if (!sheet) {
     SpreadsheetApp.getUi().alert("Matrix sheet not found.");
     return;
   }
 
-  var dataRange = sheet.getDataRange();
-  var values = dataRange.getValues();
+  const dataRange = sheet.getDataRange();
+  const values = dataRange.getValues();
 
   if (values.length <= 1) return; // Only headers
 
-  var payload = [];
+  const payload = [];
 
-  for (var i = 1; i < values.length; i++) {
-    var row = values[i];
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
     payload.push({
       id: row[0].toString(),
       category: row[1].toString(),
@@ -173,55 +171,24 @@ function pushCurrentStateToDatabase() {
     });
   }
 
+  let options;
+
   try {
-    var options = {
+    options = {
       method: "post",
       contentType: "application/json",
       payload: JSON.stringify({ data: payload }),
       muteHttpExceptions: true,
     };
 
-    var response = UrlFetchApp.fetch(API_BASE_URL + "/push", options);
+    const response = UrlFetchApp.fetch(`${API_CONFIG.sheetsPushApiUrl}`, options);
 
     if (response.getResponseCode() === 200) {
-      SpreadsheetApp.getUi().alert("Push successful. Database transaction complete.");
+      SpreadsheetApp.getUi().alert(`Push successful! 🎉 Database transaction complete.`);
     } else {
-      SpreadsheetApp.getUi().alert("Push failed: " + response.getContentText());
+      SpreadsheetApp.getUi().alert(`Push failed 😒 ${response.getContentText()}`);
     }
   } catch (err) {
-    SpreadsheetApp.getUi().alert("Connection Error: " + err.message);
-  }
-}
-
-function showSidebar() {
-  var html = HtmlService.createHtmlOutputFromFile("Sidebar")
-    .setTitle("Renovation Core Agent")
-    .setWidth(350);
-  SpreadsheetApp.getUi().showSidebar(html);
-}
-
-/**
- * Used by Sidebar to execute modifications directed by the Edge Agent via WebSocket
- */
-function executeAgentCommand(commandJson) {
-  try {
-    var cmd = JSON.parse(commandJson);
-    if (cmd.action === "UPDATE_CELL") {
-      // Locate ID and update costExpression
-      var ss = SpreadsheetApp.getActiveSpreadsheet();
-      var sheet = ss.getSheetByName("Overview & Portfolio Matrix");
-      var data = sheet.getDataRange().getValues();
-
-      for (var i = 1; i < data.length; i++) {
-        if (data[i][0] === cmd.params.id) {
-          sheet.getRange(i + 1, 5).setValue(cmd.params.costExpression); // Col 5 is Cost Expression
-          return JSON.stringify({ success: true, updatedRow: i + 1 });
-        }
-      }
-      return JSON.stringify({ success: false, reason: "ID not found" });
-    }
-    return JSON.stringify({ success: false, reason: "Unknown command" });
-  } catch (err) {
-    return JSON.stringify({ success: false, error: err.message });
+    SpreadsheetApp.getUi().alert(`Connection Error: 😤 ${err.toString()}`);
   }
 }
