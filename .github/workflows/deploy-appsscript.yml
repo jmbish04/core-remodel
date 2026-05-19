@@ -8,33 +8,28 @@ on:
     paths:
       - 'src/appscript/**' # Triggers only when files in this folder change
 
-
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
 
-      - name: Install Clasp
-        run: npm install -g @google/clasp
+    - name: Install Clasp
+      run: npm install -g @google/clasp
 
-      - name: Authenticate Clasp
-        run: echo "$CLASP_JSON" > ~/.clasprc.json
-        env:
-          CLASP_JSON: ${{ secrets.CLASP_JSON }}
-          # cat ~/.clasprc.json | jq . | pbcopy
+    - name: Authenticate Clasp
+      run: echo "$CLASP_JSON" > ~/.clasprc.json
+      env:
+        CLASP_JSON: ${{ secrets.CLASP_JSON }}
 
-      - name: Push Code to Apps Script
-        run: |
-          # If your .clasp.json is inside src/appsscript, keep the next line.
-          # If you used the rootDir fix in step 1, remove the "cd" line entirely.
-          cd src/appsscript
-          clasp push --force
+    - name: Push Code to Apps Script
+      run: |
+        cd src/appscript
+        clasp push --force
