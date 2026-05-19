@@ -34,8 +34,9 @@ function getApiConfig() {
 function showSidebar() {
   const template = HtmlService.createTemplateFromFile('Sidebar');
   const apiConfig = getApiConfig();
-  template.chatApiUrl = apiConfig.chatApiUrl;
-  template.chatStreamApiUrl = apiConfig.chatStreamApiUrl;
+  
+  // Convert the configuration object into a JSON string
+  template.apiConfigJson = JSON.stringify(apiConfig);
 
   const html = template
     .evaluate()
