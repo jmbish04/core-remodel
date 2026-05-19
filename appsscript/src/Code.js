@@ -9,6 +9,7 @@ function onOpen() {
     .createMenu('Architect Engine')
     .addItem('Open A2UI Renovation Agent', 'showSidebar')
     .addItem('Export Selected Tab as JSON', 'exportActiveTabAsJson')
+    .addItem('Export All Tabs as JSON', 'exportAllTabsAsJson')
     .addToUi();
 }
 
