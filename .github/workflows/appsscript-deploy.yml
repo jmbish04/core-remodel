@@ -2,11 +2,11 @@ name: Deploy Apps Script
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - 'src/appsscript/**'
+  # push:
+  #   branches:
+  #     - main
+  #   paths:
+  #     - 'src/appsscript/**'
 
 jobs:
   deploy:
