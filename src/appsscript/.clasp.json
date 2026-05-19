@@ -1,6 +1,6 @@
 {
   "scriptId": "1sbGgwBTk-0F3FmDFCX8CGKnRu9CgdMve2kkyUrM5P8t09qpEpqcmSVXg",
-  "rootDir": "./src/appsscript",
+  "rootDir": "src/appscript",
   "filePushOrder": [
     "Code.js",
     "Agent.js",
