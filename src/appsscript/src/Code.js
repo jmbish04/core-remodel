@@ -1,49 +1,96 @@
+/**
+ * The Monolith: Sheet Agent Engine with Native Function Calling
+ * Runtime: Google Apps Script
+ */
 
-const API_BASE_URL = "https://core-remodel.hacolby.workers.dev/api/sync/google-sheets"; // Replace with actual domain later
-
+// Initialize Custom Menu
 function onOpen() {
-  var ui = SpreadsheetApp.getUi();
-  ui.createMenu("Architect Engine")
-    .addItem("Show Sidebar", "showSidebar")
-    .addItem("Pull & Sync Database", "syncAndCompileBudget")
-    .addItem("Push Current State", "pushCurrentStateToDatabase")
+  SpreadsheetApp.getUi()
+    .createMenu('Architect Engine')
+    .addItem('Open A2UI Renovation Agent', 'showSidebar')
     .addItem('Export Selected Tab as JSON', 'exportActiveTabAsJson')
     .addToUi();
 }
 
+// Get Api config
+function getApiConfig() {
+  const scriptProperties = PropertiesService.getScriptProperties();
+  const API_URL_BASE_WORKER = scriptProperties.getProperty('API_URL_BASE_WORKER');
+  
+  return {
+    baseApiUrl: API_URL_BASE_WORKER,
+    chatApiUrl: `${API_URL_BASE_WORKER}/api/ai/chat`,
+    chatStreamApiUrl: `${API_URL_BASE_WORKER}/api/ai/chat/stream`,
+  };
+}
 
+
+// Inject and Display Sidebar Canvas
 function showSidebar() {
-  var html = HtmlService.createHtmlOutputFromFile("Sidebar")
-    .setTitle("Renovation Agent")
-    .setWidth(550);
+  const template = HtmlService.createTemplateFromFile('Sidebar');
+  const apiConfig = getApiConfig();
+  template.chatApiUrl = apiConfig.chatApiUrl;
+  template.chatStreamApiUrl = apiConfig.chatStreamApiUrl;
+
+  const html = template
+    .evaluate()
+    .setTitle('A2UI Renovation Agent')
+    .setWidth(400);
   SpreadsheetApp.getUi().showSidebar(html);
 }
 
-/**
- * Used by Sidebar to execute modifications directed by the Edge Agent via WebSocket
- */
-function executeAgentCommand(commandJson) {
-  try {
-    var cmd = JSON.parse(commandJson);
-    if (cmd.action === "UPDATE_CELL") {
-      // Locate ID and update costExpression
-      var ss = SpreadsheetApp.getActiveSpreadsheet();
-      var sheet = ss.getSheetByName("Overview & Portfolio Matrix");
-      var data = sheet.getDataRange().getValues();
 
-      for (var i = 1; i < data.length; i++) {
-        if (data[i][0] === cmd.params.id) {
-          sheet.getRange(i + 1, 5).setValue(cmd.params.costExpression); // Col 5 is Cost Expression
-          return JSON.stringify({ success: true, updatedRow: i + 1 });
-        }
-      }
-      return JSON.stringify({ success: false, reason: "ID not found" });
-    }
-    return JSON.stringify({ success: false, reason: "Unknown command" });
-  } catch (err) {
-    return JSON.stringify({ success: false, error: err.message });
+// Export current sheet as JSON
+function exportActiveTabAsJson() {
+  const ui = SpreadsheetApp.getUi();
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = spreadsheet.getActiveSheet();
+
+  if (!sheet) {
+    ui.alert('No active sheet selected.');
+    return;
   }
+
+  const values = sheet.getDataRange().getValues();
+  const headers = values.length > 0 ? values[0] : [];
+  const bodyRows = values.length > 1 ? values.slice(1) : [];
+
+  const rows = bodyRows.map(function(row) {
+    const record = {};
+    for (let i = 0; i < headers.length; i += 1) {
+      const key = headers[i] !== '' ? String(headers[i]) : 'column_' + (i + 1);
+      record[key] = row[i];
+    }
+    return record;
+  });
+
+  const payload = {
+    spreadsheetId: spreadsheet.getId(),
+    spreadsheetName: spreadsheet.getName(),
+    sheetName: sheet.getName(),
+    exportedAt: new Date().toISOString(),
+    headerColumns: headers,
+    rowCount: rows.length,
+    rows: rows
+  };
+
+  const safeSheetName = sheet.getName().replace(/[^a-z0-9-_]+/gi, '_');
+  const timestamp = Utilities.formatDate(
+    new Date(),
+    'America/Los_Angeles',
+    'yyyyMMdd_HHmmss'
+  );
+  const fileName = safeSheetName + '_export_' + timestamp + '.json';
+  const json = JSON.stringify(payload, null, 2);
+  const file = DriveApp.createFile(fileName, json, MimeType.PLAIN_TEXT);
+
+  ui.alert(
+    'JSON export complete',
+    `Created file: ${file.getName()} 
+    
+    Download here:
+    ${file.getDownloadUrl()}
+    `,
+    ui.ButtonSet.OK
+  );
 }
-
-
-
