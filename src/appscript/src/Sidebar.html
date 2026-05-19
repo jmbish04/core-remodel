@@ -250,22 +250,15 @@
     </div>
 
     <script>
+      // Force evaluation of the raw JSON string or fallback to standard defaults if empty
+      var SERVER_CONFIG = <?!= apiConfigJson || '{}' ?>;
+
       var APP_CONFIG = {
-        chatApiUrl: (function() {
-          var templated = "<?= chatApiUrl ?>";
-          if (!templated || templated.indexOf("<?") === 0) {
-            return "https://core-remodel.hacolby.workers.dev/api/ai/chat";
-          }
-          return templated;
-        })(),
-        chatStreamApiUrl: (function() {
-          var templated = "<?= chatStreamApiUrl ?>";
-          if (!templated || templated.indexOf("<?") === 0) {
-            return "https://core-remodel.hacolby.workers.dev/api/ai/chat/stream";
-          }
-          return templated;
-        })(),
+        chatApiUrl: SERVER_CONFIG.chatApiUrl || "https://core-remodel.hacolby.workers.dev/api/ai/chat",
+        chatStreamApiUrl: SERVER_CONFIG.chatStreamApiUrl || "https://core-remodel.hacolby.workers.dev/api/ai/chat/stream"
       };
+
+      console.log("Loaded API Configuration:", APP_CONFIG);      
 
       var conversationHistory = [];
       var appState = { surfaces: {}, activeSurfaceId: null };
