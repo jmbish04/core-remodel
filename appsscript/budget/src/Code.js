@@ -12,44 +12,59 @@ function onOpen() {
     .addToUi();
 }
 
+// Get Api config
+function getApiConfig() {
+  const scriptProperties = PropertiesService.getScriptProperties();
+  const API_URL_BASE_WORKER = scriptProperties.getProperty('API_URL_BASE_WORKER');
+  
+  return {
+    baseApiUrl: API_URL_BASE_WORKER,
+    chatApiUrl: `${API_URL_BASE_WORKER}/api/ai/chat`,
+    chatStreamApiUrl: `${API_URL_BASE_WORKER}/api/ai/chat/stream`,
+  };
+}
+
+
 // Inject and Display Sidebar Canvas
 function showSidebar() {
-  var template = HtmlService.createTemplateFromFile('Sidebar');
-  var apiConfig = getApiConfig();
+  const template = HtmlService.createTemplateFromFile('Sidebar');
+  const apiConfig = getApiConfig();
   template.chatApiUrl = apiConfig.chatApiUrl;
   template.chatStreamApiUrl = apiConfig.chatStreamApiUrl;
 
-  var html = template
+  const html = template
     .evaluate()
     .setTitle('A2UI Renovation Agent')
     .setWidth(400);
   SpreadsheetApp.getUi().showSidebar(html);
 }
 
+
+// Export current sheet as JSON
 function exportActiveTabAsJson() {
-  var ui = SpreadsheetApp.getUi();
-  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = spreadsheet.getActiveSheet();
+  const ui = SpreadsheetApp.getUi();
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = spreadsheet.getActiveSheet();
 
   if (!sheet) {
     ui.alert('No active sheet selected.');
     return;
   }
 
-  var values = sheet.getDataRange().getValues();
-  var headers = values.length > 0 ? values[0] : [];
-  var bodyRows = values.length > 1 ? values.slice(1) : [];
+  const values = sheet.getDataRange().getValues();
+  const headers = values.length > 0 ? values[0] : [];
+  const bodyRows = values.length > 1 ? values.slice(1) : [];
 
-  var rows = bodyRows.map(function(row) {
-    var record = {};
-    for (var i = 0; i < headers.length; i += 1) {
-      var key = headers[i] !== '' ? String(headers[i]) : 'column_' + (i + 1);
+  const rows = bodyRows.map(function(row) {
+    const record = {};
+    for (let i = 0; i < headers.length; i += 1) {
+      const key = headers[i] !== '' ? String(headers[i]) : 'column_' + (i + 1);
       record[key] = row[i];
     }
     return record;
   });
 
-  var payload = {
+  const payload = {
     spreadsheetId: spreadsheet.getId(),
     spreadsheetName: spreadsheet.getName(),
     sheetName: sheet.getName(),
@@ -59,19 +74,23 @@ function exportActiveTabAsJson() {
     rows: rows
   };
 
-  var safeSheetName = sheet.getName().replace(/[^a-z0-9-_]+/gi, '_');
-  var timestamp = Utilities.formatDate(
+  const safeSheetName = sheet.getName().replace(/[^a-z0-9-_]+/gi, '_');
+  const timestamp = Utilities.formatDate(
     new Date(),
-    Session.getScriptTimeZone(),
+    'America/Los_Angeles',
     'yyyyMMdd_HHmmss'
   );
-  var fileName = safeSheetName + '_export_' + timestamp + '.json';
-  var json = JSON.stringify(payload, null, 2);
-  var file = DriveApp.createFile(fileName, json, MimeType.PLAIN_TEXT);
+  const fileName = safeSheetName + '_export_' + timestamp + '.json';
+  const json = JSON.stringify(payload, null, 2);
+  const file = DriveApp.createFile(fileName, json, MimeType.PLAIN_TEXT);
 
   ui.alert(
     'JSON export complete',
-    'Created file: ' + file.getName() + '\n' + file.getUrl(),
+    `Created file: ${file.getName()} 
+    
+    Download here:
+    ${file.getDownloadUrl()}
+    `,
     ui.ButtonSet.OK
   );
 }
