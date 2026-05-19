@@ -244,7 +244,15 @@
 
     <div id="input-area">
       <div id="input-area-inner">
-        <input id="user-input" type="text" placeholder="Ask the renovation agent..." />
+        <!-- Add autocomplete="off" or autocomplete="one-time-code" to completely kill the popup -->
+        <input 
+          id="user-input"           
+          type="text" 
+          placeholder="Ask the renovation agent..." 
+          autocomplete="one-time-code"
+          autocorrect="off" 
+          spellcheck="false"
+        />
         <button id="send-btn" onclick="handleSend()">Send</button>
       </div>
     </div>
