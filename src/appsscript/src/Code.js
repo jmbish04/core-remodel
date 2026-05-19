@@ -16,7 +16,7 @@ function onOpen() {
 function getApiConfig() {
   const scriptProperties = PropertiesService.getScriptProperties();
   const API_URL_BASE_WORKER = scriptProperties.getProperty('API_URL_BASE_WORKER');
-  https://core-remodel.hacolby.workers.dev/api/sync/google-sheets/pull
+  
   return {
     baseApiUrl: API_URL_BASE_WORKER,
     sheetsPushApiUrl: `${API_URL_BASE_WORKER}/api/sync/google-sheets/push`,
