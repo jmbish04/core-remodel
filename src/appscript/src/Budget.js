@@ -18,12 +18,12 @@ function syncAndCompileBudget() {
     "Dimensions & Material Specs",
     "The Baseline (No-Matter-What)",
     "Scenario A - Kitchen Downstairs South (Slab Cut)",
-    "Scenario B - Kitchen Downstairs North (U-Shape",
+    "Scenario B - Kitchen Downstairs North (U-Shape)",
     "Scenario C - Kitchen Upstairs (U-Shape)", 
     "Scenario D - Kitchen Upstairs (In-Kind, L-Shape)"    
   ];
 
-  const syncLogsSheet = ss.getSheetByName("Sync Logs");
+  let syncLogsSheet = ss.getSheetByName("Sync Logs");
 
   if (!syncLogsSheet) {
     syncLogsSheet = ss.insertSheet("Sync Logs");
@@ -36,7 +36,9 @@ function syncAndCompileBudget() {
   
   try {
     response = UrlFetchApp.fetch(`${API_CONFIG.sheetsPullApiUrl}`, {
-      method: "get",
+      method: "post",
+      contentType: "application/json",
+      payload: JSON.stringify({}),
       muteHttpExceptions: true,
     });
 
@@ -44,7 +46,8 @@ function syncAndCompileBudget() {
       throw new Error("Failed to fetch from /pull: " + response.getContentText());
     }
 
-    const data = JSON.parse(response.getContentText()).data;
+    const parsedResponse = JSON.parse(response.getContentText());
+    const data = parsedResponse.data || parsedResponse.workbook?.tabs?.["Overview & Portfolio Matrix"] || [];
 
     // Process each tab layout identically for this basic implementation as per requirement
     tabsToRecreate.forEach(function (tabName) {
@@ -54,7 +57,7 @@ function syncAndCompileBudget() {
       const oldDataMap = {};
       if (sheet.getLastRow() > 1) {
         const oldValues = sheet.getDataRange().getValues();
-        for (const i = 1; i < oldValues.length; i++) {
+        for (let i = 1; i < oldValues.length; i++) {
           const rowId = oldValues[i][0];
           if (rowId) {
             oldDataMap[rowId] = {
@@ -79,12 +82,12 @@ function syncAndCompileBudget() {
           record.itemName,
           record.description,
           record.costExpression,
-          record.isActive ? "Active" : "Inactive",
+          record.isActive !== false ? "Active" : "Inactive",
         ]);
 
         const range = sheet.getRange(rowIdx, 1, 1, 6);
 
-        if (!record.isActive) {
+        if (record.isActive === false) {
           range.setBackground("#ffcccc"); // Red for inactive
           syncLogsSheet.appendRow([
             new Date(),
@@ -94,7 +97,7 @@ function syncAndCompileBudget() {
           ]);
         } else {
           const oldRecord = oldDataMap[record.id];
-          const isChanged = false;
+          let isChanged = false;
 
           if (oldRecord) {
             if (oldRecord.costExpression != record.costExpression) {
