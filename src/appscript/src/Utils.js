@@ -25,9 +25,6 @@ function deleteSheetsByMatchingNames_(ss, sheetsToClear) {
   return true;
 }
 
-
-
-
 /**
  * Helper function to map a JSON array to a 2D sheet range.
  * * @param {SpreadsheetApp.Spreadsheet} spreadsheet - The active spreadsheet object
@@ -81,30 +78,31 @@ function writeToSheet(spreadsheet, sheetName, dataArray) {
   sheet.autoResizeColumns(1, headers.length);
 }
 
+// Export current sheet as JSON
 function exportActiveTabAsJson() {
-  var ui = SpreadsheetApp.getUi();
-  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
-  var sheet = spreadsheet.getActiveSheet();
+  const ui = SpreadsheetApp.getUi();
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet = spreadsheet.getActiveSheet();
 
   if (!sheet) {
     ui.alert('No active sheet selected.');
     return;
   }
 
-  var values = sheet.getDataRange().getValues();
-  var headers = values.length > 0 ? values[0] : [];
-  var bodyRows = values.length > 1 ? values.slice(1) : [];
+  const values = sheet.getDataRange().getValues();
+  const headers = values.length > 0 ? values[0] : [];
+  const bodyRows = values.length > 1 ? values.slice(1) : [];
 
-  var rows = bodyRows.map(function(row) {
-    var record = {};
-    for (var i = 0; i < headers.length; i += 1) {
-      var key = headers[i] !== '' ? String(headers[i]) : 'column_' + (i + 1);
+  const rows = bodyRows.map(function(row) {
+    const record = {};
+    for (let i = 0; i < headers.length; i += 1) {
+      const key = headers[i] !== '' ? String(headers[i]) : 'column_' + (i + 1);
       record[key] = row[i];
     }
     return record;
   });
 
-  var payload = {
+  const payload = {
     spreadsheetId: spreadsheet.getId(),
     spreadsheetName: spreadsheet.getName(),
     sheetName: sheet.getName(),
@@ -114,19 +112,77 @@ function exportActiveTabAsJson() {
     rows: rows
   };
 
-  var safeSheetName = sheet.getName().replace(/[^a-z0-9-_]+/gi, '_');
-  var timestamp = Utilities.formatDate(
+  const safeSheetName = sheet.getName().replace(/[^a-z0-9-_]+/gi, '_');
+  const timestamp = Utilities.formatDate(
     new Date(),
-    Session.getScriptTimeZone(),
+    'America/Los_Angeles',
     'yyyyMMdd_HHmmss'
   );
-  var fileName = safeSheetName + '_export_' + timestamp + '.json';
-  var json = JSON.stringify(payload, null, 2);
-  var file = DriveApp.createFile(fileName, json, MimeType.PLAIN_TEXT);
+  const fileName = safeSheetName + '_export_' + timestamp + '.json';
+  const json = JSON.stringify(payload, null, 2);
+  const file = DriveApp.createFile(fileName, json, MimeType.PLAIN_TEXT);
 
   ui.alert(
     'JSON export complete',
-    `Created file:  ${file.getName()} \n ${file.getDownloadUrl()}`,
+    `Created file: ${file.getName()}\n\nDownload here:\n${file.getDownloadUrl()}`,
+    ui.ButtonSet.OK
+  );
+}
+
+// Export all sheets as JSON
+function exportAllTabsAsJson() {
+  const ui = SpreadsheetApp.getUi();
+  const spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const sheets = spreadsheet.getSheets();
+
+  if (!sheets || sheets.length === 0) {
+    ui.alert('No sheets found in this spreadsheet.');
+    return;
+  }
+
+  const allSheetsData = sheets.map(function(sheet) {
+    const values = sheet.getDataRange().getValues();
+    const headers = values.length > 0 ? values[0] : [];
+    const bodyRows = values.length > 1 ? values.slice(1) : [];
+
+    const rows = bodyRows.map(function(row) {
+      const record = {};
+      for (let i = 0; i < headers.length; i += 1) {
+        const key = headers[i] !== '' ? String(headers[i]) : 'column_' + (i + 1);
+        record[key] = row[i];
+      }
+      return record;
+    });
+
+    return {
+      sheetName: sheet.getName(),
+      headerColumns: headers,
+      rowCount: rows.length,
+      rows: rows
+    };
+  });
+
+  const payload = {
+    spreadsheetId: spreadsheet.getId(),
+    spreadsheetName: spreadsheet.getName(),
+    exportedAt: new Date().toISOString(),
+    totalSheets: sheets.length,
+    sheets: allSheetsData
+  };
+
+  const safeSpreadsheetName = spreadsheet.getName().replace(/[^a-z0-9-_]+/gi, '_');
+  const timestamp = Utilities.formatDate(
+    new Date(),
+    'America/Los_Angeles',
+    'yyyyMMdd_HHmmss'
+  );
+  const fileName = safeSpreadsheetName + '_all_tabs_export_' + timestamp + '.json';
+  const json = JSON.stringify(payload, null, 2);
+  const file = DriveApp.createFile(fileName, json, MimeType.PLAIN_TEXT);
+
+  ui.alert(
+    'Full JSON export complete',
+    `Created file: ${file.getName()}\n\nDownload here:\n${file.getDownloadUrl()}`,
     ui.ButtonSet.OK
   );
 }
