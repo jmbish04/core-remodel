@@ -6,7 +6,9 @@ on:
     branches:
       - main
     paths:
-      - 'src/appsscript/**'
+      - 'src/appscript/**' # Triggers only when files in this folder change
+
+
 
 jobs:
   deploy:
