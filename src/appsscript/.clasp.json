@@ -3,9 +3,10 @@
   "rootDir": "src/appsscript",
   "filePushOrder": [
     "Code.js",
+    "Agent.js",
     "Utils.js",
     "Budget.js",
     "Sidebar.html",
-    "cicd.js"
+    "CICD.js"
   ]  
 }
