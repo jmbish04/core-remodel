@@ -84,7 +84,7 @@ export async function dispatchDueWorkflows(env: Env): Promise<void> {
       continue;
     }
 
-    const workflowInstanceId = `${schedule.jobKey}-cron-${now.getTime()}`;
+    const workflowInstanceId = `${schedule.jobKey}-cron-${now.getTime()}-${crypto.randomUUID().slice(0, 8)}`;
     let nextRunAt: Date | null = null;
 
     try {
