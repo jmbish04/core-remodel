@@ -1,0 +1,67 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { drizzle } from "drizzle-orm/d1";
+import { asc } from "drizzle-orm";
+import { checklistSections } from "@backend/db";
+
+const { env } = Astro.locals.runtime;
+const db = drizzle(env.DB);
+const sections = await db
+  .select()
+  .from(checklistSections)
+  .orderBy(asc(checklistSections.sortOrder))
+  .all();
+---
+
+<BaseLayout
+  title="Questionnaire — 126 Colby Remodel Mission Control"
+  description="Room-aware construction questionnaire with AI-suggested mappings and contractor-discount ledger."
+>
+  <main class="container mx-auto px-4 py-8">
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold tracking-tight">Questionnaire</h1>
+      <p class="mt-2 text-sm text-muted-foreground">
+        Pick a section to capture room-by-room build decisions. Commits cascade into the budget tracker as shadow items.
+      </p>
+    </div>
+
+    {sections.length === 0 ? (
+      <div class="rounded-xl bg-card/20 p-8 text-center ring-1 ring-border/30">
+        <p class="font-mono text-xs uppercase tracking-widest text-muted-foreground">
+          No questionnaire sections have been seeded yet.
+        </p>
+      </div>
+    ) : (
+      <ul class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {sections.map((section) => (
+          <li>
+            <a
+              href={`/questionnaire/${section.slug}`}
+              class="block rounded-xl bg-card/20 p-5 ring-1 ring-border/30 transition-all hover:ring-border/60"
+            >
+              <p class="font-mono text-[10px] uppercase tracking-widest text-muted-foreground/60">
+                {section.slug}
+              </p>
+              <h2 class="mt-1 text-base font-semibold text-foreground">{section.name}</h2>
+              {section.description && (
+                <p class="mt-2 text-xs font-light text-muted-foreground">{section.description}</p>
+              )}
+              {section.helperText && (
+                <p class="mt-3 text-[11px] italic text-muted-foreground/80">{section.helperText}</p>
+              )}
+            </a>
+          </li>
+        ))}
+      </ul>
+    )}
+
+    <div class="mt-8 border-t border-border/10 pt-4">
+      <a
+        href="/questionnaire/print"
+        class="text-xs font-semibold uppercase tracking-wider text-primary hover:underline"
+      >
+        Open print-ready specification ledger →
+      </a>
+    </div>
+  </main>
+</BaseLayout>

@@ -1,0 +1,83 @@
+---
+import { ChecklistPrintView } from "@/components/ChecklistPrintView";
+import {
+  checklistAnswers,
+  checklistQuestions,
+  checklistSections,
+} from "@backend/db";
+import { and, asc, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+
+/**
+ * Print-only route. Uses a minimal HTML shell (no BaseLayout, no sidebar) so the
+ * page prints cleanly on letter paper. `@media print` rules inside the React
+ * component hide any chrome that does slip through.
+ */
+
+const { env } = Astro.locals.runtime;
+const db = drizzle(env.DB);
+
+const sections = await db
+  .select()
+  .from(checklistSections)
+  .orderBy(asc(checklistSections.sortOrder))
+  .all();
+const sectionsById = new Map(sections.map((section) => [section.id, section]));
+
+const questions = await db
+  .select()
+  .from(checklistQuestions)
+  .orderBy(asc(checklistQuestions.sectionId), asc(checklistQuestions.sortOrder))
+  .all();
+const questionsById = new Map(questions.map((question) => [question.id, question]));
+
+const verifiedAnswers = await db
+  .select()
+  .from(checklistAnswers)
+  .where(and(eq(checklistAnswers.isActive, true), eq(checklistAnswers.isDraft, false), eq(checklistAnswers.isChecked, true)))
+  .all();
+
+const completedItems = verifiedAnswers
+  .map((answer) => {
+    const question = questionsById.get(answer.questionId);
+    if (!question) return null;
+    const section = sectionsById.get(question.sectionId);
+    return {
+      code: question.code,
+      text: question.questionText,
+      notes: answer.notes,
+      sectionName: section?.name ?? "Uncategorized",
+    };
+  })
+  .filter((item): item is NonNullable<typeof item> => item !== null)
+  .sort((a, b) => {
+    const sectionCompare = a.sectionName.localeCompare(b.sectionName);
+    if (sectionCompare !== 0) return sectionCompare;
+    return a.code.localeCompare(b.code);
+  });
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Specification Ledger — 126 Colby Remodel</title>
+    <link rel="stylesheet" href="/src/frontend/styles/global.css" />
+    <style>
+      body {
+        margin: 0;
+        background: #ffffff;
+        color: #000000;
+      }
+      @media print {
+        body {
+          background: #ffffff !important;
+        }
+      }
+    </style>
+  </head>
+  <body class="bg-white text-black">
+    <ChecklistPrintView client:load completedItems={completedItems} />
+  </body>
+</html>

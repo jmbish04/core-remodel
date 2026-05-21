@@ -47,3 +47,7 @@ export * from "./images/image_edit_sessions";
 export * from "./images/image_edit_revisions";
 export * from "./images/image_upload_staging";
 export * from "./images/review_intelligence";
+
+export * from "./home/questionnaire";
+
+export * from "./admin/workflow_schedules";

@@ -48,11 +48,17 @@
 			"name": "image-processing-workflow",
 			"binding": "IMAGE_PROCESSING_WORKFLOW",
 			"class_name": "ImageProcessingWorkflow"
+		},
+		{
+			"name": "checklist-rationale-workflow",
+			"binding": "CHECKLIST_RATIONALE_WORKFLOW",
+			"class_name": "ChecklistRationaleWorkflow"
 		}
 	],
 	"triggers": {
 		"crons": [
-			"0 14 * * *"
+			"0 14 * * *",
+			"* * * * *"
 		]
 	},
 	"kv_namespaces": [
@@ -164,6 +170,10 @@
 			{
 				"name": "ESTIMATE_COLLAB",
 				"class_name": "EstimateCollabHub"
+			},
+			{
+				"name": "A2A_V2",
+				"class_name": "GAS_A2A"
 			}
 		]
 	},
@@ -178,6 +188,21 @@
 			"tag": "v2",
 			"new_sqlite_classes": [
 				"EstimateCollabHub"
+			]
+		},
+		{
+			"tag": "v3",
+			"new_sqlite_classes": [
+				"MyA2AV2"
+			]
+		},
+		{
+			"tag": "v4",
+			"renamed_classes": [
+				{
+					"from": "MyA2AV2",
+					"to": "GAS_A2A"
+				}
 			]
 		}
 	]

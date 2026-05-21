@@ -302,20 +302,25 @@ const homeownersPages: DocsPageDefinition[] = [
     title: "Homeowner Questionnaire and AI Guidance",
     audience: "homeowners",
     audienceLabel: "For Homeowners",
-    status: "planned",
-    summary: "Planned guidance for the upcoming room questionnaire that surfaces build questions before they become costly misses.",
+    status: "live",
+    summary: "Live room-aware questionnaire that surfaces build questions before they become costly misses, with AI-suggested room mappings the homeowner controls.",
     overview:
-      "This guide documents the intended questionnaire workflow for the product. It is included now so the documentation suite explains the coming collaboration model even before the standalone questionnaire page is fully shipped.",
+      "The standalone questionnaire is shipped at /questionnaire. Each section is parametric — adding new sections or questions in the database hydrates the UI automatically — and every committed answer can cascade into the budget tracker as a shadow item with cents-enforced estimates.",
     highlights: [
-      "The questionnaire is meant to be room-aware, not a giant one-time form.",
-      "Answers should help contractors catch hidden scope, wiring, blocking, and finish implications.",
-      "AI is expected to flag relevant questions as the homeowner adds room context and photos.",
+      "The questionnaire is room-aware, not a giant one-time form.",
+      "Answers help contractors catch hidden scope, wiring, blocking, and finish implications.",
+      "AI flags relevant question-to-room associations and the homeowner has final say via confirm or disassociate actions.",
     ],
     actions: [
       {
+        href: "/questionnaire",
+        label: "Open the questionnaire",
+        description: "Pick a section and start capturing room-by-room build decisions.",
+      },
+      {
         href: "/docs/shared/collaboration-loop",
-        label: "Read Collaboration Loop",
-        description: "See how questionnaire answers are meant to feed contractor review and pricing.",
+        label: "Read the Collaboration Loop",
+        description: "See how questionnaire answers feed contractor review and pricing.",
       },
     ],
     sections: [
@@ -325,45 +330,40 @@ const homeownersPages: DocsPageDefinition[] = [
         summary: "The goal is to prevent expensive omissions before construction begins.",
         paragraphs: [
           "Many remodel decisions are not obvious from photos alone. A homeowner may want a television wall, under-cabinet lighting, extra blocking, future speakers, or a niche that affects framing and electrical work even if they do not know how to ask for it.",
-          "The questionnaire is intended to bring those build-sensitive questions into the process early enough that contractors can account for them in scope and pricing.",
+          "The questionnaire brings those build-sensitive questions into the process early enough that contractors can account for them in scope and pricing.",
         ],
         bullets: [
           "Expect yes or no prompts that reveal hidden construction needs.",
           "Tie answers to rooms whenever possible.",
           "Use the answers to sharpen estimates, not to replace contractor judgment.",
         ],
-        note: {
-          title: "Planned workflow",
-          body: "This documentation reflects the intended standalone questionnaire page and room-linked answer flow. The product direction is documented here even if the final interface is still being built.",
-          tone: "planned",
-        },
       },
       {
         id: "room-context",
         title: "Answer questions in room context",
-        summary: "Questions should appear where the homeowner is already thinking about that room.",
+        summary: "Questions appear where the homeowner is already thinking about that room.",
         paragraphs: [
-          "A bathroom, bedroom, kitchen, and media wall do not need the same prompts. The questionnaire is meant to feel lighter because answers can be provided while the homeowner is already reviewing photos, budget, and notes for a room.",
+          "A bathroom, bedroom, kitchen, and media wall do not need the same prompts. The questionnaire feels lighter because answers can be provided while the homeowner is already reviewing photos, budget, and notes for a room.",
           "That makes the process less overwhelming than forcing the user through one giant intake checklist before the rest of the app becomes useful.",
         ],
         bullets: [
           "Associate each answer with one or more rooms.",
-          "Allow a homeowner to answer incrementally as decisions become clearer.",
-          "Show the answers later in the contractor's room review context.",
+          "Answer incrementally as decisions become clearer.",
+          "The contractor sees the resulting answers inside the room context they are pricing.",
         ],
       },
       {
         id: "ai-flagging",
-        title: "Use AI to surface the right prompts at the right time",
-        summary: "Question relevance should come from the room data the homeowner is already entering.",
+        title: "AI surfaces the right prompts at the right time",
+        summary: "Question relevance is derived from the room data the homeowner is already entering.",
         paragraphs: [
-          "The intended AI behavior is to watch the room brief, visual references, and uploaded materials, then flag questionnaire prompts that appear relevant. A media-wall reference might trigger blocking and power questions. A shower layout might trigger waterproofing, niche, or fixture questions.",
-          "That keeps the user moving through the remodel room by room while still capturing the construction decisions a contractor needs to quote responsibly.",
+          "The rationale workflow watches the room brief, visual references, and uploaded materials, then proposes question-to-room mappings. A media-wall reference triggers blocking and power questions. A shower layout triggers waterproofing, niche, or fixture questions.",
+          "Every AI suggestion is reviewable: confirming locks it as user_confirmed, dismissing it flips it to user_disassociated, and the workflow respects both states forever on subsequent runs.",
         ],
         bullets: [
-          "AI should propose relevant prompts, not interrupt every workflow.",
-          "Triggered questions should still be reviewable and editable by the homeowner.",
-          "Contractors should see the resulting answers inside the room context they are pricing.",
+          "AI proposes mappings; it never overrides homeowner decisions.",
+          "Triggered questions remain reviewable and editable by the homeowner.",
+          "Contractors see the resulting answers inside the room context they are pricing.",
         ],
       },
     ],
@@ -700,7 +700,7 @@ const sharedPages: DocsPageDefinition[] = [
     highlights: [
       "The app is meant to support repeated homeowner-contractor revision cycles.",
       "Multiple contractors should be able to review the same core brief for fairer estimate comparison.",
-      "Planned questionnaire guidance is meant to surface missing build questions while the room brief evolves.",
+      "The room-aware questionnaire surfaces missing build questions while the room brief evolves.",
     ],
     actions: [
       {
