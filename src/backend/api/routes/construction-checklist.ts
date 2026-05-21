@@ -218,45 +218,58 @@ constructionChecklistRouter.post(
     const answer = inserted[0];
 
     // ----- Cents-enforced budget side-effect -----
-    // Fires only on the first committed (non-draft, checked) transition.
+    // Fires only on the first committed (non-draft, checked) transition AND
+    // only if no budget row exists yet for this questionnaire trackId. Using
+    // the stable questionnaire trackId (NOT the revision-scoped answer.id) is
+    // critical — otherwise toggling a question off and back on would emit
+    // duplicate budget rows on every flip.
     const shouldEmitBudget =
       body.isChecked && !body.isDraft && (!previous || previous.isDraft || !previous.isChecked);
 
     if (shouldEmitBudget) {
-      const question = await db
-        .select()
-        .from(checklistQuestions)
-        .where(eq(checklistQuestions.id, body.questionId))
+      const budgetTrackId = `questionnaire:${trackId}`;
+      const existingBudget = await db
+        .select({ id: budgetTrackerItems.id })
+        .from(budgetTrackerItems)
+        .where(eq(budgetTrackerItems.trackId, budgetTrackId))
         .get();
 
-      const impact = parseBudgetImpact(question?.defaultBudgetImpactJson ?? null);
-      if (impact) {
-        try {
-          await db
-            .insert(budgetTrackerItems)
-            .values({
-              trackId: `questionnaire:${answer.id}`,
-              revisionNumber: 1,
-              isActive: true,
-              isDraft: false,
-              itemType: "project",
-              executionClass: impact.executionClass ?? "must_now",
-              title: `[Questionnaire] ${impact.title}`,
-              status: "open",
-              riskLevel: "medium",
-              isBottleneck: false,
-              estimatedLowCents: impact.lowCents,
-              estimatedHighCents: impact.highCents,
-              scenarioId: body.scenarioId ?? null,
-              changeSource: "questionnaire",
-              changedBy: "system_edge_worker",
-              datetimeCreated: now,
-              datetimeUpdated: now,
-            })
-            .run();
-        } catch (error) {
-          // Budget auto-insert failure must not block the answer commit; log only.
-          console.error("budget_tracker_items auto-insert failed", error);
+      if (!existingBudget) {
+        const question = await db
+          .select()
+          .from(checklistQuestions)
+          .where(eq(checklistQuestions.id, body.questionId))
+          .get();
+
+        const impact = parseBudgetImpact(question?.defaultBudgetImpactJson ?? null);
+        if (impact) {
+          try {
+            await db
+              .insert(budgetTrackerItems)
+              .values({
+                trackId: budgetTrackId,
+                revisionNumber: 1,
+                isActive: true,
+                isDraft: false,
+                itemType: "project",
+                executionClass: impact.executionClass ?? "must_now",
+                title: `[Questionnaire] ${impact.title}`,
+                status: "open",
+                riskLevel: "medium",
+                isBottleneck: false,
+                estimatedLowCents: impact.lowCents,
+                estimatedHighCents: impact.highCents,
+                scenarioId: body.scenarioId ?? null,
+                changeSource: "questionnaire",
+                changedBy: "system_edge_worker",
+                datetimeCreated: now,
+                datetimeUpdated: now,
+              })
+              .run();
+          } catch (error) {
+            // Budget auto-insert failure must not block the answer commit; log only.
+            console.error("budget_tracker_items auto-insert failed", error);
+          }
         }
       }
     }
