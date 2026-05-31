@@ -1,8 +1,20 @@
-import { Activity, Clock3, Eye, Loader2, MousePointerClick, Route } from "lucide-react";
+import {
+  Activity,
+  Clock3,
+  Eye,
+  Loader2,
+  MousePointerClick,
+  Route,
+  Settings2,
+} from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
+import { AdminWorkflowsPanel } from "@/components/AdminWorkflowsPanel";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
+
+type AdminTab = "overview" | "workflows";
 
 interface AdminOverview {
   success: boolean;
@@ -50,6 +62,7 @@ function formatDate(value: string | null): string {
 export function AdminDashboardApp() {
   const [loading, setLoading] = useState(true);
   const [payload, setPayload] = useState<AdminOverview | null>(null);
+  const [activeTab, setActiveTab] = useState<AdminTab>("overview");
 
   useEffect(() => {
     const load = async () => {
@@ -75,23 +88,63 @@ export function AdminDashboardApp() {
 
   const summary = useMemo(() => payload?.summary, [payload?.summary]);
 
+  const tabButton = (id: AdminTab, label: string, Icon: React.ComponentType<{ className?: string }>) => (
+    <button
+      key={id}
+      type="button"
+      onClick={() => setActiveTab(id)}
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-semibold uppercase tracking-wider ring-1 transition-all",
+        activeTab === id
+          ? "bg-primary/10 text-primary ring-primary/40"
+          : "bg-card/20 text-muted-foreground ring-border/30 hover:text-foreground hover:ring-border/60",
+      )}
+    >
+      <Icon className="size-3.5" />
+      {label}
+    </button>
+  );
+
+  const tabs = (
+    <div className="flex flex-wrap gap-2 border-b border-border/10 pb-3">
+      {tabButton("overview", "Overview", Eye)}
+      {tabButton("workflows", "Workflows", Settings2)}
+    </div>
+  );
+
   if (loading) {
     return (
-      <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground">
-        <Loader2 className="size-4 animate-spin" />
-        Loading visitor analytics...
+      <div className="space-y-4">
+        {tabs}
+        <div className="flex items-center gap-2 py-12 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" />
+          Loading admin surface...
+        </div>
+      </div>
+    );
+  }
+
+  if (activeTab === "workflows") {
+    return (
+      <div className="space-y-6">
+        {tabs}
+        <AdminWorkflowsPanel />
       </div>
     );
   }
 
   if (!payload || !summary) {
     return (
-      <p className="py-12 text-sm text-muted-foreground">No admin data is currently available.</p>
+      <div className="space-y-6">
+        {tabs}
+        <p className="py-12 text-sm text-muted-foreground">No admin data is currently available.</p>
+      </div>
     );
   }
 
   return (
     <div className="space-y-6">
+      {tabs}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Card className="ring-1 ring-border/40">
           <CardHeader>

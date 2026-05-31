@@ -1,4 +1,10 @@
-import { homeownerMessages, images, visitorEvents, visitorSessions } from "@backend/db";
+import {
+  homeownerMessages,
+  images,
+  roomMaterialQuotes,
+  visitorEvents,
+  visitorSessions,
+} from "@backend/db";
 import {
   getVisitorCookieFromRequest,
   isRequestAuthenticated,
@@ -200,6 +206,47 @@ portalRouter.post("/messages", async (c) => {
     return c.json(
       {
         error: "Failed to create homeowner message",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * GET /api/portal/rooms/:roomId/quotes
+ *
+ * Lists material quotes for a single room — used by the room viewport inside
+ * `ConstructionChecklistApp.tsx` to render the homeowner-vs-contractor ledger.
+ */
+portalRouter.get("/rooms/:roomId/quotes", async (c) => {
+  const roomId = Number.parseInt(c.req.param("roomId"), 10);
+  if (!Number.isFinite(roomId) || roomId <= 0) {
+    return c.json({ success: false, error: "Invalid roomId" }, 400);
+  }
+
+  try {
+    const db = drizzle(c.env.DB);
+    const quotes = await db
+      .select()
+      .from(roomMaterialQuotes)
+      .where(eq(roomMaterialQuotes.roomId, roomId))
+      .orderBy(desc(roomMaterialQuotes.datetimeCreated))
+      .all();
+
+    return c.json({
+      success: true,
+      quotes: quotes.map((quote) => ({
+        ...quote,
+        datetimeCreated: toIsoDate(quote.datetimeCreated),
+        datetimeUpdated: toIsoDate(quote.datetimeUpdated),
+      })),
+    });
+  } catch (error) {
+    return c.json(
+      {
+        success: false,
+        error: "Failed to load room quotes",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       500,

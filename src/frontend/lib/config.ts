@@ -30,6 +30,7 @@ export const siteConfig: SiteConfig = {
   },
   navItems: [
     { href: "/budget-tracker", label: "Budget Tracker" },
+    { href: "/questionnaire", label: "Questionnaire" },
     { href: "/estimates", label: "Estimates" },
     { href: "/contracts", label: "Contracts" },
     { href: "/uploads", label: "Uploads" },

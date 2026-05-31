@@ -19,6 +19,7 @@ export * from "./home/remodel_scenarios";
 export * from "./home/scenario_room_plans";
 export * from "./home/room_action_items";
 export * from "./home/budget_tracker_items";
+export * from "./home/truth_table_activities";
 export * from "./home/room_ai_summaries";
 export * from "./home/homeowner_messages";
 export * from "./home/visitor_sessions";
@@ -47,3 +48,7 @@ export * from "./images/image_edit_sessions";
 export * from "./images/image_edit_revisions";
 export * from "./images/image_upload_staging";
 export * from "./images/review_intelligence";
+
+export * from "./home/questionnaire";
+
+export * from "./admin/workflow_schedules";

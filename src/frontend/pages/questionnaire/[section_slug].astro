@@ -1,0 +1,35 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ConstructionChecklistApp } from "@/components/ConstructionChecklistApp";
+
+const { section_slug } = Astro.params;
+
+if (!section_slug) {
+  return Astro.redirect("/questionnaire");
+}
+
+const activeRoomIdParam = Astro.url.searchParams.get("room");
+const activeRoomId = activeRoomIdParam ? Number.parseInt(activeRoomIdParam, 10) : null;
+const roomIdProp = activeRoomId !== null && Number.isFinite(activeRoomId) ? activeRoomId : null;
+---
+
+<BaseLayout
+  title={`Questionnaire — ${section_slug} — 126 Colby Remodel Mission Control`}
+  description={`Capture room-aware decisions for the ${section_slug} section of the construction questionnaire.`}
+>
+  <main class="container mx-auto px-4 py-8">
+    <div class="mb-6">
+      <a
+        href="/questionnaire"
+        class="text-[10px] font-mono uppercase tracking-widest text-muted-foreground hover:text-foreground"
+      >
+        ← All sections
+      </a>
+    </div>
+    <ConstructionChecklistApp
+      client:load
+      sectionSlug={section_slug}
+      activeRoomId={roomIdProp}
+    />
+  </main>
+</BaseLayout>
