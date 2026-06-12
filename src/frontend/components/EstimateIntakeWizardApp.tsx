@@ -500,7 +500,7 @@ export function EstimateIntakeWizardApp() {
         throw new Error(data.error || "Failed to submit estimate");
       }
       toast.success("Estimate submitted successfully");
-      window.location.href = "/estimates";
+      window.location.href = "/admin/estimates";
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to submit estimate");
     } finally {
@@ -537,7 +537,7 @@ export function EstimateIntakeWizardApp() {
   return (
     <div className="grid gap-6 lg:grid-cols-[260px_1fr]">
       <aside className="space-y-4">
-        <a href="/estimates">
+        <a href="/admin/estimates">
           <Button variant="outline" className="w-full justify-start">
             <ArrowLeft className="mr-2 size-4" />
             Back to Estimates

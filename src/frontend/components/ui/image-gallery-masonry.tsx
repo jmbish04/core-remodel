@@ -40,12 +40,12 @@ export function ImageGalleryMasonry(props: ImageGalleryMasonryProps) {
         const hasContextActions = Boolean(contextActions && contextActions.length > 0);
         return (
           <ContextMenu key={item.id}>
-            <ContextMenuTrigger>
+            <ContextMenuTrigger className="mb-4 block w-full break-inside-avoid">
               <button
                 type="button"
                 onClick={() => onSelect?.(item)}
                 className={cn(
-                  "mb-4 block w-full break-inside-avoid overflow-hidden rounded-xl border bg-card text-left",
+                  "block w-full overflow-hidden rounded-xl border bg-card text-left",
                   "ring-1 ring-border/40 transition hover:-translate-y-0.5 hover:shadow-lg",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   selected && "ring-2 ring-ring",

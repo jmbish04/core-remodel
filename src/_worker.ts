@@ -15,7 +15,17 @@ import astroHandler from "../dist/_worker.js/index.js";
 // Export Durable Object agents for Cloudflare Workers runtime
 export { RenovationAgent } from "./backend/ai/agents/RenovationAgent";
 export { EstimateCollabHub } from "./backend/realtime/EstimateCollabHub";
-export { GAS_A2A } from "./backend/a2a-v2/server";
+// The a2a-v2 module is not committed on this branch, so re-exporting its
+// `GAS_A2A` Durable Object here breaks the deploy bundle. This stub keeps the
+// A2A_V2 binding + DO migration (wrangler.jsonc) valid; it returns 501 until the
+// a2a-v2 module is committed to the branch.
+export class GAS_A2A {
+  async fetch(): Promise<Response> {
+    return new Response("a2a-v2 module is not available in this build", {
+      status: 501,
+    });
+  }
+}
 export { ImageProcessingWorkflow } from "./backend/services/image-workflow";
 export { ChecklistRationaleWorkflow } from "./backend/services/checklist-rationale-workflow";
 

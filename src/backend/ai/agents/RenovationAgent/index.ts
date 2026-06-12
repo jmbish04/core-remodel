@@ -10,7 +10,7 @@
  *
  * All AI calls flow through this agent, which manages model selection:
  *   Vision: @cf/meta/llama-3.2-11b-vision-instruct
- *   Reasoning: @cf/openai/gpt-oss-120b (json_schema structured output)
+ *   Reasoning: @cf/moonshotai/kimi-k2.6 (json_schema structured output)
  *   Embeddings: @cf/baai/bge-base-en-v1.5
  */
 
@@ -20,10 +20,12 @@ import { ImageProcessorService } from "@backend/services/image-processor";
 import {
   getCloudflareImagesTokenCandidates,
   resolveCloudflareImagesCredentials,
+  getCloudflareAccountId,
 } from "@backend/utils/secrets";
 import { Agent, callable, type Connection } from "agents";
 
 import { type RenovationAgentState, RENOVATION_ADVICE_SCHEMA } from "./types";
+
 
 // ---------------------------------------------------------------------------
 // Agent State
@@ -83,7 +85,7 @@ export class RenovationAgent extends Agent<Env, RenovationAgentState> {
       ],
       tools: [
         "Workers AI llama-3.2-11b-vision-instruct (vision analysis)",
-        "Workers AI gpt-oss-120b (structured reasoning via json_schema)",
+        "Workers AI kimi-k2.6 (structured reasoning via json_schema)",
         "Workers AI bge-base-en-v1.5 (embeddings)",
         "Cloudflare Images (storage + delivery)",
         "D1 (persistence)",
@@ -281,7 +283,7 @@ export class RenovationAgent extends Agent<Env, RenovationAgentState> {
 
     // Verify credentials are available
     try {
-      const accountId = await this.env.CLOUDFLARE_ACCOUNT_ID.get();
+      const accountId = await getCloudflareAccountId(this.env);
       if (!accountId) issues.push("CLOUDFLARE_ACCOUNT_ID not set");
     } catch {
       issues.push("Failed to read CLOUDFLARE_ACCOUNT_ID");

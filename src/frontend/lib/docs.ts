@@ -155,7 +155,7 @@ const homeownersPages: DocsPageDefinition[] = [
         description: "Work inside the mirrored D1 and Google Sheets budget workspace.",
       },
       {
-        href: "/estimates",
+        href: "/admin/estimates",
         label: "Open Estimates",
         description: "Compare current quote revisions against your room targets.",
       },
@@ -368,6 +368,137 @@ const homeownersPages: DocsPageDefinition[] = [
       },
     ],
   },
+  {
+    slug: ["homeowners", "photo-edits"],
+    href: "/docs/homeowners/photo-edits",
+    shortTitle: "Photo edits",
+    title: "Homeowner Guide: In-Photo Editing Pipeline",
+    audience: "homeowners",
+    audienceLabel: "For Homeowners",
+    status: "live",
+    summary: "Iteratively modify remodel photos, choose rendering strategy, and index revision embeddings.",
+    overview:
+      "The In-Photo Editing pipeline enables homeowners to run iterative AI-powered transformations on listing photos and inspiration images. It tracks full revision branches in D1, supports advanced cropping and visual compare tools, and generates multi-modal pooled vector embeddings stored in Vectorize for quick semantic search.",
+    highlights: [
+      "Launch edit sessions directly from listing views or manual image uploads.",
+      "Support multiple edit strategies: layout rearrangement, paint swaps, furniture staging, and inspiration stitching.",
+      "Automatically crop outputs and index concatenated 1536-dim embeddings for search matching.",
+    ],
+    actions: [
+      {
+        href: "/photo-edits",
+        label: "Open Photo Editor",
+        description: "Review current edit sessions or spin up a new visual transformation.",
+      },
+      {
+        href: "/review",
+        label: "Review Inspiration",
+        description: "Audit inspirational images before stitching details into listing angles.",
+      },
+    ],
+    sections: [
+      {
+        id: "visual-iteration",
+        title: "Starting the visual iteration loop",
+        summary: "Initialize tracked sessions that preserve version history.",
+        paragraphs: [
+          "To begin editing, homeowners create an 'Edit Session' centered around a specific room or angle. This is a persistent canvas that holds the sequence of visual revisions, ensuring you never lose the progression of your ideas.",
+          "You can select one or more baseline listing photos from the mapped rooms catalog as the starting angle, select an edit category, and formulate prompt instructions that Workers AI stable-diffusion or uploaded custom renderings will fulfill.",
+        ],
+        bullets: [
+          "Spin up new sessions from the Photo Edits sidebar card or from the listing detail page.",
+          "Keep source images and target revisions grouped in a single container.",
+          "Iteratively adjust prompts and compare versions side-by-side using the comparison slider.",
+        ],
+      },
+      {
+        id: "edit-strategies",
+        title: "Selecting an edit strategy",
+        summary: "Optimize results by classifying the nature of your design changes.",
+        paragraphs: [
+          "The system supports four distinct editing strategies that guide the visual pipeline:",
+          "1. **Wall Layout Change:** Remove partitions, open spaces, adjust layouts, and establish a base architectural canvas.",
+          "2. **Paint Color Visuals:** Test color palettes, finishes, accent walls, and texture treatments.",
+          "3. **Staging / Furniture:** Populate structural shells with modern staging ideas, lighting fixtures, and decorative elements.",
+          "4. **Inspirational Stitching:** Extract localized design details (like a custom cabinet profile) and merge them onto listing angles.",
+        ],
+        bullets: [
+          "Set strategy mode inside the Create Session wizard.",
+          "Add room-type overrides to direct the AI's understanding of space constraints.",
+          "Provide baseline prompt templates that auto-fill into the interactive edit workspace.",
+        ],
+      },
+      {
+        id: "cropping-and-uploads",
+        title: "Advanced cropping and manual uploads",
+        summary: "Refine generated canvases and upload professional outputs.",
+        paragraphs: [
+          "For maximum control, the system does not limit you to fully automated AI generations. If you collaborate with a professional designer or render a separate layout, you can upload custom outputs directly into the session timeline.",
+          "An integrated high-precision Cropper is available on all uploads. You can manipulate scale (zoom) and rotation dynamically to strip out browser UI, watermarks, or unwanted edges before final upload.",
+        ],
+        bullets: [
+          "Upload manual rendered files directly in the revision card.",
+          "Use the Cropper modal to adjust zoom levels from 1x to 4x and rotate up to 360 degrees.",
+          "Confirm crops to create highly optimized, revision-ready JPEG/PNG deliverables.",
+        ],
+      },
+      {
+        id: "vectorize-indexing",
+        title: "Vector indexing & multi-modal search",
+        summary: "Embed visual and semantic metadata for instant project retrieval.",
+        paragraphs: [
+          "Every time a new revision is successfully created, the pipeline executes a multi-modal embedding generation pass.",
+          "The system cross-pools two discrete 768-dimensional vector representations—BGE and Google Gemma—based on the prompt text and room metadata. It normalizes and concatenates them into a single 1536-dimensional coordinate array.",
+          "This high-fidelity pooled embedding is indexed in the Cloudflare Vectorize `PHOTO_INDEX` database. This powers instant, semantic search queries across the entire photo gallery, making your iterative designs highly discoverable.",
+        ],
+        bullets: [
+          "Pooling multiple model perspectives creates an optimized, stable search space.",
+          "Embeddings are stored under the image ID inside the `core-remodel-photos` index.",
+          "Search works natively across both text queries and visual semantic markers.",
+        ],
+      },
+    ],
+  },
+  {
+    slug: ["homeowners", "permits"],
+    href: "/docs/homeowners/permits",
+    shortTitle: "Permit Pipeline",
+    title: "Homeowner Guide: Permits Intelligence Pipeline",
+    audience: "homeowners",
+    audienceLabel: "For Homeowners",
+    status: "live",
+    summary: "Understand how the permits pipeline tracks DBI records and extracts contractor workloads.",
+    overview:
+      "The Permits Intelligence Pipeline autonomously monitors the San Francisco Department of Building Inspection (SF DBI) databases to track the status of your remodeling permits and evaluate contractor workloads in real-time.",
+    highlights: [
+      "Track active building, planning, electrical, and plumbing permits on your property.",
+      "Automatically extract and cross-reference contractors associated with your project.",
+      "Monitor contractor permit portfolios across the entire city to identify project spikes or delay risks.",
+    ],
+    actions: [
+      {
+        href: "/admin/permits",
+        label: "Open Permits Dashboard",
+        description: "View active building permits, block/lot configurations, and contractor details.",
+      },
+    ],
+    sections: [
+      {
+        id: "pipeline-operations",
+        title: "How the pipeline operates",
+        summary: "Hourly synchronization with the SF DBI databases.",
+        paragraphs: [
+          "The core pipeline is built on top of Cloudflare Workers and syncs directly with the SF DBI SODA API datasets. It performs background synchronization tasks to pull the latest permit data.",
+          "The synchronization runs hourly. It queries active records from Building Permits, Planning Department records, and Electrical/Plumbing Permits datasets, compares them against known local states, and computes differences to detect status changes.",
+        ],
+        bullets: [
+          "Synchronizes hourly via background cron jobs.",
+          "Monitors SF DBI Building, Planning, Electrical, and Plumbing datasets.",
+          "Computes local differences to alert on permit status updates.",
+        ],
+      },
+    ],
+  },
 ];
 
 const contractorsPages: DocsPageDefinition[] = [
@@ -545,17 +676,17 @@ const contractorsPages: DocsPageDefinition[] = [
     ],
     actions: [
       {
-        href: "/estimates",
+        href: "/admin/estimates",
         label: "Open Estimates",
         description: "Review estimate lists, revisions, and current pricing snapshots.",
       },
       {
-        href: "/estimates/new",
+        href: "/admin/estimates/new",
         label: "Open Estimate Intake",
         description: "Create a new draft or submitted estimate revision.",
       },
       {
-        href: "/contracts",
+        href: "/admin/contracts",
         label: "Open Contracts",
         description: "Track contract revisions, findings, and payment milestones.",
       },
@@ -714,7 +845,7 @@ const sharedPages: DocsPageDefinition[] = [
         description: "Review how budget decisions evolve with the collaboration loop.",
       },
       {
-        href: "/estimates",
+        href: "/admin/estimates",
         label: "Open Estimates",
         description: "See where contractor responses become structured pricing revisions.",
       },

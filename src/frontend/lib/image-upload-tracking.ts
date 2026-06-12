@@ -36,6 +36,8 @@ export interface TrackedUploadState {
   processedAt?: string | number | Date | null;
   displayName?: string | null;
   photoCategory?: string;
+  progress?: number;
+  stepName?: string;
 }
 
 export function getTrackedUploadMessage(

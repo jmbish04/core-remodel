@@ -11,6 +11,7 @@ export const listingPhotos = sqliteTable("listing_photos", {
   id: integer("id").primaryKey({ autoIncrement: true }),
   imageId: text("image_id").references(() => images.id, { onDelete: "set null" }),
   cfImageId: text("cf_image_id").notNull(),
+  blankCanvasCfImageId: text("blank_canvas_cf_image_id"),
   roomId: integer("room_id").references(() => rooms.id, {
     onDelete: "restrict",
   }),

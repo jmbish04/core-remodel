@@ -73,3 +73,30 @@ export async function resolveCloudflareImagesCredentials(env: Env): Promise<{
 
   return { accountId, apiTokens };
 }
+
+
+/**
+ * Helper to fetch the Google Maps API Key.
+ * Maps to GOOGLE_MAPS_API in this worker secret binding.
+ */
+export async function getGoogleMapsApiKey(env: Env): Promise<string> {
+  if (env.GOOGLE_MAPS_API) {
+    return typeof env.GOOGLE_MAPS_API === "string"
+      ? env.GOOGLE_MAPS_API
+      : await (env.GOOGLE_MAPS_API as any).get();
+  }
+  throw new Error("Missing env.GOOGLE_MAPS_API in Worker Secret Bindings");
+}
+
+/**
+ * Helper to fetch the Google Search API Key.
+ * Maps to GOOGLE_SEARCH_API_KEY in this worker secret binding.
+ */
+export async function getGoogleSearchApiKey(env: Env): Promise<string> {
+  if (env.GOOGLE_SEARCH_API_KEY) {
+    return typeof env.GOOGLE_SEARCH_API_KEY === "string"
+      ? env.GOOGLE_SEARCH_API_KEY
+      : await (env.GOOGLE_SEARCH_API_KEY as any).get();
+  }
+  throw new Error("Missing env.GOOGLE_SEARCH_API_KEY in Worker Secret Bindings");
+}

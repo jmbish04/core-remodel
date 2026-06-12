@@ -259,7 +259,21 @@ const DEFAULT_ROOMS: SeedRoom[] = [
   },
 ];
 
+let _catalogSeeded: Promise<void> | null = null;
+
 export async function ensureHomeCatalogSeed(env: Env): Promise<void> {
+  if (_catalogSeeded) return _catalogSeeded;
+
+  _catalogSeeded = _doSeedHomeCatalog(env).catch((err) => {
+    // Allow retry on failure
+    _catalogSeeded = null;
+    throw err;
+  });
+
+  return _catalogSeeded;
+}
+
+async function _doSeedHomeCatalog(env: Env): Promise<void> {
   const db = drizzle(env.DB);
 
   for (const floor of DEFAULT_FLOORS) {

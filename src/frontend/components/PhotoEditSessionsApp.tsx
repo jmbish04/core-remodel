@@ -2,6 +2,7 @@ import {
   Building2,
   Check,
   Crop,
+  Eraser,
   Loader2,
   Plus,
   RefreshCw,
@@ -11,7 +12,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner";
 import { ImageCompareSlider } from "@/components/ImageCompareSlider";
 import { ImagePreview } from "@/components/ui/image-preview";
-import { MultipleSelector } from "@/components/ui/multiple-selector";
+
 import {
   Stepper,
   StepperContent,
@@ -39,14 +40,8 @@ import {
   FileUploadTrigger,
 } from "@/components/ui/file-upload";
 import { Cropper, CropperArea, CropperImage, type CropperAreaData } from "@/components/ui/cropper";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
+
+
 import { cn } from "@/lib/utils";
 
 interface ImageRecord {
@@ -59,6 +54,11 @@ interface ImageRecord {
   roomType?: string | null;
   metadata?: string | null;
   photoCategory?: "inspirational" | "listing" | "ai_render";
+  listingPhoto?: {
+    id: number;
+    blankCanvasCfImageId?: string | null;
+    [key: string]: unknown;
+  } | null;
 }
 
 interface CatalogFloor {
@@ -252,8 +252,6 @@ export function PhotoEditSessionsApp() {
   const [sessionWizardEditType, setSessionWizardEditType] = useState<
     "layout" | "paint" | "staging" | "inspiration"
   >("layout");
-  const [wizardSelectedFloorKey, setWizardSelectedFloorKey] = useState("lower_level");
-  const [wizardSelectedRoomId, setWizardSelectedRoomId] = useState("");
   const [wizardSelectedSourceImageIds, setWizardSelectedSourceImageIds] = useState<string[]>([]);
   const [wizardPreviewImageId, setWizardPreviewImageId] = useState<string | null>(null);
   const requestedSourceImageIdRef = useRef<string | null>(
@@ -284,25 +282,7 @@ export function PhotoEditSessionsApp() {
     };
   }, [cropTargetPreview]);
 
-  const lowerFloor = useMemo(
-    () =>
-      catalogFloors.find((floor) => floor.key === "lower_level") ||
-      catalogFloors[0] ||
-      null,
-    [catalogFloors],
-  );
-  const upperFloor = useMemo(
-    () =>
-      catalogFloors.find((floor) => floor.key === "upper_level") ||
-      catalogFloors[catalogFloors.length - 1] ||
-      null,
-    [catalogFloors],
-  );
-  const isWizardUpperFloor = wizardSelectedFloorKey === upperFloor?.key;
-  const wizardRoomsForSelectedFloor = useMemo(() => {
-    const floor = catalogFloors.find((entry) => entry.key === wizardSelectedFloorKey);
-    return floor?.rooms || [];
-  }, [catalogFloors, wizardSelectedFloorKey]);
+
 
   const loadSourceImages = useCallback(async () => {
     const response = await fetch("/api/images");
@@ -354,13 +334,10 @@ export function PhotoEditSessionsApp() {
 
       setCatalogFloors(normalizedFloors);
       setCatalogRooms(normalizedFloors.flatMap((floor) => floor.rooms));
-      if (!normalizedFloors.some((floor) => floor.key === wizardSelectedFloorKey)) {
-        setWizardSelectedFloorKey(normalizedFloors[0]?.key ?? "lower_level");
-      }
     } finally {
       setCatalogLoading(false);
     }
-  }, [wizardSelectedFloorKey]);
+  }, []);
 
   const loadSessions = useCallback(async () => {
     const response = await fetch("/api/photo-edits/sessions");
@@ -491,84 +468,60 @@ export function PhotoEditSessionsApp() {
     return Array.from(options.values());
   }, [revisions, sessionSourceImage]);
 
-  const listingSourceCandidates = useMemo(() => {
-    const selectedRoomId = wizardSelectedRoomId ? Number(wizardSelectedRoomId) : null;
-    return sourceImages.filter((image) => {
-      if (image.photoCategory !== "listing") {
-        return false;
-      }
-      if (!selectedRoomId) {
-        return true;
-      }
-      if (image.roomId === selectedRoomId) {
-        return true;
-      }
-      if (Array.isArray(image.roomLabels)) {
-        const selectedRoom = catalogRooms.find((room) => room.id === selectedRoomId);
-        if (selectedRoom && image.roomLabels.includes(selectedRoom.roomName)) {
-          return true;
+  const listingPhotosByFloorAndRoom = useMemo(() => {
+    const listingImages = sourceImages.filter(
+      (image) => image.photoCategory === "listing",
+    );
+
+    const groups: Array<{
+      floor: CatalogFloor;
+      rooms: Array<{ room: CatalogRoom; images: ImageRecord[] }>;
+    }> = [];
+
+    for (const floor of catalogFloors) {
+      const roomGroups: Array<{ room: CatalogRoom; images: ImageRecord[] }> = [];
+      for (const room of floor.rooms) {
+        const matched = listingImages.filter((image) => {
+          if (image.roomId === room.id) return true;
+          if (
+            Array.isArray(image.roomLabels) &&
+            image.roomLabels.includes(room.roomName)
+          )
+            return true;
+          return false;
+        });
+        if (matched.length > 0) {
+          roomGroups.push({ room, images: matched });
         }
       }
-      return false;
-    });
-  }, [catalogRooms, sourceImages, wizardSelectedRoomId]);
-
-  useEffect(() => {
-    if (!wizardSelectedRoomId) {
-      return;
+      if (roomGroups.length > 0) {
+        groups.push({ floor, rooms: roomGroups });
+      }
     }
 
-    const exists = wizardRoomsForSelectedFloor.some(
-      (room) => room.id === Number(wizardSelectedRoomId),
+    // Catch any listing photos that don't match a catalog room
+    const matchedIds = new Set(
+      groups.flatMap((g) => g.rooms.flatMap((r) => r.images.map((i) => i.id))),
     );
-    if (!exists) {
-      setWizardSelectedRoomId("");
-      setWizardSelectedSourceImageIds([]);
-    }
-  }, [wizardRoomsForSelectedFloor, wizardSelectedRoomId]);
+    const unmatched = listingImages.filter((image) => !matchedIds.has(image.id));
+
+    return { groups, unmatched };
+  }, [catalogFloors, sourceImages]);
 
   const resetSessionWizard = useCallback(() => {
     setSessionWizardStep(1);
     setSessionWizardEditType("layout");
-    setWizardSelectedFloorKey(lowerFloor?.key || "lower_level");
-    setWizardSelectedRoomId("");
     setWizardSelectedSourceImageIds([]);
     setWizardPreviewImageId(null);
     setNewSessionRoomType("");
     setNewSessionPromptTemplate("");
     setNewSessionName("");
-  }, [lowerFloor?.key]);
+  }, []);
 
   const openSessionWizard = useCallback(() => {
     resetSessionWizard();
     setSessionWizardOpen(true);
   }, [resetSessionWizard]);
-
-  const handleWizardFloorToggle = useCallback(
-    (checked: boolean) => {
-      const nextFloorKey = checked ? upperFloor?.key : lowerFloor?.key;
-      if (!nextFloorKey) {
-        return;
-      }
-      setWizardSelectedFloorKey(nextFloorKey);
-      setWizardSelectedRoomId("");
-      setWizardSelectedSourceImageIds([]);
-    },
-    [lowerFloor?.key, upperFloor?.key],
-  );
-
-  const handleWizardRoomChange = useCallback(
-    (value: string) => {
-      const nextRoomId = value === "all" ? "" : value;
-      setWizardSelectedRoomId(nextRoomId);
-      setWizardSelectedSourceImageIds([]);
-      const nextRoom = catalogRooms.find((room) => room.id === Number(nextRoomId));
-      if (nextRoom && nextRoom.floorKey !== wizardSelectedFloorKey) {
-        setWizardSelectedFloorKey(nextRoom.floorKey);
-      }
-    },
-    [catalogRooms, wizardSelectedFloorKey],
-  );
 
   useEffect(() => {
     if (wizardSelectedSourceImageIds.length === 0) {
@@ -578,12 +531,6 @@ export function PhotoEditSessionsApp() {
     setNewSessionSourceImageId(wizardSelectedSourceImageIds[0] || "");
   }, [wizardSelectedSourceImageIds]);
 
-  const selectedWizardRoom = useMemo(
-    () =>
-      catalogRooms.find((room) => room.id === Number(wizardSelectedRoomId)) ||
-      null,
-    [catalogRooms, wizardSelectedRoomId],
-  );
   const wizardPreviewImage = useMemo(
     () =>
       wizardPreviewImageId
@@ -592,12 +539,7 @@ export function PhotoEditSessionsApp() {
     [sourceImages, wizardPreviewImageId],
   );
 
-  useEffect(() => {
-    if (!selectedWizardRoom) {
-      return;
-    }
-    setNewSessionRoomType(selectedWizardRoom.roomName.toLowerCase());
-  }, [selectedWizardRoom]);
+
 
   useEffect(() => {
     if (!selectedSessionId) {
@@ -1132,7 +1074,7 @@ export function PhotoEditSessionsApp() {
       </div>
 
       <Dialog open={sessionWizardOpen} onOpenChange={setSessionWizardOpen}>
-        <DialogContent className="max-h-[85vh] max-w-5xl overflow-auto">
+        <DialogContent className="max-h-[85vh] sm:max-w-5xl overflow-auto">
           <DialogHeader>
             <DialogTitle>Create New Edit Session</DialogTitle>
           </DialogHeader>
@@ -1168,131 +1110,170 @@ export function PhotoEditSessionsApp() {
               </StepperItem>
             </StepperList>
 
-            <StepperContent step={1} className="space-y-4">
-              <div className="grid gap-4 md:grid-cols-2">
-                <div className="space-y-2">
-                  <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                    Floor
-                  </p>
-                  <div className="flex items-center justify-between rounded-md bg-muted/20 px-3 py-2 ring-1 ring-border/40">
-                    <span
-                      className={cn(
-                        "text-xs font-medium",
-                        !isWizardUpperFloor ? "text-foreground" : "text-muted-foreground",
-                      )}
-                    >
-                      {lowerFloor?.name ?? "Downstairs"}
-                    </span>
-                    <Switch
-                      checked={isWizardUpperFloor}
-                      onCheckedChange={handleWizardFloorToggle}
-                      aria-label="Toggle between downstairs and upstairs rooms"
-                      disabled={catalogLoading || !lowerFloor || !upperFloor}
-                    />
-                    <span
-                      className={cn(
-                        "text-xs font-medium",
-                        isWizardUpperFloor ? "text-foreground" : "text-muted-foreground",
-                      )}
-                    >
-                      {upperFloor?.name ?? "Upstairs"}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-                    Room
-                  </p>
-                  <Select
-                    value={wizardSelectedRoomId || "all"}
-                    onValueChange={handleWizardRoomChange}
-                    disabled={catalogLoading}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="All listing rooms" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All listing rooms</SelectItem>
-                      {wizardRoomsForSelectedFloor.map((room) => (
-                        <SelectItem key={room.id} value={String(room.id)}>
-                          {room.displayName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="space-y-2 rounded-lg bg-muted/20 p-3 ring-1 ring-border/30">
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium">Selected Source Photos</p>
-                  <span className="text-xs text-muted-foreground">
+            <StepperContent step={1} className="space-y-5">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium">
+                  Select listing photos
+                  <span className="ml-2 text-xs font-normal text-muted-foreground">
                     {wizardSelectedSourceImageIds.length} selected
                   </span>
-                </div>
-                <MultipleSelector
-                  title="Select source listing photos"
-                  placeholder="Choose one or more listing photos"
-                  options={listingSourceCandidates.map((image) => ({
-                    value: image.id,
-                    label: `${getImageDisplayName(image)} • ${image.roomType || "unassigned"}`,
-                  }))}
-                  value={wizardSelectedSourceImageIds}
-                  onValueChange={setWizardSelectedSourceImageIds}
-                />
+                </p>
               </div>
 
-              {listingSourceCandidates.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  No listing photos match this room yet.
-                </p>
-              ) : (
-                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                  {listingSourceCandidates.map((image) => {
-                    const selected = wizardSelectedSourceImageIds.includes(image.id);
-                    const name = getImageDisplayName(image);
-                    return (
-                      <button
-                        key={image.id}
-                        type="button"
-                        onClick={() => {
-                          setWizardSelectedSourceImageIds((current) => {
-                            if (current.includes(image.id)) {
-                              return current.filter((entry) => entry !== image.id);
-                            }
-                            return [...current, image.id];
-                          });
-                        }}
-                        className={cn(
-                          "overflow-hidden rounded-xl border bg-card text-left ring-1 ring-border/40 transition",
-                          selected && "ring-2 ring-ring",
-                        )}
-                      >
-                        <img
-                          src={resolveImageUrl(image)}
-                          alt={name}
-                          className="aspect-[4/3] w-full object-cover"
-                        />
-                        <div className="space-y-1 p-2.5">
-                          <p className="truncate text-sm font-medium">{name}</p>
-                          <p className="text-xs text-muted-foreground">{image.roomType || "unassigned"}</p>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            className="h-7 px-2 text-xs"
+              {listingPhotosByFloorAndRoom.groups.length === 0 &&
+                listingPhotosByFloorAndRoom.unmatched.length === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    No listing photos uploaded yet.
+                  </p>
+                )}
+
+              {listingPhotosByFloorAndRoom.groups.map((floorGroup) => (
+                <div key={floorGroup.floor.id} className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Building2 className="size-4 text-muted-foreground" />
+                    <h3 className="text-sm font-semibold tracking-wide">
+                      {floorGroup.floor.name}
+                    </h3>
+                  </div>
+
+                  {floorGroup.rooms.map((roomGroup) => (
+                    <div key={roomGroup.room.id} className="space-y-2 pl-6">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          {roomGroup.room.displayName}
+                        </p>
+                        <button
+                          type="button"
+                          className="text-xs text-primary hover:underline"
+                          onClick={() => {
+                            const roomImageIds = roomGroup.images.map((i) => i.id);
+                            const allSelected = roomImageIds.every((id) =>
+                              wizardSelectedSourceImageIds.includes(id),
+                            );
+                            setWizardSelectedSourceImageIds((current) => {
+                              if (allSelected) {
+                                return current.filter((id) => !roomImageIds.includes(id));
+                              }
+                              const next = new Set(current);
+                              for (const id of roomImageIds) next.add(id);
+                              return Array.from(next);
+                            });
+                          }}
+                        >
+                          {roomGroup.images.every((i) =>
+                            wizardSelectedSourceImageIds.includes(i.id),
+                          )
+                            ? "Deselect all"
+                            : "Select all"}
+                        </button>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-5">
+                        {roomGroup.images.map((image) => {
+                          const selected = wizardSelectedSourceImageIds.includes(image.id);
+                          const name = getImageDisplayName(image);
+                          return (
+                            <button
+                              key={image.id}
+                              type="button"
+                              onClick={() => {
+                                setWizardSelectedSourceImageIds((current) =>
+                                  current.includes(image.id)
+                                    ? current.filter((entry) => entry !== image.id)
+                                    : [...current, image.id],
+                                );
+                              }}
+                              className={cn(
+                                "group relative overflow-hidden rounded-lg ring-1 ring-border/40 transition",
+                                selected && "ring-2 ring-primary",
+                              )}
+                            >
+                              <img
+                                src={resolveImageUrl(image)}
+                                alt={name}
+                                className="aspect-square w-full object-cover"
+                              />
+                              {selected && (
+                                <div className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                                  <Check className="size-3" />
+                                </div>
+                              )}
+                              {image.listingPhoto?.blankCanvasCfImageId && (
+                                <div className="absolute left-1 top-1 flex items-center gap-0.5 rounded bg-sky-500/90 px-1 py-0.5 text-[9px] font-semibold text-white uppercase tracking-wide">
+                                  <Eraser className="size-2.5" />
+                                  Canvas
+                                </div>
+                              )}
+                              <div
+                                className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-1 pt-4 opacity-0 transition group-hover:opacity-100"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  setWizardPreviewImageId(image.id);
+                                }}
+                              >
+                                <p className="truncate text-[11px] font-medium text-white">
+                                  {name}
+                                </p>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ))}
+
+              {listingPhotosByFloorAndRoom.unmatched.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Unassigned Photos
+                  </p>
+                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 lg:grid-cols-5">
+                    {listingPhotosByFloorAndRoom.unmatched.map((image) => {
+                      const selected = wizardSelectedSourceImageIds.includes(image.id);
+                      const name = getImageDisplayName(image);
+                      return (
+                        <button
+                          key={image.id}
+                          type="button"
+                          onClick={() => {
+                            setWizardSelectedSourceImageIds((current) =>
+                              current.includes(image.id)
+                                ? current.filter((entry) => entry !== image.id)
+                                : [...current, image.id],
+                            );
+                          }}
+                          className={cn(
+                            "group relative overflow-hidden rounded-lg ring-1 ring-border/40 transition",
+                            selected && "ring-2 ring-primary",
+                          )}
+                        >
+                          <img
+                            src={resolveImageUrl(image)}
+                            alt={name}
+                            className="aspect-square w-full object-cover"
+                          />
+                          {selected && (
+                            <div className="absolute right-1 top-1 flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                              <Check className="size-3" />
+                            </div>
+                          )}
+                          <div
+                            className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-1 pt-4 opacity-0 transition group-hover:opacity-100"
                             onClick={(event) => {
                               event.stopPropagation();
                               setWizardPreviewImageId(image.id);
                             }}
                           >
-                            Preview
-                          </Button>
-                        </div>
-                      </button>
-                    );
-                  })}
+                            <p className="truncate text-[11px] font-medium text-white">
+                              {name}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </StepperContent>
@@ -1388,43 +1369,43 @@ export function PhotoEditSessionsApp() {
                 </ul>
               </div>
             </StepperContent>
-          </Stepper>
 
-          <div className="flex justify-between gap-2 border-t border-border/40 pt-4">
-            <StepperPrev onClick={() => setSessionWizardStep((current) => Math.max(1, current - 1))}>
-              Back
-            </StepperPrev>
+            <div className="flex justify-between gap-2 border-t border-border/40 pt-4">
+              <StepperPrev onClick={() => setSessionWizardStep((current) => Math.max(1, current - 1))}>
+                Back
+              </StepperPrev>
 
-            <div className="flex gap-2">
-              <Button variant="outline" onClick={() => setSessionWizardOpen(false)}>
-                Cancel
-              </Button>
-              {sessionWizardStep < 3 ? (
-                <StepperNext
-                  onClick={() =>
-                    setSessionWizardStep((current) => Math.min(3, current + 1))
-                  }
-                  disabled={sessionWizardStep === 1 && wizardSelectedSourceImageIds.length === 0}
-                >
-                  Next
-                </StepperNext>
-              ) : (
-                <Button onClick={submitSessionWizard} disabled={creatingSession}>
-                  {creatingSession ? (
-                    <>
-                      <Loader2 className="mr-2 size-4 animate-spin" />
-                      Creating
-                    </>
-                  ) : (
-                    <>
-                      <Building2 className="mr-2 size-4" />
-                      Create Session
-                    </>
-                  )}
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setSessionWizardOpen(false)}>
+                  Cancel
                 </Button>
-              )}
+                {sessionWizardStep < 3 ? (
+                  <StepperNext
+                    onClick={() =>
+                      setSessionWizardStep((current) => Math.min(3, current + 1))
+                    }
+                    disabled={sessionWizardStep === 1 && wizardSelectedSourceImageIds.length === 0}
+                  >
+                    Next
+                  </StepperNext>
+                ) : (
+                  <Button onClick={submitSessionWizard} disabled={creatingSession}>
+                    {creatingSession ? (
+                      <>
+                        <Loader2 className="mr-2 size-4 animate-spin" />
+                        Creating
+                      </>
+                    ) : (
+                      <>
+                        <Building2 className="mr-2 size-4" />
+                        Create Session
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
+          </Stepper>
         </DialogContent>
       </Dialog>
 
@@ -1443,7 +1424,7 @@ export function PhotoEditSessionsApp() {
       )}
 
       <Dialog open={cropModalOpen} onOpenChange={(open) => (open ? setCropModalOpen(true) : closeCropModal())}>
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>Crop Output Image</DialogTitle>
           </DialogHeader>

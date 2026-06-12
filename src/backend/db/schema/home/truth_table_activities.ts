@@ -48,6 +48,9 @@ export const truthTableActivities = sqliteTable(
     insuranceBaselineCentsPerUnit: integer("insurance_baseline_cents_per_unit"),
     notes: text("notes"),
 
+    isFinal: integer("is_final", { mode: "boolean" }).notNull().default(false),
+    vendorName: text("vendor_name"),
+
     sourceType: text("source_type").notNull().default("manual"),
     sourceRef: text("source_ref"),
     confidenceScore: real("confidence_score").default(0.7),

@@ -789,11 +789,17 @@
           .withFailureHandler(function(error) {
             setLoading(false);
             setStatus("Error");
+            var failureMessage = error && error.message ? error.message : "Unknown error";
             renderA2UiMessages(
               fallbackLocalResponse(
-                "Request failed: " + (error && error.message ? error.message : "Unknown error"),
+                "Request failed: " + failureMessage,
               ).uiJson,
             );
+            renderExecutionLogs([
+              "Apps Script call failed before response payload parsing.",
+              "Calling worker chat endpoint: " + APP_CONFIG.chatApiUrl,
+              "Failure detail: " + failureMessage,
+            ]);
           })
           .processUserRequest(query, JSON.stringify(conversationHistory), APP_CONFIG.chatApiUrl);
       }

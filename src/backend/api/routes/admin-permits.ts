@@ -5,7 +5,7 @@ import {
   getPermitDetail,
   markPermitViewed,
   runPermitSync,
-} from "@backend/services/permits-sync";
+} from "@/services/dbi/permits-sync";
 
 const adminPermitsRouter = new Hono<{ Bindings: Env }>();
 
@@ -18,8 +18,12 @@ adminPermitsRouter.get("/", async (c) => {
       contactCount: dashboard.contacts.length,
       contactActivityCount: dashboard.contactActivity.length,
       propertyPermitCount: dashboard.propertyPermits.length,
-      needsReviewCount: dashboard.propertyPermits.filter((row) => row.needsReview).length,
-      recentErrors: dashboard.latestRuns.filter((run) => run.status === "error").slice(0, 5),
+      needsReviewCount: dashboard.propertyPermits.filter(
+        (row) => row.needsReview,
+      ).length,
+      recentErrors: dashboard.latestRuns
+        .filter((run) => run.status === "error")
+        .slice(0, 5),
     };
 
     return c.json({
@@ -40,7 +44,9 @@ adminPermitsRouter.get("/", async (c) => {
 
 adminPermitsRouter.get("/property/:permitIdentifier", async (c) => {
   try {
-    const permitIdentifier = decodeURIComponent(c.req.param("permitIdentifier"));
+    const permitIdentifier = decodeURIComponent(
+      c.req.param("permitIdentifier"),
+    );
     const detail = await getPermitDetail(c.env, permitIdentifier);
     if (!detail) {
       return c.json({ error: "Permit not found" }, 404);
@@ -59,7 +65,9 @@ adminPermitsRouter.get("/property/:permitIdentifier", async (c) => {
 
 adminPermitsRouter.post("/property/:permitIdentifier/viewed", async (c) => {
   try {
-    const permitIdentifier = decodeURIComponent(c.req.param("permitIdentifier"));
+    const permitIdentifier = decodeURIComponent(
+      c.req.param("permitIdentifier"),
+    );
     const result = await markPermitViewed(c.env, permitIdentifier);
     return c.json({ success: true, result });
   } catch (error) {

@@ -46,7 +46,7 @@ interface MappingSummary {
 }
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const MAX_FILES = 30;
+const MAX_FILES = 9999; // Effectively unlimited
 
 const getFileKey = (file: File) =>
   `${file.name}-${file.size}-${file.type}-${file.lastModified}`;
@@ -227,84 +227,88 @@ export function UniversalUploadApp() {
     }
   };
 
-  const pollUploadStatuses = useCallback(
-    async () => {
-      const trackedEntries = Object.entries(uploadStates).filter(
-        ([, tracked]) =>
-          tracked.imageId &&
-          (tracked.status === "uploading" ||
-            tracked.status === "queued" ||
-            tracked.status === "processing"),
-      );
-
-      if (trackedEntries.length === 0) {
-        return;
-      }
-
-      try {
-        const categoryGroups = new Map<string, string[]>();
-        for (const [, tracked] of trackedEntries) {
-          const category = tracked.photoCategory || target;
-          const imageId = tracked.imageId;
-          if (!imageId) {
-            continue;
-          }
-          const ids = categoryGroups.get(category) || [];
-          ids.push(imageId);
-          categoryGroups.set(category, ids);
-        }
-
-        const imageById = new Map<string, UploadApiImageRecord>();
-        for (const [category, imageIds] of categoryGroups.entries()) {
-          const response = await fetch(buildImageStatusUrl(category, imageIds));
-          const payload = (await response.json()) as {
-            images?: UploadApiImageRecord[];
-            error?: string;
-          };
-
-          if (!response.ok) {
-            throw new Error(payload.error ?? "Failed to refresh upload status");
-          }
-
-          for (const image of Array.isArray(payload.images) ? payload.images : []) {
-            imageById.set(image.id, image);
-          }
-        }
-
-        setUploadStates((current) => {
-          const next = { ...current };
-          for (const [key, tracked] of Object.entries(current)) {
-            if (!tracked.imageId) {
-              continue;
-            }
-            const image = imageById.get(tracked.imageId);
-            if (!image) {
-              continue;
-            }
-            next[key] = mergeTrackedUploadState(tracked, image);
-          }
-          return next;
-        });
-      } catch (error) {
-        setStatus(error instanceof Error ? error.message : "Failed to refresh upload status");
-      }
-    },
-    [target, uploadStates],
-  );
-
   useEffect(() => {
-    if (!hasTrackedUploadsInFlight(uploadStates)) {
-      return;
-    }
+    let socket: WebSocket | null = null;
+    let reconnectTimeoutId: number | null = null;
+    let isDisposed = false;
 
-    const intervalId = window.setInterval(() => {
-      void pollUploadStatuses();
-    }, 4000);
+    const connect = () => {
+      if (isDisposed) return;
+
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsUrl = `${protocol}//${window.location.host}/api/images/realtime`;
+      
+      console.log("Connecting to uploads realtime WS:", wsUrl);
+      const ws = new WebSocket(wsUrl);
+      socket = ws;
+
+      ws.onopen = () => {
+        console.log("WebSocket connected to uploads realtime");
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const message = JSON.parse(event.data);
+          if (message.type === "realtime_event" && message.payload) {
+            const payload = message.payload;
+            if (payload.imageId) {
+              setUploadStates((current) => {
+                const next = { ...current };
+                for (const [key, tracked] of Object.entries(next)) {
+                  if (tracked.imageId === payload.imageId) {
+                    next[key] = {
+                      ...tracked,
+                      status: payload.status,
+                      progress: payload.progress,
+                      stepName: payload.stepName,
+                      message: payload.error || payload.stepName || getTrackedUploadMessage(payload.status),
+                      processingError: payload.error || null,
+                    };
+                    break;
+                  }
+                }
+                return next;
+              });
+
+              // Dispatch custom DOM event for other components (like UploadsMappingPanel)
+              window.dispatchEvent(
+                new CustomEvent("image-workflow-progress", {
+                  detail: payload,
+                }),
+              );
+            }
+          }
+        } catch (error) {
+          console.error("Failed to parse WebSocket message", error);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error("WebSocket error on uploads realtime", error);
+      };
+
+      ws.onclose = (event) => {
+        console.log("WebSocket disconnected from uploads realtime:", event.reason);
+        if (!isDisposed) {
+          reconnectTimeoutId = window.setTimeout(() => {
+            connect();
+          }, 3000);
+        }
+      };
+    };
+
+    connect();
 
     return () => {
-      window.clearInterval(intervalId);
+      isDisposed = true;
+      if (socket) {
+        socket.close();
+      }
+      if (reconnectTimeoutId) {
+        window.clearTimeout(reconnectTimeoutId);
+      }
     };
-  }, [pollUploadStatuses, uploadStates]);
+  }, []);
 
   const uploadFiles = async () => {
     if (files.length === 0) {
@@ -404,9 +408,6 @@ export function UniversalUploadApp() {
           detail: { source: "universal-upload" },
         }),
       );
-      if (uploadedImageIds.length > 0) {
-        void pollUploadStatuses();
-      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Upload failed";
       setUploadStates((current) => {
@@ -521,7 +522,7 @@ export function UniversalUploadApp() {
               <div>
                 <p className="text-sm font-medium">Drop images here</p>
                 <p className="text-xs text-muted-foreground">
-                  Up to {MAX_FILES} files, each max 10MB
+                  Any number of files, max 10MB each
                 </p>
               </div>
               <FileUploadTrigger asChild>
@@ -635,6 +636,26 @@ export function UniversalUploadApp() {
                           {tracked.message}
                         </p>
                       ) : null}
+                      {tracked &&
+                        (tracked.status === "uploading" ||
+                          tracked.status === "queued" ||
+                          tracked.status === "processing") && (
+                          <div className="mt-2 w-full">
+                            <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+                              <div
+                                className={cn(
+                                  "h-full rounded-full transition-all duration-500 ease-out",
+                                  tracked.status === "uploading"
+                                    ? "bg-blue-500"
+                                    : tracked.status === "queued"
+                                      ? "bg-amber-500"
+                                      : "bg-sky-500 animate-pulse",
+                                )}
+                                style={{ width: `${tracked.progress ?? 10}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
                     </div>
 
                     <Button

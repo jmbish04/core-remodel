@@ -50,15 +50,14 @@ export function GridBento(props: GridBentoProps) {
 
         return (
           <ContextMenu key={item.id}>
-            <ContextMenuTrigger>
+            <ContextMenuTrigger className={cn("block", variant)}>
               <button
                 type="button"
                 onClick={() => onSelect?.(item)}
                 className={cn(
-                  "group relative w-full overflow-hidden rounded-2xl border text-left",
+                  "group relative h-full w-full overflow-hidden rounded-2xl border text-left",
                   "ring-1 ring-border/40 transition hover:-translate-y-0.5 hover:shadow-xl",
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  variant,
                   isSelected && "ring-2 ring-ring",
                 )}
               >

@@ -252,8 +252,8 @@ photoEditsRouter.get("/sessions", async (c) => {
 
         const lastRevision = revisions.reduce(
           (latest, revision) =>
-            revision.revisionNumber > latest.revisionNumber ? revision : latest,
-          { revisionNumber: 0 } as { revisionNumber: number },
+            (revision.revisionNumber ?? 0) > (latest.revisionNumber ?? 0) ? revision : latest,
+          { revisionNumber: 0 } as any,
         );
 
         return {
@@ -438,7 +438,9 @@ photoEditsRouter.get("/sessions/:sessionId", async (c) => {
       .where(eq(imageEditRevisions.sessionId, sessionId))
       .all();
 
-    const revisionsSorted = [...revisions].sort((a, b) => a.revisionNumber - b.revisionNumber);
+    const revisionsSorted = [...revisions].sort(
+      (a, b) => (a.revisionNumber ?? 0) - (b.revisionNumber ?? 0),
+    );
 
     const sourceImage = session.sourceImageId
       ? await db.select().from(images).where(eq(images.id, session.sourceImageId)).get()
@@ -447,13 +449,15 @@ photoEditsRouter.get("/sessions/:sessionId", async (c) => {
     const outputImageMap = new Map<string, typeof images.$inferSelect>();
     const sourceImageMap = new Map<string, typeof images.$inferSelect>();
     for (const revision of revisionsSorted) {
-      const outputImage = await db
-        .select()
-        .from(images)
-        .where(eq(images.id, revision.outputImageId))
-        .get();
-      if (outputImage) {
-        outputImageMap.set(revision.outputImageId, outputImage);
+      if (revision.outputImageId) {
+        const outputImage = await db
+          .select()
+          .from(images)
+          .where(eq(images.id, revision.outputImageId))
+          .get();
+        if (outputImage) {
+          outputImageMap.set(revision.outputImageId, outputImage);
+        }
       }
 
       if (revision.sourceImageId) {
@@ -477,7 +481,9 @@ photoEditsRouter.get("/sessions/:sessionId", async (c) => {
         sourceImage: revision.sourceImageId
           ? (sourceImageMap.get(revision.sourceImageId) ?? null)
           : null,
-        outputImage: outputImageMap.get(revision.outputImageId) ?? null,
+        outputImage: revision.outputImageId
+          ? outputImageMap.get(revision.outputImageId) ?? null
+          : null,
       })),
     });
   } catch (error) {
@@ -495,11 +501,14 @@ photoEditsRouter.get("/sessions/:sessionId", async (c) => {
 photoEditsRouter.get("/decision-room", async (c) => {
   try {
     const db = drizzle(c.env.DB);
-    const [allImages, allSessions, allRevisions] = await Promise.all([
+    const [allImagesRaw, allSessions, allRevisions] = await Promise.all([
       db.select().from(images).all(),
       db.select().from(imageEditSessions).all(),
       db.select().from(imageEditRevisions).all(),
     ]);
+
+    // Exclude duplicate-flagged images from the decision room
+    const allImages = allImagesRaw.filter((img) => !img.isDuplicate);
 
     const imagesById = new Map<string, typeof images.$inferSelect>();
     for (const image of allImages) {
@@ -605,16 +614,17 @@ photoEditsRouter.get("/decision-room", async (c) => {
 
     for (const session of allSessions) {
       const revisions = [...(revisionsBySession.get(session.id) || [])].sort(
-        (a, b) => a.revisionNumber - b.revisionNumber,
+        (a, b) => (a.revisionNumber ?? 0) - (b.revisionNumber ?? 0),
       );
 
       const sessionSourceImage = session.sourceImageId
         ? imagesById.get(session.sourceImageId) || null
         : null;
       const lastRevision = revisions.length > 0 ? revisions[revisions.length - 1] : null;
-      const lastOutputImage = lastRevision
-        ? imagesById.get(lastRevision.outputImageId) || null
-        : null;
+      const lastOutputImage =
+        lastRevision && lastRevision.outputImageId
+          ? imagesById.get(lastRevision.outputImageId) || null
+          : null;
 
       const room =
         sessionSourceImage?.roomType?.trim() || lastOutputImage?.roomType?.trim() || "unassigned";
@@ -629,16 +639,18 @@ photoEditsRouter.get("/decision-room", async (c) => {
         datetimeLastModified: session.datetimeLastModified,
         revisions: revisions.map((revision) => ({
           id: revision.id,
-          revisionNumber: revision.revisionNumber,
+          revisionNumber: revision.revisionNumber ?? 0,
           prompt: revision.prompt,
           model: revision.model,
           sourceImageId: revision.sourceImageId,
-          outputImageId: revision.outputImageId,
+          outputImageId: revision.outputImageId ?? "",
           sourceImage: revision.sourceImageId
             ? imagesById.get(revision.sourceImageId) || null
             : null,
-          outputImage: imagesById.get(revision.outputImageId) || null,
-          datetimeCreated: revision.datetimeCreated,
+          outputImage: revision.outputImageId
+            ? imagesById.get(revision.outputImageId) || null
+            : null,
+          datetimeCreated: revision.datetimeCreated ?? new Date(),
         })),
       });
     }
@@ -799,7 +811,7 @@ photoEditsRouter.post("/sessions/:sessionId/revisions", async (c) => {
         guidance,
       });
       const generatedBytes = await toImageBytes(aiPayload);
-      const generatedBlob = new Blob([generatedBytes], { type: "image/png" });
+      const generatedBlob = new Blob([generatedBytes.buffer as ArrayBuffer], { type: "image/png" });
 
       uploadFile = new File([generatedBlob], `render-${sessionId}-${Date.now()}.png`, {
         type: "image/png",
@@ -836,7 +848,7 @@ photoEditsRouter.post("/sessions/:sessionId/revisions", async (c) => {
       .where(eq(imageEditRevisions.sessionId, sessionId))
       .all();
     const revisionNumber =
-      revisionRows.reduce((maxValue, row) => Math.max(maxValue, row.revisionNumber), 0) + 1;
+      revisionRows.reduce((maxValue, row) => Math.max(maxValue, row.revisionNumber ?? 0), 0) + 1;
 
     const roomType = roomTypeInput || sourceImage.roomType || "unassigned";
 
@@ -866,6 +878,17 @@ photoEditsRouter.post("/sessions/:sessionId/revisions", async (c) => {
         }),
       })
       .run();
+
+    // Generate and store Vectorize embeddings for the new revision
+    const embeddingText = `${roomType} ai_render ${prompt}`;
+    try {
+      await processor.generateAndStoreEmbeddings(outputImageId, embeddingText, deliveryUrl);
+    } catch (vectorError) {
+      console.warn(
+        `[Vectorize] Failed to store multi-modal pooled embeddings for revision image ${outputImageId}; continuing without vector index.`,
+        vectorError,
+      );
+    }
 
     const revisionId = crypto.randomUUID();
     await db

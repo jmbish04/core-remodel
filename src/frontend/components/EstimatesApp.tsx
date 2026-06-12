@@ -20,6 +20,7 @@ interface EstimateRevision {
   isLatest: boolean;
   estimateStatusId: number | null;
   totalAmountCents: number | null;
+  totalTaxCents: number | null;
   datetimeUpdated: string | null;
 }
 
@@ -238,7 +239,7 @@ export function EstimatesApp() {
                 </>
               )}
             </Button>
-            <a href="/estimates/new">
+            <a href="/admin/estimates/new">
               <Button size="sm">
                 <PlusCircle className="mr-2 size-4" />
                 Record New Estimate

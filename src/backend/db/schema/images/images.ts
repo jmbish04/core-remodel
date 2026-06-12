@@ -24,6 +24,9 @@ export const images = sqliteTable(
     sourceFilenameNormalized: text("source_filename_normalized"),
     sourceFileSize: integer("source_file_size"),
     sourceFileMd5: text("source_file_md5"),
+    isDuplicate: integer("is_duplicate", { mode: "boolean" }).notNull().default(false),
+    duplicateMarkedBy: text("duplicate_marked_by"),
+    duplicateMarkedAt: integer("duplicate_marked_at", { mode: "timestamp" }),
     datetimeCreated: integer("datetime_created", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),
@@ -34,5 +37,7 @@ export const images = sqliteTable(
       table.sourceFilenameNormalized,
       table.sourceFileSize,
     ),
+    isDuplicateIdx: index("images_is_duplicate_idx").on(table.isDuplicate),
   }),
 );
+

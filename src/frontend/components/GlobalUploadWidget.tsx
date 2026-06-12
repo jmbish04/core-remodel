@@ -52,7 +52,7 @@ interface CatalogRoom {
 }
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const MAX_FILES = 25;
+const MAX_FILES = 9999; // Effectively unlimited
 
 const getFileKey = (file: File) =>
   `${file.name}-${file.size}-${file.type}-${file.lastModified}`;
@@ -728,7 +728,7 @@ export function GlobalUploadWidget() {
                   <Upload className="mx-auto mb-2 size-6 text-muted-foreground" />
                   <p className="text-sm font-medium">Drop images here</p>
                   <p className="text-xs text-muted-foreground">
-                    Up to {MAX_FILES} files, max 10MB each
+                    Any number of files, max 10MB each
                   </p>
                   <div className="mt-3">
                     <FileUploadTrigger asChild>

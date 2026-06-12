@@ -26,9 +26,6 @@ const WORKSPACE_ITEMS: SidebarItem[] = [
   { href: "/planning", label: "Planning" },
   { href: "/daily-log", label: "Daily Log" },
   { href: "/weekly-log", label: "Weekly Log" },
-  { href: "/budget-tracker", label: "Budget Tracker" },
-  { href: "/estimates", label: "Estimates" },
-  { href: "/contracts", label: "Contracts" },
   { href: "/supporting-docs", label: "Project Records" },
   { href: "/decision-room", label: "Decision Room" },
   { href: "/moodboards", label: "Mood Boards" },
@@ -262,15 +259,33 @@ function SidebarLinks({
       {renderSection("Gallery", GALLERY_ITEMS)}
 
       {accessAuthenticated ? (
-        renderSection("Admin", [
-          { href: "/admin", label: "Admin Analytics" },
-          { href: "/uploads", label: "Uploads", badgeCount: uploadsPendingCount },
-          { href: "/review", label: "Review" },
-          { href: "/photo-edits", label: "Photo Edits" },
-          { href: "/admin/supporting-docs", label: "Supporting Docs" },
-          { href: "/admin/permits", label: "House Permits" },
-          { href: "/admin/permits/contacts", label: "Contractor Permits" },
-        ])
+        <>
+          {renderSection("Admin - Budget", [
+            { href: "/budget-tracker", label: "Budget Tracker" },
+            { href: "/budget-dashboard", label: "Budget Triage Matrix" },
+            { href: "/admin/forecasting", label: "Budget Forecasting" },
+            { href: "/admin/truth-table", label: "Labor & Materials Costs" },
+          ])}
+          {renderSection("Admin - Contractors", [
+            { href: "/admin/permits", label: "House Permits" },
+            { href: "/admin/permits/contacts", label: "Contractor Permits" },
+            { href: "/admin/contracts", label: "Contracts" },
+            { href: "/admin/estimates", label: "Estimates" },
+            { href: "/bid-portfolios", label: "Bid Portfolios" },
+          ])}
+          {renderSection("Admin - Photos & Docs", [
+            { href: "/uploads", label: "Uploads", badgeCount: uploadsPendingCount },
+            { href: "/review", label: "Review" },
+            { href: "/photo-edits", label: "Photo Edits" },
+            { href: "/admin/blank-canvas", label: "Blank Canvas" },
+            { href: "/admin/supporting-docs", label: "Supporting Docs" },
+          ])}
+          {renderSection("Admin - Tools", [
+            { href: "/admin", label: "Analytics" },
+            { href: "/admin/research", label: "Research Center" },
+            { href: "/admin/shopping-journal", label: "Shopping Journal" },
+          ])}
+        </>
       ) : (
         renderSection("Admin", [{ href: "/admin", label: "Admin" }])
       )}

@@ -17,7 +17,12 @@ import { adminPermitsRouter } from "./routes/admin-permits";
 import { adminWorkflowsRouter } from "./routes/admin-workflows";
 import { authRouter } from "./routes/auth";
 import { artifactsRouter } from "./routes/artifacts";
+import { budgetAgentRouter } from "./routes/budget-agent";
 import { budgetTrackerRouter } from "./routes/budget-tracker";
+import { budgetDataRouter } from "./routes/budget-data";
+import { budgetScenariosRouter } from "./routes/budget-scenarios";
+import { budgetAssumptionsRouter } from "./routes/budget-assumptions";
+import { budgetSnapshotRouter } from "./routes/budget-snapshot";
 import { constructionChecklistRouter } from "./routes/construction-checklist";
 import { contractsRouter } from "./routes/contracts";
 import { dashboardRouter } from "./routes/dashboard";
@@ -41,6 +46,13 @@ import { syncRouter } from "./routes/sync";
 import { threadsRouter } from "./routes/threads";
 import { supportingDocumentsRouter } from "./routes/supporting-documents";
 import { visionNodesRouter } from "./routes/vision-nodes";
+import { bidPortfoliosRouter } from "./routes/bid-portfolios";
+import { bidPortfolioPublicRouter } from "./routes/bid-portfolio-public";
+import { analyticsRouter } from "./routes/analytics";
+import { researchRouter } from "./routes/research";
+import { truthTableRouter } from "./routes/truth-table";
+import { shoppingJournalRouter } from "./routes/shopping-journal";
+import { adminConfigRouter } from "./routes/admin-config";
 import { requireAccessAuth } from "@backend/utils/access";
 
 export type Variables = {
@@ -61,6 +73,22 @@ app.use("/api/admin/*", requireAccessAuth);
 app.use("/api/images/upload", requireAccessAuth);
 app.use("/api/planning", requireAccessAuth);
 app.use("/api/planning/*", requireAccessAuth);
+app.use("/api/truth-table", requireAccessAuth);
+app.use("/api/truth-table/*", requireAccessAuth);
+app.use("/api/budget-tracker", requireAccessAuth);
+app.use("/api/budget-tracker/*", requireAccessAuth);
+app.use("/api/budget-data", requireAccessAuth);
+app.use("/api/budget-data/*", requireAccessAuth);
+app.use("/api/shopping-journal", requireAccessAuth);
+app.use("/api/shopping-journal/*", requireAccessAuth);
+app.use("/api/bid-portfolios/*", async (c, next) => {
+  // Public routes do not require auth
+  const path = new URL(c.req.url).pathname;
+  if (path.startsWith("/api/bid-portfolios/public")) {
+    return next();
+  }
+  return requireAccessAuth(c as any, next);
+});
 
 // Health check
 app.get("/api/ping", (c) => c.json({ status: "ok", timestamp: Date.now() }));
@@ -71,6 +99,8 @@ app.route("/api/access", accessRouter);
 app.route("/api/admin", adminRouter);
 app.route("/api/admin/permits", adminPermitsRouter);
 app.route("/api/admin/workflows", adminWorkflowsRouter);
+app.route("/api/admin/config", adminConfigRouter);
+app.route("/api/admin/research", researchRouter);
 app.route("/api/dashboard", dashboardRouter);
 app.route("/api/threads", threadsRouter);
 app.route("/api/health", healthRouter);
@@ -91,11 +121,21 @@ app.route("/api/estimate-contacts", estimateContactsRouter);
 app.route("/api/estimates", estimatesRouter);
 app.route("/api/contracts", contractsRouter);
 app.route("/api/construction-checklist", constructionChecklistRouter);
+app.route("/api/budget-agent", budgetAgentRouter);
 app.route("/api/budget-tracker", budgetTrackerRouter);
+app.route("/api/budget-data", budgetDataRouter);
+app.route("/api/budget-scenarios", budgetScenariosRouter);
+app.route("/api/budget-assumptions", budgetAssumptionsRouter);
+app.route("/api/budget-snapshot", budgetSnapshotRouter);
 app.route("/api/sync", syncRouter);
 app.route("/api/artifacts", artifactsRouter);
 app.route("/api/supporting-documents", supportingDocumentsRouter);
 app.route("/api/vision-nodes", visionNodesRouter);
+app.route("/api/bid-portfolios/public", bidPortfolioPublicRouter);
+app.route("/api/bid-portfolios", bidPortfoliosRouter);
+app.route("/api/analytics", analyticsRouter);
+app.route("/api/truth-table", truthTableRouter);
+app.route("/api/shopping-journal", shoppingJournalRouter);
 app.route("/", openapiRouter);
 
 export { app };

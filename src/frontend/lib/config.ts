@@ -31,8 +31,8 @@ export const siteConfig: SiteConfig = {
   navItems: [
     { href: "/budget-tracker", label: "Budget Tracker" },
     { href: "/questionnaire", label: "Questionnaire" },
-    { href: "/estimates", label: "Estimates" },
-    { href: "/contracts", label: "Contracts" },
+    { href: "/admin/estimates", label: "Estimates" },
+    { href: "/admin/contracts", label: "Contracts" },
     { href: "/uploads", label: "Uploads" },
     { href: "/supporting-docs", label: "Supporting Docs" },
     { href: "/floor-plan", label: "Floor Plan" },

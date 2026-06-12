@@ -20,7 +20,7 @@ import { imageReviews } from "@backend/db";
 import {
   buildImageUploadFingerprint,
   findDuplicateImageByFingerprint,
-} from "@backend/services/image-deduplication";
+} from "@/services/image-processor/deduplication";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { ImageProcessorService } from "../../services/image-processor";
 
@@ -33,7 +33,10 @@ const photoReviewsRouter = new Hono<{ Bindings: Env }>();
 photoReviewsRouter.get("/", async (c) => {
   try {
     const db = drizzle(c.env.DB);
-    const allImages = await db.select().from(imageReviews).orderBy(asc(imageReviews.filename));
+    const allImages = await db
+      .select()
+      .from(imageReviews)
+      .orderBy(asc(imageReviews.filename));
 
     // Group by room
     const groupsMap = new Map<string, typeof allImages>();
@@ -75,7 +78,10 @@ photoReviewsRouter.post("/upload", async (c) => {
 
     const db = drizzle(c.env.DB);
     const uploadFingerprint = await buildImageUploadFingerprint(file);
-    const duplicateImage = await findDuplicateImageByFingerprint(db, uploadFingerprint);
+    const duplicateImage = await findDuplicateImageByFingerprint(
+      db,
+      uploadFingerprint,
+    );
     if (duplicateImage) {
       return c.json(
         {
@@ -92,7 +98,10 @@ photoReviewsRouter.post("/upload", async (c) => {
     const credentials = await resolveCloudflareImagesCredentials(c.env);
 
     if (!credentials.accountId || credentials.apiTokens.length === 0) {
-      return c.json({ error: "Cloudflare Images credentials not configured" }, 500);
+      return c.json(
+        { error: "Cloudflare Images credentials not configured" },
+        500,
+      );
     }
 
     // Delegate to ImageProcessorService
@@ -104,7 +113,9 @@ photoReviewsRouter.post("/upload", async (c) => {
         fallbackApiTokens: credentials.apiTokens.slice(1),
       },
     );
-    const result = await processor.processPhotoReview(file, { uploadFingerprint });
+    const result = await processor.processPhotoReview(file, {
+      uploadFingerprint,
+    });
 
     if (!result.success) {
       return c.json({ error: result.error || "Processing failed" }, 500);
@@ -127,7 +138,11 @@ photoReviewsRouter.post("/:id", async (c) => {
     const body = await c.req.json();
     const db = drizzle(c.env.DB);
 
-    const existing = await db.select().from(imageReviews).where(eq(imageReviews.id, id)).get();
+    const existing = await db
+      .select()
+      .from(imageReviews)
+      .where(eq(imageReviews.id, id))
+      .get();
     if (!existing) {
       return c.json({ error: "Not found" }, 404);
     }
@@ -136,14 +151,24 @@ photoReviewsRouter.post("/:id", async (c) => {
     if (body.room !== undefined) updates.room = body.room.toLowerCase();
     if (body.tags !== undefined) updates.tags = body.tags;
     if (body.note !== undefined) updates.note = body.note;
+    if (body.reviewed !== undefined) updates.reviewed = body.reviewed ? 1 : 0;
     if (body.sourceFile !== undefined) updates.sourceFile = body.sourceFile;
     if (body.imageNumber !== undefined) updates.imageNumber = body.imageNumber;
     if (body.igAccount !== undefined) updates.igAccount = body.igAccount;
-    if (body.visibleCaption !== undefined) updates.visibleCaption = body.visibleCaption;
+    if (body.visibleCaption !== undefined)
+      updates.visibleCaption = body.visibleCaption;
 
-    await db.update(imageReviews).set(updates).where(eq(imageReviews.id, id)).run();
+    await db
+      .update(imageReviews)
+      .set(updates)
+      .where(eq(imageReviews.id, id))
+      .run();
 
-    const updated = await db.select().from(imageReviews).where(eq(imageReviews.id, id)).get();
+    const updated = await db
+      .select()
+      .from(imageReviews)
+      .where(eq(imageReviews.id, id))
+      .get();
     return c.json({ success: true, image: updated });
   } catch (error) {
     console.error("Update error:", error);

@@ -1,6 +1,6 @@
 {
   "$schema": "https://ui.shadcn.com/schema.json",
-  "style": "base-vega",
+  "style": "base-nova",
   "rsc": false,
   "tsx": true,
   "tailwind": {
@@ -11,19 +11,22 @@
     "prefix": ""
   },
   "iconLibrary": "lucide",
+  "rtl": false,
   "menuColor": "default",
   "menuAccent": "subtle",
   "aliases": {
-    "components": "@/components",
-    "utils": "@/lib/utils",
-    "ui": "@/components/ui",
-    "lib": "@/lib",
-    "hooks": "@/hooks"
+    "components": "src/frontend/components",
+    "utils": "src/frontend/lib/utils",
+    "ui": "src/frontend/components/ui",
+    "lib": "src/frontend/lib",
+    "hooks": "src/frontend/hooks"
   },
   "registries": {
     "@diceui": "https://diceui.com/r/{name}.json",
     "@spectrumui": "https://ui.spectrumhq.in/r/{name}.json",
     "@efferd": "https://efferd.com/r/{name}.json",
-    "@systaliko-ui": "https://systaliko-ui.vercel.app/r/{name}.json"
+    "@systaliko-ui": "https://systaliko-ui.vercel.app/r/{name}.json",
+    "@mapcn": "https://mapcn.dev/r/{name}.json",
+    "@bklit": "https://ui.bklit.com/r/{name}.json"
   }
 }
