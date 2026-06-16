@@ -1,11 +1,11 @@
 import { AlertCircle, CheckCircle2, ExternalLink, Loader2, RefreshCw, ShieldAlert } from "lucide-react";
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { ContractorActivityMap } from "@/components/ContractorActivityMap";
 
 type PermitRun = {
   id: string;
@@ -75,37 +75,6 @@ type PropertyPermit = {
   isClosed: boolean;
 };
 
-type ContactCard = {
-  contactName: string;
-  isMonitored: boolean;
-  activePropertyPermitCount: number;
-  closedPropertyPermitCount: number;
-  workload: {
-    open: number;
-    inProgress: number;
-    pending: number;
-    completed: number;
-  };
-  averageCloseDays: number | null;
-  averageCloseDaysByType: Array<{
-    permitType: string;
-    averageCloseDays: number | null;
-    count: number;
-  }>;
-  mapPoints: Array<{
-    latitude: number;
-    longitude: number;
-    statusCategory: string;
-    propertyAddress: string | null;
-  }>;
-  insight: {
-    riskLevel: string;
-    summary: string;
-    highlights: string[];
-    metrics: Record<string, unknown> | null;
-  } | null;
-};
-
 type PermitDashboardPayload = {
   success: boolean;
   summary: {
@@ -137,11 +106,6 @@ type PermitDetailPayload = {
   };
 };
 
-type ContactsPayload = {
-  success: boolean;
-  contractorCards: ContactCard[];
-};
-
 function formatDate(value: string | number | Date | null | undefined): string {
   if (!value) return "Unknown";
   const parsed = new Date(value);
@@ -156,303 +120,6 @@ function parseJson(value: unknown): unknown {
   } catch {
     return null;
   }
-}
-
-function riskBadgeVariant(riskLevel: string): "default" | "secondary" | "destructive" | "outline" {
-  const normalized = riskLevel.trim().toLowerCase();
-  if (normalized === "high") return "destructive";
-  if (normalized === "low") return "secondary";
-  return "outline";
-}
-
-function statusColor(statusCategory: string): string {
-  const status = statusCategory.trim().toLowerCase();
-  if (status === "completed") return "bg-emerald-500";
-  if (status === "in_progress") return "bg-blue-500";
-  if (status === "pending") return "bg-amber-500";
-  if (status === "cancelled") return "bg-zinc-500";
-  return "bg-fuchsia-500";
-}
-
-function statusLabel(statusCategory: string | null | undefined): string {
-  if (!statusCategory) return "other";
-  return statusCategory.replace(/_/g, " ");
-}
-
-function PermitMap({
-  cards,
-  selectedContractor,
-}: {
-  cards: ContactCard[];
-  selectedContractor: string;
-}) {
-  const filteredCards = useMemo(() => {
-    if (!selectedContractor) return cards;
-    return cards.filter((card) => card.contactName === selectedContractor);
-  }, [cards, selectedContractor]);
-
-  const points = useMemo(
-    () =>
-      filteredCards.flatMap((card) =>
-        card.mapPoints.map((point) => ({
-          ...point,
-          contactName: card.contactName,
-        })),
-      ),
-    [filteredCards],
-  );
-
-  const bounds = useMemo(() => {
-    const latitudes = points.map((row) => row.latitude).filter(Number.isFinite);
-    const longitudes = points.map((row) => row.longitude).filter(Number.isFinite);
-    if (latitudes.length === 0 || longitudes.length === 0) {
-      return {
-        minLat: 37.62,
-        maxLat: 37.95,
-        minLng: -122.58,
-        maxLng: -121.95,
-      };
-    }
-    const minLat = Math.min(...latitudes) - 0.02;
-    const maxLat = Math.max(...latitudes) + 0.02;
-    const minLng = Math.min(...longitudes) - 0.02;
-    const maxLng = Math.max(...longitudes) + 0.02;
-    return { minLat, maxLat, minLng, maxLng };
-  }, [points]);
-
-  const projected = useMemo(
-    () =>
-      points.map((point) => {
-        const lngSpan = Math.max(0.0001, bounds.maxLng - bounds.minLng);
-        const latSpan = Math.max(0.0001, bounds.maxLat - bounds.minLat);
-        const x = ((point.longitude - bounds.minLng) / lngSpan) * 100;
-        const y = 100 - ((point.latitude - bounds.minLat) / latSpan) * 100;
-        return {
-          ...point,
-          x: Math.min(98, Math.max(2, x)),
-          y: Math.min(98, Math.max(2, y)),
-        };
-      }),
-    [bounds.maxLat, bounds.maxLng, bounds.minLat, bounds.minLng, points],
-  );
-
-  return (
-    <div className="space-y-2">
-      <div className="relative h-[320px] overflow-hidden rounded-xl border border-border/60 bg-gradient-to-br from-slate-900 via-slate-850 to-slate-800">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_25%_20%,rgba(255,255,255,0.08),transparent_40%),radial-gradient(circle_at_75%_80%,rgba(34,211,238,0.12),transparent_35%)]" />
-        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.06)_1px,transparent_1px)] bg-[size:40px_40px]" />
-
-        {projected.map((point, index) => (
-          <div
-            key={`${point.contactName}-${index}`}
-            className="group absolute -translate-x-1/2 -translate-y-1/2"
-            style={{ left: `${point.x}%`, top: `${point.y}%` }}
-            title={`${point.contactName} · ${statusLabel(point.statusCategory)} · ${point.propertyAddress || "Address unavailable"}`}
-          >
-            <span
-              className={cn(
-                "block size-3 rounded-full ring-2 ring-background/80 transition group-hover:scale-125",
-                statusColor(point.statusCategory),
-              )}
-            />
-          </div>
-        ))}
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Marker colors: blue in progress, amber pending, green completed, gray cancelled.
-      </p>
-    </div>
-  );
-}
-
-function ContractorInsightsSection() {
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [payload, setPayload] = useState<ContactsPayload | null>(null);
-  const [search, setSearch] = useState("");
-  const deferredSearch = useDeferredValue(search);
-  const [selectedContractor, setSelectedContractor] = useState("");
-
-  const loadData = useCallback(async (withLoading: boolean) => {
-    if (withLoading) {
-      setLoading(true);
-    } else {
-      setRefreshing(true);
-    }
-
-    try {
-      const response = await fetch("/api/admin/permits/contacts", { credentials: "include" });
-      const result = (await response.json()) as ContactsPayload & { error?: string };
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || "Failed to load contractor intelligence");
-      }
-      setPayload(result);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load contractor intelligence");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadData(true);
-  }, [loadData]);
-
-  const cards = payload?.contractorCards || [];
-  const filteredCards = useMemo(() => {
-    const term = deferredSearch.trim().toLowerCase();
-    if (!term) return cards;
-    return cards.filter((card) => card.contactName.toLowerCase().includes(term));
-  }, [cards, deferredSearch]);
-
-  const totals = useMemo(
-    () => ({
-      contractors: cards.length,
-      monitored: cards.filter((card) => card.isMonitored).length,
-      openPermits: cards.reduce((sum, card) => sum + card.workload.open, 0),
-      highRisk: cards.filter((card) => card.insight?.riskLevel?.toLowerCase() === "high").length,
-    }),
-    [cards],
-  );
-
-  if (loading) {
-    return (
-      <div className="flex min-h-[40svh] items-center justify-center text-muted-foreground">
-        <Loader2 className="mr-2 size-5 animate-spin" />
-        Loading contractor permit intelligence...
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <Card className="ring-1 ring-border/40">
-        <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <CardTitle className="text-xl">Contractor Permit Intelligence</CardTitle>
-              <CardDescription>
-                Cross-property permit activity for contacts attached to 126 Colby permits (last 365 days + YTD).
-              </CardDescription>
-            </div>
-            <Button variant="outline" size="sm" onClick={() => void loadData(false)} disabled={refreshing}>
-              {refreshing ? <Loader2 className="mr-2 size-4 animate-spin" /> : <RefreshCw className="mr-2 size-4" />}
-              Refresh
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-4">
-          <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Contacts</p>
-            <p className="mt-1 text-lg font-semibold">{totals.contractors}</p>
-          </div>
-          <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Monitored</p>
-            <p className="mt-1 text-lg font-semibold">{totals.monitored}</p>
-          </div>
-          <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Open Permits</p>
-            <p className="mt-1 text-lg font-semibold">{totals.openPermits}</p>
-          </div>
-          <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">High Risk</p>
-            <p className="mt-1 text-lg font-semibold">{totals.highRisk}</p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="ring-1 ring-border/40">
-        <CardHeader>
-          <CardTitle className="text-base">Bay Area Activity Map</CardTitle>
-          <CardDescription>
-            Status-coded permit markers for selected contractor activity.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-[1fr_220px]">
-            <Input
-              placeholder="Filter contractors..."
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-            <select
-              className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-              value={selectedContractor}
-              onChange={(event) => setSelectedContractor(event.target.value)}
-            >
-              <option value="">All contractors</option>
-              {filteredCards.map((card) => (
-                <option key={card.contactName} value={card.contactName}>
-                  {card.contactName}
-                </option>
-              ))}
-            </select>
-          </div>
-          <PermitMap cards={filteredCards} selectedContractor={selectedContractor} />
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-4">
-        {filteredCards.map((card) => {
-          const total = Math.max(
-            1,
-            card.workload.open + card.workload.completed + card.workload.pending + card.workload.inProgress,
-          );
-          const inProgressWidth = `${(card.workload.inProgress / total) * 100}%`;
-          const pendingWidth = `${(card.workload.pending / total) * 100}%`;
-          const completedWidth = `${(card.workload.completed / total) * 100}%`;
-
-          return (
-            <Card key={card.contactName} className="ring-1 ring-border/40">
-              <CardHeader>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <CardTitle className="text-base">{card.contactName}</CardTitle>
-                    <CardDescription>
-                      Active on property permits: {card.activePropertyPermitCount} · Closed: {card.closedPropertyPermitCount}
-                    </CardDescription>
-                  </div>
-                  <Badge variant={riskBadgeVariant(card.insight?.riskLevel || "medium")}>
-                    Risk: {card.insight?.riskLevel || "unknown"}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                  <div className="flex h-full w-full">
-                    <div className="bg-blue-500" style={{ width: inProgressWidth }} />
-                    <div className="bg-amber-500" style={{ width: pendingWidth }} />
-                    <div className="bg-emerald-500" style={{ width: completedWidth }} />
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  In progress: {card.workload.inProgress} · Pending: {card.workload.pending} · Completed: {card.workload.completed}
-                </p>
-                <p className="text-sm">{card.insight?.summary || "No AI summary available yet."}</p>
-                {card.insight?.highlights?.length ? (
-                  <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
-                    {card.insight.highlights.map((item, index) => (
-                      <li key={`${card.contactName}-highlight-${index}`}>{item}</li>
-                    ))}
-                  </ul>
-                ) : null}
-                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <span>
-                    Avg close: {card.averageCloseDays ? `${card.averageCloseDays} days` : "n/a"}
-                  </span>
-                  <span>·</span>
-                  <span>Open workload: {card.workload.open}</span>
-                  <span>·</span>
-                  <span>Map points: {card.mapPoints.length}</span>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-    </div>
-  );
 }
 
 function HousePermitsSection() {
@@ -877,7 +544,7 @@ export function PermitDetailApp({ permitIdentifier }: { permitIdentifier: string
 
 export function PermitsAdminApp({ section = "house" }: { section?: "house" | "contacts" }) {
   if (section === "contacts") {
-    return <ContractorInsightsSection />;
+    return <ContractorActivityMap />;
   }
   return <HousePermitsSection />;
 }
