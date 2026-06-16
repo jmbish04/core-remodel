@@ -8,6 +8,9 @@ export const permitsContactInsights = sqliteTable("permits_contact_insights", {
   id: text("id").primaryKey(), // UUID
   contactName: text("contact_name").notNull().unique(),
   riskLevel: text("risk_level").notNull().default("medium"), // low | medium | high
+  // Per-contractor busyness read relative to the 126 Colby filing date (idle | light | busy).
+  beforeBusyness: text("before_busyness"),
+  afterBusyness: text("after_busyness"),
   summary: text("summary").notNull(),
   highlights: text("highlights"), // JSON string[]
   metrics: text("metrics"), // JSON

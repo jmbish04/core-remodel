@@ -155,6 +155,83 @@
       "when": 1779356742977,
       "tag": "0021_quick_alex_power",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "6",
+      "when": 1779628496706,
+      "tag": "0022_cooing_absorbing_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1779672038852,
+      "tag": "0023_fuzzy_spacker_dave",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1779750794949,
+      "tag": "0024_graceful_captain_universe",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1780001287043,
+      "tag": "0025_public_victor_mancha",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1780091413861,
+      "tag": "0026_big_romulus",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "6",
+      "when": 1780200380684,
+      "tag": "0027_overconfident_darkstar",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1780245999866,
+      "tag": "0028_tearful_vin_gonzales",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1780256075224,
+      "tag": "0029_chief_ezekiel_stane",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1781602860914,
+      "tag": "0030_salty_scream",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1781605965453,
+      "tag": "0031_backfill_reviewed",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1781610164158,
+      "tag": "0032_demonic_psylocke",
+      "breakpoints": true
     }
   ]
 }

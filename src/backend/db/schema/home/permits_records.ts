@@ -20,6 +20,7 @@ export const permitsRecords = sqliteTable("permits_records", {
   lot: text("lot"),
   contactName: text("contact_name"),
   contactRole: text("contact_role"),
+  filedDate: text("filed_date"),
   issuedDate: text("issued_date"),
   expiresDate: text("expires_date"),
   closedDate: text("closed_date"),
