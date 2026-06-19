@@ -1,8 +1,9 @@
 import { Banknote, DollarSign, ListChecks, ReceiptText } from "lucide-react";
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { BudgetCharts } from "./BudgetCharts";
 import { BudgetTable } from "./budget-table";
 import { formatCurrency, ROOM_SECTION_IDS, type RoomDetailPayload } from "./types";
 
@@ -38,6 +39,12 @@ export interface BudgetSignalsProps {
   detail: RoomDetailPayload;
 }
 
+/** Shape of the project-budget overview (from /api/budget-tracker/overview). */
+interface BudgetOverviewPayload {
+  items?: { total?: number; mustNow?: { low?: number; high?: number } };
+  funds?: { totalAllottedCents?: number };
+}
+
 /** A compact, reusable stat tile for the budget stat-card row. */
 function BudgetStat({
   icon,
@@ -62,9 +69,32 @@ function BudgetStat({
   );
 }
 
-export function BudgetSignals({ detail }: BudgetSignalsProps) {
+export function BudgetSignals({ roomCode, detail }: BudgetSignalsProps) {
   const { budget, estimates } = detail;
   const hasBudget = budget.items.length > 0;
+
+  // Project-level budget mid-point for the pie chart.
+  const [projectBudgetMidCents, setProjectBudgetMidCents] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/budget-tracker/overview", { credentials: "include" });
+        if (!res.ok || cancelled) return;
+        const payload = (await res.json()) as BudgetOverviewPayload;
+        // Build mid-point from must_now range (the core plan), since that's what
+        // rooms are budgeted against. Fall back to totalAllottedCents if missing.
+        const mustNow = payload.items?.mustNow;
+        if (mustNow && typeof mustNow.low === "number" && typeof mustNow.high === "number") {
+          setProjectBudgetMidCents(Math.round((mustNow.low + mustNow.high) / 2));
+        } else if (typeof payload.funds?.totalAllottedCents === "number" && payload.funds.totalAllottedCents > 0) {
+          setProjectBudgetMidCents(payload.funds.totalAllottedCents);
+        }
+      } catch { /* non-fatal */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // Derived stat-card values. These read the synchronous detail aggregate so the
   // cards paint instantly; the table below fetches its own paginated slice.
@@ -133,6 +163,17 @@ export function BudgetSignals({ detail }: BudgetSignalsProps) {
             hint="Vendor estimate versions"
           />
         </div>
+
+        {/* ── Charts ─────────────────────────────────────────────── */}
+        {hasBudget && (
+          <BudgetCharts
+            items={budget.items}
+            totalBudgetLowCents={budget.totalBudgetLowCents}
+            totalBudgetHighCents={budget.totalBudgetHighCents}
+            projectBudgetMidCents={projectBudgetMidCents}
+            roomDisplayName={detail.room.displayName}
+          />
+        )}
 
         {/* Live, paginated/searchable/filterable budget-items table. */}
         <div className="space-y-3">

@@ -1,0 +1,22 @@
+name = "recovery-remodel-dialer"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Static SPA (the cold-calling machine UI) served from ./public.
+# The Worker runs first for /api/*, /openapi.json, /scalar, /swagger and
+# falls through to ASSETS for everything else.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "recovery_remodel_dialer"
+# Create with: wrangler d1 create recovery_remodel_dialer
+# then paste the returned database_id below.
+database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
+migrations_dir = "backend/db/migrations"
+
+[observability]
+enabled = true

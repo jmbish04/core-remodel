@@ -1,0 +1,13 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ResearchLibraryApp } from "@/components/ResearchLibraryApp";
+---
+
+<BaseLayout
+  title="Research Center - 126 Colby - Remodel Mission Control"
+  description="AI-powered deep research library for home renovation intelligence. Browse research, view interactive visualizations, and chat with findings."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <ResearchLibraryApp client:only="react" />
+  </main>
+</BaseLayout>

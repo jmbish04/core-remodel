@@ -1,0 +1,15 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ResearchDetailApp } from "@/components/ResearchDetailApp";
+
+const { id } = Astro.params;
+---
+
+<BaseLayout
+  title="Research Detail - 126 Colby - Remodel Mission Control"
+  description="Interactive research visualization, document viewer, and AI-powered chat for deep research findings."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <ResearchDetailApp client:only="react" sessionId={id} />
+  </main>
+</BaseLayout>

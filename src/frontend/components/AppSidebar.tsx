@@ -4,13 +4,6 @@ import { Icons } from "@/components/Icons";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
 import { Separator } from "@/components/ui/separator";
 import { siteConfig } from "@/lib/config";
 import { docsAudienceGroups, getDocsPageByPath } from "@/lib/docs";
@@ -23,16 +16,12 @@ type SidebarItem = {
 };
 
 const WORKSPACE_ITEMS: SidebarItem[] = [
-  { href: "/planning", label: "Planning" },
-  { href: "/daily-log", label: "Daily Log" },
-  { href: "/weekly-log", label: "Weekly Log" },
   { href: "/supporting-docs", label: "Project Records" },
-  { href: "/decision-room", label: "Decision Room" },
-  { href: "/moodboards", label: "Mood Boards" },
 ];
 
 const GALLERY_ITEMS: SidebarItem[] = [
   { href: "/floor-plan", label: "Floor Plan" },
+  { href: "/kitchen-layout", label: "Kitchen Layout" },
   { href: "/listing-photos", label: "Listing Photos" },
   { href: "/inspiration-photos", label: "Inspiration Photos" },
 ];
@@ -80,12 +69,14 @@ function SidebarLinks({
   currentHash,
   uploadsPendingCount,
   accessAuthenticated,
+  sharedBoardsCount,
   onNavigate,
 }: {
   currentPath: string;
   currentHash: string;
   uploadsPendingCount: number;
   accessAuthenticated: boolean;
+  sharedBoardsCount: number;
   onNavigate?: () => void;
 }) {
   const docsPage = getDocsPageByPath(currentPath);
@@ -241,6 +232,13 @@ function SidebarLinks({
     </div>
   );
 
+  const workspaceItems = [
+    { href: "/supporting-docs", label: "Project Records" },
+  ];
+  if (sharedBoardsCount >= 1) {
+    workspaceItems.push({ href: "/moodboards", label: "Mood Boards" });
+  }
+
   return (
     <nav className="space-y-4" aria-label="Main navigation">
       <div className="space-y-1">
@@ -255,11 +253,15 @@ function SidebarLinks({
         />
       </div>
 
-      {renderSection("Workspace", WORKSPACE_ITEMS)}
+      {renderSection("Workspace", workspaceItems)}
       {renderSection("Gallery", GALLERY_ITEMS)}
 
       {accessAuthenticated ? (
         <>
+          {renderSection("Admin - Planning", [
+            { href: "/admin/planning/decision-room", label: "Decision Room" },
+            { href: "/admin/planning/moodboards", label: "Mood Boards" },
+          ])}
           {renderSection("Admin - Budget", [
             { href: "/budget-tracker", label: "Budget Tracker" },
             { href: "/budget-dashboard", label: "Budget Triage Matrix" },
@@ -272,18 +274,26 @@ function SidebarLinks({
             { href: "/admin/contracts", label: "Contracts" },
             { href: "/admin/estimates", label: "Estimates" },
             { href: "/bid-portfolios", label: "Bid Portfolios" },
+            { href: "/admin/contractor-schedule", label: "Contractor Schedule" },
+            { href: "/admin/dialer", label: "Prospect Dialer" },
           ])}
           {renderSection("Admin - Photos & Docs", [
             { href: "/uploads", label: "Uploads", badgeCount: uploadsPendingCount },
             { href: "/review", label: "Review" },
             { href: "/photo-edits", label: "Photo Edits" },
             { href: "/admin/blank-canvas", label: "Blank Canvas" },
+            { href: "/builder", label: "Renovation Studio" },
+            { href: "/gallery", label: "Render Gallery" },
             { href: "/admin/supporting-docs", label: "Supporting Docs" },
           ])}
           {renderSection("Admin - Tools", [
             { href: "/admin", label: "Analytics" },
             { href: "/admin/research", label: "Research Center" },
             { href: "/admin/shopping-journal", label: "Shopping Journal" },
+          ])}
+          {renderSection("Shopping Research", [
+            { href: "/admin/showroom", label: "Showroom Dashboard" },
+            { href: "/rooms/closets", label: "Closet Research" },
           ])}
         </>
       ) : (
@@ -300,12 +310,14 @@ function SidebarContent({
   currentHash,
   uploadsPendingCount,
   accessAuthenticated,
+  sharedBoardsCount,
   onNavigate,
 }: {
   currentPath: string;
   currentHash: string;
   uploadsPendingCount: number;
   accessAuthenticated: boolean;
+  sharedBoardsCount: number;
   onNavigate?: () => void;
 }) {
   return (
@@ -319,12 +331,13 @@ function SidebarContent({
 
       <Separator />
 
-      <div className="flex-1 overflow-y-auto px-2 py-3">
+      <div className="flex-1 overflow-y-auto overscroll-contain px-2 py-3" style={{ WebkitOverflowScrolling: "touch" }}>
         <SidebarLinks
           currentPath={currentPath}
           currentHash={currentHash}
           uploadsPendingCount={uploadsPendingCount}
           accessAuthenticated={accessAuthenticated}
+          sharedBoardsCount={sharedBoardsCount}
           onNavigate={onNavigate}
         />
       </div>
@@ -359,6 +372,7 @@ export function AppSidebar() {
   const [uploadsPendingCount, setUploadsPendingCount] = useState(0);
   const [currentHash, setCurrentHash] = useState("");
   const [accessAuthenticated, setAccessAuthenticated] = useState(false);
+  const [sharedBoardsCount, setSharedBoardsCount] = useState(0);
   const currentPath = useMemo(() => {
     const path = typeof window === "undefined" ? "/" : window.location.pathname;
     return path.replace(/\/+$/, "") || "/";
@@ -381,9 +395,10 @@ export function AppSidebar() {
 
     const fetchSidebarState = async () => {
       try {
-        const [pendingResponse, accessResponse] = await Promise.all([
+        const [pendingResponse, accessResponse, sharedResponse] = await Promise.all([
           fetch("/api/images/mapping/summary"),
           fetch("/api/access/status", { credentials: "include" }),
+          fetch("/api/mood-board?shared=true"),
         ]);
         const pendingPayload = (await pendingResponse.json()) as {
           success?: boolean;
@@ -393,12 +408,18 @@ export function AppSidebar() {
           success?: boolean;
           authenticated?: boolean;
         };
+        const sharedPayload = (await sharedResponse.json()) as {
+          moodBoards?: any[];
+        };
         if (!mounted) return;
         if (pendingResponse.ok && pendingPayload.success) {
           setUploadsPendingCount(pendingPayload.pending?.total || 0);
         }
         if (accessResponse.ok && accessPayload.success) {
           setAccessAuthenticated(Boolean(accessPayload.authenticated));
+        }
+        if (sharedResponse.ok && sharedPayload.moodBoards) {
+          setSharedBoardsCount(sharedPayload.moodBoards.length);
         }
       } catch {
         // Keep sidebar resilient; no-op on badge fetch failures.
@@ -412,11 +433,13 @@ export function AppSidebar() {
     void fetchSidebarState();
     window.addEventListener("global-upload-complete", onSummaryUpdated);
     window.addEventListener("image-mapping-summary-updated", onSummaryUpdated);
+    window.addEventListener("design-boards-updated", onSummaryUpdated);
 
     return () => {
       mounted = false;
       window.removeEventListener("global-upload-complete", onSummaryUpdated);
       window.removeEventListener("image-mapping-summary-updated", onSummaryUpdated);
+      window.removeEventListener("design-boards-updated", onSummaryUpdated);
     };
   }, []);
 
@@ -428,32 +451,51 @@ export function AppSidebar() {
           currentHash={currentHash}
           uploadsPendingCount={uploadsPendingCount}
           accessAuthenticated={accessAuthenticated}
+          sharedBoardsCount={sharedBoardsCount}
         />
       </aside>
 
       <div className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b border-border/40 bg-background/90 px-3 backdrop-blur md:hidden">
-        <Dialog open={mobileOpen} onOpenChange={setMobileOpen}>
-          <DialogTrigger render={<Button size="icon-sm" variant="ghost" aria-label="Open navigation menu" />}>
-            <Menu className="size-4" />
-          </DialogTrigger>
-          <DialogContent className="left-0 top-0 h-svh w-[88vw] max-w-xs translate-x-0 translate-y-0 rounded-none border-r border-border/40 p-0">
-            <DialogHeader className="px-3 py-3">
-              <DialogTitle className="text-sm font-semibold">Navigation</DialogTitle>
-            </DialogHeader>
-            <SidebarContent
-              currentPath={currentPath}
-              currentHash={currentHash}
-              uploadsPendingCount={uploadsPendingCount}
-              accessAuthenticated={accessAuthenticated}
-              onNavigate={() => setMobileOpen(false)}
-            />
-          </DialogContent>
-        </Dialog>
+        <Button
+          size="icon-sm"
+          variant="ghost"
+          aria-label="Open navigation menu"
+          onClick={() => setMobileOpen(true)}
+        >
+          <Menu className="size-4" />
+        </Button>
 
         <a href="/" className="truncate text-sm font-semibold">
           {siteConfig.name}
         </a>
       </div>
+
+      {/* iOS-safe mobile nav slide-over */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          {/* Backdrop */}
+          {/* biome-ignore lint/a11y/useKeyEvents: overlay dismiss */}
+          {/* biome-ignore lint/a11y/useAriaRole: overlay dismiss */}
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-xs"
+            onClick={() => setMobileOpen(false)}
+          />
+          {/* Drawer panel */}
+          <aside
+            className="absolute inset-y-0 left-0 flex w-[88vw] max-w-xs flex-col border-r border-border/40 bg-background shadow-xl"
+            style={{ WebkitOverflowScrolling: "touch" }}
+          >
+            <SidebarContent
+              currentPath={currentPath}
+              currentHash={currentHash}
+              uploadsPendingCount={uploadsPendingCount}
+              accessAuthenticated={accessAuthenticated}
+              sharedBoardsCount={sharedBoardsCount}
+              onNavigate={() => setMobileOpen(false)}
+            />
+          </aside>
+        </div>
+      )}
     </>
   );
 }

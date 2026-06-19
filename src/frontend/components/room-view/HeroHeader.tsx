@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
+import { HeroPlaceholder } from "./hero-placeholder";
 import {
   formatDate,
   resolveImageUrl,
@@ -20,6 +21,21 @@ import {
   type RoomImage,
   type RoomSummaryRecord,
 } from "./types";
+
+/**
+ * Broad-scope inspiration counts the room-detail API now appends to `roomStats`
+ * (REVISIONS.md inspiration-scope feature). They are declared as a local
+ * augmentation rather than edited into the shared `types.ts` because that file
+ * is owned by a parallel agent; in steady state the backend always sends them.
+ * Both are optional + defaulted to 0 at read time so the hero degrades cleanly
+ * if it ever renders against an older payload.
+ */
+type RoomStatsWithScope = RoomDetailPayload["roomStats"] & {
+  /** scope='level' inspiration applying to this room's whole floor. */
+  inspirationLevelCount?: number;
+  /** scope='home' inspiration applying to the entire home. */
+  inspirationHomeCount?: number;
+};
 
 /**
  * HeroHeader (T3.1) — the top of the room viewport.
@@ -60,14 +76,17 @@ export interface HeroHeaderProps {
   onRequestRefresh: () => void;
 }
 
-/** Resolves the currently-effective hero image given the detail payload. */
+/**
+ * Resolves the currently-effective hero image given the detail payload.
+ *
+ * C3 INVARIANT (REVISIONS.md): the hero is a LISTING photo only. We prefer the
+ * server-chosen `representativeImage` (already constrained to a listing photo by
+ * the API) and fall back to the first listing photo. We NEVER fall back to an
+ * inspiration photo — when there is no listing photo this returns `null` and the
+ * caller renders `<HeroPlaceholder />` instead.
+ */
 function resolveHeroImage(detail: RoomDetailPayload): RoomImage | null {
-  return (
-    detail.representativeImage ||
-    detail.listingImages[0] ||
-    detail.inspirationalImages[0] ||
-    null
-  );
+  return detail.representativeImage || detail.listingImages[0] || null;
 }
 
 export function HeroHeader({
@@ -107,7 +126,17 @@ export function HeroHeader({
   }, [detail, dialogOpen, draftHeroId, persistedHeroId]);
 
   const listingCount = detail.roomStats.listingPhotoCount;
+  // The hero's "Inspiration" badge reflects DIRECT (room-scoped) inspiration
+  // only — `inspirationPhotoCount` is defined as the direct count by the API —
+  // so level/home-wide photos (interior doors, flooring) never inflate it.
   const inspirationCount = detail.roomStats.inspirationPhotoCount;
+  // Broad-scope inspiration shared from the floor/home; surfaced as a quiet
+  // "+N shared" hint rather than rolled into the room's own badge.
+  const stats = detail.roomStats as RoomStatsWithScope;
+  const sharedInspirationCount =
+    (stats.inspirationLevelCount ?? 0) + (stats.inspirationHomeCount ?? 0);
+  // Changing the hero requires a listing photo to choose from; without one the
+  // room still renders (with the placeholder) — only the action is unavailable.
   const canChangeHero = accessAuthenticated && detail.listingImages.length > 0;
 
   const handleSave = useCallback(async () => {
@@ -177,9 +206,11 @@ export function HeroHeader({
               className="aspect-[4/3] w-full object-cover"
             />
           ) : (
-            <div className="flex aspect-[4/3] w-full flex-col items-center justify-center gap-2 bg-muted/20 text-center">
-              <ImageIcon className="size-5 text-muted-foreground" />
-              <p className="px-4 text-xs text-muted-foreground">No representative image yet.</p>
+            // C3: no listing photo → tasteful placeholder, NEVER an inspiration
+            // photo. The outer box keeps the 4:3 frame so image ⇄ placeholder
+            // never shifts layout.
+            <div className="aspect-[4/3] w-full">
+              <HeroPlaceholder size="md" />
             </div>
           )}
         </div>
@@ -190,8 +221,11 @@ export function HeroHeader({
             Change room hero image
           </Button>
         ) : accessAuthenticated ? (
+          // No dead-end: the room is fully visible above via the placeholder.
+          // This is a quiet hint, not a blocker — homeowners learn they can add
+          // a listing photo to choose a hero, but nothing is hidden meanwhile.
           <p className="text-xs text-muted-foreground">
-            Add at least one listing photo to choose a hero image.
+            Add a listing photo to choose a hero image.
           </p>
         ) : (
           <p className="text-xs text-muted-foreground">
@@ -218,6 +252,13 @@ export function HeroHeader({
             size="sm"
             className="justify-between"
             onClick={() => onOpenMedia("inspiration")}
+            // Title surfaces the shared (level/home) count on hover without
+            // crowding the badge, which stays scoped to this room's own inspo.
+            title={
+              sharedInspirationCount > 0
+                ? `${inspirationCount} for this room, +${sharedInspirationCount} shared from the floor/home`
+                : undefined
+            }
           >
             <span className="flex items-center gap-2">
               <Sparkles className="size-4" />
@@ -226,6 +267,16 @@ export function HeroHeader({
             <Badge variant="secondary">{inspirationCount}</Badge>
           </Button>
         </div>
+
+        {/* Quiet note that broad-scope inspiration exists, viewable in the
+            modal's collapsed "whole floor / whole home" appendix. */}
+        {sharedInspirationCount > 0 ? (
+          <p className="text-[11px] text-muted-foreground">
+            +{sharedInspirationCount} shared inspiration{" "}
+            {sharedInspirationCount === 1 ? "photo applies" : "photos apply"} to the whole floor or
+            home.
+          </p>
+        ) : null}
       </div>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>

@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ShowroomDashboard } from "@/components/showroom/ShowroomDashboard";
+---
+
+<BaseLayout
+  title="Showroom Dashboard — The Monolith"
+  description="Manage showroom stores, products, research, and barcode scanning for SF home renovation procurement."
+>
+  <ShowroomDashboard client:only="react" />
+</BaseLayout>

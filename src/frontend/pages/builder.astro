@@ -1,0 +1,27 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { StudioBuilder } from "@/components/render/StudioBuilder";
+---
+
+<BaseLayout
+  title="Renovation Studio - 126 Colby - Staged Render Builder"
+  description="Stage a design across a room's angles, branch variations, and run the inpainting pipeline."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 text-3xl font-bold">Renovation Studio</h1>
+      <p class="text-muted-foreground">
+        Pick a room to load its blank-canvas angles, walk the stage timeline,
+        paint inpainting masks, and branch design variations. Live pipeline
+        status appears at the top while a step is running.
+      </p>
+    </div>
+
+    <!--
+      StudioBuilder renders the pinned PipelineStatusLoader internally (it owns
+      the single realtime WebSocket so we do not open two sockets / show two
+      status cards). Canvas + socket islands require client-only hydration.
+    -->
+    <StudioBuilder client:only="react" />
+  </main>
+</BaseLayout>

@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { RoomSelect } from "@/components/ui/room-select";
 import {
   Select,
   SelectContent,
@@ -140,7 +141,9 @@ export function SupportingDocumentsLibraryApp() {
   const [rooms, setRooms] = useState<CatalogRoom[]>([]);
   const [nodeTree, setNodeTree] = useState<VisionNodeRecord[]>([]);
   const [flatNodes, setFlatNodes] = useState<VisionNodeRecord[]>([]);
-  const [selectedRoomId, setSelectedRoomId] = useState<string>("all");
+  // Room filter: null = "All rooms" (the <RoomSelect> "All" sentinel), else a
+  // canonical active room id.
+  const [selectedRoomId, setSelectedRoomId] = useState<number | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string>("all");
   const [selectedSourceType, setSelectedSourceType] = useState<string>("all");
 
@@ -217,7 +220,8 @@ export function SupportingDocumentsLibraryApp() {
     const roomId = params.get("roomId");
     const nodeId = params.get("visionNodeId");
     if (roomId) {
-      setSelectedRoomId(roomId);
+      const parsed = Number(roomId);
+      setSelectedRoomId(Number.isFinite(parsed) && parsed > 0 ? parsed : null);
     }
     if (nodeId) {
       setSelectedNodeId(nodeId);
@@ -231,7 +235,7 @@ export function SupportingDocumentsLibraryApp() {
 
   const filteredDocs = useMemo(() => {
     return docs.filter((doc) => {
-      if (selectedRoomId !== "all" && !(doc.roomIds || []).includes(Number(selectedRoomId))) {
+      if (selectedRoomId != null && !(doc.roomIds || []).includes(selectedRoomId)) {
         return false;
       }
       if (selectedNodeId !== "all" && !(doc.visionNodeIds || []).includes(selectedNodeId)) {
@@ -245,10 +249,10 @@ export function SupportingDocumentsLibraryApp() {
   }, [docs, selectedNodeId, selectedRoomId, selectedSourceType]);
 
   const filteredTree = useMemo(() => {
-    if (selectedRoomId === "all") {
+    if (selectedRoomId == null) {
       return nodeTree;
     }
-    return nodeTree.filter((node) => (node.roomIds || []).includes(Number(selectedRoomId)));
+    return nodeTree.filter((node) => (node.roomIds || []).includes(selectedRoomId));
   }, [nodeTree, selectedRoomId]);
 
   const sourceCounts = useMemo(() => {
@@ -301,9 +305,9 @@ export function SupportingDocumentsLibraryApp() {
           </CardHeader>
           <CardContent>
             <p className="text-3xl font-semibold">
-              {selectedRoomId === "all"
+              {selectedRoomId == null
                 ? flatNodes.length
-                : flatNodes.filter((node) => node.roomIds.includes(Number(selectedRoomId))).length}
+                : flatNodes.filter((node) => node.roomIds.includes(selectedRoomId)).length}
             </p>
           </CardContent>
         </Card>
@@ -314,9 +318,9 @@ export function SupportingDocumentsLibraryApp() {
           </CardHeader>
           <CardContent>
             <p className="text-sm font-medium">
-              {selectedRoomId === "all"
+              {selectedRoomId == null
                 ? "All rooms"
-                : rooms.find((room) => room.id === Number(selectedRoomId))?.displayName || "Room"}
+                : rooms.find((room) => room.id === selectedRoomId)?.displayName || "Room"}
             </p>
           </CardContent>
         </Card>
@@ -328,19 +332,17 @@ export function SupportingDocumentsLibraryApp() {
           <CardDescription>Focus records by room, node, or source type</CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-3">
-          <Select value={selectedRoomId} onValueChange={setSelectedRoomId}>
-            <SelectTrigger>
-              <SelectValue placeholder="All rooms" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All rooms</SelectItem>
-              {rooms.map((room) => (
-                <SelectItem key={room.id} value={String(room.id)}>
-                  {room.floorName} • {room.displayName}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {/* Room filter — shared <RoomSelect> (§C4) with an explicit "All rooms"
+              sentinel; floor-grouped, searchable, active-only, display names. */}
+          <RoomSelect
+            value={selectedRoomId}
+            onChange={setSelectedRoomId}
+            includeAllOption
+            allOptionLabel="All rooms"
+            placeholder="All rooms"
+            aria-label="Filter by room"
+            className="w-full"
+          />
 
           <Select value={selectedNodeId} onValueChange={setSelectedNodeId}>
             <SelectTrigger>

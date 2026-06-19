@@ -40,11 +40,8 @@ export const siteConfig: SiteConfig = {
     { href: "/review", label: "Review" },
     { href: "/listing-photos", label: "Listing Photos" },
     { href: "/inspiration-photos", label: "Inspiration Photos" },
-    { href: "/planning", label: "Planning" },
-    { href: "/daily-log", label: "Daily Log" },
-    { href: "/weekly-log", label: "Weekly Log" },
     { href: "/photo-edits", label: "Photo Edits" },
-    { href: "/decision-room", label: "Decision Room" },
+    { href: "/admin/planning/decision-room", label: "Decision Room" },
     { href: "/admin", label: "Admin" },
   ],
 };

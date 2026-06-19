@@ -1,0 +1,27 @@
+---
+import HeadSEO from "@/components/HeadSEO.astro";
+import { Toaster } from "sonner";
+
+const { title, description } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <HeadSEO title={title} description={description} />
+    <meta name="robots" content="noindex, nofollow" />
+    <script is:inline>
+      (() => {
+        try {
+          document.documentElement.classList.add("dark");
+        } catch {}
+      })();
+    </script>
+  </head>
+  <body
+    class="overscroll-none antialiased bg-zinc-950 text-zinc-100"
+  >
+    <slot />
+    <Toaster client:only="react" position="top-right" richColors theme="dark" />
+  </body>
+</html>

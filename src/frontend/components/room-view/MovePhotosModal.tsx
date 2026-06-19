@@ -10,13 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { RoomSelect } from "@/components/ui/room-select";
 import { cn } from "@/lib/utils";
 import { addInspirationRoom, reassignListingImage } from "./media-image-api";
 import { MediaThumbGrid } from "./media-thumb-grid";
@@ -30,11 +24,11 @@ import type { MediaKind, RoomDetailPayload, RoomImage } from "./types";
  * Flow:
  *   1. Thumbnail multi-select of the current room's `kind` photos (listing OR
  *      inspiration), rendered by `MediaThumbGrid`.
- *   2. A target-room picker built on the FIXED shared `SelectValue` — it is fed
- *      `items={rooms.map(r => ({ value: String(r.id), label: r.displayName }))}`
- *      so the trigger shows ROOM NAMES, not ids (base-ui's bare `Select.Value`
- *      would otherwise leak the raw id). Room options come from
- *      `GET /api/rooms/catalog`.
+ *   2. A target-room picker built on the shared `<RoomSelect>` (0005 §C4): no
+ *      default selection, floor-grouped + searchable, ACTIVE rooms only, and the
+ *      trigger shows the room DISPLAY NAME (never the id). RoomSelect fetches the
+ *      catalog itself; the current room is hidden via `excludeRoomId` so moving a
+ *      photo onto its own room (a no-op) is impossible.
  *   3. Apply, with per-photo progress:
  *        • LISTING → single-room reassign per selected image via
  *          `PUT /api/images/:id` `{ roomId: <targetId> }`.
@@ -63,20 +57,6 @@ export interface MovePhotosModalProps {
   accessAuthenticated?: boolean;
 }
 
-/** Minimal shape we read from each `GET /api/rooms/catalog` room record. */
-interface CatalogRoomOption {
-  id: number;
-  displayName: string;
-  roomName: string;
-}
-
-/** Response slice we consume from `GET /api/rooms/catalog`. */
-interface CatalogResponse {
-  success?: boolean;
-  error?: string;
-  rooms?: Array<{ id: number; displayName?: string | null; roomName?: string | null }>;
-}
-
 export function MovePhotosModal({
   open,
   onOpenChange,
@@ -91,9 +71,8 @@ export function MovePhotosModal({
   );
 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [targetRoomId, setTargetRoomId] = useState<string>("");
-  const [rooms, setRooms] = useState<CatalogRoomOption[]>([]);
-  const [loadingRooms, setLoadingRooms] = useState(false);
+  // Destination room id (null = nothing chosen yet). Fed by <RoomSelect>.
+  const [targetRoomId, setTargetRoomId] = useState<number | null>(null);
 
   // Move progress: total selected, count completed, and a running failure list.
   const [moving, setMoving] = useState(false);
@@ -104,49 +83,10 @@ export function MovePhotosModal({
   useEffect(() => {
     if (!open) return;
     setSelectedIds(new Set());
-    setTargetRoomId("");
+    setTargetRoomId(null);
     setProgress({ done: 0, total: 0 });
     setDoneSummary(null);
   }, [open, kind]);
-
-  // Load the room catalog once when the modal first opens.
-  useEffect(() => {
-    if (!open || rooms.length > 0 || loadingRooms) return;
-    setLoadingRooms(true);
-    void (async () => {
-      try {
-        const res = await fetch("/api/rooms/catalog", { credentials: "include" });
-        const body = (await res.json().catch(() => undefined)) as CatalogResponse | undefined;
-        if (!res.ok || !body?.success || !Array.isArray(body.rooms)) {
-          throw new Error(body?.error || "Failed to load rooms");
-        }
-        const options = body.rooms
-          .map((room) => ({
-            id: room.id,
-            displayName: (room.displayName || room.roomName || `Room ${room.id}`).trim(),
-            roomName: room.roomName || "",
-          }))
-          .filter((room) => Number.isFinite(room.id));
-        setRooms(options);
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Failed to load rooms");
-      } finally {
-        setLoadingRooms(false);
-      }
-    })();
-  }, [open, rooms.length, loadingRooms]);
-
-  // Target options exclude the room we are moving FROM.
-  const targetOptions = useMemo(
-    () => rooms.filter((room) => room.id !== detail.room.id),
-    [rooms, detail.room.id],
-  );
-
-  // `items` map for the FIXED SelectValue so the trigger renders names not ids.
-  const selectItems = useMemo(
-    () => targetOptions.map((room) => ({ value: String(room.id), label: room.displayName })),
-    [targetOptions],
-  );
 
   const toggleSelection = useCallback((imageId: string) => {
     setSelectedIds((current) => {
@@ -167,11 +107,11 @@ export function MovePhotosModal({
   const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
 
   const canApply =
-    accessAuthenticated && !moving && selectedIds.size > 0 && targetRoomId.trim().length > 0;
+    accessAuthenticated && !moving && selectedIds.size > 0 && targetRoomId != null;
 
   const handleApply = useCallback(async () => {
-    const target = Number(targetRoomId);
-    if (!Number.isFinite(target) || target <= 0) {
+    const target = targetRoomId;
+    if (target == null || !Number.isFinite(target) || target <= 0) {
       toast.error("Choose a destination room first.");
       return;
     }
@@ -187,7 +127,7 @@ export function MovePhotosModal({
 
     let moved = 0;
     let failed = 0;
-    const targetLabel = targetOptions.find((room) => room.id === target)?.displayName || "the room";
+    const targetLabel = "the selected room";
 
     // Sequential so each PUT is independent and one failure never aborts the
     // rest; inspiration moves also read each image's live mapping in turn.
@@ -218,7 +158,7 @@ export function MovePhotosModal({
     } else if (failed > 0) {
       toast.error("No photos could be moved.");
     }
-  }, [kind, onMoved, selectedIds, targetOptions, targetRoomId]);
+  }, [kind, onMoved, selectedIds, targetRoomId]);
 
   const progressPct =
     progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
@@ -290,30 +230,22 @@ export function MovePhotosModal({
               />
             </div>
 
-            {/* Destination picker (FIXED SelectValue → renders display names). */}
+            {/* Destination picker — shared <RoomSelect> (§C4): floor-grouped,
+                searchable, active-only, no default; the source room is hidden. */}
             <div className="space-y-1.5">
               <label htmlFor="move-target-room" className="text-sm font-medium">
                 Destination room
               </label>
-              <Select
+              <RoomSelect
+                id="move-target-room"
                 value={targetRoomId}
-                onValueChange={(value) => setTargetRoomId(value ?? "")}
-                disabled={moving || loadingRooms}
-              >
-                <SelectTrigger id="move-target-room" className="w-full">
-                  <SelectValue
-                    items={selectItems}
-                    placeholder={loadingRooms ? "Loading rooms..." : "Select a destination room"}
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {targetOptions.map((room) => (
-                    <SelectItem key={room.id} value={String(room.id)}>
-                      {room.displayName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                onChange={setTargetRoomId}
+                excludeRoomId={detail.room.id}
+                disabled={moving}
+                placeholder="Select a destination room"
+                aria-label="Destination room"
+                className="w-full"
+              />
             </div>
 
             {/* Live progress / completion summary. */}

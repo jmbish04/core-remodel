@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ESNext"],
+    "types": ["./worker-configuration.d.ts"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@db/*": ["backend/db/*"],
+      "@lib/*": ["backend/lib/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "backend/**/*.ts", "worker-configuration.d.ts"],
+  "exclude": ["node_modules"]
+}

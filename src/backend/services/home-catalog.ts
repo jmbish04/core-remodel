@@ -10,7 +10,7 @@
  * starting from an empty DB will produce the correct canonical set directly.
  *
  * Rooms that should NOT be seeded (they are created by reconciliation or are
- * deleted): lower-storage, upper-bath-2, upper-deck, and all drift codes.
+ * deactivated): lower-storage, upper-bath-2, upper-deck, and all drift codes.
  * The upper-dining-room is created by the data-fix script and is included in
  * this seed so a fresh DB also gets it.
  *
@@ -21,23 +21,30 @@
  *   floorplanYPct 100 = bottom (street / kitchen)
  *   null x/y = no dot; room appears in "Outside / Unplaced" sidebar group only
  *
+ * --- C1 (0005 REVISIONS) — is_active filter ---
+ * getHomeCatalog filters to is_active = true for both the floors-with-rooms
+ * response and the flat rooms array.  Inactive (soft-deleted / merged-away) rooms
+ * are invisible to all callers.  The seed also sets is_active=true on every
+ * freshly inserted room (the column default).
+ *
  * --- T2.1 enrichment (Phase 2, floor-plan page) ---
  * getHomeCatalog now returns per-room aggregate stats so the floor-plan dot
  * hover-card needs no additional fetches:
  *   - listingCount    — count of images WHERE photo_category='listing' AND room_id=this
  *   - inspirationCount — count of inspirational_image_rooms WHERE room_id=this
  *   - heroImageUrl    — representative image delivery URL resolved via the
- *                       fallback chain:
- *                         1. room_ai_summaries.representativeImageId → listing image
+ *                       REVISED fallback chain (C3 — 0005 REVISIONS):
+ *                         1. room_ai_summaries.representativeImageId → IF it is a listing image
  *                         2. first listing image for the room
- *                         3. first inspiration image for the room
- *                         4. null (no image at all)
+ *                         3. null — NO inspiration fallback (C3 mandate)
+ *                       Hero is ALWAYS a listing photo or null.  An inspiration photo
+ *                       must never be a hero candidate, even if the room has 0 listing photos.
  *   - dimensions      — formatted string from formatRoomDimensions ("15'0\" x 24'10\"")
  *   - sqft            — (lengthFeet + lengthInches/12) * (widthFeet + widthInches/12),
  *                       rounded to integer, or null if dims are absent
  *
  * All counts are computed with two grouped SQL queries (one for listing, one for
- * inspiration) and two targeted queries for summaries + hero images — never N+1.
+ * inspiration) and targeted queries for summaries + hero images — never N+1.
  */
 
 import { floors, images, inspirationalImageRooms, roomAiSummaries, rooms } from "@backend/db";
@@ -565,28 +572,39 @@ function resolveDeliveryUrl(
  * Return the full home catalog: all floors with their rooms, enriched with
  * per-room aggregate stats required by the floor-plan dot hover card.
  *
+ * C1 (0005 REVISIONS): only is_active=true rooms are returned.  Inactive
+ * (soft-deleted / merged-away) rooms are invisible to all callers.
+ *
  * Enriched fields per room (T2.1):
  *   listingCount      — count of images WHERE photo_category='listing' AND room_id=<id>
  *   inspirationCount  — count of inspirational_image_rooms WHERE room_id=<id>
- *   heroImageUrl      — delivery URL resolved via the fallback chain:
- *                         1. room_ai_summaries.representativeImageId → listing image
- *                         2. first listing image for the room (by datetime_created DESC)
- *                         3. first inspiration image mapped to the room
- *                         4. null
+ *   heroImageUrl      — delivery URL resolved via the REVISED fallback chain (C3):
+ *                         1. room_ai_summaries.representativeImageId → ONLY if it is
+ *                            a listing image (photo_category='listing')
+ *                         2. first listing image for the room
+ *                         3. null — NO inspiration fallback (C3 mandate)
+ *                       A room with 0 listing photos returns heroImageUrl=null.
+ *                       The caller should render a placeholder in that case.
  *   dimensions        — human-readable formatted string or null
  *   sqft              — integer area rounded from feet+inches, or null
  *
  * All aggregate counts are fetched in two grouped queries (not N+1).
- * Hero resolution uses: one summary query + two targeted image queries whose
- * result sets are bounded by the number of rooms (small, never unbounded).
+ * Hero resolution uses: one summary query + one listing image query.  The
+ * inspiration-fallback query block has been removed entirely (C3).
  */
 export async function getHomeCatalog(env: Env) {
   const db = drizzle(env.DB);
 
-  // ── 1. Fetch floors and rooms ────────────────────────────────────────────
+  // ── 1. Fetch floors and rooms (active only — C1) ─────────────────────────
   const [floorRows, roomRows] = await Promise.all([
     db.select().from(floors).orderBy(asc(floors.levelOrder)).all(),
-    db.select().from(rooms).orderBy(asc(rooms.floorId), asc(rooms.id)).all(),
+    db
+      .select()
+      .from(rooms)
+      // C1: filter to is_active = true; inactive (merged/soft-deleted) rooms are hidden.
+      .where(eq(rooms.isActive, true))
+      .orderBy(asc(rooms.floorId), asc(rooms.id))
+      .all(),
   ]);
 
   const roomIds = roomRows.map((r) => r.id);
@@ -635,28 +653,25 @@ export async function getHomeCatalog(env: Env) {
     inspirationCountByRoomId.set(row.roomId, row.cnt);
   }
 
-  // ── 3. Hero image resolution ─────────────────────────────────────────────
+  // ── 3. Hero image resolution (C3 — revised, listing-only) ──────────────────
   //
-  // Priority chain per room:
-  //   a) room_ai_summaries.representativeImageId — preferred, user-chosen hero
-  //   b) first listing photo (photo_category='listing', ordered by datetime_created DESC)
-  //   c) first inspiration photo (via inspirational_image_rooms, ordered by datetime_created DESC)
-  //   d) null — no image at all
+  // C3 mandate (0005 REVISIONS): hero is ALWAYS a listing photo or null.
+  // The inspiration fallback step has been removed entirely.
+  //
+  // Priority chain:
+  //   a) room_ai_summaries.representativeImageId — ONLY when that image has
+  //      photo_category = 'listing'.  If the representativeImageId points to an
+  //      inspiration photo, it is skipped and we fall to (b).
+  //   b) first listing photo for the room (photo_category='listing').
+  //   c) null — room has 0 listing photos; caller renders a placeholder.
   //
   // Approach to avoid N+1:
-  //   i.  Fetch all room_ai_summaries in one query → collect the representativeImageIds.
-  //   ii. Fetch those specific image rows in one query.
-  //   iii.For rooms without a summary or whose representativeImageId resolves to
-  //       nothing, fall back to the "first listing" image.  We already have the
-  //       listing count grouped query, but we need the actual image row to get the
-  //       CF token.  We use a single query: SELECT DISTINCT ON room_id (emulated via
-  //       a subquery ordering) — D1/SQLite does not support DISTINCT ON directly, so
-  //       we fetch the latest listing image per room in one pass using a window-style
-  //       approach via a correlated subquery alias, or alternatively fetch all listing
-  //       images for the room set and pick the first in JS (safe when the total number
-  //       of placed rooms is small — currently 19 rooms).  We prefer the JS approach
-  //       since it avoids complex SQL and the room count is bounded.
-  //   iv. For rooms that still have no hero, repeat the same approach for inspiration.
+  //   i.  Fetch all room_ai_summaries in one query → collect representativeImageIds.
+  //   ii. Fetch those specific image rows in one query; only accept rows whose
+  //       photo_category = 'listing'.
+  //   iii.Fetch all listing images for the room set in one query (used as fallback
+  //       and as the listing count source).  Pick first-per-room in JS.
+  //   No inspiration query at all (C3).
 
   const [summaryRows, listingImageRows] = await Promise.all([
     roomIds.length > 0
@@ -669,15 +684,15 @@ export async function getHomeCatalog(env: Env) {
           .where(inArray(roomAiSummaries.roomId, roomIds))
           .all()
       : Promise.resolve([] as Array<{ roomId: number; representativeImageId: string | null }>),
-    // Fetch all listing images for all rooms in one query.
-    // Filtered to photo_category='listing' so non-listing images (inspirational,
-    // ai_render) are excluded from the listing count fallback hero chain.
-    // Ordered latest-first so we can pick [0] per room as the fallback.
+    // Fetch ALL listing images for the active room set in one query.
+    // Filtered to photo_category='listing' so inspirational/ai_render images are
+    // completely excluded from the hero resolution chain.
     roomIds.length > 0
       ? db
           .select({
             id: images.id,
             roomId: images.roomId,
+            photoCategory: images.photoCategory,
             cfImageIdOptimized: images.cfImageIdOptimized,
             cfImageIdOriginal: images.cfImageIdOriginal,
           })
@@ -693,13 +708,14 @@ export async function getHomeCatalog(env: Env) {
           [] as Array<{
             id: string;
             roomId: number | null;
+            photoCategory: string;
             cfImageIdOptimized: string | null;
             cfImageIdOriginal: string;
           }>,
         ),
   ]);
 
-  // Build a map of representativeImageId by roomId (nulls omitted).
+  // Build map: roomId → representativeImageId (from room_ai_summaries).
   const representativeImageIdByRoomId = new Map<number, string>();
   for (const row of summaryRows) {
     if (row.representativeImageId) {
@@ -707,15 +723,18 @@ export async function getHomeCatalog(env: Env) {
     }
   }
 
-  // Collect the representative image ids we need to resolve.
+  // Collect representative image IDs we need to resolve — fetch in one query.
   const repImageIds = Array.from(new Set(representativeImageIdByRoomId.values()));
 
-  // Fetch the actual image rows for representative images in one query.
+  // Fetch image rows for representative images.
+  // C3: only accept the row if photo_category = 'listing'.
+  // We fetch all candidate rows and filter in JS to avoid a complex WHERE.
   const repImageRows =
     repImageIds.length > 0
       ? await db
           .select({
             id: images.id,
+            photoCategory: images.photoCategory,
             cfImageIdOptimized: images.cfImageIdOptimized,
             cfImageIdOriginal: images.cfImageIdOriginal,
           })
@@ -723,12 +742,17 @@ export async function getHomeCatalog(env: Env) {
           .where(inArray(images.id, repImageIds))
           .all()
       : [];
-  const repImageById = new Map(repImageRows.map((r) => [r.id, r]));
 
-  // Build: roomId → first listing image row (latest datetime_created is first in
-  // the query result because we order by datetime_created DESC in listingImageRows).
-  // We only need one image row per room.  We iterate in query order so the first
-  // entry we encounter for each room is the representative listing fallback.
+  // Only keep listing representative images (C3 — discard inspiration ones).
+  const repImageById = new Map(
+    repImageRows
+      .filter((r) => r.photoCategory === "listing")
+      .map((r) => [r.id, r]),
+  );
+
+  // Build: roomId → first listing image row (for the fallback).
+  // listingImageRows is already filtered to photo_category='listing'.
+  // Iterating in query order gives us the first encountered row per room.
   const firstListingImageByRoomId = new Map<
     number,
     { id: string; cfImageIdOptimized: string | null; cfImageIdOriginal: string }
@@ -739,67 +763,9 @@ export async function getHomeCatalog(env: Env) {
     }
   }
 
-  // Identify rooms that still have no hero candidate after checking summary + listing.
-  const roomsNeedingInspirationFallback = roomIds.filter((roomId) => {
-    const repId = representativeImageIdByRoomId.get(roomId);
-    if (repId) {
-      const repImg = repImageById.get(repId);
-      if (repImg && resolveDeliveryUrl(repImg)) return false;
-    }
-    const listingImg = firstListingImageByRoomId.get(roomId);
-    if (listingImg && resolveDeliveryUrl(listingImg)) return false;
-    return true;
-  });
-
-  // For those rooms, fetch one inspiration image per room via a single query
-  // over inspirational_image_rooms + images join.  D1 supports joins.
-  // We use a simple approach: fetch all relevant inspirational_image_rooms rows
-  // ordered by datetime_created, then resolve image ids, then fetch image rows.
-  const inspirationFallbackImageByRoomId = new Map<
-    number,
-    { cfImageIdOptimized: string | null; cfImageIdOriginal: string }
-  >();
-  if (roomsNeedingInspirationFallback.length > 0) {
-    // Fetch the most recent inspirational mapping per room that needs a fallback.
-    const inspirationMappings = await db
-      .select({
-        roomId: inspirationalImageRooms.roomId,
-        imageId: inspirationalImageRooms.imageId,
-      })
-      .from(inspirationalImageRooms)
-      .where(inArray(inspirationalImageRooms.roomId, roomsNeedingInspirationFallback))
-      .orderBy(asc(inspirationalImageRooms.datetimeCreated))
-      .all();
-
-    // Pick the first mapping per room (earliest created = most stable).
-    const firstInspirationImageIdByRoomId = new Map<number, string>();
-    for (const mapping of inspirationMappings) {
-      if (!firstInspirationImageIdByRoomId.has(mapping.roomId)) {
-        firstInspirationImageIdByRoomId.set(mapping.roomId, mapping.imageId);
-      }
-    }
-
-    const inspirationImageIds = Array.from(new Set(firstInspirationImageIdByRoomId.values()));
-    if (inspirationImageIds.length > 0) {
-      const inspirationImageRows = await db
-        .select({
-          id: images.id,
-          cfImageIdOptimized: images.cfImageIdOptimized,
-          cfImageIdOriginal: images.cfImageIdOriginal,
-        })
-        .from(images)
-        .where(inArray(images.id, inspirationImageIds))
-        .all();
-      const inspirationImageById = new Map(inspirationImageRows.map((r) => [r.id, r]));
-
-      for (const [roomId, imgId] of firstInspirationImageIdByRoomId) {
-        const imgRow = inspirationImageById.get(imgId);
-        if (imgRow) {
-          inspirationFallbackImageByRoomId.set(roomId, imgRow);
-        }
-      }
-    }
-  }
+  // C3 note: the inspiration fallback block that previously appeared here has been
+  // removed.  A room with 0 listing photos returns heroImageUrl=null.  The caller
+  // (FloorplanGalleryApp, HeroHeader, RoomViewApp) must render a placeholder.
 
   // ── 4. Build displayName (duplicate-name disambiguation) ─────────────────
   const roomCountsByFloorAndName = new Map<string, number>();
@@ -826,27 +792,30 @@ export async function getHomeCatalog(env: Env) {
     const listingCount = listingCountByRoomId.get(room.id) ?? 0;
     const inspirationCount = inspirationCountByRoomId.get(room.id) ?? 0;
 
-    // --- Hero URL (fallback chain) ---
+    // --- Hero URL (C3-revised listing-only chain) ---
+    //
+    // Attempt a: representativeImageId from room_ai_summaries — ONLY if listing.
+    //   repImageById already excludes non-listing representative images (filtered above).
+    // Attempt b: first listing image for the room.
+    // Attempt c: null — no listing photo; caller renders a placeholder.
+    //
+    // Inspiration photos are NEVER considered for the hero (C3 mandate).
     let heroImageUrl: string | null = null;
 
-    // Attempt a: representativeImageId from room_ai_summaries.
+    // Attempt a: user-chosen representative listing image.
     const repId = representativeImageIdByRoomId.get(room.id);
     if (repId) {
-      const repImg = repImageById.get(repId);
+      const repImg = repImageById.get(repId); // null if non-listing (filtered out)
       heroImageUrl = resolveDeliveryUrl(repImg ?? null);
     }
 
-    // Attempt b: first listing image.
+    // Attempt b: first listing image (fallback when no valid representative).
     if (!heroImageUrl) {
       const listingImg = firstListingImageByRoomId.get(room.id);
       heroImageUrl = resolveDeliveryUrl(listingImg ?? null);
     }
 
-    // Attempt c: first inspiration image.
-    if (!heroImageUrl) {
-      const inspImg = inspirationFallbackImageByRoomId.get(room.id);
-      heroImageUrl = resolveDeliveryUrl(inspImg ?? null);
-    }
+    // Attempt c (implicit): heroImageUrl remains null — room has no listing photos.
 
     // --- Dimensions + sqft ---
     const dimensions = formatRoomDimensions(room);
@@ -869,14 +838,20 @@ export async function getHomeCatalog(env: Env) {
   }
 
   return {
+    // C1: floors array only includes floors that have at least one active room.
+    // Floors with no active rooms (e.g. "all_levels" pseudo-floor) are still
+    // present here for completeness — they may have zero rooms but are useful
+    // for scope display.  The filter is on the rooms list within each floor.
     floors: floorRows.map((floor) => ({
       id: floor.id,
       key: floor.key,
       name: floor.name,
       levelOrder: floor.levelOrder,
+      // Only active rooms are in roomsByFloorId (the query above filtered is_active=true).
       rooms: roomsByFloorId.get(floor.id) ?? [],
     })),
-    // Backward-compatible flat rooms array (keeps existing callers working).
+    // Backward-compatible flat rooms array (active-only, keeps existing callers working).
+    // C1: roomRows was already fetched with WHERE is_active=true.
     rooms: roomRows,
   };
 }
@@ -897,9 +872,14 @@ export type EnrichedCatalogRoom = typeof rooms.$inferSelect & {
   /** Count of inspirational_image_rooms WHERE room_id=this. */
   inspirationCount: number;
   /**
-   * Cloudflare Images delivery URL for the representative/hero image, resolved
-   * via the fallback chain: representativeImageId → first listing → first
-   * inspiration → null.
+   * Cloudflare Images delivery URL for the representative/hero listing image.
+   *
+   * C3 (0005 REVISIONS): resolved via the LISTING-ONLY chain:
+   *   1. room_ai_summaries.representativeImageId (only if photo_category='listing')
+   *   2. first listing image for the room
+   *   3. null — room has no listing photos; render a placeholder
+   *
+   * Inspiration photos are NEVER a hero candidate.
    */
   heroImageUrl: string | null;
   /**
@@ -915,7 +895,15 @@ export type EnrichedCatalogRoom = typeof rooms.$inferSelect & {
   sqft: number | null;
 };
 
+/**
+ * Return a single active room by its numeric id.
+ * Returns undefined when the room does not exist or is inactive (C1).
+ */
 export async function getRoomById(env: Env, roomId: number) {
   const db = drizzle(env.DB);
-  return db.select().from(rooms).where(eq(rooms.id, roomId)).get();
+  return db
+    .select()
+    .from(rooms)
+    .where(and(eq(rooms.id, roomId), eq(rooms.isActive, true)))
+    .get();
 }

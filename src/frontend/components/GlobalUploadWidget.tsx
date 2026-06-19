@@ -14,14 +14,7 @@ import {
   FileUploadList,
   FileUploadTrigger,
 } from "@/components/ui/file-upload";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
+import { RoomSelect } from "@/components/ui/room-select";
 import {
   buildImageStatusUrl,
   createTrackedUploadStateFromResult,
@@ -147,47 +140,41 @@ export function GlobalUploadWidget() {
 
   const pageFlags = useMemo(() => {
     if (typeof window === "undefined") {
-      return { isListingPage: false };
+      return { isListingPage: false, isBlankCanvasPage: false };
     }
 
     const path = window.location.pathname;
     return {
       isListingPage: path.startsWith("/listing-photos"),
+      isBlankCanvasPage: path.startsWith("/admin/blank-canvas"),
     };
   }, []);
 
   const [catalogFloors, setCatalogFloors] = useState<CatalogFloor[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
-  const [selectedFloorKey, setSelectedFloorKey] = useState("lower_level");
-  const [selectedRoomId, setSelectedRoomId] = useState("");
+  // Listing-photo destination room (null = unassigned). The Lower/Upper floor
+  // toggle + per-floor filtering were removed in favour of the shared, fully
+  // floor-grouped + searchable <RoomSelect> (0005 §C4).
+  const [selectedRoomId, setSelectedRoomId] = useState<number | null>(null);
 
-  const lowerFloor = useMemo(
+  // Flat room list (across every floor) used only to resolve the chosen room's
+  // floor + name for the "Uploading to …" confirmation line below.
+  const allCatalogRooms = useMemo(
     () =>
-      catalogFloors.find((floor) => floor.key === "lower_level") ||
-      catalogFloors[0] ||
-      null,
+      catalogFloors.flatMap((floor) =>
+        (floor.rooms ?? []).map((room) => ({ ...room, floorName: floor.name })),
+      ),
     [catalogFloors],
   );
-  const upperFloor = useMemo(
-    () =>
-      catalogFloors.find((floor) => floor.key === "upper_level") ||
-      catalogFloors[catalogFloors.length - 1] ||
-      null,
-    [catalogFloors],
-  );
-  const isUpperFloorSelected = selectedFloorKey === upperFloor?.key;
-  const listingRoomsForSelectedFloor = useMemo(() => {
-    const selectedFloor = catalogFloors.find((floor) => floor.key === selectedFloorKey);
-    return selectedFloor?.rooms ?? [];
-  }, [catalogFloors, selectedFloorKey]);
   const selectedListingRoom = useMemo(
-    () =>
-      listingRoomsForSelectedFloor.find(
-        (room) => room.id === Number(selectedRoomId),
-      ) || null,
-    [listingRoomsForSelectedFloor, selectedRoomId],
+    () => allCatalogRooms.find((room) => room.id === selectedRoomId) || null,
+    [allCatalogRooms, selectedRoomId],
   );
-  const photoCategory = pageFlags.isListingPage ? "listing" : "inspirational";
+  const photoCategory = pageFlags.isBlankCanvasPage 
+    ? "ai_render" 
+    : pageFlags.isListingPage 
+      ? "listing" 
+      : "inspirational";
   const pendingUploadCount = useMemo(
     () =>
       files.filter((file) => {
@@ -259,9 +246,6 @@ export function GlobalUploadWidget() {
       }));
 
       setCatalogFloors(normalizedFloors);
-      if (!normalizedFloors.some((floor) => floor.key === selectedFloorKey)) {
-        setSelectedFloorKey(normalizedFloors[0]?.key ?? "lower_level");
-      }
     } catch (error) {
       setStatus({
         tone: "error",
@@ -270,24 +254,11 @@ export function GlobalUploadWidget() {
     } finally {
       setCatalogLoading(false);
     }
-  }, [pageFlags.isListingPage, selectedFloorKey]);
+  }, [pageFlags.isListingPage]);
 
   useEffect(() => {
     fetchCatalog();
   }, [fetchCatalog]);
-
-  useEffect(() => {
-    if (!selectedRoomId) {
-      return;
-    }
-
-    const existsInFloor = listingRoomsForSelectedFloor.some(
-      (room) => room.id === Number(selectedRoomId),
-    );
-    if (!existsInFloor) {
-      setSelectedRoomId("");
-    }
-  }, [listingRoomsForSelectedFloor, selectedRoomId]);
 
   useEffect(() => {
     setUploadStates((current) => {
@@ -521,8 +492,8 @@ export function GlobalUploadWidget() {
       }
       formData.append("isListingPhoto", String(pageFlags.isListingPage));
       formData.append("photoCategory", photoCategory);
-      if (pageFlags.isListingPage && selectedRoomId) {
-        formData.append("roomId", selectedRoomId);
+      if (pageFlags.isListingPage && selectedRoomId != null) {
+        formData.append("roomId", String(selectedRoomId));
       }
 
       const response = await fetch("/api/images/upload", {
@@ -530,7 +501,17 @@ export function GlobalUploadWidget() {
         body: formData,
       });
 
-      const payload = (await response.json()) as UploadApiResponse;
+      let payload: UploadApiResponse;
+      try {
+        const text = await response.text();
+        try {
+          payload = JSON.parse(text) as UploadApiResponse;
+        } catch (e) {
+          throw new Error(`Server returned non-JSON response (${response.status}): ${text.slice(0, 150)}`);
+        }
+      } catch (e) {
+        throw e instanceof Error ? e : new Error(String(e));
+      }
 
       if (!response.ok || !payload.success) {
         throw new Error(
@@ -654,54 +635,14 @@ export function GlobalUploadWidget() {
                     </span>
                   </div>
 
-                  <div className="flex items-center justify-between rounded-md bg-background/80 px-3 py-2 ring-1 ring-border/40">
-                    <span
-                      className={cn(
-                        "text-[11px] font-medium",
-                        !isUpperFloorSelected ? "text-foreground" : "text-muted-foreground",
-                      )}
-                    >
-                      {lowerFloor?.name ?? "Downstairs"}
-                    </span>
-                    <Switch
-                      checked={isUpperFloorSelected}
-                      onCheckedChange={(checked) => {
-                        const nextFloor = checked ? upperFloor?.key : lowerFloor?.key;
-                        if (nextFloor) {
-                          setSelectedFloorKey(nextFloor);
-                        }
-                      }}
-                      aria-label="Toggle listing floor for quick upload"
-                      disabled={catalogLoading || !lowerFloor || !upperFloor}
-                    />
-                    <span
-                      className={cn(
-                        "text-[11px] font-medium",
-                        isUpperFloorSelected ? "text-foreground" : "text-muted-foreground",
-                      )}
-                    >
-                      {upperFloor?.name ?? "Upstairs"}
-                    </span>
-                  </div>
-
-                  <Select
+                  <RoomSelect
                     value={selectedRoomId}
-                    onValueChange={setSelectedRoomId}
+                    onChange={setSelectedRoomId}
                     disabled={catalogLoading}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue
-                        placeholder={catalogLoading ? "Loading rooms..." : "Select room"}
-                      />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {listingRoomsForSelectedFloor.map((room) => (
-                        <SelectItem key={room.id} value={String(room.id)}>
-                          {room.displayName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    placeholder="Select room (optional)"
+                    aria-label="Listing room"
+                    className="w-full"
+                  />
 
                   <p className="text-[11px] text-muted-foreground">
                     {selectedListingRoom

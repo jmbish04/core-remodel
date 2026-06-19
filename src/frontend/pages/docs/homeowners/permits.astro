@@ -1,0 +1,62 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Homeowner Guide: Permits Intelligence Pipeline"
+  description="Understanding how the core-remodel permits intelligence pipeline works."
+>
+  <main class="container mx-auto max-w-4xl px-4 py-8 pb-12 prose prose-slate dark:prose-invert">
+    <h1>Permits Intelligence Pipeline</h1>
+    <p class="lead">
+      The Permits Intelligence Pipeline autonomously monitors the San Francisco Department of Building Inspection (SF DBI) databases to track the status of your remodeling permits and evaluate contractor workloads in real-time.
+    </p>
+
+    <h2>How the Pipeline Operates</h2>
+    <p>
+      The core pipeline is built on top of Cloudflare Workers and syncs directly with the SF DBI SODA API datasets. It performs background synchronization tasks to pull the latest permit data.
+    </p>
+    <ul>
+      <li><strong>Frequency:</strong> The synchronization runs daily at 14:00 UTC (and on demand from the admin dashboard).</li>
+      <li><strong>Dataset Sources:</strong> SF DBI Building Permits, Planning Department records, and Electrical/Plumbing Permits datasets.</li>
+      <li><strong>Execution:</strong> It fetches active records, compares them against known local states, and computes differences to detect status changes.</li>
+    </ul>
+
+    <h2>Configuring the Pipeline</h2>
+    <p>
+      For the pipeline to correctly target your property, it uses configuration parameters such as your <strong>Property Address</strong>, <strong>Block Number</strong>, and <strong>Lot Number</strong>. Because SF DBI records often contain variations in block and lot formatting (e.g., lot "005" vs "5"), you can specify multiple variants.
+    </p>
+    <p>
+      To update these settings, navigate to the <a href="/admin/config">Admin Configuration</a> dashboard. Any changes saved there are instantly picked up by the next hourly background sync.
+    </p>
+
+    <h2>Contractor Permit Portfolio Extraction</h2>
+    <p>
+      A key feature of the pipeline is <strong>Contractor Intelligence</strong>. By analyzing the active and closed permits filed for your property, the system can automatically extract the names of general contractors, architects, and specialty sub-contractors associated with your project.
+    </p>
+    
+    <h3>Cross-Referencing Workloads</h3>
+    <p>
+      Once a contractor is extracted (or manually added via the Bid Portfolios dashboard), the system leverages an AI-powered agent to evaluate that contractor's overall workload across the entire city.
+    </p>
+    <ol>
+      <li>The agent queries the SF DBI API using the contractor's name.</li>
+      <li>It accounts for variations in spelling or abbreviations to capture all matching records.</li>
+      <li>The retrieved permits are mapped onto a timeline to distinguish between <em>closed</em>, <em>in-progress</em>, and <em>recently opened</em> permits.</li>
+    </ol>
+
+    <h3>Monitoring Delays & Project Prioritization</h3>
+    <p>
+      Understanding a contractor's active permit portfolio outside of your specific remodel provides critical intelligence:
+    </p>
+    <ul>
+      <li><strong>Workload Spikes:</strong> If a contractor is experiencing delays on your house, the system can verify if they have recently pulled multiple new permits elsewhere, indicating their attention might be divided.</li>
+      <li><strong>Timeline Alignment:</strong> By evaluating the average time it takes a contractor to close permits of similar types, the system sets realistic expectations for your project's milestones.</li>
+      <li><strong>Early Warnings:</strong> You receive actionable insights if the volume of a contractor's active work spikes unexpectedly.</li>
+    </ul>
+
+    <p>
+      To view a contractor's permit portfolio and AI-generated insights, visit the Contacts tab in the <a href="/admin/bid-portfolios">Bid Portfolios Dashboard</a> and click on a specific company.
+    </p>
+  </main>
+</BaseLayout>

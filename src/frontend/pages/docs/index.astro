@@ -1,0 +1,84 @@
+---
+import { docsAudienceGroups } from "@/lib/docs";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { BookOpen, User, HardHat, RefreshCw, ArrowRight } from "lucide-react";
+---
+
+<BaseLayout
+  title="Renovation Documentation — 126 Colby Remodel Mission Control"
+  description="Homeowner, contractor, and shared workflow guides for core-remodel pipeline."
+>
+  <main class="container mx-auto max-w-6xl px-4 py-8 pb-12 space-y-12">
+    <!-- Header -->
+    <header class="space-y-3 max-w-3xl">
+      <h1 class="text-4xl font-extrabold tracking-tight text-foreground sm:text-5xl flex items-center gap-3">
+        <BookOpen className="size-8 text-primary" />
+        Renovation Guide Center
+      </h1>
+      <p class="text-lg text-muted-foreground font-light leading-relaxed">
+        Select a guide below to understand the building workflows, permit tracking, AI photo editing, and collaborative scoping systems driving this project.
+      </p>
+    </header>
+
+    <!-- Audience Sections -->
+    <div class="space-y-12">
+      {docsAudienceGroups.map((group) => {
+        // Choose appropriate icon
+        const IconComponent = 
+          group.id === "homeowners" ? User : 
+          group.id === "contractors" ? HardHat : RefreshCw;
+
+        return (
+          <section class="space-y-6">
+            <header class="flex items-center gap-3 border-b border-border/30 pb-3">
+              <div class="flex size-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <IconComponent className="size-4.5" />
+              </div>
+              <div>
+                <h2 class="text-xl font-bold tracking-tight text-foreground">
+                  {group.title}
+                </h2>
+                <p class="text-xs text-muted-foreground font-light">{group.summary}</p>
+              </div>
+            </header>
+
+            <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+              {group.pages.map((page) => (
+                <Card className="flex flex-col justify-between group overflow-hidden border-border/40 bg-card/40 hover:bg-card/70 hover:border-border transition-all duration-300 ring-1 ring-border/20 shadow-sm">
+                  <CardHeader className="space-y-2.5">
+                    <div class="flex items-center justify-between">
+                      <span class="inline-flex items-center rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold text-primary uppercase tracking-wider">
+                        {page.status}
+                      </span>
+                    </div>
+                    <CardTitle className="text-base font-semibold group-hover:text-primary transition-colors line-clamp-1">
+                      {page.shortTitle}
+                    </CardTitle>
+                    <CardDescription className="text-xs leading-relaxed text-muted-foreground font-light line-clamp-3">
+                      {page.summary}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="pt-0">
+                    <a 
+                      href={page.href}
+                      class={cn(
+                        buttonVariants({ variant: "ghost", size: "sm" }), 
+                        "w-full justify-between px-2 text-xs font-medium hover:bg-primary/5 hover:text-primary group/btn"
+                      )}
+                    >
+                      <span>Read Guide</span>
+                      <ArrowRight className="size-3.5 transform group-hover/btn:translate-x-1 transition-transform" />
+                    </a>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  </main>
+</BaseLayout>

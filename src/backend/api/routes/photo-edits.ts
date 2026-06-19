@@ -803,15 +803,24 @@ photoEditsRouter.post("/sessions/:sessionId/revisions", async (c) => {
       }
 
       const sourceBytes = new Uint8Array(await sourceResponse.arrayBuffer());
-      const aiPayload = await c.env.AI.run(model as any, {
-        prompt,
-        image: Array.from(sourceBytes),
-        strength,
-        num_steps: numSteps,
-        guidance,
-      });
-      const generatedBytes = await toImageBytes(aiPayload);
-      const generatedBlob = new Blob([generatedBytes.buffer as ArrayBuffer], { type: "image/png" });
+      // Retired Workers AI Stable Diffusion 1.5 in favor of Gemini 3 Pro Image via
+      // Cloudflare AI Gateway (faithful, controlled). The legacy SD params
+      // (model/strength/numSteps/guidance) are no longer used by this path.
+      const sourceMime = sourceResponse.headers.get("content-type") || "image/jpeg";
+      let sourceB64 = "";
+      const b64Chunk = 0x8000;
+      for (let i = 0; i < sourceBytes.length; i += b64Chunk) {
+        sourceB64 += String.fromCharCode(...sourceBytes.subarray(i, i + b64Chunk));
+      }
+      const editedBase64 = await processImageEdit(c.env, prompt, [
+        { data: btoa(sourceB64), mimeType: sourceMime },
+      ]);
+      if (!editedBase64) {
+        return c.json({ error: "Gemini returned no image for this edit." }, 500);
+      }
+      const generatedBlob = await (
+        await fetch(`data:image/png;base64,${editedBase64}`)
+      ).blob();
 
       uploadFile = new File([generatedBlob], `render-${sessionId}-${Date.now()}.png`, {
         type: "image/png",

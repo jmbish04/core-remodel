@@ -1,0 +1,19 @@
+---
+import { BidPortfoliosApp } from "@/components/BidPortfoliosApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Bid Portfolios - 126 Colby"
+  description="Manage contacts and bid portfolios for contractor outreach."
+>
+  <main class="container mx-auto px-4 py-8">
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold">Bid Portfolios</h1>
+      <p class="mt-2 text-sm text-muted-foreground">
+        Create and manage bid portfolios to share with contractors, architects, and engineers.
+      </p>
+    </div>
+    <BidPortfoliosApp client:only="react" />
+  </main>
+</BaseLayout>

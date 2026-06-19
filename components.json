@@ -22,6 +22,7 @@
     "hooks": "src/frontend/hooks"
   },
   "registries": {
+    "@bundui": "https://bundui.io/api/registry/{name}.json",
     "@diceui": "https://diceui.com/r/{name}.json",
     "@spectrumui": "https://ui.spectrumhq.in/r/{name}.json",
     "@efferd": "https://efferd.com/r/{name}.json",

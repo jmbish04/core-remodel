@@ -8,6 +8,7 @@ Three distinct API shapes:
 import io
 import os
 import tempfile
+from pathlib import Path
 
 from PIL import Image
 
@@ -18,7 +19,7 @@ def _upload_fal(path, fal_key):
     import fal_client
 
     os.environ["FAL_KEY"] = fal_key
-    return fal_client.upload_file(path)
+    return fal_client.upload_file(Path(path))
 
 
 def _upload_bytes_fal(data, fal_key, suffix=".png"):
@@ -34,7 +35,7 @@ def _upload_bytes_fal(data, fal_key, suffix=".png"):
     try:
         with os.fdopen(fd, "wb") as fh:
             fh.write(data)
-        return fal_client.upload_file(path)
+        return fal_client.upload_file(Path(path))
     finally:
         try:
             os.remove(path)

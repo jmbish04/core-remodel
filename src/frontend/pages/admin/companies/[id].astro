@@ -1,0 +1,15 @@
+---
+import { CompanyViewportApp } from "@/components/companies/CompanyViewportApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+
+const { id } = Astro.params;
+---
+
+<BaseLayout
+  title={`Company Viewport - 126 Colby`}
+  description="Manage company details, portfolio, permits, and intelligence."
+>
+  <main class="container mx-auto px-4 py-8">
+    <CompanyViewportApp companyId={Number(id)} client:only="react" />
+  </main>
+</BaseLayout>

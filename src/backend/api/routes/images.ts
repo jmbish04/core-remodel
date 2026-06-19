@@ -8,6 +8,7 @@ import { Hono } from "hono";
 
 import {
   aiEdits,
+  floors,
   imageUploadStaging,
   imageReviewHighlights,
   imageReviews,
@@ -32,6 +33,114 @@ import {
 import type { ImageProcessingWorkflowParams } from "../../services/image-processor/workflow";
 
 const imagesRouter = new Hono<{ Bindings: Env }>();
+
+// ---------------------------------------------------------------------------
+// Inspiration scope + category constants
+// ---------------------------------------------------------------------------
+
+/**
+ * Valid inspiration scope values stored in images.inspiration_scope.
+ *   "room"  — tied to specific rooms via inspirational_image_rooms (default)
+ *   "level" — applies to every active room on a floor; scopeFloorId must be set
+ *   "home"  — applies to all active rooms; no per-room rows
+ */
+const VALID_INSPIRATION_SCOPES = ["room", "level", "home"] as const;
+type InspirationScope = (typeof VALID_INSPIRATION_SCOPES)[number];
+
+/**
+ * Canonical inspiration category list used for AI suggestion and /review UI.
+ * This list is the single source of truth — the frontend must derive its
+ * category picker from this list via the API contract.
+ */
+const INSPIRATION_CATEGORIES = [
+  "Interior Doors",
+  "Lighting",
+  "Light Switches",
+  "Drywall Finishes",
+  "Flooring",
+  "Paint Colors",
+  "Trim/Baseboards",
+  "Hardware",
+  "Tile",
+  "Countertops",
+  "Cabinets",
+  "Other",
+] as const;
+type InspirationCategory = (typeof INSPIRATION_CATEGORIES)[number];
+
+function isValidInspirationScope(value: unknown): value is InspirationScope {
+  return (
+    typeof value === "string" &&
+    (VALID_INSPIRATION_SCOPES as readonly string[]).includes(value)
+  );
+}
+
+function isValidInspirationCategory(value: unknown): value is InspirationCategory {
+  return (
+    typeof value === "string" &&
+    (INSPIRATION_CATEGORIES as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * Suggests an inspiration category for an image using Workers AI vision.
+ * Returns one of the INSPIRATION_CATEGORIES strings, or null on failure.
+ * Does NOT persist the result — the caller decides whether to PATCH.
+ */
+async function suggestInspirationCategory(
+  env: Env,
+  imageDeliveryUrl: string,
+): Promise<InspirationCategory | null> {
+  const categoryList = INSPIRATION_CATEGORIES.join(", ");
+  const prompt = `You are helping categorize a home remodel inspiration photo.
+
+Look at this image and classify it into exactly ONE of the following categories:
+${categoryList}
+
+Rules:
+- Return ONLY the category name, nothing else.
+- If the image could fit multiple categories, choose the most prominent one.
+- If none of the categories fit, return "Other".
+- Do not include punctuation, quotes, or explanation.`;
+
+  try {
+    const raw = await env.AI.run(
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast" as Parameters<typeof env.AI.run>[0],
+      {
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              { type: "image_url", image_url: { url: imageDeliveryUrl } },
+            ],
+          },
+        ],
+        max_tokens: 32,
+      } as Parameters<typeof env.AI.run>[1],
+    );
+
+    const response =
+      raw && typeof raw === "object" && "response" in raw
+        ? String((raw as Record<string, unknown>).response ?? "").trim()
+        : "";
+
+    // Normalise the response: strip quotes/punctuation, trim, find match
+    const cleaned = response.replace(/^["']|["']$/g, "").trim();
+    if (isValidInspirationCategory(cleaned)) {
+      return cleaned;
+    }
+    // Case-insensitive fallback
+    const matched = INSPIRATION_CATEGORIES.find(
+      (cat) => cat.toLowerCase() === cleaned.toLowerCase(),
+    );
+    return matched ?? "Other";
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 type HighlightType = "like" | "dislike";
 type ProcessingStatus = "queued" | "processing" | "processed" | "failed";
@@ -688,7 +797,18 @@ async function hydrateMissingDeliveryTokensForImages(params: {
 
 /**
  * POST /api/images/upload
- * Upload images and enqueue background AI analysis
+ * Upload images and enqueue background AI analysis.
+ *
+ * Scope-aware fields (inspirational uploads only):
+ *   scope   — "room" | "level" | "home" (default "room")
+ *   floorId — integer floor ID; required when scope="level"
+ *
+ * Scope storage rules (0005 REVISIONS — stops fan-out):
+ *   scope="room"  → insert per-room rows in inspirational_image_rooms (only active rooms)
+ *   scope="level" → set inspiration_scope="level" + scope_floor_id=floorId; no per-room rows
+ *   scope="home"  → set inspiration_scope="home"; no per-room rows
+ *
+ * C2: room-scoped uploads reject inactive/unknown room IDs.
  */
 imagesRouter.post("/upload", async (c) => {
   try {
@@ -733,32 +853,86 @@ imagesRouter.post("/upload", async (c) => {
     const db = drizzle(c.env.DB);
     await ensureHomeCatalogSeed(c.env);
 
+    // --- Inspiration scope resolution ---
+    const rawScope = formData.get("scope");
+    const inspirationScope: InspirationScope =
+      isValidInspirationScope(rawScope) ? rawScope : "room";
+
+    const rawFloorId = formData.get("floorId");
+    const requestedFloorId =
+      typeof rawFloorId === "string" && rawFloorId.trim()
+        ? Math.trunc(Number(rawFloorId.trim()))
+        : null;
+
+    // Validate scope=level requires a floorId
+    if (
+      photoCategory === "inspirational" &&
+      inspirationScope === "level" &&
+      (requestedFloorId === null || !Number.isFinite(requestedFloorId) || requestedFloorId <= 0)
+    ) {
+      return c.json(
+        { error: "floorId is required when scope is 'level'" },
+        400,
+      );
+    }
+
+    // Verify floor exists when scope=level
+    let resolvedFloorId: number | null = null;
+    if (photoCategory === "inspirational" && inspirationScope === "level" && requestedFloorId) {
+      const floorRecord = await db
+        .select()
+        .from(floors)
+        .where(eq(floors.id, requestedFloorId))
+        .get();
+      if (!floorRecord) {
+        return c.json({ error: "Floor not found" }, 404);
+      }
+      resolvedFloorId = floorRecord.id;
+    }
+
     const requestedRoomId = parseRoomIdInput(formData.get("roomId"));
+    // C2: listing photos must map to an active room
     const selectedRoom = requestedRoomId
-      ? await db.select().from(rooms).where(eq(rooms.id, requestedRoomId)).get()
+      ? await db
+          .select()
+          .from(rooms)
+          .where(and(eq(rooms.id, requestedRoomId), eq(rooms.isActive, true)))
+          .get()
       : null;
-    const requestedInspirationalRoomIds = parseRoomIds(
-      formData.getAll("roomIds"),
-    );
+
+    // For room-scoped inspirational uploads, validate that all target rooms are active
+    const requestedInspirationalRoomIds =
+      inspirationScope === "room"
+        ? parseRoomIds(formData.getAll("roomIds"))
+        : [];
     const selectedInspirationalRooms =
       requestedInspirationalRoomIds.length > 0
         ? await db
             .select()
             .from(rooms)
-            .where(inArray(rooms.id, requestedInspirationalRoomIds))
+            .where(
+              and(
+                inArray(rooms.id, requestedInspirationalRoomIds),
+                eq(rooms.isActive, true),
+              ),
+            )
             .all()
         : [];
 
     if (photoCategory === "listing" && requestedRoomId && !selectedRoom) {
-      return c.json({ error: "Selected room was not found" }, 404);
+      return c.json(
+        { error: "Selected room was not found or is not an active room" },
+        404,
+      );
     }
     if (
       photoCategory === "inspirational" &&
+      inspirationScope === "room" &&
       requestedInspirationalRoomIds.length > 0 &&
       selectedInspirationalRooms.length !== requestedInspirationalRoomIds.length
     ) {
       return c.json(
-        { error: "One or more selected inspirational rooms were not found" },
+        { error: "One or more selected inspirational rooms were not found or are inactive" },
         404,
       );
     }
@@ -766,10 +940,15 @@ imagesRouter.post("/upload", async (c) => {
     const roomHint =
       selectedRoom?.roomName || selectedInspirationalRooms[0]?.roomName || null;
     const mappingCategory = toMappingCategory(photoCategory, isListingPhoto);
+
+    // level/home-scoped photos are considered "mapped" immediately (no per-room rows needed)
     const mappedOnUpload =
       photoCategory === "listing"
         ? Boolean(selectedRoom)
-        : selectedInspirationalRooms.length > 0;
+        : inspirationScope === "level" || inspirationScope === "home"
+          ? true
+          : selectedInspirationalRooms.length > 0;
+
     const selectedInspirationalRoomIds = selectedInspirationalRooms.map(
       (room) => room.id,
     );
@@ -859,11 +1038,16 @@ imagesRouter.post("/upload", async (c) => {
                 uploadFingerprint.sourceFilenameNormalized,
               sourceFileSize: uploadFingerprint.sourceFileSize,
               sourceFileMd5: uploadFingerprint.sourceFileMd5,
+              // Scope fields (0005 REVISIONS)
+              inspirationScope: photoCategory === "inspirational" ? inspirationScope : "room",
+              scopeFloorId: resolvedFloorId,
             })
             .run();
 
+          // Only insert per-room rows for room-scoped inspiration (C2 + no fan-out rule)
           if (
             photoCategory === "inspirational" &&
+            inspirationScope === "room" &&
             selectedInspirationalRoomIds.length > 0
           ) {
             await db
@@ -1213,6 +1397,16 @@ imagesRouter.get("/mapping/pending", async (c) => {
 /**
  * POST /api/images/mapping/apply
  * Applies room mapping in bulk for pending listing/inspirational uploads.
+ *
+ * Scope-aware fields (inspirational only):
+ *   scope   — "room" | "level" | "home" (default "room")
+ *   floorId — integer floor ID; required when scope="level"
+ *   roomIds — required only when scope="room"
+ *
+ * Scope storage rules (0005 REVISIONS — no fan-out):
+ *   scope="room"  → insert per-room rows (C2: only is_active=true rooms accepted)
+ *   scope="level" → set inspiration_scope="level" + scope_floor_id; delete per-room rows
+ *   scope="home"  → set inspiration_scope="home"; delete per-room rows
  */
 imagesRouter.post("/mapping/apply", async (c) => {
   try {
@@ -1271,13 +1465,17 @@ imagesRouter.post("/mapping/apply", async (c) => {
       if (!Number.isFinite(roomId) || roomId <= 0) {
         return c.json({ error: "roomId is required for listing mapping" }, 400);
       }
+      // C2: listing photos must map to an active room
       const selectedRoom = await db
         .select()
         .from(rooms)
-        .where(eq(rooms.id, Math.trunc(roomId)))
+        .where(and(eq(rooms.id, Math.trunc(roomId)), eq(rooms.isActive, true)))
         .get();
       if (!selectedRoom) {
-        return c.json({ error: "Selected room was not found" }, 404);
+        return c.json(
+          { error: "Selected room was not found or is not an active room" },
+          404,
+        );
       }
 
       await chunkExecute(imageIds, async (chunk) => {
@@ -1317,26 +1515,115 @@ imagesRouter.post("/mapping/apply", async (c) => {
       });
     }
 
-    const roomIds = parseRoomIds(body.roomIds);
-    if (roomIds.length === 0) {
+    // --- Inspirational mapping with scope ---
+    const rawScope = typeof body.scope === "string" ? body.scope : "room";
+    const inspirationScope: InspirationScope = isValidInspirationScope(rawScope)
+      ? rawScope
+      : "room";
+
+    const rawFloorId =
+      body.floorId !== null && body.floorId !== undefined
+        ? Number(body.floorId)
+        : null;
+    const requestedFloorId =
+      rawFloorId !== null && Number.isFinite(rawFloorId) && rawFloorId > 0
+        ? Math.trunc(rawFloorId)
+        : null;
+
+    if (
+      inspirationScope === "level" &&
+      (requestedFloorId === null)
+    ) {
       return c.json(
-        { error: "roomIds is required for inspirational mapping" },
+        { error: "floorId is required when scope is 'level'" },
         400,
       );
     }
+
+    // scope=level: verify floor exists
+    let resolvedFloorId: number | null = null;
+    if (inspirationScope === "level" && requestedFloorId) {
+      const floorRecord = await db
+        .select()
+        .from(floors)
+        .where(eq(floors.id, requestedFloorId))
+        .get();
+      if (!floorRecord) {
+        return c.json({ error: "Floor not found" }, 404);
+      }
+      resolvedFloorId = floorRecord.id;
+    }
+
+    if (inspirationScope === "level" || inspirationScope === "home") {
+      // No fan-out: store scope on the image itself, remove any stale per-room rows
+      await chunkExecute(imageIds, async (chunk) => {
+        await db
+          .delete(inspirationalImageRooms)
+          .where(inArray(inspirationalImageRooms.imageId, chunk))
+          .run();
+      });
+
+      await chunkExecute(imageIds, async (chunk) => {
+        await db
+          .update(images)
+          .set({
+            inspirationScope,
+            scopeFloorId: resolvedFloorId,
+            roomId: null,
+          })
+          .where(inArray(images.id, chunk))
+          .run();
+      });
+
+      await syncImageUploadStagingRows(
+        db,
+        imageIds.map((imageId) => ({
+          imageId,
+          photoCategory: "inspirational",
+          mapped: true,
+        })),
+      );
+
+      return c.json({
+        success: true,
+        mappedCount: imageIds.length,
+        photoCategory: "inspirational",
+        scope: inspirationScope,
+        floorId: resolvedFloorId,
+      });
+    }
+
+    // scope=room: existing per-room behavior, C2 enforced
+    const roomIds = parseRoomIds(body.roomIds);
+    if (roomIds.length === 0) {
+      return c.json(
+        { error: "roomIds is required for inspirational mapping with scope='room'" },
+        400,
+      );
+    }
+    // C2: only active rooms
     const selectedRooms = await chunkQuery(roomIds, async (chunk) => {
       return await db
         .select()
         .from(rooms)
-        .where(inArray(rooms.id, chunk))
+        .where(and(inArray(rooms.id, chunk), eq(rooms.isActive, true)))
         .all();
     });
     if (selectedRooms.length !== roomIds.length) {
       return c.json(
-        { error: "One or more selected rooms were not found" },
+        { error: "One or more selected rooms were not found or are inactive" },
         404,
       );
     }
+
+    // Clear any previous scope data and per-room rows
+    await chunkExecute(imageIds, async (chunk) => {
+      await db
+        .update(images)
+        .set({ inspirationScope: "room", scopeFloorId: null })
+        .where(inArray(images.id, chunk))
+        .run();
+    });
 
     await chunkExecute(imageIds, async (chunk) => {
       await db
@@ -1388,6 +1675,7 @@ imagesRouter.post("/mapping/apply", async (c) => {
       success: true,
       mappedCount: imageIds.length,
       photoCategory: "inspirational",
+      scope: "room",
       rooms: selectedRooms.map((room) => ({
         id: room.id,
         roomName: room.roomName,
@@ -2049,6 +2337,155 @@ imagesRouter.post("/tags", async (c) => {
     return c.json(
       {
         error: "Failed to create tag",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * GET /api/images/realtime
+ * WebSocket upgrade for live upload/processing progress. Proxied to the
+ * ESTIMATE_COLLAB "uploads" room Durable Object, which completes the 101
+ * handshake.
+ *
+ * MUST stay registered before `/:id` — Hono matches in registration order, so a
+ * `/:id` ahead of this captures `/api/images/realtime` (id="realtime") and
+ * returns 404 (the bug this fixes).
+ */
+imagesRouter.get("/realtime", async (c) => {
+  if (c.req.header("Upgrade") !== "websocket") {
+    return c.json({ error: "Expected WebSocket upgrade" }, 400);
+  }
+  const id = c.env.ESTIMATE_COLLAB.idFromName("uploads");
+  const stub = c.env.ESTIMATE_COLLAB.get(id);
+  // Forward the raw upgrade request (preserves the Upgrade header) to the DO.
+  // Legitimate WS-proxy use of stub.fetch — not RPC-over-HTTP.
+  return stub.fetch(c.req.raw);
+});
+
+// ---------------------------------------------------------------------------
+// Inspiration scoped listing + categorization endpoints (0005 REVISIONS)
+// These MUST be registered before /:id so Hono does not swallow them.
+// The full implementations are appended at the bottom; these are the
+// canonical registration slots.
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/images/inspiration/scoped
+ * Lists level/home-scoped inspiration images with optional grouping.
+ * Registration must precede /:id to avoid path capture.
+ */
+imagesRouter.get("/inspiration/scoped", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const rawScope = c.req.query("scope");
+    const rawFloorId = c.req.query("floorId");
+    const categoryFilter = c.req.query("category")?.trim() || null;
+    const uncategorizedOnly = c.req.query("uncategorizedOnly") === "true";
+    const groupBy = c.req.query("groupBy");
+
+    if (rawScope !== "level" && rawScope !== "home") {
+      return c.json(
+        {
+          error: "scope must be 'level' or 'home'",
+          validScopes: ["level", "home"],
+        },
+        400,
+      );
+    }
+
+    const inspirationScope = rawScope as "level" | "home";
+    let resolvedFloorId: number | null = null;
+
+    if (inspirationScope === "level") {
+      const requestedFloorId = rawFloorId ? Math.trunc(Number(rawFloorId)) : null;
+      if (!requestedFloorId || !Number.isFinite(requestedFloorId) || requestedFloorId <= 0) {
+        return c.json(
+          { error: "floorId is required when scope is 'level'" },
+          400,
+        );
+      }
+      const floorRecord = await db
+        .select()
+        .from(floors)
+        .where(eq(floors.id, requestedFloorId))
+        .get();
+      if (!floorRecord) {
+        return c.json({ error: "Floor not found" }, 404);
+      }
+      resolvedFloorId = floorRecord.id;
+    }
+
+    const whereConditions =
+      inspirationScope === "level" && resolvedFloorId !== null
+        ? and(
+            eq(images.inspirationScope, "level"),
+            eq(images.scopeFloorId, resolvedFloorId),
+          )
+        : eq(images.inspirationScope, "home");
+
+    let imageRows = await db.select().from(images).where(whereConditions).all();
+
+    if (categoryFilter) {
+      imageRows = imageRows.filter((img) => img.inspirationCategory === categoryFilter);
+    }
+    if (uncategorizedOnly) {
+      imageRows = imageRows.filter((img) => !img.inspirationCategory);
+    }
+
+    imageRows.sort((a, b) => {
+      const aTs = a.datetimeCreated ? new Date(a.datetimeCreated).getTime() : 0;
+      const bTs = b.datetimeCreated ? new Date(b.datetimeCreated).getTime() : 0;
+      return bTs - aTs;
+    });
+
+    const enriched = imageRows.map((img) => ({
+      ...img,
+      inspirationCategory: img.inspirationCategory ?? null,
+    }));
+
+    if (groupBy === "category") {
+      const groupMap = new Map<string, typeof enriched>();
+      for (const img of enriched) {
+        const key = img.inspirationCategory ?? "__uncategorized__";
+        const group = groupMap.get(key) ?? [];
+        group.push(img);
+        groupMap.set(key, group);
+      }
+      const sortedGroups = Array.from(groupMap.entries())
+        .sort(([a], [b]) => {
+          if (a === "__uncategorized__") return 1;
+          if (b === "__uncategorized__") return -1;
+          return a.localeCompare(b);
+        })
+        .map(([key, groupImages]) => ({
+          category: key === "__uncategorized__" ? null : key,
+          count: groupImages.length,
+          images: groupImages,
+        }));
+      return c.json({
+        success: true,
+        scope: inspirationScope,
+        floorId: resolvedFloorId,
+        groups: sortedGroups,
+        totalCount: enriched.length,
+      });
+    }
+
+    return c.json({
+      success: true,
+      scope: inspirationScope,
+      floorId: resolvedFloorId,
+      count: enriched.length,
+      images: enriched,
+    });
+  } catch (error) {
+    console.error("Scoped inspiration list error:", error);
+    return c.json(
+      {
+        error: "Failed to list scoped inspiration images",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       500,
@@ -2864,16 +3301,129 @@ imagesRouter.post("/search", async (c) => {
   }
 });
 
-imagesRouter.get("/realtime", async (c) => {
-  const upgradeHeader = c.req.header("Upgrade");
-  if (upgradeHeader !== "websocket") {
-    return c.json({ error: "Expected WebSocket upgrade" }, 400);
+/**
+ * PATCH /api/images/:id/inspiration-category
+ * Persists the inspiration category for an image.
+ *
+ * Body: { category: string }  — must be one of INSPIRATION_CATEGORIES or null to clear.
+ *
+ * Response: { success, imageId, inspirationCategory }
+ */
+imagesRouter.patch("/:id/inspiration-category", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const imageId = c.req.param("id");
+    const body = (await c.req.json()) as Record<string, unknown>;
+
+    // null/undefined clears the category
+    const rawCategory = body.category;
+    let nextCategory: string | null = null;
+
+    if (rawCategory !== null && rawCategory !== undefined && rawCategory !== "") {
+      if (!isValidInspirationCategory(rawCategory)) {
+        return c.json(
+          {
+            error: "Invalid inspiration category",
+            validCategories: INSPIRATION_CATEGORIES,
+          },
+          400,
+        );
+      }
+      nextCategory = rawCategory;
+    }
+
+    const image = await db
+      .select()
+      .from(images)
+      .where(eq(images.id, imageId))
+      .get();
+
+    if (!image) {
+      return c.json({ error: "Image not found" }, 404);
+    }
+
+    await db
+      .update(images)
+      .set({ inspirationCategory: nextCategory })
+      .where(eq(images.id, imageId))
+      .run();
+
+    return c.json({
+      success: true,
+      imageId,
+      inspirationCategory: nextCategory,
+    });
+  } catch (error) {
+    console.error("Set inspiration category error:", error);
+    return c.json(
+      {
+        error: "Failed to set inspiration category",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
   }
+});
 
-  const id = c.env.ESTIMATE_COLLAB.idFromName("uploads");
-  const stub = c.env.ESTIMATE_COLLAB.get(id);
+/**
+ * POST /api/images/:id/suggest-category
+ * Uses Workers AI (vision) to suggest an inspiration category for an image.
+ * Does NOT persist the result — frontend calls PATCH /:id/inspiration-category to confirm.
+ *
+ * Response: { success, imageId, suggestedCategory, validCategories }
+ */
+imagesRouter.post("/:id/suggest-category", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const imageId = c.req.param("id");
 
-  return stub.fetch(c.req.raw);
+    const image = await db
+      .select()
+      .from(images)
+      .where(eq(images.id, imageId))
+      .get();
+
+    if (!image) {
+      return c.json({ error: "Image not found" }, 404);
+    }
+
+    // Build delivery URL from the stored token
+    const deliveryToken = image.cfImageIdOptimized || image.cfImageIdOriginal;
+    let deliveryUrl: string | null = null;
+
+    if (deliveryToken) {
+      if (deliveryToken.startsWith("http://") || deliveryToken.startsWith("https://")) {
+        deliveryUrl = deliveryToken;
+      } else if (deliveryToken.includes("/")) {
+        deliveryUrl = `https://imagedelivery.net/${deliveryToken}/public`;
+      }
+    }
+
+    if (!deliveryUrl) {
+      return c.json(
+        { error: "Image has no resolvable delivery URL for vision analysis" },
+        400,
+      );
+    }
+
+    const suggestedCategory = await suggestInspirationCategory(c.env, deliveryUrl);
+
+    return c.json({
+      success: true,
+      imageId,
+      suggestedCategory,
+      validCategories: INSPIRATION_CATEGORIES,
+    });
+  } catch (error) {
+    console.error("Suggest category error:", error);
+    return c.json(
+      {
+        error: "Failed to suggest inspiration category",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
 });
 
 export { imagesRouter };

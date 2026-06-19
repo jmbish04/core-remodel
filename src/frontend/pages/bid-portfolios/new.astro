@@ -1,0 +1,19 @@
+---
+import { BidPortfolioIntakeWizardApp } from "@/components/bids/BidPortfolioIntakeWizardApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="New Bid Portfolio - 126 Colby"
+  description="Create a new bid portfolio package for a contractor."
+>
+  <main class="container mx-auto px-4 py-8">
+    <div class="mb-8">
+      <h1 class="text-3xl font-bold tracking-tight">Bid Intake Wizard</h1>
+      <p class="mt-2 text-sm text-muted-foreground">
+        Configure a custom bid package and select which rooms and information to share.
+      </p>
+    </div>
+    <BidPortfolioIntakeWizardApp client:only="react" />
+  </main>
+</BaseLayout>

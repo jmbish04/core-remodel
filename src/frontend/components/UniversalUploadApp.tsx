@@ -358,7 +358,17 @@ export function UniversalUploadApp() {
         method: "POST",
         body: formData,
       });
-      const payload = (await response.json()) as UploadApiResponse;
+      let payload: UploadApiResponse;
+      try {
+        const text = await response.text();
+        try {
+          payload = JSON.parse(text) as UploadApiResponse;
+        } catch (e) {
+          throw new Error(`Server returned non-JSON response (${response.status}): ${text.slice(0, 150)}`);
+        }
+      } catch (e) {
+        throw e instanceof Error ? e : new Error(String(e));
+      }
 
       if (!response.ok || !payload.success) {
         throw new Error(payload.error ?? "Upload failed");

@@ -1,0 +1,19 @@
+---
+import { CompaniesListApp } from "@/components/companies/CompaniesListApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Companies Directory - 126 Colby"
+  description="Manage companies, contractors, vendors, and their associated contacts."
+>
+  <main class="container mx-auto px-4 py-8">
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold tracking-tight">Companies Directory</h1>
+      <p class="mt-2 text-sm text-muted-foreground">
+        Manage business entities, contractors, vendors, and their associations.
+      </p>
+    </div>
+    <CompaniesListApp client:only="react" />
+  </main>
+</BaseLayout>

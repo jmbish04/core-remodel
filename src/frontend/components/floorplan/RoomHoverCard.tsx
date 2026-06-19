@@ -28,9 +28,10 @@
  *     not cover the room it describes.
  */
 
-import { ArrowUpRight, ImageOff, Ruler } from "lucide-react";
+import { ArrowUpRight, Ruler } from "lucide-react";
 import * as React from "react";
 
+import { HeroPlaceholder } from "@/components/room-view/hero-placeholder";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -191,7 +192,13 @@ export function RoomCardBody({
         className,
       )}
     >
-      {/* Hero image (or graceful empty state). */}
+      {/*
+        Hero image, or the shared "no listing photo yet" placeholder. C3
+        (REVISIONS.md): the catalog `heroImageUrl` is LISTING-only (null when the
+        room has no listing photo), so a null here means "no listing photo" — we
+        show the placeholder and NEVER fall back to an inspiration photo. The
+        compact placeholder drops its caption to fit the small card cleanly.
+      */}
       {heroImageUrl ? (
         // biome-ignore lint/performance/noImgElement: external delivery urls are expected
         <img
@@ -201,8 +208,8 @@ export function RoomCardBody({
           loading="lazy"
         />
       ) : (
-        <div className="flex aspect-[16/10] w-full items-center justify-center bg-muted/30 text-muted-foreground">
-          <ImageOff className="size-6" aria-hidden="true" />
+        <div className="aspect-[16/10] w-full">
+          <HeroPlaceholder size="sm" showCaption={false} />
         </div>
       )}
 

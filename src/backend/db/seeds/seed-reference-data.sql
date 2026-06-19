@@ -1,0 +1,93 @@
+-- Seed Bay Area Cities
+INSERT OR IGNORE INTO store_bayarea_cities (bay_area_city_name, distance_from_san_francisco, hub_route, hub_name) VALUES
+('San Francisco', '0 mi', 'A', 'SF Design District'),
+('San Jose', '48 mi', 'B', 'Silicon Valley & South Bay'),
+('Santa Clara', '44 mi', 'B', 'Silicon Valley & South Bay'),
+('Menlo Park', '32 mi', 'B', 'Silicon Valley & South Bay'),
+('Palo Alto', '33 mi', 'B', 'Silicon Valley & South Bay'),
+('San Carlos', '27 mi', 'C', 'Peninsula / Mid-Market'),
+('Belmont', '24 mi', 'C', 'Peninsula / Mid-Market'),
+('San Mateo', '20 mi', 'C', 'Peninsula / Mid-Market'),
+('Redwood City', '26 mi', 'C', 'Peninsula / Mid-Market'),
+('San Bruno', '12 mi', 'C', 'Peninsula / Mid-Market'),
+('Oakland', '12 mi', 'D', 'East Bay'),
+('Berkeley', '13 mi', 'D', 'East Bay'),
+('Emeryville', '11 mi', 'D', 'East Bay'),
+('Alameda', '14 mi', 'D', 'East Bay'),
+('Hayward', '25 mi', 'D', 'East Bay'),
+('Fremont', '36 mi', 'D', 'East Bay'),
+('Dublin', '37 mi', 'D', 'East Bay'),
+('Walnut Creek', '25 mi', 'D', 'East Bay'),
+('San Leandro', '18 mi', 'D', 'East Bay'),
+('Novato', '30 mi', 'E', 'North Bay'),
+('Mill Valley', '15 mi', 'E', 'North Bay'),
+('San Rafael', '18 mi', 'E', 'North Bay'),
+('Sausalito', '8 mi', 'E', 'North Bay');
+
+-- Seed Store Categories
+INSERT OR IGNORE INTO showroom_store_category (name, description, is_active) VALUES
+('Flooring', 'Hardwood, tile, stone, luxury vinyl, concrete', 1),
+('Kitchen Cabinetry', 'Custom and semi-custom kitchen cabinetry', 1),
+('Bathroom Vanities', 'Vanity units, custom bathroom cabinetry', 1),
+('Kitchen Countertops', 'Quartz, marble, granite, porcelain slab countertops', 1),
+('Bathroom Tile', 'Wall and floor tile for bathrooms', 1),
+('Plumbing Fixtures', 'Faucets, shower systems, bathtubs', 1),
+('Lighting', 'Decorative, recessed, under-cabinet, landscape', 1),
+('Appliances', 'Kitchen and laundry appliances', 1),
+('Doors & Hardware', 'Interior doors, entry doors, door hardware', 1),
+('Windows', 'Replacement windows, window treatments', 1),
+('Closet Systems', 'Custom closets, wardrobe systems, organization', 1),
+('Paint & Finishes', 'Interior and exterior paint, specialty finishes', 1),
+('Furniture', 'Living room, bedroom, dining furniture', 1),
+('Outdoor & Landscape', 'Outdoor furniture, planters, landscape materials', 1),
+('Smart Home', 'Home automation, smart locks, thermostats', 1),
+('Wall Coverings', 'Wallpaper, wall panels, decorative surfaces', 1),
+('Rugs & Textiles', 'Area rugs, curtains, upholstery fabric', 1),
+('Art & Accessories', 'Wall art, sculptures, decorative objects', 1),
+('Kitchen Backsplash', 'Specialty backsplash tile and materials', 1),
+('Architectural Elements', 'Molding, trim, columns, specialty features', 1),
+('Water Filtration', 'Whole-home and point-of-use water filtration', 1);
+
+-- Seed Product Areas
+INSERT OR IGNORE INTO store_product_area_def (room_name, name, description, is_active) VALUES
+-- Bathroom
+('Bathroom', 'Shower System', 'Complete shower systems including heads, valves, and controls', 1),
+('Bathroom', 'Freestanding Tub', 'Soaking tubs, Japanese tubs, freestanding designs', 1),
+('Bathroom', 'Vanity Unit', 'Bathroom vanity cabinetry and countertops', 1),
+('Bathroom', 'Bathroom Tile', 'Wall tile, floor tile, mosaic, accent tile', 1),
+('Bathroom', 'Toilet & Bidet', 'Smart toilets, wall-hung toilets, bidets', 1),
+('Bathroom', 'Bathroom Accessories', 'Towel bars, mirrors, medicine cabinets', 1),
+('Bathroom', 'Steam Shower', 'Steam generators, controls, enclosures', 1),
+-- Kitchen
+('Kitchen', 'Cooktop & Range', 'Gas, induction, dual-fuel ranges and cooktops', 1),
+('Kitchen', 'Refrigeration', 'Built-in, column, and counter-depth refrigerators', 1),
+('Kitchen', 'Dishwasher', 'Integrated and freestanding dishwashers', 1),
+('Kitchen', 'Kitchen Cabinetry', 'Custom, semi-custom, and stock cabinetry', 1),
+('Kitchen', 'Kitchen Countertop', 'Quartz, marble, granite, porcelain slab surfaces', 1),
+('Kitchen', 'Kitchen Backsplash', 'Backsplash tile, slab backsplash, specialty materials', 1),
+('Kitchen', 'Kitchen Sink & Faucet', 'Undermount, farmhouse sinks, pull-down faucets', 1),
+('Kitchen', 'Kitchen Lighting', 'Under-cabinet, pendant, recessed kitchen lighting', 1),
+('Kitchen', 'InvisaCook', 'Under-porcelain induction cooking system', 1),
+('Kitchen', 'Ventilation', 'Range hoods, downdraft, integrated ventilation', 1),
+('Kitchen', 'Water Filtration', 'Under-sink and whole-home water filtration', 1),
+-- Closet
+('Closet', 'Closet System', 'Built-in closet organization systems', 1),
+('Closet', 'Closet Island', 'Freestanding or built-in closet islands with drawers', 1),
+('Closet', 'Closet Lighting', 'LED closet lighting, motion-sensor lighting', 1),
+('Closet', 'Closet Accessories', 'Jewelry trays, shoe racks, valet rods', 1),
+('Closet', 'Grooming Station', 'Integrated vanity/makeup station within closet', 1),
+-- Living Areas
+('Living', 'Flooring', 'Hardwood, engineered wood, tile, luxury vinyl', 1),
+('Living', 'Interior Doors', 'Panel doors, pocket doors, barn doors', 1),
+('Living', 'Door Hardware', 'Handles, hinges, locks, smart locks', 1),
+('Living', 'Paint & Color', 'Interior paint, specialty finishes, color consulting', 1),
+('Living', 'Window Treatments', 'Blinds, shades, curtains, motorized systems', 1),
+('Living', 'Fireplaces', 'Gas, electric, and ethanol fireplaces and inserts', 1),
+-- Exterior
+('Exterior', 'Entry Door', 'Front door, security door, custom entry', 1),
+('Exterior', 'Outdoor Lighting', 'Landscape, pathway, and accent lighting', 1),
+('Exterior', 'Fencing & Gates', 'Privacy fencing, gates, railings', 1),
+-- General
+('General', 'Smart Home', 'Home automation, security, climate control', 1),
+('General', 'Electrical', 'Outlets, switches, panels, wiring', 1),
+('General', 'Architectural Millwork', 'Crown molding, baseboards, wainscoting, trim', 1);

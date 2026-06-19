@@ -1,0 +1,15 @@
+---
+import { RoomDetailBetaApp } from "@/components/room-detail-beta/RoomDetailBetaApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+
+const roomCode = Astro.params.slug || "";
+---
+
+<BaseLayout
+  title="Room Detail (Beta) - 126 Colby - Remodel Mission Control"
+  description="Retrofitted property-listing viewport for a single room in the remodel — budget, photos, scope, and supporting documents."
+>
+  <main class="container mx-auto px-4 py-4 lg:py-8 pb-12">
+    <RoomDetailBetaApp client:only="react" roomCode={roomCode} />
+  </main>
+</BaseLayout>

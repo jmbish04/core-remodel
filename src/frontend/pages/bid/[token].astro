@@ -1,0 +1,15 @@
+---
+import { BidPortfolioViewerApp } from "@/components/BidPortfolioViewerApp";
+import BidLayout from "@/layouts/BidLayout.astro";
+
+const { token } = Astro.params;
+---
+
+<BidLayout
+  title="Bid Portfolio"
+  description="View renovation project details."
+>
+  <main class="w-full max-w-full overflow-x-hidden">
+    <BidPortfolioViewerApp token={token} client:only="react" />
+  </main>
+</BidLayout>

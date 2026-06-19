@@ -26,6 +26,7 @@ import { ImageGallery, type ImageGalleryContextAction } from "@/components/ui/im
 import { ImageGalleryMasonry } from "@/components/ui/image-gallery-masonry";
 import { GridBento } from "@/components/ui/grid-bento";
 import { MultipleSelector, type MultipleSelectorOption } from "@/components/ui/multiple-selector";
+import { LevelRoomSelect } from "@/components/LevelRoomSelect";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Cropper, CropperArea, CropperImage, type CropperAreaData } from "@/components/ui/cropper";
@@ -38,6 +39,7 @@ import {
 } from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { RoomSelect } from "@/components/ui/room-select";
 import {
   Select,
   SelectContent,
@@ -45,7 +47,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   getTrackedUploadLabel,
@@ -414,13 +415,15 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteTargetImage, setDeleteTargetImage] = useState<ViewImageRecord | null>(null);
 
-  const [catalogFloors, setCatalogFloors] = useState<CatalogFloor[]>([]);
   const [catalogRooms, setCatalogRooms] = useState<CatalogRoom[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
 
   const [panelDisplayName, setPanelDisplayName] = useState("");
-  const [panelFloorKey, setPanelFloorKey] = useState("lower_level");
-  const [panelRoomId, setPanelRoomId] = useState("");
+  // Listing-photo room (null = unassigned). The Lower/Upper floor toggle + the
+  // per-floor filtering were removed in favour of the shared floor-grouped,
+  // searchable <RoomSelect> (0005 §C4). `panelRoomIds` (inspirational, multi-room)
+  // is a separate stream and stays on MultipleSelector/LevelRoomSelect.
+  const [panelRoomId, setPanelRoomId] = useState<number | null>(null);
   const [panelRoomIds, setPanelRoomIds] = useState<string[]>([]);
   const [tagOptions, setTagOptions] = useState<MultipleSelectorOption[]>([]);
   const [tagsLoading, setTagsLoading] = useState(false);
@@ -478,53 +481,6 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
   );
   const hasActiveProcessing =
     processingCounts.queued > 0 || processingCounts.processing > 0;
-
-  const lowerFloor = useMemo(
-    () =>
-      catalogFloors.find((floor) => floor.key === "lower_level") ||
-      catalogFloors[0] ||
-      null,
-    [catalogFloors],
-  );
-
-  const upperFloor = useMemo(
-    () =>
-      catalogFloors.find((floor) => floor.key === "upper_level") ||
-      catalogFloors[catalogFloors.length - 1] ||
-      null,
-    [catalogFloors],
-  );
-
-  const isPanelFloorUpper = panelFloorKey === upperFloor?.key;
-
-  const panelRoomsForSelectedFloor = useMemo(() => {
-    const floor = catalogFloors.find((item) => item.key === panelFloorKey);
-    return floor?.rooms || [];
-  }, [catalogFloors, panelFloorKey]);
-
-  const handlePanelFloorToggle = useCallback(
-    (checked: boolean) => {
-      const nextFloorKey = checked ? upperFloor?.key : lowerFloor?.key;
-      if (!nextFloorKey) {
-        return;
-      }
-      setPanelFloorKey(nextFloorKey);
-      setPanelRoomId("");
-    },
-    [lowerFloor?.key, upperFloor?.key],
-  );
-
-  const handlePanelRoomChange = useCallback(
-    (nextRoomId: string | null) => {
-      const resolved = nextRoomId ?? "";
-      setPanelRoomId(resolved);
-      const nextRoom = catalogRooms.find((room) => room.id === Number(resolved));
-      if (nextRoom && nextRoom.floorKey !== panelFloorKey) {
-        setPanelFloorKey(nextRoom.floorKey);
-      }
-    },
-    [catalogRooms, panelFloorKey],
-  );
 
   const loadImages = useCallback(async () => {
     setLoading(true);
@@ -660,7 +616,6 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
           : [],
       }));
 
-      setCatalogFloors(normalizedFloors);
       setCatalogRooms(normalizedFloors.flatMap((floor) => floor.rooms));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load room list");
@@ -737,42 +692,21 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
     setPanelTagDraft(detachedTags.join(", "));
 
     if (category === "listing") {
+      // Pre-fill the picker with the photo's EXISTING saved room (editing an
+      // assignment), else leave it unselected. This is not a "default" auto-select
+      // of an arbitrary/ghost room — it reflects the photo's current state.
       const matchedRoom =
         selectedImage.roomId !== null && selectedImage.roomId !== undefined
           ? catalogRooms.find((room) => room.id === selectedImage.roomId)
           : null;
 
-      if (matchedRoom) {
-        setPanelRoomId(String(matchedRoom.id));
-        setPanelFloorKey(matchedRoom.floorKey);
-      } else {
-        setPanelRoomId("");
-        if (lowerFloor) {
-          setPanelFloorKey(lowerFloor.key);
-        }
-      }
+      setPanelRoomId(matchedRoom ? matchedRoom.id : null);
       setPanelRoomIds([]);
     } else {
       setPanelRoomIds(selectedImage.roomIds.map((roomId) => String(roomId)));
-      setPanelRoomId("");
-      if (lowerFloor) {
-        setPanelFloorKey(lowerFloor.key);
-      }
+      setPanelRoomId(null);
     }
-  }, [category, catalogRooms, lowerFloor, selectedImage]);
-
-  useEffect(() => {
-    if (panelRoomId.length === 0) {
-      return;
-    }
-
-    const existsInFloor = panelRoomsForSelectedFloor.some(
-      (room) => room.id === Number(panelRoomId),
-    );
-    if (!existsInFloor) {
-      setPanelRoomId("");
-    }
-  }, [panelRoomId, panelRoomsForSelectedFloor]);
+  }, [category, catalogRooms, selectedImage]);
 
   useEffect(() => {
     if (!reviewMode) {
@@ -943,7 +877,7 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
   const saveSelectedImage = useCallback(async () => {
     if (!selectedImage) return;
 
-    if (category === "listing" && !panelRoomId) {
+    if (category === "listing" && panelRoomId == null) {
       toast.error("Listing photos must be assigned to a room");
       return;
     }
@@ -969,7 +903,7 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
       };
 
       if (category === "listing") {
-        const roomId = panelRoomId ? Number(panelRoomId) : null;
+        const roomId = panelRoomId;
         payload.roomId = roomId;
         const room = catalogRooms.find((entry) => entry.id === roomId);
         payload.roomType = room?.roomName ?? selectedImage.room;
@@ -1789,61 +1723,26 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
 
                     {category === "listing" ? (
                       <div className="space-y-2 rounded-lg bg-muted/20 p-3 ring-1 ring-border/30">
-                        <div className="flex items-center justify-between rounded-md bg-background/80 px-3 py-2 ring-1 ring-border/40">
-                          <span
-                            className={cn(
-                              "text-xs font-medium",
-                              !isPanelFloorUpper
-                                ? "text-foreground"
-                                : "text-muted-foreground",
-                            )}
-                          >
-                            {lowerFloor?.name ?? "Downstairs"}
-                          </span>
-                          <Switch
-                            checked={isPanelFloorUpper}
-                            onCheckedChange={handlePanelFloorToggle}
-                            aria-label="Toggle listing room floor"
-                            disabled={catalogLoading || !lowerFloor || !upperFloor}
-                          />
-                          <span
-                            className={cn(
-                              "text-xs font-medium",
-                              isPanelFloorUpper
-                                ? "text-foreground"
-                                : "text-muted-foreground",
-                            )}
-                          >
-                            {upperFloor?.name ?? "Upstairs"}
-                          </span>
-                        </div>
-
-                        <Select
+                        {/* Listing room — shared <RoomSelect> (§C4): floor-grouped,
+                            searchable, active-only, display name in the trigger. */}
+                        <RoomSelect
                           value={panelRoomId}
-                          onValueChange={handlePanelRoomChange}
+                          onChange={setPanelRoomId}
                           disabled={catalogLoading}
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue
-                              placeholder={
-                                catalogLoading
-                                  ? "Loading rooms..."
-                                  : "Select listing room"
-                              }
-                            />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {panelRoomsForSelectedFloor.map((room) => (
-                              <SelectItem key={room.id} value={String(room.id)}>
-                                {room.displayName}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          placeholder="Select listing room"
+                          aria-label="Listing room"
+                          className="w-full"
+                        />
                         <p className="text-xs text-muted-foreground">Room is required for listing photos.</p>
                       </div>
                     ) : (
                       <div className="space-y-2 rounded-lg bg-muted/20 p-3 ring-1 ring-border/30">
+                        <LevelRoomSelect
+                          rooms={catalogRooms}
+                          value={panelRoomIds}
+                          onChange={setPanelRoomIds}
+                          disabled={catalogLoading}
+                        />
                         <MultipleSelector
                           title="Tag inspirational rooms"
                           placeholder="Select one or more rooms"

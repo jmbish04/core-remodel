@@ -1,0 +1,19 @@
+---
+import { DialerApp } from "@/components/DialerApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Prospect Dialer - 126 Colby Remodel Mission Control"
+  description="Cold-calling machine for hiring independent drafters and architectural designers for permit-only sets."
+>
+  <main class="container mx-auto px-4 py-8">
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold tracking-tight">Prospect Dialer</h1>
+      <p class="mt-2 text-sm text-muted-foreground">
+        Pick a prospect → see their permit stats, a call script tailored to them, click-to-call, and a Gmail draft → log the call, rate them, leave notes.
+      </p>
+    </div>
+    <DialerApp client:only="react" />
+  </main>
+</BaseLayout>

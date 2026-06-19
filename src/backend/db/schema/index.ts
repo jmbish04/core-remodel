@@ -60,6 +60,11 @@ export * from "./images/image_edit_sessions";
 export * from "./images/image_edit_revisions";
 export * from "./images/image_upload_staging";
 export * from "./images/review_intelligence";
+export * from "./images/render_sessions";
+export * from "./images/render_canvases";
+export * from "./images/canvas_inspiration_references";
+export * from "./images/mood_board_generations";
+export * from "./images/photo_viewer_notes";
 
 export * from "./home/questionnaire";
 
@@ -76,3 +81,8 @@ export * from "./bid-portfolios/bid_portfolio_comments";
 export * from "./bid-portfolios/bid_portfolio_chat_messages";
 export * from "./bid-portfolios/bid_portfolio_selected_photos";
 export * from "./system/google-maps-usage";
+
+export * from "./dialer/prospects";
+export * from "./dialer/state";
+
+export * from "./showroom/index";

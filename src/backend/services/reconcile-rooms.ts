@@ -4,8 +4,9 @@
  * Purpose
  * -------
  * The room reconciliation pass for feature 0005 must repoint every FK that
- * references `rooms.id` from a source room to a target room before deleting
- * the source.  This service encodes that logic once, used by:
+ * references `rooms.id` from a source room to a target room before soft-deleting
+ * the source (setting is_active = false).  This service encodes that logic once,
+ * used by:
  *   1. scripts/0005-reconcile-rooms.ts  (one-off data-fix script, T0.3)
  *   2. Future admin API endpoints        (Room Management panel, T0.6+)
  *
@@ -16,10 +17,21 @@
  * - Every public function is idempotent: safe to call twice.  Guards use
  *   WHERE-condition checks (e.g. "does the row exist before deleting it?")
  *   so re-runs skip work already done rather than error-ing.
- * - FK repointing always happens BEFORE any DELETE to preserve referential
- *   integrity in case a run is interrupted mid-way.
+ * - FK repointing always happens BEFORE any soft-delete (is_active=false) to
+ *   preserve referential integrity in case a run is interrupted mid-way.
  * - Uniqueness constraints that would block naive UPDATE statements are
  *   handled with skip-or-delete logic described per function.
+ *
+ * C1 (0005 REVISIONS) — Soft-delete mandate
+ * ------------------------------------------
+ * Rooms are NEVER hard-deleted.  `mergeRooms` now calls `deactivateRoom` after
+ * repointing all FKs.  `deleteRoom` still exists (hard-delete) for testing /
+ * emergency admin use, but the reconciliation flow uses `deactivateRoom` only.
+ *
+ * Invariant enforced by `deactivateRoom`: before setting is_active=false the
+ * function verifies the room has ZERO images (listing or inspiration).  If it
+ * finds any, it throws so the caller can investigate rather than silently leaving
+ * orphan photos on an inactive room.
  *
  * FK table inventory (discovered by grep + runtime sqlite_master check)
  * ---------------------------------------------------------------------
@@ -57,7 +69,7 @@
  *   checklist_room_mappings    — unique(question_id, room_id): skip dupes.
  */
 
-import { and, eq, inArray, not } from "drizzle-orm";
+import { and, count, eq, inArray, not } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
@@ -114,13 +126,40 @@ export interface MergeRoomsResult {
   sourceId: number;
   targetId: number;
   rowsRepointed: Record<string, number>;
+  /** @deprecated Use sourceDeactivated — rooms are soft-deleted (is_active=false), not hard-deleted. */
   sourceDeleted: boolean;
+  /** True when the source room was successfully set is_active=false. */
+  sourceDeactivated: boolean;
 }
 
 export interface ReassignImagesResult {
   imageIds: string[];
   targetRoomId: number;
   rowsUpdated: number;
+}
+
+/**
+ * Result from `convertInspirationScope`.
+ * Reports how many inspiration images were promoted from room-scoped per-row
+ * fan-out to level-scoped or home-scoped records.
+ */
+export interface ConvertInspirationScopeResult {
+  /**
+   * Number of images promoted to scope='home' (had per-room rows covering
+   * every active room across all floors; per-room rows deleted after promotion).
+   */
+  promotedToHome: number;
+  /**
+   * Number of images promoted to scope='level' (had per-room rows covering
+   * every active room of exactly one floor; per-room rows deleted after promotion).
+   */
+  promotedToLevel: number;
+  /** Number of images examined that already had a non-"room" scope (idempotent skip). */
+  alreadyScoped: number;
+  /** Number of images that could not be promoted (partial coverage); left as room-scoped. */
+  leftAsRoom: number;
+  /** Any non-fatal warnings encountered during conversion (logged but not thrown). */
+  warnings: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -281,6 +320,7 @@ export async function mergeRooms(
       targetId: target.id,
       rowsRepointed: {},
       sourceDeleted: false,
+      sourceDeactivated: false,
     };
   }
   const target = await resolveRoom(db, targetIdOrCode);
@@ -706,18 +746,22 @@ export async function mergeRooms(
   }
 
   // ------------------------------------------------------------------
-  // 4. Delete the source room record
+  // 4. Soft-delete the source room (C1 — 0005 REVISIONS).
+  //
   //    At this point all FK references have been repointed or removed.
-  //    SQLite's foreign-key cascade / restrict logic has been pre-empted
-  //    by our explicit repointing, so no FK violation should occur.
+  //    We set is_active = false instead of DELETE to preserve the audit
+  //    trail.  `deactivateRoom` will throw if any listing or inspiration
+  //    photos still reference the source room, which would indicate a bug
+  //    in the repointing logic above.
   // ------------------------------------------------------------------
-  await db.delete(rooms).where(eq(rooms.id, sourceId)).run();
+  await deactivateRoom(db, sourceId);
 
   return {
     sourceId,
     targetId,
     rowsRepointed,
-    sourceDeleted: true,
+    sourceDeleted: true,       // kept for backward compat; see @deprecated JSDoc
+    sourceDeactivated: true,
   };
 }
 
@@ -830,7 +874,295 @@ export async function removeInspirationFromRoom(
 }
 
 /**
- * Delete a room record.
+ * Soft-delete a room by setting is_active = false.
+ *
+ * C1 mandate (0005 REVISIONS): this is the ONLY way the reconciliation
+ * script should retire a room.  Hard-deletion (deleteRoom) is reserved for
+ * admin emergencies.
+ *
+ * Precondition enforced here: the room must have ZERO listing images
+ * (images.room_id = this room AND photo_category != 'inspirational') and ZERO
+ * inspiration mappings (inspirational_image_rooms.room_id = this room).  If
+ * either count is non-zero, the function throws — that means mergeRooms failed
+ * to repoint all photos, which must be fixed before soft-deleting.
+ *
+ * Idempotent: if the room is already is_active=false (or does not exist),
+ * returns early without error.
+ *
+ * @param db         Drizzle DB instance.
+ * @param codeOrId   Room code or numeric id.
+ * @throws Error if the room still has listing or inspiration photos on it.
+ */
+export async function deactivateRoom(db: DB, codeOrId: string | number): Promise<void> {
+  let row: typeof rooms.$inferSelect | undefined;
+  try {
+    row = await resolveRoom(db, codeOrId);
+  } catch {
+    return; // Already gone — idempotent.
+  }
+
+  // Already inactive — nothing to do.
+  if (!row.isActive) return;
+
+  // Guard: verify ZERO listing images on this room.
+  const listingCheck = await db
+    .select({ cnt: count(images.id) })
+    .from(images)
+    .where(eq(images.roomId, row.id))
+    .get();
+  const listingCount = listingCheck?.cnt ?? 0;
+  if (listingCount > 0) {
+    throw new Error(
+      `deactivateRoom: room ${row.id} (${row.roomCode}) still has ${listingCount} images ` +
+        `(images.room_id). Repoint all photos before deactivating.`,
+    );
+  }
+
+  // Guard: verify ZERO inspiration mappings on this room.
+  const inspCheck = await db
+    .select({ cnt: count(inspirationalImageRooms.id) })
+    .from(inspirationalImageRooms)
+    .where(eq(inspirationalImageRooms.roomId, row.id))
+    .get();
+  const inspCount = inspCheck?.cnt ?? 0;
+  if (inspCount > 0) {
+    throw new Error(
+      `deactivateRoom: room ${row.id} (${row.roomCode}) still has ${inspCount} ` +
+        `inspirational_image_rooms rows. Repoint all inspiration before deactivating.`,
+    );
+  }
+
+  // All clear — soft-delete.
+  await db.update(rooms).set({ isActive: false }).where(eq(rooms.id, row.id)).run();
+}
+
+/**
+ * Convert existing fan-out inspiration data from room-scoped per-row rows to
+ * level-scoped or home-scoped records on images.inspiration_scope.
+ *
+ * Background (0005 REVISIONS)
+ * ----------------------------
+ * Before the scope feature, "Entire Floor / Entire Home" inspiration drops in
+ * UploadsMappingPanel created one inspirational_image_rooms row per room.  A
+ * photo dropped on "All Levels" would generate N per-room rows, flooding every
+ * room's inspiration view.
+ *
+ * This function runs AFTER all room merges + deactivations are complete (the
+ * "active rooms" set must be the final canonical set) and converts the historical
+ * fan-out data.
+ *
+ * Algorithm (per inspiration image with photo_category = 'inspirational')
+ * -----------------------------------------------------------------------
+ * 1. Skip images already scoped to 'level' or 'home' (idempotent).
+ * 2. Collect the set of active room IDs this image is mapped to via
+ *    inspirational_image_rooms.
+ * 3. Compute the full active-room set across all non-"all_levels" floors.
+ * 4. If the mapped set == the full active-room set → promote to 'home':
+ *      images SET inspiration_scope='home' WHERE id=this
+ *      DELETE FROM inspirational_image_rooms WHERE image_id=this
+ * 5. Else if the mapped set == every active room on exactly ONE floor → promote to 'level':
+ *      images SET inspiration_scope='level', scope_floor_id=that_floor WHERE id=this
+ *      DELETE FROM inspirational_image_rooms WHERE image_id=this
+ * 6. Otherwise: leave inspiration_scope='room' (partial coverage or truly room-specific).
+ *
+ * Idempotent: safe to re-run.  Already-promoted images are skipped in step 1.
+ *
+ * @param db   Drizzle DB instance.
+ * @returns    Structured result counting promotions and warnings.
+ */
+export async function convertInspirationScope(
+  db: DB,
+): Promise<ConvertInspirationScopeResult> {
+  const result: ConvertInspirationScopeResult = {
+    promotedToHome: 0,
+    promotedToLevel: 0,
+    alreadyScoped: 0,
+    leftAsRoom: 0,
+    warnings: [],
+  };
+
+  // ── 1. Build canonical active-room set ────────────────────────────────────
+  //
+  // Active rooms = WHERE is_active = 1.
+  // We exclude the "all_levels" pseudo-floor (id=233122, key='all_levels')
+  // from the coverage check because it has no real rooms of its own — it is
+  // only used as a bucket for home-wide inspiration uploads.
+  const activeRoomRows = await db
+    .select({ id: rooms.id, floorId: rooms.floorId })
+    .from(rooms)
+    .where(eq(rooms.isActive, true))
+    .all();
+
+  if (activeRoomRows.length === 0) {
+    result.warnings.push("convertInspirationScope: no active rooms found; aborting.");
+    return result;
+  }
+
+  // Collect all active rooms per floor.
+  const activeRoomIdsByFloor = new Map<number, Set<number>>();
+  const allActiveRoomIds = new Set<number>();
+  for (const r of activeRoomRows) {
+    allActiveRoomIds.add(r.id);
+    const set = activeRoomIdsByFloor.get(r.floorId) ?? new Set<number>();
+    set.add(r.id);
+    activeRoomIdsByFloor.set(r.floorId, set);
+  }
+
+  // ── 2. Fetch all current room-scoped per-image inspiration row groups ─────
+  //
+  // We load ALL inspirational_image_rooms rows in one query.  The total row
+  // count is bounded (~hundreds, not millions) and fits well within D1 limits.
+  const allInspRows = await db
+    .select({
+      imageId: inspirationalImageRooms.imageId,
+      roomId: inspirationalImageRooms.roomId,
+      rowId: inspirationalImageRooms.id,
+    })
+    .from(inspirationalImageRooms)
+    .all();
+
+  // Group by imageId: imageId → Set<roomId>.
+  const roomIdsByImage = new Map<string, Set<number>>();
+  const rowIdsByImage = new Map<string, number[]>();
+  for (const row of allInspRows) {
+    const roomSet = roomIdsByImage.get(row.imageId) ?? new Set<number>();
+    roomSet.add(row.roomId);
+    roomIdsByImage.set(row.imageId, roomSet);
+
+    const rowIds = rowIdsByImage.get(row.imageId) ?? [];
+    rowIds.push(row.rowId);
+    rowIdsByImage.set(row.imageId, rowIds);
+  }
+
+  if (roomIdsByImage.size === 0) {
+    // No inspiration mappings at all — nothing to convert.
+    return result;
+  }
+
+  // ── 3. Fetch scope status for all images that have inspiration rows ───────
+  const imageIds = Array.from(roomIdsByImage.keys());
+  const imageRows = await db
+    .select({ id: images.id, inspirationScope: images.inspirationScope, floorId: images.scopeFloorId })
+    .from(images)
+    .where(inArray(images.id, imageIds))
+    .all();
+
+  const imageScopeMap = new Map(imageRows.map((r) => [r.id, r.inspirationScope]));
+
+  // ── 4. Process each image ─────────────────────────────────────────────────
+  for (const imageId of imageIds) {
+    const currentScope = imageScopeMap.get(imageId) ?? "room";
+
+    // Skip already-promoted images (idempotent).
+    if (currentScope !== "room") {
+      result.alreadyScoped++;
+      continue;
+    }
+
+    const mappedRooms = roomIdsByImage.get(imageId) ?? new Set<number>();
+
+    // Filter mapped rooms to only active ones (inactive rooms should have
+    // been cleared by mergeRooms, but guard defensively).
+    const activeMappedRooms = new Set<number>();
+    for (const rId of mappedRooms) {
+      if (allActiveRoomIds.has(rId)) {
+        activeMappedRooms.add(rId);
+      }
+    }
+
+    if (activeMappedRooms.size === 0) {
+      // Image only mapped to inactive rooms — leave as-is (weird state).
+      result.warnings.push(
+        `convertInspirationScope: image ${imageId} has only inactive-room mappings; skipping.`,
+      );
+      result.leftAsRoom++;
+      continue;
+    }
+
+    // --- Home-scope check: mapped active rooms == all active rooms ---
+    const isHomeScope = setsEqual(activeMappedRooms, allActiveRoomIds);
+
+    if (isHomeScope) {
+      // Promote to home.
+      await db
+        .update(images)
+        .set({ inspirationScope: "home", scopeFloorId: null })
+        .where(eq(images.id, imageId))
+        .run();
+
+      // Delete all per-room rows for this image.
+      const rowIds = rowIdsByImage.get(imageId) ?? [];
+      for (let i = 0; i < rowIds.length; i += 90) {
+        const chunk = rowIds.slice(i, i + 90);
+        await db
+          .delete(inspirationalImageRooms)
+          .where(inArray(inspirationalImageRooms.id, chunk))
+          .run();
+      }
+
+      result.promotedToHome++;
+      continue;
+    }
+
+    // --- Level-scope check: mapped active rooms == all active rooms on exactly one floor ---
+    let promotedFloorId: number | null = null;
+    for (const [floorId, floorRooms] of activeRoomIdsByFloor.entries()) {
+      if (setsEqual(activeMappedRooms, floorRooms)) {
+        promotedFloorId = floorId;
+        break;
+      }
+    }
+
+    if (promotedFloorId !== null) {
+      // Promote to level.
+      await db
+        .update(images)
+        .set({ inspirationScope: "level", scopeFloorId: promotedFloorId })
+        .where(eq(images.id, imageId))
+        .run();
+
+      // Delete all per-room rows for this image.
+      const rowIds = rowIdsByImage.get(imageId) ?? [];
+      for (let i = 0; i < rowIds.length; i += 90) {
+        const chunk = rowIds.slice(i, i + 90);
+        await db
+          .delete(inspirationalImageRooms)
+          .where(inArray(inspirationalImageRooms.id, chunk))
+          .run();
+      }
+
+      result.promotedToLevel++;
+      continue;
+    }
+
+    // Partial coverage — leave as room-scoped.
+    result.leftAsRoom++;
+  }
+
+  return result;
+}
+
+// ---------------------------------------------------------------------------
+// Internal set-equality helper
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns true when sets a and b contain exactly the same elements.
+ * Used by convertInspirationScope to compare mapped-room sets with floor sets.
+ */
+function setsEqual(a: Set<number>, b: Set<number>): boolean {
+  if (a.size !== b.size) return false;
+  for (const v of a) {
+    if (!b.has(v)) return false;
+  }
+  return true;
+}
+
+/**
+ * Delete a room record (HARD DELETE).
+ *
+ * WARNING: prefer `deactivateRoom` for the reconciliation flow (C1 mandate).
+ * This function is retained for admin emergency use and tests only.
  *
  * IMPORTANT: this function only deletes the rooms row.  All FK-referencing
  * child rows must be cleared first (either repointed via mergeRooms or

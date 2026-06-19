@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ShoppingJournalApp } from "@/components/ShoppingJournalApp";
+---
+
+<BaseLayout
+  title="Shopping Journal — The Monolith"
+  description="Log showroom trips, showroom pricing detail collections, and contractor vendor interviews."
+>
+  <ShoppingJournalApp client:only="react" />
+</BaseLayout>

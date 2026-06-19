@@ -5,6 +5,14 @@ import { floors } from "./floors";
 
 /**
  * Master room records for the home as-is footprint.
+ *
+ * C1 (0005 REVISIONS): rooms are never hard-deleted.  When a drift/ghost room is
+ * merged into a canonical room, all FK references are repointed to the canonical
+ * room first, then the merged room is soft-deleted by setting is_active = false.
+ * Invariant: an is_active=false room must have ZERO images (listing or inspiration)
+ * on it after the merge.
+ *
+ * All room listings (catalog, floorplan, sidebar, pickers) filter WHERE is_active = 1.
  */
 export const rooms = sqliteTable("rooms", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -22,6 +30,17 @@ export const rooms = sqliteTable("rooms", {
   widthInches: integer("width_inches"),
 
   isLivingSpace: integer("is_living_space", { mode: "boolean" }).notNull().default(true),
+
+  /**
+   * Soft-delete flag (C1 — 0005 REVISIONS).
+   *
+   * true  = canonical active room; shown in all listings, catalogs, and pickers.
+   * false = merged / deactivated room; kept for audit trail.
+   *         Must carry ZERO images (listing or inspiration) before being set false.
+   *
+   * Default true: every freshly-inserted room is active.
+   */
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
 
   // Known room details for renovation planning.
   problemAreas: text("problem_areas"), // JSON array or freeform

@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { MultipleSelector } from "@/components/ui/multiple-selector";
+import { LevelRoomSelect } from "@/components/LevelRoomSelect";
 import {
   SelectablePhotoCards,
   type SelectablePhotoCardItem,
@@ -93,7 +94,7 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
   const { refreshToken = 0, onSummaryChange } = props;
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string>("");
-  const [activeCategory, setActiveCategory] = useState<MappingCategory>("listing");
+  const [activeCategory, setActiveCategory] = useState<MappingCategory>("inspirational");
   const [summary, setSummary] = useState<MappingSummary>({
     listing: 0,
     inspirational: 0,
@@ -113,11 +114,15 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
     inspirational: [],
   });
   const [dragImageIds, setDragImageIds] = useState<string[]>([]);
-  const [hoverRoomId, setHoverRoomId] = useState<number | null>(null);
+  const [hoverRoomId, setHoverRoomId] = useState<number | string | null>(null);
   const [inspirationRoomIds, setInspirationRoomIds] = useState<string[]>([]);
-  const [applyingImageIds, setApplyingImageIds] = useState<Set<string>>(new Set());
+  // The set of in-flight image ids is tracked purely so optimistic apply calls
+  // can be cleaned up in `.finally`; the value itself is not read for rendering
+  // (per-card spinners are driven by upload-workflow events), hence the `_`.
+  const [_applyingImageIds, setApplyingImageIds] = useState<Set<string>>(
+    new Set(),
+  );
   const debouncedRefreshTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const applying = applyingImageIds.size > 0;
   const [abandoning, setAbandoning] = useState(false);
   const [confirmAbandonOpen, setConfirmAbandonOpen] = useState(false);
   const [abandonTarget, setAbandonTarget] = useState<"selected" | "all" | null>(null);
@@ -131,6 +136,30 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
   const catalogRooms = useMemo(
     () => catalogFloors.flatMap((floor) => floor.rooms),
     [catalogFloors],
+  );
+
+  /**
+   * Maps a catalog floor bucket to the scope arguments for `applyMapping`.
+   *
+   * This is the bucket→scope mapping that fixes the "one photo becomes N rows"
+   * bug. The catalog floor ids are the canonical source of truth (so this stays
+   * correct even if the DB ids change): for the live DB those are
+   * lower_level=1, upper_level=2, outside=233121.
+   *
+   *   - "All Levels" bucket (floor.key === "all_levels") → scope "home"
+   *     (applies to the whole home, no floor id, no per-room rows).
+   *   - any real floor bucket ("Lower"/"Upper"/"Outside")  → scope "level" with
+   *     that floor's id (no per-room rows).
+   *
+   * The returned `floorId` is null for home scope (the server requires it only
+   * for level scope).
+   */
+  const floorScopeOptions = useCallback(
+    (floor: CatalogFloor): { scope: "level" | "home"; floorId: number | null } =>
+      floor.key === "all_levels"
+        ? { scope: "home", floorId: null }
+        : { scope: "level", floorId: floor.id },
+    [],
   );
   const hasActiveProcessing = useMemo(
     () =>
@@ -333,9 +362,48 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
     };
   }, [scheduleDebouncedRefresh]);
 
+  /**
+   * Applies a mapping to one or more pending uploads.
+   *
+   * Listing photos always map to a single room (`roomIds[0]`).
+   *
+   * Inspirational photos are SCOPE-AWARE (0005 REVISIONS — the fix that stops one
+   * "Entire Floor / Entire Home" photo from fanning out into N per-room rows):
+   *   - scope "room"  (default) → sends `roomIds` and the server inserts one
+   *                                `inspirational_image_rooms` row per active room.
+   *   - scope "level"           → sends `{ scope:'level', floorId }` only; the
+   *                                server records the scope on the image and does
+   *                                NOT create per-room rows. `roomIds` is ignored.
+   *   - scope "home"            → sends `{ scope:'home' }` only; applies to the
+   *                                whole home with no per-room rows.
+   *
+   * `scopeOptions` defaults to room scope so existing per-room drop targets keep
+   * their behavior; the floor/home drop targets pass an explicit level/home scope.
+   */
   const applyMapping = useCallback(
-    (category: MappingCategory, imageIds: string[], roomIds: number[]) => {
-      if (imageIds.length === 0 || roomIds.length === 0) {
+    (
+      category: MappingCategory,
+      imageIds: string[],
+      roomIds: number[],
+      scopeOptions: {
+        scope?: "room" | "level" | "home";
+        floorId?: number | null;
+      } = {},
+    ) => {
+      const scope = scopeOptions.scope ?? "room";
+      // Room/level/home each have a different "is this call actionable?" rule:
+      //   - room scope needs at least one target room id
+      //   - level scope needs a floorId
+      //   - home scope needs neither
+      const needsRoomIds = category === "listing" || scope === "room";
+      const needsFloorId = category === "inspirational" && scope === "level";
+      if (imageIds.length === 0) {
+        return;
+      }
+      if (needsRoomIds && roomIds.length === 0) {
+        return;
+      }
+      if (needsFloorId && (scopeOptions.floorId == null)) {
         return;
       }
 
@@ -399,7 +467,16 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
       };
       if (category === "listing") {
         payload.roomId = roomIds[0];
+      } else if (scope === "level") {
+        // No fan-out: store the level scope + floor on the image itself.
+        payload.scope = "level";
+        payload.floorId = scopeOptions.floorId;
+      } else if (scope === "home") {
+        // No fan-out: store the home scope on the image itself.
+        payload.scope = "home";
       } else {
+        // Per-room inspiration: one row per selected room.
+        payload.scope = "room";
         payload.roomIds = roomIds;
       }
 
@@ -721,6 +798,12 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
             <p className="text-sm font-medium">
               Multi-room apply for selected inspiration photos
             </p>
+            <LevelRoomSelect
+              rooms={catalogRooms}
+              value={inspirationRoomIds}
+              onChange={setInspirationRoomIds}
+              disabled={loading || selectedIds.length === 0}
+            />
             <MultipleSelector
               title="Select rooms"
               placeholder="Choose one or more rooms"
@@ -876,6 +959,58 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
                       {floor.name}
                     </h4>
                     <div className="space-y-1.5">
+                      {activeCategory !== "listing" && (
+                        <div
+                          onDragOver={(event) => {
+                            event.preventDefault();
+                            setHoverRoomId(`floor-${floor.id}`);
+                          }}
+                          onDragLeave={() => setHoverRoomId(null)}
+                          onDrop={(event) => {
+                            event.preventDefault();
+                            const ids = dragImageIds.length > 0 ? dragImageIds : selectedIds;
+                            setDragImageIds([]);
+                            setHoverRoomId(null);
+                            if (ids.length === 0) return;
+                            // Store the scope on the image (no per-room fan-out).
+                            const options = floorScopeOptions(floor);
+                            void applyMapping(activeCategory, ids, [], options);
+                          }}
+                          className={cn(
+                            "rounded-md border px-2 py-2 border-dashed transition-colors",
+                            hoverRoomId === `floor-${floor.id}`
+                              ? "border-primary bg-primary/10"
+                              : "border-border/60 bg-muted/30"
+                          )}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex min-w-0 items-center gap-1.5">
+                              <p className="truncate text-xs font-medium italic">
+                                {floor.key === "all_levels" ? "Entire Home (All Levels)" : `Entire Floor (${floor.name})`}
+                              </p>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2 text-[11px]"
+                              disabled={selectedIds.length === 0 || loading}
+                              onClick={() => {
+                                // Level/home scope is stored on the image — no
+                                // dependency on the floor having any rooms.
+                                const options = floorScopeOptions(floor);
+                                void applyMapping(
+                                  activeCategory,
+                                  selectedIds,
+                                  [],
+                                  options,
+                                );
+                              }}
+                            >
+                              Assign selected
+                            </Button>
+                          </div>
+                        </div>
+                      )}
                       {floor.rooms.map((room) => (
                         <div
                           key={room.id}
