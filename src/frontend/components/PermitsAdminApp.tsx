@@ -1,11 +1,21 @@
-import { AlertCircle, CheckCircle2, ExternalLink, Loader2, RefreshCw, ShieldAlert } from "lucide-react";
-import React, { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { AlertCircle, CheckCircle2, Clock, ExternalLink, Loader2, RefreshCw, ShieldAlert } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { ContractorActivityMap } from "@/components/ContractorActivityMap";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 
 type PermitRun = {
   id: string;
@@ -73,37 +83,10 @@ type PropertyPermit = {
   lastViewedHash?: string | null;
   needsReview: boolean;
   isClosed: boolean;
-};
-
-type ContactCard = {
-  contactName: string;
-  isMonitored: boolean;
-  activePropertyPermitCount: number;
-  closedPropertyPermitCount: number;
-  workload: {
-    open: number;
-    inProgress: number;
-    pending: number;
-    completed: number;
-  };
-  averageCloseDays: number | null;
-  averageCloseDaysByType: Array<{
-    permitType: string;
-    averageCloseDays: number | null;
-    count: number;
-  }>;
-  mapPoints: Array<{
-    latitude: number;
-    longitude: number;
-    statusCategory: string;
-    propertyAddress: string | null;
-  }>;
-  insight: {
-    riskLevel: string;
-    summary: string;
-    highlights: string[];
-    metrics: Record<string, unknown> | null;
-  } | null;
+  ownerClosed: boolean;
+  ownerCloseNote?: string | null;
+  ownerClosedAt?: string | number | Date | null;
+  lifecycleStatus: "active" | "suspected_expired" | "closed";
 };
 
 type PermitDashboardPayload = {
@@ -126,6 +109,7 @@ type PermitDetailPayload = {
   detail: {
     permitIdentifier: string;
     needsReview: boolean;
+    lifecycleStatus: "active" | "suspected_expired" | "closed";
     records: PermitRecord[];
     revisions: PermitRevision[];
     viewed: {
@@ -137,16 +121,37 @@ type PermitDetailPayload = {
   };
 };
 
-type ContactsPayload = {
-  success: boolean;
-  contractorCards: ContactCard[];
-};
-
 function formatDate(value: string | number | Date | null | undefined): string {
   if (!value) return "Unknown";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "Unknown";
   return parsed.toLocaleString();
+}
+
+function formatTimestamp12h(value: string | number | Date | null | undefined): string {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return parsed.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZoneName: "short",
+  });
+}
+
+/** Compute next occurrence of the `0 14 * * *` (daily 2 PM UTC) cron. */
+function getNextCronRun(): Date {
+  const now = new Date();
+  const next = new Date(now);
+  next.setUTCHours(14, 0, 0, 0);
+  if (next <= now) {
+    next.setUTCDate(next.getUTCDate() + 1);
+  }
+  return next;
 }
 
 function parseJson(value: unknown): unknown {
@@ -156,303 +161,6 @@ function parseJson(value: unknown): unknown {
   } catch {
     return null;
   }
-}
-
-function riskBadgeVariant(riskLevel: string): "default" | "secondary" | "destructive" | "outline" {
-  const normalized = riskLevel.trim().toLowerCase();
-  if (normalized === "high") return "destructive";
-  if (normalized === "low") return "secondary";
-  return "outline";
-}
-
-function statusColor(statusCategory: string): string {
-  const status = statusCategory.trim().toLowerCase();
-  if (status === "completed") return "bg-emerald-500";
-  if (status === "in_progress") return "bg-blue-500";
-  if (status === "pending") return "bg-amber-500";
-  if (status === "cancelled") return "bg-zinc-500";
-  return "bg-fuchsia-500";
-}
-
-function statusLabel(statusCategory: string | null | undefined): string {
-  if (!statusCategory) return "other";
-  return statusCategory.replace(/_/g, " ");
-}
-
-function PermitMap({
-  cards,
-  selectedContractor,
-}: {
-  cards: ContactCard[];
-  selectedContractor: string;
-}) {
-  const filteredCards = useMemo(() => {
-    if (!selectedContractor) return cards;
-    return cards.filter((card) => card.contactName === selectedContractor);
-  }, [cards, selectedContractor]);
-
-  const points = useMemo(
-    () =>
-      filteredCards.flatMap((card) =>
-        card.mapPoints.map((point) => ({
-          ...point,
-          contactName: card.contactName,
-        })),
-      ),
-    [filteredCards],
-  );
-
-  const bounds = useMemo(() => {
-    const latitudes = points.map((row) => row.latitude).filter(Number.isFinite);
-    const longitudes = points.map((row) => row.longitude).filter(Number.isFinite);
-    if (latitudes.length === 0 || longitudes.length === 0) {
-      return {
-        minLat: 37.62,
-        maxLat: 37.95,
-        minLng: -122.58,
-        maxLng: -121.95,
-      };
-    }
-    const minLat = Math.min(...latitudes) - 0.02;
-    const maxLat = Math.max(...latitudes) + 0.02;
-    const minLng = Math.min(...longitudes) - 0.02;
-    const maxLng = Math.max(...longitudes) + 0.02;
-    return { minLat, maxLat, minLng, maxLng };
-  }, [points]);
-
-  const projected = useMemo(
-    () =>
-      points.map((point) => {
-        const lngSpan = Math.max(0.0001, bounds.maxLng - bounds.minLng);
-        const latSpan = Math.max(0.0001, bounds.maxLat - bounds.minLat);
-        const x = ((point.longitude - bounds.minLng) / lngSpan) * 100;
-        const y = 100 - ((point.latitude - bounds.minLat) / latSpan) * 100;
-        return {
-          ...point,
-          x: Math.min(98, Math.max(2, x)),
-          y: Math.min(98, Math.max(2, y)),
-        };
-      }),
-    [bounds.maxLat, bounds.maxLng, bounds.minLat, bounds.minLng, points],
-  );
-
-  return (
-    <div className="space-y-2">
-      <div className="relative h-[320px] overflow-hidden rounded-xl border border-border/60 bg-gradient-to-br from-slate-900 via-slate-850 to-slate-800">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_25%_20%,rgba(255,255,255,0.08),transparent_40%),radial-gradient(circle_at_75%_80%,rgba(34,211,238,0.12),transparent_35%)]" />
-        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.06)_1px,transparent_1px)] bg-[size:40px_40px]" />
-
-        {projected.map((point, index) => (
-          <div
-            key={`${point.contactName}-${index}`}
-            className="group absolute -translate-x-1/2 -translate-y-1/2"
-            style={{ left: `${point.x}%`, top: `${point.y}%` }}
-            title={`${point.contactName} · ${statusLabel(point.statusCategory)} · ${point.propertyAddress || "Address unavailable"}`}
-          >
-            <span
-              className={cn(
-                "block size-3 rounded-full ring-2 ring-background/80 transition group-hover:scale-125",
-                statusColor(point.statusCategory),
-              )}
-            />
-          </div>
-        ))}
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Marker colors: blue in progress, amber pending, green completed, gray cancelled.
-      </p>
-    </div>
-  );
-}
-
-function ContractorInsightsSection() {
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [payload, setPayload] = useState<ContactsPayload | null>(null);
-  const [search, setSearch] = useState("");
-  const deferredSearch = useDeferredValue(search);
-  const [selectedContractor, setSelectedContractor] = useState("");
-
-  const loadData = useCallback(async (withLoading: boolean) => {
-    if (withLoading) {
-      setLoading(true);
-    } else {
-      setRefreshing(true);
-    }
-
-    try {
-      const response = await fetch("/api/admin/permits/contacts", { credentials: "include" });
-      const result = (await response.json()) as ContactsPayload & { error?: string };
-      if (!response.ok || !result.success) {
-        throw new Error(result.error || "Failed to load contractor intelligence");
-      }
-      setPayload(result);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to load contractor intelligence");
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadData(true);
-  }, [loadData]);
-
-  const cards = payload?.contractorCards || [];
-  const filteredCards = useMemo(() => {
-    const term = deferredSearch.trim().toLowerCase();
-    if (!term) return cards;
-    return cards.filter((card) => card.contactName.toLowerCase().includes(term));
-  }, [cards, deferredSearch]);
-
-  const totals = useMemo(
-    () => ({
-      contractors: cards.length,
-      monitored: cards.filter((card) => card.isMonitored).length,
-      openPermits: cards.reduce((sum, card) => sum + card.workload.open, 0),
-      highRisk: cards.filter((card) => card.insight?.riskLevel?.toLowerCase() === "high").length,
-    }),
-    [cards],
-  );
-
-  if (loading) {
-    return (
-      <div className="flex min-h-[40svh] items-center justify-center text-muted-foreground">
-        <Loader2 className="mr-2 size-5 animate-spin" />
-        Loading contractor permit intelligence...
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <Card className="ring-1 ring-border/40">
-        <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <CardTitle className="text-xl">Contractor Permit Intelligence</CardTitle>
-              <CardDescription>
-                Cross-property permit activity for contacts attached to 126 Colby permits (last 365 days + YTD).
-              </CardDescription>
-            </div>
-            <Button variant="outline" size="sm" onClick={() => void loadData(false)} disabled={refreshing}>
-              {refreshing ? <Loader2 className="mr-2 size-4 animate-spin" /> : <RefreshCw className="mr-2 size-4" />}
-              Refresh
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="grid gap-3 sm:grid-cols-4">
-          <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Contacts</p>
-            <p className="mt-1 text-lg font-semibold">{totals.contractors}</p>
-          </div>
-          <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Monitored</p>
-            <p className="mt-1 text-lg font-semibold">{totals.monitored}</p>
-          </div>
-          <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Open Permits</p>
-            <p className="mt-1 text-lg font-semibold">{totals.openPermits}</p>
-          </div>
-          <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-3">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">High Risk</p>
-            <p className="mt-1 text-lg font-semibold">{totals.highRisk}</p>
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="ring-1 ring-border/40">
-        <CardHeader>
-          <CardTitle className="text-base">Bay Area Activity Map</CardTitle>
-          <CardDescription>
-            Status-coded permit markers for selected contractor activity.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="grid gap-3 sm:grid-cols-[1fr_220px]">
-            <Input
-              placeholder="Filter contractors..."
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-            <select
-              className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-              value={selectedContractor}
-              onChange={(event) => setSelectedContractor(event.target.value)}
-            >
-              <option value="">All contractors</option>
-              {filteredCards.map((card) => (
-                <option key={card.contactName} value={card.contactName}>
-                  {card.contactName}
-                </option>
-              ))}
-            </select>
-          </div>
-          <PermitMap cards={filteredCards} selectedContractor={selectedContractor} />
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-4">
-        {filteredCards.map((card) => {
-          const total = Math.max(
-            1,
-            card.workload.open + card.workload.completed + card.workload.pending + card.workload.inProgress,
-          );
-          const inProgressWidth = `${(card.workload.inProgress / total) * 100}%`;
-          const pendingWidth = `${(card.workload.pending / total) * 100}%`;
-          const completedWidth = `${(card.workload.completed / total) * 100}%`;
-
-          return (
-            <Card key={card.contactName} className="ring-1 ring-border/40">
-              <CardHeader>
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <CardTitle className="text-base">{card.contactName}</CardTitle>
-                    <CardDescription>
-                      Active on property permits: {card.activePropertyPermitCount} · Closed: {card.closedPropertyPermitCount}
-                    </CardDescription>
-                  </div>
-                  <Badge variant={riskBadgeVariant(card.insight?.riskLevel || "medium")}>
-                    Risk: {card.insight?.riskLevel || "unknown"}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                  <div className="flex h-full w-full">
-                    <div className="bg-blue-500" style={{ width: inProgressWidth }} />
-                    <div className="bg-amber-500" style={{ width: pendingWidth }} />
-                    <div className="bg-emerald-500" style={{ width: completedWidth }} />
-                  </div>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  In progress: {card.workload.inProgress} · Pending: {card.workload.pending} · Completed: {card.workload.completed}
-                </p>
-                <p className="text-sm">{card.insight?.summary || "No AI summary available yet."}</p>
-                {card.insight?.highlights?.length ? (
-                  <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
-                    {card.insight.highlights.map((item, index) => (
-                      <li key={`${card.contactName}-highlight-${index}`}>{item}</li>
-                    ))}
-                  </ul>
-                ) : null}
-                <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                  <span>
-                    Avg close: {card.averageCloseDays ? `${card.averageCloseDays} days` : "n/a"}
-                  </span>
-                  <span>·</span>
-                  <span>Open workload: {card.workload.open}</span>
-                  <span>·</span>
-                  <span>Map points: {card.mapPoints.length}</span>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
-    </div>
-  );
 }
 
 function HousePermitsSection() {
@@ -515,6 +223,12 @@ function HousePermitsSection() {
     );
   }
 
+  const latestRun = (payload?.latestRuns || [])[0] ?? null;
+  const lastRunTimestamp = latestRun?.datetimeCreated ?? null;
+  const nextRunTimestamp = useMemo(() => getNextCronRun(), []);
+  const permitCount = payload?.propertyPermits?.length ?? 0;
+  const syncRunCount = (payload?.latestRuns || []).length;
+
   return (
     <div className="space-y-6">
       <Card className="ring-1 ring-border/40">
@@ -536,6 +250,20 @@ function HousePermitsSection() {
                 Run Sync
               </Button>
             </div>
+          </div>
+
+          {/* Sync schedule timestamps */}
+          <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <Clock className="size-3.5" />
+              <span className="font-medium text-foreground/70">Last run:</span>{" "}
+              {formatTimestamp12h(lastRunTimestamp)}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <Clock className="size-3.5" />
+              <span className="font-medium text-foreground/70">Next run:</span>{" "}
+              {formatTimestamp12h(nextRunTimestamp)}
+            </span>
           </div>
         </CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-5">
@@ -562,94 +290,120 @@ function HousePermitsSection() {
         </CardContent>
       </Card>
 
-      <Card className="ring-1 ring-border/40">
-        <CardHeader>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <CardTitle className="text-base">126 Colby Permits</CardTitle>
-              <CardDescription>
-                Click any permit to open full detail and revision history.
-              </CardDescription>
-            </div>
-            <a href="/admin/permits/contacts">
-              <Button variant="outline" size="sm">
-                Contractor Intelligence
-                <ExternalLink className="ml-2 size-4" />
-              </Button>
-            </a>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {(payload?.propertyPermits || []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">No house permits are stored yet. Run sync to hydrate.</p>
-          ) : (
-            (payload?.propertyPermits || []).map((permit) => (
-              <a
-                key={permit.permitIdentifier}
-                href={`/admin/permits/${encodeURIComponent(permit.permitIdentifier)}`}
-                className={cn(
-                  "block rounded-lg border px-3 py-3 transition",
-                  permit.needsReview
-                    ? "border-red-500/60 bg-red-500/10 hover:bg-red-500/15"
-                    : "border-border/60 bg-card/40 hover:bg-card/60",
-                )}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-medium">{permit.permitIdentifier}</p>
-                    {permit.needsReview ? (
-                      <Badge variant="destructive">Needs Review</Badge>
-                    ) : (
-                      <Badge variant="secondary">Reviewed</Badge>
-                    )}
-                    {permit.isClosed ? <Badge variant="outline">Closed</Badge> : null}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Updated {formatDate(permit.lastChangedAt)}
-                  </p>
-                </div>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {permit.permitType || "Type n/a"} · {permit.permitStatus || "Status n/a"}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {permit.propertyAddress || "Address n/a"} · Block {permit.block || "n/a"} / Lot {permit.lot || "n/a"}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Contacts: {permit.contactNames.join(", ") || "n/a"}
-                </p>
-              </a>
-            ))
-          )}
-        </CardContent>
-      </Card>
+      <Tabs defaultValue="permits">
+        <TabsList>
+          <TabsTrigger value="permits">
+            126 Colby Permits
+            <Badge variant="secondary" className="ml-1.5 px-1.5 py-0 text-[10px] font-semibold">
+              {permitCount}
+            </Badge>
+          </TabsTrigger>
+          <TabsTrigger value="runs">
+            Latest Sync Runs
+            <Badge variant="secondary" className="ml-1.5 px-1.5 py-0 text-[10px] font-semibold">
+              {syncRunCount}
+            </Badge>
+          </TabsTrigger>
+        </TabsList>
 
-      <Card className="ring-1 ring-border/40">
-        <CardHeader>
-          <CardTitle className="text-base">Latest Sync Runs</CardTitle>
-          <CardDescription>Recent ingestion jobs across SF open-data datasets.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {(payload?.latestRuns || []).slice(0, 20).map((run) => (
-            <div key={run.id} className="rounded-lg border border-border/60 bg-card/40 px-3 py-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Badge variant={run.status === "error" ? "destructive" : "secondary"}>{run.status}</Badge>
-                  <Badge variant="outline">{run.sourceDataset}</Badge>
-                  <Badge variant="outline">{run.runType}</Badge>
+        <TabsContent value="permits" className="mt-4">
+          <Card className="ring-1 ring-border/40">
+            <CardHeader>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base">126 Colby Permits</CardTitle>
+                  <CardDescription>
+                    Click any permit to open full detail and revision history.
+                  </CardDescription>
                 </div>
-                <p className="text-xs text-muted-foreground">{formatDate(run.datetimeCreated)}</p>
+                <a href="/admin/permits/contacts">
+                  <Button variant="outline" size="sm">
+                    Contractor Intelligence
+                    <ExternalLink className="ml-2 size-4" />
+                  </Button>
+                </a>
               </div>
-              <p className="mt-1 text-sm font-medium">{run.queryLabel}</p>
-              <p className="text-xs text-muted-foreground">
-                {run.resultCount} records · {run.aiSummary || "No summary"}
-              </p>
-              {run.errorText ? (
-                <p className="mt-1 text-xs text-red-400">{run.errorText}</p>
-              ) : null}
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {(payload?.propertyPermits || []).length === 0 ? (
+                <p className="text-sm text-muted-foreground">No house permits are stored yet. Run sync to hydrate.</p>
+              ) : (
+                (payload?.propertyPermits || []).map((permit) => (
+                  <a
+                    key={permit.permitIdentifier}
+                    href={`/admin/permits/${encodeURIComponent(permit.permitIdentifier)}`}
+                    className={cn(
+                      "block rounded-lg border px-3 py-3 transition",
+                      permit.needsReview
+                        ? "border-red-500/60 bg-red-500/10 hover:bg-red-500/15"
+                        : "border-border/60 bg-card/40 hover:bg-card/60",
+                    )}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium">{permit.permitIdentifier}</p>
+                        {permit.needsReview ? (
+                          <Badge variant="destructive">Needs Review</Badge>
+                        ) : (
+                          <Badge variant="secondary">Reviewed</Badge>
+                        )}
+                        {permit.isClosed ? <Badge variant="outline">Closed</Badge> : null}
+                        {permit.lifecycleStatus === "suspected_expired" ? (
+                          <Badge className="border-amber-500/60 bg-amber-500/15 text-amber-300">
+                            Suspected Expired
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Updated {formatDate(permit.lastChangedAt)}
+                      </p>
+                    </div>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {permit.permitType || "Type n/a"} · {permit.permitStatus || "Status n/a"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {permit.propertyAddress || "Address n/a"} · Block {permit.block || "n/a"} / Lot {permit.lot || "n/a"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Contacts: {permit.contactNames.join(", ") || "n/a"}
+                    </p>
+                  </a>
+                ))
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="runs" className="mt-4">
+          <Card className="ring-1 ring-border/40">
+            <CardHeader>
+              <CardTitle className="text-base">Latest Sync Runs</CardTitle>
+              <CardDescription>Recent ingestion jobs across SF open-data datasets.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {(payload?.latestRuns || []).slice(0, 20).map((run) => (
+                <div key={run.id} className="rounded-lg border border-border/60 bg-card/40 px-3 py-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Badge variant={run.status === "error" ? "destructive" : "secondary"}>{run.status}</Badge>
+                      <Badge variant="outline">{run.sourceDataset}</Badge>
+                      <Badge variant="outline">{run.runType}</Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{formatDate(run.datetimeCreated)}</p>
+                  </div>
+                  <p className="mt-1 text-sm font-medium">{run.queryLabel}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {run.resultCount} records · {run.aiSummary || "No summary"}
+                  </p>
+                  {run.errorText ? (
+                    <p className="mt-1 text-xs text-red-400">{run.errorText}</p>
+                  ) : null}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
@@ -659,6 +413,9 @@ export function PermitDetailApp({ permitIdentifier }: { permitIdentifier: string
   const [markingViewed, setMarkingViewed] = useState(false);
   const [payload, setPayload] = useState<PermitDetailPayload | null>(null);
   const [autoMarked, setAutoMarked] = useState(false);
+  const [closeOpen, setCloseOpen] = useState(false);
+  const [closeNote, setCloseNote] = useState("");
+  const [closing, setClosing] = useState(false);
 
   const loadDetail = useCallback(async () => {
     setLoading(true);
@@ -701,6 +458,37 @@ export function PermitDetailApp({ permitIdentifier }: { permitIdentifier: string
       setMarkingViewed(false);
     }
   }, [loadDetail, permitIdentifier]);
+
+  const submitClose = useCallback(async () => {
+    if (!closeNote.trim()) {
+      toast.error("A closing note is required");
+      return;
+    }
+    setClosing(true);
+    try {
+      const response = await fetch(
+        `/api/admin/permits/property/${encodeURIComponent(permitIdentifier)}/close`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ note: closeNote.trim() }),
+        },
+      );
+      const result = (await response.json()) as { success?: boolean; error?: string };
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Failed to close permit");
+      }
+      toast.success("Permit marked closed");
+      setCloseOpen(false);
+      setCloseNote("");
+      await loadDetail();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to close permit");
+    } finally {
+      setClosing(false);
+    }
+  }, [closeNote, loadDetail, permitIdentifier]);
 
   useEffect(() => {
     void loadDetail();
@@ -765,6 +553,18 @@ export function PermitDetailApp({ permitIdentifier }: { permitIdentifier: string
                 {markingViewed ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
                 Mark Reviewed
               </Button>
+              {detail.lifecycleStatus === "suspected_expired" ? (
+                <Badge className="border-amber-500/60 bg-amber-500/15 text-amber-300">
+                  Suspected Expired
+                </Badge>
+              ) : null}
+              {detail.lifecycleStatus === "closed" ? (
+                <Badge variant="outline">Closed</Badge>
+              ) : (
+                <Button variant="outline" size="sm" onClick={() => setCloseOpen(true)}>
+                  Mark Closed
+                </Button>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -871,13 +671,40 @@ export function PermitDetailApp({ permitIdentifier }: { permitIdentifier: string
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={closeOpen} onOpenChange={setCloseOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Close permit {detail.permitIdentifier}</DialogTitle>
+            <DialogDescription>
+              Mark this permit closed (e.g. expired/re-filed). A note is required and
+              kept for your records. This stops contractor tracking for this permit.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={closeNote}
+            onChange={(e) => setCloseNote(e.target.value)}
+            placeholder="Why are you closing this permit? (e.g. expired, re-filed as 202409241521)"
+            rows={4}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCloseOpen(false)} disabled={closing}>
+              Cancel
+            </Button>
+            <Button onClick={() => void submitClose()} disabled={closing || !closeNote.trim()}>
+              {closing ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+              Close permit
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
 
 export function PermitsAdminApp({ section = "house" }: { section?: "house" | "contacts" }) {
   if (section === "contacts") {
-    return <ContractorInsightsSection />;
+    return <ContractorActivityMap />;
   }
   return <HousePermitsSection />;
 }
