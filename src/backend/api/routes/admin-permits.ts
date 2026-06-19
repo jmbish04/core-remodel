@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import {
+  closePermit,
   getPermitContactsInsights,
   getPermitDashboard,
   getPermitDetail,
@@ -74,6 +75,32 @@ adminPermitsRouter.post("/property/:permitIdentifier/viewed", async (c) => {
     return c.json(
       {
         error: "Failed to update permit view state",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+adminPermitsRouter.post("/property/:permitIdentifier/close", async (c) => {
+  try {
+    const permitIdentifier = decodeURIComponent(
+      c.req.param("permitIdentifier"),
+    );
+    const body = (await c.req.json().catch(() => ({}))) as { note?: string };
+    const note = typeof body.note === "string" ? body.note.trim() : "";
+    if (!note) {
+      return c.json({ error: "A closing note is required" }, 400);
+    }
+    const detail = await closePermit(c.env, permitIdentifier, note, "homeowner");
+    if (!detail) {
+      return c.json({ error: "Permit not found" }, 404);
+    }
+    return c.json({ success: true, detail });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to close permit",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       500,
