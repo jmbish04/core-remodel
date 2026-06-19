@@ -145,7 +145,7 @@ The earlier (undeployed) working-tree changes are revised:
 
 - **Workflow step ceiling.** ~6–7 persisted steps per image; Cloudflare caps steps
   per instance (~1k). A single coordinator safely handles roughly ≤150 images. For
-  an upload larger than `MAX_COORDINATOR_ITEMS` (set to 120 for margin), the
+  an upload larger than `MAX_COORDINATOR_ITEMS` (set to 100 for margin), the
   coordinator processes the first chunk and then creates a follow-up coordinator
   for the remainder (sequential, never concurrent) so the per-upload 3-at-a-time
   cap is preserved. Realistic uploads are far smaller; this is a safety valve.
