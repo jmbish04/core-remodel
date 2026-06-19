@@ -30,10 +30,10 @@ def _upload_bytes_fal(data, fal_key, suffix=".png"):
     import fal_client
 
     os.environ["FAL_KEY"] = fal_key
-    fd, path = tempfile.mkstemp(prefix="fal_up_", suffix=suffix)
+    with tempfile.NamedTemporaryFile(prefix="fal_up_", suffix=suffix, delete=False) as tf:
+        tf.write(data)
+        path = tf.name
     try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
         return fal_client.upload_file(path)
     finally:
         try:
