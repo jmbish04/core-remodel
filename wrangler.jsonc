@@ -65,6 +65,11 @@
       "binding": "CHECKLIST_RATIONALE_WORKFLOW",
       "class_name": "ChecklistRationaleWorkflow",
     },
+    {
+      "name": "image-batch-processing-workflow",
+      "binding": "IMAGE_BATCH_WORKFLOW",
+      "class_name": "ImageBatchProcessingWorkflow",
+    },
   ],
   "triggers": {
     "crons": ["0 14 * * *", "* * * * *"],
