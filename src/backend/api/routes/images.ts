@@ -1585,75 +1585,66 @@ imagesRouter.post("/mapping/reprocess", async (c) => {
       roomIdsByImage.set(mapping.imageId, currentList);
     }
 
-    let successCount = 0;
-    const failures: Array<{ imageId: string; error: string }> = [];
-
-    // 3. Queue workflows and update staging state
+    const batchItems: ImageProcessingWorkflowParams[] = [];
     for (const image of targetImages) {
       const imageId = image.id;
       const categoryRaw = toMappingCategory(
         image.photoCategory,
         image.isListingPhoto,
       );
-      const isListingPhoto = image.isListingPhoto;
-
-      const workflowInstanceId = `${buildWorkflowInstanceId(imageId)}-re-${Date.now()}`;
-
-      const workflowParams: ImageProcessingWorkflowParams = {
+      batchItems.push({
         imageId,
         photoCategory: categoryRaw,
-        isListingPhoto,
+        isListingPhoto: image.isListingPhoto,
         filename: image.sourceFilename || "image.jpg",
         roomId: image.roomId,
         roomIds: roomIdsByImage.get(imageId) || [],
         roomHint: image.roomType,
-      };
-
-      try {
-        await c.env.IMAGE_PROCESSING_WORKFLOW.create({
-          id: workflowInstanceId,
-          params: workflowParams,
-        });
-
-        await db
-          .update(imageUploadStaging)
-          .set({
-            processingStatus: "queued",
-            processingError: null,
-            workflowInstanceId,
-            datetimeProcessingStarted: null,
-            datetimeProcessed: null,
-          })
-          .where(eq(imageUploadStaging.imageId, imageId))
-          .run();
-
-        successCount++;
-      } catch (workflowError) {
-        const message =
-          workflowError instanceof Error
-            ? workflowError.message
-            : "Failed to queue workflow";
-
-        await db
-          .update(imageUploadStaging)
-          .set({
-            processingStatus: "failed",
-            processingError: message,
-            workflowInstanceId: null,
-          })
-          .where(eq(imageUploadStaging.imageId, imageId))
-          .run();
-
-        failures.push({ imageId, error: message });
-      }
+      });
     }
 
-    return c.json({
-      success: true,
-      message: `Successfully queued ${successCount} workflow(s) for reprocessing.`,
-      successCount,
-      failures,
-    });
+    const batchInstanceId = `image-batch-re-${Date.now()}`;
+    const batchImageIds = batchItems.map((item) => item.imageId);
+
+    try {
+      await c.env.IMAGE_BATCH_WORKFLOW.create({
+        id: batchInstanceId,
+        params: { items: batchItems },
+      });
+      await db
+        .update(imageUploadStaging)
+        .set({
+          processingStatus: "queued",
+          processingError: null,
+          workflowInstanceId: batchInstanceId,
+          datetimeProcessingStarted: null,
+          datetimeProcessed: null,
+        })
+        .where(inArray(imageUploadStaging.imageId, batchImageIds))
+        .run();
+
+      return c.json({
+        success: true,
+        message: `Successfully queued ${batchImageIds.length} image(s) for reprocessing.`,
+        successCount: batchImageIds.length,
+        failures: [],
+      });
+    } catch (workflowError) {
+      const message =
+        workflowError instanceof Error
+          ? workflowError.message
+          : "Failed to queue workflow";
+      console.error("Reprocess batch workflow create failed:", message);
+      await db
+        .update(imageUploadStaging)
+        .set({ processingStatus: "failed", processingError: message })
+        .where(inArray(imageUploadStaging.imageId, batchImageIds))
+        .run();
+      return c.json(
+        { error: "Failed to reprocess workflow(s)", details: message },
+        500,
+      );
+    }
   } catch (error) {
     console.error("Reprocess workflows error:", error);
     return c.json(
