@@ -1603,7 +1603,7 @@ imagesRouter.post("/mapping/reprocess", async (c) => {
       });
     }
 
-    const batchInstanceId = `image-batch-re-${Date.now()}`;
+    const batchInstanceId = `image-batch-re-${crypto.randomUUID()}`;
     const batchImageIds = batchItems.map((item) => item.imageId);
 
     try {

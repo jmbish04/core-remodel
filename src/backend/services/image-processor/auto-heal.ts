@@ -150,7 +150,7 @@ export async function autoHealImageUploads(env: Env): Promise<void> {
     return;
   }
 
-  const batchInstanceId = `image-batch-heal-${now}`;
+  const batchInstanceId = `image-batch-heal-${crypto.randomUUID()}`;
   const batchImageIds = batchItems.map((item) => item.imageId);
 
   try {
