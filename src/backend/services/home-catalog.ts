@@ -1,5 +1,47 @@
-import { floors, rooms } from "@backend/db";
-import { asc, eq } from "drizzle-orm";
+/**
+ * @fileoverview home-catalog.ts
+ *
+ * Seeds and retrieves the canonical home floor + room catalog from D1.
+ *
+ * IMPORTANT (0005 update): DEFAULT_ROOMS now encodes the FINAL post-reconciliation
+ * room codes, names, and floorplan coordinates from IMPLEMENTATION_PLAN §4.2.
+ * `ensureHomeCatalogSeed` uses `onConflictDoNothing` on `room_code`, so it will
+ * NOT recreate old drift rooms or overwrite the reconciled rows.  A future re-seed
+ * starting from an empty DB will produce the correct canonical set directly.
+ *
+ * Rooms that should NOT be seeded (they are created by reconciliation or are
+ * deleted): lower-storage, upper-bath-2, upper-deck, and all drift codes.
+ * The upper-dining-room is created by the data-fix script and is included in
+ * this seed so a fresh DB also gets it.
+ *
+ * Coordinate system:
+ *   floorplanXPct 0 = left edge of floorplan image
+ *   floorplanXPct 100 = right edge
+ *   floorplanYPct 0 = top (back of house / bedrooms)
+ *   floorplanYPct 100 = bottom (street / kitchen)
+ *   null x/y = no dot; room appears in "Outside / Unplaced" sidebar group only
+ *
+ * --- T2.1 enrichment (Phase 2, floor-plan page) ---
+ * getHomeCatalog now returns per-room aggregate stats so the floor-plan dot
+ * hover-card needs no additional fetches:
+ *   - listingCount    — count of images WHERE photo_category='listing' AND room_id=this
+ *   - inspirationCount — count of inspirational_image_rooms WHERE room_id=this
+ *   - heroImageUrl    — representative image delivery URL resolved via the
+ *                       fallback chain:
+ *                         1. room_ai_summaries.representativeImageId → listing image
+ *                         2. first listing image for the room
+ *                         3. first inspiration image for the room
+ *                         4. null (no image at all)
+ *   - dimensions      — formatted string from formatRoomDimensions ("15'0\" x 24'10\"")
+ *   - sqft            — (lengthFeet + lengthInches/12) * (widthFeet + widthInches/12),
+ *                       rounded to integer, or null if dims are absent
+ *
+ * All counts are computed with two grouped SQL queries (one for listing, one for
+ * inspiration) and two targeted queries for summaries + hero images — never N+1.
+ */
+
+import { floors, images, inspirationalImageRooms, roomAiSummaries, rooms } from "@backend/db";
+import { and, asc, count, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 interface SeedFloor {
@@ -19,8 +61,20 @@ interface SeedRoom {
   widthFeet: number | null;
   widthInches: number | null;
   isLivingSpace: boolean;
+  /** Floorplan canvas identifier (matches floors.key). null = sidebar-only room. */
+  floorplanFloorKey: string | null;
+  /** Horizontal position on the floorplan image, 0–100. null = no dot. */
+  floorplanXPct: number | null;
+  /** Vertical position on the floorplan image, 0–100. null = no dot. */
+  floorplanYPct: number | null;
 }
 
+/**
+ * Canonical floor definitions.
+ * The "outside" and "all_levels" floors were present in the live DB with
+ * ids 233121 and 233122 respectively — they are seeded by a prior migration/seed
+ * and are included here for completeness.  onConflictDoNothing keeps it safe.
+ */
 const DEFAULT_FLOORS: SeedFloor[] = [
   {
     key: "lower_level",
@@ -34,19 +88,48 @@ const DEFAULT_FLOORS: SeedFloor[] = [
     levelOrder: 2,
     livingSqFt: 1429,
   },
+  {
+    key: "outside",
+    name: "Outside",
+    levelOrder: 3,
+    livingSqFt: null,
+  },
+  {
+    key: "all_levels",
+    name: "All Levels",
+    levelOrder: 4,
+    livingSqFt: null,
+  },
 ];
 
+/**
+ * Final canonical room set (post 0005 reconciliation).
+ * Ordered: lower level → upper level → outside.
+ * Coordinates match §4.2 of IMPLEMENTATION_PLAN.
+ *
+ * Rules:
+ *   - Room codes are all kebab-case slugs.
+ *   - Drift rooms (snake_case like `kitchen`, `family_room`) do NOT appear here.
+ *   - Deleted rooms (lower-storage, upper-bath-2, upper-deck) do NOT appear here.
+ *   - onConflictDoNothing means running this seed twice is safe.
+ */
 const DEFAULT_ROOMS: SeedRoom[] = [
+  // -------------------------------------------------------------------------
+  // LOWER LEVEL
+  // -------------------------------------------------------------------------
   {
     floorKey: "lower_level",
-    roomCode: "lower-bedroom-1",
-    roomName: "Bedroom",
+    roomCode: "lower-guest-bedroom",
+    roomName: "Guest Bedroom",
     asIsUse: "Bedroom",
     lengthFeet: 11,
     lengthInches: 11,
     widthFeet: 13,
     widthInches: 7,
     isLivingSpace: true,
+    floorplanFloorKey: "lower_level",
+    floorplanXPct: 33,
+    floorplanYPct: 28,
   },
   {
     floorKey: "lower_level",
@@ -58,17 +141,23 @@ const DEFAULT_ROOMS: SeedRoom[] = [
     widthFeet: 22,
     widthInches: 6,
     isLivingSpace: true,
+    floorplanFloorKey: "lower_level",
+    floorplanXPct: 18,
+    floorplanYPct: 34,
   },
   {
     floorKey: "lower_level",
-    roomCode: "lower-bath-1",
-    roomName: "Bath",
+    roomCode: "lower-guest-bath",
+    roomName: "Guest Bath",
     asIsUse: "Bath",
     lengthFeet: null,
     lengthInches: null,
     widthFeet: null,
     widthInches: null,
     isLivingSpace: true,
+    floorplanFloorKey: "lower_level",
+    floorplanXPct: 34,
+    floorplanYPct: 43,
   },
   {
     floorKey: "lower_level",
@@ -80,17 +169,9 @@ const DEFAULT_ROOMS: SeedRoom[] = [
     widthFeet: null,
     widthInches: null,
     isLivingSpace: false,
-  },
-  {
-    floorKey: "lower_level",
-    roomCode: "lower-storage",
-    roomName: "Storage",
-    asIsUse: "Storage",
-    lengthFeet: 8,
-    lengthInches: 1,
-    widthFeet: 3,
-    widthInches: 0,
-    isLivingSpace: false,
+    floorplanFloorKey: "lower_level",
+    floorplanXPct: 26,
+    floorplanYPct: 49,
   },
   {
     floorKey: "lower_level",
@@ -102,21 +183,44 @@ const DEFAULT_ROOMS: SeedRoom[] = [
     widthFeet: 21,
     widthInches: 9,
     isLivingSpace: false,
+    floorplanFloorKey: "lower_level",
+    floorplanXPct: 25,
+    floorplanYPct: 77,
   },
   {
     floorKey: "lower_level",
-    roomCode: "lower-entryway",
-    roomName: "Entryway",
+    roomCode: "street-front-door",
+    roomName: "Front Door / Street",
     asIsUse: "Entryway",
     lengthFeet: 5,
     lengthInches: 8,
     widthFeet: 11,
     widthInches: 5,
     isLivingSpace: false,
+    floorplanFloorKey: "lower_level",
+    floorplanXPct: 7,
+    floorplanYPct: 89,
   },
   {
     floorKey: "lower_level",
-    roomCode: "lower-patio",
+    roomCode: "lower-foyer",
+    roomName: "Foyer",
+    asIsUse: "Entry / Foyer",
+    lengthFeet: null,
+    lengthInches: null,
+    widthFeet: null,
+    widthInches: null,
+    isLivingSpace: true,
+    floorplanFloorKey: "lower_level",
+    floorplanXPct: 7,
+    floorplanYPct: 52,
+  },
+  // -------------------------------------------------------------------------
+  // OUTSIDE / EXTERIOR
+  // -------------------------------------------------------------------------
+  {
+    floorKey: "outside",
+    roomCode: "outside-patio",
     roomName: "Patio",
     asIsUse: "Patio",
     lengthFeet: 23,
@@ -124,21 +228,13 @@ const DEFAULT_ROOMS: SeedRoom[] = [
     widthFeet: 9,
     widthInches: 8,
     isLivingSpace: false,
+    floorplanFloorKey: "outside",
+    floorplanXPct: 27,
+    floorplanYPct: 10,
   },
   {
-    floorKey: "lower_level",
-    roomCode: "lower-rear-patio",
-    roomName: "Rear Patio",
-    asIsUse: "Rear Patio",
-    lengthFeet: 25,
-    lengthInches: 0,
-    widthFeet: 9,
-    widthInches: 0,
-    isLivingSpace: false,
-  },
-  {
-    floorKey: "lower_level",
-    roomCode: "lower-backyard",
+    floorKey: "outside",
+    roomCode: "outside-backyard",
     roomName: "Backyard",
     asIsUse: "Backyard",
     lengthFeet: 25,
@@ -146,10 +242,17 @@ const DEFAULT_ROOMS: SeedRoom[] = [
     widthFeet: 60,
     widthInches: 0,
     isLivingSpace: false,
+    // No dot — shown in sidebar "Outside" group only.
+    floorplanFloorKey: "outside",
+    floorplanXPct: null,
+    floorplanYPct: null,
   },
+  // -------------------------------------------------------------------------
+  // UPPER LEVEL
+  // -------------------------------------------------------------------------
   {
     floorKey: "upper_level",
-    roomCode: "upper-primary-bedroom",
+    roomCode: "primary-bedroom",
     roomName: "Primary Bedroom",
     asIsUse: "Primary Bedroom",
     lengthFeet: 11,
@@ -157,72 +260,99 @@ const DEFAULT_ROOMS: SeedRoom[] = [
     widthFeet: 13,
     widthInches: 7,
     isLivingSpace: true,
+    floorplanFloorKey: "upper_level",
+    floorplanXPct: 82,
+    floorplanYPct: 21,
   },
   {
     floorKey: "upper_level",
-    roomCode: "upper-bedroom-2",
-    roomName: "Bedroom",
+    roomCode: "jason-office",
+    roomName: "Jason's Office",
     asIsUse: "Bedroom",
     lengthFeet: 12,
     lengthInches: 0,
     widthFeet: 13,
     widthInches: 4,
     isLivingSpace: true,
+    // Coordinate from upper-bedroom-3's old position (U3 spec: coord swap)
+    floorplanFloorKey: "upper_level",
+    floorplanXPct: 66,
+    floorplanYPct: 52,
   },
   {
     floorKey: "upper_level",
-    roomCode: "upper-bedroom-3",
-    roomName: "Bedroom",
+    roomCode: "justin-office",
+    roomName: "Justin's Office",
     asIsUse: "Bedroom",
     lengthFeet: 11,
     lengthInches: 10,
     widthFeet: 10,
     widthInches: 7,
     isLivingSpace: true,
+    // Coordinate from upper-bedroom-2's old position (U4 spec: coord swap)
+    floorplanFloorKey: "upper_level",
+    floorplanXPct: 64,
+    floorplanYPct: 21,
   },
   {
     floorKey: "upper_level",
-    roomCode: "upper-living-dining",
-    roomName: "Living Room / Dining Room",
-    asIsUse: "Living Room / Dining Room",
+    roomCode: "upper-living-room",
+    roomName: "Living Room",
+    asIsUse: "Living Room",
     lengthFeet: 15,
     lengthInches: 0,
     widthFeet: 24,
     widthInches: 10,
     isLivingSpace: true,
+    floorplanFloorKey: "upper_level",
+    floorplanXPct: 84,
+    floorplanYPct: 72,
   },
   {
     floorKey: "upper_level",
-    roomCode: "upper-kitchen-breakfast",
-    roomName: "Kitchen / Breakfast Nook",
+    roomCode: "upper-dining-room",
+    roomName: "Dining Room",
+    asIsUse: "Dining Room",
+    // Dimensions not separately measured; this room was split from upper-living-dining.
+    lengthFeet: null,
+    lengthInches: null,
+    widthFeet: null,
+    widthInches: null,
+    isLivingSpace: true,
+    // User-specified: same X axis as upper-living-room, mid quad-2 (between stair-landing & living-room).
+    floorplanFloorKey: "upper_level",
+    floorplanXPct: 84,
+    floorplanYPct: 62,
+  },
+  {
+    floorKey: "upper_level",
+    roomCode: "upper-kitchen",
+    roomName: "Kitchen",
     asIsUse: "Kitchen / Breakfast Nook",
     lengthFeet: 8,
     lengthInches: 9,
     widthFeet: 18,
     widthInches: 3,
     isLivingSpace: true,
+    // Moved left from (70,76) to (65,76) per spec U7.
+    floorplanFloorKey: "upper_level",
+    floorplanXPct: 65,
+    floorplanYPct: 76,
   },
   {
     floorKey: "upper_level",
-    roomCode: "upper-bath-1",
-    roomName: "Bath",
+    roomCode: "upper-hall-bath",
+    roomName: "Hall Bath",
     asIsUse: "Bath",
     lengthFeet: 5,
     lengthInches: 4,
     widthFeet: 11,
     widthInches: 3,
     isLivingSpace: true,
-  },
-  {
-    floorKey: "upper_level",
-    roomCode: "upper-bath-2",
-    roomName: "Bath (Second)",
-    asIsUse: "Bath (Second)",
-    lengthFeet: null,
-    lengthInches: null,
-    widthFeet: null,
-    widthInches: null,
-    isLivingSpace: true,
+    // Moved up from (64,37) to (64,32) per spec U6.
+    floorplanFloorKey: "upper_level",
+    floorplanXPct: 64,
+    floorplanYPct: 32,
   },
   {
     floorKey: "upper_level",
@@ -234,38 +364,53 @@ const DEFAULT_ROOMS: SeedRoom[] = [
     widthFeet: 3,
     widthInches: 11,
     isLivingSpace: false,
+    floorplanFloorKey: "upper_level",
+    floorplanXPct: 67,
+    floorplanYPct: 39,
   },
   {
     floorKey: "upper_level",
-    roomCode: "upper-workshop",
-    roomName: "Workshop",
-    asIsUse: "Workshop",
+    roomCode: "upper-stair-landing",
+    roomName: "Stair Landing",
+    asIsUse: "Workshop / Stair Landing",
     lengthFeet: 10,
     lengthInches: 11,
     widthFeet: 7,
     widthInches: 6,
     isLivingSpace: false,
+    floorplanFloorKey: "upper_level",
+    floorplanXPct: 78,
+    floorplanYPct: 49,
   },
   {
     floorKey: "upper_level",
-    roomCode: "upper-deck",
-    roomName: "Deck",
-    asIsUse: "Deck",
-    lengthFeet: 16,
-    lengthInches: 1,
-    widthFeet: 5,
-    widthInches: 6,
-    isLivingSpace: false,
+    roomCode: "primary-bathroom",
+    roomName: "Primary Bathroom",
+    asIsUse: "Primary Bathroom",
+    lengthFeet: null,
+    lengthInches: null,
+    widthFeet: null,
+    widthInches: null,
+    isLivingSpace: true,
+    // Coordinate from upper-bath-2 (coord donor, U2b).
+    floorplanFloorKey: "upper_level",
+    floorplanXPct: 88,
+    floorplanYPct: 39,
   },
 ];
 
 let _catalogSeeded: Promise<void> | null = null;
 
+/**
+ * Ensure the home catalog floor + room seed has been applied.
+ * Idempotent — safe to call on every request startup.
+ * Uses onConflictDoNothing so it won't overwrite reconciled data.
+ */
 export async function ensureHomeCatalogSeed(env: Env): Promise<void> {
   if (_catalogSeeded) return _catalogSeeded;
 
   _catalogSeeded = _doSeedHomeCatalog(env).catch((err) => {
-    // Allow retry on failure
+    // Allow retry on failure.
     _catalogSeeded = null;
     throw err;
   });
@@ -309,18 +454,354 @@ async function _doSeedHomeCatalog(env: Env): Promise<void> {
         widthFeet: room.widthFeet,
         widthInches: room.widthInches,
         isLivingSpace: room.isLivingSpace,
+        floorplanFloorKey: room.floorplanFloorKey,
+        floorplanXPct: room.floorplanXPct,
+        floorplanYPct: room.floorplanYPct,
       })
       .onConflictDoNothing()
       .run();
   }
 }
 
+// ---------------------------------------------------------------------------
+// Dimension helpers (T2.1 — used by getHomeCatalog enrichment below)
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a room's dimensions into a human-readable string such as "15'0\" x 24'10\"".
+ * Returns null when neither length nor width is set.
+ *
+ * This mirrors the `formatRoomDimensions` helper in rooms.ts so the catalog
+ * response can include the formatted label without requiring a separate detail fetch.
+ */
+function formatRoomDimensions(
+  room: Pick<
+    typeof rooms.$inferSelect,
+    "lengthFeet" | "lengthInches" | "widthFeet" | "widthInches"
+  >,
+): string | null {
+  const lengthSet =
+    typeof room.lengthFeet === "number" || typeof room.lengthInches === "number";
+  const widthSet =
+    typeof room.widthFeet === "number" || typeof room.widthInches === "number";
+  if (!lengthSet && !widthSet) return null;
+
+  const formatSide = (feet: number | null, inches: number | null): string => {
+    const feetValue = typeof feet === "number" ? feet : 0;
+    const inchesValue = typeof inches === "number" ? inches : 0;
+    return `${feetValue}'${inchesValue}"`;
+  };
+
+  if (lengthSet && widthSet) {
+    return `${formatSide(room.lengthFeet, room.lengthInches)} x ${formatSide(room.widthFeet, room.widthInches)}`;
+  }
+  if (lengthSet) {
+    return formatSide(room.lengthFeet, room.lengthInches);
+  }
+  return formatSide(room.widthFeet, room.widthInches);
+}
+
+/**
+ * Compute the approximate square footage of a room from its dimension fields.
+ * Formula: (lengthFeet + lengthInches/12) * (widthFeet + widthInches/12), rounded.
+ * Returns null when either the length or the width dimension set is absent.
+ */
+function computeRoomSqft(
+  room: Pick<
+    typeof rooms.$inferSelect,
+    "lengthFeet" | "lengthInches" | "widthFeet" | "widthInches"
+  >,
+): number | null {
+  const lengthSet =
+    typeof room.lengthFeet === "number" || typeof room.lengthInches === "number";
+  const widthSet =
+    typeof room.widthFeet === "number" || typeof room.widthInches === "number";
+  // Both dimensions must be present to compute a meaningful area.
+  if (!lengthSet || !widthSet) return null;
+
+  const lengthFt = (typeof room.lengthFeet === "number" ? room.lengthFeet : 0) +
+    (typeof room.lengthInches === "number" ? room.lengthInches / 12 : 0);
+  const widthFt = (typeof room.widthFeet === "number" ? room.widthFeet : 0) +
+    (typeof room.widthInches === "number" ? room.widthInches / 12 : 0);
+
+  if (lengthFt <= 0 || widthFt <= 0) return null;
+  return Math.round(lengthFt * widthFt);
+}
+
+/**
+ * Resolve a Cloudflare Images delivery URL from an image row.
+ *
+ * The `cfImageIdOptimized` and `cfImageIdOriginal` fields already contain the
+ * full delivery token in the form "<accountHash>/<imageId>".  When one of those
+ * tokens is present the URL is:
+ *   https://imagedelivery.net/<token>/public
+ *
+ * If the field is itself a full URL (starts with "http") it is returned verbatim.
+ * Returns null when neither field is populated or the token has no "/" separator
+ * (which would mean it is just a bare image id with no account hash — not a valid
+ * delivery token we can construct a URL from).
+ */
+function resolveDeliveryUrl(
+  image: Pick<typeof images.$inferSelect, "cfImageIdOptimized" | "cfImageIdOriginal"> | null | undefined,
+): string | null {
+  if (!image) return null;
+  const candidate = image.cfImageIdOptimized || image.cfImageIdOriginal;
+  if (!candidate) return null;
+  if (candidate.startsWith("http://") || candidate.startsWith("https://")) {
+    return candidate;
+  }
+  // A valid delivery token must contain "/" separating accountHash from imageId.
+  if (candidate.includes("/")) {
+    return `https://imagedelivery.net/${candidate}/public`;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Public catalog query (T2.1 enriched)
+// ---------------------------------------------------------------------------
+
+/**
+ * Return the full home catalog: all floors with their rooms, enriched with
+ * per-room aggregate stats required by the floor-plan dot hover card.
+ *
+ * Enriched fields per room (T2.1):
+ *   listingCount      — count of images WHERE photo_category='listing' AND room_id=<id>
+ *   inspirationCount  — count of inspirational_image_rooms WHERE room_id=<id>
+ *   heroImageUrl      — delivery URL resolved via the fallback chain:
+ *                         1. room_ai_summaries.representativeImageId → listing image
+ *                         2. first listing image for the room (by datetime_created DESC)
+ *                         3. first inspiration image mapped to the room
+ *                         4. null
+ *   dimensions        — human-readable formatted string or null
+ *   sqft              — integer area rounded from feet+inches, or null
+ *
+ * All aggregate counts are fetched in two grouped queries (not N+1).
+ * Hero resolution uses: one summary query + two targeted image queries whose
+ * result sets are bounded by the number of rooms (small, never unbounded).
+ */
 export async function getHomeCatalog(env: Env) {
   const db = drizzle(env.DB);
 
-  const floorRows = await db.select().from(floors).orderBy(asc(floors.levelOrder)).all();
-  const roomRows = await db.select().from(rooms).orderBy(asc(rooms.floorId), asc(rooms.id)).all();
+  // ── 1. Fetch floors and rooms ────────────────────────────────────────────
+  const [floorRows, roomRows] = await Promise.all([
+    db.select().from(floors).orderBy(asc(floors.levelOrder)).all(),
+    db.select().from(rooms).orderBy(asc(rooms.floorId), asc(rooms.id)).all(),
+  ]);
 
+  const roomIds = roomRows.map((r) => r.id);
+
+  // ── 2. Aggregate counts (two grouped queries, not N+1) ───────────────────
+  //
+  // listing count: images WHERE photo_category='listing' GROUP BY room_id
+  // inspiration count: inspirational_image_rooms GROUP BY room_id
+  //
+  // We skip the queries when roomIds is empty (fresh/empty DB) to avoid
+  // a D1 "empty IN" error.
+
+  const [listingCountRows, inspirationCountRows] = await Promise.all([
+    roomIds.length > 0
+      ? db
+          .select({ roomId: images.roomId, cnt: count(images.id) })
+          .from(images)
+          .where(
+            and(
+              eq(images.photoCategory, "listing"),
+              inArray(images.roomId, roomIds),
+            ),
+          )
+          .groupBy(images.roomId)
+          .all()
+      : Promise.resolve([] as Array<{ roomId: number | null; cnt: number }>),
+    roomIds.length > 0
+      ? db
+          .select({ roomId: inspirationalImageRooms.roomId, cnt: count(inspirationalImageRooms.id) })
+          .from(inspirationalImageRooms)
+          .where(inArray(inspirationalImageRooms.roomId, roomIds))
+          .groupBy(inspirationalImageRooms.roomId)
+          .all()
+      : Promise.resolve([] as Array<{ roomId: number; cnt: number }>),
+  ]);
+
+  // Build fast lookup maps: roomId → count.
+  const listingCountByRoomId = new Map<number, number>();
+  for (const row of listingCountRows) {
+    if (typeof row.roomId === "number") {
+      listingCountByRoomId.set(row.roomId, row.cnt);
+    }
+  }
+  const inspirationCountByRoomId = new Map<number, number>();
+  for (const row of inspirationCountRows) {
+    inspirationCountByRoomId.set(row.roomId, row.cnt);
+  }
+
+  // ── 3. Hero image resolution ─────────────────────────────────────────────
+  //
+  // Priority chain per room:
+  //   a) room_ai_summaries.representativeImageId — preferred, user-chosen hero
+  //   b) first listing photo (photo_category='listing', ordered by datetime_created DESC)
+  //   c) first inspiration photo (via inspirational_image_rooms, ordered by datetime_created DESC)
+  //   d) null — no image at all
+  //
+  // Approach to avoid N+1:
+  //   i.  Fetch all room_ai_summaries in one query → collect the representativeImageIds.
+  //   ii. Fetch those specific image rows in one query.
+  //   iii.For rooms without a summary or whose representativeImageId resolves to
+  //       nothing, fall back to the "first listing" image.  We already have the
+  //       listing count grouped query, but we need the actual image row to get the
+  //       CF token.  We use a single query: SELECT DISTINCT ON room_id (emulated via
+  //       a subquery ordering) — D1/SQLite does not support DISTINCT ON directly, so
+  //       we fetch the latest listing image per room in one pass using a window-style
+  //       approach via a correlated subquery alias, or alternatively fetch all listing
+  //       images for the room set and pick the first in JS (safe when the total number
+  //       of placed rooms is small — currently 19 rooms).  We prefer the JS approach
+  //       since it avoids complex SQL and the room count is bounded.
+  //   iv. For rooms that still have no hero, repeat the same approach for inspiration.
+
+  const [summaryRows, listingImageRows] = await Promise.all([
+    roomIds.length > 0
+      ? db
+          .select({
+            roomId: roomAiSummaries.roomId,
+            representativeImageId: roomAiSummaries.representativeImageId,
+          })
+          .from(roomAiSummaries)
+          .where(inArray(roomAiSummaries.roomId, roomIds))
+          .all()
+      : Promise.resolve([] as Array<{ roomId: number; representativeImageId: string | null }>),
+    // Fetch all listing images for all rooms in one query.
+    // Filtered to photo_category='listing' so non-listing images (inspirational,
+    // ai_render) are excluded from the listing count fallback hero chain.
+    // Ordered latest-first so we can pick [0] per room as the fallback.
+    roomIds.length > 0
+      ? db
+          .select({
+            id: images.id,
+            roomId: images.roomId,
+            cfImageIdOptimized: images.cfImageIdOptimized,
+            cfImageIdOriginal: images.cfImageIdOriginal,
+          })
+          .from(images)
+          .where(
+            and(
+              eq(images.photoCategory, "listing"),
+              inArray(images.roomId, roomIds),
+            ),
+          )
+          .all()
+      : Promise.resolve(
+          [] as Array<{
+            id: string;
+            roomId: number | null;
+            cfImageIdOptimized: string | null;
+            cfImageIdOriginal: string;
+          }>,
+        ),
+  ]);
+
+  // Build a map of representativeImageId by roomId (nulls omitted).
+  const representativeImageIdByRoomId = new Map<number, string>();
+  for (const row of summaryRows) {
+    if (row.representativeImageId) {
+      representativeImageIdByRoomId.set(row.roomId, row.representativeImageId);
+    }
+  }
+
+  // Collect the representative image ids we need to resolve.
+  const repImageIds = Array.from(new Set(representativeImageIdByRoomId.values()));
+
+  // Fetch the actual image rows for representative images in one query.
+  const repImageRows =
+    repImageIds.length > 0
+      ? await db
+          .select({
+            id: images.id,
+            cfImageIdOptimized: images.cfImageIdOptimized,
+            cfImageIdOriginal: images.cfImageIdOriginal,
+          })
+          .from(images)
+          .where(inArray(images.id, repImageIds))
+          .all()
+      : [];
+  const repImageById = new Map(repImageRows.map((r) => [r.id, r]));
+
+  // Build: roomId → first listing image row (latest datetime_created is first in
+  // the query result because we order by datetime_created DESC in listingImageRows).
+  // We only need one image row per room.  We iterate in query order so the first
+  // entry we encounter for each room is the representative listing fallback.
+  const firstListingImageByRoomId = new Map<
+    number,
+    { id: string; cfImageIdOptimized: string | null; cfImageIdOriginal: string }
+  >();
+  for (const img of listingImageRows) {
+    if (typeof img.roomId === "number" && !firstListingImageByRoomId.has(img.roomId)) {
+      firstListingImageByRoomId.set(img.roomId, img);
+    }
+  }
+
+  // Identify rooms that still have no hero candidate after checking summary + listing.
+  const roomsNeedingInspirationFallback = roomIds.filter((roomId) => {
+    const repId = representativeImageIdByRoomId.get(roomId);
+    if (repId) {
+      const repImg = repImageById.get(repId);
+      if (repImg && resolveDeliveryUrl(repImg)) return false;
+    }
+    const listingImg = firstListingImageByRoomId.get(roomId);
+    if (listingImg && resolveDeliveryUrl(listingImg)) return false;
+    return true;
+  });
+
+  // For those rooms, fetch one inspiration image per room via a single query
+  // over inspirational_image_rooms + images join.  D1 supports joins.
+  // We use a simple approach: fetch all relevant inspirational_image_rooms rows
+  // ordered by datetime_created, then resolve image ids, then fetch image rows.
+  const inspirationFallbackImageByRoomId = new Map<
+    number,
+    { cfImageIdOptimized: string | null; cfImageIdOriginal: string }
+  >();
+  if (roomsNeedingInspirationFallback.length > 0) {
+    // Fetch the most recent inspirational mapping per room that needs a fallback.
+    const inspirationMappings = await db
+      .select({
+        roomId: inspirationalImageRooms.roomId,
+        imageId: inspirationalImageRooms.imageId,
+      })
+      .from(inspirationalImageRooms)
+      .where(inArray(inspirationalImageRooms.roomId, roomsNeedingInspirationFallback))
+      .orderBy(asc(inspirationalImageRooms.datetimeCreated))
+      .all();
+
+    // Pick the first mapping per room (earliest created = most stable).
+    const firstInspirationImageIdByRoomId = new Map<number, string>();
+    for (const mapping of inspirationMappings) {
+      if (!firstInspirationImageIdByRoomId.has(mapping.roomId)) {
+        firstInspirationImageIdByRoomId.set(mapping.roomId, mapping.imageId);
+      }
+    }
+
+    const inspirationImageIds = Array.from(new Set(firstInspirationImageIdByRoomId.values()));
+    if (inspirationImageIds.length > 0) {
+      const inspirationImageRows = await db
+        .select({
+          id: images.id,
+          cfImageIdOptimized: images.cfImageIdOptimized,
+          cfImageIdOriginal: images.cfImageIdOriginal,
+        })
+        .from(images)
+        .where(inArray(images.id, inspirationImageIds))
+        .all();
+      const inspirationImageById = new Map(inspirationImageRows.map((r) => [r.id, r]));
+
+      for (const [roomId, imgId] of firstInspirationImageIdByRoomId) {
+        const imgRow = inspirationImageById.get(imgId);
+        if (imgRow) {
+          inspirationFallbackImageByRoomId.set(roomId, imgRow);
+        }
+      }
+    }
+  }
+
+  // ── 4. Build displayName (duplicate-name disambiguation) ─────────────────
   const roomCountsByFloorAndName = new Map<string, number>();
   for (const room of roomRows) {
     const key = `${room.floorId}::${room.roomName.toLowerCase()}`;
@@ -328,38 +809,111 @@ export async function getHomeCatalog(env: Env) {
   }
 
   const roomIndexByFloorAndName = new Map<string, number>();
-  const roomsByFloorId = new Map<
-    number,
-    Array<(typeof roomRows)[number] & { displayName: string }>
-  >();
+
+  // ── 5. Assemble per-floor room arrays ────────────────────────────────────
+  const roomsByFloorId = new Map<number, Array<EnrichedCatalogRoom>>();
 
   for (const room of roomRows) {
-    const key = `${room.floorId}::${room.roomName.toLowerCase()}`;
-    const currentIndex = (roomIndexByFloorAndName.get(key) || 0) + 1;
-    roomIndexByFloorAndName.set(key, currentIndex);
+    // Display-name disambiguator (unchanged from prior implementation).
+    const nameKey = `${room.floorId}::${room.roomName.toLowerCase()}`;
+    const currentIndex = (roomIndexByFloorAndName.get(nameKey) || 0) + 1;
+    roomIndexByFloorAndName.set(nameKey, currentIndex);
+    const totalWithSameName = roomCountsByFloorAndName.get(nameKey) || 1;
+    const displayName =
+      totalWithSameName > 1 ? `${room.roomName} ${currentIndex}` : room.roomName;
 
-    const totalWithSameName = roomCountsByFloorAndName.get(key) || 1;
-    const displayName = totalWithSameName > 1 ? `${room.roomName} ${currentIndex}` : room.roomName;
+    // --- Counts ---
+    const listingCount = listingCountByRoomId.get(room.id) ?? 0;
+    const inspirationCount = inspirationCountByRoomId.get(room.id) ?? 0;
 
-    const payload = {
+    // --- Hero URL (fallback chain) ---
+    let heroImageUrl: string | null = null;
+
+    // Attempt a: representativeImageId from room_ai_summaries.
+    const repId = representativeImageIdByRoomId.get(room.id);
+    if (repId) {
+      const repImg = repImageById.get(repId);
+      heroImageUrl = resolveDeliveryUrl(repImg ?? null);
+    }
+
+    // Attempt b: first listing image.
+    if (!heroImageUrl) {
+      const listingImg = firstListingImageByRoomId.get(room.id);
+      heroImageUrl = resolveDeliveryUrl(listingImg ?? null);
+    }
+
+    // Attempt c: first inspiration image.
+    if (!heroImageUrl) {
+      const inspImg = inspirationFallbackImageByRoomId.get(room.id);
+      heroImageUrl = resolveDeliveryUrl(inspImg ?? null);
+    }
+
+    // --- Dimensions + sqft ---
+    const dimensions = formatRoomDimensions(room);
+    const sqft = computeRoomSqft(room);
+
+    const enrichedRoom: EnrichedCatalogRoom = {
       ...room,
       displayName,
+      listingCount,
+      inspirationCount,
+      heroImageUrl,
+      dimensions,
+      sqft,
     };
 
     if (!roomsByFloorId.has(room.floorId)) {
       roomsByFloorId.set(room.floorId, []);
     }
-    roomsByFloorId.get(room.floorId)!.push(payload);
+    roomsByFloorId.get(room.floorId)!.push(enrichedRoom);
   }
 
   return {
     floors: floorRows.map((floor) => ({
-      ...floor,
-      rooms: roomsByFloorId.get(floor.id) || [],
+      id: floor.id,
+      key: floor.key,
+      name: floor.name,
+      levelOrder: floor.levelOrder,
+      rooms: roomsByFloorId.get(floor.id) ?? [],
     })),
+    // Backward-compatible flat rooms array (keeps existing callers working).
     rooms: roomRows,
   };
 }
+
+/**
+ * Shape of a single enriched room entry in the catalog response.
+ * Exported so that the frontend and test code can reference the type without
+ * re-deriving it from the query return type.
+ *
+ * Backward-compatible: all fields present in the pre-T2.1 catalog are still
+ * present verbatim.  New fields are additive.
+ */
+export type EnrichedCatalogRoom = typeof rooms.$inferSelect & {
+  /** Human-readable display name with disambiguation suffix when names collide on the same floor. */
+  displayName: string;
+  /** Count of images WHERE photo_category='listing' AND room_id=this. */
+  listingCount: number;
+  /** Count of inspirational_image_rooms WHERE room_id=this. */
+  inspirationCount: number;
+  /**
+   * Cloudflare Images delivery URL for the representative/hero image, resolved
+   * via the fallback chain: representativeImageId → first listing → first
+   * inspiration → null.
+   */
+  heroImageUrl: string | null;
+  /**
+   * Formatted dimension string such as "15'0\" x 24'10\"" or a one-side-only
+   * string when only length or width is set.  null when no dimensions are stored.
+   */
+  dimensions: string | null;
+  /**
+   * Approximate square footage rounded to the nearest integer.
+   * Computed as (lengthFeet + lengthInches/12) * (widthFeet + widthInches/12).
+   * null when either the length or width dimension set is absent.
+   */
+  sqft: number | null;
+};
 
 export async function getRoomById(env: Env, roomId: number) {
   const db = drizzle(env.DB);

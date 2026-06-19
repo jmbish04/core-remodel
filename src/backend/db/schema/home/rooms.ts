@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 import { floors } from "./floors";
 
@@ -31,6 +31,32 @@ export const rooms = sqliteTable("rooms", {
   hvacNotes: text("hvac_notes"),
   generalNotes: text("general_notes"),
   metadata: text("metadata"), // JSON
+
+  /**
+   * Floorplan coordinate columns (Phase 0 — 0005_room_floorplan_overview_room_viewport).
+   *
+   * The floor-plan page renders one dot per room using these values instead of the
+   * previously hardcoded ROOM_COORDINATES_BY_CODE object in the frontend.  Rooms with
+   * null x/y are still shown but appear in an "Outside / Unplaced" sidebar group with
+   * no dot on the SVG canvas.
+   *
+   * floorplanFloorKey — matches floors.key: "lower_level" | "upper_level" | "outside" | null.
+   *   A null key means the room has not been assigned to any floorplan canvas yet.
+   *
+   * floorplanXPct — horizontal position on the floorplan image, 0–100 (percent).
+   *   0 = left edge, 100 = right edge.  null = no dot (sidebar only).
+   *
+   * floorplanYPct — vertical position on the floorplan image, 0–100 (percent).
+   *   0 = top edge (back of house / bedrooms), 100 = bottom edge (street / kitchen).
+   *   null = no dot (sidebar only).
+   *
+   * Both x/y must be non-null for a dot to render.  Setting either to null collapses
+   * the room into the "Unplaced" group.  Use setFloorplanPosition(code, {null, null})
+   * to remove a dot while keeping the floor-key assignment for grouping purposes.
+   */
+  floorplanFloorKey: text("floorplan_floor_key"), // "lower_level" | "upper_level" | "outside" | null
+  floorplanXPct: real("floorplan_x_pct"), // 0–100, null = no dot
+  floorplanYPct: real("floorplan_y_pct"), // 0–100, null = no dot
 
   datetimeCreated: integer("datetime_created", { mode: "timestamp" })
     .notNull()

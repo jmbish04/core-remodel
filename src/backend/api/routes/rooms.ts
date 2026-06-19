@@ -516,13 +516,57 @@ async function upsertRoomSummary(
     .get();
 }
 
+/**
+ * GET /catalog
+ *
+ * Returns the full home catalog: all floors with their rooms, enriched with
+ * per-room aggregate stats so the floor-plan dot hover-card (T2.1, Phase 2)
+ * needs no additional fetch.
+ *
+ * Response shape (stable contract for cf-frontend-engineer):
+ * {
+ *   success: true,
+ *   floors: [
+ *     {
+ *       id: number,
+ *       key: string,          // e.g. "lower_level" | "upper_level" | "outside"
+ *       name: string,
+ *       levelOrder: number,
+ *       rooms: [
+ *         {
+ *           id: number,
+ *           roomCode: string,     // stable kebab-case slug
+ *           roomName: string,     // raw DB name
+ *           displayName: string,  // disambiguated display name
+ *           floorplanFloorKey: string | null,  // canvas floor key
+ *           floorplanXPct: number | null,      // 0–100; null = no dot
+ *           floorplanYPct: number | null,      // 0–100; null = no dot
+ *           listingCount: number,     // photo_category='listing' images for this room
+ *           inspirationCount: number, // inspirational_image_rooms entries for this room
+ *           heroImageUrl: string | null,
+ *           dimensions: string | null, // e.g. "15'0\" x 24'10\""
+ *           sqft: number | null,
+ *           // … all other rooms columns (asIsUse, isLivingSpace, notes, dims, etc.)
+ *         }
+ *       ]
+ *     }
+ *   ],
+ *   rooms: Array  // flat backward-compatible array (all columns, no enrichment)
+ * }
+ *
+ * Backward compatibility: the flat `rooms` array at the top level is preserved
+ * for any caller that was iterating it directly (e.g. RoomViewApp room lookups).
+ * New callers should consume `floors[].rooms` which carries all the T2.1 fields.
+ */
 roomsRouter.get("/catalog", async (c) => {
   try {
     await ensureHomeCatalogSeed(c.env);
     const catalog = await getHomeCatalog(c.env);
     return c.json({
       success: true,
-      ...catalog,
+      floors: catalog.floors,
+      // Backward-compatible flat rooms array (columns only, no enrichment).
+      rooms: catalog.rooms,
     });
   } catch (error) {
     return c.json(

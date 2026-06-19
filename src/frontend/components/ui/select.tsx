@@ -16,13 +16,164 @@ function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   )
 }
 
-function SelectValue({ className, ...props }: SelectPrimitive.Value.Props) {
+/**
+ * The shape of a single labelled option, mirroring the object form that
+ * `@base-ui/react`'s `<Select.Root items=…>` accepts. `value` must equal the
+ * `value` you pass to the matching `<SelectItem value=…>`; `label` is what the
+ * trigger should display when that item is selected.
+ */
+export interface SelectOption<TValue = string> {
+  value: TValue
+  label: React.ReactNode
+}
+
+/**
+ * Every option-source shape `SelectValue` understands. Intentionally a superset
+ * that matches what base-ui's own `Select.Root` `items` prop accepts, so the
+ * mental model is identical whether you wire labels at the `Select` root or at
+ * the `SelectValue` trigger:
+ *
+ * - a record map: `{ [value]: label }`
+ * - an array of `{ value, label }` options
+ */
+export type SelectOptions<TValue = string> =
+  | Record<string, React.ReactNode>
+  | ReadonlyArray<SelectOption<TValue>>
+
+/**
+ * Resolves the display label for the currently-selected `value` from an `items`
+ * collection, mirroring `@base-ui/react`'s internal `resolveSelectedLabel`
+ * semantics (record lookup, then flat-array match). Returns `undefined` when no
+ * label can be resolved so callers can fall through to the next strategy.
+ */
+function resolveOptionLabel<TValue>(
+  value: TValue,
+  items: SelectOptions<TValue> | undefined
+): React.ReactNode | undefined {
+  if (items == null) {
+    return undefined
+  }
+  // Record-map form: `{ [value]: label }`.
+  if (!Array.isArray(items)) {
+    const record = items as Record<string, React.ReactNode>
+    const key = value as unknown as string
+    return key in record ? record[key] : undefined
+  }
+  // Array form: `[{ value, label }]`.
+  const match = (items as ReadonlyArray<SelectOption<TValue>>).find(
+    (item) => item.value === value
+  )
+  return match?.label
+}
+
+/**
+ * Extra props the shared wrapper layers on top of base-ui's `Select.Value`.
+ *
+ * IMPORTANT — why this exists: unlike Radix, `@base-ui/react`'s `<Select.Value>`
+ * renders the raw selected **value** when it cannot resolve a label (i.e. when
+ * the `Select.Root` was not given an `items` map). For Selects whose value is an
+ * id/code/slug that differs from its visible text (an image id, a room id, a
+ * vision-node id, …) the trigger would otherwise show the id instead of the
+ * human-readable name. These props let any Select opt in to value→label mapping
+ * at the call site with zero changes to the surrounding `<Select>` tree.
+ *
+ * Precedence (first match wins):
+ *   1. `renderValue(value)`  — full control over the rendered node.
+ *   2. function `children`   — base-ui's native render-child, untouched.
+ *   3. `getLabel(value)`     — map a value to its label.
+ *   4. `items`               — record or `{value,label}[]` lookup table.
+ *   5. base-ui default       — placeholder when empty, else nothing.
+ */
+export interface SelectValueExtraProps<TValue = string> {
+  /**
+   * Lookup table mapping each option `value` to its display label. Accepts the
+   * same shapes as base-ui's `Select.Root` `items` prop:
+   * `{ [value]: label }` or `Array<{ value, label }>`.
+   * @example
+   * ```tsx
+   * <SelectValue
+   *   items={images.map((i) => ({ value: i.id, label: i.displayName }))}
+   *   placeholder="Choose a photo"
+   * />
+   * ```
+   */
+  items?: SelectOptions<TValue>
+  /**
+   * Imperative value→label resolver. Use when a static `items` table is awkward
+   * (e.g. the label needs formatting). Return `undefined`/`null` to fall through
+   * to the placeholder / base-ui default rendering.
+   * @example
+   * ```tsx
+   * <SelectValue getLabel={(id) => byId.get(id)?.name} placeholder="Choose…" />
+   * ```
+   */
+  getLabel?: (value: TValue) => React.ReactNode | undefined
+  /**
+   * Full-control renderer for the trigger contents. Receives the current value
+   * (or `null` when nothing is selected). When provided it wins over every other
+   * strategy, including `placeholder`.
+   */
+  renderValue?: (value: TValue | null) => React.ReactNode
+}
+
+/**
+ * Drop-in replacement for `@base-ui/react`'s `Select.Value` that can resolve a
+ * selected value to its display **label** so the trigger never leaks a raw
+ * id/code. Backward compatible: with none of the extra props supplied it behaves
+ * exactly like the bare base-ui component (placeholder + native rendering), so
+ * existing call sites where `value === label` are unaffected.
+ *
+ * @see SelectValueExtraProps for the opt-in props and their precedence.
+ */
+function SelectValue<TValue = string>({
+  className,
+  items,
+  getLabel,
+  renderValue,
+  children,
+  ...props
+}: SelectPrimitive.Value.Props & SelectValueExtraProps<TValue>) {
+  // Only intercept rendering when the caller asked us to map value→label.
+  // Otherwise pass `children` straight through so base-ui's own placeholder /
+  // function-child / default behavior is preserved verbatim.
+  const shouldResolve =
+    renderValue != null ||
+    getLabel != null ||
+    items != null ||
+    typeof children === "function"
+
+  const resolvedChildren = shouldResolve
+    ? (rawValue: TValue | null) => {
+        if (renderValue != null) {
+          return renderValue(rawValue)
+        }
+        if (typeof children === "function") {
+          return (children as (value: TValue | null) => React.ReactNode)(rawValue)
+        }
+        if (rawValue != null) {
+          const fromGetLabel = getLabel?.(rawValue)
+          if (fromGetLabel != null) {
+            return fromGetLabel
+          }
+          const fromItems = resolveOptionLabel(rawValue, items)
+          if (fromItems != null) {
+            return fromItems
+          }
+        }
+        // Nothing resolved (e.g. no selection): defer to the placeholder if one
+        // was supplied, else render nothing rather than the raw value.
+        return props.placeholder ?? null
+      }
+    : (children as React.ReactNode)
+
   return (
     <SelectPrimitive.Value
       data-slot="select-value"
       className={cn("flex flex-1 text-left", className)}
       {...props}
-    />
+    >
+      {resolvedChildren as SelectPrimitive.Value.Props["children"]}
+    </SelectPrimitive.Value>
   )
 }
 

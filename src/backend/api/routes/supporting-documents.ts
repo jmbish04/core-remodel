@@ -8,6 +8,7 @@ import {
   visionPlanNodes,
 } from "@backend/db";
 import { ensureHomeCatalogSeed } from "@backend/services/home-catalog";
+import { improveDescription, summarizeDocumentForRoom } from "@backend/services/ai-text";
 import { desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
@@ -1186,6 +1187,173 @@ supportingDocumentsRouter.get("/:id", async (c) => {
     return c.json(
       {
         error: "Failed to fetch supporting document",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// T6.1 — POST /api/supporting-documents/improve-description
+// ---------------------------------------------------------------------------
+/**
+ * Improves a user-supplied description using Workers AI (the ✨ button in the
+ * supporting-document upload intake form).
+ *
+ * Lives on this public, browser-reachable router rather than aiRouter, which is
+ * Bearer-gated for server-to-server callers; the browser only holds the access
+ * cookie. Mirrors the auth posture of the sibling room-summary route below.
+ *
+ * Body (JSON): { text: string (1–3000 chars, required), context?: string (<=200) }
+ * Response: { success, original, improved }
+ */
+supportingDocumentsRouter.post("/improve-description", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { text?: string; context?: string };
+  const text = typeof body.text === "string" ? body.text.trim() : "";
+  if (!text) {
+    return c.json({ error: { code: "BAD_REQUEST", message: "text is required" } }, 400);
+  }
+  if (text.length > 3_000) {
+    return c.json({ error: { code: "BAD_REQUEST", message: "text exceeds 3000 chars" } }, 400);
+  }
+  const context = typeof body.context === "string" ? body.context.slice(0, 200) : undefined;
+  try {
+    const improved = await improveDescription(c.env, text, context);
+    return c.json({ success: true, original: text, improved });
+  } catch (error) {
+    return c.json(
+      {
+        error: { code: "AI_ERROR", message: "Failed to improve description" },
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// T6.1 — POST /api/supporting-documents/:id/room-summary
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates an AI-powered room-tailored summary for a supporting document,
+ * then caches the result into `supporting_documents.aiRationale`.
+ *
+ * The frontend calls this lazily on load for each document row that has no
+ * cached summary yet (aiRationale is null or empty).
+ *
+ * Path param: id — UUID of the supporting document
+ * Body (JSON, optional):
+ *   roomId   — integer   (optional if the document already has a single room mapping)
+ *   roomCode — string    (optional, used for context if roomId is omitted)
+ *   roomName — string    (optional override)
+ *   force    — boolean   (default false) — regenerate even when aiRationale already set
+ *
+ * Response: { success, documentId, aiRationale, cached }
+ */
+supportingDocumentsRouter.post("/:id/room-summary", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const documentId = c.req.param("id");
+
+    const doc = await db
+      .select()
+      .from(supportingDocuments)
+      .where(eq(supportingDocuments.id, documentId))
+      .get();
+
+    if (!doc) {
+      return c.json(
+        { error: { code: "NOT_FOUND", message: "Supporting document not found" } },
+        404,
+      );
+    }
+
+    const body = (await c.req.json().catch(() => ({}))) as {
+      roomId?: number;
+      roomCode?: string;
+      roomName?: string;
+      force?: boolean;
+    };
+
+    // Return cached value unless force=true
+    if (doc.aiRationale && !body.force) {
+      return c.json({
+        success: true,
+        documentId,
+        aiRationale: doc.aiRationale,
+        cached: true,
+      });
+    }
+
+    // Resolve the room context: explicit roomId > mapped rooms > fallback labels
+    let roomContext = {
+      roomName: body.roomName?.trim() || "the room",
+      roomCode: body.roomCode?.trim() || "unknown",
+    };
+
+    if (body.roomId) {
+      const room = await db
+        .select({ roomName: rooms.roomName, roomCode: rooms.roomCode })
+        .from(rooms)
+        .where(eq(rooms.id, body.roomId))
+        .get();
+      if (room) {
+        roomContext = { roomName: room.roomName, roomCode: room.roomCode };
+      }
+    } else {
+      // Fall back to first mapped room
+      const mapping = await db
+        .select({ roomId: supportingDocumentRoomMappings.roomId })
+        .from(supportingDocumentRoomMappings)
+        .where(eq(supportingDocumentRoomMappings.supportingDocumentId, documentId))
+        .get();
+      if (mapping) {
+        const room = await db
+          .select({ roomName: rooms.roomName, roomCode: rooms.roomCode })
+          .from(rooms)
+          .where(eq(rooms.id, mapping.roomId))
+          .get();
+        if (room) {
+          roomContext = { roomName: room.roomName, roomCode: room.roomCode };
+        }
+      }
+    }
+
+    const aiRationale = await summarizeDocumentForRoom(
+      c.env,
+      {
+        title: doc.title,
+        description: doc.description,
+        sourceType: doc.sourceType,
+        externalUrl: doc.externalUrl,
+      },
+      roomContext,
+    );
+
+    // Cache the result into aiRationale column (fire-and-forget is unsafe — await it)
+    if (aiRationale) {
+      await db
+        .update(supportingDocuments)
+        .set({ aiRationale, datetimeUpdated: new Date() })
+        .where(eq(supportingDocuments.id, documentId))
+        .run();
+    }
+
+    return c.json({
+      success: true,
+      documentId,
+      aiRationale: aiRationale || null,
+      cached: false,
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: {
+          code: "INTERNAL_ERROR",
+          message: "Failed to generate document room summary",
+        },
         details: error instanceof Error ? error.message : "Unknown error",
       },
       500,
