@@ -773,6 +773,7 @@ imagesRouter.post("/upload", async (c) => {
     const selectedInspirationalRoomIds = selectedInspirationalRooms.map(
       (room) => room.id,
     );
+    const batchItems: ImageProcessingWorkflowParams[] = [];
     const results: UploadResult[] = [];
     const requestFingerprintKeys = new Set<string>();
 
@@ -928,33 +929,7 @@ imagesRouter.post("/upload", async (c) => {
           roomIds: selectedInspirationalRoomIds,
           roomHint,
         };
-
-        try {
-          await c.env.IMAGE_PROCESSING_WORKFLOW.create({
-            id: workflowInstanceId,
-            params: workflowParams,
-          });
-        } catch (workflowError) {
-          const message =
-            workflowError instanceof Error
-              ? workflowError.message
-              : "Failed to queue workflow";
-          await db
-            .update(imageUploadStaging)
-            .set({
-              processingStatus: "failed",
-              processingError: message,
-            })
-            .where(eq(imageUploadStaging.imageId, imageId))
-            .run();
-
-          results.push({
-            success: false,
-            imageId,
-            error: message,
-          });
-          continue;
-        }
+        batchItems.push(workflowParams);
 
         results.push({
           success: true,
@@ -972,6 +947,33 @@ imagesRouter.post("/upload", async (c) => {
               ? fileError.message
               : "Failed to upload and queue image",
         });
+      }
+    }
+
+    if (batchItems.length > 0) {
+      try {
+        await c.env.IMAGE_BATCH_WORKFLOW.create({
+          id: `image-batch-${crypto.randomUUID()}`,
+          params: { items: batchItems },
+        });
+      } catch (batchError) {
+        const message =
+          batchError instanceof Error
+            ? batchError.message
+            : "Failed to queue batch workflow";
+        console.error("Batch workflow create failed:", message);
+        const failedIds = new Set(batchItems.map((item) => item.imageId));
+        await db
+          .update(imageUploadStaging)
+          .set({ processingStatus: "failed", processingError: message })
+          .where(inArray(imageUploadStaging.imageId, Array.from(failedIds)))
+          .run();
+        for (let i = 0; i < results.length; i += 1) {
+          const r = results[i];
+          if (r.success && failedIds.has(r.imageId)) {
+            results[i] = { success: false, imageId: r.imageId, error: message };
+          }
+        }
       }
     }
 
@@ -2201,6 +2203,19 @@ imagesRouter.put("/:id", async (c) => {
         typeof body.displayName === "string" ? body.displayName.trim() : "";
       updates.displayName = normalized || null;
     }
+    if (body.description !== undefined) {
+      const normalized =
+        typeof body.description === "string" ? body.description.trim() : "";
+      updates.description = normalized || null;
+    }
+    if (body.reviewed !== undefined) {
+      const isReviewed =
+        body.reviewed === true ||
+        body.reviewed === 1 ||
+        body.reviewed === "true";
+      updates.reviewed = isReviewed;
+      updates.reviewedAt = isReviewed ? new Date() : null;
+    }
 
     const nextCategory = normalizePhotoCategory(
       typeof body.photoCategory === "string" ? body.photoCategory : null,
@@ -2598,6 +2613,7 @@ imagesRouter.delete("/:id", async (c) => {
       }
     }
 
+    // Clean up all referencing rows before deleting the canonical images row.
     await db.delete(imageReviews).where(eq(imageReviews.id, imageId)).run();
     await db
       .delete(listingPhotos)
@@ -2606,6 +2622,14 @@ imagesRouter.delete("/:id", async (c) => {
     await db
       .delete(inspirationalImageRooms)
       .where(eq(inspirationalImageRooms.imageId, imageId))
+      .run();
+    await db
+      .delete(imageTagMappings)
+      .where(eq(imageTagMappings.imageId, imageId))
+      .run();
+    await db
+      .delete(imageUploadStaging)
+      .where(eq(imageUploadStaging.imageId, imageId))
       .run();
 
     // Delete from D1 images table
