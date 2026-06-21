@@ -21,7 +21,7 @@
     "check": "oxlint && oxfmt",
     "db:generate": "drizzle-kit generate",
     "db:seed": "npx wrangler@latest d1 execute DB --remote --file=seed.sql",
-    "migrate:local": "npx wrangler@latest d1 migrations apply DB --local",
+    "migrate:local": "pnpm run db:generate && npx wrangler@latest d1 migrations apply DB --local",
     "migrate:remote": "npx wrangler@latest d1 migrations apply DB --remote",
     "deploy": "pnpm run build && cp .assetsignore dist/.assetsignore && pnpm run migrate:remote && npx wrangler@latest deploy",
     "cf-typegen": "wrangler types --include-runtime false",
