@@ -48,9 +48,12 @@ export class BudgetAgent extends AIChatAgent<Env> {
                 const res = await secureIsolate.fetch(new Request("http://sandbox.internal/"));
                 processedPayload = await res.json();
               } else {
-                console.warn("env.LOADER binding not present; running script fallback in main isolate.");
-                const transform = new Function("items", aggregationScript);
-                processedPayload = transform(rawData);
+                // Security: never execute untrusted user-supplied scripts (`aggregationScript`)
+                // in the main isolate — it has access to env bindings, secrets, and the DB (RCE).
+                // Require the sandboxed Worker LOADER; refuse to run otherwise.
+                throw new Error(
+                  "Security Error: env.LOADER binding is not present. Execution of untrusted scripts is disabled.",
+                );
               }
               
               return { success: true, payload: processedPayload };

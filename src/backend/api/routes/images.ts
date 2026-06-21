@@ -460,9 +460,10 @@ async function syncImageUploadStagingRows(
             },
           }),
       );
-      // D1 supports batched statements via the underlying binding
-      for (const stmt of statements) {
-        await stmt.run();
+      // Batch the chunk's single-row upserts in one D1 round-trip. The chunk size (20)
+      // keeps each batch well under D1's 100-bound-parameter-per-query limit.
+      if (statements.length > 0) {
+        await db.batch(statements as [(typeof statements)[number], ...(typeof statements)[number][]]);
       }
     },
     20,
