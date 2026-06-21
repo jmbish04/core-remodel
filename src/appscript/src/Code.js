@@ -116,7 +116,12 @@ function writeGridToSheet(rawPayload) {
   const startRow = activeCell.getRow();
   const startCol = activeCell.getColumn();
   const numRows = normalized.length;
-  const numCols = normalized[0].length;
+  const numCols = normalized[0] ? normalized[0].length : 0;
+
+  if (numCols === 0) {
+    activeCell.setValue('Grid payload was empty.');
+    return;
+  }
 
   const target = sheet.getRange(startRow, startCol, numRows, numCols);
   target.clearContent();
