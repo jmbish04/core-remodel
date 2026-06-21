@@ -1,0 +1,380 @@
+{
+  "feature": "0005_room_floorplan_overview_room_viewport",
+  "description": "Reconcile drift rooms/photos, move floorplan coordinates into D1, rebuild the floor-plan page (all dots + hover/click room cards + sidebar level switch), restructure the room viewport (smaller hero + change-hero modal, live stat cards, full-width overview/options/budget, media modal, reusable scroll TOC, supporting-materials table + upload), extend the planning/task API, and add Workers-AI text helpers.",
+  "stack": "Cloudflare Worker + Astro SSR + Hono(zod-openapi) + Drizzle/D1 + Workers AI + R2 + Cloudflare Images; React islands + shadcn/@base-ui; dark Monolith theme.",
+  "conventions": [
+    "No mock/placeholder data — all data from real API calls.",
+    "No window.alert/confirm/prompt — shadcn Dialog/AlertDialog only.",
+    "Dark Monolith theme, no traditional 1px borders.",
+    "AI prompts via ES6 template literals, never .join('\\n').",
+    "Schema migrations via `pnpm run db:generate`; never hand-edit generated SQL.",
+    "Split any file approaching 1000 lines into modules before continuing.",
+    "New endpoints registered with @hono/zod-openapi (Zod v4) and visible in /openapi.json."
+  ],
+  "live_db": {
+    "d1_database_id": "4811af1e-202d-4b96-99e2-d98dc45c597e",
+    "drift_room_ids": [2330293, 2330294, 2330295, 2330296, 2330297, 2330298, 2330299, 2330300, 2330301],
+    "outside_floor_id": 233121,
+    "duplicate_image_ids_to_delete": ["4a06d3af-d8ac-4577-87bb-32a228175898", "1343677a-db36-4252-85d6-e965dd9c2779"]
+  },
+  "phases": [
+    {
+      "id": "P0",
+      "title": "Room data reconciliation + coordinate schema",
+      "tasks": [
+        {
+          "id": "T0.1",
+          "title": "Add floorplan coordinate columns to rooms schema",
+          "agent": "cf-database-engineer",
+          "effort": "S",
+          "files": ["src/backend/db/schema/home/rooms.ts"],
+          "depends_on": [],
+          "detail": "Add floorplanFloorKey (text), floorplanXPct (real), floorplanYPct (real). Run `pnpm run db:generate`. No barrel change (existing file).",
+          "acceptance": "Migration generated; `wrangler types` clean; columns nullable."
+        },
+        {
+          "id": "T0.2",
+          "title": "Build reconcileRooms service (merge/rename/setPosition/reassignImages/deleteRoom)",
+          "agent": "cf-database-engineer",
+          "effort": "L",
+          "files": ["src/backend/services/reconcile-rooms.ts"],
+          "depends_on": ["T0.1"],
+          "detail": "Repoint ALL room_id-referencing rows source->target then delete source. Enumerate room_id tables via sqlite_master/pragma at runtime. Dedupe inspirational_image_rooms (image_id,room) uniques and keep target room_ai_summaries. Idempotent + transactional.",
+          "acceptance": "Unit-callable; merging a source moves images, inspirational links, docs, action items, summaries, scenario plans, budget links, planning tasks; no orphan rows; safe to re-run."
+        },
+        {
+          "id": "T0.3",
+          "title": "Author idempotent data-fix script encoding the exact L1-L8/U1-U10 mapping",
+          "agent": "cf-database-engineer",
+          "effort": "L",
+          "files": ["scripts/0005-reconcile-rooms.sql", "scripts/0005-reconcile-rooms.ts"],
+          "depends_on": ["T0.2"],
+          "detail": "Encode Section 4.1 mapping (renames, merges, deletes, floor moves to outside=233121, the entryway split keeping image ids fd965547 & 4ce41f86 on street-front-door, moving rest to lower-foyer; move ce4f317d & 4ac13ec3 to upper-dining-room; move 22cef674 & a2a0d96c to upper-stair-landing; hard-delete duplicate images 4a06d3af & 1343677a via DELETE /api/images/:id path). Guard every statement (re-runnable).",
+          "acceptance": "Dry-run on a copy reproduces Section 4.2 final room set; total listing+inspiration preserved minus the 2 intended deletes."
+        },
+        {
+          "id": "T0.4",
+          "title": "Seed floorplan coordinates (Section 4.2 table)",
+          "agent": "cf-database-engineer",
+          "effort": "M",
+          "files": ["scripts/0005-reconcile-rooms.sql", "src/backend/services/home-catalog.ts"],
+          "depends_on": ["T0.3"],
+          "detail": "Write Section 4.2 coordinates into new columns. outside-backyard xy=null. upper-dining-room=(84,62) per user (same X-axis as upper-living-room, mid quad-2). Update home-catalog seed so future seeds carry coordinates + final room codes (so re-seed won't recreate canonical drift).",
+          "acceptance": "Every kept room has correct floor_key + xy (or null for outside-backyard); catalog seed reflects final codes."
+        },
+        {
+          "id": "T0.5",
+          "title": "Backup + execute reconciliation against remote D1, verify counts",
+          "agent": "cf-database-engineer",
+          "effort": "M",
+          "files": [],
+          "depends_on": ["T0.4"],
+          "detail": "`wrangler d1 export DB --remote --output=backup-pre-0005.sql`; run the data-fix; verify before/after photo totals; confirm 18 placed rooms + outside-backyard exist and drift IDs gone.",
+          "acceptance": "Backup saved; post-run room set matches plan; family-room & guest-bedroom photos now resolve to correctly-positioned rooms."
+        },
+        {
+          "id": "T0.6",
+          "title": "Harden against drift recurrence",
+          "agent": "cf-api-engineer",
+          "effort": "S",
+          "files": ["src/backend/api/routes/images.ts", "src/backend/api/routes/photo-edits.ts"],
+          "depends_on": ["T0.5"],
+          "detail": "Confirm no path auto-creates rooms by free-text name. If found (e.g. decision-room / AI mapping), route through a canonical-slug resolver against existing rooms.",
+          "acceptance": "No code path inserts a new room from an arbitrary display name without explicit admin intent."
+        }
+      ]
+    },
+    {
+      "id": "P1",
+      "title": "Global Select label fix",
+      "tasks": [
+        {
+          "id": "T1.1",
+          "title": "Make SelectValue render display label, not value/id (reusable)",
+          "agent": "cf-frontend-engineer",
+          "effort": "M",
+          "files": ["src/frontend/components/ui/select.tsx", "src/frontend/components/RoomViewApp.tsx"],
+          "depends_on": [],
+          "detail": "Enhance shared SelectValue wrapper to map value->label (items/getLabel/renderValue prop) per @base-ui semantics. Fix the representative-photo select (RoomViewApp.tsx:547). Audit other Select usages remain correct.",
+          "acceptance": "Selecting an option shows its name in the trigger everywhere; no regressions in GlobalUploadWidget/SupportingDocuments selects."
+        }
+      ]
+    },
+    {
+      "id": "P5",
+      "title": "Project/Task API (extend planning_*)",
+      "tasks": [
+        {
+          "id": "T5.1",
+          "title": "Task list/filter/search + status-count endpoints",
+          "agent": "cf-api-engineer",
+          "effort": "L",
+          "files": ["src/backend/api/routes/planning.ts", "src/backend/api/index.ts"],
+          "depends_on": [],
+          "detail": "GET /api/planning/tasks?roomId=&status=&priority=&q=&epicId=&page=&pageSize=; GET /api/planning/tasks/stats?roomId= -> {open,in_progress,blocked,delayed,done,total}. Zod v4, zod-openapi registered.",
+          "acceptance": "Endpoints return live planning_tasks; visible in /openapi.json; room-scoped filtering works."
+        },
+        {
+          "id": "T5.2",
+          "title": "Kanban / Gantt / Calendar / Projects endpoints",
+          "agent": "cf-api-engineer",
+          "effort": "L",
+          "files": ["src/backend/api/routes/planning.ts"],
+          "depends_on": ["T5.1"],
+          "detail": "GET /board (grouped by status), /timeline (start/due/deps), /calendar?from&to, /projects (epics-as-projects with rollups; CRUD gaps filled). All room-scopable.",
+          "acceptance": "Each endpoint returns shapes sufficient to render kanban/gantt/calendar/dashboards from real data."
+        }
+      ]
+    },
+    {
+      "id": "P6",
+      "title": "Workers-AI text helpers",
+      "tasks": [
+        {
+          "id": "T6.1",
+          "title": "AI text service: improveDescription / summarizeDocumentForRoom / summarizeRoomOptions",
+          "agent": "cf-api-engineer",
+          "effort": "M",
+          "files": ["src/backend/services/ai-text.ts", "src/backend/api/routes/ai.ts", "src/backend/api/routes/supporting-documents.ts", "src/backend/api/routes/rooms.ts"],
+          "depends_on": [],
+          "detail": "env.AI instruct model; ES6 template-literal prompts. Routes: POST /api/ai/improve-description; POST /api/supporting-documents/:id/room-summary (cache to aiRationale/metadata); POST /api/rooms/code/:roomCode/options-summary.",
+          "acceptance": "Each returns improved/summarized text; document room-summary cached; prompts use real newlines."
+        }
+      ]
+    },
+    {
+      "id": "P2",
+      "title": "Floor-plan page redesign",
+      "tasks": [
+        {
+          "id": "T2.1",
+          "title": "Extend /api/rooms/catalog with coordinates, counts, hero, dimensions",
+          "agent": "cf-api-engineer",
+          "effort": "M",
+          "files": ["src/backend/api/routes/rooms.ts", "src/backend/services/home-catalog.ts"],
+          "depends_on": ["T0.4"],
+          "detail": "Return floorplanFloorKey/xPct/yPct, listingCount, inspirationCount, heroImageUrl, formatted dimensions + sqft per room so dots+cards need no extra fetch.",
+          "acceptance": "Catalog payload powers all dots and hover cards in one request."
+        },
+        {
+          "id": "T2.2",
+          "title": "Decompose FloorplanGalleryApp into submodules",
+          "agent": "cf-frontend-engineer",
+          "effort": "M",
+          "files": ["src/frontend/components/floorplan/FloorplanDot.tsx", "src/frontend/components/floorplan/RoomHoverCard.tsx", "src/frontend/components/floorplan/LevelSidebar.tsx", "src/frontend/components/FloorplanGalleryApp.tsx"],
+          "depends_on": ["T2.1"],
+          "detail": "Extract dot, hover/sticky card, and sidebar; keep each <400 lines.",
+          "acceptance": "No behavior change yet; files modular."
+        },
+        {
+          "id": "T2.3",
+          "title": "Render all dots (both levels) from DB coordinates",
+          "agent": "cf-frontend-engineer",
+          "effort": "M",
+          "files": ["src/frontend/components/FloorplanGalleryApp.tsx", "src/frontend/components/floorplan/FloorplanDot.tsx"],
+          "depends_on": ["T2.2"],
+          "detail": "Remove hardcoded ROOM_COORDINATES_BY_CODE; show every placed room's dot for both levels simultaneously; null-coord rooms render no dot.",
+          "acceptance": "All placed rooms show dots regardless of selected level."
+        },
+        {
+          "id": "T2.4",
+          "title": "Dot hover card + click-to-pin (sticky)",
+          "agent": "cf-frontend-engineer",
+          "effort": "L",
+          "files": ["src/frontend/components/floorplan/RoomHoverCard.tsx"],
+          "depends_on": ["T2.3"],
+          "detail": "Card: hero image, room name, #listing, #inspiration, sqft+measurements, View Room button -> /rooms/{code}. Hover shows; click pins until dismissed/another dot. Touch = tap-to-pin.",
+          "acceptance": "Hover and click behaviors work on desktop + touch; View Room navigates."
+        },
+        {
+          "id": "T2.5",
+          "title": "Move level control to sidebar as a toggle Switch (no reload, dots unchanged)",
+          "agent": "cf-frontend-engineer",
+          "effort": "M",
+          "files": ["src/frontend/components/floorplan/LevelSidebar.tsx", "src/frontend/components/FloorplanGalleryApp.tsx"],
+          "depends_on": ["T2.3"],
+          "detail": "Remove header button-group; add shadcn Switch (Lower/Upper) to sidebar that only filters the sidebar room list. Add 'Outside / Unplaced' group for null-coord rooms.",
+          "acceptance": "Toggling switch changes only the sidebar list; dots stay; no page reload."
+        },
+        {
+          "id": "T2.6",
+          "title": "Delete Inspiration Highlights + Room Launch Board",
+          "agent": "cf-frontend-engineer",
+          "effort": "S",
+          "files": ["src/frontend/components/FloorplanGalleryApp.tsx"],
+          "depends_on": ["T2.2"],
+          "detail": "Remove both bottom cards (current lines ~379-422 and ~424-487) and dead data.",
+          "acceptance": "Sections gone; no unused imports/state."
+        },
+        {
+          "id": "T2.7",
+          "title": "Floor-plan mobile responsiveness",
+          "agent": "cf-frontend-engineer",
+          "effort": "M",
+          "files": ["src/frontend/components/FloorplanGalleryApp.tsx", "src/frontend/components/floorplan/LevelSidebar.tsx"],
+          "depends_on": ["T2.4", "T2.5"],
+          "detail": "Add base/sm breakpoints; image scales; sidebar stacks; dots tappable; hover-card becomes tap sheet/popover. Verify 375px.",
+          "acceptance": "Usable and legible at 375/768/1024px."
+        }
+      ]
+    },
+    {
+      "id": "P3",
+      "title": "Room viewport restructure",
+      "tasks": [
+        {
+          "id": "T3.0",
+          "title": "Decompose RoomViewApp into section components",
+          "agent": "cf-frontend-engineer",
+          "effort": "L",
+          "files": ["src/frontend/components/room-view/HeroHeader.tsx", "src/frontend/components/room-view/RoomStatsRow.tsx", "src/frontend/components/room-view/RoomOverview.tsx", "src/frontend/components/room-view/RoomOptions.tsx", "src/frontend/components/room-view/BudgetSignals.tsx", "src/frontend/components/room-view/RoomMediaModal.tsx", "src/frontend/components/room-view/SupportingMaterials.tsx", "src/frontend/components/RoomViewApp.tsx"],
+          "depends_on": [],
+          "detail": "Split the ~1050-line monolith into section components; RoomViewApp becomes a layout/orchestrator.",
+          "acceptance": "Behavior preserved; each file <400 lines."
+        },
+        {
+          "id": "T3.1",
+          "title": "Smaller top-right hero + Change-hero modal",
+          "agent": "cf-frontend-engineer",
+          "effort": "L",
+          "files": ["src/frontend/components/room-view/HeroHeader.tsx"],
+          "depends_on": ["T3.0", "T1.1"],
+          "detail": "Shrink hero, move top-right. 'Change room hero image' button -> modal with listing-photo card rows, current hero checkmarked, select moves checkmark + live-updates thumbnail, Cancel/Save; Save -> PATCH /api/rooms/code/:roomCode/profile + shadcn success (no browser alert).",
+          "acceptance": "Hero changes persist and refresh; confirmation is shadcn-only."
+        },
+        {
+          "id": "T3.2",
+          "title": "Stats row (Budget Range / Estimate count / Task Progress), clickable anchors",
+          "agent": "cf-frontend-engineer",
+          "effort": "M",
+          "files": ["src/frontend/components/room-view/RoomStatsRow.tsx"],
+          "depends_on": ["T3.0", "T5.1"],
+          "detail": "Three live stat cards; Task Progress from /api/planning/tasks/stats?roomId= (fallback room_action_items). Clicking smooth-scrolls to its section. No mock data.",
+          "acceptance": "Stats reflect live data; clicks jump to sections."
+        },
+        {
+          "id": "T3.3",
+          "title": "Room Overview full-width + edit-in-modal (refresh AI)",
+          "agent": "cf-frontend-engineer",
+          "effort": "M",
+          "files": ["src/frontend/components/room-view/RoomOverview.tsx"],
+          "depends_on": ["T3.0"],
+          "detail": "Full-width overview; top-right Edit opens Refresh-AI-summary (prompt + voice) modal using POST /api/rooms/code/:roomCode/summary. Remove standalone refresh card.",
+          "acceptance": "Overview full width; refresh only via modal; summary updates."
+        },
+        {
+          "id": "T3.4",
+          "title": "Room Options (thumbs-up empty state OR raw+AI-summary tabs)",
+          "agent": "cf-frontend-engineer",
+          "effort": "M",
+          "files": ["src/frontend/components/room-view/RoomOptions.tsx"],
+          "depends_on": ["T3.0", "T6.1"],
+          "detail": "If no deviations: 👍 + friendly message. Else tabs: raw (default) + ✨ AI Quick Summary via /api/rooms/code/:roomCode/options-summary.",
+          "acceptance": "Both states render; AI tab summarizes live content."
+        },
+        {
+          "id": "T3.5",
+          "title": "Budget Signals full-width: stat cards + paginated/searchable/filterable table",
+          "agent": "cf-frontend-engineer",
+          "effort": "L",
+          "files": ["src/frontend/components/room-view/BudgetSignals.tsx", "src/backend/api/routes/rooms.ts"],
+          "depends_on": ["T3.0"],
+          "detail": "Rebuild @coss/p-table-4 (TanStack) to Monolith. Live budget items; add GET /api/rooms/:roomId/budget-items?search=&status=&page=&pageSize= (or paginate detail payload). No mock.",
+          "acceptance": "Table paginates/searches/filters over live budget items."
+        },
+        {
+          "id": "T3.6",
+          "title": "Room Media modal (gallery/masonry/list; delete bento) + hero entry buttons",
+          "agent": "cf-frontend-engineer",
+          "effort": "L",
+          "files": ["src/frontend/components/room-view/RoomMediaModal.tsx", "src/frontend/components/room-view/HeroHeader.tsx", "src/frontend/components/ui/grid-bento.tsx"],
+          "depends_on": ["T3.0"],
+          "detail": "Move media into a Dialog. Hero buttons: Listing (badge count) + Inspiration (badge count) open it pre-filtered. Toggle Gallery/Masonry/List only; remove Bento option + GridBento usage (delete component if unused). Close X top-right + Close bottom-right.",
+          "acceptance": "Modal opens filtered; three views work; bento gone."
+        },
+        {
+          "id": "T3.7",
+          "title": "Reusable sticky scroll-progress Table of Contents",
+          "agent": "cf-frontend-engineer",
+          "effort": "M",
+          "files": ["src/frontend/components/ui/scroll-progress.tsx", "src/frontend/components/RoomViewApp.tsx"],
+          "depends_on": ["T3.0"],
+          "detail": "Reusable component (items:{id,title,level}[], className, scrollAreaRef). Right-side, scrolls with user, active-section highlight. Section ids match stat anchors. Collapsible on mobile.",
+          "acceptance": "TOC tracks scroll + jumps to sections; reusable elsewhere."
+        },
+        {
+          "id": "T3.8",
+          "title": "Delete listing/inspiration images (D1 + Cloudflare Images) from the room viewport",
+          "agent": "cf-frontend-engineer",
+          "effort": "M",
+          "files": ["src/frontend/components/room-view/RoomMediaModal.tsx", "src/frontend/components/room-view/ImageActions.tsx"],
+          "depends_on": ["T3.6"],
+          "detail": "Per-image Delete control in the media modal (and image context menu). shadcn AlertDialog confirm (no window.confirm). Listing photo: DELETE /api/images/:id (removes D1 row + Cloudflare Images asset). Inspiration photo (multi-room): offer two actions — 'Remove from this room' (unmap via PUT /api/images/:id with roomIds minus current) vs 'Delete permanently everywhere' (DELETE /api/images/:id). Surface images.is_duplicate as a badge so duplicates are easy to spot/cull. On success: shadcn toast + refresh counts/lists.",
+          "acceptance": "Deleting a listing photo removes it from D1 and Cloudflare Images; inspiration offers unmap vs hard-delete; duplicate badge visible; lists/counts refresh; no browser dialogs."
+        },
+        {
+          "id": "T3.9",
+          "title": "Move/reassign photos to the correct room (button + modal journey)",
+          "agent": "cf-frontend-engineer",
+          "effort": "L",
+          "files": ["src/frontend/components/room-view/MovePhotosModal.tsx", "src/frontend/components/room-view/RoomMediaModal.tsx"],
+          "depends_on": ["T3.6", "T1.1", "T2.1"],
+          "detail": "A 'Move / reassign photos' button opens a modal: thumbnail multi-select of the room's listing OR inspiration photos, a target-room picker (from /api/rooms/catalog, using the fixed Select that shows room display names), and Apply. Listing photos = single-room reassign (PUT /api/images/:id roomId, or POST /api/images/mapping/apply). Inspiration photos = add/replace room mappings (PUT roomIds). shadcn confirmation; refresh source + target counts. No mock data.",
+          "acceptance": "Selected photos move to the chosen room; both rooms' listing/inspiration counts update; picker shows names not ids; works for listing and inspiration."
+        }
+      ]
+    },
+    {
+      "id": "P4",
+      "title": "Supporting materials table + upload",
+      "tasks": [
+        {
+          "id": "T4.1",
+          "title": "Supporting materials table with filename preview modal + type badge + date + description + AI summary",
+          "agent": "cf-frontend-engineer",
+          "effort": "L",
+          "files": ["src/frontend/components/room-view/SupportingMaterials.tsx", "src/backend/api/routes/supporting-documents.ts"],
+          "depends_on": ["T3.0", "T6.1"],
+          "detail": "Table columns per spec. Filename -> preview modal (image inline; PDF embed; Google Drive/Docs iframe) with Close + Open-in-new-tab. AI summary column generated on load via /room-summary endpoint (cached). Room-scoped list via ?roomId=.",
+          "acceptance": "Table lists live docs; previews render by type; AI summaries appear."
+        },
+        {
+          "id": "T4.2",
+          "title": "Upload: dropzone + intake form (single/multi) + AI description + progress + per-file error/retry",
+          "agent": "cf-frontend-engineer",
+          "effort": "L",
+          "files": ["src/frontend/components/room-view/SupportingMaterials.tsx"],
+          "depends_on": ["T4.1", "T6.1"],
+          "detail": "Dropzone -> stage -> intake (single=form, multi=rows): name(prefill), type(auto MIME), date(auto), description(✨ improve via /api/ai/improve-description, approve/reject). Upload via POST /api/supporting-documents/upload (R2)+room map. Circular per-file progress, ✅ on success; block modal close mid-upload (friendly message). Errors per-file: shadcn error w/ animated copy-to-clipboard (wrapped as AI-fix prompt) + Retry; one failure must not block others.",
+          "acceptance": "Multi-file upload with independent progress/errors; AI description approve flow; modal locked during upload."
+        }
+      ]
+    },
+    {
+      "id": "P7",
+      "title": "Mobile, a11y, verification",
+      "tasks": [
+        {
+          "id": "T7.1",
+          "title": "Mobile + accessibility pass on both pages",
+          "agent": "cf-frontend-engineer",
+          "effort": "M",
+          "files": ["src/frontend/components/FloorplanGalleryApp.tsx", "src/frontend/components/RoomViewApp.tsx"],
+          "depends_on": ["T2.7", "T3.1", "T3.2", "T3.3", "T3.4", "T3.5", "T3.6", "T3.7", "T4.2"],
+          "detail": "375/768/1024px; focus traps in dialogs; keyboard for switch/tabs/stat-anchors; ErrorLogger on all errors; no window.alert/confirm.",
+          "acceptance": "Both pages clean on mobile; a11y basics pass."
+        },
+        {
+          "id": "T7.2",
+          "title": "End-to-end verification against deployed preview (Chrome DevTools MCP)",
+          "agent": "cf-frontend-engineer",
+          "effort": "M",
+          "files": [],
+          "depends_on": ["T7.1", "T0.5"],
+          "detail": "Verify the user's family-room & guest-bedroom photos now show; all acceptance criteria in IMPLEMENTATION_PLAN Section 15. Quick visual confirm of moved dots (upper-dining-room (84,62), upper-kitchen left, upper-hall-bath up, office swap) per R-4.",
+          "acceptance": "All Section 15 criteria pass on the live worker URL."
+        }
+      ]
+    }
+  ]
+}

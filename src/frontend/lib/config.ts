@@ -31,8 +31,8 @@ export const siteConfig: SiteConfig = {
   navItems: [
     { href: "/budget-tracker", label: "Budget Tracker" },
     { href: "/questionnaire", label: "Questionnaire" },
-    { href: "/estimates", label: "Estimates" },
-    { href: "/contracts", label: "Contracts" },
+    { href: "/admin/estimates", label: "Estimates" },
+    { href: "/admin/contracts", label: "Contracts" },
     { href: "/uploads", label: "Uploads" },
     { href: "/supporting-docs", label: "Supporting Docs" },
     { href: "/floor-plan", label: "Floor Plan" },
@@ -40,11 +40,8 @@ export const siteConfig: SiteConfig = {
     { href: "/review", label: "Review" },
     { href: "/listing-photos", label: "Listing Photos" },
     { href: "/inspiration-photos", label: "Inspiration Photos" },
-    { href: "/planning", label: "Planning" },
-    { href: "/daily-log", label: "Daily Log" },
-    { href: "/weekly-log", label: "Weekly Log" },
     { href: "/photo-edits", label: "Photo Edits" },
-    { href: "/decision-room", label: "Decision Room" },
+    { href: "/admin/planning/decision-room", label: "Decision Room" },
     { href: "/admin", label: "Admin" },
   ],
 };

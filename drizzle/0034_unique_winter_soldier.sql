@@ -1,0 +1,1 @@
+ALTER TABLE `listing_photos` ADD `blank_canvas_cf_image_id` text;

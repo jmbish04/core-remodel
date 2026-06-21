@@ -1,6 +1,9 @@
 import {
   Check,
+  ChevronsLeftRight,
+  CopyX,
   Crop,
+  Eraser,
   FileImage,
   Home,
   Images,
@@ -8,18 +11,22 @@ import {
   List,
   Loader2,
   RefreshCw,
+  Sparkles,
   Tag,
   Trash2,
+  Upload,
   X,
   ZoomIn,
 } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ImagePreview } from "@/components/ui/image-preview";
+import { ImageComparison } from "@/components/ui/image-comparison";
 import { ImageGallery, type ImageGalleryContextAction } from "@/components/ui/image-gallery";
 import { ImageGalleryMasonry } from "@/components/ui/image-gallery-masonry";
 import { GridBento } from "@/components/ui/grid-bento";
 import { MultipleSelector, type MultipleSelectorOption } from "@/components/ui/multiple-selector";
+import { LevelRoomSelect } from "@/components/LevelRoomSelect";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Cropper, CropperArea, CropperImage, type CropperAreaData } from "@/components/ui/cropper";
@@ -32,6 +39,7 @@ import {
 } from "@/components/ui/context-menu";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { RoomSelect } from "@/components/ui/room-select";
 import {
   Select,
   SelectContent,
@@ -39,7 +47,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   getTrackedUploadLabel,
@@ -98,6 +105,21 @@ interface ParsedMetadata {
   raw: Record<string, unknown>;
 }
 
+interface ListingPhotoRecord {
+  id: number;
+  roomId?: number | null;
+  roomName?: string | null;
+  description?: string | null;
+  blankCanvasCfImageId?: string | null;
+  aiEdits?: Array<{
+    id: number;
+    prompt: string;
+    path: string;
+    generatedCfImageId: string;
+    [key: string]: unknown;
+  }>;
+}
+
 interface ImageRecord {
   id: string;
   displayName?: string | null;
@@ -117,6 +139,7 @@ interface ImageRecord {
   workflowInstanceId?: string | null;
   processingError?: string | null;
   processedAt?: string | number | Date | null;
+  listingPhoto?: ListingPhotoRecord | null;
 }
 
 interface CatalogFloor {
@@ -262,7 +285,7 @@ function buildViewImage(image: ImageRecord): ViewImageRecord {
       ? image.highlights
           .map((highlight) => ({
             ...highlight,
-            highlightType: highlight.highlightType === "dislike" ? "dislike" : "like",
+            highlightType: (highlight.highlightType === "dislike" ? "dislike" : "like") as HighlightType,
             shapeType: highlight.shapeType || "rect",
             xPct: Number(highlight.xPct) || 0,
             yPct: Number(highlight.yPct) || 0,
@@ -392,13 +415,15 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deleteTargetImage, setDeleteTargetImage] = useState<ViewImageRecord | null>(null);
 
-  const [catalogFloors, setCatalogFloors] = useState<CatalogFloor[]>([]);
   const [catalogRooms, setCatalogRooms] = useState<CatalogRoom[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
 
   const [panelDisplayName, setPanelDisplayName] = useState("");
-  const [panelFloorKey, setPanelFloorKey] = useState("lower_level");
-  const [panelRoomId, setPanelRoomId] = useState("");
+  // Listing-photo room (null = unassigned). The Lower/Upper floor toggle + the
+  // per-floor filtering were removed in favour of the shared floor-grouped,
+  // searchable <RoomSelect> (0005 §C4). `panelRoomIds` (inspirational, multi-room)
+  // is a separate stream and stays on MultipleSelector/LevelRoomSelect.
+  const [panelRoomId, setPanelRoomId] = useState<number | null>(null);
   const [panelRoomIds, setPanelRoomIds] = useState<string[]>([]);
   const [tagOptions, setTagOptions] = useState<MultipleSelectorOption[]>([]);
   const [tagsLoading, setTagsLoading] = useState(false);
@@ -409,6 +434,18 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
   const [highlightMode, setHighlightMode] = useState<HighlightType>("like");
   const [isDrawingHighlight, setIsDrawingHighlight] = useState(false);
   const [draftHighlight, setDraftHighlight] = useState<HighlightRecord | null>(null);
+  const [aiPrompt, setAiPrompt] = useState("");
+  const [isUploadingAiRender, setIsUploadingAiRender] = useState(false);
+  const [isUploadingBlankCanvas, setIsUploadingBlankCanvas] = useState(false);
+  const [isDeletingBlankCanvas, setIsDeletingBlankCanvas] = useState(false);
+  const [demoSliderOpen, setDemoSliderOpen] = useState(false);
+  const [comparisonModal, setComparisonModal] = useState({
+    open: false,
+    beforeSrc: "",
+    afterSrc: "",
+    beforeLabel: "",
+    afterLabel: "",
+  });
   const highlightSurfaceRef = useRef<HTMLDivElement | null>(null);
   const requestedImageIdRef = useRef<string | null>(
     typeof window !== "undefined"
@@ -444,52 +481,6 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
   );
   const hasActiveProcessing =
     processingCounts.queued > 0 || processingCounts.processing > 0;
-
-  const lowerFloor = useMemo(
-    () =>
-      catalogFloors.find((floor) => floor.key === "lower_level") ||
-      catalogFloors[0] ||
-      null,
-    [catalogFloors],
-  );
-
-  const upperFloor = useMemo(
-    () =>
-      catalogFloors.find((floor) => floor.key === "upper_level") ||
-      catalogFloors[catalogFloors.length - 1] ||
-      null,
-    [catalogFloors],
-  );
-
-  const isPanelFloorUpper = panelFloorKey === upperFloor?.key;
-
-  const panelRoomsForSelectedFloor = useMemo(() => {
-    const floor = catalogFloors.find((item) => item.key === panelFloorKey);
-    return floor?.rooms || [];
-  }, [catalogFloors, panelFloorKey]);
-
-  const handlePanelFloorToggle = useCallback(
-    (checked: boolean) => {
-      const nextFloorKey = checked ? upperFloor?.key : lowerFloor?.key;
-      if (!nextFloorKey) {
-        return;
-      }
-      setPanelFloorKey(nextFloorKey);
-      setPanelRoomId("");
-    },
-    [lowerFloor?.key, upperFloor?.key],
-  );
-
-  const handlePanelRoomChange = useCallback(
-    (nextRoomId: string) => {
-      setPanelRoomId(nextRoomId);
-      const nextRoom = catalogRooms.find((room) => room.id === Number(nextRoomId));
-      if (nextRoom && nextRoom.floorKey !== panelFloorKey) {
-        setPanelFloorKey(nextRoom.floorKey);
-      }
-    },
-    [catalogRooms, panelFloorKey],
-  );
 
   const loadImages = useCallback(async () => {
     setLoading(true);
@@ -625,7 +616,6 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
           : [],
       }));
 
-      setCatalogFloors(normalizedFloors);
       setCatalogRooms(normalizedFloors.flatMap((floor) => floor.rooms));
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load room list");
@@ -702,42 +692,21 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
     setPanelTagDraft(detachedTags.join(", "));
 
     if (category === "listing") {
+      // Pre-fill the picker with the photo's EXISTING saved room (editing an
+      // assignment), else leave it unselected. This is not a "default" auto-select
+      // of an arbitrary/ghost room — it reflects the photo's current state.
       const matchedRoom =
         selectedImage.roomId !== null && selectedImage.roomId !== undefined
           ? catalogRooms.find((room) => room.id === selectedImage.roomId)
           : null;
 
-      if (matchedRoom) {
-        setPanelRoomId(String(matchedRoom.id));
-        setPanelFloorKey(matchedRoom.floorKey);
-      } else {
-        setPanelRoomId("");
-        if (lowerFloor) {
-          setPanelFloorKey(lowerFloor.key);
-        }
-      }
+      setPanelRoomId(matchedRoom ? matchedRoom.id : null);
       setPanelRoomIds([]);
     } else {
       setPanelRoomIds(selectedImage.roomIds.map((roomId) => String(roomId)));
-      setPanelRoomId("");
-      if (lowerFloor) {
-        setPanelFloorKey(lowerFloor.key);
-      }
+      setPanelRoomId(null);
     }
-  }, [category, catalogRooms, lowerFloor, selectedImage]);
-
-  useEffect(() => {
-    if (panelRoomId.length === 0) {
-      return;
-    }
-
-    const existsInFloor = panelRoomsForSelectedFloor.some(
-      (room) => room.id === Number(panelRoomId),
-    );
-    if (!existsInFloor) {
-      setPanelRoomId("");
-    }
-  }, [panelRoomId, panelRoomsForSelectedFloor]);
+  }, [category, catalogRooms, selectedImage]);
 
   useEffect(() => {
     if (!reviewMode) {
@@ -908,7 +877,7 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
   const saveSelectedImage = useCallback(async () => {
     if (!selectedImage) return;
 
-    if (category === "listing" && !panelRoomId) {
+    if (category === "listing" && panelRoomId == null) {
       toast.error("Listing photos must be assigned to a room");
       return;
     }
@@ -934,7 +903,7 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
       };
 
       if (category === "listing") {
-        const roomId = panelRoomId ? Number(panelRoomId) : null;
+        const roomId = panelRoomId;
         payload.roomId = roomId;
         const room = catalogRooms.find((entry) => entry.id === roomId);
         payload.roomType = room?.roomName ?? selectedImage.room;
@@ -979,6 +948,114 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
     selectedImage,
   ]);
 
+  const handleUploadAiRender = useCallback(
+    async (file: File) => {
+      if (!selectedImage || !selectedImage.raw.listingPhoto) return;
+      setIsUploadingAiRender(true);
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("prompt", aiPrompt.trim() || "AI Rendered Image");
+
+        const response = await fetch(`/api/listing-photos/${selectedImage.raw.listingPhoto.id}/ai-renders`, {
+          method: "POST",
+          body: formData,
+        });
+
+        const data = (await response.json()) as { success: boolean; edit?: any; error?: string };
+        if (!response.ok || !data.success || !data.edit) {
+          throw new Error(data.error || "Upload failed");
+        }
+
+        toast.success("Successfully uploaded AI render");
+        setAiPrompt("");
+
+        // Refresh database state
+        await refreshImages();
+
+        // Refetch the updated image to refresh selected details
+        const imgRes = await fetch(`/api/images?ids=${selectedImage.id}`);
+        const imgData = (await imgRes.json()) as { success: boolean; images?: ImageRecord[] };
+        if (imgRes.ok && imgData.success && imgData.images && imgData.images.length > 0) {
+          setSelectedImage(buildViewImage(imgData.images[0]));
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to upload AI render");
+      } finally {
+        setIsUploadingAiRender(false);
+      }
+    },
+    [selectedImage, aiPrompt, refreshImages]
+  );
+
+  const handleUploadBlankCanvas = useCallback(
+    async (file: File) => {
+      if (!selectedImage || !selectedImage.raw.listingPhoto) return;
+      setIsUploadingBlankCanvas(true);
+      try {
+        const formData = new FormData();
+        formData.append("file", file);
+
+        const response = await fetch(
+          `/api/listing-photos/${selectedImage.raw.listingPhoto.id}/blank-canvas`,
+          { method: "POST", body: formData },
+        );
+
+        const data = (await response.json()) as {
+          success: boolean;
+          blankCanvasCfImageId?: string;
+          error?: string;
+        };
+        if (!response.ok || !data.success) {
+          throw new Error(data.error || "Upload failed");
+        }
+
+        toast.success("Blank canvas uploaded");
+        await refreshImages();
+
+        const imgRes = await fetch(`/api/images?ids=${selectedImage.id}`);
+        const imgData = (await imgRes.json()) as { success: boolean; images?: ImageRecord[] };
+        if (imgRes.ok && imgData.success && imgData.images && imgData.images.length > 0) {
+          setSelectedImage(buildViewImage(imgData.images[0]));
+        }
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to upload blank canvas");
+      } finally {
+        setIsUploadingBlankCanvas(false);
+      }
+    },
+    [selectedImage, refreshImages],
+  );
+
+  const handleDeleteBlankCanvas = useCallback(async () => {
+    if (!selectedImage || !selectedImage.raw.listingPhoto) return;
+    setIsDeletingBlankCanvas(true);
+    try {
+      const response = await fetch(
+        `/api/listing-photos/${selectedImage.raw.listingPhoto.id}/blank-canvas`,
+        { method: "DELETE" },
+      );
+
+      const data = (await response.json()) as { success: boolean; error?: string };
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Delete failed");
+      }
+
+      toast.success("Blank canvas removed");
+      await refreshImages();
+
+      const imgRes = await fetch(`/api/images?ids=${selectedImage.id}`);
+      const imgData = (await imgRes.json()) as { success: boolean; images?: ImageRecord[] };
+      if (imgRes.ok && imgData.success && imgData.images && imgData.images.length > 0) {
+        setSelectedImage(buildViewImage(imgData.images[0]));
+      }
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to remove blank canvas");
+    } finally {
+      setIsDeletingBlankCanvas(false);
+    }
+  }, [selectedImage, refreshImages]);
+
   const requestDeleteImage = useCallback((image: ViewImageRecord) => {
     setSelectedImage(image);
     setDeleteTargetImage(image);
@@ -996,6 +1073,40 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
     const params = new URLSearchParams({ sourceImageId: image.id });
     window.location.assign(`/photo-edits?${params.toString()}`);
   }, []);
+
+  const markImageAsDuplicate = useCallback(
+    async (image: ViewImageRecord) => {
+      try {
+        const response = await fetch(`/api/images/${image.id}/duplicate`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isDuplicate: true }),
+        });
+        if (!response.ok) {
+          const payload = (await response.json().catch(() => ({}))) as { error?: string };
+          throw new Error(payload.error || "Failed to mark as duplicate");
+        }
+
+        // Remove from local list immediately
+        setImages((current) => current.filter((img) => img.id !== image.id));
+        setGroups((current) =>
+          current
+            .map((group) => ({
+              ...group,
+              images: group.images.filter((img) => img.id !== image.id),
+            }))
+            .filter((group) => group.images.length > 0),
+        );
+        if (selectedImage?.id === image.id) {
+          closeSelection();
+        }
+        toast.success("Marked as duplicate — hidden from all views");
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to mark duplicate");
+      }
+    },
+    [closeSelection, selectedImage],
+  );
 
   const performDeleteImage = useCallback(async () => {
     if (!deleteTargetImage) {
@@ -1142,10 +1253,21 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
         },
       },
       {
+        id: "mark-duplicate",
+        label: "Mark as Duplicate",
+        variant: "destructive" as const,
+        separatorBefore: true,
+        onSelect: (item) => {
+          const image = imageById.get(item.id);
+          if (image) {
+            void markImageAsDuplicate(image);
+          }
+        },
+      },
+      {
         id: "delete-image",
         label: "Delete Image",
         variant: "destructive",
-        separatorBefore: true,
         onSelect: (item) => {
           const image = imageById.get(item.id);
           if (image) {
@@ -1154,7 +1276,7 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
         },
       },
     ],
-    [imageById, navigateToAiEdit, openImage, requestDeleteImage],
+    [imageById, markImageAsDuplicate, navigateToAiEdit, openImage, requestDeleteImage],
   );
 
   const flatItems = useMemo(
@@ -1223,6 +1345,15 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
             </div>
 
             <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 border-amber-500/30 text-amber-300 bg-amber-500/5 hover:bg-amber-500/10 flex items-center gap-1.5"
+                onClick={() => setDemoSliderOpen(true)}
+              >
+                <ChevronsLeftRight className="size-4 animate-pulse" />
+                Slider Demo
+              </Button>
               <Button
                 variant={viewMode === "single" ? "default" : "outline"}
                 size="icon-sm"
@@ -1592,61 +1723,26 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
 
                     {category === "listing" ? (
                       <div className="space-y-2 rounded-lg bg-muted/20 p-3 ring-1 ring-border/30">
-                        <div className="flex items-center justify-between rounded-md bg-background/80 px-3 py-2 ring-1 ring-border/40">
-                          <span
-                            className={cn(
-                              "text-xs font-medium",
-                              !isPanelFloorUpper
-                                ? "text-foreground"
-                                : "text-muted-foreground",
-                            )}
-                          >
-                            {lowerFloor?.name ?? "Downstairs"}
-                          </span>
-                          <Switch
-                            checked={isPanelFloorUpper}
-                            onCheckedChange={handlePanelFloorToggle}
-                            aria-label="Toggle listing room floor"
-                            disabled={catalogLoading || !lowerFloor || !upperFloor}
-                          />
-                          <span
-                            className={cn(
-                              "text-xs font-medium",
-                              isPanelFloorUpper
-                                ? "text-foreground"
-                                : "text-muted-foreground",
-                            )}
-                          >
-                            {upperFloor?.name ?? "Upstairs"}
-                          </span>
-                        </div>
-
-                        <Select
+                        {/* Listing room — shared <RoomSelect> (§C4): floor-grouped,
+                            searchable, active-only, display name in the trigger. */}
+                        <RoomSelect
                           value={panelRoomId}
-                          onValueChange={handlePanelRoomChange}
+                          onChange={setPanelRoomId}
                           disabled={catalogLoading}
-                        >
-                          <SelectTrigger className="w-full">
-                            <SelectValue
-                              placeholder={
-                                catalogLoading
-                                  ? "Loading rooms..."
-                                  : "Select listing room"
-                              }
-                            />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {panelRoomsForSelectedFloor.map((room) => (
-                              <SelectItem key={room.id} value={String(room.id)}>
-                                {room.displayName}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                          placeholder="Select listing room"
+                          aria-label="Listing room"
+                          className="w-full"
+                        />
                         <p className="text-xs text-muted-foreground">Room is required for listing photos.</p>
                       </div>
                     ) : (
                       <div className="space-y-2 rounded-lg bg-muted/20 p-3 ring-1 ring-border/30">
+                        <LevelRoomSelect
+                          rooms={catalogRooms}
+                          value={panelRoomIds}
+                          onChange={setPanelRoomIds}
+                          disabled={catalogLoading}
+                        />
                         <MultipleSelector
                           title="Tag inspirational rooms"
                           placeholder="Select one or more rooms"
@@ -1792,6 +1888,227 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
                     </div>
                   </div>
 
+                  {/* Blank Canvas Section */}
+                  {category === "listing" && selectedImage.raw.listingPhoto && (
+                    <div className="space-y-3 rounded-xl border border-border/40 bg-muted/5 p-4 shadow-sm ring-1 ring-border/20">
+                      <div className="flex items-center justify-between border-b border-border/40 pb-2">
+                        <h3 className="text-xs font-semibold uppercase tracking-wider text-sky-400 flex items-center gap-1.5">
+                          <Eraser className="size-3.5" />
+                          Blank Canvas
+                        </h3>
+                        {selectedImage.raw.listingPhoto.blankCanvasCfImageId && (
+                          <Badge variant="secondary" className="text-[10px] bg-sky-500/10 text-sky-400 border-sky-500/20">
+                            Paired
+                          </Badge>
+                        )}
+                      </div>
+
+                      {selectedImage.raw.listingPhoto.blankCanvasCfImageId ? (
+                        <div className="space-y-2">
+                          <div className="relative overflow-hidden rounded-lg border border-border/40 bg-muted aspect-video">
+                            {/* biome-ignore lint/performance/noImgElement: CF Images URL */}
+                            <img
+                              src={`https://imagedelivery.net/${selectedImage.raw.listingPhoto.blankCanvasCfImageId}/public`}
+                              alt="Blank canvas"
+                              className="size-full object-cover"
+                            />
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 w-full text-[11px] font-medium border-sky-500/20 text-sky-300 bg-sky-500/5 hover:bg-sky-500/10"
+                            onClick={() => {
+                              setComparisonModal({
+                                open: true,
+                                beforeSrc: selectedImage.path,
+                                afterSrc: `https://imagedelivery.net/${selectedImage.raw.listingPhoto!.blankCanvasCfImageId}/public`,
+                                beforeLabel: "Original",
+                                afterLabel: "Blank Canvas",
+                              });
+                            }}
+                          >
+                            <ChevronsLeftRight className="mr-1.5 size-3.5" />
+                            Compare Original vs Blank Canvas
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-7 w-full text-[11px] font-medium border-amber-500/20 text-amber-300 bg-amber-500/5 hover:bg-amber-500/10"
+                            onClick={() => {
+                              const params = new URLSearchParams({ sourceImageId: selectedImage.id });
+                              window.location.assign(`/photo-edits?${params.toString()}`);
+                            }}
+                          >
+                            <Sparkles className="mr-1.5 size-3.5" />
+                            Use for Photo Edit Session
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 w-full text-[11px] text-muted-foreground hover:text-destructive"
+                            onClick={handleDeleteBlankCanvas}
+                            disabled={isDeletingBlankCanvas}
+                          >
+                            {isDeletingBlankCanvas ? (
+                              <>
+                                <Loader2 className="mr-1.5 size-3 animate-spin" />
+                                Removing...
+                              </>
+                            ) : (
+                              <>
+                                <Trash2 className="mr-1.5 size-3" />
+                                Remove Blank Canvas
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <p className="text-xs text-muted-foreground italic text-center py-1">
+                            No blank canvas uploaded yet. Upload a furniture-removed version of this listing photo.
+                          </p>
+                          <Input
+                            type="file"
+                            accept="image/*"
+                            id="blank-canvas-file"
+                            className="hidden"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              await handleUploadBlankCanvas(file);
+                              e.target.value = "";
+                            }}
+                          />
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 w-full text-xs font-medium bg-background text-foreground"
+                            onClick={() => document.getElementById("blank-canvas-file")?.click()}
+                            disabled={isUploadingBlankCanvas}
+                          >
+                            {isUploadingBlankCanvas ? (
+                              <>
+                                <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                                Uploading...
+                              </>
+                            ) : (
+                              <>
+                                <Upload className="mr-1.5 size-3.5" />
+                                Upload Blank Canvas
+                              </>
+                            )}
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* AI Renders / Modifications Section */}
+                  {category === "listing" && selectedImage.raw.listingPhoto && (
+                    <div className="space-y-4 rounded-xl border border-border/40 bg-muted/5 p-4 shadow-sm ring-1 ring-border/20">
+                      <div className="flex items-center justify-between border-b border-border/40 pb-2">
+                        <h3 className="text-xs font-semibold uppercase tracking-wider text-amber-500 flex items-center gap-1.5">
+                          ✨ AI Renders & Before/After
+                        </h3>
+                        <Badge variant="secondary" className="text-[10px]">
+                          {selectedImage.raw.listingPhoto.aiEdits?.length || 0} versions
+                        </Badge>
+                      </div>
+
+                      {/* Displaying AI edits / comparisons */}
+                      {selectedImage.raw.listingPhoto.aiEdits && selectedImage.raw.listingPhoto.aiEdits.length > 0 ? (
+                        <div className="space-y-3">
+                          {selectedImage.raw.listingPhoto.aiEdits.map((edit: NonNullable<ListingPhotoRecord["aiEdits"]>[number]) => (
+                            <div key={`edit-${edit.id}`} className="flex flex-col gap-2 rounded-lg bg-card border border-border/30 p-2.5 shadow-sm hover:border-amber-500/30 transition-all">
+                              <div className="flex gap-2">
+                                <div className="relative size-12 shrink-0 overflow-hidden rounded-md border border-border/40 bg-muted">
+                                  {/* biome-ignore lint/performance/noImgElement: External Cloudflare url */}
+                                  <img src={edit.path} alt={edit.prompt} className="size-full object-cover" />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate text-xs font-medium text-foreground" title={edit.prompt}>
+                                    {edit.prompt}
+                                  </p>
+                                  <p className="text-[10px] text-muted-foreground">
+                                    {new Date(String(edit.datetimeCreated ?? "")).toLocaleDateString()}
+                                  </p>
+                                </div>
+                              </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 w-full text-[11px] font-medium border-amber-500/20 text-amber-300 bg-amber-500/5 hover:bg-amber-500/10"
+                                onClick={() => {
+                                  setComparisonModal({
+                                    open: true,
+                                    beforeSrc: selectedImage.path,
+                                    afterSrc: edit.path,
+                                    beforeLabel: "Original Photo",
+                                    afterLabel: `AI: ${edit.prompt}`,
+                                  });
+                                }}
+                              >
+                                <ChevronsLeftRight className="mr-1.5 size-3.5" />
+                                Compare Before / After
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-muted-foreground italic text-center py-2 bg-muted/10 rounded-lg">
+                          No AI-rendered images uploaded yet.
+                        </p>
+                      )}
+
+                      {/* Upload new AI Render Form */}
+                      <div className="space-y-3 border-t border-border/30 pt-3">
+                        <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                          Upload New AI Render
+                        </p>
+                        
+                        <div className="space-y-2">
+                          <Input
+                            type="text"
+                            placeholder="Prompt (e.g. Modern kitchen with brass hardware)"
+                            value={aiPrompt}
+                            onChange={(e) => setAiPrompt(e.target.value)}
+                            className="h-8 text-xs"
+                          />
+                          
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type="file"
+                              accept="image/*"
+                              id="ai-render-file"
+                              className="hidden"
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                await handleUploadAiRender(file);
+                              }}
+                            />
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8 w-full text-xs font-medium bg-background text-foreground"
+                              onClick={() => document.getElementById("ai-render-file")?.click()}
+                              disabled={isUploadingAiRender}
+                            >
+                              {isUploadingAiRender ? (
+                                <>
+                                  <Loader2 className="mr-1.5 size-3.5 animate-spin" />
+                                  Uploading...
+                                </>
+                              ) : (
+                                "Select Image & Upload"
+                              )}
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <p className="text-xs text-muted-foreground">
                     Uploaded {selectedImage.createdAt}
                   </p>
@@ -1864,7 +2181,7 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
       )}
 
       <Dialog open={deleteConfirmOpen} onOpenChange={setDeleteConfirmOpen}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Delete Photo</DialogTitle>
           </DialogHeader>
@@ -1906,7 +2223,7 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
         open={replaceCropModalOpen}
         onOpenChange={(open) => (open ? setReplaceCropModalOpen(true) : closeReplaceCropModal())}
       >
-        <DialogContent className="max-w-4xl">
+        <DialogContent className="sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>Crop Uploaded Image</DialogTitle>
           </DialogHeader>
@@ -2000,6 +2317,87 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Premium Image Comparison Modal */}
+      <Dialog
+        open={comparisonModal.open}
+        onOpenChange={(open) => setComparisonModal((prev) => ({ ...prev, open }))}
+      >
+        <DialogContent className="sm:max-w-4xl border border-border/40 bg-card/90 shadow-2xl backdrop-blur-md">
+          <DialogHeader>
+            <DialogTitle className="text-base font-semibold text-foreground flex items-center gap-2">
+              <ChevronsLeftRight className="size-5 text-amber-500 animate-pulse" />
+              Before & After Comparison
+            </DialogTitle>
+          </DialogHeader>
+          <div className="mt-2 overflow-hidden rounded-xl border border-border/40 bg-muted/10 p-1">
+            {comparisonModal.open && (
+              <ImageComparison
+                beforeSrc={comparisonModal.beforeSrc}
+                afterSrc={comparisonModal.afterSrc}
+                beforeLabel={comparisonModal.beforeLabel}
+                afterLabel={comparisonModal.afterLabel}
+                aspectClassName="aspect-video w-full max-h-[70vh] object-contain"
+              />
+            )}
+          </div>
+          <div className="flex justify-between items-center mt-3 text-xs text-muted-foreground bg-muted/20 px-3 py-2 rounded-lg border border-border/30">
+            <span className="truncate max-w-[80%] font-medium text-foreground">
+              {comparisonModal.afterLabel}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 text-xs"
+              onClick={() => setComparisonModal((prev) => ({ ...prev, open: false }))}
+            >
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Slider Demo Modal */}
+      <Dialog
+        open={demoSliderOpen}
+        onOpenChange={setDemoSliderOpen}
+      >
+        <DialogContent className="sm:max-w-4xl border border-border/40 bg-card/90 shadow-2xl backdrop-blur-md">
+          <DialogHeader>
+            <DialogTitle className="text-base font-semibold text-foreground flex items-center gap-2">
+              <ChevronsLeftRight className="size-5 text-amber-500 animate-pulse" />
+              Interactive Diff Slider Demo
+            </DialogTitle>
+          </DialogHeader>
+          <div className="mt-2 space-y-4">
+            <p className="text-xs text-muted-foreground">
+              This demo showcases our new premium, hardware-accelerated <strong>ImageComparison</strong> component.
+              Drag directly on the image or use your mouse/finger to slide the divider and compare.
+              You can also focus the slider and use the <strong>Arrow Left</strong> and <strong>Arrow Right</strong> keys on your keyboard!
+            </p>
+            <div className="overflow-hidden rounded-xl border border-border/40 bg-muted/10 p-1">
+              {demoSliderOpen && (
+                <ImageComparison
+                  beforeSrc="https://images.unsplash.com/photo-1513694203232-719a280e022f?q=80&w=1200"
+                  afterSrc="https://images.unsplash.com/photo-1616486338812-3dadae4b4ace?q=80&w=1200"
+                  beforeLabel="Original Room (Before)"
+                  afterLabel="Premium Remodel Render (After)"
+                  aspectClassName="aspect-video w-full max-h-[60vh] object-contain"
+                />
+              )}
+            </div>
+          </div>
+          <div className="flex justify-end mt-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDemoSliderOpen(false)}
+            >
+              Done
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     </>

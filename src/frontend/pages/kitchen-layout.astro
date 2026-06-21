@@ -1,0 +1,21 @@
+---
+import { KitchenLayoutApp } from "@/components/KitchenLayoutApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Kitchen Layout Architect - 126 Colby - Remodel Mission Control"
+  description="Interactive kitchen floorplan visualizer comparing island massing and circulation clearances across three design options."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 text-3xl font-bold">Kitchen Layout Architect</h1>
+      <p class="text-muted-foreground">
+        Compare island massing, aisle widths, and living-room clearances across three layout options at 1-foot grid
+        resolution.
+      </p>
+    </div>
+
+    <KitchenLayoutApp client:only="react" />
+  </main>
+</BaseLayout>

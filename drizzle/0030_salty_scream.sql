@@ -1,0 +1,1 @@
+ALTER TABLE `image_reviews` ADD `reviewed` integer DEFAULT false;

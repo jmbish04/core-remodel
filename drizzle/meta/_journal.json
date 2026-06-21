@@ -232,6 +232,97 @@
       "when": 1781610164158,
       "tag": "0032_demonic_psylocke",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1781621905713,
+      "tag": "0033_complete_steve_rogers",
+      "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "6",
+      "when": 1781625064507,
+      "tag": "0034_unique_winter_soldier",
+      "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "6",
+      "when": 1781669422968,
+      "tag": "0035_serious_night_nurse",
+      "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1781709120329,
+      "tag": "0036_military_shinko_yamashiro",
+      "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1781712007850,
+      "tag": "0037_panoramic_random",
+      "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1781780810724,
+      "tag": "0038_wooden_captain_britain",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1781789361305,
+      "tag": "0039_curly_maestro",
+      "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "6",
+      "when": 1781796651127,
+      "tag": "0040_dry_namor",
+      "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1781853255258,
+      "tag": "0041_curious_abomination",
+      "breakpoints": true
+    },
+    {
+      "idx": 42,
+      "version": "6",
+      "when": 1781882868901,
+      "tag": "0042_striped_bloodstrike",
+      "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1781885186456,
+      "tag": "0043_lean_robbie_robertson",
+      "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1781886507721,
+      "tag": "0044_large_human_fly",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "6",
+      "when": 1781888814427,
+      "tag": "0045_old_redwing",
+      "breakpoints": true
     }
   ]
 }

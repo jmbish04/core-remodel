@@ -17,6 +17,7 @@ export const imageReviews = sqliteTable(
     imageNumber: text("image_number"),
     igAccount: text("ig_account"),
     visibleCaption: text("visible_caption"),
+    reviewed: integer("reviewed", { mode: "boolean" }).default(false),
     width: integer("width"),
     height: integer("height"),
     sourceFilenameNormalized: text("source_filename_normalized"),

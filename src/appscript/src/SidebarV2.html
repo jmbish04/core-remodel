@@ -1,0 +1,380 @@
+<!doctype html>
+<html>
+  <head>
+    <base target="_top" />
+    <title>A2A Agent V2</title>
+    <style>
+      :root {
+        --text: #202124;
+        --muted: #5f6368;
+        --line: #dadce0;
+        --panel: #f8f9fa;
+        --user: #e8f0fe;
+        --user-text: #1a73e8;
+        --working-bg: #feefe3;
+        --working-text: #b06000;
+        --done-bg: #e6f4ea;
+        --done-text: #137333;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        font-family:
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Roboto,
+          Helvetica,
+          Arial,
+          sans-serif;
+        color: var(--text);
+        background: #fff;
+      }
+
+      body {
+        box-sizing: border-box;
+        display: flex;
+        flex-direction: column;
+        padding: 12px;
+        gap: 10px;
+      }
+
+      #status-indicator {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 10px;
+        border-radius: 999px;
+        font-size: 11px;
+        font-weight: 600;
+        background: #f1f3f4;
+        color: var(--muted);
+        width: fit-content;
+      }
+
+      #status-indicator.working {
+        background: var(--working-bg);
+        color: var(--working-text);
+      }
+
+      #status-indicator.done {
+        background: var(--done-bg);
+        color: var(--done-text);
+      }
+
+      #chat-container {
+        flex: 1;
+        overflow-y: auto;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 8px;
+      }
+
+      .message {
+        margin-bottom: 10px;
+        padding: 8px 10px;
+        border-radius: 8px;
+        max-width: 88%;
+        font-size: 12px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .message.user {
+        margin-left: auto;
+        background: var(--user);
+        color: var(--user-text);
+        border-bottom-right-radius: 2px;
+      }
+
+      .message.agent {
+        margin-right: auto;
+        background: #fff;
+        border: 1px solid var(--line);
+        border-bottom-left-radius: 2px;
+      }
+
+      .grid-note {
+        margin-top: 6px;
+        border-top: 1px dashed var(--line);
+        padding-top: 6px;
+        font-size: 11px;
+        color: #6b7280;
+      }
+
+      #composer {
+        display: flex;
+        gap: 8px;
+      }
+
+      #user-input {
+        flex: 1;
+        min-height: 40px;
+        max-height: 120px;
+        resize: vertical;
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 9px 12px;
+        font: inherit;
+        font-size: 12px;
+        box-sizing: border-box;
+      }
+
+      #user-input:focus {
+        outline: none;
+        border-color: #1a73e8;
+      }
+
+      #send-btn {
+        border: none;
+        border-radius: 20px;
+        padding: 0 16px;
+        font-size: 12px;
+        font-weight: 600;
+        cursor: pointer;
+        background: #1a73e8;
+        color: #fff;
+      }
+
+      #send-btn:disabled {
+        background: #d1d5db;
+        color: #6b7280;
+        cursor: not-allowed;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="status-indicator">Agent: Standby</div>
+
+    <div id="chat-container">
+      <div class="message agent">Connected to A2A V2. Ask for chat or grid-style data output.</div>
+    </div>
+
+    <div id="composer">
+      <textarea
+        id="user-input"
+        placeholder="Type a request..."
+        onkeydown="if(event.key === 'Enter' && !event.shiftKey){ event.preventDefault(); runV2Agent(); }"
+      ></textarea>
+      <button id="send-btn" onclick="runV2Agent()">Send</button>
+    </div>
+
+    <script>
+      var SERVER_CONFIG = <?!= apiConfigJson || '{}' ?>;
+      var WORKER_V2_URL = SERVER_CONFIG.a2aV2Url || 'https://core-remodel.hacolby.workers.dev/a2a-v2';
+
+      function setStatus(label, mode) {
+        var indicator = document.getElementById('status-indicator');
+        indicator.textContent = label;
+        indicator.className = '';
+        if (mode === 'working') indicator.classList.add('working');
+        if (mode === 'done') indicator.classList.add('done');
+      }
+
+      function appendBubble(text, role) {
+        var container = document.getElementById('chat-container');
+        var bubble = document.createElement('div');
+        bubble.className = 'message ' + role;
+        bubble.textContent = text;
+        container.appendChild(bubble);
+        container.scrollTop = container.scrollHeight;
+        return bubble;
+      }
+
+      function toggleInput(disabled) {
+        document.getElementById('user-input').disabled = disabled;
+        document.getElementById('send-btn').disabled = disabled;
+      }
+
+      function extractTextParts(parts) {
+        if (!Array.isArray(parts)) return '';
+        return parts
+          .map(function(part) {
+            if (!part || typeof part !== 'object') return '';
+            return typeof part.text === 'string' ? part.text : '';
+          })
+          .filter(Boolean)
+          .join('\n');
+      }
+
+      function updateAgentBubble(agentBubble, fullText) {
+        var displayText = fullText.replace(/<sheet-grid>[\s\S]*?<\/sheet-grid>/gi, '').trim();
+        agentBubble.textContent = displayText || 'Generating response...';
+
+        if (/<sheet-grid>[\s\S]*?<\/sheet-grid>/i.test(fullText) && !agentBubble.querySelector('.grid-note')) {
+          var note = document.createElement('div');
+          note.className = 'grid-note';
+          note.textContent = 'Structured grid payload detected. Writing to sheet when completed.';
+          agentBubble.appendChild(note);
+        }
+      }
+
+      function parseSseChunk(buffer, onEvent) {
+        var segments = buffer.split('\n\n');
+        var pending = segments.pop();
+
+        segments.forEach(function(segment) {
+          var lines = segment.split('\n');
+          var dataLines = lines
+            .filter(function(line) {
+              return line.indexOf('data:') === 0;
+            })
+            .map(function(line) {
+              return line.replace(/^data:\s?/, '');
+            });
+
+          if (!dataLines.length) return;
+
+          var payloadText = dataLines.join('\n').trim();
+          if (!payloadText) return;
+
+          try {
+            onEvent(JSON.parse(payloadText));
+          } catch (_error) {
+            // Ignore malformed SSE payload lines and continue stream parsing.
+          }
+        });
+
+        return pending;
+      }
+
+      async function runV2Agent() {
+        var inputEl = document.getElementById('user-input');
+        var text = inputEl.value.trim();
+        if (!text) return;
+
+        inputEl.value = '';
+        toggleInput(true);
+        appendBubble(text, 'user');
+
+        var agentBubble = appendBubble('...', 'agent');
+        var fullAccumulatedText = '';
+
+        setStatus('Agent: Submitted', 'working');
+
+        var taskId = 'v2-task-' + Math.random().toString(36).slice(2);
+        var contextId = 'v2-sheet-session';
+
+        try {
+          var response = await fetch(WORKER_V2_URL, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Accept: 'text/event-stream',
+            },
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              method: 'execute_task',
+              id: 2,
+              params: {
+                taskId: taskId,
+                contextId: contextId,
+                userMessage: {
+                  kind: 'message',
+                  messageId: 'msg-' + Math.random().toString(36).slice(2),
+                  role: 'user',
+                  contextId: contextId,
+                  taskId: taskId,
+                  parts: [{ kind: 'text', text: text }],
+                },
+              },
+            }),
+          });
+
+          if (!response.ok || !response.body) {
+            var bodyText = await response.text();
+            throw new Error('HTTP ' + response.status + ': ' + bodyText.slice(0, 240));
+          }
+
+          var reader = response.body.getReader();
+          var decoder = new TextDecoder();
+          var buffer = '';
+
+          while (true) {
+            var next = await reader.read();
+            if (next.done) break;
+
+            buffer += decoder.decode(next.value, { stream: true });
+            buffer = parseSseChunk(buffer, function(payload) {
+              if (!payload || typeof payload !== 'object' || !payload.result) return;
+              var event = payload.result;
+
+              if (event.kind === 'status-update' && event.status) {
+                var state = event.status.state;
+                if (state === 'submitted') {
+                  setStatus('Agent: Submitted', 'working');
+                } else if (state === 'working') {
+                  setStatus('Agent: Working', 'working');
+                } else if (state === 'completed') {
+                  setStatus('Agent: Completed', 'done');
+                } else if (state === 'failed') {
+                  setStatus('Agent: Failed', '');
+                } else if (state === 'canceled') {
+                  setStatus('Agent: Canceled', '');
+                }
+
+                var statusMessage =
+                  event.status.message && Array.isArray(event.status.message.parts)
+                    ? extractTextParts(event.status.message.parts)
+                    : '';
+                if (statusMessage) {
+                  fullAccumulatedText = statusMessage;
+                  updateAgentBubble(agentBubble, fullAccumulatedText);
+                }
+              }
+
+              if (event.kind === 'message' && Array.isArray(event.parts)) {
+                var chunk = extractTextParts(event.parts);
+                if (chunk) {
+                  fullAccumulatedText += (fullAccumulatedText ? '\n' : '') + chunk;
+                  updateAgentBubble(agentBubble, fullAccumulatedText);
+                }
+              }
+            });
+          }
+
+          if (buffer.trim()) {
+            parseSseChunk(buffer + '\n\n', function(payload) {
+              if (!payload || typeof payload !== 'object' || !payload.result) return;
+              var event = payload.result;
+              if (event.kind === 'status-update' && event.status && event.status.message) {
+                var textChunk = extractTextParts(event.status.message.parts);
+                if (textChunk) {
+                  fullAccumulatedText = textChunk;
+                  updateAgentBubble(agentBubble, fullAccumulatedText);
+                }
+              }
+            });
+          }
+
+          google.script.run
+            .withSuccessHandler(function() {
+              toggleInput(false);
+              document.getElementById('user-input').focus();
+              setTimeout(function() {
+                if (document.getElementById('status-indicator').textContent === 'Agent: Completed') {
+                  setStatus('Agent: Standby', '');
+                }
+              }, 2000);
+            })
+            .withFailureHandler(function(error) {
+              toggleInput(false);
+              var message = error && error.message ? error.message : String(error || 'Unknown error');
+              setStatus('Agent: Sheet Write Failed', '');
+              appendBubble('Sheet write failed: ' + message, 'agent');
+            })
+            .writeGridToSheet(fullAccumulatedText);
+        } catch (error) {
+          var errMessage = error && error.message ? error.message : String(error);
+          setStatus('Agent: Connection Error', '');
+          agentBubble.textContent = 'Network transmission error: ' + errMessage;
+          toggleInput(false);
+        }
+      }
+    </script>
+  </body>
+</html>

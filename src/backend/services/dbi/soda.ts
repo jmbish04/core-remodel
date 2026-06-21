@@ -233,6 +233,57 @@ export function isClosedStatus(
   return statusCategory === "completed" || statusCategory === "cancelled";
 }
 
+export type PermitLifecycle = "active" | "suspected_expired" | "closed";
+
+/** A non-terminal permit older than this (newest of filed/issued) is treated
+ *  as suspected-expired and surfaced to the homeowner for review. */
+export const SUSPECTED_EXPIRED_AFTER_DAYS = 365;
+
+function newestPermitDateMs(
+  ...dates: Array<string | null | undefined>
+): number | null {
+  let newest: number | null = null;
+  for (const value of dates) {
+    if (!value) continue;
+    const ms = new Date(value).getTime();
+    if (Number.isNaN(ms)) continue;
+    if (newest === null || ms > newest) newest = ms;
+  }
+  return newest;
+}
+
+/**
+ * Classify a property permit. `closed` = terminal (SODA completed/cancelled, a
+ * closed date, or homeowner-closed). `suspected_expired` = not closed but its
+ * newest filed/issued date is older than SUSPECTED_EXPIRED_AFTER_DAYS — likely
+ * dead (e.g. a long-stale `issued`/`filed` permit) and excluded from anchoring.
+ * `active` = everything else.
+ */
+export function derivePermitLifecycle(input: {
+  statusCategory: string | null;
+  closedDate: string | null;
+  ownerClosed: boolean;
+  filedDate: string | null;
+  issuedDate: string | null;
+  now?: number;
+}): PermitLifecycle {
+  if (
+    input.ownerClosed ||
+    isClosedStatus(input.statusCategory, input.closedDate)
+  ) {
+    return "closed";
+  }
+  const now = input.now ?? Date.now();
+  const newest = newestPermitDateMs(input.filedDate, input.issuedDate);
+  if (
+    newest !== null &&
+    now - newest > SUSPECTED_EXPIRED_AFTER_DAYS * 24 * 60 * 60 * 1000
+  ) {
+    return "suspected_expired";
+  }
+  return "active";
+}
+
 // ---------------------------------------------------------------------------
 // Field resolution
 // ---------------------------------------------------------------------------

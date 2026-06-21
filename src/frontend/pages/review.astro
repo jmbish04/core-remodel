@@ -1,18 +1,20 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
-import { PhotoLibraryApp } from "@/components/PhotoLibraryApp";
+import { PhotoReviewApp } from "@/components/PhotoReviewApp";
 ---
 
 <BaseLayout
   title="Photo Reviews - 126 Colby - Remodel Mission Control"
-  description="Manage photo reviews with AI-powered tagging and categorization."
+  description="Code listing photos and categorize level/home-scoped inspiration with AI-assisted suggestions."
 >
+  {/*
+    Two tabs live inside PhotoReviewApp: the per-image coding workspace and the
+    level/home inspiration categorizer + grouped viewer (feature 0005). The
+    shell owns its own height under the 3.5rem navbar, so no extra wrapper sizing
+    is needed here.
+  */}
   <div class="pt-[1px]">
-    <PhotoLibraryApp
-      client:only="react"
-      category="inspirational"
-      title="Photo Reviews"
-      reviewMode={true}
-    />
+    <PhotoReviewApp client:only="react" />
   </div>
 </BaseLayout>
+

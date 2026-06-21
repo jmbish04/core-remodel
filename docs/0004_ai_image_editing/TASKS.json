@@ -1,0 +1,373 @@
+{
+  "feature": "ai-image-editing-staged-render-pipeline",
+  "version": "1.0.0",
+  "source_plan": "docs/0004_ai_image_editing/IMPLEMENTATION_PLAN.md",
+  "stack": {
+    "api": "Hono + @hono/zod-openapi (Zod v4)",
+    "db": "Drizzle ORM on Cloudflare D1 (binding DB); migrations via drizzle-kit (pnpm run db:generate); never hand-write SQL",
+    "frontend": "Astro SSR + React islands + shadcn/ui",
+    "image_store": "Cloudflare Images (CF_IMAGES_TOKEN)",
+    "models": "Per-stage registry via Cloudflare AI Gateway — Gemini 3 Pro Image (GEMINI_API_KEY); Fal (FAL_API_KEY): bria/fibo-edit, nano-banana-pro/edit, flux-pro/kontext, flux-2-pro/edit, fast-sdxl; Replicate (REPLICATE_API_TOKEN): black-forest-labs/flux-depth-pro, black-forest-labs/flux-kontext-max (async). Never raw fal.run or api.replicate.com.",
+    "orchestration": "Cloudflare Workflows"
+  },
+  "hard_constraints": [
+    "NO sharp/libvips on Workers — crop via Cloudflare Images transforms.",
+    "NO interactive db.transaction() on D1 — use db.batch([...]) for atomic multi-row writes.",
+    "Per-stage provider selection behind a StageProvider interface, ALL routed through Cloudflare AI Gateway. Gemini 3 Pro default for structure-critical stages (base, rough-in); Fal (native gateway provider) Seedream v4 edit / FLUX first-class for try-on/finish. FAL_API_KEY is wired.",
+    "Always EDIT the real blank-canvas image; pin image_config (aspect_ratio + image_size); never generate from scratch.",
+    "Pass Cloudflare Images delivery URLs to models, not large base64 strings.",
+    "Use global crypto.randomUUID(); reuse AI Gateway via existing inline-editor.ts pattern.",
+    "ALL Fal calls route through Cloudflare AI Gateway /fal (or x-fal-target-url) — never raw https://fal.run.",
+    "Treat Fal model slugs + pricing as to-be-verified against the live catalog (via the gateway) before wiring; keep slugs in one registry config module.",
+    "Cloudflare Images upload URL is https://api.cloudflare.com/client/v4/accounts/{id}/images/v1 (Bearer token via getCloudflareImagesToken, account via getCloudflareAccountId); pass image/mask URLs, not base64.",
+    "Real-time progress: a Worker WebSocket MUST be terminated by a Durable Object — otherwise reuse the existing realtime channel or use SSE/polling; never a bare Worker WS.",
+    "Layer-0 prep (if built) = object-removal/inpainting that keeps the room shell. Do NOT use BiRefNet background removal (it keeps the foreground, drops the background).",
+    "Black Forest Labs flux-depth-pro and flux-kontext-max are NOT on Fal — route via Replicate through the gateway /replicate path (REPLICATE_API_TOKEN). Replicate is ASYNC: create prediction, poll urls.get or send 'Prefer: wait', then read output[0]."
+  ],
+  "phases": [
+    { "id": "P0", "title": "Foundation" },
+    { "id": "P1", "title": "Single-angle staged pipeline" },
+    { "id": "P2", "title": "Multi-angle consistency + try-on" },
+    { "id": "P3", "title": "Inspiration extraction + gallery" },
+    { "id": "P4", "title": "Multi-model registry, Fal providers & failover" }
+  ],
+  "tasks": [
+    {
+      "id": "T0.1",
+      "phase": "P0",
+      "title": "Add render schema tables (Drizzle)",
+      "summary": "Create render_sessions, render_canvases (stage-typed incl. stage_5_LP_synthesis, self-ref parentCanvasId, lightingProfile), and canvas_inspiration_references (junction with bounding box + referenceIndex for @image ordering). Add to schema barrel; generate migration with drizzle-kit.",
+      "files": [
+        "src/backend/db/schema/images/render_sessions.ts",
+        "src/backend/db/schema/images/render_canvases.ts",
+        "src/backend/db/schema/images/canvas_inspiration_references.ts",
+        "src/backend/db/schema/index.ts"
+      ],
+      "acceptance": [
+        "pnpm run db:generate produces a migration; pnpm typecheck passes",
+        "Tables reuse images.id, listing_photos.id (angle), rooms.id via FKs",
+        "render_canvases.type enum matches the stage taxonomy in the plan",
+        "canvas_inspiration_references has referenceIndex (int) for @image array ordering"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "T0.2",
+      "phase": "P0",
+      "title": "StageProvider interface + GeminiStageProvider",
+      "summary": "Define a provider-agnostic StageProvider { name, run(StageInput): StageOutput }. Implement GeminiStageProvider by reusing the AI Gateway call pattern in inline-editor.ts. Returns a Cloudflare Images id + metadata.",
+      "files": [
+        "src/backend/services/render/stage-provider.ts",
+        "src/backend/services/render/providers/gemini-stage-provider.ts"
+      ],
+      "acceptance": [
+        "GeminiStageProvider sends image_config (aspect_ratio + image_size) computed from source dims",
+        "Calls go through AI Gateway; model = gemini-3-pro-image",
+        "Input is passed as a Cloudflare Images delivery URL, not base64"
+      ],
+      "depends_on": ["T0.1"]
+    },
+    {
+      "id": "T0.3",
+      "phase": "P0",
+      "title": "Prompt + image_config utilities (port from Python proof)",
+      "summary": "Port the preservation-prompt block, reference-scoping language, nearest-aspect-ratio, and image_config builder from proofs/.../batch_image_edit_kitchen.py into TS utilities.",
+      "files": ["src/backend/services/render/prompt-kit.ts"],
+      "acceptance": [
+        "Preservation block forbids inventing/moving/closing walls & windows",
+        "Reference-scoping text restricts references to material/form only",
+        "nearestAspectRatio() maps source WxH to a supported ratio string"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "T0.4",
+      "phase": "P0",
+      "title": "Cloudflare Images crop helper (replaces sharp)",
+      "summary": "Helper to extract a source-pixel bounding-box region from a Cloudflare Images source and store the snippet as a new Images id, using Cloudflare Images transformations (NOT sharp).",
+      "files": ["src/backend/services/render/image-crop.ts"],
+      "acceptance": [
+        "No sharp/libvips import",
+        "Given an Images id + {x,y,w,h} in source pixels, returns a new Images id for the crop",
+        "Clamps the region to source bounds"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "T0.5",
+      "phase": "P0",
+      "title": "Retire the SD1.5 edit path; wire Gemini engine",
+      "summary": "Replace the Workers AI stable-diffusion-v1-5 call in the photo-edit route with the new StageRunner/GeminiStageProvider. Keep the legacy session tables intact but route generation through the new engine.",
+      "files": ["src/backend/api/routes/photo-edits.ts"],
+      "acceptance": [
+        "No remaining @cf/runwayml/stable-diffusion call in the edit path",
+        "Existing edit page produces a Gemini render end to end"
+      ],
+      "depends_on": ["T0.2", "T0.3"]
+    },
+    {
+      "id": "T0.6",
+      "phase": "P0",
+      "title": "Wire FAL_API_KEY secret + AI Gateway /fal access (DONE)",
+      "summary": "Added FAL_API_KEY to wrangler.jsonc secrets_store_secrets; added getFalApiKey() to utils/secrets.ts; regenerated Env types via cf-typegen. Fal models are reached through the native AI Gateway /fal path (proxyUrl or x-fal-target-url).",
+      "files": ["wrangler.jsonc", "src/backend/utils/secrets.ts", "worker-configuration.d.ts"],
+      "acceptance": [
+        "env.FAL_API_KEY typed as SecretsStoreSecret",
+        "getFalApiKey(env) returns the token",
+        "User adds the FAL_API_KEY value to the Cloudflare Secrets Store"
+      ],
+      "status": "completed",
+      "depends_on": []
+    },
+    {
+      "id": "T0.7",
+      "phase": "P0",
+      "title": "Cloudflare Images upload + mask-upload helpers",
+      "summary": "Helper to upload a Blob to Cloudflare Images via POST https://api.cloudflare.com/client/v4/accounts/{accountId}/images/v1 (Bearer from getCloudflareImagesToken; account from getCloudflareAccountId), returning {imageId, deliveryUrl}. Same path stores drawn inpainting masks; callers pass mask_url to models (never base64).",
+      "files": ["src/backend/services/render/cf-images.ts"],
+      "acceptance": [
+        "Uses the correct v4 accounts/{id}/images/v1 URL + Bearer imagesToken",
+        "Returns image id + delivery URL; supports /thumb variant requests",
+        "Mask upload returns a URL passed to the model as mask_url"
+      ],
+      "depends_on": []
+    },
+    {
+      "id": "T1.1",
+      "phase": "P1",
+      "title": "StageRunner service (state-tree write)",
+      "summary": "Service that resolves provider, builds the stage prompt, runs the model, uploads result to Cloudflare Images, and persists the render_canvases node (+ junction rows) atomically with db.batch().",
+      "files": ["src/backend/services/render/stage-runner.ts"],
+      "acceptance": [
+        "Multi-row writes use db.batch([...]) (no db.transaction)",
+        "Each node records parentCanvasId, prompt, provider, model, input/output Images ids",
+        "Failure marks node status=failed and surfaces the error"
+      ],
+      "depends_on": ["T0.1", "T0.2", "T0.3"]
+    },
+    {
+      "id": "T1.2",
+      "phase": "P1",
+      "title": "Stage prompts: base / rough-in / finish",
+      "summary": "Implement stage-1 (floor+paint), stage-2 (spatial layout placement), stage-3 (material finish) prompt builders on top of prompt-kit, each with the preservation block.",
+      "files": ["src/backend/services/render/stages.ts"],
+      "acceptance": [
+        "Stage 2 prompt anchors placement to the real room and forbids structural change",
+        "Stage 3 prompt scopes references to material/form only",
+        "Design tokens (floor/wall/cabinet/counter) injected from session.designConfig"
+      ],
+      "depends_on": ["T1.1"]
+    },
+    {
+      "id": "T1.3",
+      "phase": "P1",
+      "title": "Render API routes (sessions + stage)",
+      "summary": "Add Hono zod-openapi routes: POST /api/render/sessions, GET /api/render/sessions/:id, POST /api/render/stage, GET /api/render/canvases/:id. Validate with OrchestrateRequestSchema.",
+      "files": [
+        "src/backend/api/routes/render.ts",
+        "src/backend/api/schemas/render.ts",
+        "src/backend/api/index.ts"
+      ],
+      "acceptance": [
+        "OpenAPI registered; /scalar shows the routes",
+        "actionType routes to the correct stage and branch behavior (micro vs macro)",
+        "Returns the new canvas node with lineage"
+      ],
+      "depends_on": ["T1.1", "T1.2"]
+    },
+    {
+      "id": "T1.4",
+      "phase": "P1",
+      "title": "Optional structural QA gate",
+      "summary": "After a stage, run a vision check (Gemini or Workers AI) comparing render vs blank canvas for structural drift; retry once on drift; record verdict in canvas.metadata. Behind a config flag.",
+      "files": ["src/backend/services/render/qa-gate.ts"],
+      "acceptance": [
+        "Returns {drift:boolean, changes:string} and logs to metadata",
+        "On drift, retries once with a strengthened preservation prompt",
+        "Flag-disabled path is a no-op"
+      ],
+      "depends_on": ["T1.1"]
+    },
+    {
+      "id": "T2.1",
+      "phase": "P2",
+      "title": "Multi-angle hero+reference fan-out (Workflow)",
+      "summary": "POST /api/render/looks: build hero angle, then render each other angle with the hero finish attached as a consistency reference. Run as a Cloudflare Workflow for durability.",
+      "files": [
+        "src/backend/services/render/looks-workflow.ts",
+        "src/backend/api/routes/render.ts",
+        "wrangler.jsonc"
+      ],
+      "acceptance": [
+        "New Workflow binding added",
+        "Each non-hero angle receives the hero image as a reference with 'same kitchen, this viewpoint' instruction",
+        "All angle renders grouped under one look/session"
+      ],
+      "depends_on": ["T1.3"]
+    },
+    {
+      "id": "T2.2",
+      "phase": "P2",
+      "title": "Try-on variations (finish swap, element move, day/night)",
+      "summary": "Branch operations from a saved baseline: micro (reuse finish + region), macro (rewind to base), and lightingProfile day/night re-render.",
+      "files": ["src/backend/services/render/branching.ts"],
+      "acceptance": [
+        "Micro edit reuses latest stage-3 node",
+        "Macro edit creates a new branch from stage-1/0",
+        "Day/night produces sibling nodes with lightingProfile set"
+      ],
+      "depends_on": ["T1.3"]
+    },
+    {
+      "id": "T3.1",
+      "phase": "P3",
+      "title": "Inspiration extraction endpoint",
+      "summary": "POST /api/render/extract: crop an inspiration region via Cloudflare Images, store snippet, and write canvas_inspiration_references rows (db.batch).",
+      "files": ["src/backend/api/routes/render.ts", "src/backend/services/render/extract.ts"],
+      "acceptance": [
+        "Bounding box stored in source pixels; snippet stored as Images id",
+        "Junction rows written atomically with the canvas",
+        "No sharp usage"
+      ],
+      "depends_on": ["T0.4", "T1.3"]
+    },
+    {
+      "id": "T3.2",
+      "phase": "P3",
+      "title": "Frontend: InspirationCanvas (bounding-box selector)",
+      "summary": "React island: click-drag box over an inspiration photo; scale display coords to source pixels; submit to /api/render/extract.",
+      "files": ["src/frontend/components/render/InspirationCanvas.tsx"],
+      "acceptance": [
+        "Coords scaled by naturalWidth/clientWidth before submit",
+        "Resilient to resize; clear/submit actions",
+        "Hydrated with client:load"
+      ],
+      "depends_on": ["T3.1"]
+    },
+    {
+      "id": "T3.3",
+      "phase": "P3",
+      "title": "Frontend: GalleryViewport + tree/branch + design panel",
+      "summary": "Render viewport with inspiration chips (hover highlights source region via CSS punch-out, normalized to 0-1000), a state-tree/branch navigator, a design config panel, and an angle gallery.",
+      "files": [
+        "src/frontend/components/render/GalleryViewport.tsx",
+        "src/frontend/components/render/BranchNavigator.tsx",
+        "src/frontend/components/render/DesignConfigPanel.tsx",
+        "src/frontend/components/render/AngleGallery.tsx"
+      ],
+      "acceptance": [
+        "GET /api/render/canvases/:id feeds the viewport (render + lineage + refs)",
+        "Hovering a chip highlights its clipped region over the inspiration source image (not the generative render)",
+        "Design panel writes session.designConfig incl. day/night toggle"
+      ],
+      "depends_on": ["T1.3", "T2.1"]
+    },
+    {
+      "id": "T3.4",
+      "phase": "P3",
+      "title": "Multi-image inspo synthesis endpoint",
+      "summary": "POST /api/render/synthesize: assemble image_urls = [base canvas, ...inspiration refs ordered by referenceIndex], compile the @image{n} prompt, and call fal-ai/flux-2-pro/edit (<=9 images) through the AI Gateway /fal path. Persist a stage_5_LP_synthesis canvas node.",
+      "files": ["src/backend/api/routes/render.ts", "src/backend/services/render/synthesize.ts"],
+      "acceptance": [
+        "image_urls ordered strictly by referenceIndex (base canvas = @image1)",
+        "Routed through AI Gateway /fal (not raw fal.run); output stored in Cloudflare Images",
+        "Result persisted as stage_5_LP_synthesis with its inspiration junction rows"
+      ],
+      "depends_on": ["T3.1"]
+    },
+    {
+      "id": "T3.5",
+      "phase": "P3",
+      "title": "Frontend: InspoSortWorkspace (DnD @image ordering)",
+      "summary": "React island using @hello-pangea/dnd to drag-order inspiration chips; base canvas is the fixed @image1 anchor; live-preview @image{n} tags; submit ordered refs (referenceIndex) to /api/render/synthesize.",
+      "files": ["src/frontend/components/render/InspoSortWorkspace.tsx"],
+      "acceptance": [
+        "Drag reorder updates referenceIndex (inspirations start at 1)",
+        "Hydrated with client:only=react",
+        "Submits ordered references to the synthesize endpoint"
+      ],
+      "depends_on": ["T3.4"]
+    },
+    {
+      "id": "T3.6",
+      "phase": "P3",
+      "title": "Frontend: /builder page (room selector + stage-explorer timeline)",
+      "summary": "src/pages/builder.astro mounting the Renovation Studio: shadcn Select room picker loading that room's canvas history; a stage-explorer timeline (stage_0..stage_3) listing canvases per type with starting/output images + ai_title. Server-load data via Drizzle; hydrate islands client:only=react.",
+      "files": ["src/pages/builder.astro", "src/frontend/components/render/StudioBuilder.tsx", "src/frontend/components/render/StageExplorer.tsx"],
+      "acceptance": [
+        "Room select loads that room's canvases; no DB aggregation in JSX",
+        "Stage timeline lists canvases by type with image previews + ai_title",
+        "Interactive parts hydrated client:only=react"
+      ],
+      "depends_on": ["T1.3"]
+    },
+    {
+      "id": "T3.7",
+      "phase": "P3",
+      "title": "Frontend: MaskConfigurator (canvas mask + prompt/JSON)",
+      "summary": "HTML5 canvas over the selected stage image to draw an inpainting mask (Draw/Clear), beside a shadcn Textarea toggling natural-language prompt vs JSON config. On submit, upload the mask to Cloudflare Images and POST its URL + config to /api/render/stage (no base64 mask).",
+      "files": ["src/frontend/components/render/MaskConfigurator.tsx"],
+      "acceptance": [
+        "Mask drawn on canvas, uploaded as an Images asset; mask_url sent (not base64)",
+        "Prompt/JSON toggle; config bundled into the stage request",
+        "Hydrated client:only=react"
+      ],
+      "depends_on": ["T0.7", "T1.3", "T3.6"]
+    },
+    {
+      "id": "T3.8",
+      "phase": "P3",
+      "title": "Frontend + realtime: PipelineStatusLoader",
+      "summary": "Pinned status card (stage badge, shadcn Progress, streaming log). Feed it from the app's existing realtime event channel; if a WebSocket is used it MUST be terminated by a Durable Object, otherwise use SSE or poll the canvas status. No bare Worker WS.",
+      "files": ["src/frontend/components/render/PipelineStatusLoader.tsx", "src/backend/services/render/progress-channel.ts"],
+      "acceptance": [
+        "Displays live stage/progress/log during a run",
+        "Transport is DO-backed WS, SSE, or polling (not a bare Worker WS)",
+        "Reuses the existing realtime mechanism where possible"
+      ],
+      "depends_on": ["T1.3"]
+    },
+    {
+      "id": "T4.1",
+      "phase": "P4",
+      "title": "Multi-model registry + Fal stage providers (via AI Gateway)",
+      "summary": "Implement the per-stage model registry (one config module) and FalStageProvider routed through the AI Gateway /fal path (@fal-ai/client with proxyUrl, or fetch with 'Authorization: Key' + x-fal-target-url). Fal targets: bria/fibo-edit (base), fal-ai/nano-banana-pro/edit (interaction; prefer direct Gemini), fal-ai/flux-pro/kontext (finish alt), fal-ai/flux-2-pro/edit (synthesis), fast-sdxl (rough-in alt). The official BFL flux-depth-pro / flux-kontext-max defaults are NOT on Fal — see T4.3 (Replicate). Per-stage model config-selectable for A/B vs Gemini; verify each slug against the live catalog first.",
+      "files": [
+        "src/backend/services/render/model-registry.ts",
+        "src/backend/services/render/providers/fal-stage-provider.ts"
+      ],
+      "acceptance": [
+        "All Fal calls route through AI Gateway /fal using FAL_API_KEY (getFalApiKey); no raw fal.run",
+        "Stage->model mapping lives in one config module; switching a stage's model is a config edit",
+        "Slugs verified against the live Fal catalog before wiring; stages default to Gemini unless config selects Fal"
+      ],
+      "depends_on": ["T1.2", "T0.6"]
+    },
+    {
+      "id": "T4.2",
+      "phase": "P4",
+      "title": "Failover / step-down wrapper",
+      "summary": "Wrap StageRunner model calls: on transient 429/5xx, retry once then step down to a faster/cheaper sibling, possibly cross-provider (e.g. Replicate flux-kontext-max -> fal-ai/flux-pro/kontext -> fal-ai/flux-2/turbo/edit); record resolvedModel + provider + fallbackTriggered in render_canvases.metadata. Re-throw fatal 4xx schema errors. Prefer AI Gateway native retries where available.",
+      "files": ["src/backend/services/render/failover.ts", "src/backend/services/render/stage-runner.ts"],
+      "acceptance": [
+        "Transient faults step down to a sibling model and still return an image",
+        "metadata records resolvedModel + fallbackTriggered",
+        "Fatal non-429 errors are re-thrown (not masked)"
+      ],
+      "depends_on": ["T4.1"]
+    },
+    {
+      "id": "T4.3",
+      "phase": "P4",
+      "title": "ReplicateStageProvider (BFL Pro/Max via AI Gateway) + wire REPLICATE_API_TOKEN",
+      "summary": "Wire REPLICATE_API_TOKEN (Secrets Store + wrangler.jsonc secrets_store_secrets + getReplicateApiToken in utils/secrets.ts; cf-typegen). Implement ReplicateStageProvider routed through the AI Gateway /replicate path for black-forest-labs/flux-depth-pro (stage 2 rough-in) and black-forest-labs/flux-kontext-max (stage 3 finish). Handle Replicate's ASYNC lifecycle: create prediction, poll urls.get (or 'Prefer: wait'), read output[0]; upload result to Cloudflare Images.",
+      "files": ["wrangler.jsonc", "src/backend/utils/secrets.ts", "src/backend/services/render/providers/replicate-stage-provider.ts"],
+      "acceptance": [
+        "REPLICATE_API_TOKEN bound + typed; getReplicateApiToken returns it",
+        "Calls route through AI Gateway /replicate (no raw api.replicate.com)",
+        "Async prediction handled (poll or Prefer: wait); output stored in Cloudflare Images"
+      ],
+      "depends_on": ["T4.1"]
+    }
+  ]
+}

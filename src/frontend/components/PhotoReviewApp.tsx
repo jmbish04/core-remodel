@@ -1,148 +1,243 @@
 import {
-  CircleAlert,
-  Check,
-  CheckCircle2,
-  Copy,
   Crop,
+  Eye,
   FileImage,
-  Home,
+  Images,
+  LayoutGrid,
+  Loader2,
+  PanelRight,
+  Palette,
   RefreshCw,
-  RotateCw,
+  Save,
   Tag,
-  Upload,
   X,
-  ZoomIn,
-  ZoomOut,
 } from "lucide-react";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { toast } from "sonner";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from "@/components/ui/context-menu";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+  Cropper,
+  CropperArea,
+  CropperImage,
+  type CropperAreaData,
+} from "@/components/ui/cropper";
 import {
-  FileUpload,
-  FileUploadClear,
-  FileUploadDropzone,
-  FileUploadItem,
-  FileUploadItemDelete,
-  FileUploadItemMetadata,
-  FileUploadItemPreview,
-  FileUploadList,
-  FileUploadTrigger,
-} from "@/components/ui/file-upload";
-import { Cropper, CropperArea, CropperImage, type CropperAreaData } from "@/components/ui/cropper";
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import {
+  MultipleSelector,
+  type MultipleSelectorOption,
+} from "@/components/ui/multiple-selector";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
-interface ImageRecord {
-  id: string;
-  path: string;
-  filename: string;
-  room: string;
-  tags: string | string[];
+import { ScopedInspirationCategorizer } from "@/components/review/ScopedInspirationCategorizer";
+import { ScopedInspirationReview } from "@/components/review/ScopedInspirationReview";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+type HighlightType = "like" | "dislike";
+type PhotoCategory = "listing" | "inspirational";
+
+interface HighlightRecord {
+  /**
+   * Stable identity for React keys. Persisted highlights carry a numeric DB id;
+   * client-drafted highlights get a `crypto.randomUUID()` string until saved.
+   */
+  id?: number | string;
+  highlightType: HighlightType;
+  shapeType: string;
+  xPct: number;
+  yPct: number;
+  widthPct: number;
+  heightPct: number;
   note: string;
-  sourceFile?: string;
-  imageNumber?: string;
-  igAccount?: string;
-  visibleCaption?: string;
-  width?: number;
-  height?: number;
 }
 
-interface ImageGroup {
-  room: string;
-  images: ImageRecord[];
+interface TagMapping {
+  tagId: number;
+  slug: string;
+  label: string;
 }
 
-interface CropState {
-  crop: { x: number; y: number };
-  zoom: number;
-  rotation: number;
-  areaPixels: CropperAreaData | null;
+/** Shape returned by GET /api/images (subset we consume here). */
+interface ApiImage {
+  id: string;
+  displayName?: string | null;
+  description?: string | null;
+  cfImageIdOriginal?: string | null;
+  cfImageIdOptimized?: string | null;
+  metadata?: string | null;
+  photoCategory: string;
+  isDuplicate?: boolean;
+  roomType?: string | null;
+  roomLabels?: string[];
+  tags?: string[];
+  tagMappings?: TagMapping[];
+  highlights?: Array<Partial<HighlightRecord>>;
+  reviewed?: boolean;
 }
 
-type QueueUploadStatus = "idle" | "uploading" | "success" | "error";
-
-interface QueueUploadOutcome {
-  status: QueueUploadStatus;
-  message?: string;
-  failurePrompt?: string;
-  copiedToClipboard?: boolean;
+/** Normalized view-model used by the review pane. */
+interface ReviewImage {
+  id: string;
+  title: string;
+  description: string;
+  path: string;
+  category: PhotoCategory;
+  roomType: string | null;
+  tagIds: string[];
+  tags: string[];
+  highlights: HighlightRecord[];
+  reviewed: boolean;
 }
 
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const MAX_UPLOAD_FILES = 20;
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-const fileKey = (file: File) =>
-  `${file.name}-${file.size}-${file.type}-${file.lastModified}`;
+function clampPercent(value: number): number {
+  return Math.max(0, Math.min(100, Number(value.toFixed(4))));
+}
 
-const toPrompt = (params: {
-  file: File;
-  statusCode?: number;
-  statusText?: string;
-  errorMessage: string;
-  rawResponse?: string;
-}) =>
-  [
-    "Please help debug this photo upload failure in core-remodel.",
-    `File: ${params.file.name}`,
-    `Size: ${params.file.size} bytes`,
-    `Type: ${params.file.type || "unknown"}`,
-    `HTTP status: ${params.statusCode ?? "unknown"} ${params.statusText ?? ""}`.trim(),
-    `Error message: ${params.errorMessage}`,
-    "Raw server response:",
-    params.rawResponse?.trim() || "(empty response)",
-  ].join("\n");
+function deliveryUrlFromMetadata(metadata: string | null | undefined): string | null {
+  if (!metadata) return null;
+  try {
+    const parsed = JSON.parse(metadata) as Record<string, unknown>;
+    if (typeof parsed.deliveryUrl === "string") {
+      return parsed.deliveryUrl;
+    }
+  } catch {
+    /* ignore malformed metadata */
+  }
+  return null;
+}
 
-const createImageFromFile = (file: File): Promise<HTMLImageElement> =>
-  new Promise((resolve, reject) => {
+function resolveImageUrl(image: ApiImage): string {
+  const deliveryId = image.cfImageIdOptimized || image.cfImageIdOriginal;
+  if (deliveryId) {
+    if (deliveryId.startsWith("http://") || deliveryId.startsWith("https://")) {
+      return deliveryId;
+    }
+    if (deliveryId.includes("/")) {
+      return `https://imagedelivery.net/${deliveryId}/public`;
+    }
+  }
+  const fromMetadata = deliveryUrlFromMetadata(image.metadata);
+  if (fromMetadata) {
+    return fromMetadata;
+  }
+  return deliveryId ? `https://imagedelivery.net/${deliveryId}/public` : "";
+}
+
+function normalizeHighlights(
+  raw: Array<Partial<HighlightRecord>> | undefined,
+): HighlightRecord[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((highlight) => ({
+      id: highlight?.id || crypto.randomUUID(),
+      highlightType: (highlight?.highlightType === "dislike"
+        ? "dislike"
+        : "like") as HighlightType,
+      shapeType: highlight?.shapeType || "rect",
+      xPct: Number(highlight?.xPct) || 0,
+      yPct: Number(highlight?.yPct) || 0,
+      widthPct: Number(highlight?.widthPct) || 0,
+      heightPct: Number(highlight?.heightPct) || 0,
+      note: highlight?.note || "",
+    }))
+    .filter((highlight) => highlight.widthPct > 0 && highlight.heightPct > 0);
+}
+
+function buildReviewImage(image: ApiImage): ReviewImage {
+  const category: PhotoCategory =
+    image.photoCategory === "listing" ? "listing" : "inspirational";
+  const tagMappings = Array.isArray(image.tagMappings) ? image.tagMappings : [];
+  
+  let computedRoomType = image.roomType?.trim() || null;
+  const labels = Array.isArray(image.roomLabels) ? image.roomLabels : [];
+  if (!computedRoomType && labels.length > 0) {
+    if (labels.length > 5) {
+      computedRoomType = "Entire Home (All Levels)";
+    } else {
+      computedRoomType = labels.join(", ");
+    }
+  }
+
+  return {
+    id: image.id,
+    title: image.displayName?.trim() || "",
+    description: image.description?.trim() || "",
+    path: resolveImageUrl(image),
+    category,
+    roomType: computedRoomType,
+    tagIds: tagMappings.map((mapping) => String(mapping.tagId)),
+    tags: Array.isArray(image.tags)
+      ? image.tags.map((tag) => String(tag).trim()).filter(Boolean)
+      : [],
+    highlights: normalizeHighlights(image.highlights),
+    reviewed: Boolean(image.reviewed),
+  };
+}
+
+function createImageFromBlob(blob: Blob): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
     const image = new Image();
-    const objectUrl = URL.createObjectURL(file);
-
+    const objectUrl = URL.createObjectURL(blob);
     image.addEventListener("load", () => {
       URL.revokeObjectURL(objectUrl);
       resolve(image);
     });
-
-    image.addEventListener("error", (error) => {
+    image.addEventListener("error", () => {
       URL.revokeObjectURL(objectUrl);
-      reject(error);
+      reject(new Error("Failed to load image for cropping"));
     });
-
     image.src = objectUrl;
   });
+}
 
-const getCroppedFile = async (
-  file: File,
+async function cropBlob(
+  sourceBlob: Blob,
   areaPixels: CropperAreaData,
-): Promise<File> => {
-  const image = await createImageFromFile(file);
+  filename: string,
+): Promise<File> {
+  const image = await createImageFromBlob(sourceBlob);
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
-
   if (!context) {
     throw new Error("2D context is not available for cropping");
   }
-
   const width = Math.max(1, Math.round(areaPixels.width));
   const height = Math.max(1, Math.round(areaPixels.height));
   const x = Math.max(0, Math.round(areaPixels.x));
   const y = Math.max(0, Math.round(areaPixels.y));
-
   canvas.width = width;
   canvas.height = height;
-
   context.drawImage(image, x, y, width, height, 0, 0, width, height);
-
-  const outputType = file.type === "image/png" ? "image/png" : "image/jpeg";
-
+  const outputType = sourceBlob.type === "image/png" ? "image/png" : "image/jpeg";
   const blob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob(
       (result) => {
@@ -156,1029 +251,935 @@ const getCroppedFile = async (
       0.95,
     );
   });
+  return new File([blob], filename, { type: outputType });
+}
 
-  return new File([blob], file.name, {
-    type: outputType,
-    lastModified: Date.now(),
-  });
+interface CropState {
+  crop: { x: number; y: number };
+  zoom: number;
+  rotation: number;
+  areaPixels: CropperAreaData | null;
+}
+
+const INITIAL_CROP_STATE: CropState = {
+  crop: { x: 0, y: 0 },
+  zoom: 1,
+  rotation: 0,
+  areaPixels: null,
 };
 
-export function PhotoReviewApp() {
-  const [images, setImages] = useState<ImageRecord[]>([]);
-  const [groups, setGroups] = useState<ImageGroup[]>([]);
+// ---------------------------------------------------------------------------
+// Photo coding workspace (the original per-image review/coding tool)
+// ---------------------------------------------------------------------------
+
+/**
+ * The full-height photo coding workspace: a coding pane (image + highlights +
+ * title/description/tags) plus a queued/reviewed sidebar. This is the original
+ * `PhotoReviewApp` body, now rendered as the "Code photos" tab of the wrapping
+ * {@link PhotoReviewApp} shell. Behavior is unchanged.
+ */
+function PhotoCodingWorkspace() {
+  const [images, setImages] = useState<ReviewImage[]>([]);
   const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
-  const [selectedImage, setSelectedImage] = useState<ImageRecord | null>(null);
-  const [uploadProgress, setUploadProgress] = useState<{
-    current: number;
-    total: number;
-  } | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [sidebarTab, setSidebarTab] = useState<"queued" | "reviewed">("queued");
 
-  const [queuedFiles, setQueuedFiles] = useState<File[]>([]);
-  const [croppedFiles, setCroppedFiles] = useState<Set<string>>(new Set());
-  const [queueUploadOutcomes, setQueueUploadOutcomes] = useState<
-    Record<string, QueueUploadOutcome>
-  >({});
+  const [tagOptions, setTagOptions] = useState<MultipleSelectorOption[]>([]);
+  const [tagsLoading, setTagsLoading] = useState(false);
 
-  const [cropModalOpen, setCropModalOpen] = useState(false);
-  const [cropTargetFile, setCropTargetFile] = useState<File | null>(null);
-  const [cropState, setCropState] = useState<CropState>({
-    crop: { x: 0, y: 0 },
-    zoom: 1,
-    rotation: 0,
-    areaPixels: null,
-  });
-
-  const [zoomModalOpen, setZoomModalOpen] = useState(false);
-  const [zoomedImage, setZoomedImage] = useState<ImageRecord | null>(null);
-  const [zoomLevel, setZoomLevel] = useState(1);
-
-  const [panelRoom, setPanelRoom] = useState("");
-  const [panelTags, setPanelTags] = useState("");
-  const [panelNote, setPanelNote] = useState("");
+  // Coding-panel fields for the selected image.
+  const [panelTitle, setPanelTitle] = useState("");
+  const [panelDescription, setPanelDescription] = useState("");
+  const [panelTagIds, setPanelTagIds] = useState<string[]>([]);
+  const [panelHighlights, setPanelHighlights] = useState<HighlightRecord[]>([]);
+  const [highlightMode, setHighlightMode] = useState<HighlightType>("like");
+  const [isDrawingHighlight, setIsDrawingHighlight] = useState(false);
+  const [draftHighlight, setDraftHighlight] = useState<HighlightRecord | null>(
+    null,
+  );
+  const highlightSurfaceRef = useRef<HTMLDivElement | null>(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [deletingImageId, setDeletingImageId] = useState<string | null>(null);
 
-  const cropTargetPreview = useMemo(
-    () => (cropTargetFile ? URL.createObjectURL(cropTargetFile) : null),
-    [cropTargetFile],
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [cropOpen, setCropOpen] = useState(false);
+  const [cropState, setCropState] = useState<CropState>(INITIAL_CROP_STATE);
+  const [savingCrop, setSavingCrop] = useState(false);
+
+  const selectedImage = useMemo(
+    () => images.find((image) => image.id === selectedId) ?? null,
+    [images, selectedId],
+  );
+  const queuedImages = useMemo(
+    () => images.filter((image) => !image.reviewed),
+    [images],
+  );
+  const reviewedImages = useMemo(
+    () => images.filter((image) => image.reviewed),
+    [images],
   );
 
-  useEffect(() => {
-    return () => {
-      if (cropTargetPreview) {
-        URL.revokeObjectURL(cropTargetPreview);
-      }
-    };
-  }, [cropTargetPreview]);
+  // ----- data loading -----
 
   const fetchImages = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/photo-reviews");
-      const data = (await res.json()) as {
-        images?: ImageRecord[];
-        groups?: ImageGroup[];
-      };
-
-      if (data.images && data.groups) {
-        setImages(data.images);
-        setGroups(data.groups);
-      }
+      const response = await fetch("/api/images");
+      const payload = (await response.json()) as { images?: ApiImage[] };
+      const list = (payload.images ?? [])
+        .filter((image) => !image.isDuplicate)
+        .filter((image) => image.photoCategory === "inspirational")
+        .map(buildReviewImage);
+      setImages(list);
     } catch (error) {
-      toast.error("Failed to load images");
+      toast.error(
+        error instanceof Error ? error.message : "Failed to load photos",
+      );
     } finally {
       setLoading(false);
     }
   }, []);
 
+  const fetchTags = useCallback(async () => {
+    setTagsLoading(true);
+    try {
+      const response = await fetch("/api/images/tags");
+      const payload = (await response.json()) as {
+        tags?: Array<{ id: number; label: string; slug: string }>;
+      };
+      setTagOptions(
+        (payload.tags ?? []).map((tag) => ({
+          value: String(tag.id),
+          label: tag.label,
+          description: tag.slug,
+        })),
+      );
+    } catch {
+      /* tags are optional; ignore load failures */
+    } finally {
+      setTagsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     void fetchImages();
-  }, [fetchImages]);
+    void fetchTags();
+  }, [fetchImages, fetchTags]);
 
+  // ----- selection -----
+
+  const loadImageIntoPanel = useCallback((image: ReviewImage | null) => {
+    setSelectedId(image?.id ?? null);
+    setPanelTitle(image?.title ?? "");
+    setPanelDescription(image?.description ?? "");
+    setPanelTagIds(image?.tagIds ?? []);
+    setPanelHighlights(image?.highlights ?? []);
+    setDraftHighlight(null);
+    setIsDrawingHighlight(false);
+    setHighlightMode("like");
+  }, []);
+
+  // Auto-select the first queued photo once data loads and nothing is selected.
   useEffect(() => {
-    const onGlobalUploadComplete = (event: Event) => {
-      const customEvent = event as CustomEvent<{
-        target?: string;
-        isListingPhoto?: boolean;
-      }>;
-      const target = customEvent.detail?.target;
-      if (
-        target === "photo-reviews" ||
-        (target === "images" && customEvent.detail?.isListingPhoto !== true)
-      ) {
-        void fetchImages();
-      }
-    };
-
-    window.addEventListener("global-upload-complete", onGlobalUploadComplete);
-    return () => {
-      window.removeEventListener("global-upload-complete", onGlobalUploadComplete);
-    };
-  }, [fetchImages]);
-
-  useEffect(() => {
-    if (!selectedImage) return;
-
-    setPanelRoom(selectedImage.room || "unassigned");
-
-    let tags = selectedImage.tags;
-    if (typeof tags === "string") {
-      try {
-        tags = JSON.parse(tags);
-      } catch {
-        tags = [];
-      }
+    if (loading || selectedId) return;
+    const firstQueued = images.find((image) => !image.reviewed);
+    if (firstQueued) {
+      loadImageIntoPanel(firstQueued);
     }
+  }, [images, loading, selectedId, loadImageIntoPanel]);
 
-    setPanelTags(Array.isArray(tags) ? tags.join(", ") : "");
-    setPanelNote(selectedImage.note || "");
-  }, [selectedImage]);
+  // ----- tags -----
 
-  useEffect(() => {
-    setCroppedFiles((prev) => {
-      if (queuedFiles.length === 0 || prev.size === 0) {
-        return queuedFiles.length === 0 ? new Set() : prev;
-      }
-
-      const activeKeys = new Set(queuedFiles.map(fileKey));
-      let changed = false;
-      const next = new Set<string>();
-
-      for (const key of prev) {
-        if (activeKeys.has(key)) {
-          next.add(key);
-        } else {
-          changed = true;
-        }
-      }
-
-      return changed ? next : prev;
-    });
-  }, [queuedFiles]);
-
-  useEffect(() => {
-    setQueueUploadOutcomes((prev) => {
-      if (queuedFiles.length === 0) {
-        if (Object.keys(prev).length === 0) return prev;
-        return {};
-      }
-
-      let changed = false;
-      const next: Record<string, QueueUploadOutcome> = {};
-      for (const file of queuedFiles) {
-        const key = fileKey(file);
-        if (prev[key]) {
-          next[key] = prev[key];
-        } else {
-          next[key] = { status: "idle" };
-          changed = true;
-        }
-      }
-
-      if (Object.keys(prev).length !== Object.keys(next).length) {
-        changed = true;
-      }
-
-      return changed ? next : prev;
-    });
-  }, [queuedFiles]);
-
-  const pendingUploadCount = useMemo(
-    () =>
-      queuedFiles.filter(
-        (file) => queueUploadOutcomes[fileKey(file)]?.status !== "success",
-      ).length,
-    [queuedFiles, queueUploadOutcomes],
-  );
-
-  const getTags = useCallback((tagsRaw: string | string[]): string[] => {
-    if (Array.isArray(tagsRaw)) return tagsRaw;
-
-    if (typeof tagsRaw === "string") {
-      try {
-        const parsed = JSON.parse(tagsRaw);
-        if (Array.isArray(parsed)) return parsed;
-      } catch {
-        return [];
-      }
-    }
-
-    return [];
-  }, []);
-
-  const onFileValidate = useCallback((file: File) => {
-    if (!file.type.startsWith("image/")) {
-      return "Only image files are supported";
-    }
-
-    if (file.size > MAX_FILE_SIZE) {
-      return "Each file must be 10MB or less";
-    }
-
-    return null;
-  }, []);
-
-  const onFileReject = useCallback((file: File, message: string) => {
-    toast.error(`${file.name}: ${message}`);
-  }, []);
-
-  const onFilesAccepted = useCallback((files: File[]) => {
-    setQueueUploadOutcomes((prev) => {
-      const next = { ...prev };
-      for (const file of files) {
-        const key = fileKey(file);
-        if (!next[key]) {
-          next[key] = { status: "idle" };
-        }
-      }
-      return next;
-    });
-    toast.success(
-      files.length === 1
-        ? `Added ${files[0]?.name}`
-        : `Added ${files.length} files to queue`,
-    );
-  }, []);
-
-  const openCropModal = useCallback((file: File) => {
-    setCropTargetFile(file);
-    setCropState({
-      crop: { x: 0, y: 0 },
-      zoom: 1,
-      rotation: 0,
-      areaPixels: null,
-    });
-    setCropModalOpen(true);
-  }, []);
-
-  const closeCropModal = useCallback(() => {
-    setCropModalOpen(false);
-    setCropTargetFile(null);
-  }, []);
-
-  const saveCroppedImage = useCallback(async () => {
-    if (!cropTargetFile || !cropState.areaPixels) {
-      toast.error("Select a crop area before applying");
-      return;
-    }
-
-    try {
-      const croppedFile = await getCroppedFile(cropTargetFile, cropState.areaPixels);
-      const oldKey = fileKey(cropTargetFile);
-      const newKey = fileKey(croppedFile);
-
-      setQueuedFiles((prev) =>
-        prev.map((item) => (item === cropTargetFile ? croppedFile : item)),
-      );
-
-      setCroppedFiles((prev) => {
-        const next = new Set(prev);
-        next.delete(oldKey);
-        next.add(newKey);
-        return next;
+  const createTagOption = useCallback(
+    async (label: string): Promise<MultipleSelectorOption | null> => {
+      const normalized = label.trim();
+      if (!normalized) return null;
+      const response = await fetch("/api/images/tags", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: normalized }),
       });
-
-      toast.success(`Cropped ${croppedFile.name}`);
-      closeCropModal();
-    } catch (error) {
-      toast.error("Failed to apply crop");
-    }
-  }, [closeCropModal, cropState.areaPixels, cropTargetFile]);
-
-  const uploadQueuedFiles = useCallback(async () => {
-    if (queuedFiles.length === 0) {
-      toast.error("No files in queue");
-      return;
-    }
-
-    const filesToUpload = queuedFiles.filter(
-      (file) => queueUploadOutcomes[fileKey(file)]?.status !== "success",
-    );
-    if (filesToUpload.length === 0) {
-      toast.success("All queued photos are already uploaded");
-      return;
-    }
-
-    setUploading(true);
-    setUploadProgress({ current: 0, total: filesToUpload.length });
-
-    let successCount = 0;
-    let lastUploadedImage: ImageRecord | null = null;
-
-    for (let index = 0; index < filesToUpload.length; index++) {
-      const file = filesToUpload[index];
-      const key = fileKey(file);
-      const formData = new FormData();
-      formData.append("file", file);
-
-      setQueueUploadOutcomes((prev) => ({
-        ...prev,
-        [key]: {
-          status: "uploading",
-          message: "Uploading...",
-          failurePrompt: undefined,
-          copiedToClipboard: false,
-        },
-      }));
-
-      try {
-        const response = await fetch("/api/photo-reviews/upload", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!response.ok) {
-          const rawResponse = await response.text();
-          let errorMessage = `Upload failed (${response.status})`;
-          if (rawResponse.trim().length > 0) {
-            try {
-              const errorData = JSON.parse(rawResponse) as { error?: string; message?: string };
-              errorMessage =
-                errorData.error?.trim() ||
-                errorData.message?.trim() ||
-                rawResponse.trim();
-            } catch {
-              errorMessage = rawResponse.trim();
-            }
-          }
-
-          const failurePrompt = toPrompt({
-            file,
-            statusCode: response.status,
-            statusText: response.statusText,
-            errorMessage,
-            rawResponse,
-          });
-
-          setQueueUploadOutcomes((prev) => ({
-            ...prev,
-            [key]: {
-              status: "error",
-              message: errorMessage,
-              failurePrompt,
-              copiedToClipboard: false,
-            },
-          }));
-
-          toast.error(`Failed ${file.name}: ${errorMessage}`);
-          setUploadProgress({ current: index + 1, total: filesToUpload.length });
-          if (index < filesToUpload.length - 1) {
-            await new Promise((resolve) => setTimeout(resolve, 350));
-          }
-          continue;
-        }
-
-        const payload = (await response.json()) as {
-          success?: boolean;
-          image?: ImageRecord;
-          error?: string;
-        };
-
-        if (payload.success) {
-          successCount += 1;
-          if (payload.image) {
-            lastUploadedImage = payload.image;
-          }
-          setQueueUploadOutcomes((prev) => ({
-            ...prev,
-            [key]: {
-              status: "success",
-              message: "Uploaded and processed successfully",
-              failurePrompt: undefined,
-              copiedToClipboard: false,
-            },
-          }));
-        } else {
-          const errorMessage = payload.error?.trim() || "Unknown error";
-          const rawResponse = JSON.stringify(payload, null, 2);
-          const failurePrompt = toPrompt({
-            file,
-            errorMessage,
-            rawResponse,
-          });
-          setQueueUploadOutcomes((prev) => ({
-            ...prev,
-            [key]: {
-              status: "error",
-              message: errorMessage,
-              failurePrompt,
-              copiedToClipboard: false,
-            },
-          }));
-          toast.error(`Failed ${file.name}: ${errorMessage}`);
-        }
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "Unexpected upload error";
-        const failurePrompt = toPrompt({
-          file,
-          errorMessage: message,
-        });
-        setQueueUploadOutcomes((prev) => ({
-          ...prev,
-          [key]: {
-            status: "error",
-            message,
-            failurePrompt,
-            copiedToClipboard: false,
-          },
-        }));
-        toast.error(`Failed ${file.name}: ${message}`);
+      const payload = (await response.json()) as {
+        tag?: { id: number; label: string; slug: string };
+        error?: string;
+      };
+      if (!response.ok || !payload.tag) {
+        throw new Error(payload.error || "Failed to create tag");
       }
-
-      setUploadProgress({ current: index + 1, total: filesToUpload.length });
-
-      if (index < filesToUpload.length - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 350));
-      }
-    }
-
-    setUploading(false);
-    setUploadProgress(null);
-
-    if (successCount > 0) {
-      await fetchImages();
-
-      if (lastUploadedImage) {
-        setSelectedImage(lastUploadedImage);
-      }
-    }
-
-    if (successCount === filesToUpload.length) {
-      toast.success(`Uploaded all ${successCount} files`);
-    } else {
-      toast.warning(`Uploaded ${successCount} of ${filesToUpload.length} files`);
-    }
-  }, [fetchImages, queuedFiles, queueUploadOutcomes]);
-
-  const copyFailurePrompt = useCallback(
-    async (key: string) => {
-      const prompt = queueUploadOutcomes[key]?.failurePrompt;
-      if (!prompt) return;
-      try {
-        await navigator.clipboard.writeText(prompt);
-        setQueueUploadOutcomes((prev) => ({
-          ...prev,
-          [key]: {
-            ...prev[key],
-            copiedToClipboard: true,
-          },
-        }));
-      } catch {
-        toast.error("Failed to copy prompt to clipboard");
-      }
+      const created: MultipleSelectorOption = {
+        value: String(payload.tag.id),
+        label: payload.tag.label,
+        description: payload.tag.slug,
+      };
+      setTagOptions((previous) =>
+        previous.some((option) => option.value === created.value)
+          ? previous
+          : [...previous, created].sort((a, b) =>
+              a.label.localeCompare(b.label),
+            ),
+      );
+      return created;
     },
-    [queueUploadOutcomes],
+    [],
   );
 
-  const queueOutcomeAlerts = useMemo(
-    () =>
-      queuedFiles
-        .map((file) => {
-          const key = fileKey(file);
-          return {
-            file,
-            key,
-            outcome: queueUploadOutcomes[key],
-          };
-        })
-        .filter(
-          (entry) =>
-            entry.outcome?.status === "success" ||
-            entry.outcome?.status === "error",
-        ),
-    [queuedFiles, queueUploadOutcomes],
+  // ----- highlight drawing -----
+
+  const updateHighlightNote = useCallback((index: number, note: string) => {
+    setPanelHighlights((previous) =>
+      previous.map((entry, entryIndex) =>
+        entryIndex === index ? { ...entry, note } : entry,
+      ),
+    );
+  }, []);
+
+  const removeHighlight = useCallback((index: number) => {
+    setPanelHighlights((previous) =>
+      previous.filter((_, entryIndex) => entryIndex !== index),
+    );
+  }, []);
+
+  const beginHighlightDraw = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0 || !selectedImage) return;
+      const surface = highlightSurfaceRef.current;
+      if (!surface) return;
+      const bounds = surface.getBoundingClientRect();
+      if (!bounds.width || !bounds.height) return;
+      const xPct = clampPercent(
+        ((event.clientX - bounds.left) / bounds.width) * 100,
+      );
+      const yPct = clampPercent(
+        ((event.clientY - bounds.top) / bounds.height) * 100,
+      );
+      setDraftHighlight({
+        highlightType: highlightMode,
+        shapeType: "rect",
+        xPct,
+        yPct,
+        widthPct: 0.1,
+        heightPct: 0.1,
+        note: "",
+      });
+      setIsDrawingHighlight(true);
+      surface.setPointerCapture(event.pointerId);
+    },
+    [highlightMode, selectedImage],
   );
 
-  const saveSelectedImage = useCallback(async () => {
+  const moveHighlightDraw = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      if (!isDrawingHighlight || !draftHighlight) return;
+      const surface = highlightSurfaceRef.current;
+      if (!surface) return;
+      const bounds = surface.getBoundingClientRect();
+      const xPct = clampPercent(
+        ((event.clientX - bounds.left) / bounds.width) * 100,
+      );
+      const yPct = clampPercent(
+        ((event.clientY - bounds.top) / bounds.height) * 100,
+      );
+      const nextX = Math.min(draftHighlight.xPct, xPct);
+      const nextY = Math.min(draftHighlight.yPct, yPct);
+      const nextWidth = Math.abs(xPct - draftHighlight.xPct);
+      const nextHeight = Math.abs(yPct - draftHighlight.yPct);
+      setDraftHighlight((previous) =>
+        previous
+          ? {
+              ...previous,
+              xPct: nextX,
+              yPct: nextY,
+              widthPct: clampPercent(nextWidth),
+              heightPct: clampPercent(nextHeight),
+            }
+          : null,
+      );
+    },
+    [draftHighlight, isDrawingHighlight],
+  );
+
+  const endHighlightDraw = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const surface = highlightSurfaceRef.current;
+      if (surface && surface.hasPointerCapture(event.pointerId)) {
+        surface.releasePointerCapture(event.pointerId);
+      }
+      if (!draftHighlight) {
+        setIsDrawingHighlight(false);
+        return;
+      }
+      if (draftHighlight.widthPct >= 1 && draftHighlight.heightPct >= 1) {
+        setPanelHighlights((previous) => [...previous, draftHighlight]);
+      }
+      setDraftHighlight(null);
+      setIsDrawingHighlight(false);
+    },
+    [draftHighlight],
+  );
+
+  // ----- save / advance -----
+
+  const saveSelected = useCallback(async () => {
     if (!selectedImage) return;
+    const wasQueued = !selectedImage.reviewed;
+    const queueIndex = queuedImages.findIndex(
+      (image) => image.id === selectedImage.id,
+    );
+    const nextQueued =
+      queuedImages[queueIndex + 1] ??
+      queuedImages.find((image) => image.id !== selectedImage.id) ??
+      null;
 
     setIsSaving(true);
-
-    const tags = panelTags
-      .split(",")
-      .map((tag) => tag.trim())
-      .filter(Boolean);
-
     try {
-      const response = await fetch(`/api/photo-reviews/${selectedImage.id}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          room: panelRoom,
-          tags,
-          note: panelNote,
-        }),
-      });
-
-      const payload = (await response.json()) as {
-        success?: boolean;
-        image?: ImageRecord;
+      const payload: Record<string, unknown> = {
+        displayName: panelTitle,
+        description: panelDescription,
+        tagIds: panelTagIds.map((value) => Number(value)),
+        highlights: panelHighlights.map((highlight) => ({
+          ...highlight,
+          note: highlight.note?.trim() || "",
+        })),
+        reviewed: true,
       };
-
-      if (payload.success) {
-        await fetchImages();
-        if (payload.image) {
-          setSelectedImage(payload.image);
-        }
-        toast.success("Saved changes");
-      } else {
-        toast.error("Failed to save changes");
+      const response = await fetch(`/api/images/${selectedImage.id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = (await response.json()) as {
+        image?: ApiImage;
+        error?: string;
+      };
+      if (!response.ok || !data.image) {
+        throw new Error(data.error ?? "Save failed");
+      }
+      const saved = buildReviewImage(data.image);
+      setImages((previous) =>
+        previous.map((image) => (image.id === saved.id ? saved : image)),
+      );
+      toast.success("Saved and marked reviewed");
+      if (wasQueued) {
+        loadImageIntoPanel(nextQueued);
       }
     } catch (error) {
-      toast.error("Failed to save changes");
+      toast.error(error instanceof Error ? error.message : "Failed to save");
     } finally {
       setIsSaving(false);
     }
-  }, [fetchImages, panelNote, panelRoom, panelTags, selectedImage]);
+  }, [
+    loadImageIntoPanel,
+    panelDescription,
+    panelHighlights,
+    panelTagIds,
+    panelTitle,
+    queuedImages,
+    selectedImage,
+  ]);
 
-  const deleteImage = useCallback(
-    async (image: ImageRecord) => {
-      setDeletingImageId(image.id);
-      try {
-        const response = await fetch(`/api/images/${image.id}`, {
-          method: "DELETE",
-        });
-        const payload = (await response.json()) as { error?: string };
-        if (!response.ok) {
-          throw new Error(payload.error || "Failed to delete image");
-        }
+  // ----- crop / replace -----
 
-        await fetchImages();
-        setSelectedImage((current) => (current?.id === image.id ? null : current));
-        toast.success("Image deleted");
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Failed to delete image");
-      } finally {
-        setDeletingImageId(null);
+  const openCrop = useCallback(() => {
+    if (!selectedImage) return;
+    setCropState(INITIAL_CROP_STATE);
+    setCropOpen(true);
+  }, [selectedImage]);
+
+  const saveCrop = useCallback(async () => {
+    if (!selectedImage || !cropState.areaPixels) {
+      toast.error("Select a crop area before saving");
+      return;
+    }
+    setSavingCrop(true);
+    try {
+      const sourceResponse = await fetch(selectedImage.path, {
+        cache: "no-store",
+      });
+      if (!sourceResponse.ok) {
+        throw new Error(
+          `Failed to fetch source image (${sourceResponse.status})`,
+        );
       }
-    },
-    [fetchImages],
-  );
+      const sourceBlob = await sourceResponse.blob();
+      const croppedFile = await cropBlob(
+        sourceBlob,
+        cropState.areaPixels,
+        `${selectedImage.id}-crop.jpg`,
+      );
+      const formData = new FormData();
+      formData.append("file", croppedFile);
+      const response = await fetch(`/api/images/${selectedImage.id}/replace`, {
+        method: "POST",
+        body: formData,
+      });
+      const payload = (await response.json()) as {
+        image?: ApiImage;
+        error?: string;
+      };
+      if (!response.ok || !payload.image) {
+        throw new Error(payload.error ?? "Failed to save cropped image");
+      }
+      const updated = buildReviewImage(payload.image);
+      setImages((previous) =>
+        previous.map((image) => (image.id === updated.id ? updated : image)),
+      );
+      toast.success("Image crop saved");
+      setCropOpen(false);
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Failed to save cropped image",
+      );
+    } finally {
+      setSavingCrop(false);
+    }
+  }, [cropState.areaPixels, selectedImage]);
 
-  const openAiEdit = useCallback((image: ImageRecord) => {
-    const params = new URLSearchParams({ sourceImageId: image.id });
-    window.location.assign(`/photo-edits?${params.toString()}`);
-  }, []);
+  // ----- rendering -----
 
-  const openZoomModal = useCallback((image: ImageRecord) => {
-    setZoomedImage(image);
-    setZoomLevel(1);
-    setZoomModalOpen(true);
-  }, []);
+  const sidebarImages = sidebarTab === "queued" ? queuedImages : reviewedImages;
 
-  return (
-    <div className="flex h-[calc(100vh-4rem)] overflow-hidden bg-background text-foreground">
-      <div
+  const renderThumb = (image: ReviewImage) => {
+    const isActive = image.id === selectedId;
+    return (
+      <button
+        type="button"
+        key={image.id}
+        onClick={() => loadImageIntoPanel(image)}
         className={cn(
-          "flex flex-1 flex-col overflow-hidden transition-all",
-          selectedImage && "mr-[22rem]",
+          "flex w-full items-center gap-3 rounded-lg border p-2 text-left transition",
+          isActive
+            ? "border-primary bg-primary/5"
+            : "border-border/40 hover:border-border hover:bg-muted/40",
         )}
       >
-        <header className="flex items-center justify-between border-b border-border/40 bg-card/60 px-6 py-4 backdrop-blur">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Photo Reviews</h1>
-            <p className="text-sm text-muted-foreground">
-              {images.length} photos across {groups.length} rooms
-              {queuedFiles.length > 0 ? ` • ${queuedFiles.length} queued` : ""}
-            </p>
-          </div>
-
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={fetchImages}
-            disabled={loading}
-            className="gap-2"
-          >
-            <RefreshCw className={cn("size-4", loading && "animate-spin")} />
-            Refresh
-          </Button>
-        </header>
-
-        <div className="flex-1 space-y-6 overflow-y-auto px-6 py-6">
-          <Card className="gap-4 ring-1 ring-border/40">
-            <CardHeader className="pb-0">
-              <CardTitle className="text-lg">Upload Queue</CardTitle>
-              <CardDescription>
-                Drag and drop multiple photos, crop any image before upload, then batch submit.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <FileUpload
-                value={queuedFiles}
-                onValueChange={setQueuedFiles}
-                onAccept={onFilesAccepted}
-                onFileReject={onFileReject}
-                onFileValidate={onFileValidate}
-                maxFiles={MAX_UPLOAD_FILES}
-                maxSize={MAX_FILE_SIZE}
-                accept="image/*"
-                multiple
-                label="Photo upload queue"
-                disabled={uploading}
-              >
-                <FileUploadDropzone className="gap-3 rounded-xl border-border/40 bg-muted/20 p-8 text-center">
-                  <Upload className="size-8 text-muted-foreground" />
-                  <div>
-                    <p className="text-sm font-medium">Drop images here</p>
-                    <p className="text-xs text-muted-foreground">
-                      Up to {MAX_UPLOAD_FILES} files, each max 10MB
-                    </p>
-                  </div>
-                  <FileUploadTrigger asChild>
-                    <Button size="sm" variant="secondary">
-                      Browse Files
-                    </Button>
-                  </FileUploadTrigger>
-                </FileUploadDropzone>
-
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <FileUploadClear asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      disabled={uploading}
-                      onClick={() => {
-                        setQueueUploadOutcomes({});
-                        setCroppedFiles(new Set());
-                      }}
-                    >
-                      Clear Queue
-                    </Button>
-                  </FileUploadClear>
-
-                  <Button
-                    size="sm"
-                    onClick={uploadQueuedFiles}
-                    disabled={uploading || pendingUploadCount === 0}
-                    className="gap-2"
-                  >
-                    {uploading ? (
-                      <>
-                        <RefreshCw className="size-4 animate-spin" />
-                        Uploading {uploadProgress?.current}/{uploadProgress?.total}
-                      </>
-                    ) : (
-                      <>
-                        <Check className="size-4" />
-                        Upload Queued Files
-                      </>
-                    )}
-                  </Button>
-                </div>
-
-                <FileUploadList className="max-h-72 overflow-y-auto pr-1">
-                  {queuedFiles.map((file) => {
-                    const key = fileKey(file);
-                    const isCropped = croppedFiles.has(key);
-                    const outcome = queueUploadOutcomes[key];
-                    const rowClass =
-                      outcome?.status === "success"
-                        ? "border-emerald-500/50 bg-emerald-500/10"
-                        : outcome?.status === "error"
-                          ? "border-destructive/60 bg-destructive/10"
-                          : outcome?.status === "uploading"
-                            ? "border-blue-500/50 bg-blue-500/10"
-                            : "border-border/40 bg-card/60";
-
-                    return (
-                      <FileUploadItem
-                        key={key}
-                        value={file}
-                        className={cn("gap-3 rounded-lg px-3 py-2 transition-colors", rowClass)}
-                      >
-                        <FileUploadItemPreview className="size-12 rounded-md ring-1 ring-border/40" />
-                        <FileUploadItemMetadata size="sm" />
-
-                        {outcome?.status === "success" && (
-                          <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-[11px] font-medium text-emerald-300">
-                            Uploaded
-                          </span>
-                        )}
-
-                        {outcome?.status === "error" && (
-                          <span className="rounded-full bg-destructive/20 px-2 py-1 text-[11px] font-medium text-destructive">
-                            Failed
-                          </span>
-                        )}
-
-                        {outcome?.status === "uploading" && (
-                          <span className="rounded-full bg-blue-500/20 px-2 py-1 text-[11px] font-medium text-blue-300">
-                            Processing
-                          </span>
-                        )}
-
-                        {isCropped && (
-                          <span className="rounded-full bg-emerald-500/20 px-2 py-1 text-[11px] font-medium text-emerald-300">
-                            Cropped
-                          </span>
-                        )}
-
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => openCropModal(file)}
-                          title="Crop image"
-                        >
-                          <Crop className="size-4" />
-                          <span className="sr-only">Crop {file.name}</span>
-                        </Button>
-
-                        <FileUploadItemDelete asChild>
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            title="Remove file"
-                            className="text-muted-foreground hover:text-foreground"
-                          >
-                            <X className="size-4" />
-                            <span className="sr-only">Remove {file.name}</span>
-                          </Button>
-                        </FileUploadItemDelete>
-                      </FileUploadItem>
-                    );
-                  })}
-                </FileUploadList>
-
-                {queueOutcomeAlerts.length > 0 && (
-                  <div className="space-y-2">
-                    {queueOutcomeAlerts.map(({ file, key, outcome }) => {
-                      if (!outcome) return null;
-                      if (outcome.status === "success") {
-                        return (
-                          <Alert key={`${key}-success`} variant="success">
-                            <CheckCircle2 />
-                            <AlertTitle>{file.name}</AlertTitle>
-                            <AlertDescription>
-                              {outcome.message || "Uploaded and processed successfully."}
-                            </AlertDescription>
-                          </Alert>
-                        );
-                      }
-
-                      return (
-                        <Alert key={`${key}-error`} variant="destructive">
-                          <CircleAlert />
-                          <AlertTitle>{file.name}</AlertTitle>
-                          <AlertDescription className="space-y-2">
-                            <p>{outcome.message || "Upload failed."}</p>
-                            {outcome.failurePrompt && (
-                              <>
-                                <pre className="max-h-40 overflow-auto rounded-md border border-destructive/40 bg-background/60 p-2 text-xs whitespace-pre-wrap">
-                                  {outcome.failurePrompt}
-                                </pre>
-                                <div className="flex items-center gap-2">
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => copyFailurePrompt(key)}
-                                  >
-                                    <Copy className="mr-2 size-4" />
-                                    Copy Failure Prompt
-                                  </Button>
-                                  {outcome.copiedToClipboard && (
-                                    <span className="text-xs text-emerald-300">
-                                      Copied to clipboard.
-                                    </span>
-                                  )}
-                                </div>
-                              </>
-                            )}
-                          </AlertDescription>
-                        </Alert>
-                      );
-                    })}
-                  </div>
-                )}
-              </FileUpload>
-            </CardContent>
-          </Card>
-
-          {loading && images.length === 0 ? (
-            <div className="flex items-center justify-center rounded-xl bg-card/30 py-20 text-muted-foreground ring-1 ring-border/40">
-              <RefreshCw className="mr-3 size-6 animate-spin" />
-              Loading gallery...
-            </div>
-          ) : groups.length === 0 ? (
-            <div className="rounded-xl bg-card/30 px-6 py-16 text-center ring-1 ring-border/40">
-              <div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-muted/50">
-                <FileImage className="size-8 text-muted-foreground" />
-              </div>
-              <h3 className="text-xl font-medium">No photos yet</h3>
-              <p className="mt-2 text-sm text-muted-foreground">
-                Upload your first batch above. Workers AI will classify rooms and generate tags.
-              </p>
-            </div>
+        <div className="size-14 shrink-0 overflow-hidden rounded-md bg-muted/40 ring-1 ring-border/30">
+          {image.path ? (
+            // biome-ignore lint/performance/noImgElement: external delivery urls
+            <img
+              src={image.path}
+              alt={image.title || "Listing photo"}
+              className="size-full object-cover"
+              loading="lazy"
+            />
           ) : (
-            <div className="space-y-10 pb-10">
-              {groups.map((group) => (
-                <section key={group.room} className="space-y-4">
-                  <div className="sticky top-0 z-10 -mx-2 flex items-center gap-3 bg-background/90 px-2 py-2 backdrop-blur">
-                    <div className="rounded-md bg-muted p-2">
-                      <Home className="size-4 text-muted-foreground" />
-                    </div>
-                    <h2 className="text-lg font-semibold capitalize">{group.room}</h2>
-                    <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                      {group.images.length}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                    {group.images.map((image) => {
-                      const tags = getTags(image.tags);
-                      const isSelected = selectedImage?.id === image.id;
-
-                      return (
-                        <ContextMenu key={image.id}>
-                          <ContextMenuTrigger>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedImage(image)}
-                              className={cn(
-                                "group relative aspect-[4/3] w-full overflow-hidden rounded-xl bg-muted/30 ring-1 ring-border/40 transition-all",
-                                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                                "hover:-translate-y-0.5 hover:shadow-lg",
-                                isSelected && "ring-2 ring-ring",
-                              )}
-                            >
-                              <img
-                                src={image.path.startsWith("http") ? image.path : `/images/${image.path}`}
-                                alt={image.filename}
-                                loading="lazy"
-                                className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-                              />
-
-                              <div className="absolute inset-0 bg-linear-to-t from-black/75 via-black/20 to-transparent opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100" />
-
-                              <div className="absolute bottom-2 left-2 right-2 z-10 flex flex-wrap gap-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                                {tags.slice(0, 3).map((tag) => (
-                                  <span
-                                    key={tag}
-                                    className="rounded bg-black/45 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-white"
-                                  >
-                                    {tag}
-                                  </span>
-                                ))}
-                                {tags.length > 3 && (
-                                  <span className="rounded bg-black/45 px-1.5 py-0.5 text-[10px] font-medium tracking-wide text-white">
-                                    +{tags.length - 3}
-                                  </span>
-                                )}
-                              </div>
-
-                              <span className="sr-only">Open {image.filename}</span>
-                            </button>
-                          </ContextMenuTrigger>
-                          <ContextMenuContent>
-                            <ContextMenuItem onClick={() => setSelectedImage(image)}>
-                              Update Metadata
-                            </ContextMenuItem>
-                            <ContextMenuItem onClick={() => openAiEdit(image)}>
-                              Edit With AI
-                            </ContextMenuItem>
-                            <ContextMenuSeparator />
-                            <ContextMenuItem
-                              variant="destructive"
-                              disabled={deletingImageId === image.id}
-                              onClick={() => deleteImage(image)}
-                            >
-                              Delete Image
-                            </ContextMenuItem>
-                          </ContextMenuContent>
-                        </ContextMenu>
-                      );
-                    })}
-                  </div>
-                </section>
-              ))}
+            <div className="flex size-full items-center justify-center text-muted-foreground">
+              <FileImage className="size-5" />
             </div>
           )}
         </div>
-      </div>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium">
+            {image.title || "Untitled photo"}
+          </p>
+          <p className="truncate text-xs text-muted-foreground">
+            {image.roomType || image.category}
+          </p>
+          {image.tags.length > 0 && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              {image.tags.slice(0, 2).map((tag) => (
+                <Badge key={tag} variant="secondary" className="text-[10px]">
+                  {tag}
+                </Badge>
+              ))}
+              {image.tags.length > 2 && (
+                <Badge variant="outline" className="text-[10px]">
+                  +{image.tags.length - 2}
+                </Badge>
+              )}
+            </div>
+          )}
+        </div>
+      </button>
+    );
+  };
 
-      <aside
-        className={cn(
-          "fixed right-0 top-16 bottom-0 z-20 w-[22rem] translate-x-full border-l border-border/40 bg-card/80 shadow-2xl backdrop-blur transition-transform",
-          selectedImage && "translate-x-0",
-        )}
-      >
-        <div className="flex h-full flex-col">
-          <div className="flex items-center justify-between border-b border-border/40 px-4 py-3">
-            <h2 className="truncate pr-4 text-sm font-semibold">
-              {selectedImage?.filename ?? "Details"}
-            </h2>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={() => setSelectedImage(null)}
-              title="Close details"
-            >
-              <X className="size-4" />
-            </Button>
-          </div>
+  const [thumbSidebarOpen, setThumbSidebarOpen] = useState(false);
 
-          {selectedImage && (
-            <>
-              <div className="flex items-center justify-center border-b border-border/40 bg-muted/20 p-4">
-                <img
-                  src={selectedImage.path.startsWith("http") ? selectedImage.path : `/images/${selectedImage.path}`}
-                  alt={selectedImage.filename}
-                  className="max-h-56 w-full rounded-lg object-contain ring-1 ring-border/40"
-                />
+  return (
+    <div className="flex h-full min-h-[30rem] w-full">
+      {/* Main coding pane */}
+      <main className="flex min-w-0 flex-1 flex-col">
+        {selectedImage ? (
+          <>
+            <div className="flex items-center justify-between gap-2 border-b border-border/40 p-4">
+              <div className="min-w-0">
+                <h1 className="truncate text-base font-semibold">
+                  {panelTitle || "Untitled photo"}
+                </h1>
+                <p className="text-xs text-muted-foreground">
+                  {selectedImage.roomType || selectedImage.category}
+                  {selectedImage.reviewed ? " · reviewed" : " · queued"}
+                </p>
+              </div>
+              <div className="flex shrink-0 items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPreviewOpen(true)}
+                  className="hidden sm:inline-flex"
+                >
+                  <Eye className="mr-1.5 size-4" />
+                  Preview
+                </Button>
+                <Button variant="outline" size="sm" onClick={openCrop} className="hidden sm:inline-flex">
+                  <Crop className="mr-1.5 size-4" />
+                  Crop
+                </Button>
+                <Button size="sm" onClick={saveSelected} disabled={isSaving}>
+                  {isSaving ? (
+                    <Loader2 className="mr-1.5 size-4 animate-spin" />
+                  ) : (
+                    <Save className="mr-1.5 size-4" />
+                  )}
+                  <span className="hidden sm:inline">Save &amp; mark reviewed</span>
+                  <span className="sm:hidden">Save</span>
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  className="lg:hidden"
+                  onClick={() => setThumbSidebarOpen(true)}
+                  aria-label="Show photo list"
+                >
+                  <PanelRight className="size-4" />
+                </Button>
+              </div>
+            </div>
+
+            <div className="flex-1 space-y-4 overflow-y-auto p-4">
+              {/* Image + highlight surface */}
+              <div className="space-y-2">
+                <div
+                  ref={highlightSurfaceRef}
+                  className="relative cursor-crosshair overflow-hidden rounded-xl bg-muted/30 ring-1 ring-border/40"
+                  style={{ touchAction: "none" }}
+                  onPointerDown={beginHighlightDraw}
+                  onPointerMove={moveHighlightDraw}
+                  onPointerUp={endHighlightDraw}
+                  onPointerCancel={endHighlightDraw}
+                >
+                  {/* biome-ignore lint/performance/noImgElement: external delivery urls */}
+                  <img
+                    src={selectedImage.path}
+                    alt={panelTitle || "Listing photo"}
+                    className="max-h-[50vh] w-full select-none object-contain sm:max-h-[60vh]"
+                    draggable={false}
+                  />
+                  {panelHighlights.map((highlight, index) => (
+                    <div
+                      key={`highlight-${index}-${highlight.id ?? "new"}`}
+                      className={cn(
+                        "pointer-events-none absolute border-2",
+                        highlight.highlightType === "like"
+                          ? "border-emerald-400 bg-emerald-400/20"
+                          : "border-rose-400 bg-rose-400/20",
+                      )}
+                      style={{
+                        left: `${highlight.xPct}%`,
+                        top: `${highlight.yPct}%`,
+                        width: `${highlight.widthPct}%`,
+                        height: `${highlight.heightPct}%`,
+                      }}
+                    />
+                  ))}
+                  {draftHighlight ? (
+                    <div
+                      className={cn(
+                        "pointer-events-none absolute border-2",
+                        draftHighlight.highlightType === "like"
+                          ? "border-emerald-300 bg-emerald-300/20"
+                          : "border-rose-300 bg-rose-300/20",
+                      )}
+                      style={{
+                        left: `${draftHighlight.xPct}%`,
+                        top: `${draftHighlight.yPct}%`,
+                        width: `${draftHighlight.widthPct}%`,
+                        height: `${draftHighlight.heightPct}%`,
+                      }}
+                    />
+                  ) : null}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Drag on the image to mark a region, then describe it below.
+                </p>
               </div>
 
-              <div className="flex-1 space-y-4 overflow-y-auto p-4">
+              {/* Coding fields — stacked below the image */}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <label
-                    htmlFor="photo-room"
-                    className="flex items-center gap-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase"
+                    htmlFor="review-title"
+                    className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
                   >
-                    <Home className="size-3.5" />
-                    Room
+                    Title
                   </label>
-                  <input
-                    id="photo-room"
-                    type="text"
-                    value={panelRoom}
-                    onChange={(event) => setPanelRoom(event.target.value)}
-                    className="w-full rounded-md border border-border/50 bg-background px-3 py-2 text-sm outline-none ring-ring/40 transition focus:ring-2"
-                    placeholder="Kitchen"
+                  <Input
+                    id="review-title"
+                    value={panelTitle}
+                    onChange={(event) => setPanelTitle(event.target.value)}
+                    placeholder="Kitchen sink wall concept"
                   />
                 </div>
 
                 <div className="space-y-1.5">
                   <label
-                    htmlFor="photo-tags"
-                    className="flex items-center gap-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase"
+                    htmlFor="review-description"
+                    className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
                   >
-                    <Tag className="size-3.5" />
-                    Tags
+                    Description
                   </label>
-                  <textarea
-                    id="photo-tags"
-                    value={panelTags}
-                    onChange={(event) => setPanelTags(event.target.value)}
+                  <Textarea
+                    id="review-description"
+                    value={panelDescription}
+                    onChange={(event) =>
+                      setPanelDescription(event.target.value)
+                    }
                     rows={3}
-                    className="w-full resize-none rounded-md border border-border/50 bg-background px-3 py-2 text-sm outline-none ring-ring/40 transition focus:ring-2"
-                    placeholder="modern, white oak, brushed brass"
-                  />
-                </div>
-
-                <div className="space-y-1.5">
-                  <label
-                    htmlFor="photo-notes"
-                    className="flex items-center gap-1.5 text-xs font-medium tracking-wide text-muted-foreground uppercase"
-                  >
-                    <FileImage className="size-3.5" />
-                    Notes
-                  </label>
-                  <textarea
-                    id="photo-notes"
-                    value={panelNote}
-                    onChange={(event) => setPanelNote(event.target.value)}
-                    rows={5}
-                    className="w-full resize-none rounded-md border border-border/50 bg-background px-3 py-2 text-sm outline-none ring-ring/40 transition focus:ring-2"
                     placeholder="Lighting, finishes, layout ideas..."
                   />
                 </div>
-
-                <div className="flex gap-2 pt-2">
-                  <Button
-                    className="flex-1"
-                    variant="outline"
-                    onClick={() => openZoomModal(selectedImage)}
-                  >
-                    <ZoomIn className="mr-2 size-4" />
-                    Zoom
-                  </Button>
-                  <Button
-                    className="flex-1"
-                    onClick={saveSelectedImage}
-                    disabled={isSaving}
-                  >
-                    {isSaving ? (
-                      <>
-                        <RefreshCw className="mr-2 size-4 animate-spin" />
-                        Saving
-                      </>
-                    ) : (
-                      <>
-                        <Check className="mr-2 size-4" />
-                        Save
-                      </>
-                    )}
-                  </Button>
-                </div>
               </div>
-            </>
+
+              <div className="space-y-1.5">
+                <span className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  <Tag className="size-3.5" />
+                  Tags
+                </span>
+                <MultipleSelector
+                  title="Select tags"
+                  placeholder={
+                    tagsLoading ? "Loading tags..." : "Select or create tags"
+                  }
+                  options={tagOptions}
+                  value={panelTagIds}
+                  onValueChange={setPanelTagIds}
+                  disabled={tagsLoading}
+                  enableCreate
+                  createLabel="Create tag"
+                  onCreateOption={async (value) => {
+                    try {
+                      return await createTagOption(value);
+                    } catch (error) {
+                      toast.error(
+                        error instanceof Error
+                          ? error.message
+                          : "Failed to create tag",
+                      );
+                      return null;
+                    }
+                  }}
+                  searchPlaceholder="Search tags..."
+                />
+              </div>
+
+              <div className="space-y-2 rounded-lg border border-border/40 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Highlights
+                  </span>
+                  <Select
+                    value={highlightMode}
+                    onValueChange={(next) =>
+                      setHighlightMode(next as HighlightType)
+                    }
+                  >
+                    <SelectTrigger className="h-8 w-[9rem] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="like">I like this</SelectItem>
+                      <SelectItem value="dislike">
+                        I do not like this
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {panelHighlights.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Drag a box on the image to add a{" "}
+                    {highlightMode === "like" ? "liked" : "disliked"} region.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {panelHighlights.map((highlight, index) => (
+                      <div
+                        key={`highlight-editor-${index}`}
+                        className="rounded-md border border-border/40 p-2"
+                      >
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <Badge
+                            variant={
+                              highlight.highlightType === "like"
+                                ? "default"
+                                : "destructive"
+                            }
+                          >
+                            {highlight.highlightType === "like"
+                              ? "Like"
+                              : "Do not like"}
+                          </Badge>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeHighlight(index)}
+                            className="h-7 px-2 text-xs"
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                        <Input
+                          value={highlight.note || ""}
+                          onChange={(event) =>
+                            updateHighlightNote(index, event.target.value)
+                          }
+                          placeholder={
+                            highlight.highlightType === "like"
+                              ? "What do you want to replicate here?"
+                              : "What should be avoided here?"
+                          }
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+            <div className="flex size-14 items-center justify-center rounded-full bg-muted/40">
+              <Images className="size-7 text-muted-foreground" />
+            </div>
+            {queuedImages.length === 0 ? (
+              <>
+                <h2 className="text-lg font-semibold">
+                  No queued photos to code
+                </h2>
+                <p className="max-w-md text-sm text-muted-foreground">
+                  You&apos;re all caught up. You can still modify the coding of
+                  any photo by selecting it from the{" "}
+                  <button
+                    type="button"
+                    className="font-medium text-primary underline-offset-2 hover:underline"
+                    onClick={() => setSidebarTab("reviewed")}
+                  >
+                    Reviewed
+                  </button>{" "}
+                  tab.
+                </p>
+              </>
+            ) : (
+              <>
+                <h2 className="text-lg font-semibold">Select a photo to code</h2>
+                <p className="max-w-md text-sm text-muted-foreground">
+                  Pick a photo from the Queued tab on the right to add a title,
+                  description, tags, and highlights.
+                </p>
+              </>
+            )}
+          </div>
+        )}
+      </main>
+
+      {/* Sidebar photo selector — always visible on lg+, slide-over on smaller */}
+      <aside className="hidden w-80 shrink-0 flex-col border-l border-border/40 lg:flex">
+        <div className="flex items-center justify-between gap-2 border-b border-border/40 p-3">
+          <Tabs
+            value={sidebarTab}
+            onValueChange={(value) =>
+              setSidebarTab(value as "queued" | "reviewed")
+            }
+          >
+            <TabsList>
+              <TabsTrigger value="queued">
+                Queued ({queuedImages.length})
+              </TabsTrigger>
+              <TabsTrigger value="reviewed">
+                Reviewed ({reviewedImages.length})
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8"
+            onClick={() => void fetchImages()}
+            title="Refresh"
+          >
+            <RefreshCw className={cn("size-4", loading && "animate-spin")} />
+          </Button>
+        </div>
+        <div className="flex-1 space-y-2 overflow-y-auto p-3">
+          {loading ? (
+            <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" />
+              Loading photos...
+            </div>
+          ) : sidebarImages.length === 0 ? (
+            <p className="px-1 py-8 text-center text-sm text-muted-foreground">
+              {sidebarTab === "queued"
+                ? "No photos awaiting review."
+                : "No reviewed photos yet."}
+            </p>
+          ) : (
+            sidebarImages.map(renderThumb)
           )}
         </div>
       </aside>
 
-      <Dialog open={cropModalOpen} onOpenChange={(open) => (open ? setCropModalOpen(true) : closeCropModal())}>
-        <DialogContent className="max-w-4xl">
+      {/* Mobile slide-over for photo list */}
+      {thumbSidebarOpen && (
+        <div className="fixed inset-0 z-50 lg:hidden">
+          {/* Backdrop */}
+          {/* biome-ignore lint/a11y/useKeyEvents: overlay dismiss */}
+          {/* biome-ignore lint/a11y/useAriaRole: overlay dismiss */}
+          <div
+            className="absolute inset-0 bg-black/40 backdrop-blur-xs"
+            onClick={() => setThumbSidebarOpen(false)}
+          />
+          {/* Panel */}
+          <aside
+            className="absolute inset-y-0 right-0 flex w-[85vw] max-w-sm flex-col bg-background shadow-xl"
+            style={{ WebkitOverflowScrolling: "touch" }}
+          >
+            <div className="flex items-center justify-between gap-2 border-b border-border/40 p-3">
+              <Tabs
+                value={sidebarTab}
+                onValueChange={(value) =>
+                  setSidebarTab(value as "queued" | "reviewed")
+                }
+              >
+                <TabsList>
+                  <TabsTrigger value="queued">
+                    Queued ({queuedImages.length})
+                  </TabsTrigger>
+                  <TabsTrigger value="reviewed">
+                    Reviewed ({reviewedImages.length})
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8"
+                  onClick={() => void fetchImages()}
+                  title="Refresh"
+                >
+                  <RefreshCw className={cn("size-4", loading && "animate-spin")} />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="size-8"
+                  onClick={() => setThumbSidebarOpen(false)}
+                  aria-label="Close photo list"
+                >
+                  <X className="size-4" />
+                </Button>
+              </div>
+            </div>
+            <div
+              className="flex-1 space-y-2 overflow-y-auto overscroll-contain p-3"
+              style={{ WebkitOverflowScrolling: "touch" }}
+            >
+              {loading ? (
+                <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" />
+                  Loading photos...
+                </div>
+              ) : sidebarImages.length === 0 ? (
+                <p className="px-1 py-8 text-center text-sm text-muted-foreground">
+                  {sidebarTab === "queued"
+                    ? "No photos awaiting review."
+                    : "No reviewed photos yet."}
+                </p>
+              ) : (
+                sidebarImages.map((image) => (
+                  <button
+                    type="button"
+                    key={image.id}
+                    onClick={() => {
+                      loadImageIntoPanel(image);
+                      setThumbSidebarOpen(false);
+                    }}
+                    className={cn(
+                      "flex w-full items-center gap-3 rounded-lg border p-2 text-left transition",
+                      image.id === selectedId
+                        ? "border-primary bg-primary/5"
+                        : "border-border/40 hover:border-border hover:bg-muted/40",
+                    )}
+                  >
+                    <div className="size-14 shrink-0 overflow-hidden rounded-md bg-muted/40 ring-1 ring-border/30">
+                      {image.path ? (
+                        // biome-ignore lint/performance/noImgElement: external delivery urls
+                        <img
+                          src={image.path}
+                          alt={image.title || "Listing photo"}
+                          className="size-full object-cover"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="flex size-full items-center justify-center text-muted-foreground">
+                          <FileImage className="size-5" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">
+                        {image.title || "Untitled photo"}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {image.roomType || image.category}
+                      </p>
+                    </div>
+                  </button>
+                ))
+              )}
+            </div>
+          </aside>
+        </div>
+      )}
+
+      {/* Preview dialog */}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>
-              Crop {cropTargetFile?.name ?? "image"}
+            <DialogTitle className="truncate">
+              {panelTitle || "Photo preview"}
             </DialogTitle>
           </DialogHeader>
+          {selectedImage ? (
+            // biome-ignore lint/performance/noImgElement: external delivery urls
+            <img
+              src={selectedImage.path}
+              alt={panelTitle || "Listing photo"}
+              className="max-h-[75vh] w-full rounded-lg object-contain"
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
-          <div className="space-y-4">
-            <div className="relative h-[22rem] overflow-hidden rounded-xl bg-muted/30 ring-1 ring-border/40">
-              {cropTargetPreview && (
+      {/* Crop dialog */}
+      <Dialog open={cropOpen} onOpenChange={setCropOpen}>
+        <DialogContent className="sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Crop photo</DialogTitle>
+          </DialogHeader>
+          {selectedImage ? (
+            <div className="space-y-4">
+              <div className="relative h-[22rem] overflow-hidden rounded-xl bg-muted/30 ring-1 ring-border/40">
                 <Cropper
                   crop={cropState.crop}
                   zoom={cropState.zoom}
                   rotation={cropState.rotation}
                   aspectRatio={4 / 3}
                   withGrid
-                  onCropChange={(crop) => setCropState((prev) => ({ ...prev, crop }))}
-                  onZoomChange={(zoom) => setCropState((prev) => ({ ...prev, zoom }))}
+                  onCropChange={(crop) =>
+                    setCropState((prev) => ({ ...prev, crop }))
+                  }
+                  onZoomChange={(zoom) =>
+                    setCropState((prev) => ({ ...prev, zoom }))
+                  }
                   onRotationChange={(rotation) =>
                     setCropState((prev) => ({ ...prev, rotation }))
                   }
@@ -1186,122 +1187,96 @@ export function PhotoReviewApp() {
                     setCropState((prev) => ({ ...prev, areaPixels }))
                   }
                 >
-                  <CropperImage src={cropTargetPreview} alt="Crop target" />
+                  <CropperImage
+                    src={selectedImage.path}
+                    alt="Crop target"
+                    crossOrigin="anonymous"
+                  />
                   <CropperArea />
                 </Cropper>
-              )}
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="space-y-2 text-sm">
-                <span className="text-muted-foreground">Zoom ({cropState.zoom.toFixed(2)}x)</span>
-                <input
-                  type="range"
-                  min={1}
-                  max={4}
-                  step={0.05}
-                  value={cropState.zoom}
-                  onChange={(event) =>
-                    setCropState((prev) => ({
-                      ...prev,
-                      zoom: Number(event.target.value),
-                    }))
-                  }
-                  className="w-full"
-                />
-              </label>
-
-              <label className="space-y-2 text-sm">
-                <span className="text-muted-foreground">Rotation ({Math.round(cropState.rotation)}°)</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={360}
-                  step={1}
-                  value={cropState.rotation}
-                  onChange={(event) =>
-                    setCropState((prev) => ({
-                      ...prev,
-                      rotation: Number(event.target.value),
-                    }))
-                  }
-                  className="w-full"
-                />
-              </label>
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={closeCropModal}>
-                Cancel
-              </Button>
-              <Button onClick={saveCroppedImage}>
-                <Crop className="mr-2 size-4" />
-                Apply Crop
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={zoomModalOpen} onOpenChange={setZoomModalOpen}>
-        <DialogContent className="max-w-6xl">
-          <DialogHeader>
-            <DialogTitle>{zoomedImage?.filename}</DialogTitle>
-          </DialogHeader>
-
-          <div className="relative max-h-[70vh] overflow-auto rounded-xl bg-muted/30 ring-1 ring-border/40">
-            {zoomedImage && (
-              <div className="flex min-h-[24rem] items-center justify-center p-4">
-                <img
-                  src={zoomedImage.path.startsWith("http") ? zoomedImage.path : `/images/${zoomedImage.path}`}
-                  alt={zoomedImage.filename}
-                  style={{ transform: `scale(${zoomLevel})` }}
-                  className="max-w-full transition-transform"
-                />
               </div>
-            )}
-          </div>
-
-          <div className="flex items-center gap-3">
-            <Button
-              variant="outline"
-              size="icon-sm"
-              onClick={() => setZoomLevel((level) => Math.max(0.5, level - 0.25))}
-              title="Zoom out"
-            >
-              <ZoomOut className="size-4" />
-            </Button>
-
-            <input
-              type="range"
-              min={0.5}
-              max={5}
-              step={0.25}
-              value={zoomLevel}
-              onChange={(event) => setZoomLevel(Number(event.target.value))}
-              className="flex-1"
-            />
-
-            <Button
-              variant="outline"
-              size="icon-sm"
-              onClick={() => setZoomLevel((level) => Math.min(5, level + 0.25))}
-              title="Zoom in"
-            >
-              <ZoomIn className="size-4" />
-            </Button>
-
-            <Button variant="ghost" size="sm" onClick={() => setZoomLevel(1)} className="gap-2">
-              <RotateCw className="size-4" />
-              Reset
-            </Button>
-
-            <span className="min-w-14 text-right text-sm text-muted-foreground">
-              {zoomLevel.toFixed(2)}x
-            </span>
-          </div>
+              <div className="flex items-center justify-end gap-2">
+                <Button variant="outline" onClick={() => setCropOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={saveCrop} disabled={savingCrop}>
+                  {savingCrop ? (
+                    <Loader2 className="mr-1.5 size-4 animate-spin" />
+                  ) : (
+                    <Crop className="mr-1.5 size-4" />
+                  )}
+                  Save crop
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Review shell — tabs between photo coding and level/home inspiration categories
+// ---------------------------------------------------------------------------
+
+/**
+ * PhotoReviewApp — the /review page shell.
+ *
+ * Two tabs:
+ *   1. "Code photos"          — the original {@link PhotoCodingWorkspace}
+ *                               (per-image title/description/tags/highlights).
+ *   2. "Inspiration categories" — the 0005 level/home-scope surface: the
+ *      {@link ScopedInspirationCategorizer} (AI-suggest + confirm a category for
+ *      broad-scope inspiration) stacked above the reusable
+ *      {@link ScopedInspirationReview} (the same photos grouped by category).
+ *
+ * Saving a category in the categorizer bumps a `refreshToken` so the grouped
+ * viewer below re-fetches and reflects the change immediately. The coding
+ * workspace owns the full viewport height; the categories tab scrolls its own
+ * padded column so both fit under the shared 3.5rem navbar.
+ */
+export function PhotoReviewApp() {
+  const [activeTab, setActiveTab] = useState<"code" | "categories">("code");
+  // Bumped after each successful category save to refresh the grouped viewer.
+  const [viewerRefreshToken, setViewerRefreshToken] = useState(0);
+
+  return (
+    <Tabs
+      value={activeTab}
+      onValueChange={(value) => setActiveTab(value as "code" | "categories")}
+      className="h-[calc(100dvh-3.5rem)] w-full gap-0"
+    >
+      <div className="flex items-center gap-2 border-b border-border/40 px-4 py-2">
+        <TabsList>
+          <TabsTrigger value="code">
+            <LayoutGrid className="size-4" />
+            Code photos
+          </TabsTrigger>
+          <TabsTrigger value="categories">
+            <Palette className="size-4" />
+            Inspiration categories
+          </TabsTrigger>
+        </TabsList>
+      </div>
+
+      {/* Photo coding workspace keeps its own internal full-height layout. */}
+      <TabsContent value="code" className="min-h-0 overflow-hidden">
+        <PhotoCodingWorkspace />
+      </TabsContent>
+
+      {/* Level/home categorization + grouped viewer, in a scrollable column. */}
+      <TabsContent
+        value="categories"
+        className="min-h-0 overflow-y-auto"
+      >
+        <div className="mx-auto w-full max-w-6xl space-y-4 p-4">
+          <ScopedInspirationCategorizer
+            onCategorized={() => setViewerRefreshToken((token) => token + 1)}
+          />
+          <ScopedInspirationReview refreshToken={viewerRefreshToken} />
+        </div>
+      </TabsContent>
+    </Tabs>
   );
 }

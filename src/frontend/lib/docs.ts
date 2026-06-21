@@ -155,7 +155,7 @@ const homeownersPages: DocsPageDefinition[] = [
         description: "Work inside the mirrored D1 and Google Sheets budget workspace.",
       },
       {
-        href: "/estimates",
+        href: "/admin/estimates",
         label: "Open Estimates",
         description: "Compare current quote revisions against your room targets.",
       },
@@ -368,6 +368,364 @@ const homeownersPages: DocsPageDefinition[] = [
       },
     ],
   },
+  {
+    slug: ["homeowners", "photo-edits"],
+    href: "/docs/homeowners/photo-edits",
+    shortTitle: "Photo edits",
+    title: "Homeowner Guide: In-Photo Editing Pipeline",
+    audience: "homeowners",
+    audienceLabel: "For Homeowners",
+    status: "live",
+    summary: "Iteratively modify remodel photos, choose rendering strategy, and index revision embeddings.",
+    overview:
+      "The In-Photo Editing pipeline enables homeowners to run iterative AI-powered transformations on listing photos and inspiration images. It tracks full revision branches in D1, supports advanced cropping and visual compare tools, and generates multi-modal pooled vector embeddings stored in Vectorize for quick semantic search.",
+    highlights: [
+      "Launch edit sessions directly from listing views or manual image uploads.",
+      "Support multiple edit strategies: layout rearrangement, paint swaps, furniture staging, and inspiration stitching.",
+      "Automatically crop outputs and index concatenated 1536-dim embeddings for search matching.",
+    ],
+    actions: [
+      {
+        href: "/photo-edits",
+        label: "Open Photo Editor",
+        description: "Review current edit sessions or spin up a new visual transformation.",
+      },
+      {
+        href: "/review",
+        label: "Review Inspiration",
+        description: "Audit inspirational images before stitching details into listing angles.",
+      },
+      {
+        href: "/docs/homeowners/render-studio",
+        label: "Read the Render Studio Guide",
+        description: "Go deeper with the staged blank-canvas pipeline, multi-angle renders, and mood boards.",
+      },
+    ],
+    sections: [
+      {
+        id: "visual-iteration",
+        title: "Starting the visual iteration loop",
+        summary: "Initialize tracked sessions that preserve version history.",
+        paragraphs: [
+          "To begin editing, homeowners create an 'Edit Session' centered around a specific room or angle. This is a persistent canvas that holds the sequence of visual revisions, ensuring you never lose the progression of your ideas.",
+          "You can select one or more baseline listing photos from the mapped rooms catalog as the starting angle, select an edit category, and formulate prompt instructions that Workers AI stable-diffusion or uploaded custom renderings will fulfill.",
+        ],
+        bullets: [
+          "Spin up new sessions from the Photo Edits sidebar card or from the listing detail page.",
+          "Keep source images and target revisions grouped in a single container.",
+          "Iteratively adjust prompts and compare versions side-by-side using the comparison slider.",
+        ],
+      },
+      {
+        id: "edit-strategies",
+        title: "Selecting an edit strategy",
+        summary: "Optimize results by classifying the nature of your design changes.",
+        paragraphs: [
+          "The system supports four distinct editing strategies that guide the visual pipeline:",
+          "1. **Wall Layout Change:** Remove partitions, open spaces, adjust layouts, and establish a base architectural canvas.",
+          "2. **Paint Color Visuals:** Test color palettes, finishes, accent walls, and texture treatments.",
+          "3. **Staging / Furniture:** Populate structural shells with modern staging ideas, lighting fixtures, and decorative elements.",
+          "4. **Inspirational Stitching:** Extract localized design details (like a custom cabinet profile) and merge them onto listing angles.",
+        ],
+        bullets: [
+          "Set strategy mode inside the Create Session wizard.",
+          "Add room-type overrides to direct the AI's understanding of space constraints.",
+          "Provide baseline prompt templates that auto-fill into the interactive edit workspace.",
+        ],
+      },
+      {
+        id: "cropping-and-uploads",
+        title: "Advanced cropping and manual uploads",
+        summary: "Refine generated canvases and upload professional outputs.",
+        paragraphs: [
+          "For maximum control, the system does not limit you to fully automated AI generations. If you collaborate with a professional designer or render a separate layout, you can upload custom outputs directly into the session timeline.",
+          "An integrated high-precision Cropper is available on all uploads. You can manipulate scale (zoom) and rotation dynamically to strip out browser UI, watermarks, or unwanted edges before final upload.",
+        ],
+        bullets: [
+          "Upload manual rendered files directly in the revision card.",
+          "Use the Cropper modal to adjust zoom levels from 1x to 4x and rotate up to 360 degrees.",
+          "Confirm crops to create highly optimized, revision-ready JPEG/PNG deliverables.",
+        ],
+      },
+      {
+        id: "vectorize-indexing",
+        title: "Vector indexing & multi-modal search",
+        summary: "Embed visual and semantic metadata for instant project retrieval.",
+        paragraphs: [
+          "Every time a new revision is successfully created, the pipeline executes a multi-modal embedding generation pass.",
+          "The system cross-pools two discrete 768-dimensional vector representations—BGE and Google Gemma—based on the prompt text and room metadata. It normalizes and concatenates them into a single 1536-dimensional coordinate array.",
+          "This high-fidelity pooled embedding is indexed in the Cloudflare Vectorize `PHOTO_INDEX` database. This powers instant, semantic search queries across the entire photo gallery, making your iterative designs highly discoverable.",
+        ],
+        bullets: [
+          "Pooling multiple model perspectives creates an optimized, stable search space.",
+          "Embeddings are stored under the image ID inside the `core-remodel-photos` index.",
+          "Search works natively across both text queries and visual semantic markers.",
+        ],
+        note: {
+          title: "Looking for full-room renovation renders?",
+          body: "This editor is best for freeform, localized edits to a single image. When you want a structure-faithful renovation rendered consistently across every camera angle in a room — with a staged base, rough-in, and photoreal finish, plus an auto-generated mood board — use the AI Render Studio instead. See the Render Studio guide for the full staged pipeline.",
+          tone: "info",
+        },
+      },
+    ],
+  },
+  {
+    slug: ["homeowners", "render-studio"],
+    href: "/docs/homeowners/render-studio",
+    shortTitle: "Render Studio",
+    title: "AI Render Studio & Mood Boards",
+    audience: "homeowners",
+    audienceLabel: "For Homeowners",
+    status: "live",
+    summary:
+      "Turn a real listing photo into a structure-faithful renovation: strip the room to a blank canvas, render staged base, rough-in, and photoreal finish, keep every angle consistent, and auto-generate a mood board.",
+    overview:
+      "The AI Render Studio treats your room like a fashion fitting: the room is the model, the design is the outfit, and you can re-dress it with new floors, paint, cabinetry, fixtures, and lighting, then view the result from every angle. Instead of generating a brand-new room from a text prompt — which drifts, moves walls, and invents windows — the Studio always EDITS the real photo of your space. It runs a staged pipeline, saves every step as a node in a render state tree so edits branch and reuse cache, and renders each viewing angle so the room reads as the same kitchen throughout. When a finish render is complete, the system automatically composes a professional mood board from the design and links it back to the render.",
+    highlights: [
+      "Every render starts from the real blank canvas of your room, so walls, windows, openings, and proportions stay true.",
+      "A staged pipeline (base, rough-in, finish) lets you change a single finish cheaply or move an element without losing the rest.",
+      "One design renders consistently across all of a room's camera angles using a hero-and-reference technique.",
+      "Finished renders auto-generate a linked, flatlay-style mood board summarized by AI into a title and description.",
+    ],
+    actions: [
+      {
+        href: "/builder",
+        label: "Open Render Studio",
+        description: "Configure a design and run the staged base, rough-in, and finish pipeline on a room.",
+      },
+      {
+        href: "/gallery",
+        label: "Open Render Gallery",
+        description: "Browse finished renders with inspiration chips and per-angle results.",
+      },
+      {
+        href: "/moodboards",
+        label: "Open Mood Boards",
+        description: "Review auto-generated and hand-built mood boards linked to your renders.",
+      },
+      {
+        href: "/docs/homeowners/photo-edits",
+        label: "Compare with the Photo Editor",
+        description: "Use the freeform In-Photo editor for localized single-image edits.",
+      },
+    ],
+    sections: [
+      {
+        id: "fidelity-first",
+        title: "Fidelity first: edit the real room, never invent one",
+        summary: "The single most important design principle is that renders stay architecturally faithful to your actual space.",
+        paragraphs: [
+          "The number one rule of the Render Studio is fidelity. A homeowner and contractor can only make decisions from a render if the rendered room is genuinely their room. Text-to-image generation is unreliable for this: ask a model for 'a renovated kitchen' and it will happily relocate the sink wall, widen the window, raise the ceiling, and re-crop the framing. None of those choices are real, and pricing a fantasy room wastes everyone's time.",
+          "To prevent that drift, the Studio always performs an EDIT on the real, existing photo of your room rather than generating from scratch. The starting image is a 'blank canvas' — your listing photo with the existing furniture and clutter stripped out — so the model only ever has to add what you asked for on top of true architecture, never reconstruct the space.",
+          "Three guardrails enforce fidelity on every single stage. First, output framing and resolution are pinned: the render is locked to the source photo's aspect ratio and a high-resolution target, so the model cannot silently re-crop to portrait or downscale. Second, a strict structure-preservation instruction block is attached to every prompt, telling the model exactly what it must not touch. Third, any reference image you attach is scoped to material and form only, so the model borrows a finish's color and texture without importing that reference photo's camera angle, floor, props, or scene.",
+        ],
+        bullets: [
+          "Renders are edits of your real photo, so they cannot invent a different room.",
+          "Output aspect ratio and resolution are pinned to the source, preventing re-cropping and downscaling.",
+          "A preservation prompt protects walls, windows, openings, floor, ceiling, framing, and camera angle.",
+          "Reference images contribute material and form only — never their angle or background.",
+        ],
+        note: {
+          title: "Why this matters for your budget",
+          body: "Because the geometry is preserved, a contractor can price what they see. A render that quietly moved a wall or enlarged a window would invite estimates for work that does not exist — fidelity keeps the visual brief honest.",
+          tone: "info",
+        },
+      },
+      {
+        id: "staged-pipeline",
+        title: "The staged pipeline: blank canvas to photoreal finish",
+        summary: "Renovations are built in deliberate stages so each layer can be reviewed, reused, and re-edited.",
+        paragraphs: [
+          "Rather than asking for a finished kitchen in one shot, the Studio composes the renovation in stages, and every stage output is saved so you can build on it later. Thinking of the room as a model being dressed, each stage adds another layer of the outfit.",
+          "It begins with the blank canvas: your real listing photo with existing furniture and fixtures removed, leaving true walls, floor, windows, and openings. From there the pipeline runs three main stages.",
+          "1. **Stage 1 — Base.** Establishes the room's foundational surfaces: the floor material and the wall paint. This sets the palette and mood while leaving structure untouched.",
+          "2. **Stage 2 — Rough-in.** Places the major elements — cabinetry, an island, large fixtures — into the space. This is a structure-preserving placement pass: it positions volumes correctly against the real room without yet resolving every photoreal material detail.",
+          "3. **Stage 3 — Finish.** Resolves photorealistic materials, reflections, and lighting so the render reads like a real photograph of the finished room.",
+          "Staging the work this way is not just tidy; it is what makes editing cheap and reliable. Because the base and rough-in already exist as saved layers, the finish stage can focus only on the surface realism, and later changes can rewind to exactly the right layer instead of regenerating the entire room.",
+        ],
+        bullets: [
+          "Stage 0 (blank canvas): the real room with furniture stripped, structure intact.",
+          "Stage 1 (base): floor material plus wall paint.",
+          "Stage 2 (rough-in): cabinetry, island, and fixture placement, preserving structure.",
+          "Stage 3 (finish): photoreal materials, reflections, and lighting.",
+        ],
+      },
+      {
+        id: "state-tree",
+        title: "The render state tree: branch, reuse, and rewind",
+        summary: "Every stage output is a saved node, so edits reuse cached work and branch cleanly instead of starting over.",
+        paragraphs: [
+          "Each stage output is persisted as a node in a render state tree. Nodes record their stage, their parent, the prompt and model used, the lighting profile, and the resulting image. Because the lineage is preserved, the Studio can be smart about where an edit should attach — and that distinction is what keeps iteration fast and consistent.",
+          "Edits fall into two kinds. A micro-edit changes a surface detail — swapping a countertop material, trying a different cabinet color — and it reuses the latest finish node as its starting point, so only the requested finish is re-rendered while everything else stays identical. A macro-edit changes the room's composition — moving the island, relocating a fixture — and it rewinds to the base node and creates a new branch, because a structural change cannot safely be patched on top of a finish that assumed the old layout.",
+          "The practical payoff is that you can explore freely without losing work. Two countertop options become two branches off the same finish; a different island layout becomes a branch off the base. Every option remains visible in the tree, and shared upstream stages are reused from cache instead of being regenerated, which keeps both cost and render time down.",
+        ],
+        bullets: [
+          "Each stage output is a node with parent lineage, prompt, model, and lighting recorded.",
+          "Micro-edit (swap a finish): reuses the latest finish node, re-rendering only the requested change.",
+          "Macro-edit (move an element): rewinds to the base node and branches a new line of work.",
+          "Branches keep every option inspectable while reusing cached upstream stages.",
+        ],
+      },
+      {
+        id: "multi-angle",
+        title: "Multi-angle consistency with hero and reference",
+        summary: "One design renders across every camera angle of a room so it reads as the same space throughout.",
+        paragraphs: [
+          "A room is usually photographed from several angles, and a design is only believable if it looks like the same room from each one. The Studio achieves this with a hero-and-reference technique rather than rendering each angle independently and hoping they match.",
+          "First, one angle is chosen as the hero and rendered through the full staged pipeline to a finished result. Then every other angle is rendered with the hero's finished image attached as a consistency reference, with an instruction that amounts to: 'this is the same kitchen — render it from this viewpoint and match its materials, layout, cabinetry, and fixtures exactly, while keeping this angle's real walls, windows, and openings unchanged.'",
+          "Because each non-hero render still edits that angle's own real blank canvas, the true geometry of each viewpoint is preserved while the design carries over faithfully from the hero. The result is a set of renders that a homeowner and contractor can review together as one coherent room, not a collection of loosely related images. The hero render is remembered on the session so the whole set stays anchored to a single source of truth.",
+        ],
+        bullets: [
+          "Pick a hero angle and render it fully first.",
+          "Render every other angle with the hero attached as a 'same kitchen, this viewpoint' reference.",
+          "Each angle still edits its own real canvas, so per-angle geometry stays true.",
+          "The hero is recorded on the session to keep the whole room consistent.",
+        ],
+      },
+      {
+        id: "lighting-inspiration-synthesis",
+        title: "Lighting, inspiration extraction, and multi-image synthesis",
+        summary: "Tune the mood with day or night lighting and pull precise details from inspiration photos.",
+        paragraphs: [
+          "Renders carry a lighting profile so you can see a room in different conditions. Beyond the default, day and night profiles let you preview how the same finish reads in bright daylight versus warm evening light — useful for judging paint colors, cabinet tones, and how fixtures glow after dark.",
+          "Inspiration extraction lets you borrow a specific detail instead of a whole photo. On an inspiration image, you draw a bounding box around the exact region you care about — a tile pattern, a faucet form, a cabinet profile — and that selection is recorded as a reference tied to the render. In the gallery, inspiration chips can highlight the selected region back on the original inspiration image so it is clear what was borrowed and from where.",
+          "Multi-image synthesis combines several sources into one render. Your working canvas plus one or more inspiration references are sent to the model in an explicit, user-orderable sequence, where the base canvas is the first image and each inspiration reference follows. The ordering is meaningful: it controls how the model prioritizes and blends the references, and you can rearrange the chips to change the emphasis before rendering.",
+        ],
+        bullets: [
+          "Day and night lighting profiles preview the same design in different conditions.",
+          "Bounding-box selection extracts a precise region from an inspiration photo as a scoped reference.",
+          "Gallery chips highlight the borrowed region on the source inspiration image.",
+          "Multi-image synthesis blends the base canvas with ordered inspiration references; the order sets the emphasis.",
+        ],
+      },
+      {
+        id: "models-and-resilience",
+        title: "Models, the AI gateway, and graceful failover",
+        summary: "A proven default engine with a swappable, observable model registry behind every stage.",
+        paragraphs: [
+          "The default engine for every stage is Gemini 3 Pro Image (also known as Nano Banana Pro). It was chosen because, with the output configuration pinned to a fixed aspect ratio and a high-resolution target, it produces controlled, architecturally faithful, multi-reference edits — exactly the behavior fidelity demands. Every model call, regardless of provider, is routed through the Cloudflare AI Gateway so the team gets unified observability, caching, and key management.",
+          "The engine is not hard-wired. A per-stage model registry makes each stage's model swappable, which supports A/B comparison and provider flexibility. Through the gateway's Fal path the Studio can reach a base editor, a conversational interaction model, a finish model, a multi-image synthesis model, and a faster rough-in alternate, with an additional edit model available for try-on. Through the gateway's Replicate path it can reach a depth-locked rough-in model and a premium finish model; Replicate runs asynchronously, so those calls create a job and then wait for or poll the result.",
+          "Reliability is handled by a failover layer. If the primary model for a stage hits a transient fault — a rate limit or a server error — the system automatically steps down to the next compatible model, which may be on a different provider, and records that a fallback occurred. Genuine input errors are never masked behind a fallback; they surface so the real problem can be fixed.",
+        ],
+        bullets: [
+          "Default engine: Gemini 3 Pro Image (Nano Banana Pro) for all stages, with pinned aspect ratio and 2K resolution.",
+          "All providers (Gemini, Fal, Replicate) are routed through the Cloudflare AI Gateway for observability and caching.",
+          "Fal options cover base, conversational interaction, finish, multi-image synthesis, a rough-in alternate, and try-on.",
+          "Replicate options cover depth-locked rough-in and premium finish, and run asynchronously (create then poll or wait).",
+          "A per-stage registry makes engines swappable; a failover layer steps down on transient faults and never hides fatal errors.",
+        ],
+        note: {
+          title: "Model slugs",
+          body: "The default and alternate models are kept in one configuration module so engines can be retuned per stage without touching the pipeline. Fal and Replicate slugs are verified against the live catalogs before they are enabled.",
+          tone: "info",
+        },
+      },
+      {
+        id: "structure-preservation-prompt",
+        title: "The structure-preservation prompt block",
+        summary: "The exact guardrails attached to every stage prompt to stop architectural drift.",
+        paragraphs: [
+          "Fidelity is enforced in language as well as in configuration. Every stage prompt opens by framing the model as an expert architectural photo editor performing a natural, localized, photorealistic edit, and then attaches a strict preservation block that spells out what must remain untouched.",
+          "That block instructs the model to preserve exactly — changing in no way — the flooring and its material, color, finish, and plank direction; every wall and wall color; all windows and their grids; all openings; the ceiling; and the room's dimensions, proportions, and camera angle. It forbids inventing, moving, widening, or closing any wall, window, or opening. It forbids cropping, zooming, panning, rotating, re-framing, or changing the aspect ratio, requiring the output framing to match the input one-to-one. And it forbids adding any furniture, rugs, decor, plants, or props that were not explicitly requested.",
+          "When a reference image is attached, an additional scoping line tells the model to use that reference only for its material, color, veining, and form, and to ignore its camera angle, orientation, floor, props, lighting, and background. The prompt closes by requiring the model to return only the final edited image and no text. An optional structural QA gate can compare the render against the blank canvas afterward to confirm no wall, window, or opening was added, moved, or closed, and to retry with a strengthened prompt if drift is detected.",
+        ],
+        bullets: [
+          "Preserve exactly: floor (material/color/finish/plank direction), walls and colors, windows and grids, openings, ceiling, dimensions, proportions, and camera angle.",
+          "Never invent, move, widen, or close a wall, window, or opening.",
+          "Never crop, zoom, pan, rotate, re-frame, or change the aspect ratio; match input framing one-to-one.",
+          "Never add unrequested furniture, rugs, decor, plants, or props.",
+          "Scope references to material and form only; return only the final image.",
+        ],
+      },
+      {
+        id: "mood-boards",
+        title: "Mood boards: auto-generated and on demand",
+        summary: "Professional flatlay mood boards generated from prompts, images, or both — and linked to finished renders.",
+        paragraphs: [
+          "A mood board captures the feel of a design as a single, organized flatlay image. The Studio can create one in three ways: from a prompt only, from one or more images only, or from a prompt combined with images, in which case the prompt acts as context that guides how the supplied images are arranged and interpreted. Each mood board is stored together with the request that produced it, so the inputs behind a board are never lost.",
+          "Most importantly, mood boards are generated automatically. When a finish render completes, the system composes a mood board from that design and links it back to the render, giving every finished room a ready-made companion board with no extra effort. Boards are servable by room, by floor, and by keywords, so the right inspiration surfaces in the right context across the app.",
+          "To make boards easy to skim and search, Workers AI's llama-3.2-11b-vision model reads the generated board and summarizes it into a concise title and description. That turns a wall of imagery into something a homeowner or contractor can scan, reference in conversation, and find again later.",
+        ],
+        bullets: [
+          "Generate from a prompt only, image(s) only, or prompt plus images (the prompt contextualizes the images).",
+          "Every mood board is stored with the request that created it.",
+          "Finished renders auto-generate a linked mood board.",
+          "Boards are servable by room, floor, and keywords.",
+          "llama-3.2-11b-vision summarizes each board into a title and description.",
+        ],
+      },
+      {
+        id: "mood-board-prompt",
+        title: "The mood board generation prompt",
+        summary: "The exact prompt used to compose a professional, flatlay-style mood board image.",
+        paragraphs: [
+          "Mood board images are composed with a single, deliberate prompt designed to produce a clean, professional flatlay rather than a cluttered collage. It is reproduced verbatim below so the output style is explicit and stable.",
+          "CREATE A PHOTOGRAPH OF AN INTERIOR DESIGN MOOD BOARD THAT INCORPORATES ELEMENTS FROM ALL THE UPLOADED IMAGES. THE MOOD BOARD SHOULD BE ORGANIZED, THOUGHT OUT, AND CRAFTED LIKE A PROFESSIONAL INTERIOR DESIGN MOOD BOARD FLATLAY FOR DESIGN PURPOSES. MINIMALLY OVERLAP ELEMENTS WHEN APPLICABLE AND USE DESIGN TECHNIQUES LIKE COLLAGING AND TRANSPARENCY. WHITE BACKGROUND. DO NOT INCLUDE ANY TEXT.",
+          "The instructions to keep the layout organized, to minimally overlap elements, to use collaging and transparency, to keep a white background, and to include no text are what give every board a consistent, presentation-ready look that reads clearly whether it was built from a prompt, from images, or auto-generated from a finished render.",
+        ],
+        bullets: [
+          "Incorporates elements from all the supplied images.",
+          "Crafted like a professional interior-design flatlay for design purposes.",
+          "Minimal element overlap; uses collaging and transparency.",
+          "White background and no text, for a clean, consistent result.",
+        ],
+      },
+      {
+        id: "mcp-automation",
+        title: "Drive the renderer from Claude with the MCP tool",
+        summary: "An OAuth-secured MCP tool lets Claude operate the Render Studio on your behalf.",
+        paragraphs: [
+          "The Render Studio is also exposed through an OAuth-authenticated MCP (Model Context Protocol) tool, which lets Claude drive the renderer directly. With the tool connected, you can describe a renovation in conversation and have the staged pipeline, multi-angle fan-out, and mood board generation carried out for you, rather than clicking through each step in the builder.",
+          "Because the tool is OAuth-secured, access is gated to authorized users and runs against the same pipeline, models, and state tree as the in-app Studio. That means an assistant-driven render is just as faithful and just as inspectable as one you build by hand — the results land as nodes in the same render tree, with the same linked mood boards.",
+        ],
+        bullets: [
+          "An OAuth-secured MCP tool exposes the renderer to Claude.",
+          "Claude can run the staged pipeline, multi-angle renders, and mood boards conversationally.",
+          "Assistant-driven renders use the same pipeline, models, and state tree as the in-app Studio.",
+        ],
+      },
+    ],
+  },
+  {
+    slug: ["homeowners", "permits"],
+    href: "/docs/homeowners/permits",
+    shortTitle: "Permit Pipeline",
+    title: "Homeowner Guide: Permits Intelligence Pipeline",
+    audience: "homeowners",
+    audienceLabel: "For Homeowners",
+    status: "live",
+    summary: "Understand how the permits pipeline tracks DBI records and extracts contractor workloads.",
+    overview:
+      "The Permits Intelligence Pipeline autonomously monitors the San Francisco Department of Building Inspection (SF DBI) databases to track the status of your remodeling permits and evaluate contractor workloads in real-time.",
+    highlights: [
+      "Track active building, planning, electrical, and plumbing permits on your property.",
+      "Automatically extract and cross-reference contractors associated with your project.",
+      "Monitor contractor permit portfolios across the entire city to identify project spikes or delay risks.",
+    ],
+    actions: [
+      {
+        href: "/admin/permits",
+        label: "Open Permits Dashboard",
+        description: "View active building permits, block/lot configurations, and contractor details.",
+      },
+    ],
+    sections: [
+      {
+        id: "pipeline-operations",
+        title: "How the pipeline operates",
+        summary: "Hourly synchronization with the SF DBI databases.",
+        paragraphs: [
+          "The core pipeline is built on top of Cloudflare Workers and syncs directly with the SF DBI SODA API datasets. It performs background synchronization tasks to pull the latest permit data.",
+          "The synchronization runs hourly. It queries active records from Building Permits, Planning Department records, and Electrical/Plumbing Permits datasets, compares them against known local states, and computes differences to detect status changes.",
+        ],
+        bullets: [
+          "Synchronizes hourly via background cron jobs.",
+          "Monitors SF DBI Building, Planning, Electrical, and Plumbing datasets.",
+          "Computes local differences to alert on permit status updates.",
+        ],
+      },
+    ],
+  },
 ];
 
 const contractorsPages: DocsPageDefinition[] = [
@@ -545,17 +903,17 @@ const contractorsPages: DocsPageDefinition[] = [
     ],
     actions: [
       {
-        href: "/estimates",
+        href: "/admin/estimates",
         label: "Open Estimates",
         description: "Review estimate lists, revisions, and current pricing snapshots.",
       },
       {
-        href: "/estimates/new",
+        href: "/admin/estimates/new",
         label: "Open Estimate Intake",
         description: "Create a new draft or submitted estimate revision.",
       },
       {
-        href: "/contracts",
+        href: "/admin/contracts",
         label: "Open Contracts",
         description: "Track contract revisions, findings, and payment milestones.",
       },
@@ -714,7 +1072,7 @@ const sharedPages: DocsPageDefinition[] = [
         description: "Review how budget decisions evolve with the collaboration loop.",
       },
       {
-        href: "/estimates",
+        href: "/admin/estimates",
         label: "Open Estimates",
         description: "See where contractor responses become structured pricing revisions.",
       },

@@ -1,5 +1,12 @@
 /**
- * @fileoverview AI API routes for Workers AI integration via AI Gateway
+ * @fileoverview AI API routes for Workers AI integration via AI Gateway.
+ *
+ * Includes T6.1 (feature 0005) helper routes:
+ *   POST /api/ai/improve-description — tighten a description (✨ button)
+ *
+ * The other T6.1 routes live beside their resources:
+ *   POST /api/supporting-documents/:id/room-summary  → supporting-documents.ts
+ *   POST /api/rooms/code/:roomCode/options-summary   → rooms.ts
  */
 
 import { zValidator } from "@hono/zod-validator";
@@ -132,6 +139,11 @@ aiRouter.post("/text-to-speech", zValidator("json", textToSpeechSchema), async (
     return c.json({ error: "Text-to-speech failed" }, 500);
   }
 });
+
+// NOTE: T6.1 POST /api/ai/improve-description was MOVED to the public,
+// browser-reachable supporting-documents router (this aiRouter is Bearer-gated
+// for server-to-server use; the browser only holds the access cookie).
+// See supporting-documents.ts → POST /api/supporting-documents/improve-description.
 
 // POST /api/ai/embeddings
 aiRouter.post(

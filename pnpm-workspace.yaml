@@ -2,8 +2,14 @@ packages:
   - "."
 
 allowBuilds:
+  '@google/genai': true
   core-js-pure: true
   esbuild: true
   msw: true
+  protobufjs: true
   sharp: true
   workerd: true
+
+overrides:
+  '@cloudflare/workers-types': '$@cloudflare/workers-types'
+  hono: $hono

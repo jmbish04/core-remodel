@@ -30,6 +30,12 @@ export const permitsRecords = sqliteTable("permits_records", {
     .notNull()
     .default(false),
   isClosed: integer("is_closed", { mode: "boolean" }).notNull().default(false),
+  ownerClosed: integer("owner_closed", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  ownerCloseNote: text("owner_close_note"),
+  ownerClosedAt: integer("owner_closed_at", { mode: "timestamp" }),
+  ownerClosedBy: text("owner_closed_by"),
   changeHash: text("change_hash"),
   lastChangedAt: integer("last_changed_at", { mode: "timestamp" }),
   latestRunId: text("latest_run_id").references(() => permitsSyncRuns.id, {

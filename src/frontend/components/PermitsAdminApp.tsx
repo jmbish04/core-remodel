@@ -1,11 +1,21 @@
-import { AlertCircle, CheckCircle2, ExternalLink, Loader2, RefreshCw, ShieldAlert } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { AlertCircle, CheckCircle2, Clock, ExternalLink, Loader2, RefreshCw, ShieldAlert } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { ContractorActivityMap } from "@/components/ContractorActivityMap";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 
 type PermitRun = {
   id: string;
@@ -73,6 +83,10 @@ type PropertyPermit = {
   lastViewedHash?: string | null;
   needsReview: boolean;
   isClosed: boolean;
+  ownerClosed: boolean;
+  ownerCloseNote?: string | null;
+  ownerClosedAt?: string | number | Date | null;
+  lifecycleStatus: "active" | "suspected_expired" | "closed";
 };
 
 type PermitDashboardPayload = {
@@ -95,6 +109,7 @@ type PermitDetailPayload = {
   detail: {
     permitIdentifier: string;
     needsReview: boolean;
+    lifecycleStatus: "active" | "suspected_expired" | "closed";
     records: PermitRecord[];
     revisions: PermitRevision[];
     viewed: {
@@ -111,6 +126,32 @@ function formatDate(value: string | number | Date | null | undefined): string {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "Unknown";
   return parsed.toLocaleString();
+}
+
+function formatTimestamp12h(value: string | number | Date | null | undefined): string {
+  if (!value) return "—";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "—";
+  return parsed.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZoneName: "short",
+  });
+}
+
+/** Compute next occurrence of the `0 14 * * *` (daily 2 PM UTC) cron. */
+function getNextCronRun(): Date {
+  const now = new Date();
+  const next = new Date(now);
+  next.setUTCHours(14, 0, 0, 0);
+  if (next <= now) {
+    next.setUTCDate(next.getUTCDate() + 1);
+  }
+  return next;
 }
 
 function parseJson(value: unknown): unknown {
@@ -182,6 +223,12 @@ function HousePermitsSection() {
     );
   }
 
+  const latestRun = (payload?.latestRuns || [])[0] ?? null;
+  const lastRunTimestamp = latestRun?.datetimeCreated ?? null;
+  const nextRunTimestamp = useMemo(() => getNextCronRun(), []);
+  const permitCount = payload?.propertyPermits?.length ?? 0;
+  const syncRunCount = (payload?.latestRuns || []).length;
+
   return (
     <div className="space-y-6">
       <Card className="ring-1 ring-border/40">
@@ -203,6 +250,20 @@ function HousePermitsSection() {
                 Run Sync
               </Button>
             </div>
+          </div>
+
+          {/* Sync schedule timestamps */}
+          <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <Clock className="size-3.5" />
+              <span className="font-medium text-foreground/70">Last run:</span>{" "}
+              {formatTimestamp12h(lastRunTimestamp)}
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              <Clock className="size-3.5" />
+              <span className="font-medium text-foreground/70">Next run:</span>{" "}
+              {formatTimestamp12h(nextRunTimestamp)}
+            </span>
           </div>
         </CardHeader>
         <CardContent className="grid gap-3 sm:grid-cols-5">
@@ -229,94 +290,120 @@ function HousePermitsSection() {
         </CardContent>
       </Card>
 
-      <Card className="ring-1 ring-border/40">
-        <CardHeader>
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <CardTitle className="text-base">126 Colby Permits</CardTitle>
-              <CardDescription>
-                Click any permit to open full detail and revision history.
-              </CardDescription>
-            </div>
-            <a href="/admin/permits/contacts">
-              <Button variant="outline" size="sm">
-                Contractor Intelligence
-                <ExternalLink className="ml-2 size-4" />
-              </Button>
-            </a>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {(payload?.propertyPermits || []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">No house permits are stored yet. Run sync to hydrate.</p>
-          ) : (
-            (payload?.propertyPermits || []).map((permit) => (
-              <a
-                key={permit.permitIdentifier}
-                href={`/admin/permits/${encodeURIComponent(permit.permitIdentifier)}`}
-                className={cn(
-                  "block rounded-lg border px-3 py-3 transition",
-                  permit.needsReview
-                    ? "border-red-500/60 bg-red-500/10 hover:bg-red-500/15"
-                    : "border-border/60 bg-card/40 hover:bg-card/60",
-                )}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="font-medium">{permit.permitIdentifier}</p>
-                    {permit.needsReview ? (
-                      <Badge variant="destructive">Needs Review</Badge>
-                    ) : (
-                      <Badge variant="secondary">Reviewed</Badge>
-                    )}
-                    {permit.isClosed ? <Badge variant="outline">Closed</Badge> : null}
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Updated {formatDate(permit.lastChangedAt)}
-                  </p>
-                </div>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {permit.permitType || "Type n/a"} · {permit.permitStatus || "Status n/a"}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {permit.propertyAddress || "Address n/a"} · Block {permit.block || "n/a"} / Lot {permit.lot || "n/a"}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  Contacts: {permit.contactNames.join(", ") || "n/a"}
-                </p>
-              </a>
-            ))
-          )}
-        </CardContent>
-      </Card>
+      <Tabs defaultValue="permits">
+        <TabsList>
+          <TabsTrigger value="permits">
+            126 Colby Permits
+            <Badge variant="secondary" className="ml-1.5 px-1.5 py-0 text-[10px] font-semibold">
+              {permitCount}
+            </Badge>
+          </TabsTrigger>
+          <TabsTrigger value="runs">
+            Latest Sync Runs
+            <Badge variant="secondary" className="ml-1.5 px-1.5 py-0 text-[10px] font-semibold">
+              {syncRunCount}
+            </Badge>
+          </TabsTrigger>
+        </TabsList>
 
-      <Card className="ring-1 ring-border/40">
-        <CardHeader>
-          <CardTitle className="text-base">Latest Sync Runs</CardTitle>
-          <CardDescription>Recent ingestion jobs across SF open-data datasets.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-2">
-          {(payload?.latestRuns || []).slice(0, 20).map((run) => (
-            <div key={run.id} className="rounded-lg border border-border/60 bg-card/40 px-3 py-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Badge variant={run.status === "error" ? "destructive" : "secondary"}>{run.status}</Badge>
-                  <Badge variant="outline">{run.sourceDataset}</Badge>
-                  <Badge variant="outline">{run.runType}</Badge>
+        <TabsContent value="permits" className="mt-4">
+          <Card className="ring-1 ring-border/40">
+            <CardHeader>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="text-base">126 Colby Permits</CardTitle>
+                  <CardDescription>
+                    Click any permit to open full detail and revision history.
+                  </CardDescription>
                 </div>
-                <p className="text-xs text-muted-foreground">{formatDate(run.datetimeCreated)}</p>
+                <a href="/admin/permits/contacts">
+                  <Button variant="outline" size="sm">
+                    Contractor Intelligence
+                    <ExternalLink className="ml-2 size-4" />
+                  </Button>
+                </a>
               </div>
-              <p className="mt-1 text-sm font-medium">{run.queryLabel}</p>
-              <p className="text-xs text-muted-foreground">
-                {run.resultCount} records · {run.aiSummary || "No summary"}
-              </p>
-              {run.errorText ? (
-                <p className="mt-1 text-xs text-red-400">{run.errorText}</p>
-              ) : null}
-            </div>
-          ))}
-        </CardContent>
-      </Card>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {(payload?.propertyPermits || []).length === 0 ? (
+                <p className="text-sm text-muted-foreground">No house permits are stored yet. Run sync to hydrate.</p>
+              ) : (
+                (payload?.propertyPermits || []).map((permit) => (
+                  <a
+                    key={permit.permitIdentifier}
+                    href={`/admin/permits/${encodeURIComponent(permit.permitIdentifier)}`}
+                    className={cn(
+                      "block rounded-lg border px-3 py-3 transition",
+                      permit.needsReview
+                        ? "border-red-500/60 bg-red-500/10 hover:bg-red-500/15"
+                        : "border-border/60 bg-card/40 hover:bg-card/60",
+                    )}
+                  >
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-medium">{permit.permitIdentifier}</p>
+                        {permit.needsReview ? (
+                          <Badge variant="destructive">Needs Review</Badge>
+                        ) : (
+                          <Badge variant="secondary">Reviewed</Badge>
+                        )}
+                        {permit.isClosed ? <Badge variant="outline">Closed</Badge> : null}
+                        {permit.lifecycleStatus === "suspected_expired" ? (
+                          <Badge className="border-amber-500/60 bg-amber-500/15 text-amber-300">
+                            Suspected Expired
+                          </Badge>
+                        ) : null}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Updated {formatDate(permit.lastChangedAt)}
+                      </p>
+                    </div>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      {permit.permitType || "Type n/a"} · {permit.permitStatus || "Status n/a"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {permit.propertyAddress || "Address n/a"} · Block {permit.block || "n/a"} / Lot {permit.lot || "n/a"}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Contacts: {permit.contactNames.join(", ") || "n/a"}
+                    </p>
+                  </a>
+                ))
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="runs" className="mt-4">
+          <Card className="ring-1 ring-border/40">
+            <CardHeader>
+              <CardTitle className="text-base">Latest Sync Runs</CardTitle>
+              <CardDescription>Recent ingestion jobs across SF open-data datasets.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {(payload?.latestRuns || []).slice(0, 20).map((run) => (
+                <div key={run.id} className="rounded-lg border border-border/60 bg-card/40 px-3 py-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <Badge variant={run.status === "error" ? "destructive" : "secondary"}>{run.status}</Badge>
+                      <Badge variant="outline">{run.sourceDataset}</Badge>
+                      <Badge variant="outline">{run.runType}</Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground">{formatDate(run.datetimeCreated)}</p>
+                  </div>
+                  <p className="mt-1 text-sm font-medium">{run.queryLabel}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {run.resultCount} records · {run.aiSummary || "No summary"}
+                  </p>
+                  {run.errorText ? (
+                    <p className="mt-1 text-xs text-red-400">{run.errorText}</p>
+                  ) : null}
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
@@ -326,6 +413,9 @@ export function PermitDetailApp({ permitIdentifier }: { permitIdentifier: string
   const [markingViewed, setMarkingViewed] = useState(false);
   const [payload, setPayload] = useState<PermitDetailPayload | null>(null);
   const [autoMarked, setAutoMarked] = useState(false);
+  const [closeOpen, setCloseOpen] = useState(false);
+  const [closeNote, setCloseNote] = useState("");
+  const [closing, setClosing] = useState(false);
 
   const loadDetail = useCallback(async () => {
     setLoading(true);
@@ -368,6 +458,37 @@ export function PermitDetailApp({ permitIdentifier }: { permitIdentifier: string
       setMarkingViewed(false);
     }
   }, [loadDetail, permitIdentifier]);
+
+  const submitClose = useCallback(async () => {
+    if (!closeNote.trim()) {
+      toast.error("A closing note is required");
+      return;
+    }
+    setClosing(true);
+    try {
+      const response = await fetch(
+        `/api/admin/permits/property/${encodeURIComponent(permitIdentifier)}/close`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ note: closeNote.trim() }),
+        },
+      );
+      const result = (await response.json()) as { success?: boolean; error?: string };
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || "Failed to close permit");
+      }
+      toast.success("Permit marked closed");
+      setCloseOpen(false);
+      setCloseNote("");
+      await loadDetail();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to close permit");
+    } finally {
+      setClosing(false);
+    }
+  }, [closeNote, loadDetail, permitIdentifier]);
 
   useEffect(() => {
     void loadDetail();
@@ -432,6 +553,18 @@ export function PermitDetailApp({ permitIdentifier }: { permitIdentifier: string
                 {markingViewed ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
                 Mark Reviewed
               </Button>
+              {detail.lifecycleStatus === "suspected_expired" ? (
+                <Badge className="border-amber-500/60 bg-amber-500/15 text-amber-300">
+                  Suspected Expired
+                </Badge>
+              ) : null}
+              {detail.lifecycleStatus === "closed" ? (
+                <Badge variant="outline">Closed</Badge>
+              ) : (
+                <Button variant="outline" size="sm" onClick={() => setCloseOpen(true)}>
+                  Mark Closed
+                </Button>
+              )}
             </div>
           </div>
         </CardHeader>
@@ -538,6 +671,33 @@ export function PermitDetailApp({ permitIdentifier }: { permitIdentifier: string
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={closeOpen} onOpenChange={setCloseOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Close permit {detail.permitIdentifier}</DialogTitle>
+            <DialogDescription>
+              Mark this permit closed (e.g. expired/re-filed). A note is required and
+              kept for your records. This stops contractor tracking for this permit.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            value={closeNote}
+            onChange={(e) => setCloseNote(e.target.value)}
+            placeholder="Why are you closing this permit? (e.g. expired, re-filed as 202409241521)"
+            rows={4}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCloseOpen(false)} disabled={closing}>
+              Cancel
+            </Button>
+            <Button onClick={() => void submitClose()} disabled={closing || !closeNote.trim()}>
+              {closing ? <Loader2 className="mr-2 size-4 animate-spin" /> : null}
+              Close permit
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

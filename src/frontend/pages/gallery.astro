@@ -1,3 +1,24 @@
 ---
-return Astro.redirect("/floor-plan", 301);
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { GalleryViewport } from "@/components/render/GalleryViewport";
+
+// Optional deep-link: /gallery?canvas=<id> opens a specific render.
+const canvasId = Astro.url.searchParams.get("canvas") ?? undefined;
 ---
+
+<BaseLayout
+  title="Render Gallery - 126 Colby - Renovation Studio"
+  description="Final staged renders with an inspiration-reference rail and hover region highlights."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 text-3xl font-bold">Render Gallery</h1>
+      <p class="text-muted-foreground">
+        Review the active finish render alongside the inspiration references that
+        shaped it. Hover a reference to highlight the region it was drawn from.
+      </p>
+    </div>
+
+    <GalleryViewport client:load canvasId={canvasId} />
+  </main>
+</BaseLayout>

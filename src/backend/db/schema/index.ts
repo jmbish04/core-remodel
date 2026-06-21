@@ -2,6 +2,7 @@ export * from "./auth/users";
 export * from "./auth/sessions";
 
 export * from "./dashboard/dashboard_metrics";
+export * from "./dashboard/jobs_analytics";
 
 export * from "./ai/threads";
 export * from "./ai/messages";
@@ -20,6 +21,7 @@ export * from "./home/scenario_room_plans";
 export * from "./home/room_action_items";
 export * from "./home/budget_tracker_items";
 export * from "./home/truth_table_activities";
+export * from "./home/shopping_journal";
 export * from "./home/room_ai_summaries";
 export * from "./home/homeowner_messages";
 export * from "./home/visitor_sessions";
@@ -38,6 +40,16 @@ export * from "./home/permits_contact_activity";
 export * from "./home/permits_identifier_views";
 export * from "./home/permits_contact_insights";
 
+export * from "./home/work_item_types";
+export * from "./home/trade_data";
+export * from "./home/standard_costs";
+export * from "./home/static_budget_items";
+export * from "./home/budget_variance_scenarios";
+export * from "./home/budget_variance_line_items";
+export * from "./home/assumption_line_items";
+export * from "./home/assumption_micro_variances";
+export * from "./home/project_system_variables";
+
 export * from "./images/images";
 export * from "./images/inspirational_image_rooms";
 export * from "./images/listing_photos";
@@ -48,7 +60,29 @@ export * from "./images/image_edit_sessions";
 export * from "./images/image_edit_revisions";
 export * from "./images/image_upload_staging";
 export * from "./images/review_intelligence";
+export * from "./images/render_sessions";
+export * from "./images/render_canvases";
+export * from "./images/canvas_inspiration_references";
+export * from "./images/mood_board_generations";
+export * from "./images/photo_viewer_notes";
 
 export * from "./home/questionnaire";
 
 export * from "./admin/workflow_schedules";
+export * from "./admin/research_sessions";
+
+export * from "./directory/business_types";
+export * from "./directory/companies";
+export * from "./directory/company_contacts";
+export * from "./bid-portfolios/contacts";
+export * from "./bid-portfolios/bid_portfolios";
+export * from "./bid-portfolios/bid_portfolio_room_configs";
+export * from "./bid-portfolios/bid_portfolio_comments";
+export * from "./bid-portfolios/bid_portfolio_chat_messages";
+export * from "./bid-portfolios/bid_portfolio_selected_photos";
+export * from "./system/google-maps-usage";
+
+export * from "./dialer/prospects";
+export * from "./dialer/state";
+
+export * from "./showroom/index";

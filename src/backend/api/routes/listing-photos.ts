@@ -228,6 +228,94 @@ listingPhotosRouter.post("/:id/edit", async (c) => {
 });
 
 /**
+ * POST /api/listing-photos/:id/ai-renders
+ * Upload an AI-rendered image of a listing photo
+ */
+listingPhotosRouter.post("/:id/ai-renders", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const photoId = parseInt(c.req.param("id"));
+    
+    // Check if listing photo exists
+    const listingPhoto = await db
+      .select()
+      .from(listingPhotos)
+      .where(eq(listingPhotos.id, photoId))
+      .get();
+
+    if (!listingPhoto) {
+      return c.json({ error: "Listing photo not found" }, 404);
+    }
+
+    const formData = await c.req.formData();
+    const file = formData.get("file");
+    const prompt = formData.get("prompt") || "AI Rendered Image";
+
+    if (!(file instanceof File)) {
+      return c.json({ error: "file is required" }, 400);
+    }
+
+    const credentials = await resolveCloudflareImagesCredentials(c.env);
+    if (!credentials.accountId || credentials.apiTokens.length === 0) {
+      return c.json({ error: "Cloudflare credentials not configured" }, 500);
+    }
+
+    const processor = new ImageProcessorService(
+      c.env,
+      credentials.accountId,
+      credentials.apiTokens[0],
+      {
+        fallbackApiTokens: credentials.apiTokens.slice(1),
+      },
+    );
+
+    const arrayBuffer = await file.arrayBuffer();
+    const imageBlob = new Blob([arrayBuffer], { type: file.type || "image/jpeg" });
+    const imageId = crypto.randomUUID();
+
+    const uploadResponse = await processor.uploadToCloudflareImages(
+      imageBlob,
+      imageId,
+      file.name || "ai-render.jpg"
+    );
+
+    if (!uploadResponse.success) {
+      return c.json({ error: "Failed to upload image to Cloudflare" }, 500);
+    }
+
+    const deliveryUrl = processor.getDeliveryUrl(uploadResponse, uploadResponse.result.id);
+    const deliveryToken = ImageProcessorService.extractDeliveryTokenFromUrl(deliveryUrl) || `${credentials.accountId}/${uploadResponse.result.id}`;
+
+    // Store in aiEdits table
+    const edit = await db
+      .insert(aiEdits)
+      .values({
+        originalListingId: photoId,
+        prompt: typeof prompt === "string" ? prompt : "AI Rendered Image",
+        generatedCfImageId: deliveryToken,
+      })
+      .returning()
+      .get();
+
+    return c.json({
+      success: true,
+      edit: {
+        ...edit,
+        path: deliveryUrl,
+      },
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to upload AI render",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
  * GET /api/listing-photos/:id/edits
  * Get all AI edits for a listing photo
  */
@@ -242,10 +330,21 @@ listingPhotosRouter.get("/:id/edits", async (c) => {
       .where(eq(aiEdits.originalListingId, photoId))
       .all();
 
+    const formattedEdits = edits.map((edit) => {
+      const deliveryId = edit.generatedCfImageId;
+      const path = deliveryId.includes("/")
+        ? `https://imagedelivery.net/${deliveryId}/public`
+        : `https://imagedelivery.net/${deliveryId}/public`;
+      return {
+        ...edit,
+        path,
+      };
+    });
+
     return c.json({
       success: true,
-      count: edits.length,
-      edits,
+      count: formattedEdits.length,
+      edits: formattedEdits,
     });
   } catch (error) {
     return c.json(
@@ -289,6 +388,131 @@ listingPhotosRouter.delete("/:id", async (c) => {
     return c.json(
       {
         error: "Failed to delete listing photo",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * POST /api/listing-photos/:id/blank-canvas
+ * Upload a blank canvas (furniture-removed) image for a listing photo
+ */
+listingPhotosRouter.post("/:id/blank-canvas", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const photoId = parseInt(c.req.param("id"));
+
+    const listingPhoto = await db
+      .select()
+      .from(listingPhotos)
+      .where(eq(listingPhotos.id, photoId))
+      .get();
+
+    if (!listingPhoto) {
+      return c.json({ error: "Listing photo not found" }, 404);
+    }
+
+    const formData = await c.req.formData();
+    const file = formData.get("file");
+
+    if (!(file instanceof File)) {
+      return c.json({ error: "file is required" }, 400);
+    }
+
+    const credentials = await resolveCloudflareImagesCredentials(c.env);
+    if (!credentials.accountId || credentials.apiTokens.length === 0) {
+      return c.json({ error: "Cloudflare credentials not configured" }, 500);
+    }
+
+    const processor = new ImageProcessorService(
+      c.env,
+      credentials.accountId,
+      credentials.apiTokens[0],
+      {
+        fallbackApiTokens: credentials.apiTokens.slice(1),
+      },
+    );
+
+    const arrayBuffer = await file.arrayBuffer();
+    const imageBlob = new Blob([arrayBuffer], { type: file.type || "image/jpeg" });
+    const imageId = crypto.randomUUID();
+
+    const uploadResponse = await processor.uploadToCloudflareImages(
+      imageBlob,
+      imageId,
+      file.name || "blank-canvas.jpg",
+    );
+
+    if (!uploadResponse.success) {
+      return c.json({ error: "Failed to upload image to Cloudflare" }, 500);
+    }
+
+    const deliveryUrl = processor.getDeliveryUrl(uploadResponse, uploadResponse.result.id);
+    const deliveryToken =
+      ImageProcessorService.extractDeliveryTokenFromUrl(deliveryUrl) ||
+      `${credentials.accountId}/${uploadResponse.result.id}`;
+
+    await db
+      .update(listingPhotos)
+      .set({ blankCanvasCfImageId: deliveryToken })
+      .where(eq(listingPhotos.id, photoId))
+      .run();
+
+    return c.json({
+      success: true,
+      blankCanvasCfImageId: deliveryToken,
+      deliveryUrl: `https://imagedelivery.net/${deliveryToken}/public`,
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to upload blank canvas",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * DELETE /api/listing-photos/:id/blank-canvas
+ * Remove the blank canvas image from a listing photo
+ */
+listingPhotosRouter.delete("/:id/blank-canvas", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const photoId = parseInt(c.req.param("id"));
+
+    const listingPhoto = await db
+      .select()
+      .from(listingPhotos)
+      .where(eq(listingPhotos.id, photoId))
+      .get();
+
+    if (!listingPhoto) {
+      return c.json({ error: "Listing photo not found" }, 404);
+    }
+
+    if (!listingPhoto.blankCanvasCfImageId) {
+      return c.json({ error: "No blank canvas to remove" }, 400);
+    }
+
+    await db
+      .update(listingPhotos)
+      .set({ blankCanvasCfImageId: null })
+      .where(eq(listingPhotos.id, photoId))
+      .run();
+
+    return c.json({
+      success: true,
+      message: "Blank canvas removed",
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to remove blank canvas",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       500,

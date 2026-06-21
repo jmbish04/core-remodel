@@ -1,12 +1,38 @@
 /**
  * @fileoverview Cloudflare Workers AI provider — invokes models via
- * `env.AI.run()` through the AI Gateway.
+ * `env.AI.run()`. Uses direct binding for native Workers AI models (@cf/*)
+ * and routes through the AI Gateway only for non-Workers-AI models.
  */
 
 import type { AIProvider, InvokeOpts, ModelDescriptor } from "./base";
 
+/** Workers AI models use the @cf/ prefix and run natively on the binding. */
+function isNativeWorkersAI(modelId: string): boolean {
+  return modelId.startsWith("@cf/");
+}
+
 export class WorkersAIProvider implements AIProvider {
   constructor(private readonly env: Env) {}
+
+  // -----------------------------------------------------------------------
+  // Gateway options — only used for non-Workers-AI models
+  // -----------------------------------------------------------------------
+
+  private buildGatewayOpts(
+    modelId: string,
+    opts: InvokeOpts,
+  ): { gateway: { id: string; skipCache: boolean; cacheTtl?: number } } | undefined {
+    if (isNativeWorkersAI(modelId)) {
+      return undefined;
+    }
+    return {
+      gateway: {
+        id: this.env.AI_GATEWAY_ID,
+        skipCache: opts.cacheTtl === 0,
+        cacheTtl: opts.cacheTtl,
+      },
+    };
+  }
 
   // -----------------------------------------------------------------------
   // Synchronous invocation — returns parsed model output
@@ -23,13 +49,8 @@ export class WorkersAIProvider implements AIProvider {
       throw new Error(`env.AI.run requires an object body for ${model.id}`);
     }
 
-    const raw = await this.env.AI.run(model.id, body, {
-      gateway: {
-        id: this.env.AI_GATEWAY_ID,
-        skipCache: opts.cacheTtl === 0,
-        cacheTtl: opts.cacheTtl,
-      },
-    });
+    const gateway = this.buildGatewayOpts(model.id, opts);
+    const raw = await this.env.AI.run(model.id, body, gateway);
 
     return model.parseResponse(raw);
   }
@@ -49,13 +70,8 @@ export class WorkersAIProvider implements AIProvider {
       throw new Error(`env.AI.run requires an object body for ${model.id}`);
     }
 
-    const raw = await this.env.AI.run(model.id, body, {
-      gateway: {
-        id: this.env.AI_GATEWAY_ID,
-        skipCache: opts.cacheTtl === 0,
-        cacheTtl: opts.cacheTtl,
-      },
-    });
+    const gateway = this.buildGatewayOpts(model.id, opts);
+    const raw = await this.env.AI.run(model.id, body, gateway);
 
     // Unwrap nested result object if present (e.g. { result: { ... } })
     const result = isRecord(raw) && isRecord(raw.result) ? raw.result : raw;
@@ -66,7 +82,15 @@ export class WorkersAIProvider implements AIProvider {
       if (choice && isRecord(choice.message)) {
         const content = (choice.message as Record<string, unknown>).content;
         if (typeof content === "string") {
-          return JSON.parse(stripJsonFences(content));
+          const cleaned = stripJsonFences(content);
+          if (cleaned.trimStart().startsWith("<")) {
+            throw new Error(
+              `AI model ${model.id} returned HTML instead of JSON. ` +
+                `This usually indicates a temporary AI Gateway or model availability issue. ` +
+                `Response preview: ${cleaned.slice(0, 120)}`,
+            );
+          }
+          return JSON.parse(cleaned);
         }
       }
     }
@@ -75,7 +99,15 @@ export class WorkersAIProvider implements AIProvider {
     if (isRecord(result)) {
       const textValue = result.response ?? result.text ?? result.description;
       if (typeof textValue === "string") {
-        return JSON.parse(stripJsonFences(textValue));
+        const cleaned = stripJsonFences(textValue);
+        if (cleaned.trimStart().startsWith("<")) {
+          throw new Error(
+            `AI model ${model.id} returned HTML instead of JSON. ` +
+              `This usually indicates a temporary AI Gateway or model availability issue. ` +
+              `Response preview: ${cleaned.slice(0, 120)}`,
+          );
+        }
+        return JSON.parse(cleaned);
       }
     }
 
@@ -108,13 +140,8 @@ export class WorkersAIProvider implements AIProvider {
       throw new Error(`env.AI.run stream requires an object body for ${model.id}`);
     }
 
-    const result = await this.env.AI.run(model.id, body, {
-      gateway: {
-        id: this.env.AI_GATEWAY_ID,
-        skipCache: opts.cacheTtl === 0,
-        cacheTtl: opts.cacheTtl,
-      },
-    });
+    const gateway = this.buildGatewayOpts(model.id, opts);
+    const result = await this.env.AI.run(model.id, body, gateway);
 
     if (result instanceof ReadableStream) {
       return result;
@@ -160,8 +187,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /**
  * Strip optional markdown JSON fences from model output.
- * gpt-oss-120b with json_schema should not need this, but it serves as a
- * safety net for models that wrap JSON in ```json ... ``` blocks.
+ * Safety net for models that wrap JSON in ```json ... ``` blocks.
  */
 function stripJsonFences(value: string): string {
   return value

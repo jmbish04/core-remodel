@@ -1,0 +1,19 @@
+---
+import { ContractorScheduleApp } from "@/components/ContractorScheduleApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Contractor Schedule - 126 Colby Remodel Mission Control"
+  description="Gantt chart comparing contractor scenarios and project timelines for the 126 Colby remodel."
+>
+  <main class="container mx-auto px-4 py-8">
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold tracking-tight">Contractor Schedule</h1>
+      <p class="mt-2 text-sm text-muted-foreground">
+        Comparative Gantt chart showing three project trajectory scenarios with Paul (GC) milestone tracking.
+      </p>
+    </div>
+    <ContractorScheduleApp client:only="react" />
+  </main>
+</BaseLayout>

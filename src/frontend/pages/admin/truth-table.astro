@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { TruthTableApp } from "@/components/TruthTableApp";
+---
+
+<BaseLayout
+  title="Labor & Materials Costs — The Monolith"
+  description="Granular contractor verbal quotes, supplier estimates, and engaged/executed pricing. SF Bay market-adjusted."
+>
+  <TruthTableApp client:only="react" />
+</BaseLayout>

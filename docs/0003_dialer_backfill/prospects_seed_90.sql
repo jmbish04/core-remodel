@@ -1,0 +1,710 @@
+-- Backfill seed: 90 SF independent design pros (>=5 matching permits)
+-- Source: DBI i98e-djp9 JOIN 3pee-9qhc on permit_number; design roles; corp names excluded.
+-- Data-only INSERTs. Apply AFTER adding the new columns to the Drizzle prospects schema + db:generate.
+-- Re-runnable: DELETE only the catalog-sourced rows, preserves prospect_state.
+DELETE FROM dialer_prospects;
+INSERT INTO dialer_prospects (id,rank,first_name,last_name,full_name,firm,roles,permit_count,avg_cost,median_cost,scope_keywords,is_unbundled_candidate,collision_risk,license_no,distinct_licenses,distinct_firms,distinct_zips,agent_zip,phone,phone_source,email,email_source,website,contact_status,license_note,call_script) VALUES
+('tony-lee-1',1,'Tony','Lee','Tony Lee','Hing Wah Design','architect / designer',120,232864,210000,'bath, full, kitchen, remodel, bathroom, rear',1,1,NULL,0,6,1,'94124',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Tony? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 120 single-family kitchen & bath remodel permits over the last couple of years.
+
+You don''t have much of a web presence, so the permit records were how I found you — which usually means you stay busy on word of mouth.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('arten-chan-2',2,'Arten','Chan','Arten Chan','Tommy Lee Consulting','designer / pmt consultant/expediter',50,152351,182190,'bathroom, remodel, kitchen, relocate, room, laundry',0,0,NULL,0,1,2,'94030',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Arten? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 50 single-family kitchen & bath remodel permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('ken-chan-3',3,'Ken','Chan','Ken Chan','Ken Chan','architect / designer / pmt consultant/expediter',41,184909,182000,'bathroom, room, kitchen, construct, remodel, replace',1,0,NULL,0,2,2,'94017',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Ken? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 41 single-family kitchen & bath remodel permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('bill-guan-4',4,'Bill','Guan','Bill Guan','Xie Associates','architect',32,225514,184926,'remodel, kitchen, bathroom, bedroom, bath, stair',0,0,'C32963',1,1,1,'94131',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Bill? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 32 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('bin-lei-5',5,'Bin','Lei','Bin Lei','Bin Lei','architect / designer / pmt consultant/expediter',29,101595,70000,'room, bathroom, remodel, plan, kitchenette, bedroom',1,0,NULL,0,1,1,'94010',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Bin? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 29 single-family kitchen & bath remodel permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('aaron-lim-6',6,'Aaron','Lim','Aaron Lim','Aaron Lim Design','architect',28,138108,100000,'remodel, kitchen, room, bath, exterior, work',0,1,'C-37034',3,2,2,'94112',NULL,NULL,'aaron@aaronlimdesign.com','first-party: aaronlimdesign.com/contact','https://aaronlimdesign.com','partial','VERIFIED licensed CA architect; SF studio, single-family remodels + permitting. Phone not published.','Hi, is this Aaron? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 28 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('francisco-matos-7',7,'Francisco','Matos','Francisco Matos','Architects Sf','architect',23,126734,76770,'kitchen, bathroom, remodel, wall, interior, deck',0,1,'C-34078',2,1,1,'94142',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Francisco? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 23 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('xie-guan-8',8,'Xie','Guan','Xie Guan','Xie Associates','architect',23,205049,200000,'remodel, kitchen, bathroom, bath, room, rear',0,1,'C-32963',2,1,2,'94131',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Xie? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 23 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('dong-liang-9',9,'Dong','Liang','Dong Liang','Don Liang','designer',19,83419,50000,'bath, remodel, kitchen, full, relocate, bedroom',1,0,NULL,0,1,1,'94122',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Dong? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 19 single-family kitchen & bath remodel permits over the last couple of years.
+
+You don''t have much of a web presence, so the permit records were how I found you — which usually means you stay busy on word of mouth.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('tien-chu-10',10,'Tien','Chu','Tien Chu','T-Square Design Llc','architect / designer',18,193597,218000,'bath, kitchen, room, replace, door, bedrooms',0,0,NULL,0,2,1,'94080',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Tien? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 18 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('katherine-fontaine-11',11,'Katherine','Fontaine','Katherine Fontaine','Actually Design Build','architect / designer',17,136219,100000,'rear, bathroom, kitchen, wall, remodel, replace',0,1,'C-347-40',4,1,1,'94122','(415) 243-6701','Manta directory — UNVERIFIED, confirm before dialing',NULL,NULL,'https://www.actuallydesignbuild.com','partial','VERIFIED firm Actually Design Build; architect+contractor licenses, 50+ SF renovations. Full design-build (ask to unbundle a permit set).','Hi, is this Katherine? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 17 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('tommy-lee-12',12,'Tommy','Lee','Tommy Lee','Tommy Lee Consulting','architect / designer',17,150055,150000,'bathroom, kitchen, relocate, remodel, bedroom, laundry',1,0,'C29384',1,1,1,'94112',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Tommy? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 17 single-family kitchen & bath remodel permits over the last couple of years.
+
+You don''t have much of a web presence, so the permit records were how I found you — which usually means you stay busy on word of mouth.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('jason-chan-13',13,'Jason','Chan','Jason Chan','Jason M.J.Chan Architect','architect',16,148313,130000,'remodel, bathroom, room, kitchen, interior, wall',0,1,'C-25279',2,2,1,'94030',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Jason? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 16 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('kenneth-chan-14',14,'Kenneth','Chan','Kenneth Chan','Ken Chan','designer',15,149700,138000,'room, construct, bathroom, kitchen, remodel, bath',1,0,NULL,0,2,1,'94017',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Kenneth? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 15 single-family kitchen & bath remodel permits over the last couple of years.
+
+You don''t have much of a web presence, so the permit records were how I found you — which usually means you stay busy on word of mouth.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('stephen-sutro-15',15,'Stephen','Sutro','Stephen Sutro','Sutro Architects','architect',14,375747,93750,'replace, wall, revision, interior, remodel, kitchen',0,1,'C-30702',2,1,2,'94109',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Stephen? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 14 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('yu-bin-lei-1605-hunt-dr-16',16,'Yu Bin Lei','1605 Hunt Dr','Yu Bin Lei 1605 Hunt Dr',NULL,'designer',14,51654,17716,'kitchenette, room, bathroom, laundry, reconfigure, relocate',1,0,NULL,0,0,1,'94010',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Yu Bin Lei? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 14 single-family kitchen & bath remodel permits over the last couple of years.
+
+You don''t have much of a web presence, so the permit records were how I found you — which usually means you stay busy on word of mouth.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('jorge-carbonell-17',17,'Jorge','Carbonell','Jorge Carbonell','Jorge Carbonell Architecture','architect / designer',13,96808,30000,'replace, rear, room, remodel, interior, remove',1,1,'C-30680',2,1,1,'94107',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Jorge? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 13 single-family kitchen & wall work permits over the last couple of years.
+
+You don''t have much of a web presence, so the permit records were how I found you — which usually means you stay busy on word of mouth.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('alan-ouyang-18',18,'Alan','Ouyang','Alan Ouyang','Alan Z. Ouyang','architect / designer / pmt consultant/expediter',13,143122,125108,'bath, remodel, kitchen, room, family, bedroom',1,0,NULL,0,2,1,'94109',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Alan? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 13 single-family kitchen & bath remodel permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('lisa-wong-19',19,'Lisa','Wong','Lisa Wong','Lisa Wong','architect',12,118258,120400,'room, bath, kitchen, relocate, wall, general',0,1,'C-17301',2,2,1,'94103',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Lisa? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 12 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('ava-lui-20',20,'Ava','Lui','Ava Lui','Hing Wah Construction','designer / pmt consultant/expediter',12,374390,335984,'bath, full, remodel, kitchen, bathroom, family',0,0,NULL,0,1,1,'94124',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Ava? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 12 single-family kitchen & bath remodel permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('ryan-knock-21',21,'Ryan','Knock','Ryan Knock','Knock Arch & Design','architect / designer',11,99409,40000,'create, kitchen, rear, bedroom, windows, remodel',1,1,'31156',3,2,2,'94110',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Ryan? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 11 single-family kitchen & wall work permits over the last couple of years.
+
+You don''t have much of a web presence, so the permit records were how I found you — which usually means you stay busy on word of mouth.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('cassandra-mettling-davis-22',22,'Cassandra','Mettling-Davis','Cassandra Mettling-Davis','Cassandra Mettling Davis','architect',11,56697,65241,'kitchen, wall, room, work, deck, revision',0,1,'C-24981',2,1,1,'94127',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Cassandra? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 11 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('dong-wen-liang-23',23,'Dong Wen','Liang','Dong Wen Liang','Dong Wen Liang','designer / pmt consultant/expediter',11,255666,210000,'relocate, full, bath, kitchen, remodel, bathroom',1,0,NULL,0,1,1,'94122',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Dong Wen? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 11 single-family kitchen & bath remodel permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('eric-larizadeh-saito-24',24,'Eric','Larizadeh-Saito','Eric Larizadeh-Saito','Eric Larizadeh-Saito','pmt consultant/expediter',11,180502,100000,'kitchen, bath, bathroom, remodel, wall, rear',1,1,NULL,0,3,1,'94118',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Eric? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 11 single-family kitchen & bath remodel permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('suheil-shatara-25',25,'Suheil','Shatara','Suheil Shatara','Shatara Architecture','architect',11,133563,125000,'bath, walls, rear, modify, remodel, kitchen',0,1,'C-24700',2,3,1,'94107',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Suheil? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 11 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('peter-chow-26',26,'Peter','Chow','Peter Chow','Inncon Design','designer',11,128273,180000,'room, relocate, bath, kitchen, rear, master',0,0,NULL,0,2,1,'94118',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Peter? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 11 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('kelly-melendez-27',27,'Kelly','Melendez','Kelly Melendez','Kelly Melendez Architect','architect',10,103643,31500,'garage, revision, wall, remodel, kitchen, convert',0,0,'C27652',1,2,1,'94146',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Kelly? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 10 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('jeffrey-eade-28',28,'Jeffrey','Eade','Jeffrey Eade','Jeffrey A. Eade Architect','architect',10,155232,80000,'remodel, existing, rear, kitchen, wall, interior',0,1,'C-30594',2,1,1,'94131',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Jeffrey? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 10 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('mark-topetcher-29',29,'Mark','Topetcher','Mark Topetcher','Topetcher Architecture Inc.','architect',10,318334,275000,'bath, kitchen, existing, reconfigure, living, space',0,1,'C-21678',2,3,1,'94117',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Mark? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 10 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('juan-gomez-30',30,'Juan','Gomez','Juan Gomez','Atrium Design And Drafting','designer',10,45669,40000,'remodel, like, kitchen, bathroom, replace, laundry',1,1,NULL,0,4,1,'94112',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Juan? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 10 single-family kitchen & bath remodel permits over the last couple of years.
+
+You don''t have much of a web presence, so the permit records were how I found you — which usually means you stay busy on word of mouth.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('anita-zhu-31',31,'Anita','Zhu','Anita Zhu','Anita Zhu','designer / pmt consultant/expediter',10,258461,235000,'full, bathroom, remodel, bath, kitchen, bedrooms',1,1,NULL,0,3,1,'94124',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Anita? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 10 single-family kitchen & bath remodel permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('john-lum-32',32,'John','Lum','John Lum','John Lum Architecture','architect',10,297125,140000,'remodel, kitchen, windows, replace, story, window',0,1,'21837',3,2,1,'94110',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this John? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 10 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('schaeffer-nelson-33',33,'Schaeffer','Nelson','Schaeffer Nelson','Gary Bell Associates','pmt consultant/expediter',10,186009,74000,'wall, retaining, kitchen, existing, replacing, kind',0,0,NULL,0,2,1,'94114',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Schaeffer? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 10 single-family kitchen & wall work permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('sandy-mak-34',34,'Sandy','Mak','Sandy Mak','Hexagon Permit Services','designer / pmt consultant/expediter',10,205273,175000,'kitchen, remodel, bath, bathroom, replace, convert',0,0,NULL,0,1,2,'94112',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Sandy? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 10 single-family kitchen & bath remodel permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('curtis-hollenbeck-35',35,'Curtis','Hollenbeck','Curtis Hollenbeck','Curtis Hollenbeck Architect','architect',9,68010,75000,'kitchen, remodel, bathroom, exterior, bedroom, rear',0,0,'C24843',1,2,1,'94133',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Curtis? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 9 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('derek-vinh-36',36,'Derek','Vinh','Derek Vinh','Ice Design Inc.','architect / designer / pmt consultant/expediter',9,69667,50000,'room, bedrooms, full, kitchen, entertainment, kitchenette',0,0,NULL,0,2,2,'94030',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Derek? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 9 single-family kitchen & wall work permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('joyce-zeng-37',37,'Joyce','Zeng','Joyce Zeng','Hing Wah Construction','pmt consultant/expediter',9,183945,70000,'remodel, bath, kitchen, full, bathroom, room',0,0,NULL,0,1,0,NULL,NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Joyce? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 9 single-family kitchen & bath remodel permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('carolyn-liu-38',38,'Carolyn','Liu','Carolyn Liu','Carolyn Liu','designer',9,204445,200000,'bath, replace, remodel, bedroom, kitchenette, door',1,0,NULL,0,1,1,'94134',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Carolyn? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 9 single-family kitchen & bath remodel permits over the last couple of years.
+
+You don''t have much of a web presence, so the permit records were how I found you — which usually means you stay busy on word of mouth.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('yung-chen-39',39,'Yung','Chen','Yung Chen','Yung Chen','designer',8,131655,112500,'kitchen, remodel, bathroom, convert, interior, bedroom',1,0,NULL,0,1,1,'94127',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Yung? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 8 single-family kitchen & bath remodel permits over the last couple of years.
+
+You don''t have much of a web presence, so the permit records were how I found you — which usually means you stay busy on word of mouth.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('fiona-lee-40',40,'Fiona','Lee','Fiona Lee','Innovative Const','pmt consultant/expediter',8,102850,91400,'remodel, room, wall, replace, foundation, bathroom',0,0,NULL,0,1,1,'94121',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Fiona? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 8 single-family kitchen & bath remodel permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('troy-kashanipour-41',41,'Troy','Kashanipour','Troy Kashanipour','Troy Kashanipour','architect',8,160465,97500,'kitchen, room, wall, remodel, bedroom, bath',0,0,'C27646',1,1,1,'94107',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Troy? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 8 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('bryan-fox-42',42,'Bryan','Fox','Bryan Fox','Five Design','architect',8,172896,80000,'kitchen, remodel, remove, windows, revise, window',0,0,'C-36311',2,1,1,'94122',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Bryan? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 8 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('corbin-jones-43',43,'Corbin','Jones','Corbin Jones','Gary Bell Associates','designer / pmt consultant/expediter',8,108052,115000,'level, work, kitchen, remodel, only, addition',0,0,NULL,0,2,2,'94105',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Corbin? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 8 single-family kitchen & wall work permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('missy-cantor-44',44,'Missy','Cantor','Missy Cantor','Sf Permitting','pmt consultant/expediter',8,134147,78388,'bathroom, kitchen, master, second, remodel, kind',0,0,NULL,0,1,1,'94114',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Missy? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 8 single-family kitchen & bath remodel permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('sherman-yan-45',45,'Sherman','Yan','Sherman Yan','Sherman Yan','designer',8,97967,60000,'kitchen, existing, bedrooms, bath, remove, remodel',1,0,NULL,0,2,1,'94134',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Sherman? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 8 single-family kitchen & bath remodel permits over the last couple of years.
+
+You don''t have much of a web presence, so the permit records were how I found you — which usually means you stay busy on word of mouth.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('jared-kuykendall-46',46,'Jared','Kuykendall','Jared Kuykendall','Studio 797','architect',7,104286,90000,'remodel, bath, kitchen, reconfigure, full, create',0,0,'C-36856',2,1,1,'94015',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Jared? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 7 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('michael-baushke-47',47,'Michael','Baushke','Michael Baushke','Apparatus','architect',7,102136,98000,'work, kitchen, existing, remodel, building, renovate',0,0,'C25953',1,1,1,'94114',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Michael? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 7 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('shaum-mehra-48',48,'Shaum','Mehra','Shaum Mehra','Sf Design Bureau','architect',7,59814,10000,'kitchen, remodel, wall, rear, remove, revision',0,0,'C36812',1,2,2,'94114',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Shaum? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 7 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('flora-huang-49',49,'Flora','Huang','Flora Huang','Hx.S','architect / designer',7,255358,230000,'bath, room, kitchen, full, water, heater',0,0,NULL,0,1,0,NULL,NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Flora? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 7 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('mark-thomas-50',50,'Mark','Thomas','Mark Thomas','Hood Thomas Architects','architect',7,33262,18000,'wall, interior, rear, revised, west, deck',0,0,'C19445',1,1,1,'94105',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Mark? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 7 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('joyce-zhang-51',51,'Joyce','Zhang','Joyce Zhang','Joyce Zhang','designer / pmt consultant/expediter',7,133399,110000,'bath, full, remodel, kitchen, deck, rear',1,0,NULL,0,1,0,NULL,NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Joyce? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 7 single-family kitchen & bath remodel permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('danielle-elimelech-52',52,'Danielle','Elimelech','Danielle Elimelech',NULL,'pmt consultant/expediter',7,79506,58200,'kitchen, remodel, like, wall, area, remove',1,0,NULL,0,0,1,'95113',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Danielle? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 7 single-family kitchen & wall work permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('elias-horat-53',53,'Elias','Horat','Elias Horat','Creates Cool','architect',7,200965,119935,'interior, kitchen, remodel, space, wall, rear',0,0,'C-39292',2,1,1,'94108',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Elias? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 7 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('alan-fox-54',54,'Alan','Fox','Alan Fox','Five Design','architect',6,204167,200000,'remodel, room, kitchen, windows, powder, full',0,0,'C-36111',3,1,0,NULL,NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Alan? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 6 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('andre-rothblatt-55',55,'Andre','Rothblatt','Andre Rothblatt','Andre Rothblatt Architecture','architect',6,116042,97500,'kitchen, remodel, replace, wall, interior, increase',0,0,'C-22561',2,2,1,'94107',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Andre? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 6 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('david-marlatt-56',56,'David','Marlatt','David Marlatt','Dnm Architect','architect',6,135651,150000,'kitchen, remodel, story, rear, repair, interior',0,0,'C-27909',2,1,1,'94965',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this David? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 6 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('han-li-57',57,'Han','Li','Han Li','Han Design Studio','designer',6,120449,90000,'kitchen, bath, replace, electrical, water, front',1,0,'7248',2,2,1,'94132',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Han? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 6 single-family kitchen & bath remodel permits over the last couple of years.
+
+You don''t have much of a web presence, so the permit records were how I found you — which usually means you stay busy on word of mouth.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('william-pashelinsky-58',58,'William','Pashelinsky','William Pashelinsky','William Pashelinsky Arch.','architect',6,52316,2500,'kitchen, revision, slab, including, remodel, bathroom',0,0,'11020',2,2,1,'94117',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this William? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 6 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('kelly-condon-59',59,'Kelly','Condon','Kelly Condon','Kelly Condon Design','architect / designer / pmt consultant/expediter',6,67500,35000,'bath, kitchen, rear, replace, garage, room',1,0,NULL,0,1,1,'94127',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Kelly? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 6 single-family kitchen & bath remodel permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('kamala-mostert-60',60,'Kamala','Mostert','Kamala Mostert','Mostert Architecture','architect',6,89334,60500,'kitchen, bathroom, bath, revision, permit, wall',0,0,'C26896',1,1,1,'94110',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Kamala? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 6 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('sky-cai-61',61,'Sky','Cai','Sky Cai',NULL,'pmt consultant/expediter',6,215833,262500,'bath, full, remodel, kitchen, relocate, laundry',1,0,NULL,0,0,1,'94124',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Sky? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 6 single-family kitchen & bath remodel permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('anthony-chau-62',62,'Anthony','Chau','Anthony Chau','Anthony Chau & Partners Llc','architect',6,206667,200000,'kitchen, remodel, replace, bath, room, install',0,0,'C30909',1,1,1,'94549',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Anthony? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 6 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('dior-popko-63',63,'Dior','Popko','Dior Popko','Doir Poko Design','designer',6,157836,79804,'remodel, house, kitchen, replace, bathroom, remove',1,0,NULL,0,2,2,'94115',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Dior? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 6 single-family kitchen & bath remodel permits over the last couple of years.
+
+You don''t have much of a web presence, so the permit records were how I found you — which usually means you stay busy on word of mouth.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('my-my-ly-64',64,'My My','Ly','My My Ly','Mml Architect','architect',6,94833,11500,'rear, wall, retaining, comply, yard, windows',0,0,'C-32972',2,1,2,'94116',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this My My? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 6 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('stuart-hills-65',65,'Stuart','Hills','Stuart Hills','Apparatus','architect',6,84183,61426,'bath, remodel, room, level, revision, include',0,0,'C24966',1,2,0,NULL,NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Stuart? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 6 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('su-ling-slaton-66',66,'Su-Ling','Slaton','Su-Ling Slaton','Slc Design','designer',6,216312,174000,'remove, kitchen, bathroom, room, remodel, create',0,0,NULL,0,1,2,'94536',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Su-Ling? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 6 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('nancy-torres-67',67,'Nancy','Torres','Nancy Torres','C/Ogolden State Bilders','pmt consultant/expediter',6,29334,31500,'kitchen, like, walls, remodel, structural, changes',0,0,NULL,0,1,0,NULL,NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Nancy? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 6 single-family kitchen & wall work permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('jason-langkammerer-68',68,'Jason','Langkammerer','Jason Langkammerer','At6 Architecture Design','architect',6,198464,172392,'bathroom, remodel, kitchen, level, replacing, door',0,0,'C28796',1,2,1,'94103',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Jason? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 6 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('michael-beazer-69',69,'Michael','Beazer','Michael Beazer','Studio 22 Design','architect',5,213160,210000,'remodel, replace, fixtures, finishes, kitchen, permit',0,0,'C-33524',2,1,1,'94121',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Michael? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('michael-larkin-70',70,'Michael','Larkin','Michael Larkin','Mike Larkin Architecture','architect',5,164200,100000,'remodel, kitchen, bathroom, install, addition, including',0,0,'C25214',1,1,1,'94107',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Michael? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('david-cumby-71',71,'David','Cumby','David Cumby','Cumby Architecture','architect',5,157560,58000,'kitchen, bath, window, renovate, revision, bathroom',0,0,'29182',2,1,2,'94107',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this David? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('brian-milford-72',72,'Brian','Milford','Brian Milford','Martinkovic Milford Architects','architect',5,210038,104162,'infill, rear, only, remodel, windows, room',0,0,'C-33430',2,2,1,'94104',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Brian? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('sheldon-eaton-73',73,'Sheldon','Eaton','Sheldon Eaton','Vicinity Architects','architect',5,229720,194900,'remodel, rear, interior, kitchen, level, addition',0,0,'C36656',1,1,2,'94110',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Sheldon? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('michael-terndrup-74',74,'Michael','Terndrup','Michael Terndrup','Eag Studio Architecture','architect',5,69400,65000,'reconfigure, wall, kitchen, skylight, level, drain',0,0,'C40160',1,2,2,'94103',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Michael? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('carolyn-lui-75',75,'Carolyn','Lui','Carolyn Lui',NULL,'designer',5,172000,180000,'bath, replace, doors, stairs, full, wdws',1,0,NULL,0,0,1,'94134',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Carolyn? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & bath remodel permits over the last couple of years.
+
+You don''t have much of a web presence, so the permit records were how I found you — which usually means you stay busy on word of mouth.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('ross-levy-76',76,'Ross','Levy','Ross Levy','Levy Art & Architecture','architect',5,145949,97381,'remodel, kitchen, flat, roof, interior, single',0,0,'C-25660',2,2,1,'94107',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Ross? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('karen-mar-77',77,'Karen','Mar','Karen Mar','Marjang Design','architect',5,203200,185000,'rear, yard, remodel, windows, wall, deck',0,0,'C-25227',2,2,1,'94117',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Karen? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('william-henderson-78',78,'William','Henderson','William Henderson','Outerlands Design','architect',5,156400,140000,'kitchen, remodel, remodeling, bathroom, rear, adding',0,0,'C33505',1,1,1,'A9411',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this William? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('kevin-ka-kiu-ma-79',79,'Kevin Ka-Kiu','Ma','Kevin Ka-Kiu Ma','Kevin Ma Architecture','architect',5,178948,55000,'bath, remodel, interior, replace, rear, kitchen',0,0,'C29781',1,1,1,'94702',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Kevin Ka-Kiu? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('xie-xing-guan-80',80,'Xie Xing','Guan','Xie Xing Guan','Bill Xie Guan','architect',5,135722,87500,'remodel, kitchen, relocate, bathroom, interior, stair',0,0,'C32963',1,1,1,'94134',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Xie Xing? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('kyle-sheehy-81',81,'Kyle','Sheehy','Kyle Sheehy','Bb Contractor Services','pmt consultant/expediter',5,69000,50000,'remodel, kitchen, interior, bathroom, including, lighting',0,0,NULL,0,1,1,'94044',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Kyle? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & bath remodel permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('marc-dimalanta-82',82,'Marc','Dimalanta','Marc Dimalanta','D-Scheme Studio','architect',5,255833,120000,'remodel, kitchen, bathroom, interior, work, master',0,0,'C-33350',2,1,1,'94103',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Marc? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('mason-robert-kirby-83',83,'Mason Robert','Kirby','Mason Robert Kirby','Mason Kirby Inc.','architect',5,80400,22000,'wall, previously, approved, adjacent, concrete, retaining',0,0,'C029468',1,1,1,'94110',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Mason Robert? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('david-armour-84',84,'David','Armour','David Armour','David Armour Architecture','architect',5,208492,65000,'kitchen, rebuild, interior, basement, bath, revision',0,0,'C34527',1,1,1,'94117',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this David? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('joshua-larson-85',85,'Joshua','Larson','Joshua Larson','Larson Shores Arch.','architect',5,207360,120000,'bath, addition, kitchen, rear, yard, retaining',0,0,'C30627',1,1,1,'94607',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Joshua? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & bath remodel permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('ernie-selander-86',86,'Ernie','Selander','Ernie Selander','Selander Architects','architect',5,139000,125000,'interior, remodel, kitchen, stairs, rear, room',0,0,'C12715',1,1,1,'94110',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Ernie? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('emma-bahm-87',87,'Emma','Bahm','Emma Bahm','Ecr Engineering','pmt consultant/expediter',5,222712,175000,'bathroom, remodel, structural, walls, room, crawlspace',0,0,NULL,0,1,1,'94123',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Emma? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & bath remodel permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('gary-meyer-88',88,'Gary','Meyer','Gary Meyer','Wayne Myer Works Arch','architect',5,71012,70000,'remodel, kitchen, revision, reconfigure, room, relocate',0,0,'31705',3,2,1,'94608',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Gary? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('andrew-kwok-89',89,'Andrew','Kwok','Andrew Kwok','I E General Const Inc','architect / designer',5,85000,100000,'kitchen, relocate, replace, room, build, remodel',0,0,NULL,0,1,2,'94014',NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Andrew? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & wall work permits over the last couple of years.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?'),
+('damaris-rodas-90',90,'Damaris','Rodas','Damaris Rodas','Kloud B Studio Inc','pmt consultant/expediter',5,195625,61500,'like, remodel, changes, kitchen, layout, bath',0,0,NULL,0,2,0,NULL,NULL,NULL,NULL,NULL,NULL,'needs_research',NULL,'Hi, is this Damaris? My name''s Justin — I''m a homeowner doing a kitchen remodel here in San Francisco that involves opening a structural wall and correcting a plumbing defect in the main waste stack.
+
+I''ll be upfront about how I found you: I went through the SF DBI permit database, and your name came up on roughly 5 single-family kitchen & bath remodel permits over the last couple of years.
+
+I also saw you do permit expediting — someone who can walk the set through DBI is exactly what I''m after.
+
+My situation: I already have my GC and a structural engineer lined up. The piece I''m missing is a clean, permit-ready drawing set — not full-service design.
+
+Do you take permit-only / unbundled work, and would you have capacity in the next few weeks? Happy to send the scope and the engineer''s prelim — what''s the best email for that?');

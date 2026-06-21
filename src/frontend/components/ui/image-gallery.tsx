@@ -53,7 +53,7 @@ export function ImageGallery(props: ImageGalleryProps) {
 
         return (
           <ContextMenu key={item.id}>
-            <ContextMenuTrigger>
+            <ContextMenuTrigger className="block w-full">
               <button
                 type="button"
                 onClick={() => onSelect?.(item)}

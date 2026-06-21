@@ -1,0 +1,13 @@
+---
+import { BudgetDashboardApp } from "@/components/BudgetDashboardApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Budget Triage Matrix — The Monolith"
+  description="Play out budget scenarios in real-time."
+>
+  <main class="w-full max-w-full overflow-x-hidden">
+    <BudgetDashboardApp client:only="react" />
+  </main>
+</BaseLayout>

@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ClosetResearchApp } from "@/components/showroom/ClosetResearchApp";
+---
+
+<BaseLayout
+  title="Closet Research — The Monolith"
+  description="Custom closet system research: layout scenarios, vendor comparison, and ROI analysis for SF primary suite renovation."
+>
+  <ClosetResearchApp client:only="react" />
+</BaseLayout>

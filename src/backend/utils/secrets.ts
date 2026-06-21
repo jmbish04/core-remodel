@@ -73,3 +73,60 @@ export async function resolveCloudflareImagesCredentials(env: Env): Promise<{
 
   return { accountId, apiTokens };
 }
+
+
+/**
+ * Helper to fetch the Google Maps API Key.
+ * Maps to GOOGLE_MAPS_API in this worker secret binding.
+ */
+export async function getGoogleMapsApiKey(env: Env): Promise<string> {
+  if (env.GOOGLE_MAPS_API) {
+    return typeof env.GOOGLE_MAPS_API === "string"
+      ? env.GOOGLE_MAPS_API
+      : await (env.GOOGLE_MAPS_API as any).get();
+  }
+  throw new Error("Missing env.GOOGLE_MAPS_API in Worker Secret Bindings");
+}
+
+/**
+ * Helper to fetch the Google Search API Key.
+ * Maps to GOOGLE_SEARCH_API_KEY in this worker secret binding.
+ */
+export async function getGoogleSearchApiKey(env: Env): Promise<string> {
+  if (env.GOOGLE_SEARCH_API_KEY) {
+    return typeof env.GOOGLE_SEARCH_API_KEY === "string"
+      ? env.GOOGLE_SEARCH_API_KEY
+      : await (env.GOOGLE_SEARCH_API_KEY as any).get();
+  }
+  throw new Error("Missing env.GOOGLE_SEARCH_API_KEY in Worker Secret Bindings");
+}
+
+/**
+ * Helper to fetch the Fal AI API key.
+ * Used as the `Authorization: Key <token>` credential for Fal models routed through
+ * Cloudflare AI Gateway's native `/fal` provider path. Maps to FAL_API_KEY in this
+ * worker secret binding.
+ */
+export async function getFalApiKey(env: Env): Promise<string> {
+  if (env.FAL_API_KEY) {
+    return typeof env.FAL_API_KEY === "string"
+      ? env.FAL_API_KEY
+      : await (env.FAL_API_KEY as any).get();
+  }
+  throw new Error("Missing env.FAL_API_KEY in Worker Secret Bindings");
+}
+
+/**
+ * Helper to fetch the Replicate API token.
+ * Used as the `Authorization: Bearer <token>` credential for Black Forest Labs
+ * Pro/Max models (flux-depth-pro, flux-kontext-max) routed through Cloudflare AI
+ * Gateway's native `/replicate` provider path. Maps to REPLICATE_API_TOKEN.
+ */
+export async function getReplicateApiToken(env: Env): Promise<string> {
+  if (env.REPLICATE_API_TOKEN) {
+    return typeof env.REPLICATE_API_TOKEN === "string"
+      ? env.REPLICATE_API_TOKEN
+      : await (env.REPLICATE_API_TOKEN as any).get();
+  }
+  throw new Error("Missing env.REPLICATE_API_TOKEN in Worker Secret Bindings");
+}

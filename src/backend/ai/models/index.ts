@@ -14,6 +14,7 @@ import type { ModelDescriptor } from "../providers/base";
 import { aura_1 } from "./aura-1";
 import { bge_large_en_v1_5 } from "./bge-large-en-v1-5";
 import { gpt_oss_120b } from "./gpt-oss-120b";
+import { kimi_k2_6 } from "./kimi-k2.6";
 import { llama_3_1_8b } from "./llama-3-1-8b-instruct";
 import { llama_3_2_11b_vision } from "./llama-3-2-11b-vision";
 import { llama_3_3_70b } from "./llama-3-3-70b-instruct-fp8-fast";
@@ -25,6 +26,7 @@ import { whisper } from "./whisper";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const MODEL_MAP: Record<string, ModelDescriptor<any, any>> = {
+  "@cf/moonshotai/kimi-k2.6": kimi_k2_6,
   "@cf/openai/gpt-oss-120b": gpt_oss_120b,
   "@cf/meta/llama-3.3-70b-instruct-fp8-fast": llama_3_3_70b,
   "@cf/meta/llama-3.1-8b-instruct": llama_3_1_8b,
@@ -36,9 +38,9 @@ const MODEL_MAP: Record<string, ModelDescriptor<any, any>> = {
 // ---------------------------------------------------------------------------
 
 export const modelRegistry = {
-  chat: gpt_oss_120b,
-  extract: gpt_oss_120b,
-  draft: gpt_oss_120b,
+  chat: kimi_k2_6,
+  extract: kimi_k2_6,
+  draft: kimi_k2_6,
   embed: bge_large_en_v1_5,
   stt: whisper,
   tts: aura_1,
@@ -51,7 +53,7 @@ export const modelRegistry = {
 
 export function getModelRegistry(_env: Env) {
   // Static registry — model selection is fixed for this project.
-  // Vision: llama-3.2-11b-vision | Reasoning: gpt-oss-120b
+  // Vision: llama-3.2-11b-vision | Reasoning: kimi-k2.6
   return modelRegistry;
 }
 

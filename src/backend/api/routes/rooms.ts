@@ -9,6 +9,7 @@ import {
   estimateRoomMappings,
   estimateStatuses,
   estimates,
+  floors,
   images,
   inspirationalImageRooms,
   remodelScenarios,
@@ -108,6 +109,15 @@ async function ensureAccess(c: Parameters<typeof roomsRouter.get>[1]) {
   return null;
 }
 
+/**
+ * Loads full room detail, enforcing:
+ *   - C1: is_active=true (404 for inactive or unknown rooms)
+ *   - C3: hero/representative must be a listing photo only
+ *   - Inspiration split into three typed buckets:
+ *       inspirationDirect  — scope='room' images mapped via inspirational_image_rooms
+ *       inspirationLevel   — scope='level' images where scope_floor_id = this room's floor
+ *       inspirationHome    — scope='home' images (global)
+ */
 async function loadRoomDetail(env: Env, roomCode: string) {
   await ensureHomeCatalogSeed(env);
   const db = drizzle(env.DB);
@@ -126,10 +136,25 @@ async function loadRoomDetail(env: Env, roomCode: string) {
     return null;
   }
 
-  const roomRecord = await db.select().from(rooms).where(eq(rooms.id, catalogRoom.id)).get();
+  // C1: only resolve is_active=true rooms
+  const roomRecord = await db
+    .select()
+    .from(rooms)
+    .where(and(eq(rooms.id, catalogRoom.id), eq(rooms.isActive, true)))
+    .get();
   if (!roomRecord) {
     return null;
   }
+
+  // Resolve the canonical floor record so we have a stable floor_id for level-scope queries.
+  // rooms.floorId is an integer FK to floors.id.
+  const floorRecord = await db
+    .select()
+    .from(floors)
+    .where(eq(floors.id, roomRecord.floorId))
+    .get();
+
+  const roomFloorId: number | null = floorRecord?.id ?? null;
 
   const [
     listingImages,
@@ -148,6 +173,7 @@ async function loadRoomDetail(env: Env, roomCode: string) {
       .where(and(eq(images.photoCategory, "listing"), eq(images.roomId, roomRecord.id)))
       .orderBy(desc(images.datetimeCreated))
       .all(),
+    // Only room-scoped inspiration uses the join table
     db
       .select()
       .from(inspirationalImageRooms)
@@ -208,7 +234,12 @@ async function loadRoomDetail(env: Env, roomCode: string) {
   const scenarioIds = Array.from(new Set(scenarioPlanRows.map((plan) => plan.scenarioId)));
 
   const [
-    inspirationalImages,
+    // room-scoped (direct) inspiration images via inspirational_image_rooms
+    inspirationDirectImages,
+    // level-scoped inspiration: scope='level' AND scope_floor_id = this room's floor
+    inspirationLevelImages,
+    // home-scoped inspiration: scope='home' (applies to all rooms)
+    inspirationHomeImages,
     documentRows,
     nodeRows,
     nodeImageRows,
@@ -221,10 +252,36 @@ async function loadRoomDetail(env: Env, roomCode: string) {
       ? db
           .select()
           .from(images)
-          .where(inArray(images.id, inspirationImageIds))
+          .where(
+            and(
+              inArray(images.id, inspirationImageIds),
+              eq(images.inspirationScope, "room"),
+            ),
+          )
           .orderBy(desc(images.datetimeCreated))
           .all()
       : Promise.resolve([]),
+    // Level-scoped: no join table row needed; query by scope + floor
+    roomFloorId !== null
+      ? db
+          .select()
+          .from(images)
+          .where(
+            and(
+              eq(images.inspirationScope, "level"),
+              eq(images.scopeFloorId, roomFloorId),
+            ),
+          )
+          .orderBy(desc(images.datetimeCreated))
+          .all()
+      : Promise.resolve([]),
+    // Home-scoped: no floor filter
+    db
+      .select()
+      .from(images)
+      .where(eq(images.inspirationScope, "home"))
+      .orderBy(desc(images.datetimeCreated))
+      .all(),
     documentIds.length > 0
       ? db
           .select()
@@ -375,10 +432,24 @@ async function loadRoomDetail(env: Env, roomCode: string) {
     };
   });
 
+  /**
+   * C3: hero/representative must be a listing photo only.
+   * Fallback chain: representativeImageId (if listing) → first listing image → null.
+   * An inspiration photo must NEVER be a hero candidate.
+   */
   const representativeImage =
     (summaryRow?.representativeImageId
       ? listingImages.find((image) => image.id === summaryRow.representativeImageId) || null
       : null) || listingImages[0] || null;
+
+  /**
+   * Map each inspiration image to include inspirationCategory in the payload.
+   * This is the field the /review categorization endpoints write to.
+   */
+  const mapInspirationImage = (img: typeof images.$inferSelect) => ({
+    ...img,
+    inspirationCategory: img.inspirationCategory ?? null,
+  });
 
   return {
     room: {
@@ -386,6 +457,7 @@ async function loadRoomDetail(env: Env, roomCode: string) {
       displayName: catalogRoom.displayName,
       floorKey: catalogRoom.floorKey,
       floorName: catalogRoom.floorName,
+      floorId: roomFloorId,
       dimensionLabel: formatRoomDimensions(roomRecord),
     },
     summary: summaryRow
@@ -396,7 +468,21 @@ async function loadRoomDetail(env: Env, roomCode: string) {
       : null,
     representativeImage,
     listingImages,
-    inspirationalImages,
+    /**
+     * Three inspiration buckets (replaces flat inspirationalImages):
+     *   inspirationDirect  — scope='room' images explicitly mapped to this room via
+     *                        inspirational_image_rooms. Show prominently.
+     *   inspirationLevel   — scope='level' images applied to this room's whole floor.
+     *                        Render in collapsed "Applies to whole level" appendix.
+     *   inspirationHome    — scope='home' images applied to the entire home.
+     *                        Render in collapsed "Applies to whole home" appendix.
+     * Each image includes `inspirationCategory` (nullable string).
+     */
+    inspirationDirect: inspirationDirectImages.map(mapInspirationImage),
+    inspirationLevel: inspirationLevelImages.map(mapInspirationImage),
+    inspirationHome: inspirationHomeImages.map(mapInspirationImage),
+    /** Legacy flat array — kept for backward compat; equals inspirationDirect only. */
+    inspirationalImages: inspirationDirectImages.map(mapInspirationImage),
     supportingDocuments: documentRows.map((document) => ({
       ...document,
       tags: parseStringArray(document.tagsJson),
@@ -516,13 +602,57 @@ async function upsertRoomSummary(
     .get();
 }
 
+/**
+ * GET /catalog
+ *
+ * Returns the full home catalog: all floors with their rooms, enriched with
+ * per-room aggregate stats so the floor-plan dot hover-card (T2.1, Phase 2)
+ * needs no additional fetch.
+ *
+ * Response shape (stable contract for cf-frontend-engineer):
+ * {
+ *   success: true,
+ *   floors: [
+ *     {
+ *       id: number,
+ *       key: string,          // e.g. "lower_level" | "upper_level" | "outside"
+ *       name: string,
+ *       levelOrder: number,
+ *       rooms: [
+ *         {
+ *           id: number,
+ *           roomCode: string,     // stable kebab-case slug
+ *           roomName: string,     // raw DB name
+ *           displayName: string,  // disambiguated display name
+ *           floorplanFloorKey: string | null,  // canvas floor key
+ *           floorplanXPct: number | null,      // 0–100; null = no dot
+ *           floorplanYPct: number | null,      // 0–100; null = no dot
+ *           listingCount: number,     // photo_category='listing' images for this room
+ *           inspirationCount: number, // inspirational_image_rooms entries for this room
+ *           heroImageUrl: string | null,
+ *           dimensions: string | null, // e.g. "15'0\" x 24'10\""
+ *           sqft: number | null,
+ *           // … all other rooms columns (asIsUse, isLivingSpace, notes, dims, etc.)
+ *         }
+ *       ]
+ *     }
+ *   ],
+ *   rooms: Array  // flat backward-compatible array (all columns, no enrichment)
+ * }
+ *
+ * Backward compatibility: the flat `rooms` array at the top level is preserved
+ * for any caller that was iterating it directly (e.g. RoomViewApp room lookups).
+ * New callers should consume `floors[].rooms` which carries all the T2.1 fields.
+ */
 roomsRouter.get("/catalog", async (c) => {
   try {
     await ensureHomeCatalogSeed(c.env);
     const catalog = await getHomeCatalog(c.env);
     return c.json({
       success: true,
-      ...catalog,
+      floors: catalog.floors,
+      // Backward-compatible flat rooms array (columns only, no enrichment).
+      rooms: catalog.rooms,
     });
   } catch (error) {
     return c.json(
@@ -551,7 +681,11 @@ roomsRouter.get("/code/:roomCode/detail", async (c) => {
       ...detail,
       roomStats: {
         listingPhotoCount: detail.listingImages.length,
-        inspirationPhotoCount: detail.inspirationalImages.length,
+        // Direct inspiration (room-scoped) count — used for the room badge
+        inspirationPhotoCount: detail.inspirationDirect.length,
+        // Broad-scope counts (shown separately, collapsed by default)
+        inspirationLevelCount: detail.inspirationLevel.length,
+        inspirationHomeCount: detail.inspirationHome.length,
         supportingDocumentCount: detail.supportingDocuments.length,
         actionItemCount: detail.actionItems.length,
         visionNodeCount: detail.visionNodes.length,
@@ -668,7 +802,12 @@ roomsRouter.post("/code/:roomCode/summary", async (c) => {
         hvacNotes: detail.room.hvacNotes,
       },
       listingImages: detail.listingImages,
-      inspirationalImages: detail.inspirationalImages,
+      // Pass all inspiration buckets merged for summary context
+      inspirationalImages: [
+        ...detail.inspirationDirect,
+        ...detail.inspirationLevel,
+        ...detail.inspirationHome,
+      ],
       supportingDocuments: detail.supportingDocuments,
       actionItems: detail.actionItems,
       scenarioPlans: detail.scenarioPlans,

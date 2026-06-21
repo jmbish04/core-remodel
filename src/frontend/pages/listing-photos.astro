@@ -1,14 +1,14 @@
 ---
-import { PhotoLibraryApp } from "@/components/PhotoLibraryApp";
+import { PhotoCollectionApp } from "@/components/photo-collection/PhotoCollectionApp";
 import BaseLayout from "@/layouts/BaseLayout.astro";
 ---
 
 <BaseLayout
   title="Listing Photos - 126 Colby - Remodel Mission Control"
-  description="Manage listing-focused photos with room metadata and crop editing"
+  description="Browse listing photos organized by room — captured from the original property listing."
 >
   <div class="pt-[1px]">
-    <PhotoLibraryApp
+    <PhotoCollectionApp
       client:only="react"
       category="listing"
       title="Listing Photos"

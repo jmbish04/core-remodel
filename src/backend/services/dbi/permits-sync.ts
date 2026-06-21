@@ -25,6 +25,7 @@ import {
 
 import {
   coerceLatLong,
+  derivePermitLifecycle,
   escapeSoqlLiteral,
   extractFieldValue,
   fetchDatasetMetadata,
@@ -39,6 +40,7 @@ import {
   stableSortObject,
   statusToCategory,
   type DatasetMetadata,
+  type PermitLifecycle,
   type SodaRow,
 } from "./soda";
 import { PERMIT_DATASETS, TRADES, type Trade } from "./datasets";
@@ -100,6 +102,10 @@ export type PermitsDashboard = {
     lastViewedHash: string | null;
     needsReview: boolean;
     isClosed: boolean;
+    ownerClosed: boolean;
+    ownerCloseNote: string | null;
+    ownerClosedAt: Date | null;
+    lifecycleStatus: PermitLifecycle;
   }>;
   contactInsights: Array<typeof permitsContactInsights.$inferSelect>;
 };
@@ -107,6 +113,7 @@ export type PermitsDashboard = {
 type PermitDetail = {
   permitIdentifier: string;
   needsReview: boolean;
+  lifecycleStatus: PermitLifecycle;
   records: Array<typeof permitsRecords.$inferSelect>;
   revisions: Array<typeof permitsRecordRevisions.$inferSelect>;
   viewed: typeof permitsIdentifierViews.$inferSelect | null;
@@ -581,7 +588,14 @@ export async function runPermitSync(env: Env): Promise<{
     const permitNumber = row.permitNumber || row.permitIdentifier;
     if (!permitNumber) continue;
     targetPermitNumbers.add(permitNumber);
-    if (!row.isClosed && TRADES.includes(row.dataset as Trade)) {
+    const lifecycle = derivePermitLifecycle({
+      statusCategory: row.statusCategory,
+      closedDate: row.closedDate,
+      ownerClosed: Boolean(row.ownerClosed),
+      filedDate: row.filedDate,
+      issuedDate: row.issuedDate,
+    });
+    if (lifecycle === "active" && TRADES.includes(row.dataset as Trade)) {
       anchors.push({
         trade: row.dataset as Trade,
         permitNumber,
@@ -681,6 +695,16 @@ async function hydratePropertyPermitRows(
       lastViewedHash: view?.lastViewedHash || null,
       needsReview,
       isClosed: Boolean(first.isClosed),
+      ownerClosed: Boolean(first.ownerClosed),
+      ownerCloseNote: first.ownerCloseNote ?? null,
+      ownerClosedAt: first.ownerClosedAt ?? null,
+      lifecycleStatus: derivePermitLifecycle({
+        statusCategory: first.statusCategory,
+        closedDate: first.closedDate,
+        ownerClosed: Boolean(first.ownerClosed),
+        filedDate: first.filedDate,
+        issuedDate: first.issuedDate,
+      }),
     };
   });
 }
@@ -739,7 +763,14 @@ export async function getPermitDetail(
 
   const latestHash = records[0].changeHash || null;
   const needsReview = Boolean(latestHash && latestHash !== (viewed?.lastViewedHash || null));
-  return { permitIdentifier: normalized, needsReview, records, revisions, viewed: viewed || null };
+  const lifecycleStatus = derivePermitLifecycle({
+    statusCategory: records[0].statusCategory,
+    closedDate: records[0].closedDate,
+    ownerClosed: Boolean(records[0].ownerClosed),
+    filedDate: records[0].filedDate,
+    issuedDate: records[0].issuedDate,
+  });
+  return { permitIdentifier: normalized, needsReview, lifecycleStatus, records, revisions, viewed: viewed || null };
 }
 
 export async function markPermitViewed(
@@ -787,6 +818,33 @@ export async function markPermitViewed(
     .run();
 
   return { success: true, permitIdentifier: normalized };
+}
+
+export async function closePermit(
+  env: Env,
+  permitIdentifier: string,
+  note: string,
+  closedBy: string,
+): Promise<PermitDetail | null> {
+  const db = drizzle(env.DB);
+  const normalized = permitIdentifier.trim();
+  const trimmedNote = note.trim();
+  if (!normalized) throw new Error("permitIdentifier is required");
+  if (!trimmedNote) throw new Error("A closing note is required");
+
+  await db
+    .update(permitsRecords)
+    .set({
+      ownerClosed: true,
+      ownerCloseNote: trimmedNote,
+      ownerClosedAt: new Date(),
+      ownerClosedBy: closedBy,
+      datetimeUpdated: new Date(),
+    })
+    .where(eq(permitsRecords.permitIdentifier, normalized))
+    .run();
+
+  return getPermitDetail(env, normalized);
 }
 
 // ---------------------------------------------------------------------------

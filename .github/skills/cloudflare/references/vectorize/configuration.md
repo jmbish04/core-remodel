@@ -3,10 +3,22 @@
 ## Create Index
 
 ```bash
-npx wrangler vectorize create my-index --dimensions=768 --metric=cosine
+# Standard 1536 dimension index accepting concatenated multi-modal BGE + Gemma embeddings
+npx wrangler vectorize create remodel-embeddings --dimensions=1536 --metric=dotproduct
 ```
 
 **⚠️ Dimensions and metric are immutable** - cannot change after creation.
+
+### Dimensional Ceiling & Pooled Embeddings
+To accommodate multi-perspective pooled spaces, vectors from distinct models (e.g. BGE 768d + Gemma 768d) are concatenated back-to-back into a unified 1536-dimensional float allocation.
+
+### Search Metrics & Similarity
+* Since vectors are **pre-normalized** to unit length inside the processing pipeline loop, **dotproduct** and **cosine** metrics yield mathematically identical similarity rankings. 
+* Pre-normalization followed by `dotproduct` similarity is highly recommended for optimal performance on Vectorize.
+
+### Float Allocation
+* All array inputs to Vectorize must be explicitly mapped to standard single-precision floats. Convert any inputs to `Float32Array` or map them to guarantee standard `Float32` allocation before passing to `vectorIndex.upsert()` or `vectorIndex.query()`.
+
 
 ## Worker Binding
 

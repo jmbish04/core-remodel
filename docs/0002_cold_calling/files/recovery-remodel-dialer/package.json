@@ -1,0 +1,31 @@
+{
+  "name": "recovery-remodel-dialer",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "pnpm run db:generate && pnpm run migrate:remote && pnpm run seed:remote && wrangler deploy",
+    "cf-typegen": "wrangler types",
+    "db:generate": "drizzle-kit generate",
+    "migrate:local": "wrangler d1 migrations apply recovery_remodel_dialer --local",
+    "migrate:remote": "wrangler d1 migrations apply recovery_remodel_dialer --remote",
+    "seed:local": "wrangler d1 execute recovery_remodel_dialer --local --file=./seed/seed.sql",
+    "seed:remote": "wrangler d1 execute recovery_remodel_dialer --remote --file=./seed/seed.sql",
+    "lint": "oxlint .",
+    "format": "oxfmt -w ."
+  },
+  "dependencies": {
+    "@hono/swagger-ui": "^0.5.0",
+    "@hono/zod-openapi": "^0.18.3",
+    "@scalar/hono-api-reference": "^0.5.165",
+    "drizzle-orm": "^0.36.4",
+    "hono": "^4.6.14",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.28.1",
+    "oxlint": "^0.15.0",
+    "wrangler": "^3.90.0"
+  }
+}

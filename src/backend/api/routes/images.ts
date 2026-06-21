@@ -2,13 +2,13 @@
  * @fileoverview Images API routes for remodel mood board
  */
 
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
-
-
 import {
+  aiEdits,
+  floors,
   imageUploadStaging,
   imageReviewHighlights,
   imageReviews,
@@ -23,16 +23,124 @@ import {
   buildImageUploadFingerprint,
   buildUploadFingerprintKey,
   findDuplicateImageByFingerprint,
-} from "@backend/services/image-deduplication";
+} from "@/services/image-processor/deduplication";
 import { ensureHomeCatalogSeed } from "@backend/services/home-catalog";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import {
   ImageProcessorService,
   type PhotoCategory,
 } from "../../services/image-processor";
-import type { ImageProcessingWorkflowParams } from "../../services/image-workflow";
+import type { ImageProcessingWorkflowParams } from "../../services/image-processor/workflow";
 
 const imagesRouter = new Hono<{ Bindings: Env }>();
+
+// ---------------------------------------------------------------------------
+// Inspiration scope + category constants
+// ---------------------------------------------------------------------------
+
+/**
+ * Valid inspiration scope values stored in images.inspiration_scope.
+ *   "room"  — tied to specific rooms via inspirational_image_rooms (default)
+ *   "level" — applies to every active room on a floor; scopeFloorId must be set
+ *   "home"  — applies to all active rooms; no per-room rows
+ */
+const VALID_INSPIRATION_SCOPES = ["room", "level", "home"] as const;
+type InspirationScope = (typeof VALID_INSPIRATION_SCOPES)[number];
+
+/**
+ * Canonical inspiration category list used for AI suggestion and /review UI.
+ * This list is the single source of truth — the frontend must derive its
+ * category picker from this list via the API contract.
+ */
+const INSPIRATION_CATEGORIES = [
+  "Interior Doors",
+  "Lighting",
+  "Light Switches",
+  "Drywall Finishes",
+  "Flooring",
+  "Paint Colors",
+  "Trim/Baseboards",
+  "Hardware",
+  "Tile",
+  "Countertops",
+  "Cabinets",
+  "Other",
+] as const;
+type InspirationCategory = (typeof INSPIRATION_CATEGORIES)[number];
+
+function isValidInspirationScope(value: unknown): value is InspirationScope {
+  return (
+    typeof value === "string" &&
+    (VALID_INSPIRATION_SCOPES as readonly string[]).includes(value)
+  );
+}
+
+function isValidInspirationCategory(value: unknown): value is InspirationCategory {
+  return (
+    typeof value === "string" &&
+    (INSPIRATION_CATEGORIES as readonly string[]).includes(value)
+  );
+}
+
+/**
+ * Suggests an inspiration category for an image using Workers AI vision.
+ * Returns one of the INSPIRATION_CATEGORIES strings, or null on failure.
+ * Does NOT persist the result — the caller decides whether to PATCH.
+ */
+async function suggestInspirationCategory(
+  env: Env,
+  imageDeliveryUrl: string,
+): Promise<InspirationCategory | null> {
+  const categoryList = INSPIRATION_CATEGORIES.join(", ");
+  const prompt = `You are helping categorize a home remodel inspiration photo.
+
+Look at this image and classify it into exactly ONE of the following categories:
+${categoryList}
+
+Rules:
+- Return ONLY the category name, nothing else.
+- If the image could fit multiple categories, choose the most prominent one.
+- If none of the categories fit, return "Other".
+- Do not include punctuation, quotes, or explanation.`;
+
+  try {
+    const raw = await env.AI.run(
+      "@cf/meta/llama-3.3-70b-instruct-fp8-fast" as Parameters<typeof env.AI.run>[0],
+      {
+        messages: [
+          {
+            role: "user",
+            content: [
+              { type: "text", text: prompt },
+              { type: "image_url", image_url: { url: imageDeliveryUrl } },
+            ],
+          },
+        ],
+        max_tokens: 32,
+      } as Parameters<typeof env.AI.run>[1],
+    );
+
+    const response =
+      raw && typeof raw === "object" && "response" in raw
+        ? String((raw as Record<string, unknown>).response ?? "").trim()
+        : "";
+
+    // Normalise the response: strip quotes/punctuation, trim, find match
+    const cleaned = response.replace(/^["']|["']$/g, "").trim();
+    if (isValidInspirationCategory(cleaned)) {
+      return cleaned;
+    }
+    // Case-insensitive fallback
+    const matched = INSPIRATION_CATEGORIES.find(
+      (cat) => cat.toLowerCase() === cleaned.toLowerCase(),
+    );
+    return matched ?? "Other";
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
 
 type HighlightType = "like" | "dislike";
 type ProcessingStatus = "queued" | "processing" | "processed" | "failed";
@@ -65,6 +173,40 @@ interface UploadResult {
   workflowInstanceId?: string;
   processingStatus?: ProcessingStatus;
   image?: typeof images.$inferSelect | null;
+}
+
+async function chunkQuery<T, I>(
+  items: I[],
+  queryFn: (chunk: I[]) => Promise<T[]>,
+  chunkSize: number = 90,
+): Promise<T[]> {
+  if (items.length === 0) {
+    return [];
+  }
+  const results: T[] = [];
+  for (let i = 0; i < items.length; i += chunkSize) {
+    const chunk = items.slice(i, i + chunkSize);
+    if (chunk.length > 0) {
+      results.push(...(await queryFn(chunk)));
+    }
+  }
+  return results;
+}
+
+async function chunkExecute<I>(
+  items: I[],
+  executeFn: (chunk: I[]) => Promise<unknown>,
+  chunkSize: number = 90,
+): Promise<void> {
+  if (items.length === 0) {
+    return;
+  }
+  for (let i = 0; i < items.length; i += chunkSize) {
+    const chunk = items.slice(i, i + chunkSize);
+    if (chunk.length > 0) {
+      await executeFn(chunk);
+    }
+  }
 }
 
 function slugifyTag(value: string): string {
@@ -260,7 +402,10 @@ function toMappingCategory(
 
 function getImageDeliveryUrl(
   image:
-    | Pick<typeof images.$inferSelect, "cfImageIdOptimized" | "cfImageIdOriginal">
+    | Pick<
+        typeof images.$inferSelect,
+        "cfImageIdOptimized" | "cfImageIdOriginal"
+      >
     | null
     | undefined,
 ): string | null {
@@ -288,28 +433,41 @@ async function syncImageUploadStagingRows(
     mapped: boolean;
   }>,
 ): Promise<void> {
-  for (const row of rows) {
-    await db
-      .insert(imageUploadStaging)
-      .values({
-        imageId: row.imageId,
-        photoCategory: row.photoCategory,
-        mappingStatus: row.mapped ? "mapped" : "pending",
-        processingStatus: "processed",
-        datetimeProcessingStarted: new Date(),
-        datetimeProcessed: new Date(),
-        datetimeMapped: row.mapped ? new Date() : null,
-      })
-      .onConflictDoUpdate({
-        target: imageUploadStaging.imageId,
-        set: {
-          photoCategory: row.photoCategory,
-          mappingStatus: row.mapped ? "mapped" : "pending",
-          datetimeMapped: row.mapped ? new Date() : null,
-        },
-      })
-      .run();
-  }
+  if (rows.length === 0) return;
+
+  // Batch upserts in chunks instead of one-by-one to cut D1 round-trips
+  await chunkExecute(
+    rows,
+    async (chunk) => {
+      const statements = chunk.map((row) =>
+        db
+          .insert(imageUploadStaging)
+          .values({
+            imageId: row.imageId,
+            photoCategory: row.photoCategory,
+            mappingStatus: row.mapped ? "mapped" : "pending",
+            processingStatus: "processed",
+            datetimeProcessingStarted: new Date(),
+            datetimeProcessed: new Date(),
+            datetimeMapped: row.mapped ? new Date() : null,
+          })
+          .onConflictDoUpdate({
+            target: imageUploadStaging.imageId,
+            set: {
+              photoCategory: row.photoCategory,
+              mappingStatus: row.mapped ? "mapped" : "pending",
+              datetimeMapped: row.mapped ? new Date() : null,
+            },
+          }),
+      );
+      // Batch the chunk's single-row upserts in one D1 round-trip. The chunk size (20)
+      // keeps each batch well under D1's 100-bound-parameter-per-query limit.
+      if (statements.length > 0) {
+        await db.batch(statements as [(typeof statements)[number], ...(typeof statements)[number][]]);
+      }
+    },
+    20,
+  );
 }
 
 function buildWorkflowInstanceId(imageId: string): string {
@@ -325,17 +483,19 @@ async function getUploadProcessingByImageIds(
     return result;
   }
 
-  const stagingRows = await db
-    .select({
-      imageId: imageUploadStaging.imageId,
-      processingStatus: imageUploadStaging.processingStatus,
-      workflowInstanceId: imageUploadStaging.workflowInstanceId,
-      processingError: imageUploadStaging.processingError,
-      processedAt: imageUploadStaging.datetimeProcessed,
-    })
-    .from(imageUploadStaging)
-    .where(inArray(imageUploadStaging.imageId, imageIds))
-    .all();
+  const stagingRows = await chunkQuery(imageIds, async (chunk) => {
+    return await db
+      .select({
+        imageId: imageUploadStaging.imageId,
+        processingStatus: imageUploadStaging.processingStatus,
+        workflowInstanceId: imageUploadStaging.workflowInstanceId,
+        processingError: imageUploadStaging.processingError,
+        processedAt: imageUploadStaging.datetimeProcessed,
+      })
+      .from(imageUploadStaging)
+      .where(inArray(imageUploadStaging.imageId, chunk))
+      .all();
+  });
 
   for (const row of stagingRows) {
     result.set(row.imageId, {
@@ -379,10 +539,16 @@ async function ensureTags(
     .run();
 
   const slugs = normalized.map((tag) => tag.slug);
-  return db.select().from(imageTags).where(inArray(imageTags.slug, slugs)).all();
+  return db
+    .select()
+    .from(imageTags)
+    .where(inArray(imageTags.slug, slugs))
+    .all();
 }
 
-function extractTagsFromMetadata(metadataRaw: string | null | undefined): string[] {
+function extractTagsFromMetadata(
+  metadataRaw: string | null | undefined,
+): string[] {
   if (!metadataRaw) return [];
   try {
     const metadata = JSON.parse(metadataRaw) as Record<string, unknown>;
@@ -401,14 +567,24 @@ async function getTagMappingsByImageIds(
     return result;
   }
 
-  const mappings = await db
-    .select()
-    .from(imageTagMappings)
-    .where(inArray(imageTagMappings.imageId, imageIds))
-    .all();
+  const mappings = await chunkQuery(imageIds, async (chunk) => {
+    return await db
+      .select()
+      .from(imageTagMappings)
+      .where(inArray(imageTagMappings.imageId, chunk))
+      .all();
+  });
   const tagIds = Array.from(new Set(mappings.map((mapping) => mapping.tagId)));
   const tags =
-    tagIds.length > 0 ? await db.select().from(imageTags).where(inArray(imageTags.id, tagIds)).all() : [];
+    tagIds.length > 0
+      ? await chunkQuery(tagIds, async (chunk) => {
+          return await db
+            .select()
+            .from(imageTags)
+            .where(inArray(imageTags.id, chunk))
+            .all();
+        })
+      : [];
   const tagById = new Map(tags.map((tag) => [tag.id, tag]));
 
   for (const mapping of mappings) {
@@ -436,16 +612,21 @@ async function getHighlightsByImageIds(
   db: ReturnType<typeof drizzle>,
   imageIds: string[],
 ): Promise<Map<string, Array<typeof imageReviewHighlights.$inferSelect>>> {
-  const result = new Map<string, Array<typeof imageReviewHighlights.$inferSelect>>();
+  const result = new Map<
+    string,
+    Array<typeof imageReviewHighlights.$inferSelect>
+  >();
   if (imageIds.length === 0) {
     return result;
   }
 
-  const highlights = await db
-    .select()
-    .from(imageReviewHighlights)
-    .where(inArray(imageReviewHighlights.imageId, imageIds))
-    .all();
+  const highlights = await chunkQuery(imageIds, async (chunk) => {
+    return await db
+      .select()
+      .from(imageReviewHighlights)
+      .where(inArray(imageReviewHighlights.imageId, chunk))
+      .all();
+  });
 
   for (const highlight of highlights) {
     const next = result.get(highlight.imageId) || [];
@@ -463,7 +644,10 @@ async function replaceImageTagMappings(
   source: "manual" | "ai_prefill",
   rationaleBySlug?: Map<string, string>,
 ): Promise<void> {
-  await db.delete(imageTagMappings).where(eq(imageTagMappings.imageId, imageId)).run();
+  await db
+    .delete(imageTagMappings)
+    .where(eq(imageTagMappings.imageId, imageId))
+    .run();
   if (tagRows.length === 0) {
     return;
   }
@@ -482,7 +666,9 @@ async function replaceImageTagMappings(
     .run();
 }
 
-function extractCloudflareImageId(value: string | null | undefined): string | null {
+function extractCloudflareImageId(
+  value: string | null | undefined,
+): string | null {
   if (!value) {
     return null;
   }
@@ -532,7 +718,8 @@ async function hydrateMissingDeliveryTokensForImages(params: {
       continue;
     }
 
-    const candidateImageId = image.cfImageIdOptimized || image.cfImageIdOriginal;
+    const candidateImageId =
+      image.cfImageIdOptimized || image.cfImageIdOriginal;
     if (!candidateImageId) {
       continue;
     }
@@ -611,7 +798,18 @@ async function hydrateMissingDeliveryTokensForImages(params: {
 
 /**
  * POST /api/images/upload
- * Upload images and enqueue background AI analysis
+ * Upload images and enqueue background AI analysis.
+ *
+ * Scope-aware fields (inspirational uploads only):
+ *   scope   — "room" | "level" | "home" (default "room")
+ *   floorId — integer floor ID; required when scope="level"
+ *
+ * Scope storage rules (0005 REVISIONS — stops fan-out):
+ *   scope="room"  → insert per-room rows in inspirational_image_rooms (only active rooms)
+ *   scope="level" → set inspiration_scope="level" + scope_floor_id=floorId; no per-room rows
+ *   scope="home"  → set inspiration_scope="home"; no per-room rows
+ *
+ * C2: room-scoped uploads reject inactive/unknown room IDs.
  */
 imagesRouter.post("/upload", async (c) => {
   try {
@@ -656,41 +854,106 @@ imagesRouter.post("/upload", async (c) => {
     const db = drizzle(c.env.DB);
     await ensureHomeCatalogSeed(c.env);
 
+    // --- Inspiration scope resolution ---
+    const rawScope = formData.get("scope");
+    const inspirationScope: InspirationScope =
+      isValidInspirationScope(rawScope) ? rawScope : "room";
+
+    const rawFloorId = formData.get("floorId");
+    const requestedFloorId =
+      typeof rawFloorId === "string" && rawFloorId.trim()
+        ? Math.trunc(Number(rawFloorId.trim()))
+        : null;
+
+    // Validate scope=level requires a floorId
+    if (
+      photoCategory === "inspirational" &&
+      inspirationScope === "level" &&
+      (requestedFloorId === null || !Number.isFinite(requestedFloorId) || requestedFloorId <= 0)
+    ) {
+      return c.json(
+        { error: "floorId is required when scope is 'level'" },
+        400,
+      );
+    }
+
+    // Verify floor exists when scope=level
+    let resolvedFloorId: number | null = null;
+    if (photoCategory === "inspirational" && inspirationScope === "level" && requestedFloorId) {
+      const floorRecord = await db
+        .select()
+        .from(floors)
+        .where(eq(floors.id, requestedFloorId))
+        .get();
+      if (!floorRecord) {
+        return c.json({ error: "Floor not found" }, 404);
+      }
+      resolvedFloorId = floorRecord.id;
+    }
+
     const requestedRoomId = parseRoomIdInput(formData.get("roomId"));
+    // C2: listing photos must map to an active room
     const selectedRoom = requestedRoomId
-      ? await db.select().from(rooms).where(eq(rooms.id, requestedRoomId)).get()
+      ? await db
+          .select()
+          .from(rooms)
+          .where(and(eq(rooms.id, requestedRoomId), eq(rooms.isActive, true)))
+          .get()
       : null;
-    const requestedInspirationalRoomIds = parseRoomIds(formData.getAll("roomIds"));
+
+    // For room-scoped inspirational uploads, validate that all target rooms are active
+    const requestedInspirationalRoomIds =
+      inspirationScope === "room"
+        ? parseRoomIds(formData.getAll("roomIds"))
+        : [];
     const selectedInspirationalRooms =
       requestedInspirationalRoomIds.length > 0
         ? await db
             .select()
             .from(rooms)
-            .where(inArray(rooms.id, requestedInspirationalRoomIds))
+            .where(
+              and(
+                inArray(rooms.id, requestedInspirationalRoomIds),
+                eq(rooms.isActive, true),
+              ),
+            )
             .all()
         : [];
 
     if (photoCategory === "listing" && requestedRoomId && !selectedRoom) {
-      return c.json({ error: "Selected room was not found" }, 404);
+      return c.json(
+        { error: "Selected room was not found or is not an active room" },
+        404,
+      );
     }
     if (
       photoCategory === "inspirational" &&
+      inspirationScope === "room" &&
       requestedInspirationalRoomIds.length > 0 &&
       selectedInspirationalRooms.length !== requestedInspirationalRoomIds.length
     ) {
-      return c.json({ error: "One or more selected inspirational rooms were not found" }, 404);
+      return c.json(
+        { error: "One or more selected inspirational rooms were not found or are inactive" },
+        404,
+      );
     }
 
     const roomHint =
-      selectedRoom?.roomName ||
-      selectedInspirationalRooms[0]?.roomName ||
-      null;
+      selectedRoom?.roomName || selectedInspirationalRooms[0]?.roomName || null;
     const mappingCategory = toMappingCategory(photoCategory, isListingPhoto);
+
+    // level/home-scoped photos are considered "mapped" immediately (no per-room rows needed)
     const mappedOnUpload =
       photoCategory === "listing"
         ? Boolean(selectedRoom)
-        : selectedInspirationalRooms.length > 0;
-    const selectedInspirationalRoomIds = selectedInspirationalRooms.map((room) => room.id);
+        : inspirationScope === "level" || inspirationScope === "home"
+          ? true
+          : selectedInspirationalRooms.length > 0;
+
+    const selectedInspirationalRoomIds = selectedInspirationalRooms.map(
+      (room) => room.id,
+    );
+    const batchItems: ImageProcessingWorkflowParams[] = [];
     const results: UploadResult[] = [];
     const requestFingerprintKeys = new Set<string>();
 
@@ -700,7 +963,8 @@ imagesRouter.post("/upload", async (c) => {
 
       try {
         const uploadFingerprint = await buildImageUploadFingerprint(file);
-        const requestFingerprintKey = buildUploadFingerprintKey(uploadFingerprint);
+        const requestFingerprintKey =
+          buildUploadFingerprintKey(uploadFingerprint);
 
         if (requestFingerprintKeys.has(requestFingerprintKey)) {
           results.push({
@@ -713,7 +977,10 @@ imagesRouter.post("/upload", async (c) => {
         }
         requestFingerprintKeys.add(requestFingerprintKey);
 
-        const duplicateImage = await findDuplicateImageByFingerprint(db, uploadFingerprint);
+        const duplicateImage = await findDuplicateImageByFingerprint(
+          db,
+          uploadFingerprint,
+        );
         if (duplicateImage) {
           results.push({
             success: false,
@@ -735,14 +1002,16 @@ imagesRouter.post("/upload", async (c) => {
           uploadResponse,
           uploadResponse.result.id,
         );
-        const deliveryToken = ImageProcessorService.extractDeliveryTokenFromUrl(deliveryUrl);
+        const deliveryToken =
+          ImageProcessorService.extractDeliveryTokenFromUrl(deliveryUrl);
 
         if (!deliveryToken) {
           throw new Error("Failed to derive Cloudflare Images delivery token");
         }
 
         const workflowInstanceId = buildWorkflowInstanceId(imageId);
-        const displayName = ImageProcessorService.deriveDisplayNameFromFilename(filename);
+        const displayName =
+          ImageProcessorService.deriveDisplayNameFromFilename(filename);
         const initialMetadata = JSON.stringify({
           deliveryUrl,
           deliveryToken,
@@ -750,8 +1019,9 @@ imagesRouter.post("/upload", async (c) => {
           uploadFingerprint,
         });
 
-        const insertedImage = await db.transaction(async (tx) => {
-          await tx
+        let insertedImage: typeof images.$inferSelect | undefined;
+        try {
+          await db
             .insert(images)
             .values({
               id: imageId,
@@ -759,19 +1029,29 @@ imagesRouter.post("/upload", async (c) => {
               cfImageIdOriginal: deliveryToken,
               cfImageIdOptimized: null,
               photoCategory,
-              roomId: photoCategory === "listing" ? selectedRoom?.id ?? null : null,
+              roomId:
+                photoCategory === "listing" ? (selectedRoom?.id ?? null) : null,
               roomType: roomHint,
               metadata: initialMetadata,
               isListingPhoto: photoCategory === "listing",
               sourceFilename: uploadFingerprint.sourceFilename,
-              sourceFilenameNormalized: uploadFingerprint.sourceFilenameNormalized,
+              sourceFilenameNormalized:
+                uploadFingerprint.sourceFilenameNormalized,
               sourceFileSize: uploadFingerprint.sourceFileSize,
               sourceFileMd5: uploadFingerprint.sourceFileMd5,
+              // Scope fields (0005 REVISIONS)
+              inspirationScope: photoCategory === "inspirational" ? inspirationScope : "room",
+              scopeFloorId: resolvedFloorId,
             })
             .run();
 
-          if (photoCategory === "inspirational" && selectedInspirationalRoomIds.length > 0) {
-            await tx
+          // Only insert per-room rows for room-scoped inspiration (C2 + no fan-out rule)
+          if (
+            photoCategory === "inspirational" &&
+            inspirationScope === "room" &&
+            selectedInspirationalRoomIds.length > 0
+          ) {
+            await db
               .insert(inspirationalImageRooms)
               .values(
                 selectedInspirationalRoomIds.map((roomId) => ({
@@ -783,7 +1063,7 @@ imagesRouter.post("/upload", async (c) => {
               .run();
           }
 
-          await tx
+          await db
             .insert(imageUploadStaging)
             .values({
               imageId,
@@ -805,12 +1085,25 @@ imagesRouter.post("/upload", async (c) => {
             })
             .run();
 
-          return tx
+          insertedImage = await db
             .select()
             .from(images)
             .where(eq(images.id, imageId))
             .get();
-        });
+        } catch (persistError) {
+          // D1 in Workers does not support SQL BEGIN/SAVEPOINT transactions.
+          // Apply a best-effort rollback to keep related rows consistent.
+          await db
+            .delete(inspirationalImageRooms)
+            .where(eq(inspirationalImageRooms.imageId, imageId))
+            .run();
+          await db
+            .delete(imageUploadStaging)
+            .where(eq(imageUploadStaging.imageId, imageId))
+            .run();
+          await db.delete(images).where(eq(images.id, imageId)).run();
+          throw persistError;
+        }
 
         const workflowParams: ImageProcessingWorkflowParams = {
           imageId,
@@ -821,58 +1114,66 @@ imagesRouter.post("/upload", async (c) => {
           roomIds: selectedInspirationalRoomIds,
           roomHint,
         };
-
-        try {
-          await c.env.IMAGE_PROCESSING_WORKFLOW.create({
-            id: workflowInstanceId,
-            params: workflowParams,
-          });
-        } catch (workflowError) {
-          const message =
-            workflowError instanceof Error ? workflowError.message : "Failed to queue workflow";
-          await db
-            .update(imageUploadStaging)
-            .set({
-              processingStatus: "failed",
-              processingError: message,
-            })
-            .where(eq(imageUploadStaging.imageId, imageId))
-            .run();
-
-          results.push({
-            success: false,
-            imageId,
-            error: message,
-          });
-          continue;
-        }
+        batchItems.push(workflowParams);
 
         results.push({
           success: true,
           imageId,
           workflowInstanceId,
           processingStatus: "queued",
-          image: insertedImage,
+          image: insertedImage ?? null,
         });
       } catch (fileError) {
         results.push({
           success: false,
           imageId,
           error:
-            fileError instanceof Error ? fileError.message : "Failed to upload and queue image",
+            fileError instanceof Error
+              ? fileError.message
+              : "Failed to upload and queue image",
         });
+      }
+    }
+
+    if (batchItems.length > 0) {
+      try {
+        await c.env.IMAGE_BATCH_WORKFLOW.create({
+          id: `image-batch-${crypto.randomUUID()}`,
+          params: { items: batchItems },
+        });
+      } catch (batchError) {
+        const message =
+          batchError instanceof Error
+            ? batchError.message
+            : "Failed to queue batch workflow";
+        console.error("Batch workflow create failed:", message);
+        const failedIds = new Set(batchItems.map((item) => item.imageId));
+        await db
+          .update(imageUploadStaging)
+          .set({ processingStatus: "failed", processingError: message })
+          .where(inArray(imageUploadStaging.imageId, Array.from(failedIds)))
+          .run();
+        for (let i = 0; i < results.length; i += 1) {
+          const r = results[i];
+          if (r.success && failedIds.has(r.imageId)) {
+            results[i] = { success: false, imageId: r.imageId, error: message };
+          }
+        }
       }
     }
 
     const successCount = results.filter((r) => r.success).length;
     const failureCount = results.length - successCount;
 
-    return c.json({
-      success: true,
-      message: `Accepted ${successCount} image uploads for background processing with ${failureCount} failures`,
-      photoCategory,
-      results,
-    }, 202);
+    return c.json(
+      {
+        success: true,
+        message: `Accepted ${successCount} image uploads for background processing with ${failureCount} failures`,
+        photoCategory,
+        results,
+      },
+      202,
+    );
   } catch (error) {
     console.error("Upload error:", error);
     return c.json(
@@ -892,13 +1193,41 @@ imagesRouter.post("/upload", async (c) => {
 imagesRouter.get("/mapping/summary", async (c) => {
   try {
     const db = drizzle(c.env.DB);
-    const pendingRows = await db
+    const pendingRowsRaw = await db
       .select({
         photoCategory: imageUploadStaging.photoCategory,
+        imageId: imageUploadStaging.imageId,
       })
       .from(imageUploadStaging)
-      .where(eq(imageUploadStaging.mappingStatus, "pending"))
+      .where(
+        or(
+          eq(imageUploadStaging.mappingStatus, "pending"),
+          inArray(imageUploadStaging.processingStatus, [
+            "queued",
+            "processing",
+          ]),
+        ),
+      )
       .all();
+
+    // Exclude duplicate-flagged images from summary counts
+    const duplicateIds = new Set<string>();
+    if (pendingRowsRaw.length > 0) {
+      const imageIds = pendingRowsRaw.map((r) => r.imageId);
+      const imageRows = await chunkQuery(imageIds, async (chunk) =>
+        db
+          .select({ id: images.id, isDuplicate: images.isDuplicate })
+          .from(images)
+          .where(inArray(images.id, chunk))
+          .all(),
+      );
+      for (const row of imageRows) {
+        if (row.isDuplicate) duplicateIds.add(row.id);
+      }
+    }
+    const pendingRows = pendingRowsRaw.filter(
+      (r) => !duplicateIds.has(r.imageId),
+    );
 
     let listing = 0;
     let inspirational = 0;
@@ -942,13 +1271,24 @@ imagesRouter.get("/mapping/pending", async (c) => {
       categoryQuery !== "listing" &&
       categoryQuery !== "inspirational"
     ) {
-      return c.json({ error: "photoCategory must be listing or inspirational" }, 400);
+      return c.json(
+        { error: "photoCategory must be listing or inspirational" },
+        400,
+      );
     }
 
     const pendingRowsRaw = await db
       .select()
       .from(imageUploadStaging)
-      .where(eq(imageUploadStaging.mappingStatus, "pending"))
+      .where(
+        or(
+          eq(imageUploadStaging.mappingStatus, "pending"),
+          inArray(imageUploadStaging.processingStatus, [
+            "queued",
+            "processing",
+          ]),
+        ),
+      )
       .all();
     const pendingRows = categoryQuery
       ? pendingRowsRaw.filter((row) => row.photoCategory === categoryQuery)
@@ -959,20 +1299,38 @@ imagesRouter.get("/mapping/pending", async (c) => {
     }
 
     const imageIds = pendingRows.map((row) => row.imageId);
-    const imageRows = await db.select().from(images).where(inArray(images.id, imageIds)).all();
+    const imageRows = await chunkQuery(imageIds, async (chunk) => {
+      return await db
+        .select()
+        .from(images)
+        .where(inArray(images.id, chunk))
+        .all();
+    });
     const imageById = new Map(imageRows.map((row) => [row.id, row]));
 
-    const inspirationMappings = await db
-      .select()
-      .from(inspirationalImageRooms)
-      .where(inArray(inspirationalImageRooms.imageId, imageIds))
-      .all();
-    const mappedRoomIds = Array.from(new Set(inspirationMappings.map((row) => row.roomId)));
+    const inspirationMappings = await chunkQuery(imageIds, async (chunk) => {
+      return await db
+        .select()
+        .from(inspirationalImageRooms)
+        .where(inArray(inspirationalImageRooms.imageId, chunk))
+        .all();
+    });
+    const mappedRoomIds = Array.from(
+      new Set(inspirationMappings.map((row) => row.roomId)),
+    );
     const mappedRooms =
       mappedRoomIds.length > 0
-        ? await db.select().from(rooms).where(inArray(rooms.id, mappedRoomIds)).all()
+        ? await chunkQuery(mappedRoomIds, async (chunk) => {
+            return await db
+              .select()
+              .from(rooms)
+              .where(inArray(rooms.id, chunk))
+              .all();
+          })
         : [];
-    const roomNameById = new Map(mappedRooms.map((room) => [room.id, room.roomName]));
+    const roomNameById = new Map(
+      mappedRooms.map((room) => [room.id, room.roomName]),
+    );
     const roomIdsByImage = new Map<string, number[]>();
     for (const row of inspirationMappings) {
       const next = roomIdsByImage.get(row.imageId) || [];
@@ -994,6 +1352,10 @@ imagesRouter.get("/mapping/pending", async (c) => {
         if (!image) {
           return null;
         }
+        // Exclude duplicate-flagged images
+        if (image.isDuplicate) {
+          return null;
+        }
         const roomIds = roomIdsByImage.get(image.id) || [];
         const roomLabels = roomIds
           .map((roomId) => roomNameById.get(roomId))
@@ -1001,7 +1363,10 @@ imagesRouter.get("/mapping/pending", async (c) => {
 
         return {
           ...image,
-          photoCategory: toMappingCategory(image.photoCategory, image.isListingPhoto),
+          photoCategory: toMappingCategory(
+            image.photoCategory,
+            image.isListingPhoto,
+          ),
           roomIds,
           roomLabels,
           deliveryUrl: getImageDeliveryUrl(image),
@@ -1033,17 +1398,29 @@ imagesRouter.get("/mapping/pending", async (c) => {
 /**
  * POST /api/images/mapping/apply
  * Applies room mapping in bulk for pending listing/inspirational uploads.
+ *
+ * Scope-aware fields (inspirational only):
+ *   scope   — "room" | "level" | "home" (default "room")
+ *   floorId — integer floor ID; required when scope="level"
+ *   roomIds — required only when scope="room"
+ *
+ * Scope storage rules (0005 REVISIONS — no fan-out):
+ *   scope="room"  → insert per-room rows (C2: only is_active=true rooms accepted)
+ *   scope="level" → set inspiration_scope="level" + scope_floor_id; delete per-room rows
+ *   scope="home"  → set inspiration_scope="home"; delete per-room rows
  */
 imagesRouter.post("/mapping/apply", async (c) => {
   try {
     const db = drizzle(c.env.DB);
     const body = (await c.req.json()) as Record<string, unknown>;
-    await ensureHomeCatalogSeed(c.env);
 
     const categoryRaw =
       typeof body.photoCategory === "string" ? body.photoCategory : null;
     if (categoryRaw !== "listing" && categoryRaw !== "inspirational") {
-      return c.json({ error: "photoCategory must be listing or inspirational" }, 400);
+      return c.json(
+        { error: "photoCategory must be listing or inspirational" },
+        400,
+      );
     }
 
     const imageIds = Array.isArray(body.imageIds)
@@ -1059,17 +1436,21 @@ imagesRouter.post("/mapping/apply", async (c) => {
       return c.json({ error: "imageIds is required" }, 400);
     }
 
-    const targetImages = await db
-      .select()
-      .from(images)
-      .where(inArray(images.id, imageIds))
-      .all();
+    const targetImages = await chunkQuery(imageIds, async (chunk) => {
+      return await db
+        .select()
+        .from(images)
+        .where(inArray(images.id, chunk))
+        .all();
+    });
     if (targetImages.length !== imageIds.length) {
       return c.json({ error: "One or more images were not found" }, 404);
     }
 
     const mismatched = targetImages.filter(
-      (image) => toMappingCategory(image.photoCategory, image.isListingPhoto) !== categoryRaw,
+      (image) =>
+        toMappingCategory(image.photoCategory, image.isListingPhoto) !==
+        categoryRaw,
     );
     if (mismatched.length > 0) {
       return c.json(
@@ -1085,27 +1466,35 @@ imagesRouter.post("/mapping/apply", async (c) => {
       if (!Number.isFinite(roomId) || roomId <= 0) {
         return c.json({ error: "roomId is required for listing mapping" }, 400);
       }
+      // C2: listing photos must map to an active room
       const selectedRoom = await db
         .select()
         .from(rooms)
-        .where(eq(rooms.id, Math.trunc(roomId)))
+        .where(and(eq(rooms.id, Math.trunc(roomId)), eq(rooms.isActive, true)))
         .get();
       if (!selectedRoom) {
-        return c.json({ error: "Selected room was not found" }, 404);
+        return c.json(
+          { error: "Selected room was not found or is not an active room" },
+          404,
+        );
       }
 
-      await db
-        .update(images)
-        .set({
-          roomId: selectedRoom.id,
-          roomType: selectedRoom.roomName,
-        })
-        .where(inArray(images.id, imageIds))
-        .run();
-      await db
-        .delete(inspirationalImageRooms)
-        .where(inArray(inspirationalImageRooms.imageId, imageIds))
-        .run();
+      await chunkExecute(imageIds, async (chunk) => {
+        await db
+          .update(images)
+          .set({
+            roomId: selectedRoom.id,
+            roomType: selectedRoom.roomName,
+          })
+          .where(inArray(images.id, chunk))
+          .run();
+      });
+      await chunkExecute(imageIds, async (chunk) => {
+        await db
+          .delete(inspirationalImageRooms)
+          .where(inArray(inspirationalImageRooms.imageId, chunk))
+          .run();
+      });
 
       await syncImageUploadStagingRows(
         db,
@@ -1127,41 +1516,152 @@ imagesRouter.post("/mapping/apply", async (c) => {
       });
     }
 
+    // --- Inspirational mapping with scope ---
+    const rawScope = typeof body.scope === "string" ? body.scope : "room";
+    const inspirationScope: InspirationScope = isValidInspirationScope(rawScope)
+      ? rawScope
+      : "room";
+
+    const rawFloorId =
+      body.floorId !== null && body.floorId !== undefined
+        ? Number(body.floorId)
+        : null;
+    const requestedFloorId =
+      rawFloorId !== null && Number.isFinite(rawFloorId) && rawFloorId > 0
+        ? Math.trunc(rawFloorId)
+        : null;
+
+    if (
+      inspirationScope === "level" &&
+      (requestedFloorId === null)
+    ) {
+      return c.json(
+        { error: "floorId is required when scope is 'level'" },
+        400,
+      );
+    }
+
+    // scope=level: verify floor exists
+    let resolvedFloorId: number | null = null;
+    if (inspirationScope === "level" && requestedFloorId) {
+      const floorRecord = await db
+        .select()
+        .from(floors)
+        .where(eq(floors.id, requestedFloorId))
+        .get();
+      if (!floorRecord) {
+        return c.json({ error: "Floor not found" }, 404);
+      }
+      resolvedFloorId = floorRecord.id;
+    }
+
+    if (inspirationScope === "level" || inspirationScope === "home") {
+      // No fan-out: store scope on the image itself, remove any stale per-room rows
+      await chunkExecute(imageIds, async (chunk) => {
+        await db
+          .delete(inspirationalImageRooms)
+          .where(inArray(inspirationalImageRooms.imageId, chunk))
+          .run();
+      });
+
+      await chunkExecute(imageIds, async (chunk) => {
+        await db
+          .update(images)
+          .set({
+            inspirationScope,
+            scopeFloorId: resolvedFloorId,
+            roomId: null,
+          })
+          .where(inArray(images.id, chunk))
+          .run();
+      });
+
+      await syncImageUploadStagingRows(
+        db,
+        imageIds.map((imageId) => ({
+          imageId,
+          photoCategory: "inspirational",
+          mapped: true,
+        })),
+      );
+
+      return c.json({
+        success: true,
+        mappedCount: imageIds.length,
+        photoCategory: "inspirational",
+        scope: inspirationScope,
+        floorId: resolvedFloorId,
+      });
+    }
+
+    // scope=room: existing per-room behavior, C2 enforced
     const roomIds = parseRoomIds(body.roomIds);
     if (roomIds.length === 0) {
-      return c.json({ error: "roomIds is required for inspirational mapping" }, 400);
+      return c.json(
+        { error: "roomIds is required for inspirational mapping with scope='room'" },
+        400,
+      );
     }
-    const selectedRooms = await db.select().from(rooms).where(inArray(rooms.id, roomIds)).all();
+    // C2: only active rooms
+    const selectedRooms = await chunkQuery(roomIds, async (chunk) => {
+      return await db
+        .select()
+        .from(rooms)
+        .where(and(inArray(rooms.id, chunk), eq(rooms.isActive, true)))
+        .all();
+    });
     if (selectedRooms.length !== roomIds.length) {
-      return c.json({ error: "One or more selected rooms were not found" }, 404);
+      return c.json(
+        { error: "One or more selected rooms were not found or are inactive" },
+        404,
+      );
     }
 
-    await db
-      .delete(inspirationalImageRooms)
-      .where(inArray(inspirationalImageRooms.imageId, imageIds))
-      .run();
-    await db
-      .insert(inspirationalImageRooms)
-      .values(
-        imageIds.flatMap((imageId) =>
-          selectedRooms.map((room) => ({
-            imageId,
-            roomId: room.id,
-          })),
-        ),
-      )
-      .onConflictDoNothing()
-      .run();
+    // Clear any previous scope data and per-room rows
+    await chunkExecute(imageIds, async (chunk) => {
+      await db
+        .update(images)
+        .set({ inspirationScope: "room", scopeFloorId: null })
+        .where(inArray(images.id, chunk))
+        .run();
+    });
+
+    await chunkExecute(imageIds, async (chunk) => {
+      await db
+        .delete(inspirationalImageRooms)
+        .where(inArray(inspirationalImageRooms.imageId, chunk))
+        .run();
+    });
+
+    const insertValues = imageIds.flatMap((imageId) =>
+      selectedRooms.map((room) => ({
+        imageId,
+        roomId: room.id,
+      })),
+    );
+    await chunkExecute(
+      insertValues,
+      async (chunk) => {
+        await db
+          .insert(inspirationalImageRooms)
+          .values(chunk)
+          .onConflictDoNothing()
+          .run();
+      },
+      40,
+    );
 
     const primaryRoom = selectedRooms[0] ?? null;
-    await db
-      .update(images)
-      .set({
-        roomId: null,
-        roomType: primaryRoom?.roomName ?? null,
-      })
-      .where(inArray(images.id, imageIds))
-      .run();
+    await chunkExecute(imageIds, async (chunk) => {
+      await db
+        .update(images)
+        .set({
+          roomId: null,
+          roomType: primaryRoom?.roomName ?? null,
+        })
+        .where(inArray(images.id, chunk))
+        .run();
+    });
 
     await syncImageUploadStagingRows(
       db,
@@ -1176,6 +1676,7 @@ imagesRouter.post("/mapping/apply", async (c) => {
       success: true,
       mappedCount: imageIds.length,
       photoCategory: "inspirational",
+      scope: "room",
       rooms: selectedRooms.map((room) => ({
         id: room.id,
         roomName: room.roomName,
@@ -1186,6 +1687,258 @@ imagesRouter.post("/mapping/apply", async (c) => {
     return c.json(
       {
         error: "Failed to apply image mapping",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * POST /api/images/mapping/abandon
+ * Discards pending unmapped staging image(s) from database and deletes assets from Cloudflare Images.
+ */
+imagesRouter.post("/mapping/abandon", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const body = (await c.req.json()) as Record<string, unknown>;
+
+    const imageIds = Array.isArray(body.imageIds)
+      ? Array.from(
+          new Set(
+            body.imageIds
+              .map((value) => String(value).trim())
+              .filter((value) => value.length > 0),
+          ),
+        )
+      : [];
+
+    if (imageIds.length === 0) {
+      return c.json({ error: "imageIds is required" }, 400);
+    }
+
+    // 1. Fetch images to get Cloudflare Images delivery tokens
+    const targetImages = await chunkQuery(imageIds, async (chunk) => {
+      return await db
+        .select()
+        .from(images)
+        .where(inArray(images.id, chunk))
+        .all();
+    });
+
+    if (targetImages.length === 0) {
+      return c.json({ success: true, message: "No images found to abandon" });
+    }
+
+    // 2. Perform best-effort Cloudflare Images deletions
+    const credentials = await resolveCloudflareImagesCredentials(c.env);
+    if (credentials.accountId && credentials.apiTokens.length > 0) {
+      const candidateCloudflareIds = Array.from(
+        new Set(
+          targetImages
+            .flatMap((image) => [
+              image.cfImageIdOriginal,
+              image.cfImageIdOptimized,
+            ])
+            .map((value) => extractCloudflareImageId(value))
+            .filter(
+              (value): value is string =>
+                typeof value === "string" && value.length > 0,
+            ),
+        ),
+      );
+
+      for (const cloudflareId of candidateCloudflareIds) {
+        for (const token of credentials.apiTokens) {
+          try {
+            const response = await fetch(
+              `https://api.cloudflare.com/client/v4/accounts/${credentials.accountId}/images/v1/${cloudflareId}`,
+              {
+                method: "DELETE",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                },
+              },
+            );
+
+            if (response.ok || response.status === 404) {
+              break; // Done with this image
+            }
+          } catch (error) {
+            console.warn(
+              `[Images API] Abandon cleanup failed for image ${cloudflareId}:`,
+              error,
+            );
+          }
+        }
+      }
+    }
+
+    // 3. Delete records from database tables in D1-parameter-safe chunks
+    await chunkExecute(imageIds, async (chunk) => {
+      await db
+        .delete(imageReviews)
+        .where(inArray(imageReviews.id, chunk))
+        .run();
+    });
+    await chunkExecute(imageIds, async (chunk) => {
+      await db
+        .delete(listingPhotos)
+        .where(inArray(listingPhotos.imageId, chunk))
+        .run();
+    });
+    await chunkExecute(imageIds, async (chunk) => {
+      await db
+        .delete(inspirationalImageRooms)
+        .where(inArray(inspirationalImageRooms.imageId, chunk))
+        .run();
+    });
+    await chunkExecute(imageIds, async (chunk) => {
+      await db
+        .delete(imageUploadStaging)
+        .where(inArray(imageUploadStaging.imageId, chunk))
+        .run();
+    });
+    await chunkExecute(imageIds, async (chunk) => {
+      await db.delete(images).where(inArray(images.id, chunk)).run();
+    });
+
+    return c.json({
+      success: true,
+      message: `Successfully abandoned ${targetImages.length} unmapped photo(s).`,
+      abandonedCount: targetImages.length,
+    });
+  } catch (error) {
+    console.error("Abandon mapping error:", error);
+    return c.json(
+      {
+        error: "Failed to abandon pending mapping(s)",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * POST /api/images/mapping/reprocess
+ * Reprocesses the workflow for unmapped image(s) to clear AI errors.
+ */
+imagesRouter.post("/mapping/reprocess", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const body = (await c.req.json()) as Record<string, unknown>;
+
+    const imageIds = Array.isArray(body.imageIds)
+      ? Array.from(
+          new Set(
+            body.imageIds
+              .map((value) => String(value).trim())
+              .filter((value) => value.length > 0),
+          ),
+        )
+      : [];
+
+    if (imageIds.length === 0) {
+      return c.json({ error: "imageIds is required" }, 400);
+    }
+
+    // 1. Fetch images
+    const targetImages = await chunkQuery(imageIds, async (chunk) => {
+      return await db
+        .select()
+        .from(images)
+        .where(inArray(images.id, chunk))
+        .all();
+    });
+
+    if (targetImages.length === 0) {
+      return c.json({ error: "No images found to reprocess" }, 404);
+    }
+
+    // 2. Fetch inspirational room mappings
+    const roomMappings = await chunkQuery(imageIds, async (chunk) => {
+      return await db
+        .select()
+        .from(inspirationalImageRooms)
+        .where(inArray(inspirationalImageRooms.imageId, chunk))
+        .all();
+    });
+
+    const roomIdsByImage = new Map<string, number[]>();
+    for (const mapping of roomMappings) {
+      const currentList = roomIdsByImage.get(mapping.imageId) || [];
+      if (!currentList.includes(mapping.roomId)) {
+        currentList.push(mapping.roomId);
+      }
+      roomIdsByImage.set(mapping.imageId, currentList);
+    }
+
+    const batchItems: ImageProcessingWorkflowParams[] = [];
+    for (const image of targetImages) {
+      const imageId = image.id;
+      const categoryRaw = toMappingCategory(
+        image.photoCategory,
+        image.isListingPhoto,
+      );
+      batchItems.push({
+        imageId,
+        photoCategory: categoryRaw,
+        isListingPhoto: image.isListingPhoto,
+        filename: image.sourceFilename || "image.jpg",
+        roomId: image.roomId,
+        roomIds: roomIdsByImage.get(imageId) || [],
+        roomHint: image.roomType,
+      });
+    }
+
+    const batchInstanceId = `image-batch-re-${crypto.randomUUID()}`;
+    const batchImageIds = batchItems.map((item) => item.imageId);
+
+    try {
+      await c.env.IMAGE_BATCH_WORKFLOW.create({
+        id: batchInstanceId,
+        params: { items: batchItems },
+      });
+      await db
+        .update(imageUploadStaging)
+        .set({
+          processingStatus: "queued",
+          processingError: null,
+          workflowInstanceId: batchInstanceId,
+          datetimeProcessingStarted: null,
+          datetimeProcessed: null,
+        })
+        .where(inArray(imageUploadStaging.imageId, batchImageIds))
+        .run();
+
+      return c.json({
+        success: true,
+        message: `Successfully queued ${batchImageIds.length} image(s) for reprocessing.`,
+        successCount: batchImageIds.length,
+        failures: [],
+      });
+    } catch (workflowError) {
+      const message =
+        workflowError instanceof Error
+          ? workflowError.message
+          : "Failed to queue workflow";
+      console.error("Reprocess batch workflow create failed:", message);
+      await db
+        .update(imageUploadStaging)
+        .set({ processingStatus: "failed", processingError: message })
+        .where(inArray(imageUploadStaging.imageId, batchImageIds))
+        .run();
+      return c.json(
+        { error: "Failed to reprocess workflow(s)", details: message },
+        500,
+      );
+    }
+  } catch (error) {
+    console.error("Reprocess workflows error:", error);
+    return c.json(
+      {
+        error: "Failed to reprocess workflow(s)",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       500,
@@ -1209,9 +1962,12 @@ imagesRouter.get("/", async (c) => {
     let query = db.select().from(images);
 
     // Apply filters (this is simplified - in production use proper query builder)
+    const includeDuplicates = c.req.query("includeDuplicates") === "true";
     const allImages = await query.all();
 
-    let filtered = allImages;
+    let filtered = includeDuplicates
+      ? allImages
+      : allImages.filter((img) => !img.isDuplicate);
 
     if (roomType) {
       filtered = filtered.filter((img) => img.roomType === roomType);
@@ -1229,7 +1985,10 @@ imagesRouter.get("/", async (c) => {
 
     if (photoCategory !== undefined) {
       filtered = filtered.filter((img) => {
-        const normalized = normalizePhotoCategory(img.photoCategory, img.isListingPhoto);
+        const normalized = normalizePhotoCategory(
+          img.photoCategory,
+          img.isListingPhoto,
+        );
         return normalized === photoCategory;
       });
     }
@@ -1241,27 +2000,43 @@ imagesRouter.get("/", async (c) => {
 
     filtered = filtered.map((image) => ({
       ...image,
-      photoCategory: normalizePhotoCategory(image.photoCategory, image.isListingPhoto),
+      photoCategory: normalizePhotoCategory(
+        image.photoCategory,
+        image.isListingPhoto,
+      ),
     }));
 
     const filteredImageIds = filtered.map((image) => image.id);
-    const processingByImageId = await getUploadProcessingByImageIds(db, filteredImageIds);
+    const processingByImageId = await getUploadProcessingByImageIds(
+      db,
+      filteredImageIds,
+    );
     const inspirationalMappings =
       filteredImageIds.length > 0
-        ? await db
-            .select()
-            .from(inspirationalImageRooms)
-            .where(inArray(inspirationalImageRooms.imageId, filteredImageIds))
-            .all()
+        ? await chunkQuery(filteredImageIds, async (chunk) => {
+            return await db
+              .select()
+              .from(inspirationalImageRooms)
+              .where(inArray(inspirationalImageRooms.imageId, chunk))
+              .all();
+          })
         : [];
     const mappedRoomIds = Array.from(
       new Set(inspirationalMappings.map((mapping) => mapping.roomId)),
     );
     const mappedRooms =
       mappedRoomIds.length > 0
-        ? await db.select().from(rooms).where(inArray(rooms.id, mappedRoomIds)).all()
+        ? await chunkQuery(mappedRoomIds, async (chunk) => {
+            return await db
+              .select()
+              .from(rooms)
+              .where(inArray(rooms.id, chunk))
+              .all();
+          })
         : [];
-    const roomNameById = new Map(mappedRooms.map((room) => [room.id, room.roomName]));
+    const roomNameById = new Map(
+      mappedRooms.map((room) => [room.id, room.roomName]),
+    );
     const roomIdsByImage = new Map<string, number[]>();
 
     for (const mapping of inspirationalMappings) {
@@ -1272,8 +2047,68 @@ imagesRouter.get("/", async (c) => {
       roomIdsByImage.set(mapping.imageId, next);
     }
 
-    const tagMappingsByImageId = await getTagMappingsByImageIds(db, filteredImageIds);
-    const highlightsByImageId = await getHighlightsByImageIds(db, filteredImageIds);
+    const tagMappingsByImageId = await getTagMappingsByImageIds(
+      db,
+      filteredImageIds,
+    );
+    const highlightsByImageId = await getHighlightsByImageIds(
+      db,
+      filteredImageIds,
+    );
+
+    // Fetch listingPhotos for the matching image IDs
+    const listingPhotosRecords =
+      filteredImageIds.length > 0
+        ? await chunkQuery(filteredImageIds, async (chunk) => {
+            return await db
+              .select()
+              .from(listingPhotos)
+              .where(inArray(listingPhotos.imageId, chunk))
+              .all();
+          })
+        : [];
+
+    // Fetch aiEdits for all these listingPhotos records
+    const listingPhotoIds = listingPhotosRecords.map((r) => r.id);
+    const aiEditsRecords =
+      listingPhotoIds.length > 0
+        ? await chunkQuery(listingPhotoIds, async (chunk) => {
+            return await db
+              .select()
+              .from(aiEdits)
+              .where(inArray(aiEdits.originalListingId, chunk))
+              .all();
+          })
+        : [];
+
+    // Map aiEdits by originalListingId and construct path
+    const aiEditsByListingPhotoId = new Map<number, any[]>();
+    for (const edit of aiEditsRecords) {
+      const current = aiEditsByListingPhotoId.get(edit.originalListingId) || [];
+      const deliveryId = edit.generatedCfImageId;
+      const path = deliveryId.includes("/")
+        ? `https://imagedelivery.net/${deliveryId}/public`
+        : `https://imagedelivery.net/${deliveryId}/public`;
+      current.push({
+        ...edit,
+        path,
+      });
+      aiEditsByListingPhotoId.set(edit.originalListingId, current);
+    }
+
+    // Map listingPhotos by imageId
+    const listingPhotoByImageId = new Map<string, any>();
+    for (const record of listingPhotosRecords) {
+      if (!record.imageId) continue;
+      listingPhotoByImageId.set(record.imageId, {
+        id: record.id,
+        roomId: record.roomId,
+        roomName: record.roomName,
+        description: record.description,
+        blankCanvasCfImageId: record.blankCanvasCfImageId ?? null,
+        aiEdits: aiEditsByListingPhotoId.get(record.id) || [],
+      });
+    }
 
     const enriched = filtered.map((image) => {
       const roomIds = roomIdsByImage.get(image.id) || [];
@@ -1287,7 +2122,10 @@ imagesRouter.get("/", async (c) => {
         .map((mapping) => mapping.label)
         .filter((value): value is string => typeof value === "string");
       const tagsFromMetadata = extractTagsFromMetadata(image.metadata);
-      const tags = tagsFromMappings.length > 0 ? tagsFromMappings : tagsFromMetadata;
+      const tags =
+        tagsFromMappings.length > 0 ? tagsFromMappings : tagsFromMetadata;
+
+      const listingPhoto = listingPhotoByImageId.get(image.id) || null;
 
       return {
         ...image,
@@ -1300,6 +2138,7 @@ imagesRouter.get("/", async (c) => {
         tagMappings,
         tags,
         highlights,
+        listingPhoto,
       };
     });
 
@@ -1335,7 +2174,11 @@ imagesRouter.post("/maintenance/resolve-delivery-tokens", async (c) => {
       : [];
     const sourceImages =
       targetIds.length > 0
-        ? await db.select().from(images).where(inArray(images.id, targetIds)).all()
+        ? await db
+            .select()
+            .from(images)
+            .where(inArray(images.id, targetIds))
+            .all()
         : await db.select().from(images).all();
     const credentials = await resolveCloudflareImagesCredentials(c.env);
     const result = await hydrateMissingDeliveryTokensForImages({
@@ -1353,6 +2196,73 @@ imagesRouter.post("/maintenance/resolve-delivery-tokens", async (c) => {
     return c.json(
       {
         error: "Failed to resolve image delivery tokens",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * PATCH /api/images/:imageId/duplicate
+ * Toggle the duplicate flag on an image (admin-only).
+ */
+imagesRouter.patch("/:imageId/duplicate", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const imageId = c.req.param("imageId");
+    const body = (await c.req.json()) as { isDuplicate?: boolean };
+
+    if (typeof body.isDuplicate !== "boolean") {
+      return c.json({ error: "isDuplicate (boolean) is required" }, 400);
+    }
+
+    const image = await db
+      .select()
+      .from(images)
+      .where(eq(images.id, imageId))
+      .get();
+    if (!image) {
+      return c.json({ error: "Image not found" }, 404);
+    }
+
+    await db
+      .update(images)
+      .set({
+        isDuplicate: body.isDuplicate,
+        duplicateMarkedBy: body.isDuplicate ? "admin" : null,
+        duplicateMarkedAt: body.isDuplicate ? new Date() : null,
+      })
+      .where(eq(images.id, imageId))
+      .run();
+
+    // If marking as duplicate, also remove from pending staging
+    if (body.isDuplicate) {
+      await db
+        .update(imageUploadStaging)
+        .set({
+          mappingStatus: "mapped",
+          datetimeMapped: new Date(),
+        })
+        .where(eq(imageUploadStaging.imageId, imageId))
+        .run();
+    }
+
+    const updated = await db
+      .select()
+      .from(images)
+      .where(eq(images.id, imageId))
+      .get();
+
+    return c.json({
+      success: true,
+      image: updated,
+    });
+  } catch (error) {
+    console.error("Mark duplicate error:", error);
+    return c.json(
+      {
+        error: "Failed to update duplicate status",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       500,
@@ -1411,7 +2321,11 @@ imagesRouter.post("/tags", async (c) => {
       .onConflictDoNothing()
       .run();
 
-    const created = await db.select().from(imageTags).where(eq(imageTags.slug, slug)).get();
+    const created = await db
+      .select()
+      .from(imageTags)
+      .where(eq(imageTags.slug, slug))
+      .get();
     if (!created) {
       return c.json({ error: "Failed to create tag" }, 500);
     }
@@ -1432,6 +2346,155 @@ imagesRouter.post("/tags", async (c) => {
 });
 
 /**
+ * GET /api/images/realtime
+ * WebSocket upgrade for live upload/processing progress. Proxied to the
+ * ESTIMATE_COLLAB "uploads" room Durable Object, which completes the 101
+ * handshake.
+ *
+ * MUST stay registered before `/:id` — Hono matches in registration order, so a
+ * `/:id` ahead of this captures `/api/images/realtime` (id="realtime") and
+ * returns 404 (the bug this fixes).
+ */
+imagesRouter.get("/realtime", async (c) => {
+  if (c.req.header("Upgrade") !== "websocket") {
+    return c.json({ error: "Expected WebSocket upgrade" }, 400);
+  }
+  const id = c.env.ESTIMATE_COLLAB.idFromName("uploads");
+  const stub = c.env.ESTIMATE_COLLAB.get(id);
+  // Forward the raw upgrade request (preserves the Upgrade header) to the DO.
+  // Legitimate WS-proxy use of stub.fetch — not RPC-over-HTTP.
+  return stub.fetch(c.req.raw);
+});
+
+// ---------------------------------------------------------------------------
+// Inspiration scoped listing + categorization endpoints (0005 REVISIONS)
+// These MUST be registered before /:id so Hono does not swallow them.
+// The full implementations are appended at the bottom; these are the
+// canonical registration slots.
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/images/inspiration/scoped
+ * Lists level/home-scoped inspiration images with optional grouping.
+ * Registration must precede /:id to avoid path capture.
+ */
+imagesRouter.get("/inspiration/scoped", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const rawScope = c.req.query("scope");
+    const rawFloorId = c.req.query("floorId");
+    const categoryFilter = c.req.query("category")?.trim() || null;
+    const uncategorizedOnly = c.req.query("uncategorizedOnly") === "true";
+    const groupBy = c.req.query("groupBy");
+
+    if (rawScope !== "level" && rawScope !== "home") {
+      return c.json(
+        {
+          error: "scope must be 'level' or 'home'",
+          validScopes: ["level", "home"],
+        },
+        400,
+      );
+    }
+
+    const inspirationScope = rawScope as "level" | "home";
+    let resolvedFloorId: number | null = null;
+
+    if (inspirationScope === "level") {
+      const requestedFloorId = rawFloorId ? Math.trunc(Number(rawFloorId)) : null;
+      if (!requestedFloorId || !Number.isFinite(requestedFloorId) || requestedFloorId <= 0) {
+        return c.json(
+          { error: "floorId is required when scope is 'level'" },
+          400,
+        );
+      }
+      const floorRecord = await db
+        .select()
+        .from(floors)
+        .where(eq(floors.id, requestedFloorId))
+        .get();
+      if (!floorRecord) {
+        return c.json({ error: "Floor not found" }, 404);
+      }
+      resolvedFloorId = floorRecord.id;
+    }
+
+    const whereConditions =
+      inspirationScope === "level" && resolvedFloorId !== null
+        ? and(
+            eq(images.inspirationScope, "level"),
+            eq(images.scopeFloorId, resolvedFloorId),
+          )
+        : eq(images.inspirationScope, "home");
+
+    let imageRows = await db.select().from(images).where(whereConditions).all();
+
+    if (categoryFilter) {
+      imageRows = imageRows.filter((img) => img.inspirationCategory === categoryFilter);
+    }
+    if (uncategorizedOnly) {
+      imageRows = imageRows.filter((img) => !img.inspirationCategory);
+    }
+
+    imageRows.sort((a, b) => {
+      const aTs = a.datetimeCreated ? new Date(a.datetimeCreated).getTime() : 0;
+      const bTs = b.datetimeCreated ? new Date(b.datetimeCreated).getTime() : 0;
+      return bTs - aTs;
+    });
+
+    const enriched = imageRows.map((img) => ({
+      ...img,
+      inspirationCategory: img.inspirationCategory ?? null,
+    }));
+
+    if (groupBy === "category") {
+      const groupMap = new Map<string, typeof enriched>();
+      for (const img of enriched) {
+        const key = img.inspirationCategory ?? "__uncategorized__";
+        const group = groupMap.get(key) ?? [];
+        group.push(img);
+        groupMap.set(key, group);
+      }
+      const sortedGroups = Array.from(groupMap.entries())
+        .sort(([a], [b]) => {
+          if (a === "__uncategorized__") return 1;
+          if (b === "__uncategorized__") return -1;
+          return a.localeCompare(b);
+        })
+        .map(([key, groupImages]) => ({
+          category: key === "__uncategorized__" ? null : key,
+          count: groupImages.length,
+          images: groupImages,
+        }));
+      return c.json({
+        success: true,
+        scope: inspirationScope,
+        floorId: resolvedFloorId,
+        groups: sortedGroups,
+        totalCount: enriched.length,
+      });
+    }
+
+    return c.json({
+      success: true,
+      scope: inspirationScope,
+      floorId: resolvedFloorId,
+      count: enriched.length,
+      images: enriched,
+    });
+  } catch (error) {
+    console.error("Scoped inspiration list error:", error);
+    return c.json(
+      {
+        error: "Failed to list scoped inspiration images",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
  * GET /api/images/:id
  * Get a specific image by ID
  */
@@ -1440,7 +2503,11 @@ imagesRouter.get("/:id", async (c) => {
     const db = drizzle(c.env.DB);
     const imageId = c.req.param("id");
 
-    const result = await db.select().from(images).where(eq(images.id, imageId)).get();
+    const result = await db
+      .select()
+      .from(images)
+      .where(eq(images.id, imageId))
+      .get();
 
     if (!result) {
       return c.json({ error: "Image not found" }, 404);
@@ -1457,7 +2524,9 @@ imagesRouter.get("/:id", async (c) => {
         ? await db.select().from(rooms).where(inArray(rooms.id, roomIds)).all()
         : [];
     const roomLabels = roomRows.map((room) => room.roomName);
-    const processingByImageId = await getUploadProcessingByImageIds(db, [imageId]);
+    const processingByImageId = await getUploadProcessingByImageIds(db, [
+      imageId,
+    ]);
     const processing = processingByImageId.get(imageId);
     const tagMappingsByImageId = await getTagMappingsByImageIds(db, [imageId]);
     const highlightsByImageId = await getHighlightsByImageIds(db, [imageId]);
@@ -1467,7 +2536,8 @@ imagesRouter.get("/:id", async (c) => {
       .map((mapping) => mapping.label)
       .filter((entry): entry is string => typeof entry === "string");
     const tagsFromMetadata = extractTagsFromMetadata(result.metadata);
-    const tags = tagsFromMappings.length > 0 ? tagsFromMappings : tagsFromMetadata;
+    const tags =
+      tagsFromMappings.length > 0 ? tagsFromMappings : tagsFromMetadata;
 
     return c.json({
       success: true,
@@ -1507,7 +2577,11 @@ imagesRouter.put("/:id", async (c) => {
     const body = (await c.req.json()) as Record<string, unknown>;
 
     // Check if image exists
-    const existing = await db.select().from(images).where(eq(images.id, imageId)).get();
+    const existing = await db
+      .select()
+      .from(images)
+      .where(eq(images.id, imageId))
+      .get();
 
     if (!existing) {
       return c.json({ error: "Image not found" }, 404);
@@ -1522,15 +2596,20 @@ imagesRouter.put("/:id", async (c) => {
         : Number(body.roomId);
     let selectedRoom: typeof rooms.$inferSelect | null = null;
 
-    if (body.roomId !== undefined && body.roomId !== null && body.roomId !== "") {
+    if (
+      body.roomId !== undefined &&
+      body.roomId !== null &&
+      body.roomId !== ""
+    ) {
       if (requestedRoomId === null || !Number.isFinite(requestedRoomId)) {
         return c.json({ error: "Invalid roomId" }, 400);
       }
-      selectedRoom = (await db
-        .select()
-        .from(rooms)
-        .where(eq(rooms.id, Math.trunc(requestedRoomId)))
-        .get()) ?? null;
+      selectedRoom =
+        (await db
+          .select()
+          .from(rooms)
+          .where(eq(rooms.id, Math.trunc(requestedRoomId)))
+          .get()) ?? null;
       if (!selectedRoom) {
         return c.json({ error: "Selected room was not found" }, 404);
       }
@@ -1544,12 +2623,27 @@ imagesRouter.put("/:id", async (c) => {
       body.room ??
       (selectedRoom ? selectedRoom.roomName : undefined);
     if (roomType !== undefined) updates.roomType = roomType;
-    if (body.instagramAccount !== undefined) updates.instagramAccount = body.instagramAccount;
-    if (body.instagramCaption !== undefined) updates.instagramCaption = body.instagramCaption;
+    if (body.instagramAccount !== undefined)
+      updates.instagramAccount = body.instagramAccount;
+    if (body.instagramCaption !== undefined)
+      updates.instagramCaption = body.instagramCaption;
     if (body.displayName !== undefined) {
       const normalized =
         typeof body.displayName === "string" ? body.displayName.trim() : "";
       updates.displayName = normalized || null;
+    }
+    if (body.description !== undefined) {
+      const normalized =
+        typeof body.description === "string" ? body.description.trim() : "";
+      updates.description = normalized || null;
+    }
+    if (body.reviewed !== undefined) {
+      const isReviewed =
+        body.reviewed === true ||
+        body.reviewed === 1 ||
+        body.reviewed === "true";
+      updates.reviewed = isReviewed;
+      updates.reviewedAt = isReviewed ? new Date() : null;
     }
 
     const nextCategory = normalizePhotoCategory(
@@ -1563,7 +2657,10 @@ imagesRouter.put("/:id", async (c) => {
       updates.isListingPhoto = nextCategory === "listing";
     }
 
-    const roomIdsProvided = Object.prototype.hasOwnProperty.call(body, "roomIds");
+    const roomIdsProvided = Object.prototype.hasOwnProperty.call(
+      body,
+      "roomIds",
+    );
     const requestedInspirationalRoomIds = roomIdsProvided
       ? parseRoomIds(body.roomIds)
       : [];
@@ -1581,7 +2678,10 @@ imagesRouter.put("/:id", async (c) => {
       requestedInspirationalRoomIds.length > 0 &&
       selectedInspirationalRooms.length !== requestedInspirationalRoomIds.length
     ) {
-      return c.json({ error: "One or more selected rooms were not found" }, 404);
+      return c.json(
+        { error: "One or more selected rooms were not found" },
+        404,
+      );
     }
 
     const effectiveRoomId =
@@ -1589,7 +2689,10 @@ imagesRouter.put("/:id", async (c) => {
     const effectiveCategory =
       updates.photoCategory !== undefined
         ? String(updates.photoCategory)
-        : normalizePhotoCategory(existing.photoCategory, existing.isListingPhoto);
+        : normalizePhotoCategory(
+            existing.photoCategory,
+            existing.isListingPhoto,
+          );
 
     if (effectiveCategory === "listing" && !effectiveRoomId) {
       return c.json(
@@ -1609,9 +2712,15 @@ imagesRouter.put("/:id", async (c) => {
     }
 
     let metadataObject: Record<string, unknown> = {};
-    if (typeof existing.metadata === "string" && existing.metadata.trim().length > 0) {
+    if (
+      typeof existing.metadata === "string" &&
+      existing.metadata.trim().length > 0
+    ) {
       try {
-        metadataObject = JSON.parse(existing.metadata) as Record<string, unknown>;
+        metadataObject = JSON.parse(existing.metadata) as Record<
+          string,
+          unknown
+        >;
       } catch {
         metadataObject = {};
       }
@@ -1634,17 +2743,32 @@ imagesRouter.put("/:id", async (c) => {
 
     const tagIdsProvided = Object.prototype.hasOwnProperty.call(body, "tagIds");
     const tagsProvided = Object.prototype.hasOwnProperty.call(body, "tags");
-    const customTagsProvided = Object.prototype.hasOwnProperty.call(body, "customTags");
+    const customTagsProvided = Object.prototype.hasOwnProperty.call(
+      body,
+      "customTags",
+    );
     let nextTagRows: Array<typeof imageTags.$inferSelect> | null = null;
 
     if (tagIdsProvided || tagsProvided || customTagsProvided) {
-      const requestedTagIds = tagIdsProvided ? parseNumberArray(body.tagIds) : [];
+      const requestedTagIds = tagIdsProvided
+        ? parseNumberArray(body.tagIds)
+        : [];
       const selectedTagRows =
         requestedTagIds.length > 0
-          ? await db.select().from(imageTags).where(inArray(imageTags.id, requestedTagIds)).all()
+          ? await db
+              .select()
+              .from(imageTags)
+              .where(inArray(imageTags.id, requestedTagIds))
+              .all()
           : [];
-      if (requestedTagIds.length > 0 && selectedTagRows.length !== requestedTagIds.length) {
-        return c.json({ error: "One or more selected tags were not found" }, 404);
+      if (
+        requestedTagIds.length > 0 &&
+        selectedTagRows.length !== requestedTagIds.length
+      ) {
+        return c.json(
+          { error: "One or more selected tags were not found" },
+          404,
+        );
       }
 
       const enteredTagLabels = [
@@ -1667,7 +2791,10 @@ imagesRouter.put("/:id", async (c) => {
       metadataObject.note = body.note;
     }
 
-    const highlightsProvided = Object.prototype.hasOwnProperty.call(body, "highlights");
+    const highlightsProvided = Object.prototype.hasOwnProperty.call(
+      body,
+      "highlights",
+    );
     const normalizedHighlights: Array<{
       highlightType: HighlightType;
       shapeType: string;
@@ -1698,14 +2825,19 @@ imagesRouter.put("/:id", async (c) => {
         }
 
         normalizedHighlights.push({
-          highlightType: highlight.highlightType === "dislike" ? "dislike" : "like",
-          shapeType: typeof highlight.shapeType === "string" ? highlight.shapeType : "rect",
+          highlightType:
+            highlight.highlightType === "dislike" ? "dislike" : "like",
+          shapeType:
+            typeof highlight.shapeType === "string"
+              ? highlight.shapeType
+              : "rect",
           xPct: clampPercent(xPct),
           yPct: clampPercent(yPct),
           widthPct: clampPercent(widthPct),
           heightPct: clampPercent(heightPct),
           note:
-            typeof highlight.note === "string" && highlight.note.trim().length > 0
+            typeof highlight.note === "string" &&
+            highlight.note.trim().length > 0
               ? highlight.note.trim().slice(0, 1200)
               : null,
         });
@@ -1794,7 +2926,11 @@ imagesRouter.put("/:id", async (c) => {
     ]);
 
     // Get updated record
-    const updated = await db.select().from(images).where(eq(images.id, imageId)).get();
+    const updated = await db
+      .select()
+      .from(images)
+      .where(eq(images.id, imageId))
+      .get();
     const mappingRows = await db
       .select()
       .from(inspirationalImageRooms)
@@ -1814,7 +2950,8 @@ imagesRouter.put("/:id", async (c) => {
       .map((mapping) => mapping.label)
       .filter((entry): entry is string => typeof entry === "string");
     const tagsFromMetadata = extractTagsFromMetadata(updated?.metadata);
-    const tags = tagsFromMappings.length > 0 ? tagsFromMappings : tagsFromMetadata;
+    const tags =
+      tagsFromMappings.length > 0 ? tagsFromMappings : tagsFromMetadata;
 
     return c.json({
       success: true,
@@ -1851,7 +2988,11 @@ imagesRouter.delete("/:id", async (c) => {
     const imageId = c.req.param("id");
 
     // Check if image exists
-    const existing = await db.select().from(images).where(eq(images.id, imageId)).get();
+    const existing = await db
+      .select()
+      .from(images)
+      .where(eq(images.id, imageId))
+      .get();
 
     if (!existing) {
       return c.json({ error: "Image not found" }, 404);
@@ -1862,7 +3003,10 @@ imagesRouter.delete("/:id", async (c) => {
       new Set(
         [existing.cfImageIdOriginal, existing.cfImageIdOptimized]
           .map((value) => extractCloudflareImageId(value))
-          .filter((value): value is string => typeof value === "string" && value.length > 0),
+          .filter(
+            (value): value is string =>
+              typeof value === "string" && value.length > 0,
+          ),
       ),
     );
 
@@ -1898,11 +3042,23 @@ imagesRouter.delete("/:id", async (c) => {
       }
     }
 
+    // Clean up all referencing rows before deleting the canonical images row.
     await db.delete(imageReviews).where(eq(imageReviews.id, imageId)).run();
-    await db.delete(listingPhotos).where(eq(listingPhotos.imageId, imageId)).run();
+    await db
+      .delete(listingPhotos)
+      .where(eq(listingPhotos.imageId, imageId))
+      .run();
     await db
       .delete(inspirationalImageRooms)
       .where(eq(inspirationalImageRooms.imageId, imageId))
+      .run();
+    await db
+      .delete(imageTagMappings)
+      .where(eq(imageTagMappings.imageId, imageId))
+      .run();
+    await db
+      .delete(imageUploadStaging)
+      .where(eq(imageUploadStaging.imageId, imageId))
       .run();
 
     // Delete from D1 images table
@@ -1933,7 +3089,11 @@ imagesRouter.post("/:id/replace", async (c) => {
     const db = drizzle(c.env.DB);
     const imageId = c.req.param("id");
 
-    const existing = await db.select().from(images).where(eq(images.id, imageId)).get();
+    const existing = await db
+      .select()
+      .from(images)
+      .where(eq(images.id, imageId))
+      .get();
     if (!existing) {
       return c.json({ error: "Image not found" }, 404);
     }
@@ -1945,7 +3105,10 @@ imagesRouter.post("/:id/replace", async (c) => {
     }
 
     const uploadFingerprint = await buildImageUploadFingerprint(file);
-    const duplicateImage = await findDuplicateImageByFingerprint(db, uploadFingerprint);
+    const duplicateImage = await findDuplicateImageByFingerprint(
+      db,
+      uploadFingerprint,
+    );
     if (duplicateImage && duplicateImage.id !== imageId) {
       return c.json(
         {
@@ -1971,13 +3134,20 @@ imagesRouter.post("/:id/replace", async (c) => {
         fallbackApiTokens: credentials.apiTokens.slice(1),
       },
     );
-    const uploadResponse = await processor.uploadToCloudflareImages(file, undefined, file.name);
+    const uploadResponse = await processor.uploadToCloudflareImages(
+      file,
+      undefined,
+      file.name,
+    );
 
     if (!uploadResponse.success) {
       return c.json({ error: "Failed to upload replacement image" }, 500);
     }
 
-    const deliveryUrl = processor.getDeliveryUrl(uploadResponse, uploadResponse.result.id);
+    const deliveryUrl = processor.getDeliveryUrl(
+      uploadResponse,
+      uploadResponse.result.id,
+    );
     const deliveryUrlParts = deliveryUrl.split("/").filter(Boolean);
     const deliveryToken =
       deliveryUrlParts.length >= 4
@@ -1986,10 +3156,14 @@ imagesRouter.post("/:id/replace", async (c) => {
     const nowEpochSeconds = Math.floor(Date.now() / 1000);
 
     const nextMetadata =
-      typeof existing.metadata === "string" && existing.metadata.trim().length > 0
+      typeof existing.metadata === "string" &&
+      existing.metadata.trim().length > 0
         ? (() => {
             try {
-              const parsed = JSON.parse(existing.metadata) as Record<string, unknown>;
+              const parsed = JSON.parse(existing.metadata) as Record<
+                string,
+                unknown
+              >;
               return JSON.stringify({
                 ...parsed,
                 replacementImageId: uploadResponse.result.id,
@@ -2044,7 +3218,11 @@ imagesRouter.post("/:id/replace", async (c) => {
       .where(eq(imageReviews.id, imageId))
       .run();
 
-    const updated = await db.select().from(images).where(eq(images.id, imageId)).get();
+    const updated = await db
+      .select()
+      .from(images)
+      .where(eq(images.id, imageId))
+      .get();
 
     return c.json({
       success: true,
@@ -2098,7 +3276,9 @@ imagesRouter.post("/search", async (c) => {
     const imageIds = results.matches.map((m) => m.id);
 
     const imageDetails = await Promise.all(
-      imageIds.map((id) => db.select().from(images).where(eq(images.id, id)).get()),
+      imageIds.map((id) =>
+        db.select().from(images).where(eq(images.id, id)).get(),
+      ),
     );
 
     return c.json({
@@ -2115,6 +3295,131 @@ imagesRouter.post("/search", async (c) => {
     return c.json(
       {
         error: "Failed to search images",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * PATCH /api/images/:id/inspiration-category
+ * Persists the inspiration category for an image.
+ *
+ * Body: { category: string }  — must be one of INSPIRATION_CATEGORIES or null to clear.
+ *
+ * Response: { success, imageId, inspirationCategory }
+ */
+imagesRouter.patch("/:id/inspiration-category", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const imageId = c.req.param("id");
+    const body = (await c.req.json()) as Record<string, unknown>;
+
+    // null/undefined clears the category
+    const rawCategory = body.category;
+    let nextCategory: string | null = null;
+
+    if (rawCategory !== null && rawCategory !== undefined && rawCategory !== "") {
+      if (!isValidInspirationCategory(rawCategory)) {
+        return c.json(
+          {
+            error: "Invalid inspiration category",
+            validCategories: INSPIRATION_CATEGORIES,
+          },
+          400,
+        );
+      }
+      nextCategory = rawCategory;
+    }
+
+    const image = await db
+      .select()
+      .from(images)
+      .where(eq(images.id, imageId))
+      .get();
+
+    if (!image) {
+      return c.json({ error: "Image not found" }, 404);
+    }
+
+    await db
+      .update(images)
+      .set({ inspirationCategory: nextCategory })
+      .where(eq(images.id, imageId))
+      .run();
+
+    return c.json({
+      success: true,
+      imageId,
+      inspirationCategory: nextCategory,
+    });
+  } catch (error) {
+    console.error("Set inspiration category error:", error);
+    return c.json(
+      {
+        error: "Failed to set inspiration category",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * POST /api/images/:id/suggest-category
+ * Uses Workers AI (vision) to suggest an inspiration category for an image.
+ * Does NOT persist the result — frontend calls PATCH /:id/inspiration-category to confirm.
+ *
+ * Response: { success, imageId, suggestedCategory, validCategories }
+ */
+imagesRouter.post("/:id/suggest-category", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const imageId = c.req.param("id");
+
+    const image = await db
+      .select()
+      .from(images)
+      .where(eq(images.id, imageId))
+      .get();
+
+    if (!image) {
+      return c.json({ error: "Image not found" }, 404);
+    }
+
+    // Build delivery URL from the stored token
+    const deliveryToken = image.cfImageIdOptimized || image.cfImageIdOriginal;
+    let deliveryUrl: string | null = null;
+
+    if (deliveryToken) {
+      if (deliveryToken.startsWith("http://") || deliveryToken.startsWith("https://")) {
+        deliveryUrl = deliveryToken;
+      } else if (deliveryToken.includes("/")) {
+        deliveryUrl = `https://imagedelivery.net/${deliveryToken}/public`;
+      }
+    }
+
+    if (!deliveryUrl) {
+      return c.json(
+        { error: "Image has no resolvable delivery URL for vision analysis" },
+        400,
+      );
+    }
+
+    const suggestedCategory = await suggestInspirationCategory(c.env, deliveryUrl);
+
+    return c.json({
+      success: true,
+      imageId,
+      suggestedCategory,
+      validCategories: INSPIRATION_CATEGORIES,
+    });
+  } catch (error) {
+    console.error("Suggest category error:", error);
+    return c.json(
+      {
+        error: "Failed to suggest inspiration category",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       500,

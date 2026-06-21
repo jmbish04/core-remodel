@@ -171,3 +171,7 @@ store_product_rating
 The research should kick off the minute that a store or store product is added into the system 
 
 There should be a dedicated tool on this app that would allow for scanning barcodes on mobile phone so that ai vision could be asked to decode to further help it to perform research, price matching, very very very similar items, product reviews, etc -- which would be a photo of the barcode that would be decoded as part of a workflow that would then try to fill in research, tags, description, reviews, ratings, warranties, quality, etc, pricing, similar items
+
+
+
+Please update this shopping suite with the manufactures of the closet systems discussed within proofs/research_app/custom-closets.html and then please retrofit proofs/research_app/custom-closets.html to astro shadcn to match our existing frontend and find a way to integrate this artifact so its available in the astro frontend new shopping / shopping research under a section for closets

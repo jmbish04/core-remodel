@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dark Walnut Cabinetry & Bay Area Makers Guide</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Chosen Palette: Warm Neutrals (Stone/Amber) - Background: #FAFAF9, Cards: #FFFFFF, Accent: #78350F (Dark Walnut), Text: #292524 -->
+    <!-- Application Structure Plan: A two-part interactive dashboard. Section 1 focuses on the educational aspect (Stain vs Paint finish methods), utilizing toggles and a comparative radar chart for quick visual assessment of pros/cons. Section 2 serves as a vendor selection tool for SF Bay Area makers, utilizing an interactive list and a scatter plot (Cost vs Lead Time) to help users balance budget, time, and quality. This separation allows users to first understand the technical requirements of their desired finish, and then practically apply that knowledge when evaluating local manufacturers. -->
+    <!-- Visualization & Content Choices: 
+    1. Finish Comparison (Goal: Compare) -> Radar Chart (Chart.js) -> Toggle interactions update chart -> Justification: Allows simultaneous multi-variable comparison (cost, durability, aesthetics) of paint vs stain on plywood -> Chart.js Canvas (NO SVG/Mermaid).
+    2. Maker Analysis (Goal: Compare/Organize) -> Scatter Plot (Chart.js) -> Hover for details, Click list to highlight -> Justification: Plots two critical decision factors (Lead Time vs. Cost Index) while utilizing bubble size for Rating, making vendor selection highly intuitive -> Chart.js Canvas (NO SVG/Mermaid). -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #FAFAF9;
+            color: #292524;
+        }
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 700px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 40vh;
+            max-height: 400px;
+        }
+        @media (max-width: 768px) {
+            .chart-container {
+                height: 350px;
+                max-height: 350px;
+            }
+        }
+        .nav-btn.active {
+            background-color: #78350F;
+            color: white;
+            border-color: #78350F;
+        }
+        .finish-btn.active {
+            border-color: #78350F;
+            background-color: #FFFBEB;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+        .maker-card:hover {
+            border-color: #78350F;
+            transform: translateY(-2px);
+            transition: all 0.2s ease-in-out;
+        }
+        .maker-card.selected {
+            border-color: #78350F;
+            background-color: #FFFBEB;
+            border-width: 2px;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #f1f1f1; 
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #d6d3d1; 
+            border-radius: 10px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #a8a29e; 
+        }
+    </style>
+</head>
+<body class="antialiased h-screen flex flex-col overflow-hidden">
+
+    <header class="bg-white border-b border-stone-200 px-6 py-4 flex-shrink-0 z-10 shadow-sm">
+        <div class="max-w-6xl mx-auto flex flex-col md:flex-row justify-between items-center">
+            <div>
+                <h1 class="text-2xl font-bold text-stone-900 tracking-tight">Project Walnut</h1>
+                <p class="text-sm text-stone-500">Plywood Finishing & SF Bay Area Maker Analysis</p>
+            </div>
+            <nav class="mt-4 md:mt-0 flex space-x-2">
+                <button id="nav-finishes" class="nav-btn active px-4 py-2 border border-stone-300 text-stone-700 rounded-md text-sm font-semibold transition-colors">1. Finishing Methods</button>
+                <button id="nav-makers" class="nav-btn px-4 py-2 border border-stone-300 text-stone-700 rounded-md text-sm font-semibold transition-colors">2. Bay Area Makers</button>
+            </nav>
+        </div>
+    </header>
+
+    <main class="flex-grow overflow-y-auto custom-scrollbar p-6">
+        <div class="max-w-6xl mx-auto">
+
+            <section id="view-finishes" class="block animate-fade-in">
+                <div class="bg-white rounded-xl shadow-sm border border-stone-200 p-6 md:p-8 mb-6">
+                    <h2 class="text-3xl font-bold text-stone-900 mb-4">Achieving a Dark Walnut Aesthetic on Plywood</h2>
+                    <p class="text-stone-600 mb-8 leading-relaxed">
+                        This section explores the two primary methodologies for achieving a rich, dark walnut appearance on cabinetry built with plywood construction: Staining and Painting (Tinted Enamels). While solid walnut is ideal, plywood offers structural stability at a lower cost. However, finishing plywood requires specific techniques to mimic the depth of solid wood. Select a method below to explore its characteristics, pros, cons, and maintenance requirements.
+                    </p>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        
+                        <div class="flex flex-col gap-4">
+                            <div id="btn-stain" class="finish-btn active cursor-pointer border-2 border-stone-200 rounded-lg p-5 transition-all">
+                                <h3 class="text-xl font-bold text-stone-900 flex items-center justify-between">
+                                    Wood Stain & Seal
+                                    <span class="text-2xl text-amber-900">&#9679;</span>
+                                </h3>
+                                <p class="text-sm text-stone-500 mt-1">Enhances natural grain of walnut or birch veneer plywood.</p>
+                            </div>
+                            <div id="btn-paint" class="finish-btn cursor-pointer border-2 border-stone-200 rounded-lg p-5 transition-all">
+                                <h3 class="text-xl font-bold text-stone-900 flex items-center justify-between">
+                                    Dark Tinted Enamel / Paint
+                                    <span class="text-2xl text-stone-800">&#9632;</span>
+                                </h3>
+                                <p class="text-sm text-stone-500 mt-1">Opaque, highly durable finish simulating walnut color tones.</p>
+                            </div>
+
+                            <div class="bg-stone-50 border border-stone-200 rounded-lg p-5 mt-4">
+                                <h4 id="detail-title" class="font-bold text-lg text-amber-900 mb-3">Stain & Seal Profile</h4>
+                                
+                                <div class="mb-4">
+                                    <h5 class="text-xs uppercase font-bold text-stone-400 tracking-wider mb-1">Pros</h5>
+                                    <ul id="detail-pros" class="text-sm text-stone-700 space-y-1 pl-4 list-disc">
+                                        <li>Highlights natural wood grain and organic beauty.</li>
+                                        <li>Creates a deep, rich, authentic walnut look.</li>
+                                        <li>Minor scratches blend into the wood pattern naturally.</li>
+                                    </ul>
+                                </div>
+
+                                <div class="mb-4">
+                                    <h5 class="text-xs uppercase font-bold text-stone-400 tracking-wider mb-1">Cons</h5>
+                                    <ul id="detail-cons" class="text-sm text-stone-700 space-y-1 pl-4 list-disc">
+                                        <li>Plywood veneer is extremely thin (risk of sanding through).</li>
+                                        <li>Requires pre-stain conditioner to prevent blotchiness.</li>
+                                        <li>Color consistency varies across different plywood sheets.</li>
+                                    </ul>
+                                </div>
+
+                                <div>
+                                    <h5 class="text-xs uppercase font-bold text-stone-400 tracking-wider mb-1">Maintenance</h5>
+                                    <p id="detail-maintenance" class="text-sm text-stone-700 leading-relaxed">
+                                        Requires periodic application of oils or clear coats depending on the top-seal used (polyurethane vs. hard wax oil). Vulnerable to standing water damage at the edges.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-col justify-center items-center bg-stone-50 rounded-lg border border-stone-200 p-4">
+                            <h3 class="text-sm font-bold text-stone-500 uppercase tracking-wider mb-2 text-center">Performance Matrix</h3>
+                            <div class="chart-container">
+                                <canvas id="finishChart"></canvas>
+                            </div>
+                            <p class="text-xs text-stone-400 mt-4 text-center">Score out of 10. Higher is generally better (Cost = Cost Efficiency).</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section id="view-makers" class="hidden animate-fade-in">
+                <div class="bg-white rounded-xl shadow-sm border border-stone-200 p-6 md:p-8 mb-6">
+                    <h2 class="text-3xl font-bold text-stone-900 mb-4">San Francisco Bay Area Cabinet Makers</h2>
+                    <p class="text-stone-600 mb-8 leading-relaxed">
+                        This section analyzes top-rated custom and semi-custom cabinet manufacturers within the SF Bay Area specializing in high-quality plywood box construction (crucial for structural integrity in California's seismic and coastal moisture environments). Use the interactive chart to balance Lead Time vs. Cost, and select a maker to view detailed reviews and material specifications.
+                    </p>
+
+                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        
+                        <div class="flex flex-col bg-stone-50 rounded-lg border border-stone-200 p-4">
+                            <h3 class="text-sm font-bold text-stone-500 uppercase tracking-wider mb-2 text-center">Market Landscape: Cost vs Lead Time</h3>
+                            <div class="chart-container flex-grow">
+                                <canvas id="makersChart"></canvas>
+                            </div>
+                            <p class="text-xs text-stone-400 mt-4 text-center">Bubble size represents Average Customer Rating (4.0 - 5.0). Click a bubble or list item to view details.</p>
+                        </div>
+
+                        <div class="flex flex-col h-full">
+                            <div class="flex justify-between items-end mb-4">
+                                <h3 class="text-xl font-bold text-stone-900">Shortlisted Manufacturers</h3>
+                                <span class="text-xs text-stone-500">Sorted by Rating</span>
+                            </div>
+                            
+                            <div id="makers-list" class="space-y-3 overflow-y-auto custom-scrollbar flex-grow pr-2" style="max-height: 500px;">
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="maker-detail-panel" class="hidden mt-8 bg-[#FAFAF9] border-2 border-amber-900/20 rounded-xl p-6">
+                        <div class="flex justify-between items-start mb-4">
+                            <div>
+                                <h4 id="panel-maker-name" class="text-2xl font-bold text-amber-900">Maker Name</h4>
+                                <p id="panel-maker-location" class="text-sm text-stone-500 font-semibold uppercase tracking-wider">Location</p>
+                            </div>
+                            <div class="text-right">
+                                <div id="panel-maker-rating" class="text-lg text-yellow-600 font-bold">&#9733;&#9733;&#9733;&#9733;&#9733;</div>
+                                <span class="text-xs text-stone-500">Customer Rating</span>
+                            </div>
+                        </div>
+                        
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                            <div class="bg-white p-3 rounded border border-stone-200 text-center">
+                                <p class="text-xs text-stone-400 uppercase font-bold">Price Index</p>
+                                <p id="panel-maker-cost" class="text-lg font-bold text-stone-800">$$$</p>
+                            </div>
+                            <div class="bg-white p-3 rounded border border-stone-200 text-center">
+                                <p class="text-xs text-stone-400 uppercase font-bold">Lead Time</p>
+                                <p id="panel-maker-lead" class="text-lg font-bold text-stone-800">8 Weeks</p>
+                            </div>
+                            <div class="bg-white p-3 rounded border border-stone-200 text-center col-span-2 md:col-span-2">
+                                <p class="text-xs text-stone-400 uppercase font-bold">Core Material</p>
+                                <p id="panel-maker-material" class="text-sm font-bold text-stone-800 mt-1">Baltic Birch Plywood</p>
+                            </div>
+                        </div>
+
+                        <div>
+                            <h5 class="text-sm uppercase font-bold text-stone-500 tracking-wider mb-2">Research Summary & Feedback</h5>
+                            <p id="panel-maker-review" class="text-sm text-stone-700 leading-relaxed italic border-l-4 border-amber-900 pl-4 py-1">
+                                Review goes here.
+                            </p>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+        </div>
+    </main>
+
+    <script>
+        const finishData = {
+            stain: {
+                title: "Stain & Seal Profile",
+                pros: [
+                    "Highlights natural wood grain and organic beauty.",
+                    "Creates a deep, rich, authentic walnut look.",
+                    "Minor scratches blend into the wood pattern naturally.",
+                    "Easier to touch up small localized areas over time."
+                ],
+                cons: [
+                    "Plywood veneer is extremely thin (risk of sanding through).",
+                    "Requires pre-stain conditioner to prevent blotchiness.",
+                    "Color consistency varies across different plywood sheets.",
+                    "More labor-intensive preparation process."
+                ],
+                maintenance: "Requires periodic application of specific oils or clear coats depending on the top-seal used (polyurethane vs. hard wax oil). Vulnerable to standing water damage at the edges if seal is broken.",
+                chartData: [9, 7, 6, 8, 10] 
+            },
+            paint: {
+                title: "Dark Tinted Enamel Profile",
+                pros: [
+                    "Provides uniform, consistent color across all cabinets.",
+                    "Hides variations and imperfections in plywood grain.",
+                    "Highly durable surface when using professional conversion varnish.",
+                    "Easier to clean smooth surfaces."
+                ],
+                cons: [
+                    "Covers natural wood texture (looks 'flat' compared to wood).",
+                    "Scratches clearly show the primer or raw wood underneath.",
+                    "Extremely difficult to touch-up perfectly without repainting full door.",
+                    "Requires professional spray equipment for factory finish."
+                ],
+                maintenance: "Daily maintenance is simple (wipe down with mild soap). However, long-term maintenance is difficult; deep chips require professional filling and color-matching to fix properly.",
+                chartData: [4, 9, 8, 6, 2] 
+            }
+        };
+
+        const makersData = [
+            { id: 'm1', name: 'Bay Woods Cabinetry', location: 'Oakland, CA', rating: 4.8, cost: 4, lead: 10, costDisplay: '$$$$', material: '3/4" Baltic Birch', review: 'Highly praised for their exceptional attention to detail and ability to execute complex custom walnut veneers. Customer feedback consistently mentions their flawless finish, but notes that lead times can stretch beyond initial estimates during busy seasons.' },
+            { id: 'm2', name: 'Pacific Custom Millwork', location: 'San Jose, CA', rating: 4.5, cost: 3, lead: 6, costDisplay: '$$$', material: 'Domestic Maple Plywood', review: 'Offers a fantastic balance of price and quality. Their semi-custom line is very popular. Feedback highlights their robust box construction and excellent customer service, though finishing options are slightly more limited than full custom shops.' },
+            { id: 'm3', name: 'SF Plywood Pros', location: 'San Francisco, CA', rating: 4.2, cost: 2, lead: 4, costDisplay: '$$', material: 'Imported Birch Plywood', review: 'The go-to for rapid turnarounds and budget-friendly projects. They utilize CNC routing for efficiency. Reviews mention good structural integrity, but some users noted that the edge banding requires careful inspection upon delivery.' },
+            { id: 'm4', name: 'Golden Gate Bespoke', location: 'Marin County, CA', rating: 4.9, cost: 5, lead: 14, costDisplay: '$$$$$', material: 'Walnut Core / Marine Grade', review: 'The absolute pinnacle of luxury cabinetry in the Bay Area. If budget and time are unlimited, their craftsmanship is unmatched. Clients rave about the heirloom quality and precise grain-matching across entire kitchen runs.' },
+            { id: 'm5', name: 'Silicon Valley Woodworks', location: 'Palo Alto, CA', rating: 4.6, cost: 4, lead: 8, costDisplay: '$$$$', material: 'FSC Certified Plywood', review: 'Specializes in eco-friendly materials and modern, slab-door styles which are perfect for dark walnut finishes. Great reviews on their high-tech design process and 3D rendering capabilities prior to build.' }
+        ];
+
+        let finishChartInstance = null;
+        let makersChartInstance = null;
+        let currentSelectedMaker = null;
+
+        document.getElementById('nav-finishes').addEventListener('click', (e) => switchTab('finishes', e.target));
+        document.getElementById('nav-makers').addEventListener('click', (e) => switchTab('makers', e.target));
+        document.getElementById('btn-stain').addEventListener('click', () => updateFinishData('stain'));
+        document.getElementById('btn-paint').addEventListener('click', () => updateFinishData('paint'));
+
+        function switchTab(tab, btnElement) {
+            document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active', 'bg-amber-900', 'text-white'));
+            
+            btnElement.classList.add('active');
+            
+            document.getElementById('view-finishes').classList.add('hidden');
+            document.getElementById('view-makers').classList.add('hidden');
+            
+            document.getElementById(`view-${tab}`).classList.remove('hidden');
+
+            if (tab === 'finishes') {
+                if(!finishChartInstance) initFinishChart();
+            } else if (tab === 'makers') {
+                if(!makersChartInstance) initMakersChart();
+                if(document.getElementById('makers-list').innerHTML === "") populateMakersList();
+            }
+        }
+
+        function updateFinishData(type) {
+            document.getElementById('btn-stain').classList.remove('active');
+            document.getElementById('btn-paint').classList.remove('active');
+            document.getElementById(`btn-${type}`).classList.add('active');
+
+            const data = finishData[type];
+            document.getElementById('detail-title').innerText = data.title;
+            
+            const prosList = document.getElementById('detail-pros');
+            prosList.innerHTML = '';
+            data.pros.forEach(item => {
+                let li = document.createElement('li');
+                li.innerText = item;
+                prosList.appendChild(li);
+            });
+
+            const consList = document.getElementById('detail-cons');
+            consList.innerHTML = '';
+            data.cons.forEach(item => {
+                let li = document.createElement('li');
+                li.innerText = item;
+                consList.appendChild(li);
+            });
+
+            document.getElementById('detail-maintenance').innerText = data.maintenance;
+
+            if (finishChartInstance) {
+                finishChartInstance.data.datasets[0].data = data.chartData;
+                
+                if(type === 'stain') {
+                    finishChartInstance.data.datasets[0].backgroundColor = 'rgba(120, 53, 15, 0.2)';
+                    finishChartInstance.data.datasets[0].borderColor = 'rgba(120, 53, 15, 1)';
+                    finishChartInstance.data.datasets[0].label = 'Stain Performance';
+                } else {
+                    finishChartInstance.data.datasets[0].backgroundColor = 'rgba(41, 37, 36, 0.2)';
+                    finishChartInstance.data.datasets[0].borderColor = 'rgba(41, 37, 36, 1)';
+                    finishChartInstance.data.datasets[0].label = 'Enamel Performance';
+                }
+                finishChartInstance.update();
+            }
+        }
+
+        function initFinishChart() {
+            const ctx = document.getElementById('finishChart').getContext('2d');
+            Chart.defaults.font.family = 'Inter';
+            finishChartInstance = new Chart(ctx, {
+                type: 'radar',
+                data: {
+                    labels: ['Aesthetic Depth', 'Durability', 'Maintenance Ease', 'Cost Efficiency', 'Grain Visibility'],
+                    datasets: [{
+                        label: 'Stain Performance',
+                        data: finishData.stain.chartData,
+                        backgroundColor: 'rgba(120, 53, 15, 0.2)',
+                        borderColor: 'rgba(120, 53, 15, 1)',
+                        pointBackgroundColor: 'rgba(120, 53, 15, 1)',
+                        borderWidth: 2
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        r: {
+                            angleLines: { color: 'rgba(0,0,0,0.1)' },
+                            grid: { color: 'rgba(0,0,0,0.1)' },
+                            pointLabels: { font: { size: 11, family: 'Inter' }, color: '#57534e' },
+                            ticks: { display: false, min: 0, max: 10 }
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#292524',
+                            titleFont: { family: 'Inter' },
+                            bodyFont: { family: 'Inter' },
+                            callbacks: {
+                                label: function(context) {
+                                    return context.dataset.label + ': ' + context.formattedValue + '/10';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function initMakersChart() {
+            const ctx = document.getElementById('makersChart').getContext('2d');
+            
+            const scatterData = makersData.map(maker => ({
+                x: maker.cost,
+                y: maker.lead,
+                r: (maker.rating - 3.8) * 15, 
+                makerData: maker
+            }));
+
+            makersChartInstance = new Chart(ctx, {
+                type: 'bubble',
+                data: {
+                    datasets: [{
+                        label: 'Makers',
+                        data: scatterData,
+                        backgroundColor: 'rgba(120, 53, 15, 0.6)',
+                        borderColor: 'rgba(120, 53, 15, 1)',
+                        borderWidth: 1,
+                        hoverBackgroundColor: 'rgba(120, 53, 15, 0.9)'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    onClick: (e, elements) => {
+                        if (elements.length > 0) {
+                            const dataIndex = elements[0].index;
+                            const maker = makersData[dataIndex];
+                            selectMaker(maker.id);
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Cost Index (Lower to Higher)', color: '#57534e' },
+                            min: 1, max: 6,
+                            ticks: { stepSize: 1, callback: function(value) { return '$'.repeat(value); } }
+                        },
+                        y: {
+                            title: { display: true, text: 'Lead Time (Weeks)', color: '#57534e' },
+                            min: 0, max: 16
+                        }
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: '#292524',
+                            callbacks: {
+                                label: function(context) {
+                                    const m = context.raw.makerData;
+                                    return `${m.name} | Rating: ${m.rating} | ${m.lead} wks`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function populateMakersList() {
+            const listContainer = document.getElementById('makers-list');
+            listContainer.innerHTML = '';
+            
+            const sortedMakers = [...makersData].sort((a, b) => b.rating - a.rating);
+
+            sortedMakers.forEach(maker => {
+                const card = document.createElement('div');
+                card.className = `maker-card bg-white border border-stone-200 rounded-lg p-4 cursor-pointer flex justify-between items-center shadow-sm`;
+                card.id = `card-${maker.id}`;
+                card.onclick = () => selectMaker(maker.id);
+
+                let stars = '';
+                for(let i=0; i<Math.floor(maker.rating); i++) stars += '&#9733;';
+                
+                card.innerHTML = `
+                    <div>
+                        <h4 class="font-bold text-stone-900">${maker.name}</h4>
+                        <p class="text-xs text-stone-500">${maker.location}</p>
+                    </div>
+                    <div class="text-right">
+                        <div class="text-sm text-yellow-600 font-bold">${stars} <span class="text-stone-600 text-xs">${maker.rating}</span></div>
+                        <p class="text-xs text-stone-400 font-mono">${maker.costDisplay}</p>
+                    </div>
+                `;
+                listContainer.appendChild(card);
+            });
+        }
+
+        function selectMaker(id) {
+            currentSelectedMaker = id;
+            const maker = makersData.find(m => m.id === id);
+            
+            document.querySelectorAll('.maker-card').forEach(c => c.classList.remove('selected'));
+            const cardEl = document.getElementById(`card-${id}`);
+            if(cardEl) {
+                cardEl.classList.add('selected');
+                cardEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+
+            const panel = document.getElementById('maker-detail-panel');
+            panel.classList.remove('hidden');
+
+            document.getElementById('panel-maker-name').innerText = maker.name;
+            document.getElementById('panel-maker-location').innerText = maker.location;
+            
+            let stars = '';
+            for(let i=0; i<Math.floor(maker.rating); i++) stars += '&#9733;';
+            document.getElementById('panel-maker-rating').innerHTML = stars;
+
+            document.getElementById('panel-maker-cost').innerText = maker.costDisplay;
+            document.getElementById('panel-maker-lead').innerText = `${maker.lead} Weeks`;
+            document.getElementById('panel-maker-material').innerText = maker.material;
+            document.getElementById('panel-maker-review').innerText = maker.review;
+
+            if (makersChartInstance) {
+                const dataset = makersChartInstance.data.datasets[0];
+                dataset.backgroundColor = dataset.data.map(d => 
+                    d.makerData.id === id ? 'rgba(120, 53, 15, 1)' : 'rgba(120, 53, 15, 0.3)'
+                );
+                dataset.borderColor = dataset.data.map(d => 
+                    d.makerData.id === id ? '#000000' : 'rgba(120, 53, 15, 1)'
+                );
+                dataset.borderWidth = dataset.data.map(d => d.makerData.id === id ? 2 : 1);
+                makersChartInstance.update();
+            }
+        }
+
+        window.onload = () => {
+            initFinishChart();
+        };
+
+    </script>
+</body>
+</html>
