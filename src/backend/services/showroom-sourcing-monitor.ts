@@ -35,11 +35,13 @@ function normalizeConstraint(note: string | null): string | null {
 }
 
 async function wasRecentlySwept(env: Env, categoryId: number): Promise<boolean> {
+  if (!env.CACHE) return false;
   const value = await env.CACHE.get(`showroom-sourcing-monitor:${categoryId}`);
   return Boolean(value);
 }
 
 async function markSwept(env: Env, categoryId: number) {
+  if (!env.CACHE) return;
   await env.CACHE.put(
     `showroom-sourcing-monitor:${categoryId}`,
     new Date().toISOString(),

@@ -193,7 +193,7 @@ showroomStoresRouter.openapi(
   }),
   async (c) => {
     const { productId } = c.req.valid("param");
-    const body = c.req.valid("json");
+    const body = c.req.valid("json") ?? { negativeConstraints: [] };
 
     try {
       const prompt = await generateProductDraftPrompt(
@@ -243,7 +243,7 @@ showroomStoresRouter.openapi(
   }),
   async (c) => {
     const { productId } = c.req.valid("param");
-    const body = c.req.valid("json");
+    const body = c.req.valid("json") ?? {};
     const agent = await getShowroomResearchAgent(c.env);
     const result = await agent.deepSweepProduct({
       productId,
@@ -291,7 +291,7 @@ showroomStoresRouter.openapi(
   }),
   async (c) => {
     const { id } = c.req.valid("param");
-    const body = c.req.valid("json");
+    const body = c.req.valid("json") ?? {};
     const agent = await getShowroomResearchAgent(c.env);
     const result = await agent.deepSweepStore({
       storeId: id,
@@ -339,7 +339,7 @@ showroomStoresRouter.openapi(
   }),
   async (c) => {
     const { categoryId } = c.req.valid("param");
-    const body = c.req.valid("json");
+    const body = c.req.valid("json") ?? {};
     const agent = await getShowroomResearchAgent(c.env);
     const result = await agent.deepSweepCategory({
       categoryId,

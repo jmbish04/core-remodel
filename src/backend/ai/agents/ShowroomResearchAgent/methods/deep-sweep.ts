@@ -531,7 +531,7 @@ async function upsertProductImage(
         ogTitle: extraction.title ?? null,
         ogDescription: extraction.description ?? null,
         metadataJson: JSON.stringify({ source: "showroom-deep-sweep" }),
-        updatedAt: new Date(),
+        updatedAt: sql`(unixepoch())` as any,
       },
     });
 
@@ -593,7 +593,7 @@ async function upsertShowroomImage(
         ogTitle: extraction.title ?? null,
         ogDescription: extraction.description ?? null,
         metadataJson: JSON.stringify({ source: "showroom-deep-sweep" }),
-        updatedAt: new Date(),
+        updatedAt: sql`(unixepoch())` as any,
       },
     });
 
@@ -609,40 +609,50 @@ async function upsertSpecs(
   if (!specs || specs.length === 0) return 0;
 
   const db = drizzle(env.DB);
-  let written = 0;
+  const statements = [];
   for (const spec of specs) {
     const key = spec.key?.trim();
     const value = spec.value?.trim();
     if (!key || !value) continue;
 
-    await db
-      .insert(productSpecs)
-      .values({
-        storeProductId: productId,
-        specKey: key,
-        specValue: value,
-        unit: spec.unit ?? null,
-        sourceUrl,
-        confidence: normalizeConfidence(spec.confidence),
-        metadataJson: JSON.stringify({ source: "showroom-deep-sweep" }),
-      })
-      .onConflictDoUpdate({
-        target: [
-          productSpecs.storeProductId,
-          productSpecs.specKey,
-          productSpecs.sourceUrl,
-        ],
-        set: {
+    statements.push(
+      db
+        .insert(productSpecs)
+        .values({
+          storeProductId: productId,
+          specKey: key,
           specValue: value,
           unit: spec.unit ?? null,
+          sourceUrl,
           confidence: normalizeConfidence(spec.confidence),
           metadataJson: JSON.stringify({ source: "showroom-deep-sweep" }),
-          updatedAt: new Date(),
-        },
-      });
-    written += 1;
+        })
+        .onConflictDoUpdate({
+          target: [
+            productSpecs.storeProductId,
+            productSpecs.specKey,
+            productSpecs.sourceUrl,
+          ],
+          set: {
+            specValue: value,
+            unit: spec.unit ?? null,
+            confidence: normalizeConfidence(spec.confidence),
+            metadataJson: JSON.stringify({ source: "showroom-deep-sweep" }),
+            updatedAt: sql`(unixepoch())` as any,
+          },
+        }),
+    );
   }
-  return written;
+
+  if (statements.length === 0) return 0;
+
+  const BATCH_SIZE = 50;
+  for (let i = 0; i < statements.length; i += BATCH_SIZE) {
+    const chunk = statements.slice(i, i + BATCH_SIZE);
+    await db.batch(chunk as [typeof chunk[number], ...typeof chunk[number][]]);
+  }
+
+  return statements.length;
 }
 
 async function insertProductFindings(
