@@ -1,9 +1,9 @@
 """Fal provider — model-aware argument construction.
 
-Three distinct API shapes:
-  bria/*              → instruction + image_url (singular)   [Bria FIBO-Edit]
-  flux-2-pro/edit     → prompt + image_urls (plural, up to 9)
-  kontext|nano-banana → prompt + image_url (singular)
+Distinct API shapes:
+  bria/*                       → instruction + image_url (singular)   [Bria FIBO-Edit]
+  flux-2-pro/edit, nano-banana → prompt + image_urls (plural list)
+  kontext                      → prompt + image_url (singular)
 """
 import io
 import os
@@ -31,10 +31,10 @@ def _upload_bytes_fal(data, fal_key, suffix=".png"):
     import fal_client
 
     os.environ["FAL_KEY"] = fal_key
-    fd, path = tempfile.mkstemp(prefix="fal_up_", suffix=suffix)
+    with tempfile.NamedTemporaryFile(prefix="fal_up_", suffix=suffix, delete=False) as tf:
+        tf.write(data)
+        path = tf.name
     try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
         return fal_client.upload_file(Path(path))
     finally:
         try:
@@ -66,6 +66,7 @@ def fal_run(model, prompt, image_bytes, references, env, mask=None):
     is_fill = "/fill" in model
     is_bria = model.startswith("bria/")
     is_flux2_edit = "flux-2" in model and "edit" in model
+    is_nano_banana = "nano-banana" in model
 
     if is_fill:
         # Flux Fill (e.g. fal-ai/flux-pro/v1/fill): freezes everything outside the white
@@ -93,8 +94,16 @@ def fal_run(model, prompt, image_bytes, references, env, mask=None):
             "image_size": "auto",
             "output_format": "png",
         }
+    elif is_nano_banana:
+        # Nano-Banana Pro Edit (Gemini 3 Pro Image via Fal) requires image_urls (plural):
+        # the working image first, then the scoped reference images.
+        args = {
+            "prompt": prompt,
+            "image_urls": [image_url] + ref_urls,
+            "output_format": "png",
+        }
     else:
-        # Kontext / Nano-Banana: prompt + image_url (singular).
+        # Kontext (single-image edit): prompt + image_url (singular).
         args = {"prompt": prompt, "image_url": image_url}
 
     def on_queue_update(update):
