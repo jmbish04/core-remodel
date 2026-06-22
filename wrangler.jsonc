@@ -213,6 +213,11 @@
         "name": "SHOWROOM_RESEARCH_AGENT",
         "class_name": "ShowroomResearchAgent",
       },
+      {
+        // 0006 Phase 2C: real-time collaborative floor-plan rooms (one DO per room).
+        "name": "FLOORPLAN_SESSION",
+        "class_name": "FloorplanSessionDO",
+      },
     ],
   },
   "migrations": [
@@ -256,6 +261,10 @@
     {
       "tag": "v9",
       "new_sqlite_classes": ["ShowroomResearchAgent"],
+    },
+    {
+      "tag": "v10",
+      "new_sqlite_classes": ["FloorplanSessionDO"],
     },
   ],
   "worker_loaders": [

@@ -39,6 +39,7 @@ interface __BaseEnv_Env {
 	RESEARCH_AGENT: DurableObjectNamespace<import("./src/_worker").ResearchAgent>;
 	PERMIT_INTELLIGENCE_AGENT: DurableObjectNamespace<import("./src/_worker").PermitIntelligenceAgent>;
 	SHOWROOM_RESEARCH_AGENT: DurableObjectNamespace<import("./src/_worker").ShowroomResearchAgent>;
+	FLOORPLAN_SESSION: DurableObjectNamespace<import("./src/_worker").FloorplanSessionDO>;
 	IMAGE_PROCESSING_WORKFLOW: Workflow<Parameters<import("./src/_worker").ImageProcessingWorkflow['run']>[0]['payload']>;
 	CHECKLIST_RATIONALE_WORKFLOW: Workflow<Parameters<import("./src/_worker").ChecklistRationaleWorkflow['run']>[0]['payload']>;
 	IMAGE_BATCH_WORKFLOW: Workflow<Parameters<import("./src/_worker").ImageBatchProcessingWorkflow['run']>[0]['payload']>;
@@ -46,7 +47,7 @@ interface __BaseEnv_Env {
 declare namespace Cloudflare {
 	interface GlobalProps {
 		mainModule: typeof import("./src/_worker");
-		durableNamespaces: "RenovationAgent" | "EstimateCollabHub" | "GAS_A2A" | "BudgetAgent" | "BidPortfolioAgent" | "ResearchAgent" | "PermitIntelligenceAgent" | "ShowroomResearchAgent";
+		durableNamespaces: "RenovationAgent" | "EstimateCollabHub" | "GAS_A2A" | "BudgetAgent" | "BidPortfolioAgent" | "ResearchAgent" | "PermitIntelligenceAgent" | "ShowroomResearchAgent" | "FloorplanSessionDO";
 	}
 	interface Env extends __BaseEnv_Env {}
 }
