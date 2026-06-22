@@ -34,6 +34,8 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { useUnitSystem } from "@/lib/use-unit-system";
+import { UNIT_LABEL } from "@/lib/units";
 
 import {
   ELEMENT_TYPE_OPTIONS,
@@ -45,6 +47,7 @@ import {
   type MeasurementInput,
   type MeasurementSource,
 } from "./measurement-types";
+import { AreaField, DimensionField } from "./unit-fields";
 
 interface MeasurementFormDialogProps {
   open: boolean;
@@ -117,50 +120,6 @@ function formFromMeasurement(m: Measurement): FormState {
   };
 }
 
-/** A labelled feet + inches pair. */
-function DimensionRow({
-  label,
-  feet,
-  inches,
-  onFeet,
-  onInches,
-}: {
-  label: string;
-  feet: string;
-  inches: string;
-  onFeet: (v: string) => void;
-  onInches: (v: string) => void;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label>{label}</Label>
-      <div className="flex items-center gap-1.5">
-        <Input
-          type="number"
-          inputMode="numeric"
-          min={0}
-          value={feet}
-          onChange={(e) => onFeet(e.target.value)}
-          placeholder="0"
-          aria-label={`${label} feet`}
-        />
-        <span className="text-xs text-muted-foreground">ft</span>
-        <Input
-          type="number"
-          inputMode="decimal"
-          min={0}
-          step="0.25"
-          value={inches}
-          onChange={(e) => onInches(e.target.value)}
-          placeholder="0"
-          aria-label={`${label} inches`}
-        />
-        <span className="text-xs text-muted-foreground">in</span>
-      </div>
-    </div>
-  );
-}
-
 export function MeasurementFormDialog({
   open,
   onOpenChange,
@@ -169,6 +128,7 @@ export function MeasurementFormDialog({
 }: MeasurementFormDialogProps) {
   const [form, setForm] = React.useState<FormState>(EMPTY_FORM);
   const [saving, setSaving] = React.useState(false);
+  const [unitSystem] = useUnitSystem();
 
   const isEdit = measurement !== null;
 
@@ -214,7 +174,11 @@ export function MeasurementFormDialog({
         <DialogHeader>
           <DialogTitle>{isEdit ? "Edit measurement" : "Add measurement"}</DialogTitle>
           <DialogDescription>
-            Master, as-is dimensions. Leave fields blank when not applicable.
+            Master, as-is dimensions. Entering in{" "}
+            <span className="font-medium text-foreground">
+              {UNIT_LABEL[unitSystem].label} ({UNIT_LABEL[unitSystem].length})
+            </span>
+            {" "}— switch units from the sidebar. Leave fields blank when not applicable.
           </DialogDescription>
         </DialogHeader>
 
@@ -261,44 +225,40 @@ export function MeasurementFormDialog({
             />
           </div>
 
-          {/* Dimensions */}
-          <DimensionRow
+          {/* Dimensions (rendered in the active unit; stored canonically) */}
+          <DimensionField
             label="Length"
             feet={form.lengthFeet}
             inches={form.lengthInches}
             onFeet={(v) => set("lengthFeet", v)}
             onInches={(v) => set("lengthInches", v)}
+            system={unitSystem}
           />
-          <DimensionRow
+          <DimensionField
             label="Width"
             feet={form.widthFeet}
             inches={form.widthInches}
             onFeet={(v) => set("widthFeet", v)}
             onInches={(v) => set("widthInches", v)}
+            system={unitSystem}
           />
-          <DimensionRow
+          <DimensionField
             label="Height"
             feet={form.heightFeet}
             inches={form.heightInches}
             onFeet={(v) => set("heightFeet", v)}
             onInches={(v) => set("heightInches", v)}
+            system={unitSystem}
           />
 
           {/* Area + quantity */}
           <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="measurement-area">Area (sq ft)</Label>
-              <Input
-                id="measurement-area"
-                type="number"
-                inputMode="decimal"
-                min={0}
-                step="0.01"
-                value={form.areaSqFt}
-                onChange={(e) => set("areaSqFt", e.target.value)}
-                placeholder="optional"
-              />
-            </div>
+            <AreaField
+              label="Area"
+              sqft={form.areaSqFt}
+              onChange={(v) => set("areaSqFt", v)}
+              system={unitSystem}
+            />
             <div className="space-y-1.5">
               <Label htmlFor="measurement-qty">Quantity</Label>
               <Input

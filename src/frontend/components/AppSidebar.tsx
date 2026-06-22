@@ -5,6 +5,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { UnitToggle } from "@/components/ui/unit-toggle";
 import { siteConfig } from "@/lib/config";
 import { docsAudienceGroups, getDocsPageByPath } from "@/lib/docs";
 import { cn } from "@/lib/utils";
@@ -363,6 +364,10 @@ function SidebarContent({
         <div className="flex items-center justify-between rounded-md border border-border/50 bg-card/60 px-2 py-1">
           <span className="text-xs text-muted-foreground">Theme</span>
           <ThemeToggle />
+        </div>
+        <div className="flex items-center justify-between rounded-md border border-border/50 bg-card/60 px-2 py-1">
+          <span className="text-xs text-muted-foreground">Units</span>
+          <UnitToggle />
         </div>
       </div>
     </div>

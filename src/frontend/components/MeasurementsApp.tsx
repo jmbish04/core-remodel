@@ -35,6 +35,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { UnitToggle } from "@/components/ui/unit-toggle";
 
 import { MeasurementFormDialog } from "./measurements/MeasurementFormDialog";
 import { MeasurementTable, type RoomGroup } from "./measurements/MeasurementTable";
@@ -236,13 +237,16 @@ export function MeasurementsApp() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Measurements</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Master, as-is dimensions for the whole house — the source of truth for scope &amp; ROI.
+            Exact, as-is dimensions for the whole house — measure twice, order once; ready for material takeoffs, quotes &amp; designers.
           </p>
         </div>
-        <Button onClick={openAdd}>
-          <Plus className="mr-2 size-4" />
-          Add measurement
-        </Button>
+        <div className="flex items-center gap-2">
+          <UnitToggle />
+          <Button onClick={openAdd}>
+            <Plus className="mr-2 size-4" />
+            Add measurement
+          </Button>
+        </div>
       </div>
 
       {/* Filter bar */}
@@ -307,9 +311,7 @@ export function MeasurementsApp() {
             </SelectContent>
           </Select>
 
-          <span className="ml-auto text-xs text-muted-foreground">
-            {measurements.length} measurement{measurements.length === 1 ? "" : "s"}
-          </span>
+          <span className="ml-auto text-xs text-muted-foreground">{measurements.length} measurement{measurements.length === 1 ? "" : "s"}</span>
         </CardContent>
       </Card>
 
