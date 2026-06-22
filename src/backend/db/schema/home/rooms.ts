@@ -29,6 +29,18 @@ export const rooms = sqliteTable("rooms", {
   widthFeet: integer("width_feet"),
   widthInches: integer("width_inches"),
 
+  /**
+   * Explicit square-footage override (0006 PHASE 1).
+   *
+   * When set (non-null), this authoritative area is PREFERRED over the
+   * length × width computation in home-catalog.ts `computeRoomSqft`, so irregular
+   * / non-rectangular rooms (e.g. the L-shaped lower foyer = 77.28 sq ft) report
+   * their true area everywhere the catalog `sqft` field is surfaced (floor-plan
+   * hover card, room detail, bid portfolios).  null = fall back to the computed
+   * rectangular estimate.
+   */
+  areaSqFt: real("area_sq_ft"),
+
   isLivingSpace: integer("is_living_space", { mode: "boolean" }).notNull().default(true),
 
   /**

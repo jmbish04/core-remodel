@@ -260,6 +260,7 @@ function SidebarLinks({
         <>
           {renderSection("Admin - Planning", [
             { href: "/measure", label: "Live Floor Plan" },
+            { href: "/measurements", label: "Measurements" },
             { href: "/admin/planning/decision-room", label: "Decision Room" },
             { href: "/admin/planning/moodboards", label: "Mood Boards" },
           ])}

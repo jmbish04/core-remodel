@@ -34,6 +34,7 @@ import { estimatesRouter } from "./routes/estimates";
 import { healthRouter } from "./routes/health";
 import { imagesRouter } from "./routes/images";
 import { listingPhotosRouter } from "./routes/listing-photos";
+import { measurementsRouter } from "./routes/measurements";
 import { moodBoardsRouter } from "./routes/moodboards";
 import { notificationsRouter } from "./routes/notifications";
 import { openapiRouter } from "./routes/openapi";
@@ -138,6 +139,7 @@ app.route("/api/planning", planningExtendedRouter);
 // /code/:roomCode/options-summary take priority over the broader /:id catch-all.
 app.route("/api/rooms", roomsExtendedRouter);
 app.route("/api/rooms", roomsRouter);
+app.route("/api/measurements", measurementsRouter);
 app.route("/api/estimate-statuses", estimateStatusesRouter);
 app.route("/api/estimate-companies", estimateCompaniesRouter);
 app.route("/api/estimate-contacts", estimateContactsRouter);

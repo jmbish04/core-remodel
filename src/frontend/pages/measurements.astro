@@ -1,0 +1,18 @@
+---
+/**
+ * /measurements — admin data-entry surface for the master measurements database
+ * (0006 Phase 1).  Hosts the <MeasurementsApp> React island, which fetches and
+ * mutates /api/measurements and reads /api/rooms/catalog for room grouping.
+ */
+import { MeasurementsApp } from "@/components/MeasurementsApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Measurements - 126 Colby Remodel Mission Control"
+  description="Master, as-is measurements database for the home — rooms, fixtures, walls, stairs, and site dimensions."
+>
+  <main class="container mx-auto px-4 py-8">
+    <MeasurementsApp client:only="react" />
+  </main>
+</BaseLayout>
