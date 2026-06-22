@@ -1,4 +1,4 @@
-export type DocsAudienceId = "homeowners" | "contractors" | "shared";
+export type DocsAudienceId = "homeowners" | "contractors" | "shared" | "platform";
 export type DocsStatus = "live" | "planned";
 export type DocsNoteTone = "info" | "planned";
 
@@ -14,11 +14,23 @@ export interface DocsSectionNote {
   tone?: DocsNoteTone;
 }
 
+/**
+ * A Mermaid diagram embedded in a docs section. `code` is the raw Mermaid
+ * source (flowchart, sequenceDiagram, erDiagram, stateDiagram-v2, …); it is
+ * rendered client-side by the MermaidDiagram island. Source is authored in this
+ * file only — never user-supplied.
+ */
+export interface DocsDiagram {
+  code: string;
+  caption?: string;
+}
+
 export interface DocsSectionDefinition {
   id: string;
   title: string;
   summary: string;
   paragraphs: string[];
+  diagrams?: DocsDiagram[];
   bullets?: string[];
   actions?: DocsActionLink[];
   note?: DocsSectionNote;
@@ -1129,6 +1141,308 @@ const sharedPages: DocsPageDefinition[] = [
   },
 ];
 
+/**
+ * Platform & Systems docs — how the deep-research sourcing engine actually
+ * works, what it does today, and where it's headed. Authored to give the
+ * operator a precise mental model (with Mermaid diagrams) before extending it.
+ */
+const platformPages: DocsPageDefinition[] = [
+  {
+    slug: ["platform", "deep-research-overview"],
+    href: "/docs/platform/deep-research-overview",
+    shortTitle: "Deep research sourcing",
+    title: "Deep Research Sourcing — Overview",
+    audience: "platform",
+    audienceLabel: "Platform & Systems",
+    status: "live",
+    summary:
+      "What the deep-research sourcing engine is for, what it researches, and the artifacts it produces against the showroom data model.",
+    overview:
+      "Deep research sourcing turns a question about a material, product, or showroom into traceable, citation-backed artifacts in D1. You point it at a target — a generic material such as kitchen stone, a product you already track, an individual showroom, or an under-covered category — and it gathers price signals, ratings, gotchas, specs, and imagery, then stores them against that target so the rest of the app can use them.",
+    highlights: [
+      "Four research targets: material, tracked product, showroom, and category gap.",
+      "Outputs are findings (with sentiment), specs, scraped images, review sources, and RAG vectors.",
+      "Every artifact is bound to a specific D1 entity so it shows up in that entity's view.",
+      "The Sourcing Research console is the human surface for launching and reviewing sweeps.",
+    ],
+    actions: [
+      {
+        href: "/admin/showroom/sourcing",
+        label: "Open Sourcing Research",
+        description: "Stage a prompt, launch a sweep, and review findings and media.",
+      },
+      {
+        href: "/admin/showroom",
+        label: "Showroom Dashboard",
+        description: "Browse the showrooms and products that sweeps write against.",
+      },
+    ],
+    sections: [
+      {
+        id: "what-it-researches",
+        title: "What it researches",
+        summary: "The four targets and the artifacts each sweep produces.",
+        paragraphs: [
+          "A sweep always has one explicit target. That target is chosen before the sweep starts, which is why every fact the sweep discovers is filed against the correct entity by construction rather than guessed at afterward.",
+          "Regardless of target, the sweep produces the same shape of output: short findings tagged positive, negative, or neutral; structured specs; scraped images uploaded to Cloudflare Images; review-platform ratings used as sources; and vector embeddings for retrieval.",
+        ],
+        diagrams: [
+          {
+            code: `flowchart TD
+    M["Material (e.g. kitchen stone)"] --> Sweep
+    P["Tracked product"] --> Sweep
+    S["Showroom / store"] --> Sweep
+    C["Under-covered category"] --> Sweep
+    Sweep(["Deep research sweep"])
+    Sweep --> F["Findings — price, ratings, gotchas"]
+    Sweep --> Sp["Specs"]
+    Sweep --> Img["Product / storefront images"]
+    Sweep --> R["Review-source ratings"]
+    Sweep --> V["Vector embeddings (RAG)"]`,
+            caption: "Any of four targets flows through one sweep into five kinds of artifact.",
+          },
+        ],
+        bullets: [
+          "Material: research a generic material first, then use it to source candidate products and showrooms.",
+          "Product: refresh pricing, sales, reviews, and specs on something you already track.",
+          "Showroom: gather reputation, return policy, delivery reliability, and storefront imagery.",
+          "Category gap: the cron path — find alternatives when a category has thin or rejected coverage.",
+        ],
+      },
+      {
+        id: "data-model",
+        title: "Where the artifacts land",
+        summary: "The showroom tables a sweep reads and writes.",
+        paragraphs: [
+          "Findings, specs, and images are written against the specific store or product the sweep targeted. Homeowner ratings are the only approval signal today, and they live at the store and product level.",
+          "The two research-context read endpoints added with the Sourcing Research console expose these rows to the frontend so the ledger and galleries render live data.",
+        ],
+        diagrams: [
+          {
+            code: `erDiagram
+    showroom_stores ||--o{ showroom_store_products : has
+    showroom_stores ||--o{ store_research : findings
+    showroom_stores ||--o{ showroom_images : storefront
+    showroom_stores ||--o{ showroom_store_ratings : sources
+    showroom_stores ||--o{ store_rating : homeowner
+    showroom_store_products ||--o{ store_product_research : findings
+    showroom_store_products ||--o{ product_images : imagery
+    showroom_store_products ||--o{ product_specs : specs
+    showroom_store_products ||--o{ store_product_rating : homeowner`,
+            caption: "Showroom sourcing data model — findings, images, specs, and ratings hang off stores and products.",
+          },
+        ],
+        note: {
+          title: "Approval today is store-level only",
+          body: "There is no per-finding or per-image approval column yet. The only human approval signal is a store or product rating. The roadmap page covers the planned fact-level and image-level review gates.",
+          tone: "planned",
+        },
+      },
+    ],
+  },
+  {
+    slug: ["platform", "sourcing-pipeline"],
+    href: "/docs/platform/sourcing-pipeline",
+    shortTitle: "Sourcing pipeline (as-built)",
+    title: "Sourcing Pipeline — As Built",
+    audience: "platform",
+    audienceLabel: "Platform & Systems",
+    status: "live",
+    summary:
+      "The exact pipeline that runs today: prompt staging, citation discovery, Browser Rendering extraction, persistence, and the autonomous cron monitor.",
+    overview:
+      "Today's pipeline is a single-shot autonomous run. After an optional prompt-staging step, the agent discovers citation URLs (via Gemini deep research or a quick Flash JSON call), extracts structured data from each source with Browser Rendering, uploads imagery to Cloudflare Images, and writes everything to D1 and Vectorize. There is no plan-review pause and no per-artifact gate — the only human review is rating a showroom after the fact.",
+    highlights: [
+      "Prompt staging uses Llama 3.3 to draft a product-specific brief you can edit.",
+      "Citation discovery uses Gemini deep research (deep) or Gemini Flash JSON (quick).",
+      "Browser Rendering extractJson structures findings, specs, images, and ratings.",
+      "Images are content-type validated and capped at 4 per source — no relevance filter.",
+      "A per-minute cron sweeps categories that are thin or fully rejected.",
+    ],
+    actions: [
+      {
+        href: "/admin/showroom/sourcing",
+        label: "Open Sourcing Research",
+        description: "Run a sweep and watch the artifacts land.",
+      },
+    ],
+    sections: [
+      {
+        id: "sweep-pipeline",
+        title: "The sweep pipeline",
+        summary: "From prompt to persisted artifacts, end to end.",
+        paragraphs: [
+          "The frontend can first call the draft-prompt endpoint to stage an editable brief. Launching a sweep dispatches the ShowroomResearchAgent by RPC. The agent discovers citations, then loops over each source URL extracting structured data and imagery before persisting and embedding.",
+          "Note the absence of any pause: the citation plan flows straight into scraping and persistence. The only review is the homeowner rating applied afterward in the Review Ledger.",
+        ],
+        diagrams: [
+          {
+            code: `sequenceDiagram
+    actor U as Homeowner
+    participant FE as Sourcing UI
+    participant API as Hono API
+    participant AG as ShowroomResearchAgent
+    participant G as Gemini (AI Gateway)
+    participant BR as Browser Rendering
+    participant IMG as Cloudflare Images
+    participant D1 as D1
+    participant VEC as Vectorize
+    U->>FE: Stage prompt (optional)
+    FE->>API: POST draft-prompt
+    API->>AG: generateProductDraftPrompt (Llama 3.3)
+    AG-->>FE: prompt text
+    U->>FE: Launch sweep (quick or deep)
+    FE->>API: POST deep-sweep
+    API->>AG: deepSweep* (RPC)
+    AG->>G: Discover citations
+    G-->>AG: citation URLs
+    loop per source URL
+        AG->>BR: extractJson + extractMarkdown
+        BR-->>AG: findings, specs, images, ratings
+        AG->>IMG: upload scraped images
+        AG->>D1: insert findings / specs / images
+        AG->>VEC: embed summary chunks
+    end
+    AG-->>FE: counts`,
+            caption: "As-built sweep — no plan review, no per-artifact gate. Review is store-level rating after the fact.",
+          },
+        ],
+      },
+      {
+        id: "cron-monitor",
+        title: "Autonomous cron monitor",
+        summary: "How thin or rejected categories trigger sweeps on their own.",
+        paragraphs: [
+          "A per-minute scheduled handler checks each active category. It fires a category sweep when coverage is thin (at most one mapped showroom) or when every mapped showroom has been rejected by a homeowner rating of one or lower. The reasons attached to those low ratings become negative constraints for the next sweep.",
+          "Sweeps are throttled per category for 24 hours and limited to one per tick, so the loop nudges coverage forward without runaway cost.",
+        ],
+        diagrams: [
+          {
+            code: `flowchart TD
+    T["Cron tick — every minute"] --> M["monitorShowroomSourcingCoverage"]
+    M --> Q{"For each active category"}
+    Q --> G{"<= 1 showroom OR all rated <= 1?"}
+    G -- no --> Skip["Skip"]
+    G -- yes --> Th{"Throttled in last 24h?"}
+    Th -- yes --> Skip
+    Th -- no --> NC["Build negative constraints from ratingNotes"]
+    NC --> Sweep["deepSweepCategory"]
+    Sweep --> One["Max 1 sweep per tick"]`,
+            caption: "The rejection loop: a ruled-out showroom's reason feeds the next autonomous category sweep.",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    slug: ["platform", "sourcing-hitl-roadmap"],
+    href: "/docs/platform/sourcing-hitl-roadmap",
+    shortTitle: "HITL review & roadmap",
+    title: "HITL Review & Roadmap — Intended Flow",
+    audience: "platform",
+    audienceLabel: "Platform & Systems",
+    status: "planned",
+    summary:
+      "The intended human-in-the-loop flow: a reviewable research plan with agent annotations, structured fact parsing with entity matching, and per-fact and per-image approval gates.",
+    overview:
+      "The intended flow adds review gates the current pipeline skips. Gemini should return a research plan, the onboard worker agent should annotate that plan with its own notes, and the operator should iterate to approval. Once the findings report comes back, Workers AI should parse it against a structured schema and match each fact to the right entity — and because that matching can be wrong, every fact and every scraped image should be approved or rejected by a human before it sticks.",
+    highlights: [
+      "Plan review: Gemini proposes a plan; the worker agent appends its review notes.",
+      "Iterative approval: the operator edits and re-runs the plan until it is approved.",
+      "Structured parse: Workers AI converts the findings report into typed facts.",
+      "Entity matching: each fact is proposed against a product, material, or showroom.",
+      "Per-fact and per-image HITL: approve correct matches, reject wrong ones and junk imagery.",
+    ],
+    actions: [
+      {
+        href: "/admin/showroom/sourcing",
+        label: "Open Sourcing Research",
+        description: "Where the review gates will live.",
+      },
+    ],
+    sections: [
+      {
+        id: "intended-flow",
+        title: "Intended end-to-end flow",
+        summary: "Plan review, structured parse, entity matching, and approval gates.",
+        paragraphs: [
+          "Gemini returns a proposed research plan instead of running straight through. The worker agent reviews that plan and appends its own thoughts, so the operator sees both the plan and the agent's annotations. The operator can request changes and iterate before approving.",
+          "After approval, the findings report is parsed by Workers AI into a structured schema and each fact is matched to a candidate entity. Because that matching is imperfect, the operator confirms or rejects each fact, and separately confirms or rejects each scraped image so spam and mismatched assets never persist.",
+        ],
+        diagrams: [
+          {
+            code: `sequenceDiagram
+    actor U as Homeowner
+    participant AG as Worker Agent
+    participant G as Gemini Deep Research
+    participant WAI as Workers AI (structured)
+    participant BR as Browser Rendering
+    participant D1 as D1
+    U->>G: Kick off research brief
+    G-->>AG: Proposed research plan
+    AG->>AG: Review plan, append notes
+    AG-->>U: Plan + agent annotations
+    U->>AG: Edit / request changes
+    Note over U,AG: Iterate until approved (gate 1)
+    U->>G: Approve and run
+    G-->>WAI: Findings report
+    WAI->>WAI: Structured parse + entity match
+    WAI-->>U: Proposed facts
+    U->>D1: Approve / reject each fact (gate 2)
+    AG->>BR: Scrape candidate images
+    BR-->>U: Image candidates
+    U->>D1: Approve / reject each image (gate 3)`,
+            caption: "Intended flow with three human gates: plan approval, per-fact review, and per-image review.",
+          },
+        ],
+      },
+      {
+        id: "review-lifecycle",
+        title: "Review lifecycle of a fact or image",
+        summary: "The state a proposed artifact moves through under HITL.",
+        paragraphs: [
+          "Under the intended model, every parsed fact and scraped image starts pending. The operator approves it — applying it to the matched entity — or rejects it. Rejections are not wasted: a rejected showroom or finding feeds the negative constraints that tune future sweeps, the same mechanism the cron rejection loop already uses.",
+        ],
+        diagrams: [
+          {
+            code: `stateDiagram-v2
+    [*] --> Pending: AI proposes fact or image
+    Pending --> Approved: Homeowner approves
+    Pending --> Rejected: Wrong entity or junk
+    Approved --> Applied: Written to entity
+    Rejected --> Constraints: Feeds negative constraints
+    Applied --> [*]
+    Constraints --> [*]`,
+            caption: "A proposed artifact's lifecycle — approval applies it, rejection sharpens the next sweep.",
+          },
+        ],
+      },
+      {
+        id: "gap-analysis",
+        title: "Gap analysis — built vs. intended",
+        summary: "What exists today and what the intended flow still needs.",
+        paragraphs: [
+          "The list below marks each intended step against the current implementation so the work is explicit.",
+        ],
+        bullets: [
+          "Gemini returns a reviewable plan — NOT BUILT. Deep research runs straight through; collaborative planning is off.",
+          "Worker agent annotates the plan — NOT BUILT. No code reads a plan or appends agent notes.",
+          "Iterative HITL plan approval — NOT BUILT. There is no plan-approval route, table, or UI.",
+          "Structured findings parse — PARTIAL. Structuring happens via Browser Rendering extractJson and Gemini JSON, not a dedicated Workers AI structured parse.",
+          "Entity matching of facts — NOT BUILT. The target id is fixed up front; facts are bound by construction.",
+          "Image scraping — BUILT. Images upload to Cloudflare Images and index in D1, but with no relevance or spam filter.",
+          "Per-fact and per-image approve/reject — NOT BUILT. No approval column exists; only store-level rating does.",
+        ],
+        note: {
+          title: "What this unlocks next",
+          body: "Per-fact and per-image review needs a small schema addition (a review-status column on the findings and image tables) plus an approval endpoint and ledger controls. The plan-review gate needs Gemini collaborative planning plus an agent annotation step. These are the next increments, documented here so the target is explicit.",
+          tone: "planned",
+        },
+      },
+    ],
+  },
+];
+
 export const docsAudienceGroups: DocsAudienceGroup[] = [
   {
     id: "homeowners",
@@ -1147,6 +1461,12 @@ export const docsAudienceGroups: DocsAudienceGroup[] = [
     title: "Shared Workflows",
     summary: "Understand the common decision trail that should survive from first concept through pricing and agreement.",
     pages: sharedPages,
+  },
+  {
+    id: "platform",
+    title: "Platform & Systems",
+    summary: "How the deep-research sourcing engine works under the hood — what runs today and the intended human-in-the-loop roadmap.",
+    pages: platformPages,
   },
 ];
 
