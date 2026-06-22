@@ -1439,8 +1439,7 @@ budgetTrackerRouter.get("/realtime", async (c) => {
     return c.json({ error: "Expected WebSocket upgrade" }, 400);
   }
 
-  const id = c.env.ESTIMATE_COLLAB.idFromName("budget");
-  const stub = c.env.ESTIMATE_COLLAB.get(id);
+  const stub = c.env.ESTIMATE_COLLAB.getByName("budget");
 
   return stub.fetch(c.req.raw);
 });

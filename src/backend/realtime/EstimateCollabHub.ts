@@ -4,7 +4,7 @@ import { DurableObject } from "cloudflare:workers";
  * Durable Object realtime fan-out hub for estimate/contract collaboration and
  * upload/processing progress events.
  *
- * One instance exists per "room" name (via `idFromName(room)`): WebSocket clients
+ * One instance exists per "room" name (via `getByName(room)`): WebSocket clients
  * connect to a room and receive every message broadcast to it; producers POST a
  * JSON payload to `/emit` to fan it out to all connected clients in that room.
  *

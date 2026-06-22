@@ -20,7 +20,6 @@
  */
 
 import { AIChatAgent } from "@cloudflare/ai-chat";
-import { GoogleGenAI } from "@google/genai";
 import { callable } from "agents";
 import { streamText, convertToModelMessages } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
@@ -28,6 +27,13 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 
 import { researchSessions } from "@backend/db/schema/admin/research_sessions";
+import {
+  createDeepResearchInteraction,
+  createResearchMcpToolConfig,
+  GEMINI_DEEP_RESEARCH_AGENT,
+  GEMINI_DEEP_RESEARCH_MAX_AGENT,
+  getDeepResearchInteraction,
+} from "@backend/services/gemini/deep-research";
 import {
   chunkMarkdown,
   embedAndUpsertChunks,
@@ -37,18 +43,76 @@ import { runHealthProbe } from "./health";
 import {
   type ResearchAgentState,
   DEFAULT_RESEARCH_STATE,
+  type StartResearchInput,
+  type StartResearchOptions,
   r2MarkdownKey,
   r2WebappKey,
   vectorNamespace,
 } from "./types";
 
-// Define a type for the Deep Research interaction state
-type InteractionState = {
-  id: string;
-  status: string;
-  output_text?: string;
-  error?: string;
-};
+function normalizeStartResearchArgs(
+  topicOrInput: string | StartResearchInput,
+  sessionId?: number,
+): StartResearchInput {
+  if (typeof topicOrInput === "string") {
+    if (!sessionId) {
+      throw new Error("sessionId is required when startResearch is called with a topic string");
+    }
+    return {
+      topic: topicOrInput,
+      sessionId,
+    };
+  }
+
+  return topicOrInput;
+}
+
+function researchPrompt(input: StartResearchInput): string {
+  const basePrompt =
+    input.prompt?.trim() ||
+    `Conduct a comprehensive deep research report on the following topic: "${input.topic}".`;
+
+  const plan = input.researchPlan?.trim();
+
+  return `Conduct a comprehensive Deep Research report for this remodel planning topic.
+
+Topic:
+${input.topic}
+
+User-reviewed prompt:
+${basePrompt}
+
+${plan ? `Approved research plan:\n${plan}` : "Approved research plan:\nnone"}
+
+Requirements:
+- Include specific numbers, percentages, price ranges, warranty details, lead-time notes, and vendor comparison points where available.
+- Cite source URLs inline for factual claims.
+- Prefer manufacturer, showroom, warranty, installation, pricing, and review sources.
+- Format as clean Markdown with headers, bullet points, and tables where appropriate.
+- Separate confirmed facts from inferred recommendations.`;
+}
+
+function progressTextFromInteraction(interaction: any): string {
+  const steps = Array.isArray(interaction?.steps) ? interaction.steps : [];
+  for (let i = steps.length - 1; i >= 0; i--) {
+    const step = steps[i] as any;
+    const content = Array.isArray(step?.content) ? step.content : [];
+    for (let j = content.length - 1; j >= 0; j--) {
+      const item = content[j] as any;
+      if (item?.type === "text" && typeof item.text === "string" && item.text.trim()) {
+        return "Generating report...";
+      }
+      if (
+        (item?.type === "thought" || item?.type === "thought_summary") &&
+        typeof item.text === "string" &&
+        item.text.trim()
+      ) {
+        return `Thinking: ${item.text.trim().slice(0, 240)}`;
+      }
+    }
+  }
+  return "Deep Research in progress...";
+}
 
 // ---------------------------------------------------------------------------
 // Agent
@@ -90,7 +154,9 @@ export class ResearchAgent extends AIChatAgent<Env, ResearchAgentState> {
         },
       ],
       tools: [
-        "Gemini 2.5 Pro (deep research + visualizer generation)",
+        `${GEMINI_DEEP_RESEARCH_AGENT} / ${GEMINI_DEEP_RESEARCH_MAX_AGENT} via Gemini Interactions API`,
+        "Scoped MCP bridge for per-session context/progress/source callbacks",
+        "Gemini 2.5 Pro (visualizer generation)",
         "Gemini 2.5 Flash (RAG chat streaming)",
         "Workers AI bge-large-en-v1.5 (embeddings via env.AI.run())",
         "R2 (markdown + visualizer storage)",
@@ -135,25 +201,6 @@ export class ResearchAgent extends AIChatAgent<Env, ResearchAgentState> {
   }
 
   // -------------------------------------------------------------------------
-  // Private: Gemini client factory
-  // -------------------------------------------------------------------------
-
-  private async getGeminiClient(): Promise<GoogleGenAI> {
-    const geminiApiKey = await this.env.GEMINI_API_KEY.get();
-    const cloudflareAccountId = await this.env.CLOUDFLARE_ACCOUNT_ID.get();
-
-    if (!geminiApiKey) throw new Error("GEMINI_API_KEY not configured");
-    if (!cloudflareAccountId) throw new Error("CLOUDFLARE_ACCOUNT_ID not configured");
-
-    return new GoogleGenAI({
-      apiKey: geminiApiKey,
-      httpOptions: {
-        baseUrl: `https://gateway.ai.cloudflare.com/v1/${cloudflareAccountId}/${this.env.AI_GATEWAY_ID}/google-ai-studio`,
-      },
-    });
-  }
-
-  // -------------------------------------------------------------------------
   // Private: D1 database accessor
   // -------------------------------------------------------------------------
 
@@ -166,39 +213,81 @@ export class ResearchAgent extends AIChatAgent<Env, ResearchAgentState> {
   // -------------------------------------------------------------------------
 
   @callable()
-  async startResearch(topic: string, sessionId: number): Promise<void> {
+  async startResearch(
+    topicOrInput: string | StartResearchInput,
+    sessionIdArg?: number,
+    legacyOptions?: StartResearchOptions,
+  ): Promise<void> {
+  const input = {
+      ...normalizeStartResearchArgs(topicOrInput, sessionIdArg),
+      ...legacyOptions,
+    };
     const db = this.getDb();
 
     try {
       this.updateProgress("researching", "Starting Gemini deep research...", {
-        currentSessionId: sessionId,
-        currentTopic: topic,
+        currentSessionId: input.sessionId,
+        currentTopic: input.topic,
+        mcpBridgeEnabled: input.enableMcpBridge ?? false,
       });
 
       await db
         .update(researchSessions)
-        .set({ status: "researching" })
-        .where(eq(researchSessions.id, sessionId));
+        .set({
+          status: "researching",
+          interactionAgent:
+            input.mode === "max"
+              ? GEMINI_DEEP_RESEARCH_MAX_AGENT
+              : GEMINI_DEEP_RESEARCH_AGENT,
+          mcpBridgeEnabled: input.enableMcpBridge ?? false,
+        })
+        .where(eq(researchSessions.id, input.sessionId));
 
-      const ai = await this.getGeminiClient();
+      const tools: Array<Record<string, unknown>> = [
+        { type: "google_search" },
+        { type: "url_context" },
+        { type: "code_execution" },
+      ];
 
-      // Deep Research Interactions API expects interactions.create with background=True
-      const interaction = await ai.interactions.create({
-        input: `Conduct a comprehensive deep research report on the following topic: "${topic}".
-Include specific numbers, percentages, and price ranges throughout. Format as clean Markdown with proper headers, bullet points, and tables where appropriate.`,
-        agent: "deep-research-preview-04-2026",
-        background: true,
-        agent_config: { type: "deep-research", thinking_summaries: "auto" }
-      }) as any;
+      if (input.enableMcpBridge) {
+        const mcpTool = await createResearchMcpToolConfig(this.env, {
+          serverUrl: input.mcpServerUrl,
+          scope: {
+            type: "session",
+            id: input.sessionId,
+            sessionId: input.sessionId,
+          },
+        });
+        if (mcpTool) tools.push(mcpTool as unknown as Record<string, unknown>);
+      }
+
+      const interaction = await createDeepResearchInteraction(this.env, {
+        prompt: researchPrompt(input),
+        mode: input.mode,
+        visualization: input.visualization ?? "off",
+        tools,
+      });
 
       // Save the interaction ID so it can be resumed
-      this.setState({ ...this.state, interactionId: interaction.id });
+      this.setState({
+        ...this.state,
+        interactionId: interaction.id,
+        currentSessionId: input.sessionId,
+        currentTopic: input.topic,
+      });
+
+      await db
+        .update(researchSessions)
+        .set({
+          interactionId: interaction.id,
+        })
+        .where(eq(researchSessions.id, input.sessionId));
 
       // Process the stream asynchronously without blocking the RPC response
-      this.ctx.waitUntil(this.monitorResearchStream(this.state.interactionId!, sessionId));
+      this.ctx.waitUntil(this.monitorResearchStream(interaction.id, input.sessionId));
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error";
-      await db.update(researchSessions).set({ status: "failed", errorMessage }).where(eq(researchSessions.id, sessionId));
+      await db.update(researchSessions).set({ status: "failed", errorMessage }).where(eq(researchSessions.id, input.sessionId));
       this.updateProgress("failed", `Failed to start research: ${errorMessage}`);
       throw error;
     }
@@ -210,52 +299,39 @@ Include specific numbers, percentages, and price ranges throughout. Format as cl
 
   private async monitorResearchStream(interactionId: string, sessionId: number) {
     const db = this.getDb();
-    let isComplete = false;
-    let lastEventId: string | undefined = this.state.lastEventId;
 
     try {
-      const ai = await this.getGeminiClient();
-      
-      const processStream = async (stream: any) => {
-        for await (const event of stream) {
-          if (event.event_id) {
-            lastEventId = event.event_id;
-            this.setState({ ...this.state, lastEventId });
-          }
-          if (event.type === "step.delta" || event.event_type === "step.delta") {
-            const delta = event.delta;
-            if (delta.type === "thought") {
-              this.updateProgress("researching", `Thinking: ${delta.text}`);
-            } else if (delta.type === "text") {
-              this.updateProgress("researching", "Generating report...");
-            }
-          } else if (["interaction.completed", "error"].includes(event.type || event.event_type)) {
-            isComplete = true;
-          }
-        }
-      };
+      const [session] = await db
+        .select()
+        .from(researchSessions)
+        .where(eq(researchSessions.id, sessionId))
+        .limit(1);
 
-      // Loop to handle reconnects
-      while (!isComplete) {
-        const statusResponse = await ai.interactions.get(interactionId);
+      const topic = session?.topic ?? this.state.currentTopic ?? "research session";
+
+      while (true) {
+        const statusResponse = await getDeepResearchInteraction(this.env, interactionId);
         
         if (statusResponse.status === "completed") {
-          isComplete = true;
-          await this.finalizeResearch(sessionId, this.state.currentTopic!, statusResponse.output_text || "");
+          await this.finalizeResearch(sessionId, topic, statusResponse.output_text || "");
           break;
         } else if (statusResponse.status === "failed") {
-          throw new Error("Deep research failed on Gemini servers");
+          throw new Error(
+            `Deep research failed on Gemini servers: ${statusResponse.error?.message ?? statusResponse.error ?? "unknown error"}`,
+          );
         } else if (statusResponse.status === "in_progress") {
-          try {
-            const stream = await ai.interactions.get(interactionId, { stream: true, last_event_id: lastEventId });
-            await processStream(stream);
-          } catch (streamErr) {
-            console.warn("Stream disconnected, polling again in 10s...", streamErr);
-            await new Promise(r => setTimeout(r, 10000));
-          }
+          this.updateProgress("researching", progressTextFromInteraction(statusResponse));
+          await db
+            .update(researchSessions)
+            .set({
+              interactionId,
+              lastEventId: statusResponse.last_event_id ?? this.state.lastEventId ?? null,
+            })
+            .where(eq(researchSessions.id, sessionId));
+          await new Promise((resolve) => setTimeout(resolve, 10_000));
         } else {
-          // Unknown status
-          await new Promise(r => setTimeout(r, 10000));
+          this.updateProgress("researching", `Deep Research status: ${statusResponse.status}`);
+          await new Promise((resolve) => setTimeout(resolve, 10_000));
         }
       }
     } catch (error) {
@@ -376,6 +452,7 @@ Include specific numbers, percentages, and price ranges throughout. Format as cl
         const queryEmbedding = (await this.env.AI.run(
           "@cf/baai/bge-large-en-v1.5",
           { text: [queryText] },
+          { gateway: { id: this.env.AI_GATEWAY_ID } },
         )) as { data: number[][] };
 
         // Search Vectorize with session namespace isolation
@@ -400,7 +477,16 @@ Include specific numbers, percentages, and price ranges throughout. Format as cl
             .filter(Boolean);
 
           if (relevantChunks.length > 0) {
-            ragContext = `\n\nRELEVANT RESEARCH CONTEXT (from embedded research documents):\n${relevantChunks.map((c, i) => `[${i + 1}] ${c}`).join("\n\n")}`;
+            let relevantContextText = "";
+            for (let i = 0; i < relevantChunks.length; i++) {
+              relevantContextText = `${relevantContextText}[${i + 1}] ${relevantChunks[i]}
+
+`;
+            }
+            ragContext = `
+
+RELEVANT RESEARCH CONTEXT (from embedded research documents):
+${relevantContextText.trimEnd()}`;
           }
         }
       } catch (err) {

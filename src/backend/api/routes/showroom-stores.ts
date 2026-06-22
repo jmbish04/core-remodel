@@ -5,10 +5,10 @@
  * scan log, cities, and gap analysis. Mounts at /api/showroom-stores.
  */
 
-import { Hono } from "hono";
+import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, desc, and, sql, like, inArray } from "drizzle-orm";
-import { z } from "zod";
+import { eq, desc, and, like } from "drizzle-orm";
+import { getAgentByName } from "agents";
 
 import {
   showroomStores,
@@ -19,19 +19,20 @@ import {
   storeNotes,
   storeProductNotes,
   storeRating,
-  storeProductRating,
   showroomStoreRatings,
   storeResearch,
-  storeProductResearch,
   storeProductAreaDef,
   storePaMapping,
   showroomScanLog,
   showroomTagDef,
   storeTagMapping,
-  storeProductTagMapping,
 } from "@backend/db/schema/showroom/index";
+import {
+  generateProductDraftPrompt,
+} from "@backend/ai/agents/ShowroomResearchAgent/methods";
+import type { ShowroomResearchAgent } from "@backend/ai/agents/ShowroomResearchAgent";
 
-export const showroomStoresRouter = new Hono<{ Bindings: Env }>();
+export const showroomStoresRouter = new OpenAPIHono<{ Bindings: Env }>();
 
 // ─── Validation Schemas ───────────────────────────────────────────────────────
 
@@ -76,6 +77,284 @@ const createProductSchema = z.object({
   possibleDiscounts: z.string().optional().nullable(),
   tradeDiscount: z.string().optional().nullable(),
 });
+
+const productIdParamsSchema = z.object({
+  productId: z.string().regex(/^\d+$/).transform(Number),
+});
+
+const storeIdParamsSchema = z.object({
+  id: z.string().regex(/^\d+$/).transform(Number),
+});
+
+const categoryIdParamsSchema = z.object({
+  categoryId: z.string().regex(/^\d+$/).transform(Number),
+});
+
+const draftPromptRequestSchema = z
+  .object({
+    negativeConstraints: z.array(z.string().min(1)).default([]),
+  })
+  .default({ negativeConstraints: [] });
+
+const deepSweepRequestSchema = z
+  .object({
+    prompt: z.string().min(1).optional(),
+    maxSources: z.number().int().min(1).max(10).optional(),
+    negativeConstraints: z.array(z.string().min(1)).default([]),
+    researchMode: z.enum(["quick", "deep"]).default("quick"),
+    deepResearchWaitMs: z.number().int().min(15_000).max(240_000).optional(),
+    enableMcpBridge: z.boolean().default(false),
+    triggerSource: z
+      .enum([
+        "manual",
+        "product-created",
+        "store-created",
+        "cron-category-gap",
+        "cron-rejection-loop",
+      ])
+      .default("manual"),
+  })
+  .default({
+    negativeConstraints: [],
+    researchMode: "quick",
+    enableMcpBridge: false,
+    triggerSource: "manual",
+  });
+
+const draftPromptResponseSchema = z.object({
+  success: z.boolean(),
+  productId: z.number(),
+  prompt: z.string(),
+});
+
+const sweepResultSchema = z.object({
+  success: z.boolean(),
+  targetType: z.enum(["product", "store", "category"]),
+  targetId: z.number(),
+  citationsFound: z.number(),
+  sourcesProcessed: z.number(),
+  findingsWritten: z.number(),
+  imagesWritten: z.number(),
+  specsWritten: z.number(),
+  vectorsWritten: z.number(),
+  warnings: z.array(z.string()),
+});
+
+const errorResponseSchema = z.object({
+  success: z.literal(false),
+  error: z.string(),
+});
+
+async function getShowroomResearchAgent(env: Env) {
+  return getAgentByName<Env, ShowroomResearchAgent>(
+    env.SHOWROOM_RESEARCH_AGENT as any,
+    "showroom-research",
+  );
+}
+
+// ─── RESEARCH ORCHESTRATION ──────────────────────────────────────────────────
+
+showroomStoresRouter.openapi(
+  createRoute({
+    method: "post",
+    path: "/products/:productId/research/draft-prompt",
+    operationId: "createShowroomProductResearchDraftPrompt",
+    tags: ["Showroom Research"],
+    summary: "Generate a draft research prompt for a showroom product",
+    request: {
+      params: productIdParamsSchema,
+      body: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: draftPromptRequestSchema,
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "Draft prompt generated",
+        content: {
+          "application/json": {
+            schema: draftPromptResponseSchema,
+          },
+        },
+      },
+      404: {
+        description: "Product not found",
+        content: { "application/json": { schema: errorResponseSchema } },
+      },
+      500: {
+        description: "Prompt generation failed",
+        content: { "application/json": { schema: errorResponseSchema } },
+      },
+    },
+  }),
+  async (c) => {
+    const { productId } = c.req.valid("param");
+    const body = c.req.valid("json") ?? { negativeConstraints: [] };
+
+    try {
+      const prompt = await generateProductDraftPrompt(
+        c.env,
+        productId,
+        body.negativeConstraints ?? [],
+      );
+      return c.json({ success: true, productId, prompt }, 200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes("not found")) {
+        return c.json({ success: false as const, error: message }, 404);
+      }
+      return c.json({ success: false as const, error: message }, 500);
+    }
+  },
+);
+
+showroomStoresRouter.openapi(
+  createRoute({
+    method: "post",
+    path: "/products/:productId/research/deep-sweep",
+    operationId: "runShowroomProductResearchDeepSweep",
+    tags: ["Showroom Research"],
+    summary: "Run citation-backed product deep research",
+    request: {
+      params: productIdParamsSchema,
+      body: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: deepSweepRequestSchema,
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "Product deep sweep completed",
+        content: { "application/json": { schema: sweepResultSchema } },
+      },
+      500: {
+        description: "Product deep sweep failed",
+        content: { "application/json": { schema: sweepResultSchema } },
+      },
+    },
+  }),
+  async (c) => {
+    const { productId } = c.req.valid("param");
+    const body = c.req.valid("json") ?? {};
+    const agent = await getShowroomResearchAgent(c.env);
+    const result = await agent.deepSweepProduct({
+      productId,
+      prompt: body.prompt,
+      maxSources: body.maxSources,
+      negativeConstraints: body.negativeConstraints,
+      triggerSource: body.triggerSource,
+      researchMode: body.researchMode,
+      deepResearchWaitMs: body.deepResearchWaitMs,
+      enableMcpBridge: body.enableMcpBridge,
+      mcpServerUrl: new URL("/api/mcp", c.req.url).toString(),
+    });
+    return c.json(result, result.success ? 200 : 500);
+  },
+);
+
+showroomStoresRouter.openapi(
+  createRoute({
+    method: "post",
+    path: "/:id/research/deep-sweep",
+    operationId: "runShowroomStoreResearchDeepSweep",
+    tags: ["Showroom Research"],
+    summary: "Run citation-backed showroom/store deep research",
+    request: {
+      params: storeIdParamsSchema,
+      body: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: deepSweepRequestSchema,
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "Store deep sweep completed",
+        content: { "application/json": { schema: sweepResultSchema } },
+      },
+      500: {
+        description: "Store deep sweep failed",
+        content: { "application/json": { schema: sweepResultSchema } },
+      },
+    },
+  }),
+  async (c) => {
+    const { id } = c.req.valid("param");
+    const body = c.req.valid("json") ?? {};
+    const agent = await getShowroomResearchAgent(c.env);
+    const result = await agent.deepSweepStore({
+      storeId: id,
+      prompt: body.prompt,
+      maxSources: body.maxSources,
+      negativeConstraints: body.negativeConstraints,
+      triggerSource: body.triggerSource,
+      researchMode: body.researchMode,
+      deepResearchWaitMs: body.deepResearchWaitMs,
+      enableMcpBridge: body.enableMcpBridge,
+      mcpServerUrl: new URL("/api/mcp", c.req.url).toString(),
+    });
+    return c.json(result, result.success ? 200 : 500);
+  },
+);
+
+showroomStoresRouter.openapi(
+  createRoute({
+    method: "post",
+    path: "/meta/categories/:categoryId/research/deep-sweep",
+    operationId: "runShowroomCategoryResearchDeepSweep",
+    tags: ["Showroom Research"],
+    summary: "Run citation-backed category gap research",
+    request: {
+      params: categoryIdParamsSchema,
+      body: {
+        required: false,
+        content: {
+          "application/json": {
+            schema: deepSweepRequestSchema,
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "Category deep sweep completed",
+        content: { "application/json": { schema: sweepResultSchema } },
+      },
+      500: {
+        description: "Category deep sweep failed",
+        content: { "application/json": { schema: sweepResultSchema } },
+      },
+    },
+  }),
+  async (c) => {
+    const { categoryId } = c.req.valid("param");
+    const body = c.req.valid("json") ?? {};
+    const agent = await getShowroomResearchAgent(c.env);
+    const result = await agent.deepSweepCategory({
+      categoryId,
+      prompt: body.prompt,
+      maxSources: body.maxSources,
+      negativeConstraints: body.negativeConstraints,
+      triggerSource: body.triggerSource,
+      researchMode: body.researchMode,
+      deepResearchWaitMs: body.deepResearchWaitMs,
+      enableMcpBridge: body.enableMcpBridge,
+      mcpServerUrl: new URL("/api/mcp", c.req.url).toString(),
+    });
+    return c.json(result, result.success ? 200 : 500);
+  },
+);
 
 // ─── STORES CRUD ──────────────────────────────────────────────────────────────
 
@@ -255,8 +534,16 @@ showroomStoresRouter.post("/", async (c) => {
     .values(data)
     .returning();
 
-  // TODO: Trigger ShowroomResearchAgent via waitUntil when agent is wired up.
-  // c.executionCtx.waitUntil(triggerResearch(c.env, inserted.id));
+  c.executionCtx.waitUntil(
+    (async () => {
+      try {
+        const agent = await getShowroomResearchAgent(c.env);
+        await agent.researchStore(inserted.id);
+      } catch (error) {
+        console.error(`ShowroomResearchAgent store research failed for ${inserted.id}:`, error);
+      }
+    })(),
+  );
 
   return c.json({ store: inserted }, 201);
 });
@@ -325,8 +612,16 @@ showroomStoresRouter.post("/:id/products", async (c) => {
     .values(data)
     .returning();
 
-  // TODO: Trigger ShowroomResearchAgent for product research.
-  // c.executionCtx.waitUntil(triggerProductResearch(c.env, inserted.id));
+  c.executionCtx.waitUntil(
+    (async () => {
+      try {
+        const agent = await getShowroomResearchAgent(c.env);
+        await agent.researchProduct(inserted.id);
+      } catch (error) {
+        console.error(`ShowroomResearchAgent product research failed for ${inserted.id}:`, error);
+      }
+    })(),
+  );
 
   return c.json({ product: inserted }, 201);
 });
@@ -521,15 +816,14 @@ showroomStoresRouter.post("/scan", async (c) => {
             messages: [
               {
                 role: "system",
-                content:
-                  "You are a product identification expert. Extract product details from this image. Return a JSON object with: product_name, brand, price, dimensions, color_finish, description, sku_if_visible. If you cannot identify the product, explain why.",
+                content: `You are a product identification expert. Extract product details from this image. Return a JSON object with: product_name, brand, price, dimensions, color_finish, description, sku_if_visible. If you cannot identify the product, explain why.`,
               },
               {
                 role: "user",
                 content: [
                   {
                     type: "text",
-                    text: "Identify this product and extract all visible details. Return JSON only.",
+                    text: `Identify this product and extract all visible details. Return JSON only.`,
                   },
                   {
                     type: "image_url",
@@ -538,7 +832,8 @@ showroomStoresRouter.post("/scan", async (c) => {
                 ],
               },
             ],
-          } as any
+          } as any,
+          { gateway: { id: c.env.AI_GATEWAY_ID } },
         );
 
         const rawOutput =

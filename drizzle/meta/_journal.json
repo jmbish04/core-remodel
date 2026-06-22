@@ -323,6 +323,20 @@
       "when": 1781888814427,
       "tag": "0045_old_redwing",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "6",
+      "when": 1782092748037,
+      "tag": "0046_cloudy_carnage",
+      "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "6",
+      "when": 1782094071984,
+      "tag": "0047_sharp_starjammers",
+      "breakpoints": true
     }
   ]
 }
