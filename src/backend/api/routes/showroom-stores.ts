@@ -26,6 +26,11 @@ import {
   showroomScanLog,
   showroomTagDef,
   storeTagMapping,
+  storeProductResearch,
+  storeProductRating,
+  productImages,
+  productSpecs,
+  showroomImages,
 } from "@backend/db/schema/showroom/index";
 import {
   generateProductDraftPrompt,
@@ -355,6 +360,133 @@ showroomStoresRouter.openapi(
     return c.json(result, result.success ? 200 : 500);
   },
 );
+
+// ─── RESEARCH CONTEXT READS ──────────────────────────────────────────────────
+//
+// The deep-sweep agent writes findings, images, and specs but the showroom
+// schema shipped without read endpoints for them. These two GET routes expose
+// the persisted sourcing artifacts so the frontend Review Ledger and Media
+// Galleries render live data (never mock). Read-only; gated by the
+// /api/showroom-stores requireAccessAuth middleware in api/index.ts.
+
+/**
+ * GET /products/:pid/research/context — Sourcing artifacts for one product.
+ *
+ * Returns the product row plus its research findings (sentiment-coded),
+ * scraped product images, extracted specs, and the homeowner's active rating.
+ * Powers the product-scoped ledger, media gallery, and specs panels.
+ */
+showroomStoresRouter.get("/products/:pid/research/context", async (c) => {
+  const db = drizzle(c.env.DB);
+  const productId = Number(c.req.param("pid"));
+  if (!Number.isInteger(productId)) {
+    return c.json({ success: false, error: "Invalid product id" }, 400);
+  }
+
+  const [product] = await db
+    .select()
+    .from(showroomStoreProducts)
+    .where(eq(showroomStoreProducts.id, productId))
+    .limit(1);
+
+  if (!product) {
+    return c.json({ success: false, error: "Product not found" }, 404);
+  }
+
+  const [findings, images, specs, ratings] = await Promise.all([
+    db
+      .select()
+      .from(storeProductResearch)
+      .where(eq(storeProductResearch.storeProductId, productId))
+      .orderBy(desc(storeProductResearch.timestamp)),
+    db
+      .select()
+      .from(productImages)
+      .where(eq(productImages.storeProductId, productId))
+      .orderBy(desc(productImages.createdAt)),
+    db
+      .select()
+      .from(productSpecs)
+      .where(eq(productSpecs.storeProductId, productId))
+      .orderBy(desc(productSpecs.confidence)),
+    db
+      .select()
+      .from(storeProductRating)
+      .where(
+        and(
+          eq(storeProductRating.storeProductId, productId),
+          eq(storeProductRating.isActive, true),
+        ),
+      ),
+  ]);
+
+  return c.json({
+    success: true,
+    product,
+    findings,
+    images,
+    specs,
+    rating: ratings[0] ?? null,
+  });
+});
+
+/**
+ * GET /:id/research/context — Sourcing artifacts for one showroom/store.
+ *
+ * Returns the store's research findings (sentiment-coded), scraped storefront
+ * images, external platform ratings (sources), and the homeowner's active
+ * rating. Powers the showroom-scoped ledger and storefront media gallery.
+ */
+showroomStoresRouter.get("/:id/research/context", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  const [store] = await db
+    .select()
+    .from(showroomStores)
+    .where(eq(showroomStores.id, storeId))
+    .limit(1);
+
+  if (!store) {
+    return c.json({ success: false, error: "Store not found" }, 404);
+  }
+
+  const [findings, images, externalRatings, ratings] = await Promise.all([
+    db
+      .select()
+      .from(storeResearch)
+      .where(eq(storeResearch.storeId, storeId))
+      .orderBy(desc(storeResearch.timestamp)),
+    db
+      .select()
+      .from(showroomImages)
+      .where(eq(showroomImages.storeId, storeId))
+      .orderBy(desc(showroomImages.createdAt)),
+    db
+      .select()
+      .from(showroomStoreRatings)
+      .where(eq(showroomStoreRatings.storeId, storeId))
+      .orderBy(desc(showroomStoreRatings.scrapedAt)),
+    db
+      .select()
+      .from(storeRating)
+      .where(
+        and(eq(storeRating.storeId, storeId), eq(storeRating.isActive, true)),
+      ),
+  ]);
+
+  return c.json({
+    success: true,
+    store,
+    findings,
+    images,
+    externalRatings,
+    rating: ratings[0] ?? null,
+  });
+});
 
 // ─── STORES CRUD ──────────────────────────────────────────────────────────────
 
