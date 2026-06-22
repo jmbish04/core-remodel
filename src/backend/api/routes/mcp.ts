@@ -10,7 +10,22 @@
  * is a documented follow-up; Claude Code can use this today with a bearer header.
  */
 import { listingPhotos, moodBoardGenerations, renderCanvases, renderSessions } from "@backend/db";
-import { eq } from "drizzle-orm";
+import { researchSessions } from "@backend/db/schema/admin/research_sessions";
+import {
+  showroomStoreCategory,
+  showroomStoreProducts,
+  showroomStores,
+  storeProductResearch,
+  storeResearch,
+} from "@backend/db/schema/showroom/index";
+import { loadProductPromptContext } from "@backend/ai/agents/ShowroomResearchAgent/methods/prompt-context";
+import {
+  researchMcpTokenKey,
+  type DeepResearchMcpScope,
+  type DeepResearchMcpTokenRecord,
+} from "@backend/services/gemini/deep-research";
+import { isRequestAuthenticated } from "@backend/utils/access";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
@@ -28,6 +43,10 @@ interface McpTool {
   description: string;
   inputSchema: Record<string, unknown>;
 }
+
+type McpAuthContext =
+  | { kind: "worker" }
+  | { kind: "research"; token: string; scope: DeepResearchMcpScope };
 
 const TOOLS: McpTool[] = [
   {
@@ -87,6 +106,44 @@ const TOOLS: McpTool[] = [
       properties: { q: { type: "string" }, roomId: { type: "number" } },
     },
   },
+  {
+    name: "get_deep_research_context",
+    description:
+      "Return the scoped Core Remodel D1 context for this one Deep Research interaction.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+    },
+  },
+  {
+    name: "record_deep_research_progress",
+    description:
+      "Record a short progress note from the Deep Research agent for the scoped target.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        message: { type: "string" },
+        status: { type: "string" },
+      },
+      required: ["message"],
+    },
+  },
+  {
+    name: "record_deep_research_source",
+    description:
+      "Record one scoped source URL or finding discovered by Deep Research.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        url: { type: "string" },
+        title: { type: "string" },
+        summary: { type: "string" },
+        finding: { type: "string" },
+        sentiment: { type: "string", enum: ["good", "bad", "neutral"] },
+      },
+      required: ["url"],
+    },
+  },
 ];
 
 const ACTION_TO_STAGE: Record<string, StageType> = {
@@ -110,7 +167,254 @@ function metaDeliveryUrl(metadata: string | null): string | null {
   }
 }
 
-async function callTool(env: Env, name: string, args: Record<string, any>): Promise<string> {
+function bearerToken(request: Request): string | null {
+  const header = request.headers.get("authorization")?.trim();
+  if (!header?.toLowerCase().startsWith("bearer ")) return null;
+  return header.slice("bearer ".length).trim();
+}
+
+async function authenticateMcpRequest(request: Request, env: Env): Promise<McpAuthContext | null> {
+  const token = bearerToken(request);
+  if (token) {
+    const workerKey = (await env.WORKER_API_KEY.get())?.trim();
+    if (workerKey && token === workerKey) {
+      return { kind: "worker" };
+    }
+
+    if (env.CACHE) {
+      const rawRecord = await env.CACHE.get(researchMcpTokenKey(token));
+      if (rawRecord) {
+        try {
+          const record = JSON.parse(rawRecord) as DeepResearchMcpTokenRecord;
+          if (new Date(record.expiresAt).getTime() > Date.now()) {
+            return { kind: "research", token, scope: record.scope };
+          }
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+
+  if (await isRequestAuthenticated(request, env)) {
+    return { kind: "worker" };
+  }
+
+  return null;
+}
+
+function isResearchTool(name: string): boolean {
+  return (
+    name === "get_deep_research_context" ||
+    name === "record_deep_research_progress" ||
+    name === "record_deep_research_source"
+  );
+}
+
+function requireWorkerAuth(auth: McpAuthContext, name: string) {
+  if (auth.kind !== "worker" && !isResearchTool(name)) {
+    throw new Error(`Tool ${name} is not allowed for scoped Deep Research MCP tokens`);
+  }
+}
+
+function scopedKey(scope: DeepResearchMcpScope, suffix: string): string {
+  return `research-mcp:${scope.type}:${scope.id}:${suffix}`;
+}
+
+async function appendScopedCacheEvent(
+  env: Env,
+  scope: DeepResearchMcpScope,
+  suffix: string,
+  event: Record<string, unknown>,
+) {
+  if (!env.CACHE) return;
+  const key = scopedKey(scope, suffix);
+  const existing = await env.CACHE.get(key);
+  let events: Array<Record<string, unknown>> = [];
+  if (existing) {
+    try {
+      events = JSON.parse(existing) as Array<Record<string, unknown>>;
+    } catch {
+      events = [];
+    }
+  }
+  events.push({ ...event, at: new Date().toISOString() });
+  await env.CACHE.put(key, JSON.stringify(events.slice(-50)), {
+    expirationTtl: 6 * 60 * 60,
+  });
+}
+
+function normalizeSentiment(value: unknown): "good" | "bad" | "neutral" {
+  return value === "good" || value === "bad" || value === "neutral"
+    ? value
+    : "neutral";
+}
+
+async function getResearchContext(env: Env, scope: DeepResearchMcpScope): Promise<string> {
+  const db = drizzle(env.DB);
+
+  if (scope.type === "product") {
+    const context = await loadProductPromptContext(env, scope.productId ?? scope.id);
+    return JSON.stringify(context, null, 2);
+  }
+
+  if (scope.type === "store") {
+    const [store] = await db
+      .select()
+      .from(showroomStores)
+      .where(eq(showroomStores.id, scope.storeId ?? scope.id))
+      .limit(1);
+    return JSON.stringify({ store }, null, 2);
+  }
+
+  if (scope.type === "category") {
+    const [category] = await db
+      .select()
+      .from(showroomStoreCategory)
+      .where(eq(showroomStoreCategory.id, scope.categoryId ?? scope.id))
+      .limit(1);
+    return JSON.stringify({ category }, null, 2);
+  }
+
+  const [session] = await db
+    .select()
+    .from(researchSessions)
+    .where(eq(researchSessions.id, scope.sessionId ?? scope.id))
+    .limit(1);
+
+  return JSON.stringify({ session }, null, 2);
+}
+
+async function recordResearchSource(
+  env: Env,
+  scope: DeepResearchMcpScope,
+  args: Record<string, any>,
+): Promise<string> {
+  const db = drizzle(env.DB);
+  const url = String(args.url ?? "").trim();
+  if (!url) throw new Error("url is required");
+  new URL(url);
+
+  const finding = String(args.finding ?? args.summary ?? args.title ?? url).trim();
+  if (!finding) throw new Error("finding, summary, or title is required");
+
+  await appendScopedCacheEvent(env, scope, "sources", {
+    url,
+    title: args.title ?? null,
+    summary: args.summary ?? null,
+    finding,
+    sentiment: normalizeSentiment(args.sentiment),
+  });
+
+  if (scope.type === "product") {
+    const productId = scope.productId ?? scope.id;
+    const [product] = await db
+      .select({ id: showroomStoreProducts.id })
+      .from(showroomStoreProducts)
+      .where(eq(showroomStoreProducts.id, productId))
+      .limit(1);
+    if (!product) throw new Error(`Product ${productId} not found`);
+
+    const [existing] = await db
+      .select({ id: storeProductResearch.id })
+      .from(storeProductResearch)
+      .where(
+        and(
+          eq(storeProductResearch.storeProductId, productId),
+          eq(storeProductResearch.finding, finding),
+          eq(storeProductResearch.findingUrl, url),
+        ),
+      )
+      .limit(1);
+    if (!existing) {
+      await db.insert(storeProductResearch).values({
+        storeProductId: productId,
+        finding,
+        findingUrl: url,
+        sentiment: normalizeSentiment(args.sentiment),
+      });
+    }
+  }
+
+  if (scope.type === "store") {
+    const storeId = scope.storeId ?? scope.id;
+    const [store] = await db
+      .select({ id: showroomStores.id })
+      .from(showroomStores)
+      .where(eq(showroomStores.id, storeId))
+      .limit(1);
+    if (!store) throw new Error(`Store ${storeId} not found`);
+
+    const [existing] = await db
+      .select({ id: storeResearch.id })
+      .from(storeResearch)
+      .where(
+        and(
+          eq(storeResearch.storeId, storeId),
+          eq(storeResearch.finding, finding),
+          eq(storeResearch.findingUrl, url),
+        ),
+      )
+      .limit(1);
+    if (!existing) {
+      await db.insert(storeResearch).values({
+        storeId,
+        finding,
+        findingUrl: url,
+        sentiment: normalizeSentiment(args.sentiment),
+      });
+    }
+  }
+
+  return JSON.stringify({ recorded: true, scope, url });
+}
+
+async function callResearchTool(
+  env: Env,
+  auth: McpAuthContext,
+  name: string,
+  args: Record<string, any>,
+): Promise<string> {
+  const scope = auth.kind === "research"
+    ? auth.scope
+    : {
+        type: "session" as const,
+        id: Number(args.sessionId ?? 0),
+        sessionId: Number(args.sessionId ?? 0),
+      };
+
+  if (!scope.id) {
+    throw new Error("Research scope is required");
+  }
+
+  if (name === "get_deep_research_context") {
+    return getResearchContext(env, scope);
+  }
+
+  if (name === "record_deep_research_progress") {
+    const message = String(args.message ?? "").trim();
+    if (!message) throw new Error("message is required");
+    await appendScopedCacheEvent(env, scope, "progress", {
+      message,
+      status: args.status ?? null,
+    });
+    return JSON.stringify({ recorded: true, scope, message });
+  }
+
+  if (name === "record_deep_research_source") {
+    return recordResearchSource(env, scope, args);
+  }
+
+  throw new Error(`Unknown research tool: ${name}`);
+}
+
+async function callTool(env: Env, auth: McpAuthContext, name: string, args: Record<string, any>): Promise<string> {
+  requireWorkerAuth(auth, name);
+
+  if (isResearchTool(name)) {
+    return callResearchTool(env, auth, name, args);
+  }
+
   const db = drizzle(env.DB);
   switch (name) {
     case "create_render_session": {
@@ -215,6 +519,11 @@ async function callTool(env: Env, name: string, args: Record<string, any>): Prom
 
 // JSON-RPC over HTTP (the MCP streamable-HTTP transport).
 mcpRouter.post("/", async (c) => {
+  const auth = await authenticateMcpRequest(c.req.raw, c.env);
+  if (!auth) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
   const body = (await c.req.json().catch(() => null)) as any;
 
   const handle = async (msg: any) => {
@@ -234,10 +543,11 @@ mcpRouter.post("/", async (c) => {
         };
       }
       if (method === "tools/list") {
-        return { jsonrpc: "2.0", id, result: { tools: TOOLS } };
+        const tools = TOOLS.filter((tool) => auth.kind === "worker" || isResearchTool(tool.name));
+        return { jsonrpc: "2.0", id, result: { tools } };
       }
       if (method === "tools/call") {
-        const text = await callTool(c.env, params?.name, params?.arguments ?? {});
+        const text = await callTool(c.env, auth, params?.name, params?.arguments ?? {});
         return { jsonrpc: "2.0", id, result: { content: [{ type: "text", text }] } };
       }
       if (method === "ping") {
@@ -266,14 +576,21 @@ mcpRouter.post("/", async (c) => {
 });
 
 // Discovery / health (handy for sanity-checking the server)
-mcpRouter.get("/", (c) =>
-  c.json({
+mcpRouter.get("/", async (c) => {
+  const auth = await authenticateMcpRequest(c.req.raw, c.env);
+  if (!auth) {
+    return c.json({ error: "Unauthorized" }, 401);
+  }
+
+  return c.json({
     name: SERVER_INFO.name,
     version: SERVER_INFO.version,
     protocol: "mcp",
     transport: "http",
-    tools: TOOLS.map((t) => t.name),
-  }),
-);
+    tools: TOOLS
+      .filter((tool) => auth.kind === "worker" || isResearchTool(tool.name))
+      .map((t) => t.name),
+  });
+});
 
 export default mcpRouter;

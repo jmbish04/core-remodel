@@ -22,6 +22,20 @@ export const researchSessions = sqliteTable("research_sessions", {
   /** The structured research plan (markdown) */
   researchPlan: text("research_plan"),
 
+  /** Gemini Interactions API ID for the background Deep Research task */
+  interactionId: text("interaction_id"),
+
+  /** Last streamed event ID observed while monitoring the interaction */
+  lastEventId: text("last_event_id"),
+
+  /** Gemini managed agent ID used for this session */
+  interactionAgent: text("interaction_agent"),
+
+  /** Whether a scoped MCP bridge was attached to the interaction */
+  mcpBridgeEnabled: integer("mcp_bridge_enabled", { mode: "boolean" }).default(
+    false,
+  ),
+
   /**
    * Orchestration status:
    *   pending     — created, not yet started

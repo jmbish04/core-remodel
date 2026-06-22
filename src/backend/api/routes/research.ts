@@ -22,7 +22,7 @@ import { getAgentByName } from "agents";
 import { researchSessions } from "@backend/db/schema/admin/research_sessions";
 import { deleteSessionVectors, embedAndUpsertChunks } from "@backend/ai/agents/ResearchAgent/methods/embed-chunks";
 import { chunkMarkdown } from "@backend/ai/agents/ResearchAgent/methods/chunk-markdown";
-import { r2MarkdownKey, r2WebappKey, vectorNamespace } from "@backend/ai/agents/ResearchAgent/types";
+import { r2MarkdownKey, r2WebappKey } from "@backend/ai/agents/ResearchAgent/types";
 import type { ResearchAgent } from "@backend/ai/agents/ResearchAgent";
 
 export const researchRouter = new Hono<{ Bindings: Env }>();
@@ -32,7 +32,14 @@ export const researchRouter = new Hono<{ Bindings: Env }>();
 // ---------------------------------------------------------------------------
 
 researchRouter.post("/", async (c) => {
-  const body = await c.req.json<{ topic?: string; prompt?: string; researchPlan?: string }>();
+  const body = await c.req.json<{
+    topic?: string;
+    prompt?: string;
+    researchPlan?: string;
+    enableMcpBridge?: boolean;
+    mode?: "standard" | "max";
+    visualization?: "auto" | "off";
+  }>();
   const topic = body?.topic?.trim();
   const prompt = body?.prompt?.trim() || null;
   const researchPlan = body?.researchPlan?.trim() || null;
@@ -60,7 +67,16 @@ researchRouter.post("/", async (c) => {
       `research-${session.id}`,
     );
     // Call startResearch without awaiting — returns 202 immediately
-    (agent as any).startResearch(topic, session.id).catch((err: unknown) => {
+    (agent as any).startResearch({
+      topic,
+      sessionId: session.id,
+      prompt,
+      researchPlan,
+      enableMcpBridge: body?.enableMcpBridge === true,
+      mcpServerUrl: new URL("/api/mcp", c.req.url).toString(),
+      mode: body?.mode === "max" ? "max" : "standard",
+      visualization: body?.visualization === "auto" ? "auto" : "off",
+    }).catch((err: unknown) => {
       console.error(`Research pipeline failed for session ${session.id}:`, err);
     });
   } catch (err) {

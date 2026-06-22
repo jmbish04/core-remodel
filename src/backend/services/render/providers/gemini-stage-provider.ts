@@ -31,6 +31,27 @@ async function urlToInlineData(url: string): Promise<{ data: string; mimeType: s
 }
 
 /**
+ * Create a Gemini client routed through Cloudflare AI Gateway.
+ *
+ * This is the single shared Gemini client factory for Worker-side code. It
+ * preserves the existing google-ai-studio Gateway route while avoiding ad-hoc
+ * client construction in agents and service modules.
+ */
+export async function createGeminiAiGatewayClient(env: Env): Promise<GoogleGenAI> {
+  const apiKey = await env.GEMINI_API_KEY.get();
+  const accountId = await getCloudflareAccountId(env);
+  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
+  if (!accountId) throw new Error("CLOUDFLARE_ACCOUNT_ID is not configured");
+
+  return new GoogleGenAI({
+    apiKey,
+    httpOptions: {
+      baseUrl: `https://gateway.ai.cloudflare.com/v1/${accountId}/${env.AI_GATEWAY_ID}/google-ai-studio`,
+    },
+  });
+}
+
+/**
  * Gemini 3 Pro Image via Cloudflare AI Gateway (google-ai-studio path). Pins
  * aspect_ratio + image_size via imageConfig — the proven control that stops the
  * model re-cropping to portrait / downsizing. Edits the real image (never generates
@@ -40,17 +61,7 @@ export class GeminiStageProvider implements StageProvider {
   readonly name = "gemini" as const;
 
   async run(input: StageInput, env: Env): Promise<StageOutput> {
-    const apiKey = await env.GEMINI_API_KEY.get();
-    const accountId = await getCloudflareAccountId(env);
-    if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
-    if (!accountId) throw new Error("CLOUDFLARE_ACCOUNT_ID is not configured");
-
-    const ai = new GoogleGenAI({
-      apiKey,
-      httpOptions: {
-        baseUrl: `https://gateway.ai.cloudflare.com/v1/${accountId}/${env.AI_GATEWAY_ID}/google-ai-studio`,
-      },
-    });
+    const ai = await createGeminiAiGatewayClient(env);
 
     const model = input.model || "gemini-3-pro-image";
 

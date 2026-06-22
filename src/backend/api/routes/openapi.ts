@@ -185,6 +185,158 @@ const openApiSpec = {
         },
       },
     },
+    "/showroom-stores/products/{productId}/research/draft-prompt": {
+      post: {
+        operationId: "createShowroomProductResearchDraftPrompt",
+        summary: "Generate a draft research prompt for a showroom product",
+        tags: ["Showroom Research"],
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "productId",
+            in: "path",
+            required: true,
+            schema: { type: "integer", minimum: 1 },
+          },
+        ],
+        requestBody: {
+          required: false,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  negativeConstraints: {
+                    type: "array",
+                    items: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Draft prompt generated",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    success: { type: "boolean" },
+                    productId: { type: "integer" },
+                    prompt: { type: "string" },
+                  },
+                  required: ["success", "productId", "prompt"],
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/showroom-stores/products/{productId}/research/deep-sweep": {
+      post: {
+        operationId: "runShowroomProductResearchDeepSweep",
+        summary: "Run citation-backed product deep research",
+        tags: ["Showroom Research"],
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "productId",
+            in: "path",
+            required: true,
+            schema: { type: "integer", minimum: 1 },
+          },
+        ],
+        requestBody: {
+          required: false,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ShowroomDeepSweepRequest" },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Product deep sweep completed",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ShowroomSweepResult" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/showroom-stores/{storeId}/research/deep-sweep": {
+      post: {
+        operationId: "runShowroomStoreResearchDeepSweep",
+        summary: "Run citation-backed showroom/store deep research",
+        tags: ["Showroom Research"],
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "storeId",
+            in: "path",
+            required: true,
+            schema: { type: "integer", minimum: 1 },
+          },
+        ],
+        requestBody: {
+          required: false,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ShowroomDeepSweepRequest" },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Store deep sweep completed",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ShowroomSweepResult" },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/showroom-stores/meta/categories/{categoryId}/research/deep-sweep": {
+      post: {
+        operationId: "runShowroomCategoryResearchDeepSweep",
+        summary: "Run citation-backed category gap research",
+        tags: ["Showroom Research"],
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "categoryId",
+            in: "path",
+            required: true,
+            schema: { type: "integer", minimum: 1 },
+          },
+        ],
+        requestBody: {
+          required: false,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ShowroomDeepSweepRequest" },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Category deep sweep completed",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ShowroomSweepResult" },
+              },
+            },
+          },
+        },
+      },
+    },
     "/estimate-statuses": {
       get: {
         operationId: "listEstimateStatuses",
@@ -717,6 +869,83 @@ const openApiSpec = {
       bearerAuth: {
         type: "http",
         scheme: "bearer",
+      },
+    },
+    schemas: {
+      ShowroomDeepSweepRequest: {
+        type: "object",
+        properties: {
+          prompt: { type: "string" },
+          maxSources: { type: "integer", minimum: 1, maximum: 10 },
+          negativeConstraints: {
+            type: "array",
+            items: { type: "string" },
+          },
+          researchMode: {
+            type: "string",
+            enum: ["quick", "deep"],
+            default: "quick",
+            description:
+              "quick uses Gemini citation planning; deep starts the Gemini Deep Research Interactions API with a bounded wait and falls back to quick planning on timeout/failure.",
+          },
+          deepResearchWaitMs: {
+            type: "integer",
+            minimum: 15000,
+            maximum: 240000,
+            description:
+              "Maximum synchronous wait for Deep Research citation discovery when researchMode is deep.",
+          },
+          enableMcpBridge: {
+            type: "boolean",
+            default: false,
+            description:
+              "Attach a scoped ephemeral /api/mcp research bridge to this one Deep Research interaction.",
+          },
+          triggerSource: {
+            type: "string",
+            enum: [
+              "manual",
+              "product-created",
+              "store-created",
+              "cron-category-gap",
+              "cron-rejection-loop",
+            ],
+            default: "manual",
+          },
+        },
+      },
+      ShowroomSweepResult: {
+        type: "object",
+        properties: {
+          success: { type: "boolean" },
+          targetType: {
+            type: "string",
+            enum: ["product", "store", "category"],
+          },
+          targetId: { type: "integer" },
+          citationsFound: { type: "integer" },
+          sourcesProcessed: { type: "integer" },
+          findingsWritten: { type: "integer" },
+          imagesWritten: { type: "integer" },
+          specsWritten: { type: "integer" },
+          vectorsWritten: { type: "integer" },
+          warnings: {
+            type: "array",
+            items: { type: "string" },
+          },
+        },
+        required: [
+          "success",
+          "targetType",
+          "targetId",
+          "citationsFound",
+          "sourcesProcessed",
+          "findingsWritten",
+          "imagesWritten",
+          "specsWritten",
+          "vectorsWritten",
+          "warnings",
+        ],
       },
     },
   },

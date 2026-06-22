@@ -30,6 +30,8 @@ export interface ResearchAgentState {
   interactionId?: string;
   /** Deep Research stream last event ID */
   lastEventId?: string;
+  /** Whether this run attached a scoped remote MCP bridge */
+  mcpBridgeEnabled?: boolean;
 }
 
 export const DEFAULT_RESEARCH_STATE: ResearchAgentState = {
@@ -72,6 +74,20 @@ export interface EmbedResult {
 export interface VisualizerResult {
   r2Key: string;
   sizeBytes: number;
+}
+
+export interface StartResearchOptions {
+  prompt?: string | null;
+  researchPlan?: string | null;
+  enableMcpBridge?: boolean;
+  mcpServerUrl?: string | null;
+  mode?: "standard" | "max";
+  visualization?: "auto" | "off";
+}
+
+export interface StartResearchInput extends StartResearchOptions {
+  topic: string;
+  sessionId: number;
 }
 
 // ---------------------------------------------------------------------------
