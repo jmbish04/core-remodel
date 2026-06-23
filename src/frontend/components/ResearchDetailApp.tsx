@@ -258,7 +258,7 @@ export function ResearchDetailApp({ sessionId }: { sessionId?: string }) {
 
       {/* Document + interactive web app (full width). Chat is the floating modal below. */}
       {(isComplete || markdown) && (
-        <div className="flex flex-col lg:h-[calc(100vh-240px)] lg:min-h-[600px]">
+        <div className="flex flex-col lg:h-[calc(100vh_-_240px)] lg:min-h-[600px]">
           <Tabs defaultValue="document" className="flex min-h-0 flex-1 flex-col">
             <TabsList className="mb-4 h-auto w-full shrink-0 justify-start overflow-x-auto rounded-none border-b border-zinc-800 bg-transparent p-0">
               <TabsTrigger
