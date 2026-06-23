@@ -75,7 +75,8 @@ const PHASES: Phase[] = [
   {
     id: "4",
     title: "Phase 4 — Detail viewports (store / product / material)",
-    status: "active",
+    status: "done",
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/40",
     tasks: [
       { label: "Store + product viewports (reuse research context)", done: true },
       { label: "Material viewport (/api/materials/:id + /match)", done: true },
@@ -84,31 +85,33 @@ const PHASES: Phase[] = [
   {
     id: "5",
     title: "Phase 5 — Compare",
-    status: "queued",
+    status: "active",
     tasks: [
-      { label: "Compare endpoints over similar-map tables", done: false },
-      { label: "Side-by-side matrix + shareable link + decide", done: false },
+      { label: "GET /catalog/compare spec-matrix endpoint", done: true },
+      { label: "Side-by-side matrix + add/remove + shareable link + decide", done: true },
     ],
   },
   {
     id: "6",
     title: "Phase 6 — Deep Research portal + Engine A",
-    status: "queued",
+    status: "done",
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/42",
     tasks: [
-      { label: "Typed launcher + engine selector", done: false },
-      { label: "Findings markdown tab (R2)", done: false },
-      { label: "Interactive visualizer (R2) + mindmap", done: false },
-      { label: "Assistant-UI chat (D1 + Vectorize tools, suggestions)", done: false },
+      { label: "Typed launcher + engine selector", done: true },
+      { label: "Findings markdown tab (R2)", done: true },
+      { label: "Interactive visualizer (R2) + mind map (mind-elixir)", done: true },
+      { label: "Assistant-UI chat (D1 tools + Vectorize RAG, suggestions)", done: true },
     ],
   },
   {
     id: "7",
     title: "Phase 7 — Engine B: self-hosted Deep Research on Cloudflare Agents",
-    status: "queued",
+    status: "done",
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/39",
     tasks: [
-      { label: "DeepResearchAgent 6-agent loop", done: false },
-      { label: "Config (tone, depth, iterations, breadth, model)", done: false },
-      { label: "Same parse path → D1 / Vectorize / R2 as Engine A", done: false },
+      { label: "DeepResearchAgent 6-agent loop", done: true },
+      { label: "Config (tone, depth, iterations, breadth, model)", done: true },
+      { label: "Same parse path → D1 / Vectorize / R2 as Engine A", done: true },
     ],
   },
   {
