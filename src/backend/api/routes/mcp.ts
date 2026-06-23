@@ -663,11 +663,16 @@ async function callTool(env: Env, auth: McpAuthContext, name: string, args: Reco
             .map((s) => s.trim())
             .filter(Boolean)
         : undefined;
+      const num = (v: unknown): number | undefined => {
+        if (v == null) return undefined;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : undefined;
+      };
       const rows = await listMeasurements(db, {
-        roomId: args.roomId != null ? Number(args.roomId) : undefined,
+        roomId: num(args.roomId),
         elementTypes: elementTypes as MeasurementElementType[] | undefined,
         q: args.q != null ? String(args.q) : undefined,
-        limit: args.limit != null ? Number(args.limit) : undefined,
+        limit: num(args.limit),
       });
       return JSON.stringify(rows.map(rowToDto));
     }
