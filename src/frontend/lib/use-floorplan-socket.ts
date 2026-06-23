@@ -134,5 +134,5 @@ export function useFloorplanSocket(
     }
   }, []);
 
-  return { status, sendWallTouch };
+  return React.useMemo(() => ({ status, sendWallTouch }), [status, sendWallTouch]);
 }
