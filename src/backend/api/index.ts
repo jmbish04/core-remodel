@@ -66,6 +66,7 @@ import { showroomSeedRouter } from "./routes/showroom-seed";
 import { materialsRouter } from "./routes/materials";
 import { showroomGapsRouter } from "./routes/showroom-gaps";
 import { showroomCatalogRouter } from "./routes/showroom-catalog";
+import { showroomScanRouter } from "./routes/showroom-scan";
 import { requireAccessAuth } from "@backend/utils/access";
 
 export type Variables = {
@@ -170,6 +171,7 @@ app.route("/api/showroom-stores", showroomStoresRouter);
 app.route("/api/showroom-stores", showroomSeedRouter);
 app.route("/api/showroom-stores", showroomGapsRouter);
 app.route("/api/showroom-stores", showroomCatalogRouter);
+app.route("/api/showroom-stores", showroomScanRouter);
 app.route("/api/materials", materialsRouter);
 app.route("/", openapiRouter);
 
