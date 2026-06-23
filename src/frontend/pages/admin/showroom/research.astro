@@ -1,0 +1,24 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { PhaseScaffold } from "@/components/showroom/PhaseScaffold";
+---
+
+<BaseLayout
+  title="Deep Research — The Monolith"
+  description="Typed background research engine: Showroom, Material, and Product sweeps. Gemini deep-research findings flow through the agent into a Closet-Research-style review portal."
+>
+  <PhaseScaffold
+    client:only="react"
+    title="Deep Research"
+    phase={2}
+    source="Deep Research (replaces Sourcing Research)"
+    purpose="The typed background research engine. Three job types — Showroom (bulk-discover hubs from the materials list), Material (e.g. 'fridge' → specs / budget / deals / showrooms), and Product (deep dive: reviews, sales, gotchas, lead times, alternatives). Gemini deep-research findings flow through the agent into a generated review portal modeled on Closet Research."
+    steps={[
+      "Drizzle `research_jobs` schema (type: showroom | material | product, target, status, prompt, findings_md, sources)",
+      "Job queue UI: stage prompt → approve agent plan → launch Gemini sweep → review findings/sources",
+      "Agent (Agents SDK) ingests findings → writes back to D1 (showrooms / products / materials) + Vectorize for RAG",
+      "Generated portal per finding: Tab A markdown→shadcn typography, Tab B generated mini web-app, assistant-ui RAG chat modal (model on Closet Research)",
+      "Retire the legacy Sourcing app; `/admin/showroom/sourcing` redirects here",
+    ]}
+  />
+</BaseLayout>

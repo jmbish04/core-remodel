@@ -1,0 +1,31 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { PhaseScaffold } from "@/components/showroom/PhaseScaffold";
+
+const { id } = Astro.params;
+if (!id) {
+  return Astro.redirect("/admin/showroom/schedule");
+}
+---
+
+<BaseLayout
+  title={`Material ${id} — The Monolith`}
+  description="Single material viewport: specs, budget, linked showrooms and products, and its deep-research findings."
+>
+  <PhaseScaffold
+    client:only="react"
+    title={`Material · ${id}`}
+    phase={4}
+    source="Material detail"
+    purpose="Single material viewport — specs, budget, linked showrooms and products, and the deep-research findings for this line item."
+    backHref="/admin/showroom/schedule"
+    backLabel="Materials Schedule"
+    steps={[
+      "Load the material by id from `/api/materials/:id`",
+      "Linked products + showrooms panels",
+      "Embedded research portal (findings + RAG chat)",
+      "Budget vs. sourced rollup for this material",
+      "'Research again' trigger that seeds a new Deep Research job",
+    ]}
+  />
+</BaseLayout>

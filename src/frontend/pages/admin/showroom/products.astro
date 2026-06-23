@@ -1,0 +1,24 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { PhaseScaffold } from "@/components/showroom/PhaseScaffold";
+---
+
+<BaseLayout
+  title="Products — The Monolith"
+  description="The catalog of every product sourced across showrooms, filterable by zone, hub, status, and price — the bridge between a material and a specific buyable product."
+>
+  <PhaseScaffold
+    client:only="react"
+    title="Products"
+    phase={2}
+    source="Products"
+    purpose="The catalog of every product sourced across showrooms, filterable by zone, hub, status, and price. The bridge between an abstract material (fridge) and a specific buyable product (this fridge, at this showroom, for this price)."
+    steps={[
+      "Drizzle `products` schema (FK → material, FK → showroom, price, specs, status)",
+      "zod-openapi routes (`/api/products`) with filter params (zone / hub / status / price)",
+      "Filterable catalog grid with status badges",
+      "'Add to Compare' + 'Deep dive' → Product detail viewport (Phase 4)",
+      "Compatibility checks against material gotchas (e.g. Invisacook ✗ natural stone)",
+    ]}
+  />
+</BaseLayout>

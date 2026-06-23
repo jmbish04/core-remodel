@@ -1,0 +1,31 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { PhaseScaffold } from "@/components/showroom/PhaseScaffold";
+
+const { id } = Astro.params;
+if (!id) {
+  return Astro.redirect("/admin/showroom/showrooms");
+}
+---
+
+<BaseLayout
+  title={`Showroom ${id} — The Monolith`}
+  description="Single showroom viewport: location, hours, materials served, deals, reviews, and products carried."
+>
+  <PhaseScaffold
+    client:only="react"
+    title={`Showroom · ${id}`}
+    phase={4}
+    source="Showroom detail"
+    purpose="Single showroom viewport — location, hours, materials served, deals, reviews, and the products this showroom carries."
+    backHref="/admin/showroom/showrooms"
+    backLabel="Showrooms"
+    steps={[
+      "Load the showroom by id from `/api/showrooms/:id`",
+      "Products-carried list + current deals",
+      "Reviews with source attribution",
+      "Day-trip routing context (hub + nearby showrooms)",
+      "Approve / rule-out controls that update showroom status",
+    ]}
+  />
+</BaseLayout>

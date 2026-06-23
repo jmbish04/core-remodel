@@ -1,0 +1,24 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { PhaseScaffold } from "@/components/showroom/PhaseScaffold";
+---
+
+<BaseLayout
+  title="Compare — The Monolith"
+  description="Decision support: side-by-side product comparisons with shared links and comments, pulling in gotchas, lead times, and reviews from research."
+>
+  <PhaseScaffold
+    client:only="react"
+    title="Compare"
+    phase={3}
+    source="Compare"
+    purpose="Decision support — build side-by-side product comparisons with shareable links and threaded comments, pulling in gotchas, lead times, and reviews from research so a final pick is defensible."
+    steps={[
+      "Drizzle `comparisons` + `comparison_items` schema",
+      "Build a comparison from selected products; render a side-by-side spec matrix",
+      "Shareable link + threaded comments",
+      "Pull gotchas / lead-times / reviews from research into the matrix",
+      "'Decide' → marks the chosen product's status back on the Materials Schedule",
+    ]}
+  />
+</BaseLayout>

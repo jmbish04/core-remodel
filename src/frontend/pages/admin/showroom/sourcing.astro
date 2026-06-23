@@ -1,11 +1,7 @@
 ---
-import BaseLayout from "@/layouts/BaseLayout.astro";
-import { SourcingResearchApp } from "@/components/showroom/sourcing";
+// "Sourcing Research" has been reframed as the typed Deep Research engine.
+// This route is kept as a permanent redirect so no existing link breaks.
+// The legacy SourcingResearchApp component is retained in the repo
+// (src/frontend/components/showroom/sourcing) for reference until Phase 2.
+return Astro.redirect("/admin/showroom/research", 301);
 ---
-
-<BaseLayout
-  title="Sourcing Research — The Monolith"
-  description="Deep-research sourcing for Bay Area showrooms and products: stage prompts, launch Gemini sweeps, review findings/sources, and approve or rule out showrooms."
->
-  <SourcingResearchApp client:only="react" />
-</BaseLayout>
