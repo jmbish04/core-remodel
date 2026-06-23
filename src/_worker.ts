@@ -27,6 +27,7 @@ export { ChecklistRationaleWorkflow } from "./backend/services/checklist-rationa
 export { ResearchAgent } from "./backend/ai/agents/ResearchAgent";
 export { PermitIntelligenceAgent } from "./backend/ai/agents/PermitIntelligenceAgent/index";
 export { ShowroomResearchAgent } from "./backend/ai/agents/ShowroomResearchAgent/index";
+export { DeepResearchAgent } from "./backend/ai/agents/DeepResearchAgent/index";
 
 const handler: ExportedHandler<Env> = {
   async fetch(request, env, ctx) {

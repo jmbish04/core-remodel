@@ -218,6 +218,11 @@
         "name": "FLOORPLAN_SESSION",
         "class_name": "FloorplanSessionDO",
       },
+      {
+        // 0008 Phase 7: Engine B — self-hosted 6-agent Deep Research loop.
+        "name": "DEEP_RESEARCH_AGENT",
+        "class_name": "DeepResearchAgent",
+      },
     ],
   },
   "migrations": [
@@ -265,6 +270,10 @@
     {
       "tag": "v10",
       "new_sqlite_classes": ["FloorplanSessionDO"],
+    },
+    {
+      "tag": "v11",
+      "new_sqlite_classes": ["DeepResearchAgent"],
     },
   ],
   "worker_loaders": [
