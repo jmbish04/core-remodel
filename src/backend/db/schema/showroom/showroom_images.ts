@@ -42,6 +42,15 @@ export const showroomImages = sqliteTable(
     ogDescription: text("og_description"),
     metadataJson: text("metadata_json"),
 
+    /** HITL review state — see product_images.review_status (junk rejection). */
+    reviewStatus: text("review_status", {
+      enum: ["pending", "approved", "rejected"],
+    })
+      .notNull()
+      .default("pending"),
+    reviewReason: text("review_reason"),
+    reviewedAt: integer("reviewed_at", { mode: "timestamp" }),
+
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),

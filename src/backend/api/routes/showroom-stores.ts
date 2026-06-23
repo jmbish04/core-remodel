@@ -488,6 +488,110 @@ showroomStoresRouter.get("/:id/research/context", async (c) => {
   });
 });
 
+// ─── HITL REVIEW WRITES ───────────────────────────────────────────────────────
+//
+// Per-fact and per-image approve/reject. Workers AI parses findings against a
+// fixed target, so a fact can be mis-attributed and scraping can surface junk
+// imagery; these endpoints let the homeowner approve correct artifacts and
+// reject wrong/spam ones. The reason on a rejection is retained and (for
+// findings) replayed as a negative constraint on the next sweep. Read-only
+// gated by the /api/showroom-stores requireAccessAuth middleware.
+
+/** Body shape for both review endpoints. */
+const reviewBodySchema = z.object({
+  scope: z.enum(["product", "store"]),
+  reviewStatus: z.enum(["pending", "approved", "rejected"]),
+  reviewReason: z.string().max(500).optional().nullable(),
+});
+
+/**
+ * PATCH /research/findings/:id — set a finding's HITL review state.
+ *
+ * `scope` selects the table: "product" → store_product_research,
+ * "store" → store_research (ids are independent across the two tables).
+ */
+showroomStoresRouter.patch("/research/findings/:id", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = Number(c.req.param("id"));
+  if (!Number.isInteger(id)) {
+    return c.json({ success: false, error: "Invalid finding id" }, 400);
+  }
+
+  const parsed = reviewBodySchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+  const { scope, reviewStatus, reviewReason } = parsed.data;
+
+  const patch = {
+    reviewStatus,
+    reviewReason: reviewReason ?? null,
+    reviewedAt: new Date(),
+  };
+
+  const [updated] =
+    scope === "product"
+      ? await db
+          .update(storeProductResearch)
+          .set(patch)
+          .where(eq(storeProductResearch.id, id))
+          .returning()
+      : await db
+          .update(storeResearch)
+          .set(patch)
+          .where(eq(storeResearch.id, id))
+          .returning();
+
+  if (!updated) {
+    return c.json({ success: false, error: "Finding not found" }, 404);
+  }
+  return c.json({ success: true, finding: updated });
+});
+
+/**
+ * PATCH /research/images/:id — set a scraped image's HITL review state.
+ *
+ * `scope` selects the table: "product" → product_images,
+ * "store" → showroom_images. Rejecting marks junk/spam so it is not surfaced.
+ */
+showroomStoresRouter.patch("/research/images/:id", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = Number(c.req.param("id"));
+  if (!Number.isInteger(id)) {
+    return c.json({ success: false, error: "Invalid image id" }, 400);
+  }
+
+  const parsed = reviewBodySchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+  const { scope, reviewStatus, reviewReason } = parsed.data;
+
+  const patch = {
+    reviewStatus,
+    reviewReason: reviewReason ?? null,
+    reviewedAt: new Date(),
+  };
+
+  const [updated] =
+    scope === "product"
+      ? await db
+          .update(productImages)
+          .set(patch)
+          .where(eq(productImages.id, id))
+          .returning()
+      : await db
+          .update(showroomImages)
+          .set(patch)
+          .where(eq(showroomImages.id, id))
+          .returning();
+
+  if (!updated) {
+    return c.json({ success: false, error: "Image not found" }, 404);
+  }
+  return c.json({ success: true, image: updated });
+});
+
 // ─── STORES CRUD ──────────────────────────────────────────────────────────────
 
 /**

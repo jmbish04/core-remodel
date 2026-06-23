@@ -98,6 +98,28 @@ function extractNegativeConstraints(
   return constraints;
 }
 
+/**
+ * Turn homeowner-rejected findings into negative constraints so the next sweep
+ * learns from the corrections. A finding is typically rejected because Workers
+ * AI mis-attributed it to the wrong entity or it was low-quality; we replay the
+ * finding text plus any reason the homeowner gave.
+ */
+function rejectedFindingConstraints(
+  findings: Array<{ finding: string; reviewStatus: string; reviewReason: string | null }>,
+): string[] {
+  const constraints: string[] = [];
+  for (const f of findings) {
+    if (f.reviewStatus !== "rejected") continue;
+    const reason = f.reviewReason?.trim();
+    constraints.push(
+      reason
+        ? `Do not repeat this previously rejected finding (${reason}): ${f.finding.trim()}`
+        : `Do not repeat this previously rejected finding: ${f.finding.trim()}`,
+    );
+  }
+  return constraints;
+}
+
 export async function loadProductPromptContext(
   env: Env,
   productId: number,
@@ -160,6 +182,8 @@ export async function loadProductPromptContext(
         finding: storeProductResearch.finding,
         findingUrl: storeProductResearch.findingUrl,
         sentiment: storeProductResearch.sentiment,
+        reviewStatus: storeProductResearch.reviewStatus,
+        reviewReason: storeProductResearch.reviewReason,
       })
       .from(storeProductResearch)
       .where(eq(storeProductResearch.storeProductId, productId))
@@ -191,6 +215,7 @@ export async function loadProductPromptContext(
 
   const negativeConstraints = [
     ...extractNegativeConstraints(activeProductRatings, activeStoreRatings),
+    ...rejectedFindingConstraints(researchFindings),
     ...extraNegativeConstraints.map((value) => value.trim()).filter(Boolean),
   ];
 
