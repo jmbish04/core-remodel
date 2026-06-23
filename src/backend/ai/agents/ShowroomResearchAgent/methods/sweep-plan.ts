@@ -257,9 +257,12 @@ export async function runApprovedSweep(
         });
         seedCitationUrls = extractCitationUrlsFromInteraction(completed.interaction);
         report(`Approved research surfaced ${seedCitationUrls.length} citations; extracting…`);
-      } catch {
-        // Non-fatal: fall back to quick citation discovery on the approved plan.
-        report("Deep research run unavailable; falling back to quick citation discovery.");
+      } catch (error) {
+        // Non-fatal: fall back to quick citation discovery on the approved plan,
+        // but surface the cause so API failures/timeouts are diagnosable.
+        const details = error instanceof Error ? error.message : String(error);
+        console.error(`Approved deep research failed for sweep session ${sessionId}:`, error);
+        report(`Deep research run unavailable (${details}); falling back to quick citation discovery.`);
       }
     }
 
