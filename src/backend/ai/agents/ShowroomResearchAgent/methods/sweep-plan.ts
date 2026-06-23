@@ -26,7 +26,12 @@ import {
   sourcingSweepSessions,
   type SourcingSweepSession,
 } from "@backend/db/schema/showroom/index";
-import { draftDeepResearchPlan } from "@backend/services/gemini/deep-research";
+import {
+  continueDeepResearchPlan,
+  draftDeepResearchPlan,
+  extractCitationUrlsFromInteraction,
+  pollDeepResearchInteraction,
+} from "@backend/services/gemini/deep-research";
 import { annotatePlan } from "@backend/ai/plan-review/annotate-plan";
 import { loadProductPromptContext, generateProductDraftPrompt } from "./prompt-context";
 import {
@@ -233,14 +238,40 @@ export async function runApprovedSweep(
     const prompt = session.planMarkdown ?? session.prompt ?? undefined;
     const maxSources = session.maxSources ?? undefined;
     const enableMcpBridge = session.enableMcpBridge ?? false;
+
+    // Deep-citation on approval: if a deep plan interaction exists, RELEASE it
+    // (continue the collaborative interaction → the approved deep research now
+    // runs to completion) and seed the citations it found into the extraction
+    // sweep, so the approved deep research is used rather than re-run.
+    let seedCitationUrls: string[] = [];
+    if (session.researchMode === "deep" && session.planInteractionId) {
+      try {
+        report("Running the approved deep research…");
+        const interaction = await continueDeepResearchPlan(
+          env,
+          session.planInteractionId,
+          { kind: "approve" },
+        );
+        const completed = await pollDeepResearchInteraction(env, interaction.id, {
+          onStatus: () => report("Approved deep research in progress…"),
+        });
+        seedCitationUrls = extractCitationUrlsFromInteraction(completed.interaction);
+        report(`Approved research surfaced ${seedCitationUrls.length} citations; extracting…`);
+      } catch {
+        // Non-fatal: fall back to quick citation discovery on the approved plan.
+        report("Deep research run unavailable; falling back to quick citation discovery.");
+      }
+    }
+
     const common = {
       prompt,
       maxSources,
-      // The approved plan is the reviewed prompt — quick citation discovery runs
-      // the full extraction pipeline without a second deep-research run.
+      // Quick citation discovery runs the full extraction pipeline; when a deep
+      // run was released above, its citations seed discovery so they are reused.
       researchMode: "quick" as const,
       enableMcpBridge,
       triggerSource: "manual" as const,
+      seedCitationUrls: seedCitationUrls.length > 0 ? seedCitationUrls : undefined,
     };
 
     const result =

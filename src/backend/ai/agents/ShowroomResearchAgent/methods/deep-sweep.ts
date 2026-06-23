@@ -972,7 +972,10 @@ export async function deepSweepProduct(
     input.negativeConstraints ?? [],
   );
   const prompt = input.prompt?.trim() || buildProductResearchPrompt(context);
-  const fallbackUrls = context.store?.websiteUrl ? [context.store.websiteUrl] : [];
+  const fallbackUrls = [
+    ...(input.seedCitationUrls ?? []),
+    ...(context.store?.websiteUrl ? [context.store.websiteUrl] : []),
+  ];
   progress?.("Discovering product citation URLs", 10);
 
   const plan = await discoverCitationPlan(
@@ -1059,7 +1062,7 @@ ${bulletList(input.negativeConstraints ?? [])}`;
   const plan = await discoverCitationPlan(
     env,
     prompt,
-    store.websiteUrl ? [store.websiteUrl] : [],
+    [...(input.seedCitationUrls ?? []), ...(store.websiteUrl ? [store.websiteUrl] : [])],
     input.negativeConstraints ?? [],
     clampMaxSources(input.maxSources),
     {
@@ -1142,7 +1145,7 @@ export async function deepSweepCategory(
     .where(eq(showroomStoreCategoryMapping.categoryId, input.categoryId))
     .orderBy(desc(showroomStores.createdAt));
 
-  const fallbackUrls: string[] = [];
+  const fallbackUrls: string[] = [...(input.seedCitationUrls ?? [])];
   const storeContext: string[] = [];
   const rejectionConstraints = [...(input.negativeConstraints ?? [])];
   for (const row of mappedStores) {
