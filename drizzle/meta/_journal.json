@@ -351,6 +351,13 @@
       "when": 1782203447638,
       "tag": "0049_freezing_la_nuit",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1782205583472,
+      "tag": "0050_wild_spot",
+      "breakpoints": true
     }
   ]
 }
