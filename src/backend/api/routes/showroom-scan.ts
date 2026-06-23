@@ -101,8 +101,19 @@ showroomScanRouter.post("/scan/batch-sync", async (c) => {
       })
       .returning();
 
+    const jsonExtractedData = JSON.stringify({
+      notes: card.notes ?? null,
+      capturedVia: "field-scan-batch",
+      awaitingEnrichment: true,
+    });
+    const barcodeDecodedValue = card.barcode?.trim() || null;
+    const isBarcode = Boolean(card.barcode);
+
     let uploaded = 0;
     let failed = 0;
+    // cfImageUrl per log row: one row per photo, or a single null-image row when
+    // a card has no photos (barcode/notes-only) so every scan keeps an audit trail.
+    const cfImageUrls: (string | null)[] = [];
     for (const photo of card.photos) {
       const blob = processor ? dataUrlToBlob(photo) : null;
       let cfImageUrl: string | null = null;
@@ -117,15 +128,22 @@ showroomScanRouter.post("/scan/batch-sync", async (c) => {
       } else {
         failed += 1;
       }
-      await db.insert(showroomScanLog).values({
-        isBarcode: Boolean(card.barcode),
+      cfImageUrls.push(cfImageUrl);
+    }
+    if (cfImageUrls.length === 0) cfImageUrls.push(null);
+
+    const logInserts = cfImageUrls.map((cfImageUrl) =>
+      db.insert(showroomScanLog).values({
+        isBarcode,
         cfImageUrl,
-        barcodeDecodedValue: card.barcode?.trim() || null,
-        jsonExtractedData: JSON.stringify({ notes: card.notes ?? null, capturedVia: "field-scan-batch", awaitingEnrichment: true }),
+        barcodeDecodedValue,
+        jsonExtractedData,
         autoCreatedProductId: product.id,
         storeId,
-      });
-    }
+      }),
+    );
+    // db.batch keeps single-row inserts under D1's 100-bound-parameter limit.
+    await db.batch(logInserts as [(typeof logInserts)[number], ...typeof logInserts]);
 
     // Fire-and-forget deep-research enrichment; findings land in HITL review.
     if (parsed.data.runResearch) {

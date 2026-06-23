@@ -23,13 +23,23 @@ interface ScanCard {
 const DB_NAME = "showroom-field-scan";
 const STORE = "cards";
 
+// Cache the connection promise so the DB is opened once and reused across all
+// operations (upsert fires on every keystroke — a fresh connection per call leaks).
+let dbPromise: Promise<IDBDatabase> | null = null;
+
 function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = () => req.result.createObjectStore(STORE, { keyPath: "id" });
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
+  if (typeof window === "undefined") {
+    return Promise.reject(new Error("IndexedDB is only available in the browser"));
+  }
+  if (!dbPromise) {
+    dbPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => req.result.createObjectStore(STORE, { keyPath: "id" });
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  return dbPromise;
 }
 async function idbAll(): Promise<ScanCard[]> {
   const db = await openDb();
@@ -169,8 +179,13 @@ export function FieldScanApp() {
   const syncAll = async () => {
     const toSync = cards.filter((c) => c.status !== "synced");
     if (toSync.length === 0) return;
-    if (toSync.some((c) => !c.storeId.trim())) {
-      toast.error("Every card needs a Store ID before syncing");
+    if (
+      toSync.some((c) => {
+        const id = Number.parseInt(c.storeId, 10);
+        return !Number.isFinite(id) || id <= 0;
+      })
+    ) {
+      toast.error("Every card needs a valid positive integer Store ID before syncing");
       return;
     }
     setSyncing(true);
@@ -198,6 +213,10 @@ export function FieldScanApp() {
       setCards((cs) => cs.map((c) => (c.status !== "synced" ? { ...c, status: "synced" } : c)));
       toast.success(`Synced ${toSync.length} product${toSync.length === 1 ? "" : "s"} — research queued`);
     } catch (e) {
+      for (const c of toSync) {
+        await idbPut({ ...c, status: "error" }).catch(() => {});
+      }
+      setCards((cs) => cs.map((c) => (c.status !== "synced" ? { ...c, status: "error" } : c)));
       toast.error(e instanceof Error ? e.message : "Sync failed");
     } finally {
       setSyncing(false);
