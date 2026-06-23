@@ -178,10 +178,10 @@ export const measurements = sqliteTable(
 
     datetimeCreated: integer("datetime_created", { mode: "timestamp" })
       .notNull()
-      .default(sql("(unixepoch() * 1000)")),
+      .default(sql`(unixepoch())`),
     datetimeUpdated: integer("datetime_updated", { mode: "timestamp" })
       .notNull()
-      .default(sql("(unixepoch() * 1000)")),
+      .default(sql`(unixepoch())`),
   },
   (table) => ({
     // List/filter endpoints query primarily by room, then by floor and element type.
