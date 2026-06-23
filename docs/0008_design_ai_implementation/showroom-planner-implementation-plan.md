@@ -31,22 +31,25 @@ PR, with the user able to watch progress.
 
 ---
 
-## Execution protocol (applies to EVERY phase)
+## Execution protocol (stacked PRs)
 
-1. **Branch** off latest `main`: `0008-phase-N-<slug>`.
-2. **Implement** the phase (backend + frontend + migration via `pnpm run
-   db:generate`; never hand-write SQL).
+Phases are built as a **stack** — each branches off the previous phase's branch
+(not `main`) — so work continues without waiting on per-phase deploys.
+
+**During the build (per phase):**
+1. **Branch** off the previous phase branch: `0008-phase-N-<slug>`.
+2. **Implement** (backend + frontend + migration via `pnpm run db:generate`;
+   never hand-write SQL).
 3. **Verify locally:** `pnpm run build` + `tsc --noEmit` on changed files.
-4. **Open PR** to `main` (`gh pr create`), titled `feat(0008/phase-N): …`.
-5. **Gemini review loop:** set a **5-minute check-in timer**. On wake, fetch review
-   comments. If comments exist → fix + patch + push, reset the timer. Repeat until
-   Gemini has reviewed and no actionable comments remain.
-6. **Merge** the PR → `main` auto-builds + deploys to prod (verify check-runs).
-7. **Test deployed endpoints**. For research-bearing phases, run a **real reno
-   deep-research prompt** grounded in the 126 Colby project and confirm findings
-   persist to D1.
-8. **Update the progress page**: tick completed tasks, attach the PR link, mark the
-   next phase active. Then proceed.
+4. **Open PR** (base = previous phase branch), titled `feat(0008/phase-N): …`.
+5. **Update the progress page** (mark this phase done, next phase active) and
+   move on to the next phase.
+
+**Circle-back (after all phases are stacked):**
+6. Resolve **all** Gemini review comments on every PR (push fixes per PR).
+7. **Merge the PRs one at a time**, bottom of the stack up. Each merge to `main`
+   auto-deploys prod; verify check-runs and run the **real reno deep-research
+   prompt** smoke test for research-bearing phases before the next merge.
 
 ---
 

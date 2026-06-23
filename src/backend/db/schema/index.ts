@@ -86,4 +86,6 @@ export * from "./system/google-maps-usage";
 export * from "./dialer/prospects";
 export * from "./dialer/state";
 
+export * from "./materials/index";
+
 export * from "./showroom/index";

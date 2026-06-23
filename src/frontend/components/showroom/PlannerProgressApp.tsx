@@ -27,7 +27,8 @@ const PHASES: Phase[] = [
   {
     id: "0",
     title: "Phase 0 — Scaffolding, progress tracker, deep-research restore",
-    status: "active",
+    status: "done",
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/35",
     tasks: [
       { label: "Restore the deep-research route to render SourcingResearchApp", done: true },
       { label: "Per-page TASK placeholders (phase badge + tasks)", done: true },
@@ -38,12 +39,12 @@ const PHASES: Phase[] = [
   {
     id: "1",
     title: "Phase 1 — Materials Schedule (backend + frontend)",
-    status: "queued",
+    status: "active",
     tasks: [
-      { label: "Drizzle material_schedule_items + material_required_specs", done: false },
-      { label: "Nullable materialId FK on showroom_store_products", done: false },
-      { label: "/api/materials routes (CRUD, specs, /match)", done: false },
-      { label: "MaterialsScheduleApp dashboard + schedule.astro", done: false },
+      { label: "Drizzle material_schedule_items + material_required_specs", done: true },
+      { label: "Nullable materialId FK on showroom_store_products", done: true },
+      { label: "/api/materials routes (CRUD, specs, /match)", done: true },
+      { label: "MaterialsScheduleApp dashboard + schedule.astro", done: true },
     ],
   },
   {
