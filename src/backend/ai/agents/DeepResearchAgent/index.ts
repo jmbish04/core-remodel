@@ -62,6 +62,19 @@ import {
 
 const MAX_FINDINGS_DIGEST_CHARS = 12_000;
 
+/**
+ * Extract the numeric session id from a `cf-research-{id}` DO name. Returns
+ * `null` for any name that doesn't match the expected shape (or yields a
+ * non-finite number), so callers never query Vectorize with a bogus namespace.
+ */
+function parseSessionIdFromName(name: string | undefined): number | null {
+  if (!name) return null;
+  const match = /^cf-research-(\d+)$/.exec(name);
+  if (!match) return null;
+  const id = Number(match[1]);
+  return Number.isFinite(id) ? id : null;
+}
+
 function buildBasePrompt(input: RunDeepResearchInput): string {
   if (input.prompt?.trim()) return input.prompt.trim();
   return `Conduct a comprehensive sourcing-research report for this Bay Area renovation topic: "${input.topic}". Cover product/material categories, specifications, finishes, dimensions, price ranges, lead times, warranty terms, installation requirements, and which Bay-Area showrooms or shippable vendors carry the relevant lines.`;
@@ -446,10 +459,17 @@ export class DeepResearchAgent extends AIChatAgent<Env, DeepResearchAgentState> 
   // -------------------------------------------------------------------------
 
   async onChatMessage(onFinish: any, options?: { abortSignal?: AbortSignal }) {
-    const sessionId = parseInt(this.name.replace("cf-research-", ""), 10);
+    // Prefer the persisted state (set during `runDeepResearch`); fall back to
+    // parsing the DO name only when it matches the expected `cf-research-{id}`
+    // shape, so a malformed `this.name` never yields a bogus namespace query.
+    const sessionId =
+      typeof this.state.sessionId === "number" &&
+      Number.isFinite(this.state.sessionId)
+        ? this.state.sessionId
+        : parseSessionIdFromName(this.name);
     let ragContext = "";
 
-    if (!isNaN(sessionId)) {
+    if (sessionId !== null) {
       try {
         const lastMessage = this.messages[this.messages.length - 1];
         const queryText =

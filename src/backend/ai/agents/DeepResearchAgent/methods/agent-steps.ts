@@ -47,6 +47,27 @@ function systemInstruction(prompt: string) {
   };
 }
 
+/**
+ * Build a Gemini `config` object, including `thinkingConfig` only when a
+ * positive `thinkingBudget` is requested. Passing `thinkingConfig` to models
+ * that don't support reasoning/thinking (or with a zero budget) can trigger
+ * API errors, so we omit it entirely in that case.
+ */
+function buildModelConfig(
+  systemPrompt: string,
+  thinkingBudget: number,
+  extra: Record<string, any> = {},
+): Record<string, any> {
+  const config: Record<string, any> = {
+    systemInstruction: systemInstruction(systemPrompt),
+    ...extra,
+  };
+  if (thinkingBudget > 0) {
+    config.thinkingConfig = { thinkingBudget };
+  }
+  return config;
+}
+
 function cleanupJson(raw: string): string {
   return raw
     .replace(/^```json\s*/i, "")
@@ -87,11 +108,9 @@ export async function runQnaAgent(
 ): Promise<CfClarifyingQuestion[]> {
   const response = (await ai.models.generateContent({
     model,
-    config: {
-      thinkingConfig: { thinkingBudget },
-      systemInstruction: systemInstruction(QNA_PROMPT),
+    config: buildModelConfig(QNA_PROMPT, thinkingBudget, {
       responseMimeType: "application/json",
-    },
+    }),
     contents: [{ role: "user", parts: [{ text: query }] }],
   } as any)) as { text?: string };
 
@@ -123,9 +142,7 @@ async function runTaskAgent(
 ): Promise<CfResearchTask[]> {
   const response = (await ai.models.generateContent({
     model,
-    config: {
-      thinkingConfig: { thinkingBudget },
-      systemInstruction: systemInstruction(systemPrompt),
+    config: buildModelConfig(systemPrompt, thinkingBudget, {
       responseMimeType: "application/json",
       responseSchema: {
         type: "OBJECT",
@@ -145,7 +162,7 @@ async function runTaskAgent(
         },
         required: ["tasks"],
       },
-    },
+    }),
     contents: [{ role: "user", parts: [{ text: userContent }] }],
   } as any)) as { text?: string };
 
@@ -214,11 +231,9 @@ export async function runReportPlanAgent(
 
   const response = (await ai.models.generateContent({
     model,
-    config: {
-      thinkingConfig: { thinkingBudget },
-      systemInstruction: systemInstruction(REPORT_PLAN_PROMPT),
+    config: buildModelConfig(REPORT_PLAN_PROMPT, thinkingBudget, {
       tools: [{ googleSearch: {} }],
-    },
+    }),
     contents: [
       {
         role: "user",
@@ -282,11 +297,9 @@ export async function runResearcherAgent(
   try {
     const response = (await ai.models.generateContent({
       model,
-      config: {
-        thinkingConfig: { thinkingBudget },
-        systemInstruction: systemInstruction(RESEARCHER_PROMPT),
+      config: buildModelConfig(RESEARCHER_PROMPT, thinkingBudget, {
         tools: [{ urlContext: {} }, { googleSearch: {} }],
-      },
+      }),
       contents: [{ role: "user", parts: [{ text: userContent }] }],
     } as any)) as any;
 
@@ -346,13 +359,11 @@ export async function runReporterAgent(
 
   const response = (await ai.models.generateContent({
     model,
-    config: {
-      thinkingConfig: { thinkingBudget: config.thinkingBudget },
-      systemInstruction: systemInstruction(
-        reporterPrompt(config.reportTone, config.minWords),
-      ),
-      tools: [{ codeExecution: {} }],
-    },
+    config: buildModelConfig(
+      reporterPrompt(config.reportTone, config.minWords),
+      config.thinkingBudget,
+      { tools: [{ codeExecution: {} }] },
+    ),
     contents: [{ role: "user", parts: [{ text: userContent }] }],
   } as any)) as { text?: string };
 
