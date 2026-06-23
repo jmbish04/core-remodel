@@ -275,7 +275,7 @@ export function ResearchLibraryApp() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <ResearchPromptEditor onTextChange={setTopic} disabled={creating} />
+          <ResearchPromptEditor value={topic} onTextChange={setTopic} disabled={creating} />
           <div className="flex flex-wrap items-center justify-between gap-3">
             <p className="text-xs text-muted-foreground">
               {topic.trim().length < 5

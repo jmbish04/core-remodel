@@ -8,6 +8,7 @@
  * change for the create request.
  */
 
+import { useEffect } from "react";
 import { useEditor, EditorContent, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import {
@@ -26,6 +27,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 interface ResearchPromptEditorProps {
+  /** Controlled plain-text value (lets the parent clear/reset the editor). */
+  value: string;
   /** Fired with the editor's plain-text content on each change. */
   onTextChange: (text: string) => void;
   disabled?: boolean;
@@ -68,6 +71,7 @@ function ToolbarButton({
 }
 
 export function ResearchPromptEditor({
+  value,
   onTextChange,
   disabled,
 }: ResearchPromptEditorProps) {
@@ -94,6 +98,20 @@ export function ResearchPromptEditor({
     },
     onUpdate: ({ editor: e }) => onTextChange(e.getText()),
   });
+
+  // `useEditor`'s `editable` is only read on init — keep it in sync.
+  useEffect(() => {
+    if (editor && !editor.isDestroyed) editor.setEditable(!disabled);
+  }, [editor, disabled]);
+
+  // Sync external value changes (e.g. parent clears it after submit), guarding
+  // against cursor jumps by only resetting when the text actually differs.
+  useEffect(() => {
+    if (!editor || editor.isDestroyed) return;
+    if (value !== editor.getText()) {
+      editor.commands.setContent(value);
+    }
+  }, [value, editor]);
 
   // Re-render the toolbar on selection/content changes so active states update.
   const isActive = (name: string, attrs?: Record<string, unknown>) =>
