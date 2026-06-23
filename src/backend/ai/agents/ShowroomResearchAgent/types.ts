@@ -139,7 +139,7 @@ export interface ProductPromptContext {
   } | null;
   activeProductRatings: Array<{ rating: number; ratingNotes: string | null }>;
   activeStoreRatings: Array<{ rating: number; ratingNotes: string | null }>;
-  researchFindings: Array<{ finding: string; findingUrl: string | null; sentiment: string | null }>;
+  researchFindings: Array<{ finding: string; findingUrl: string | null; sentiment: string | null; reviewStatus: string; reviewReason: string | null }>;
   specs: Array<{ specKey: string; specValue: string; unit: string | null; sourceUrl: string | null }>;
   images: Array<{ deliveryUrl: string; sourceUrl: string; imageKind: string; altText: string | null }>;
   negativeConstraints: string[];

@@ -273,12 +273,23 @@ export function SourcingResearchApp() {
                       Loading findings…
                     </div>
                   ) : (
-                    <FindingsLedger findings={detailFindings} sources={detailSources} />
+                    <FindingsLedger
+                      findings={detailFindings}
+                      sources={detailSources}
+                      scope={isProductTarget ? "product" : "store"}
+                      onReviewed={refreshTarget}
+                    />
                   )}
                 </section>
                 <section className="space-y-3">
                   <h3 className="text-sm font-semibold">Media &amp; specs</h3>
-                  <MediaGallery images={detailImages} specs={detailSpecs} sweeping={sweeping} />
+                  <MediaGallery
+                    images={detailImages}
+                    specs={detailSpecs}
+                    sweeping={sweeping}
+                    scope={isProductTarget ? "product" : "store"}
+                    onReviewed={refreshTarget}
+                  />
                 </section>
               </div>
             </>

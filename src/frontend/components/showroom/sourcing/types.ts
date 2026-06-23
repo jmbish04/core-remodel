@@ -35,6 +35,9 @@ export interface ShowroomProduct {
 
 export type Sentiment = "good" | "bad" | "neutral";
 
+/** HITL review state of a parsed fact or scraped image. */
+export type ReviewStatus = "pending" | "approved" | "rejected";
+
 /** A research finding (`store_research` / `store_product_research`). */
 export interface ResearchFinding {
   id: number;
@@ -42,6 +45,8 @@ export interface ResearchFinding {
   findingUrl?: string | null;
   sentiment?: Sentiment | null;
   timestamp?: string | number | null;
+  reviewStatus?: ReviewStatus | null;
+  reviewReason?: string | null;
 }
 
 /** A scraped image (`product_images` / `showroom_images`). */
@@ -55,6 +60,8 @@ export interface SourcedImage {
   imageKind?: string | null;
   ogTitle?: string | null;
   createdAt?: string | number | null;
+  reviewStatus?: ReviewStatus | null;
+  reviewReason?: string | null;
 }
 
 /** An extracted product spec (`product_specs`). */

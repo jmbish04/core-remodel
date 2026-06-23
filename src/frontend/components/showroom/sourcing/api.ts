@@ -11,6 +11,7 @@
 import type {
   ProductResearchContext,
   ResearchMode,
+  ReviewStatus,
   StoreResearchContext,
   SweepResult,
 } from "./types";
@@ -183,5 +184,53 @@ export function rateStore(
       body: JSON.stringify({ rating, ratingNotes }),
     },
     (p) => p.rating ?? { id: 0 },
+  );
+}
+
+// ─── Per-fact / per-image HITL review ─────────────────────────────────────────
+
+/** Which table a finding/image lives in (product- vs store-scoped). */
+export type ReviewScope = "product" | "store";
+
+/**
+ * Set a finding's review state. Approving keeps a correct fact; rejecting marks
+ * a mis-attributed/low-quality one — the reason is replayed as a negative
+ * constraint on the next sweep.
+ */
+export function reviewFinding(
+  scope: ReviewScope,
+  findingId: number,
+  reviewStatus: ReviewStatus,
+  reviewReason?: string,
+): Promise<ApiResult<{ id: number }>> {
+  return request(
+    `/api/showroom-stores/research/findings/${findingId}`,
+    {
+      method: "PATCH",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ scope, reviewStatus, reviewReason }),
+    },
+    (p) => p.finding ?? { id: findingId },
+  );
+}
+
+/**
+ * Set a scraped image's review state. Rejecting marks junk/spam imagery so it is
+ * not surfaced as the entity's media.
+ */
+export function reviewImage(
+  scope: ReviewScope,
+  imageId: number,
+  reviewStatus: ReviewStatus,
+  reviewReason?: string,
+): Promise<ApiResult<{ id: number }>> {
+  return request(
+    `/api/showroom-stores/research/images/${imageId}`,
+    {
+      method: "PATCH",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({ scope, reviewStatus, reviewReason }),
+    },
+    (p) => p.image ?? { id: imageId },
   );
 }
