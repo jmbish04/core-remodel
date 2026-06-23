@@ -63,27 +63,44 @@ researchRouter.post("/", async (c) => {
     .values({ topic, prompt, researchPlan, status: "pending" })
     .returning();
 
-  // Fire-and-forget: trigger the ResearchAgent asynchronously
-  // The frontend connects via WebSocket to watch state transitions
+  // Trigger the ResearchAgent asynchronously and return 202 immediately. The
+  // dispatch MUST be registered with executionCtx.waitUntil — otherwise the
+  // unawaited RPC is dropped when the response is sent and the session is left
+  // stuck at "pending" (the agent's startResearch never runs).
   try {
     const agent = await getAgentByName<Env, ResearchAgent>(
       c.env.RESEARCH_AGENT as any,
       `research-${session.id}`,
     );
-    // Call startResearch without awaiting — returns immediately
-    (agent as any).startResearch({
-      topic,
-      sessionId: session.id,
-      prompt,
-      researchPlan,
-      enableMcpBridge: body?.enableMcpBridge === true,
-      mcpServerUrl: new URL("/api/mcp", c.req.url).toString(),
-      mode: body?.mode === "max" ? "max" : "standard",
-      visualization: body?.visualization === "auto" ? "auto" : "off",
-      usePlanReview,
-    }).catch((err: unknown) => {
-      console.error(`Research pipeline failed for session ${session.id}:`, err);
-    });
+    c.executionCtx.waitUntil(
+      (agent as any)
+        .startResearch({
+          topic,
+          sessionId: session.id,
+          prompt,
+          researchPlan,
+          enableMcpBridge: body?.enableMcpBridge === true,
+          mcpServerUrl: new URL("/api/mcp", c.req.url).toString(),
+          mode: body?.mode === "max" ? "max" : "standard",
+          visualization: body?.visualization === "auto" ? "auto" : "off",
+          usePlanReview,
+        })
+        .catch(async (err: unknown) => {
+          console.error(`Research pipeline failed for session ${session.id}:`, err);
+          // Don't leave the session stuck at "pending" if the RPC itself rejects.
+          try {
+            await db
+              .update(researchSessions)
+              .set({
+                status: "failed",
+                errorMessage: err instanceof Error ? err.message : "Failed to execute agent",
+              })
+              .where(eq(researchSessions.id, session.id));
+          } catch (dbErr) {
+            console.error(`Failed to mark research session ${session.id} failed:`, dbErr);
+          }
+        }),
+    );
   } catch (err) {
     console.error("Failed to dispatch research agent:", err);
     // Update session to failed if we can't even reach the agent
