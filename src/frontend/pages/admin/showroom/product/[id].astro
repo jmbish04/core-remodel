@@ -1,30 +1,17 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
-import { PhaseScaffold } from "@/components/showroom/PhaseScaffold";
+import { ProductViewportApp } from "@/components/showroom/ProductViewportApp";
 
 const { id } = Astro.params;
-if (!id) {
+const productId = id ? Number.parseInt(id, 10) : NaN;
+if (!Number.isFinite(productId)) {
   return Astro.redirect("/admin/showroom/products");
 }
 ---
 
 <BaseLayout
-  title={`Product ${id} — The Monolith`}
-  description="Single product viewport: full deep dive — reviews, sales, gotchas, lead times, alternatives, and the showrooms carrying it."
+  title={`Product ${productId} — The Monolith`}
+  description="Single product viewport: specs, research findings, images, and store link."
 >
-  <PhaseScaffold
-    title={`Product · ${id}`}
-    phase={4}
-    source="Product detail"
-    purpose="Single product viewport — the full deep dive: reviews, sales, gotchas, lead times, alternatives to consider, and which showrooms carry it."
-    backHref="/admin/showroom/products"
-    backLabel="Products"
-    steps={[
-      "Load the product by id from `/api/products/:id`",
-      "Reviews / sales / lead-time panels",
-      "Gotcha + compatibility flags (e.g. Invisacook ✗ natural stone)",
-      "'Similar products to consider' recommendations",
-      "Add to Compare / mark decision back on the Schedule",
-    ]}
-  />
+  <ProductViewportApp client:only="react" id={productId} />
 </BaseLayout>
