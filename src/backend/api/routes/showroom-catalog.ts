@@ -6,16 +6,18 @@
  * the main showroom-stores router.
  *
  *   GET /catalog/products?search=&hub=&linked=
+ *   GET /catalog/compare?ids=1,2,3
  */
 
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { and, desc, eq, isNotNull, isNull, like, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull, like, or } from "drizzle-orm";
 
 import {
   showroomStoreProducts,
   showroomStores,
   storeBayareaCities,
+  productSpecs,
 } from "@backend/db/schema/showroom/index";
 
 export const showroomCatalogRouter = new Hono<{ Bindings: Env }>();
@@ -71,4 +73,55 @@ showroomCatalogRouter.get("/catalog/products", async (c) => {
       cityName: r.cityName,
     })),
   });
+});
+
+/**
+ * GET /catalog/compare?ids=1,2,3 — side-by-side comparison of selected products.
+ * Returns the products (with store name) and a unified spec matrix keyed by
+ * spec key, so the frontend can render rows = specs, columns = products.
+ */
+showroomCatalogRouter.get("/catalog/compare", async (c) => {
+  const db = drizzle(c.env.DB);
+  const idsRaw = c.req.query("ids") ?? "";
+  const ids = idsRaw
+    .split(",")
+    .map((s) => Number.parseInt(s.trim(), 10))
+    .filter((n) => Number.isFinite(n) && n > 0);
+
+  if (ids.length === 0) {
+    return c.json({ products: [], specKeys: [], specMatrix: {} });
+  }
+
+  const rows = await db
+    .select({ product: showroomStoreProducts, storeName: showroomStores.name })
+    .from(showroomStoreProducts)
+    .leftJoin(showroomStores, eq(showroomStoreProducts.storeId, showroomStores.id))
+    .where(inArray(showroomStoreProducts.id, ids));
+
+  const specRows = await db
+    .select({
+      storeProductId: productSpecs.storeProductId,
+      specKey: productSpecs.specKey,
+      specValue: productSpecs.specValue,
+      unit: productSpecs.unit,
+    })
+    .from(productSpecs)
+    .where(inArray(productSpecs.storeProductId, ids));
+
+  // specMatrix[specKey][productId] = "value unit"
+  const specMatrix: Record<string, Record<number, string>> = {};
+  for (const s of specRows) {
+    const key = s.specKey;
+    specMatrix[key] = specMatrix[key] ?? {};
+    specMatrix[key][s.storeProductId] = `${s.specValue ?? ""}${s.unit ? ` ${s.unit}` : ""}`.trim();
+  }
+
+  // Preserve the caller's requested order.
+  const byId = new Map(rows.map((r) => [r.product.id, r]));
+  const products = ids
+    .map((id) => byId.get(id))
+    .filter((r): r is NonNullable<typeof r> => r != null)
+    .map((r) => ({ ...r.product, storeName: r.storeName }));
+
+  return c.json({ products, specKeys: Object.keys(specMatrix).sort(), specMatrix });
 });
