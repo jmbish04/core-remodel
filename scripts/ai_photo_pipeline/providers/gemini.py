@@ -22,7 +22,8 @@ def gemini_generate(model, prompt, image_bytes, references, env, mask=None):
         contents=[types.Content(role="user", parts=parts)],
         config=build_generation_config(aspect_ratio_for(image_bytes)),
     )
-    if (not response.candidates or not response.candidates[0].content
+    if (not response.candidates or response.candidates[0] is None
+            or not response.candidates[0].content
             or not response.candidates[0].content.parts):
         raise RuntimeError(f"Gemini returned no content (model {model}). Response: {response!r}")
     for part in response.candidates[0].content.parts:
