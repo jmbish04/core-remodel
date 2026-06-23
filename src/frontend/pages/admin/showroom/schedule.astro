@@ -1,0 +1,23 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { PhaseScaffold } from "@/components/showroom/PhaseScaffold";
+---
+
+<BaseLayout
+  title="Materials Schedule — The Monolith"
+  description="The master materials list that seeds all downstream showroom discovery, product sourcing, and deep research."
+>
+  <PhaseScaffold
+    title="Materials Schedule"
+    phase={1}
+    source="Schedule"
+    purpose="The master materials list — every line item (e.g. fridge, quartz counter) with its specs and budget. This is the seed that feeds all downstream sourcing and research."
+    steps={[
+      "Drizzle `materials` schema on D1 (category/subcategory folders) → drizzle-zod → `pnpm run db:generate` → migrate:remote",
+      "zod-openapi CRUD routes (`/api/materials`) with specs, budget, status, and zone fields",
+      "Schedule table UI + KPI cards (item count, budgeted vs. sourced, draft count)",
+      "Row action 'Research this' → seeds a typed Deep Research job (Phase 2)",
+      "Link each material to its discovered showrooms and sourced products",
+    ]}
+  />
+</BaseLayout>

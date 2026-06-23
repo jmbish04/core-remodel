@@ -1,0 +1,23 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { PhaseScaffold } from "@/components/showroom/PhaseScaffold";
+---
+
+<BaseLayout
+  title="Showrooms — The Monolith"
+  description="Bulk-discover great showrooms to visit based on the materials list, then persist them as D1 showroom records with reviews, deals, and day-trip routing."
+>
+  <PhaseScaffold
+    title="Showrooms"
+    phase={3}
+    source="Showrooms"
+    purpose="Bulk-discover great showrooms to visit based on the materials list, then persist them as D1 showroom records — with reviews, deals, and Bay Area day-trip routing. This is the whole point of showroom research: uncover and vet hubs in bulk."
+    steps={[
+      "Drizzle `showrooms` schema (location, hub, materials-served, rating, source, status)",
+      "Agent flow: materials list → Gemini sweep → candidate showrooms → upsert D1 records",
+      "Map + Bay Area hub grouping UI with day-trip routing",
+      "Vet / approve / rule-out workflow that updates showroom status",
+      "Deal-finding pass: match showroom inventory to materials and capture reviews",
+    ]}
+  />
+</BaseLayout>

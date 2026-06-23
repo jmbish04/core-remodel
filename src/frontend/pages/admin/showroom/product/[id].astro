@@ -1,0 +1,30 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { PhaseScaffold } from "@/components/showroom/PhaseScaffold";
+
+const { id } = Astro.params;
+if (!id) {
+  return Astro.redirect("/admin/showroom/products");
+}
+---
+
+<BaseLayout
+  title={`Product ${id} — The Monolith`}
+  description="Single product viewport: full deep dive — reviews, sales, gotchas, lead times, alternatives, and the showrooms carrying it."
+>
+  <PhaseScaffold
+    title={`Product · ${id}`}
+    phase={4}
+    source="Product detail"
+    purpose="Single product viewport — the full deep dive: reviews, sales, gotchas, lead times, alternatives to consider, and which showrooms carry it."
+    backHref="/admin/showroom/products"
+    backLabel="Products"
+    steps={[
+      "Load the product by id from `/api/products/:id`",
+      "Reviews / sales / lead-time panels",
+      "Gotcha + compatibility flags (e.g. Invisacook ✗ natural stone)",
+      "'Similar products to consider' recommendations",
+      "Add to Compare / mark decision back on the Schedule",
+    ]}
+  />
+</BaseLayout>

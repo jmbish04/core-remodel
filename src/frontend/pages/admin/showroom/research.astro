@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { SourcingResearchApp } from "@/components/showroom/sourcing";
+---
+
+<BaseLayout
+  title="Deep Research — The Monolith"
+  description="Plan-gated deep-research sourcing for Bay Area showrooms and products: stage prompts, launch sweeps, review findings/sources, and approve or rule out. Phase 6 extends this into the full research portal."
+>
+  <SourcingResearchApp client:only="react" />
+</BaseLayout>

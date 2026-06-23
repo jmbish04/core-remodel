@@ -1,0 +1,23 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { PhaseScaffold } from "@/components/showroom/PhaseScaffold";
+---
+
+<BaseLayout
+  title="Field Scan — The Monolith"
+  description="Offline-first field capture: scan barcodes and QR codes at showrooms, queue locally, and sync product and showroom records when back online."
+>
+  <PhaseScaffold
+    title="Field Scan"
+    phase={8}
+    source="Scan"
+    purpose="Offline-first field capture for showroom visits — scan barcodes / QR codes, capture photos, queue everything locally, and sync into product and showroom records when back online."
+    steps={[
+      "Offline-first scan queue (IndexedDB) with network toggle + auto-sync",
+      "Barcode / QR capture → match or create a product / showroom record",
+      "Photo capture per scan (CF Images) attached to the product",
+      "Sync queue → `/api/products` and `/api/showrooms`",
+      "Conflict resolution on re-sync",
+    ]}
+  />
+</BaseLayout>

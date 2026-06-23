@@ -292,12 +292,18 @@ function SidebarLinks({
           {renderSection("Admin - Tools", [
             { href: "/admin", label: "Analytics" },
             { href: "/admin/research", label: "Research Center" },
-            { href: "/admin/shopping-journal", label: "Shopping Journal" },
           ])}
-          {renderSection("Shopping Research", [
+          {renderSection("Admin - Shopping", [
             { href: "/admin/showroom", label: "Showroom Dashboard" },
-            { href: "/admin/showroom/sourcing", label: "Sourcing Research" },
+            { href: "/admin/showroom/schedule", label: "Materials Schedule" },
+            { href: "/admin/showroom/showrooms", label: "Showrooms" },
+            { href: "/admin/showroom/products", label: "Products" },
+            { href: "/admin/showroom/research", label: "Deep Research" },
+            { href: "/admin/showroom/compare", label: "Compare" },
+            { href: "/admin/showroom/scan", label: "Field Scan" },
+            { href: "/admin/shopping-journal", label: "Shopping Journal" },
             { href: "/rooms/closets", label: "Closet Research" },
+            { href: "/admin/showroom/progress", label: "Build Progress" },
           ])}
         </>
       ) : (
