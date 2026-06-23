@@ -85,8 +85,20 @@ researchRouter.post("/", async (c) => {
           visualization: body?.visualization === "auto" ? "auto" : "off",
           usePlanReview,
         })
-        .catch((err: unknown) => {
+        .catch(async (err: unknown) => {
           console.error(`Research pipeline failed for session ${session.id}:`, err);
+          // Don't leave the session stuck at "pending" if the RPC itself rejects.
+          try {
+            await db
+              .update(researchSessions)
+              .set({
+                status: "failed",
+                errorMessage: err instanceof Error ? err.message : "Failed to execute agent",
+              })
+              .where(eq(researchSessions.id, session.id));
+          } catch (dbErr) {
+            console.error(`Failed to mark research session ${session.id} failed:`, dbErr);
+          }
         }),
     );
   } catch (err) {
