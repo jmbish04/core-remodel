@@ -9,4 +9,5 @@ export { ReviewLedger } from "./ReviewLedger";
 export { FindingsLedger } from "./FindingsLedger";
 export { MediaGallery } from "./MediaGallery";
 export { RuleOutDialog } from "./RuleOutDialog";
+export { SweepPlanReview } from "./SweepPlanReview";
 export * from "./types";

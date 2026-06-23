@@ -38,16 +38,18 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
-import { draftProductPrompt, sweepProduct, sweepStore } from "./api";
+import { draftProductPrompt, startSweepPlan, sweepProduct, sweepStore } from "./api";
 import type { ResearchMode, SweepResult, SweepTarget } from "./types";
 
 interface PromptStagingCardProps {
   target: SweepTarget;
   targetLabel: string;
-  /** Called with the sweep result so the parent can refresh context. */
+  /** Called with the sweep result so the parent can refresh context (quick mode). */
   onSwept: (result: SweepResult) => void;
   /** Mirrors the in-flight state up so galleries can show "Scraping…". */
   onSweepingChange: (sweeping: boolean) => void;
+  /** Deep mode is plan-gated: hands the new sweep session up for review. */
+  onPlanStarted: (sessionId: number) => void;
 }
 
 const MODE_OPTIONS: { value: ResearchMode; label: string; hint: string; icon: typeof Zap }[] = [
@@ -56,7 +58,7 @@ const MODE_OPTIONS: { value: ResearchMode; label: string; hint: string; icon: ty
 ];
 
 export function PromptStagingCard(props: PromptStagingCardProps) {
-  const { target, targetLabel, onSwept, onSweepingChange } = props;
+  const { target, targetLabel, onSwept, onSweepingChange, onPlanStarted } = props;
 
   const [prompt, setPrompt] = useState("");
   const [mode, setMode] = useState<ResearchMode>("quick");
@@ -82,18 +84,41 @@ export function PromptStagingCard(props: PromptStagingCardProps) {
   }
 
   async function handleLaunch() {
+    // Deep mode is plan-gated: draft a plan for review before anything runs.
+    if (mode === "deep") {
+      setSweeping(true);
+      const result = await startSweepPlan(target, {
+        prompt,
+        maxSources,
+        researchMode: "deep",
+        enableMcpBridge,
+      });
+      setSweeping(false);
+      if (!result.ok) {
+        toast.error(`Could not start plan: ${result.error}`);
+        return;
+      }
+      onPlanStarted(result.data.sessionId);
+      toast.success("Drafting a research plan for your review…");
+      return;
+    }
+
+    // Quick mode: un-gated sweep that returns counts directly.
     setSweeping(true);
     onSweepingChange(true);
-    const opts = {
-      prompt,
-      maxSources,
-      researchMode: mode,
-      enableMcpBridge: mode === "deep" ? enableMcpBridge : false,
-      deepResearchWaitMs: mode === "deep" ? 120_000 : undefined,
-    };
     const result = isProduct
-      ? await sweepProduct(target.productId, opts)
-      : await sweepStore(target.storeId, opts);
+      ? await sweepProduct(target.productId, {
+          prompt,
+          maxSources,
+          researchMode: "quick",
+          enableMcpBridge: false,
+        })
+      : await sweepStore(target.storeId, {
+          prompt,
+          maxSources,
+          researchMode: "quick",
+          enableMcpBridge: false,
+        });
     setSweeping(false);
     onSweepingChange(false);
 
@@ -259,12 +284,12 @@ export function PromptStagingCard(props: PromptStagingCardProps) {
           {sweeping ? (
             <>
               <Loader2 className="size-4 animate-spin" />
-              {mode === "deep" ? "Running deep sweep…" : "Sweeping…"}
+              {mode === "deep" ? "Drafting plan…" : "Sweeping…"}
             </>
           ) : (
             <>
               <Radar className="size-4" />
-              Launch {mode === "deep" ? "deep" : "quick"} sweep
+              {mode === "deep" ? "Draft plan & review" : "Launch quick sweep"}
             </>
           )}
         </Button>

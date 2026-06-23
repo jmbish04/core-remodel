@@ -14,6 +14,8 @@ import type {
   ReviewStatus,
   StoreResearchContext,
   SweepResult,
+  SweepSession,
+  SweepTarget,
 } from "./types";
 
 export type ApiResult<T> =
@@ -232,5 +234,66 @@ export function reviewImage(
       body: JSON.stringify({ scope, reviewStatus, reviewReason }),
     },
     (p) => p.image ?? { id: imageId },
+  );
+}
+
+// ─── Plan-gated sweeps (Phase 2) ──────────────────────────────────────────────
+
+export interface StartSweepPlanOptions {
+  prompt?: string;
+  maxSources?: number;
+  researchMode: ResearchMode;
+  enableMcpBridge: boolean;
+}
+
+/** Start a plan-gated sweep; returns the session id to poll. */
+export function startSweepPlan(
+  target: SweepTarget,
+  opts: StartSweepPlanOptions,
+): Promise<ApiResult<{ sessionId: number }>> {
+  const path =
+    target.kind === "product"
+      ? `/api/showroom-stores/products/${target.productId}/research/plan`
+      : `/api/showroom-stores/${target.storeId}/research/plan`;
+  return request(
+    path,
+    {
+      method: "POST",
+      headers: JSON_HEADERS,
+      body: JSON.stringify({
+        prompt: opts.prompt?.trim() || undefined,
+        maxSources: opts.maxSources,
+        researchMode: opts.researchMode,
+        enableMcpBridge: opts.enableMcpBridge,
+      }),
+    },
+    (p) => ({ sessionId: p.sessionId }),
+  );
+}
+
+export function getSweepSession(sessionId: number): Promise<ApiResult<SweepSession>> {
+  return request(
+    `/api/showroom-stores/research/sweep-sessions/${sessionId}`,
+    undefined,
+    (p) => p.session,
+  );
+}
+
+export function approveSweepPlan(sessionId: number): Promise<ApiResult<{ status: string }>> {
+  return request(
+    `/api/showroom-stores/research/sweep-sessions/${sessionId}/approve-plan`,
+    { method: "POST", headers: JSON_HEADERS },
+    (p) => ({ status: p.status ?? "sweeping" }),
+  );
+}
+
+export function reviseSweepPlan(
+  sessionId: number,
+  feedback: string,
+): Promise<ApiResult<{ status: string }>> {
+  return request(
+    `/api/showroom-stores/research/sweep-sessions/${sessionId}/request-changes`,
+    { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ feedback }) },
+    (p) => ({ status: p.status ?? "planning" }),
   );
 }

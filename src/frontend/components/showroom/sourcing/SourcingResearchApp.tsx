@@ -37,6 +37,7 @@ import { MediaGallery } from "./MediaGallery";
 import { PromptStagingCard } from "./PromptStagingCard";
 import { ReviewLedger } from "./ReviewLedger";
 import { RuleOutDialog } from "./RuleOutDialog";
+import { SweepPlanReview } from "./SweepPlanReview";
 import type {
   ProductResearchContext,
   ShowroomProduct,
@@ -60,6 +61,7 @@ export function SourcingResearchApp() {
   const [productCtx, setProductCtx] = useState<ProductResearchContext | null>(null);
   const [loadingCtx, setLoadingCtx] = useState(false);
   const [sweeping, setSweeping] = useState(false);
+  const [planSessionId, setPlanSessionId] = useState<number | null>(null);
 
   const [ruleOutStore, setRuleOutStore] = useState<{ id: number; name: string } | null>(null);
   const [ruleOutOpen, setRuleOutOpen] = useState(false);
@@ -262,7 +264,20 @@ export function SourcingResearchApp() {
                 targetLabel={targetLabel}
                 onSwept={refreshTarget}
                 onSweepingChange={setSweeping}
+                onPlanStarted={setPlanSessionId}
               />
+
+              {/* Plan-review gate (deep mode) */}
+              {planSessionId != null ? (
+                <SweepPlanReview
+                  key={planSessionId}
+                  sessionId={planSessionId}
+                  onComplete={() => {
+                    refreshTarget();
+                  }}
+                  onClose={() => setPlanSessionId(null)}
+                />
+              ) : null}
 
               {/* WF2b + WF4 */}
               <div className="grid gap-5 xl:grid-cols-2">
