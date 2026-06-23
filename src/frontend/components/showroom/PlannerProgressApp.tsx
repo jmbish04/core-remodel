@@ -39,7 +39,8 @@ const PHASES: Phase[] = [
   {
     id: "1",
     title: "Phase 1 — Materials Schedule (backend + frontend)",
-    status: "active",
+    status: "done",
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/36",
     tasks: [
       { label: "Drizzle material_schedule_items + material_required_specs", done: true },
       { label: "Nullable materialId FK on showroom_store_products", done: true },
@@ -50,12 +51,12 @@ const PHASES: Phase[] = [
   {
     id: "2",
     title: "Phase 2 — Gap-intelligence engine (keystone)",
-    status: "queued",
+    status: "active",
     tasks: [
-      { label: "showroom_gaps schema + lifecycle", done: false },
-      { label: "Workers-AI gap detection (analyze, upsert by gapKey)", done: false },
-      { label: "Dismiss (never resurface) + research hand-off endpoints", done: false },
-      { label: "Shared GapPanel on Materials / Products / Showrooms", done: false },
+      { label: "showroom_gaps schema + lifecycle", done: true },
+      { label: "Workers-AI gap detection (analyze, upsert by gapKey)", done: true },
+      { label: "Dismiss (never resurface) + research hand-off endpoints", done: true },
+      { label: "Shared GapPanel (on Materials now; Products/Showrooms in Phase 3)", done: true },
     ],
   },
   {

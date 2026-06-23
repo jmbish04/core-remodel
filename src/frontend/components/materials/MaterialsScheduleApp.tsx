@@ -17,6 +17,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { GapPanel } from "@/components/showroom/GapPanel";
 
 interface Material {
   id: number;
@@ -404,6 +405,10 @@ export function MaterialsScheduleApp() {
           ))}
         </div>
       )}
+
+      <div className="mt-8">
+        <GapPanel context="material" onChanged={fetchMaterials} />
+      </div>
     </main>
   );
 }
