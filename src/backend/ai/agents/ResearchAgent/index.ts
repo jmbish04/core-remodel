@@ -21,7 +21,7 @@
 
 import { AIChatAgent } from "@cloudflare/ai-chat";
 import { callable } from "agents";
-import { streamText, convertToModelMessages } from "ai";
+import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
@@ -44,6 +44,7 @@ import {
   chunkMarkdown,
   embedAndUpsertChunks,
   generateVisualizerWebapp,
+  buildChatDataTools,
 } from "./methods";
 import { runHealthProbe } from "./health";
 import {
@@ -751,12 +752,22 @@ Your responses should be:
 - Contextual (reference the research findings when available)
 - Concise but thorough${ragContext}
 
+You also have TOOLS to ground answers in the homeowner's live D1 data and across every embedded research session:
+- list_materials — the Materials Schedule (what's needed/purchased, by room)
+- list_showrooms — tracked Bay Area showroom stores
+- list_products — products captured across showrooms (optionally scoped to a showroom)
+- search_research — global semantic search across ALL deep-research documents
+
+Call these tools whenever the question touches the homeowner's materials, vendors, products, or past research — then ground your answer in the returned records. Prefer real data over generic advice.
+
 When answering, always reference relevant findings from the research context if available. If the context doesn't contain relevant information for the question, say so and provide your best general knowledge.`;
 
     const result = streamText({
       model: workersai("@cf/meta/llama-4-scout-17b-16e-instruct"),
       system: systemPrompt,
       messages: await convertToModelMessages(this.messages),
+      tools: buildChatDataTools(this.env),
+      stopWhen: stepCountIs(5),
       abortSignal: options?.abortSignal,
       onFinish,
     });

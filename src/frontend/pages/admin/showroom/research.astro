@@ -1,11 +1,11 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
-import { SourcingResearchApp } from "@/components/showroom/sourcing";
+import { ShowroomResearchPortalApp } from "@/components/research/ShowroomResearchPortalApp";
 ---
 
 <BaseLayout
   title="Deep Research — The Monolith"
-  description="Plan-gated deep-research sourcing for Bay Area showrooms and products: stage prompts, launch sweeps, review findings/sources, and approve or rule out. Phase 6 extends this into the full research portal."
+  description="Deep Research portal: launch typed research jobs (Gemini Engine A / self-hosted Engine B), then explore each result as findings, an interactive visualizer + mind map, and a data-grounded assistant chat over Materials, Showrooms, Products & RAG."
 >
-  <SourcingResearchApp client:only="react" />
+  <ShowroomResearchPortalApp client:only="react" />
 </BaseLayout>
