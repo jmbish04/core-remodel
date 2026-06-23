@@ -320,6 +320,24 @@ export async function draftDeepResearchPlan(
     const current = await getDeepResearchInteraction(env, interaction.id);
     await options.onStatus?.(current);
 
+    // Preview-API observability: the `collaborative_planning` paused-plan shape is
+    // unverified, so log the interaction's STRUCTURE (not content) on each poll —
+    // status + top-level keys + which fields hold a plan. Lets us confirm/correct
+    // extractPlanFromInteraction from real runs via Workers logs. Safe to keep.
+    console.log(
+      "[collab-plan probe]",
+      JSON.stringify({
+        interactionId: current?.id,
+        status: current?.status,
+        topLevelKeys:
+          current && typeof current === "object" ? Object.keys(current) : [],
+        hasPlanField: Boolean(current?.plan ?? current?.research_plan),
+        outputTextLen:
+          typeof current?.output_text === "string" ? current.output_text.length : 0,
+        stepCount: Array.isArray(current?.steps) ? current.steps.length : 0,
+      }),
+    );
+
     if (current.status === "failed") {
       throw new Error(
         `Deep Research planning failed: ${current.error?.message ?? current.error ?? "unknown error"}`,
