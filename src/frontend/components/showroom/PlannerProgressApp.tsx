@@ -85,7 +85,8 @@ const PHASES: Phase[] = [
   {
     id: "5",
     title: "Phase 5 — Compare",
-    status: "active",
+    status: "done",
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/41",
     tasks: [
       { label: "GET /catalog/compare spec-matrix endpoint", done: true },
       { label: "Side-by-side matrix + add/remove + shareable link + decide", done: true },
@@ -117,11 +118,11 @@ const PHASES: Phase[] = [
   {
     id: "8",
     title: "Phase 8 — Field Scan bulk capture",
-    status: "queued",
+    status: "active",
     tasks: [
-      { label: "Offline-first per-product photo-group capture", done: false },
-      { label: "Bulk research → Workers-AI parse → HITL populate", done: false },
-      { label: "scan/batch-sync endpoint", done: false },
+      { label: "Offline-first (IndexedDB) per-product photo-group capture", done: true },
+      { label: "Bulk research → Workers-AI parse → HITL populate", done: true },
+      { label: "scan/batch-sync endpoint", done: true },
     ],
   },
 ];
