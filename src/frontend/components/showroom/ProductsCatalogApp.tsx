@@ -25,9 +25,11 @@ interface CatalogProduct {
 
 async function api<T>(url: string): Promise<T> {
   const res = await fetch(url, { credentials: "include" });
-  const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!res.ok) throw new Error((payload.error as string) ?? `Request failed (${res.status})`);
-  return payload as T;
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    throw new Error((payload.error as string) ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
 }
 
 const HUBS = ["A", "B", "C", "D", "E"];
@@ -36,14 +38,20 @@ export function ProductsCatalogApp() {
   const [products, setProducts] = useState<CatalogProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [hub, setHub] = useState<string | null>(null);
   const [linked, setLinked] = useState<"all" | "yes" | "no">("all");
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 250);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   const fetchProducts = useCallback(async () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (search.trim()) params.set("search", search.trim());
+      if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
       if (hub) params.set("hub", hub);
       if (linked !== "all") params.set("linked", linked);
       const data = await api<{ products: CatalogProduct[] }>(`/api/showroom-stores/catalog/products?${params.toString()}`);
@@ -53,7 +61,7 @@ export function ProductsCatalogApp() {
     } finally {
       setLoading(false);
     }
-  }, [search, hub, linked]);
+  }, [debouncedSearch, hub, linked]);
 
   useEffect(() => {
     fetchProducts();
