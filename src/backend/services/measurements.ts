@@ -109,13 +109,20 @@ export async function createMeasurement(
   input: CreateMeasurementInput,
 ): Promise<CreateMeasurementResult> {
   // Only active rooms are valid targets.
-  if (typeof input.roomId === "number") {
+  if (input.roomId !== undefined && input.roomId !== null) {
+    if (!Number.isInteger(input.roomId)) {
+      return { ok: false, error: "room_not_found" };
+    }
     const roomError = await validateRoomTarget(db, input.roomId);
     if (roomError) return { ok: false, error: roomError };
   }
-  if (typeof input.floorId === "number" && !(await floorExists(db, input.floorId))) {
-    return { ok: false, error: "floor_not_found" };
+  if (input.floorId !== undefined && input.floorId !== null) {
+    if (!Number.isInteger(input.floorId) || !(await floorExists(db, input.floorId))) {
+      return { ok: false, error: "floor_not_found" };
+    }
   }
+
+  
 
   const [row] = await db
     .insert(measurements)
