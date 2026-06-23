@@ -7,9 +7,12 @@
  *   - an ENGINE selector:
  *       • Engine A — Google Gemini Deep Research (default; the existing
  *         /api/admin/research POST → ResearchAgent → sweep/research path)
- *       • Engine B — Self-hosted Deep Research on Cloudflare Agents (Phase 7,
- *         built in parallel). We render the option but guard the call: if the
- *         endpoint 404s, we surface a "coming soon" toast instead of erroring.
+ *       • Engine B — Self-hosted Deep Research on Cloudflare Agents (Phase 7):
+ *         POST /api/admin/research/cf-engine kicks the 6-agent loop on the
+ *         DeepResearchAgent DO, writing the SAME research_sessions row + R2
+ *         markdown/visualizer + Vectorize as Engine A. The portal's existing
+ *         3-tab view consumes the result unchanged; live loop progress is
+ *         polled from GET /api/admin/research/cf-engine/:id/status.
  *
  * On a successful launch it calls `onLaunched(sessionId)` so the portal can
  * open the new session's 3-tab view.
@@ -75,25 +78,19 @@ export function ResearchJobLauncher({
     setBusy(true);
     try {
       if (engine === "self-hosted") {
-        // Engine B (Phase 7) — endpoint may not exist yet. Guard the 404.
-        const res = await fetch("/api/admin/research/engine-b", {
+        // Engine B (Phase 7) — self-hosted Cloudflare Agents loop.
+        const res = await fetch("/api/admin/research/cf-engine", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
           body: JSON.stringify({ topic: finalTopic, targetType: target }),
         });
-        if (res.status === 404) {
-          toast("Self-hosted engine is coming soon", {
-            description: "Engine B (Cloudflare Agents) ships in Phase 7. Using Gemini for now.",
-          });
-          return;
-        }
         if (!res.ok) {
           const msg = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(msg?.error || `Engine B failed (${res.status})`);
         }
         const data = (await res.json()) as { sessionId: number };
-        toast.success("Self-hosted research launched");
+        toast.success("Self-hosted research launched — the loop is running now.");
         onLaunched(data.sessionId);
         setTopic("");
         return;
@@ -181,7 +178,7 @@ export function ResearchJobLauncher({
         <p className="text-[11px] text-muted-foreground">
           {engine === "gemini"
             ? "Gemini will draft a plan you review before the run."
-            : "Engine B runs the self-hosted multi-agent loop (Phase 7)."}
+            : "Engine B runs the self-hosted 6-agent loop on Cloudflare Agents — live progress streams into the portal."}
         </p>
         <Button size="sm" onClick={launch} disabled={!canLaunch}>
           {busy ? <Loader2 className="size-4 animate-spin" /> : <Rocket className="size-4" />}

@@ -54,11 +54,12 @@ export function buildChatDataTools(env: Env) {
           .select()
           .from(materialScheduleItems)
           .orderBy(desc(materialScheduleItems.dateAdded))
+          .limit(LIMIT)
           .$dynamic();
         if (conditions.length > 0) q = q.where(and(...conditions));
 
         const rows = await q;
-        const items = rows.slice(0, LIMIT).map((m) => ({
+        const items = rows.map((m) => ({
           id: m.id,
           title: m.title,
           room: m.roomName,
@@ -87,11 +88,12 @@ export function buildChatDataTools(env: Env) {
           .select()
           .from(showroomStores)
           .orderBy(desc(showroomStores.createdAt))
+          .limit(LIMIT)
           .$dynamic();
         if (conditions.length > 0) q = q.where(and(...conditions));
 
         const rows = await q;
-        const stores = rows.slice(0, LIMIT).map((s) => ({
+        const stores = rows.map((s) => ({
           id: s.id,
           name: s.name,
           pricePoint: s.pricePoint,
@@ -121,11 +123,12 @@ export function buildChatDataTools(env: Env) {
           .select()
           .from(showroomStoreProducts)
           .orderBy(desc(showroomStoreProducts.createdAt))
+          .limit(LIMIT)
           .$dynamic();
         if (conditions.length > 0) q = q.where(and(...conditions));
 
         const rows = await q;
-        const products = rows.slice(0, LIMIT).map((p) => ({
+        const products = rows.map((p) => ({
           id: p.id,
           itemName: p.itemName,
           storeId: p.storeId,

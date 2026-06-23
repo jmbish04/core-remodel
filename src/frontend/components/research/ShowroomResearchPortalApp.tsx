@@ -52,6 +52,8 @@ interface ResearchSession {
   id: number;
   topic: string;
   status: string;
+  /** "gemini" (Engine A) | "cf" (Engine B, self-hosted Cloudflare Agents). */
+  engine?: string | null;
   r2MarkdownKey: string | null;
   r2WebappKey: string | null;
   chunkCount: number | null;
@@ -59,7 +61,35 @@ interface ResearchSession {
   completedAt: number | string | null;
 }
 
+/** Live loop state surfaced by GET /cf-engine/:id/status (cf_engine_state). */
+interface CfLoopState {
+  phase?: string;
+  progress?: string;
+  currentTier?: number;
+  maxTier?: number;
+  tasksTotal?: number;
+  tasksDone?: number;
+  sourcesCount?: number;
+  chunkCount?: number;
+}
+
 const IN_PROGRESS = ["pending", "planning", "awaiting_plan_approval", "researching", "embedding", "generating"];
+
+/**
+ * Normalize a drizzle `{ mode: "timestamp" }` value into a real Date.
+ *
+ * SQLite columns default to `(unixepoch())` — SECONDS — but drizzle's timestamp
+ * deserializer treats the integer as MILLISECONDS, so a raw `new Date(val)`
+ * lands in 1970. Detect second-scale values (< 1e10 ≈ year 2286 in seconds) and
+ * scale them up; pass ISO strings straight through.
+ */
+function safeDate(val: number | string): Date {
+  const num = Number(val);
+  if (!isNaN(num) && val !== "") {
+    return new Date(num < 1e10 ? num * 1000 : num);
+  }
+  return new Date(val);
+}
 
 export function ShowroomResearchPortalApp() {
   const [sessions, setSessions] = useState<ResearchSession[]>([]);
@@ -92,7 +122,7 @@ export function ShowroomResearchPortalApp() {
     <div className="mx-auto w-full max-w-[1400px] px-4 py-6 md:px-8">
       <header className="mb-6 space-y-1.5">
         <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-violet-400">
-          Deep research portal · Engine A
+          Deep research portal · Engine A (Gemini) + Engine B (Cloudflare)
         </p>
         <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Deep Research</h1>
         <p className="max-w-2xl text-sm text-muted-foreground">
@@ -190,7 +220,7 @@ function SessionList({
               <span className="flex items-center gap-2 text-[11px] text-muted-foreground">
                 <SessionStatusDot status={s.status} />
                 {s.status}
-                <span className="ml-auto">{new Date(s.createdAt).toLocaleDateString()}</span>
+                <span className="ml-auto">{safeDate(s.createdAt).toLocaleDateString()}</span>
               </span>
             </button>
           ))
@@ -226,8 +256,10 @@ function SessionPortal({
   onRefresh: () => void;
 }) {
   const id = session.id;
+  const isEngineB = session.engine === "cf";
   const [markdown, setMarkdown] = useState<string | null>(null);
   const [mdLoading, setMdLoading] = useState(false);
+  const [loopState, setLoopState] = useState<CfLoopState | null>(null);
 
   const fetchMarkdown = useCallback(async () => {
     setMdLoading(true);
@@ -243,6 +275,21 @@ function SessionPortal({
     }
   }, [id]);
 
+  // Engine B exposes a live loop state via the cf-engine status endpoint.
+  const fetchLoopState = useCallback(async () => {
+    if (!isEngineB) return;
+    try {
+      const res = await fetch(`/api/admin/research/cf-engine/${id}/status`, {
+        credentials: "include",
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as { loopState: CfLoopState | null };
+      if (data.loopState) setLoopState(data.loopState);
+    } catch {
+      /* status not ready yet */
+    }
+  }, [id, isEngineB]);
+
   useEffect(() => {
     if (session.r2MarkdownKey) void fetchMarkdown();
   }, [session.r2MarkdownKey, fetchMarkdown]);
@@ -250,12 +297,17 @@ function SessionPortal({
   // Poll while in-progress so the portal fills in as the agent finishes.
   useEffect(() => {
     if (!IN_PROGRESS.includes(session.status)) return;
+    // Pull Engine-B loop state immediately so progress shows without a 4s wait.
+    void fetchLoopState();
     const t = setInterval(() => {
       void onRefresh();
-      if (session.r2MarkdownKey && !markdown) void fetchMarkdown();
+      void fetchLoopState();
+      // Once R2 has the markdown but we haven't pulled it yet, fetch it.
+      // Guard on !mdLoading so a slow (>4s) fetch can't fire duplicates.
+      if (session.r2MarkdownKey && !markdown && !mdLoading) void fetchMarkdown();
     }, 4000);
     return () => clearInterval(t);
-  }, [session.status, session.r2MarkdownKey, markdown, onRefresh, fetchMarkdown]);
+  }, [session.status, session.r2MarkdownKey, markdown, mdLoading, onRefresh, fetchMarkdown, fetchLoopState]);
 
   const isComplete = session.status === "complete";
   const inProgress = IN_PROGRESS.includes(session.status);
@@ -274,14 +326,26 @@ function SessionPortal({
             <ArrowLeft className="mr-1 size-3.5" />
             All sessions
           </Button>
-          <h2 className="text-xl font-semibold tracking-tight">Research portal</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-semibold tracking-tight">Research portal</h2>
+            <span
+              className={cn(
+                "rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-wider ring-1",
+                isEngineB
+                  ? "bg-violet-500/10 text-violet-300 ring-violet-500/30"
+                  : "bg-sky-500/10 text-sky-300 ring-sky-500/30",
+              )}
+            >
+              {isEngineB ? "Engine B · Cloudflare" : "Engine A · Gemini"}
+            </span>
+          </div>
           <p className="mt-1 line-clamp-1 max-w-3xl text-sm text-muted-foreground" title={session.topic}>
             {session.topic}
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
             <span className="flex items-center gap-1">
               <Clock className="size-3" />
-              {new Date(session.createdAt).toLocaleString()}
+              {safeDate(session.createdAt).toLocaleString()}
             </span>
             {isComplete && (
               <span className="flex items-center gap-1 text-emerald-400">
@@ -294,11 +358,42 @@ function SessionPortal({
 
       {inProgress && (
         <Card className="bg-amber-950/20 ring-1 ring-amber-800/40">
-          <CardContent className="flex items-center gap-3 py-4">
-            <Loader2 className="size-5 animate-spin text-amber-400" />
-            <p className="text-sm text-amber-300">
-              Research in progress (status: {session.status}). This view auto-refreshes.
-            </p>
+          <CardContent className="flex flex-col gap-3 py-4">
+            <div className="flex items-center gap-3">
+              <Loader2 className="size-5 shrink-0 animate-spin text-amber-400" />
+              <p className="text-sm text-amber-300">
+                {isEngineB && loopState?.progress
+                  ? loopState.progress
+                  : `Research in progress (status: ${session.status}). This view auto-refreshes.`}
+              </p>
+            </div>
+
+            {/* Engine B — live 6-agent loop telemetry from cf_engine_state. */}
+            {isEngineB && loopState && (
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1 pl-8 text-[11px] text-amber-200/80">
+                {loopState.phase && (
+                  <span>
+                    Phase <span className="font-mono text-amber-300">{loopState.phase}</span>
+                  </span>
+                )}
+                {typeof loopState.maxTier === "number" && loopState.maxTier > 0 && (
+                  <span>
+                    Round {loopState.currentTier ?? 0}/{loopState.maxTier}
+                  </span>
+                )}
+                {typeof loopState.tasksTotal === "number" && loopState.tasksTotal > 0 && (
+                  <span>
+                    Tasks {loopState.tasksDone ?? 0}/{loopState.tasksTotal}
+                  </span>
+                )}
+                {typeof loopState.sourcesCount === "number" && loopState.sourcesCount > 0 && (
+                  <span>{loopState.sourcesCount} sources</span>
+                )}
+                {typeof loopState.chunkCount === "number" && loopState.chunkCount > 0 && (
+                  <span>{loopState.chunkCount} chunks</span>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
       )}

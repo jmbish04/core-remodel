@@ -26,7 +26,10 @@ interface HeadingNode extends NodeObj {
  * (usually the research topic) becomes the root; headings nest beneath it.
  */
 export function markdownToMindmap(markdown: string, rootTopic: string): MindElixirData {
-  counter = 0;
+  // NOTE: do NOT reset the module-level `counter` here. Two calls within the
+  // same millisecond would otherwise produce colliding IDs (Date.now() equal,
+  // counter restarting at 0) and crash Mind Elixir. The global counter is
+  // monotonic across calls, guaranteeing unique node IDs.
   const root: HeadingNode = {
     id: nid(),
     topic: truncate(rootTopic, 80) || "Research",

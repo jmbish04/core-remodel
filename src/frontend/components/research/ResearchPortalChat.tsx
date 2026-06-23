@@ -97,14 +97,14 @@ const MaterialsToolUI = makeAssistantToolUI<
     <ToolShell icon={<Boxes className="size-3.5" />} title="Materials Schedule" status={status.type}>
       {result ? (
         <div className="space-y-0">
-          {result.items.length === 0 ? (
+          {!result.items?.length ? (
             <p className="text-muted-foreground">No matching materials.</p>
           ) : (
             result.items.map((m) => (
               <Row key={m.id} left={`${m.title}${m.room ? ` · ${m.room}` : ""}`} right={m.purchased ? "bought" : "needed"} />
             ))
           )}
-          <p className="mt-1 text-[10px] text-muted-foreground">{result.count} total</p>
+          <p className="mt-1 text-[10px] text-muted-foreground">{result.count ?? 0} total</p>
         </div>
       ) : null}
     </ToolShell>
@@ -120,12 +120,12 @@ const ShowroomsToolUI = makeAssistantToolUI<
     <ToolShell icon={<Store className="size-3.5" />} title="Showrooms" status={status.type}>
       {result ? (
         <div className="space-y-0">
-          {result.stores.length === 0 ? (
+          {!result.stores?.length ? (
             <p className="text-muted-foreground">No matching showrooms.</p>
           ) : (
             result.stores.map((s) => <Row key={s.id} left={s.name} right={s.pricePoint ?? s.scale ?? undefined} />)
           )}
-          <p className="mt-1 text-[10px] text-muted-foreground">{result.count} total</p>
+          <p className="mt-1 text-[10px] text-muted-foreground">{result.count ?? 0} total</p>
         </div>
       ) : null}
     </ToolShell>
@@ -141,12 +141,12 @@ const ProductsToolUI = makeAssistantToolUI<
     <ToolShell icon={<Package className="size-3.5" />} title="Products" status={status.type}>
       {result ? (
         <div className="space-y-0">
-          {result.products.length === 0 ? (
+          {!result.products?.length ? (
             <p className="text-muted-foreground">No matching products.</p>
           ) : (
             result.products.map((p) => <Row key={p.id} left={p.itemName} right={p.price ?? undefined} />)
           )}
-          <p className="mt-1 text-[10px] text-muted-foreground">{result.count} total</p>
+          <p className="mt-1 text-[10px] text-muted-foreground">{result.count ?? 0} total</p>
         </div>
       ) : null}
     </ToolShell>
@@ -162,7 +162,7 @@ const ResearchSearchToolUI = makeAssistantToolUI<
     <ToolShell icon={<Database className="size-3.5" />} title={`RAG · "${args?.query ?? ""}"`} status={status.type}>
       {result ? (
         <div className="space-y-1.5">
-          {result.matches.length === 0 ? (
+          {!result.matches?.length ? (
             <p className="text-muted-foreground">No relevant research chunks.</p>
           ) : (
             result.matches.map((m, i) => (
