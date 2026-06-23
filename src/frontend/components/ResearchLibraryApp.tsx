@@ -5,12 +5,16 @@ import {
   CardTitle,
   CardDescription,
   CardContent,
-  CardFooter,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Separator } from "@/components/ui/separator";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Search,
   Plus,
@@ -25,8 +29,11 @@ import {
   ArrowRight,
   Trash2,
   RefreshCw,
+  MoreVertical,
 } from "lucide-react";
 import { toast } from "sonner";
+
+import { ResearchPromptEditor } from "@/components/research/ResearchPromptEditor";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -37,6 +44,8 @@ interface ResearchSession {
   topic: string;
   status:
     | "pending"
+    | "planning"
+    | "awaiting_plan_approval"
     | "researching"
     | "embedding"
     | "generating"
@@ -64,6 +73,18 @@ const STATUS_CONFIG: Record<
     icon: Clock,
     variant: "secondary",
     colorClass: "text-zinc-400",
+  },
+  planning: {
+    label: "Planning",
+    icon: Loader2,
+    variant: "default",
+    colorClass: "text-violet-400",
+  },
+  awaiting_plan_approval: {
+    label: "Plan review",
+    icon: FileText,
+    variant: "secondary",
+    colorClass: "text-violet-300",
   },
   researching: {
     label: "Researching",
@@ -130,7 +151,9 @@ export function ResearchLibraryApp() {
   // Poll for in-progress sessions
   useEffect(() => {
     const hasInProgress = sessions.some((s) =>
-      ["pending", "researching", "embedding", "generating"].includes(s.status),
+      ["pending", "planning", "awaiting_plan_approval", "researching", "embedding", "generating"].includes(
+        s.status,
+      ),
     );
     if (!hasInProgress) return;
 
@@ -157,7 +180,7 @@ export function ResearchLibraryApp() {
         const err = (await res.json()) as any;
         throw new Error(err.error ?? "Failed to create session");
       }
-      const data = await res.json();
+      await res.json();
       toast.success(`Research started: "${trimmed}"`);
       setTopic("");
       fetchSessions();
@@ -251,17 +274,14 @@ export function ResearchLibraryApp() {
             analysis with data-driven findings.
           </CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="flex gap-3">
-            <Input
-              placeholder="e.g. Cost analysis for second-floor bathroom remodel in San Francisco..."
-              value={topic}
-              onChange={(e) => setTopic(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !creating) handleCreate();
-              }}
-              className="flex-1"
-            />
+        <CardContent className="space-y-3">
+          <ResearchPromptEditor onTextChange={setTopic} disabled={creating} />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              {topic.trim().length < 5
+                ? "Write at least a sentence describing what to research."
+                : "Plan mode is on — you'll review the research plan before it runs."}
+            </p>
             <Button
               onClick={handleCreate}
               disabled={creating || topic.trim().length < 5}
@@ -271,7 +291,7 @@ export function ResearchLibraryApp() {
               ) : (
                 <Plus className="mr-1.5 h-4 w-4" />
               )}
-              {creating ? "Starting..." : "Research"}
+              {creating ? "Starting..." : "Start research"}
             </Button>
           </div>
         </CardContent>
@@ -315,76 +335,107 @@ export function ResearchLibraryApp() {
               "generating",
             ].includes(session.status);
 
+            const open = () => {
+              window.location.href = `/admin/research/${session.id}`;
+            };
+
             return (
               <Card
                 key={session.id}
-                className="group relative ring-1 ring-border/40 transition-all duration-200 hover:ring-border/60"
+                className="group flex flex-col overflow-hidden p-0 ring-1 ring-border/40 transition hover:ring-border/60"
               >
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <CardTitle className="line-clamp-2 text-base leading-snug">
-                      {session.topic}
-                    </CardTitle>
-                    <Badge
-                      variant={statusCfg.variant}
-                      className="shrink-0"
-                    >
+                <CardContent className="flex flex-1 flex-col p-0">
+                  {/* Top bar: status + actions menu */}
+                  <div className="flex items-center justify-between gap-2 border-b border-border/40 px-3 py-2">
+                    <Badge variant={statusCfg.variant} className="gap-1">
                       <StatusIcon
-                        className={`mr-1 h-3 w-3 ${isActive ? "animate-spin" : ""} ${statusCfg.colorClass}`}
+                        className={`size-3 ${isActive ? "animate-spin" : ""} ${statusCfg.colorClass}`}
+                        aria-hidden="true"
                       />
                       {statusCfg.label}
                     </Badge>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger
+                        render={
+                          <Button
+                            variant="ghost"
+                            size="icon-sm"
+                            className="text-muted-foreground"
+                            aria-label="Session actions"
+                          />
+                        }
+                      >
+                        <MoreVertical className="size-4" aria-hidden="true" />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-36">
+                        <DropdownMenuItem onClick={open}>Open</DropdownMenuItem>
+                        <DropdownMenuItem
+                          onClick={() => handleDelete(session.id)}
+                          className="text-rose-400"
+                        >
+                          <Trash2 className="size-3.5" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                   </div>
-                  <CardDescription className="text-xs">
-                    {formatDate(session.createdAt)}
-                  </CardDescription>
-                </CardHeader>
 
-                <CardContent className="pb-3">
-                  {session.status === "failed" && session.errorMessage && (
-                    <p className="mb-2 rounded bg-red-950/40 px-2 py-1.5 text-xs text-red-400 ring-1 ring-red-800/40">
-                      {session.errorMessage}
-                    </p>
-                  )}
+                  {/* Body */}
+                  <div className="flex flex-1 flex-col gap-3 p-4">
+                    <div className="space-y-1.5">
+                      <h3 className="line-clamp-2 text-sm font-medium leading-snug text-foreground">
+                        {session.topic}
+                      </h3>
+                      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Clock className="size-3" aria-hidden="true" />
+                        {formatDate(session.createdAt)}
+                      </p>
+                    </div>
 
-                  <div className="flex items-center gap-4 text-xs text-zinc-500">
-                    {session.chunkCount != null && session.chunkCount > 0 && (
-                      <span className="flex items-center gap-1">
-                        <Database className="h-3 w-3" />
-                        {session.chunkCount} chunks
-                      </span>
+                    {session.status === "failed" && session.errorMessage && (
+                      <p className="rounded-md bg-rose-500/5 px-2 py-1.5 text-xs text-rose-400 ring-1 ring-rose-500/20">
+                        {session.errorMessage}
+                      </p>
                     )}
-                    {session.r2MarkdownKey && (
-                      <span className="flex items-center gap-1">
-                        <FileText className="h-3 w-3" />
-                        Report saved
-                      </span>
-                    )}
+
+                    <div className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                      {session.chunkCount != null && session.chunkCount > 0 && (
+                        <span className="flex items-center gap-1">
+                          <Database className="size-3" aria-hidden="true" />
+                          {session.chunkCount} chunks
+                        </span>
+                      )}
+                      {session.r2MarkdownKey && (
+                        <span className="flex items-center gap-1">
+                          <FileText className="size-3" aria-hidden="true" />
+                          Report saved
+                        </span>
+                      )}
+                    </div>
                   </div>
                 </CardContent>
 
-                <CardFooter className="gap-2 pt-0">
-                  {session.status === "complete" && (
-                    <Button
-                      size="sm"
-                      className="flex-1"
-                      onClick={() => {
-                        window.location.href = `/admin/research/${session.id}`;
-                      }}
-                    >
-                      View Research
-                      <ArrowRight className="ml-1 h-3.5 w-3.5" />
-                    </Button>
-                  )}
+                {/* Footer action */}
+                <div className="border-t border-border/40 p-3">
                   <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleDelete(session.id)}
-                    className="text-zinc-500 hover:text-red-400"
+                    variant={session.status === "complete" ? "default" : "outline"}
+                    className="w-full"
+                    onClick={open}
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
+                    {session.status === "complete" ? (
+                      <>
+                        View research
+                        <ArrowRight className="ml-1 size-3.5" />
+                      </>
+                    ) : session.status === "awaiting_plan_approval" ? (
+                      "Review plan"
+                    ) : isActive ? (
+                      "In progress"
+                    ) : (
+                      "Open"
+                    )}
                   </Button>
-                </CardFooter>
+                </div>
               </Card>
             );
           })}
