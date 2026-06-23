@@ -8,13 +8,14 @@
  */
 
 import { getAgentByName } from "agents";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
   showroomStoreCategory,
   showroomStoreCategoryMapping,
   showroomStores,
+  sourcingSweepSessions,
   storeRating,
 } from "@backend/db/schema/showroom/index";
 import type { ShowroomResearchAgent } from "@backend/ai/agents/ShowroomResearchAgent";
@@ -74,21 +75,54 @@ function analyzeCoverage(
   return coverage;
 }
 
+/**
+ * CACHE (KV) key that opts the cron into plan-gating. When set to "true", the
+ * autonomous monitor drafts a research plan for homeowner approval (a pending
+ * sourcing_sweep_session) instead of running the category sweep immediately.
+ * Toggle at runtime via KV — no redeploy. Absent/anything-else = legacy behavior.
+ */
+const CRON_PLAN_GATE_KEY = "sourcing:cron_plan_gate";
+
 export async function monitorShowroomSourcingCoverage(env: Env): Promise<{
   checkedCategories: number;
   triggeredSweeps: number;
+  queuedPlans: number;
 }> {
   const db = drizzle(env.DB);
+  const planGate = (await env.CACHE?.get(CRON_PLAN_GATE_KEY)) === "true";
   const categories = await db
     .select()
     .from(showroomStoreCategory)
     .where(eq(showroomStoreCategory.isActive, true));
 
   let triggeredSweeps = 0;
+  let queuedPlans = 0;
 
   for (const category of categories) {
-    if (triggeredSweeps >= MAX_AUTOMATIC_SWEEPS_PER_TICK) break;
+    if (triggeredSweeps + queuedPlans >= MAX_AUTOMATIC_SWEEPS_PER_TICK) break;
     if (await wasRecentlySwept(env, category.id)) continue;
+
+    // When plan-gating, a pending plan can outlive the 24h throttle. Skip
+    // drafting a duplicate if this category already has an in-flight session
+    // (planning / awaiting approval / sweeping) the homeowner hasn't resolved.
+    if (planGate) {
+      const [activeSession] = await db
+        .select({ id: sourcingSweepSessions.id })
+        .from(sourcingSweepSessions)
+        .where(
+          and(
+            eq(sourcingSweepSessions.targetType, "category"),
+            eq(sourcingSweepSessions.targetId, category.id),
+            inArray(sourcingSweepSessions.status, [
+              "planning",
+              "awaiting_plan_approval",
+              "sweeping",
+            ]),
+          ),
+        )
+        .limit(1);
+      if (activeSession) continue;
+    }
 
     const rows = await db
       .select({
@@ -131,19 +165,37 @@ All mapped showrooms rejected by homeowner: ${allMappedRejected ? "yes" : "no"}
 
 Use the negative constraints to avoid repeating showroom traits the homeowner rejected. Find better cited sources and candidate vendors for this category.`;
 
-    await agent.deepSweepCategory({
-      categoryId: category.id,
-      prompt,
-      maxSources: 3,
-      negativeConstraints: coverage.negativeConstraints,
-      triggerSource: allMappedRejected
-        ? "cron-rejection-loop"
-        : "cron-category-gap",
-    });
+    if (planGate) {
+      // Draft a plan for homeowner approval instead of auto-sweeping. The pending
+      // sourcing_sweep_session surfaces in the console for review/approval.
+      const constraintBlock =
+        coverage.negativeConstraints.length > 0
+          ? `\n\nNegative constraints:\n${coverage.negativeConstraints.map((c) => `- ${c}`).join("\n")}`
+          : "";
+      await agent.discoverSweepPlan({
+        targetType: "category",
+        targetId: category.id,
+        prompt: `${prompt}${constraintBlock}`,
+        maxSources: 3,
+        researchMode: "deep",
+        negativeConstraints: coverage.negativeConstraints,
+      });
+      queuedPlans += 1;
+    } else {
+      await agent.deepSweepCategory({
+        categoryId: category.id,
+        prompt,
+        maxSources: 3,
+        negativeConstraints: coverage.negativeConstraints,
+        triggerSource: allMappedRejected
+          ? "cron-rejection-loop"
+          : "cron-category-gap",
+      });
+      triggeredSweeps += 1;
+    }
 
     await markSwept(env, category.id);
-    triggeredSweeps += 1;
   }
 
-  return { checkedCategories: categories.length, triggeredSweeps };
+  return { checkedCategories: categories.length, triggeredSweeps, queuedPlans };
 }
