@@ -1,29 +1,14 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import {
-  AssistantRuntimeProvider,
-  ComposerPrimitive,
-  MessagePrimitive,
-  ThreadPrimitive,
-  useExternalStoreRuntime,
-  AssistantModalPrimitive,
-} from "@assistant-ui/react";
-import { useAgent } from "agents/react";
-// CRITICAL: import from @cloudflare/ai-chat/react — never from ai/react (zodv3 breakage)
-import { useAgentChat } from "@cloudflare/ai-chat/react";
+import { useState, useEffect, useCallback } from "react";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import {
   ArrowLeft,
-  BookOpen,
   FileText,
   Monitor,
-  MessageSquare,
   Download,
   Loader2,
   CheckCircle,
@@ -32,13 +17,12 @@ import {
   Database,
   Sparkles,
   Send,
-  Bot,
-  User,
   ExternalLink,
-  Maximize2,
-  Minimize2,
 } from "lucide-react";
 import { toast } from "sonner";
+
+import { MarkdownProse } from "@/components/research/MarkdownProse";
+import { ResearchChatModal } from "@/components/research/ResearchChatModal";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -196,9 +180,15 @@ export function ResearchDetailApp({ sessionId }: { sessionId?: string }) {
             <Separator orientation="vertical" className="h-4" />
             <StatusBadge status={session.status} />
           </div>
-          <h1 className="text-xl font-extrabold tracking-tight text-white sm:text-2xl">
-            {session.topic}
+          <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-emerald-500">
+            Deep research
+          </p>
+          <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl">
+            Deep Research Report
           </h1>
+          <p className="mt-1 line-clamp-1 max-w-3xl text-sm text-muted-foreground" title={session.topic}>
+            {session.topic}
+          </p>
           <div className="mt-2 flex flex-wrap items-center gap-3 text-xs text-zinc-500">
             <span className="flex items-center gap-1">
               <Clock className="h-3 w-3" />
@@ -266,52 +256,44 @@ export function ResearchDetailApp({ sessionId }: { sessionId?: string }) {
         </Card>
       )}
 
-      {/* Layout — Tabs and Chat */}
+      {/* Document + interactive web app (full width). Chat is the floating modal below. */}
       {(isComplete || markdown) && (
-        <div className="flex flex-col lg:flex-row gap-6 lg:h-[calc(100vh-220px)] lg:min-h-[600px]">
-          {/* Main Content Area (Tabs) */}
-          <div className="flex-1 flex flex-col min-w-0">
-            <Tabs defaultValue="document" className="flex-1 flex flex-col min-h-0 h-full">
-              <TabsList className="w-full justify-start rounded-none border-b border-zinc-800 bg-transparent p-0 mb-4 h-auto overflow-x-auto shrink-0">
-                <TabsTrigger 
-                  value="document"
-                  className="relative rounded-none border-b-2 border-transparent bg-transparent px-4 pb-3 pt-2 font-semibold text-zinc-400 shadow-none hover:text-zinc-200 data-[state=active]:border-emerald-500 data-[state=active]:text-zinc-100 data-[state=active]:shadow-none"
-                >
-                  <FileText className="h-4 w-4 mr-2" />
-                  Research Document
-                </TabsTrigger>
-                <TabsTrigger 
-                  value="visualizer"
-                  className="relative rounded-none border-b-2 border-transparent bg-transparent px-4 pb-3 pt-2 font-semibold text-zinc-400 shadow-none hover:text-zinc-200 data-[state=active]:border-emerald-500 data-[state=active]:text-zinc-100 data-[state=active]:shadow-none"
-                >
-                  <Monitor className="h-4 w-4 mr-2" />
-                  Interactive Web App
-                </TabsTrigger>
-              </TabsList>
-              
-              <TabsContent value="document" className="flex-1 min-h-[500px] lg:min-h-0 m-0 data-[state=active]:flex flex-col">
-                <DocumentPanel
-                  markdown={markdown}
-                  loading={markdownLoading}
-                  topic={session.topic}
-                />
-              </TabsContent>
-              
-              <TabsContent value="visualizer" className="flex-1 min-h-[500px] lg:min-h-0 m-0 data-[state=active]:flex flex-col">
-                <VisualizerPanel
-                  sessionId={id}
-                  hasVisualizer={!!session.r2WebappKey}
-                />
-              </TabsContent>
-            </Tabs>
-          </div>
+        <div className="flex flex-col lg:h-[calc(100vh-240px)] lg:min-h-[600px]">
+          <Tabs defaultValue="document" className="flex min-h-0 flex-1 flex-col">
+            <TabsList className="mb-4 h-auto w-full shrink-0 justify-start overflow-x-auto rounded-none border-b border-zinc-800 bg-transparent p-0">
+              <TabsTrigger
+                value="document"
+                className="relative rounded-none border-b-2 border-transparent bg-transparent px-4 pb-3 pt-2 font-semibold text-zinc-400 shadow-none hover:text-zinc-200 data-[state=active]:border-emerald-500 data-[state=active]:text-zinc-100 data-[state=active]:shadow-none"
+              >
+                <FileText className="mr-2 h-4 w-4" />
+                Research Document
+              </TabsTrigger>
+              <TabsTrigger
+                value="visualizer"
+                className="relative rounded-none border-b-2 border-transparent bg-transparent px-4 pb-3 pt-2 font-semibold text-zinc-400 shadow-none hover:text-zinc-200 data-[state=active]:border-emerald-500 data-[state=active]:text-zinc-100 data-[state=active]:shadow-none"
+              >
+                <Monitor className="mr-2 h-4 w-4" />
+                Interactive Web App
+              </TabsTrigger>
+            </TabsList>
 
-          {/* Chat Panel (Right Sidebar) */}
-          <div className="w-full lg:w-[380px] xl:w-[420px] shrink-0 flex flex-col h-[500px] lg:h-full">
-            <ChatPanel sessionId={id} topic={session.topic} />
-          </div>
+            <TabsContent value="document" className="m-0 flex min-h-[500px] flex-col lg:min-h-0 lg:flex-1 data-[state=active]:flex">
+              <DocumentPanel
+                markdown={markdown}
+                loading={markdownLoading}
+                topic={session.topic}
+              />
+            </TabsContent>
+
+            <TabsContent value="visualizer" className="m-0 flex min-h-[500px] flex-col lg:min-h-0 lg:flex-1 data-[state=active]:flex">
+              <VisualizerPanel sessionId={id} hasVisualizer={!!session.r2WebappKey} />
+            </TabsContent>
+          </Tabs>
         </div>
       )}
+
+      {/* Strict assistant-ui floating chat modal — available once findings exist */}
+      {isComplete && <ResearchChatModal sessionId={id} topic={session.topic} />}
     </div>
   );
 }
@@ -457,10 +439,8 @@ function PlanReviewPanel({
           </div>
         )}
 
-        <div className="prose prose-invert max-w-none rounded-lg bg-muted/10 p-4 text-sm ring-1 ring-border/40">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {planMarkdown || "_No plan content yet._"}
-          </ReactMarkdown>
+        <div className="max-h-72 overflow-y-auto rounded-lg bg-muted/10 p-4 ring-1 ring-border/40">
+          <MarkdownProse>{planMarkdown || "_No plan content yet._"}</MarkdownProse>
         </div>
 
         {showFeedback && (
@@ -569,23 +549,7 @@ function DocumentPanel({
             <Loader2 className="h-6 w-6 animate-spin text-zinc-500" />
           </div>
         ) : markdown ? (
-          <article
-            className="prose prose-sm prose-invert max-w-none
-              prose-headings:text-zinc-100 prose-headings:font-bold
-              prose-p:text-zinc-300 prose-p:leading-relaxed
-              prose-strong:text-zinc-100
-              prose-li:text-zinc-300
-              prose-a:text-emerald-400 prose-a:no-underline hover:prose-a:underline
-              prose-code:text-emerald-300 prose-code:bg-zinc-800 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded
-              prose-pre:bg-zinc-900 prose-pre:ring-1 prose-pre:ring-border/40 prose-pre:text-emerald-300
-              prose-table:text-zinc-300
-              prose-th:text-zinc-100 prose-th:border-zinc-700
-              prose-td:border-zinc-800"
-          >
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {markdown}
-            </ReactMarkdown>
-          </article>
+          <MarkdownProse className="mx-auto max-w-3xl">{markdown}</MarkdownProse>
         ) : (
           <div className="flex flex-col items-center justify-center py-12 text-zinc-500">
             <FileText className="h-8 w-8" />
@@ -661,135 +625,6 @@ function VisualizerPanel({
         )}
       </CardContent>
     </Card>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Panel 3: Research Chat (assistant-ui + @cloudflare/ai-chat)
-// ---------------------------------------------------------------------------
-
-function ChatPanel({
-  sessionId,
-  topic,
-}: {
-  sessionId: number;
-  topic: string;
-}) {
-  const agent = useAgent({
-    agent: "ResearchAgent",
-    name: `research-${sessionId}`,
-  });
-
-  const chat = useAgentChat({
-    agent,
-  });
-
-  const runtime = useExternalStoreRuntime({
-    isRunning: chat.status === "streaming" || chat.status === "submitted",
-    messages: chat.messages,
-    convertMessage: (message: any) => ({
-      id: message.id,
-      role: message.role,
-      content: [{ type: "text" as const, text: message.content }],
-    }),
-    onNew: async (message) => {
-      if (message.content[0]?.type === "text") {
-        chat.sendMessage({
-          role: "user",
-          parts: [{ type: "text", text: message.content[0].text }],
-        });
-      }
-    },
-  });
-
-  return (
-    <Card className="flex h-full min-h-[400px] flex-col ring-1 ring-border/40">
-      <CardHeader className="flex-row items-center gap-2 pb-3">
-        <MessageSquare className="h-4 w-4 text-emerald-500" />
-        <CardTitle className="text-sm">Research Chat</CardTitle>
-        <Badge variant="outline" className="ml-auto text-xs">
-          RAG-powered
-        </Badge>
-      </CardHeader>
-      <Separator className="opacity-40" />
-      <CardContent className="flex-1 overflow-hidden p-0">
-        <AssistantRuntimeProvider runtime={runtime}>
-          <div className="flex h-full flex-col">
-            {/* Messages */}
-            <ThreadPrimitive.Root className="flex-1 overflow-y-auto">
-              <ThreadPrimitive.Viewport className="flex flex-col gap-3 p-4">
-                {/* Welcome message */}
-                <ThreadPrimitive.Empty>
-                  <div className="flex flex-col items-center justify-center py-8 text-center text-zinc-500">
-                    <Bot className="h-8 w-8 text-emerald-500/50" />
-                    <p className="mt-3 text-sm font-medium text-zinc-400">
-                      Ask about your research
-                    </p>
-                    <p className="mt-1 max-w-xs text-xs text-zinc-600">
-                      I have context from the deep research on &ldquo;
-                      {topic.slice(0, 60)}
-                      {topic.length > 60 ? "..." : ""}&rdquo;
-                    </p>
-                  </div>
-                </ThreadPrimitive.Empty>
-
-                <ThreadPrimitive.Messages
-                  components={{
-                    UserMessage: ChatUserMessage,
-                    AssistantMessage: ChatAssistantMessage,
-                  }}
-                />
-              </ThreadPrimitive.Viewport>
-            </ThreadPrimitive.Root>
-
-            {/* Composer */}
-            <div className="border-t border-zinc-800/60 p-3">
-              <ComposerPrimitive.Root className="flex items-center gap-2">
-                <ComposerPrimitive.Input
-                  placeholder="Ask a question about the research..."
-                  className="flex-1 resize-none rounded-lg bg-zinc-900 px-3 py-2 text-sm text-zinc-100 ring-1 ring-border/40 placeholder:text-zinc-600 focus:outline-none focus:ring-emerald-500/50"
-                />
-                <ComposerPrimitive.Send asChild>
-                  <Button size="sm" className="shrink-0">
-                    <Send className="h-3.5 w-3.5" />
-                  </Button>
-                </ComposerPrimitive.Send>
-              </ComposerPrimitive.Root>
-            </div>
-          </div>
-        </AssistantRuntimeProvider>
-      </CardContent>
-    </Card>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Chat Message Components
-// ---------------------------------------------------------------------------
-
-function ChatUserMessage() {
-  return (
-    <div className="flex gap-2 justify-end">
-      <div className="max-w-[80%] rounded-xl bg-emerald-600/20 px-3 py-2 text-sm text-zinc-100 ring-1 ring-emerald-500/20">
-        <MessagePrimitive.Content />
-      </div>
-      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-800 ring-1 ring-border/40">
-        <User className="h-3.5 w-3.5 text-zinc-400" />
-      </div>
-    </div>
-  );
-}
-
-function ChatAssistantMessage() {
-  return (
-    <div className="flex gap-2">
-      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-emerald-950 ring-1 ring-emerald-500/30">
-        <Bot className="h-3.5 w-3.5 text-emerald-400" />
-      </div>
-      <div className="max-w-[80%] rounded-xl bg-zinc-900 px-3 py-2 text-sm text-zinc-300 ring-1 ring-border/40">
-        <MessagePrimitive.Content />
-      </div>
-    </div>
   );
 }
 
