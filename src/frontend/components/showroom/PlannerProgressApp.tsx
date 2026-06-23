@@ -63,7 +63,8 @@ const PHASES: Phase[] = [
   {
     id: "3",
     title: "Phase 3 — Showrooms directory + Products catalog",
-    status: "active",
+    status: "done",
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/38",
     tasks: [
       { label: "Showrooms directory + Bay-Area hub map + GapPanel", done: true },
       { label: "discover-from-materials via showroom GapPanel", done: true },
@@ -74,10 +75,10 @@ const PHASES: Phase[] = [
   {
     id: "4",
     title: "Phase 4 — Detail viewports (store / product / material)",
-    status: "queued",
+    status: "active",
     tasks: [
-      { label: "Store + product viewports (reuse research context)", done: false },
-      { label: "Material viewport (/api/materials/:id)", done: false },
+      { label: "Store + product viewports (reuse research context)", done: true },
+      { label: "Material viewport (/api/materials/:id + /match)", done: true },
     ],
   },
   {
