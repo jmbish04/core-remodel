@@ -150,6 +150,7 @@ export function FloorplanLiveApp() {
   }, [level]);
 
   // Delegate clicks on the injected SVG → broadcast a touch + self-flash.
+  const { sendWallTouch } = socket;
   React.useEffect(() => {
     const root = canvasRef.current;
     if (!root || !svg) return;
@@ -157,12 +158,12 @@ export function FloorplanLiveApp() {
       const target = event.target as Element | null;
       const segment = target?.closest('[id*="_wall_segment_"]');
       if (!segment?.id) return;
-      socket.sendWallTouch(segment.id);
+      sendWallTouch(segment.id);
       flashSegment(segment.id, "self");
     };
     root.addEventListener("click", handler);
     return () => root.removeEventListener("click", handler);
-  }, [svg, socket, flashSegment]);
+  }, [svg, sendWallTouch, flashSegment]);
 
   // Clear any pending flash timers on unmount.
   React.useEffect(() => {
