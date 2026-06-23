@@ -8,3 +8,9 @@ export {
   deepSweepProduct,
   deepSweepStore,
 } from "./deep-sweep";
+export {
+  createSweepSession,
+  draftSweepPlan,
+  runApprovedSweep,
+  type DiscoverSweepPlanInput,
+} from "./sweep-plan";

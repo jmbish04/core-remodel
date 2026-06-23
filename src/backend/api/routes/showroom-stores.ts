@@ -6,6 +6,7 @@
  */
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
+import type { Context } from "hono";
 import { drizzle } from "drizzle-orm/d1";
 import { eq, desc, and, like } from "drizzle-orm";
 import { getAgentByName } from "agents";
@@ -31,6 +32,7 @@ import {
   productImages,
   productSpecs,
   showroomImages,
+  sourcingSweepSessions,
 } from "@backend/db/schema/showroom/index";
 import {
   generateProductDraftPrompt,
@@ -642,6 +644,99 @@ showroomStoresRouter.patch("/research/images/:id", async (c) => {
     return c.json({ success: false, error: "Image not found" }, 404);
   }
   return c.json({ success: true, image: updated });
+});
+
+// ─── SWEEP PLAN-REVIEW (Phase 2) ──────────────────────────────────────────────
+//
+// Plan-gated deep sweeps: a sweep first drafts + annotates a research plan
+// (sourcing_sweep_sessions), pauses for homeowner approval, then runs. The
+// existing /deep-sweep routes remain for un-gated/quick sweeps.
+
+/** Kick a plan-gated sweep for a product/store/category target. */
+async function startSweepPlan(
+  c: Context<{ Bindings: Env }>,
+  targetType: "product" | "store" | "category",
+  targetId: number,
+) {
+  const body = await c.req.json().catch(() => ({}));
+  const agent = await getShowroomResearchAgent(c.env);
+  const result = await agent.discoverSweepPlan({
+    targetType,
+    targetId,
+    prompt: typeof body?.prompt === "string" ? body.prompt : undefined,
+    maxSources: typeof body?.maxSources === "number" ? body.maxSources : undefined,
+    researchMode: body?.researchMode === "quick" ? "quick" : "deep",
+    enableMcpBridge: body?.enableMcpBridge === true,
+    mcpServerUrl: new URL("/api/mcp", c.req.url).toString(),
+  });
+  return c.json({ success: true, ...result }, 202);
+}
+
+showroomStoresRouter.post("/products/:productId/research/plan", async (c) => {
+  const productId = Number(c.req.param("productId"));
+  if (!Number.isInteger(productId)) return c.json({ success: false, error: "Invalid product id" }, 400);
+  return startSweepPlan(c, "product", productId);
+});
+
+showroomStoresRouter.post("/:id/research/plan", async (c) => {
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId)) return c.json({ success: false, error: "Invalid store id" }, 400);
+  return startSweepPlan(c, "store", storeId);
+});
+
+showroomStoresRouter.post("/meta/categories/:categoryId/research/plan", async (c) => {
+  const categoryId = Number(c.req.param("categoryId"));
+  if (!Number.isInteger(categoryId)) return c.json({ success: false, error: "Invalid category id" }, 400);
+  return startSweepPlan(c, "category", categoryId);
+});
+
+/** Poll a sweep session — plan, annotations, status, and result counts. */
+showroomStoresRouter.get("/research/sweep-sessions/:sid", async (c) => {
+  const db = drizzle(c.env.DB);
+  const sid = Number(c.req.param("sid"));
+  if (!Number.isInteger(sid)) return c.json({ success: false, error: "Invalid session id" }, 400);
+
+  const [session] = await db
+    .select()
+    .from(sourcingSweepSessions)
+    .where(eq(sourcingSweepSessions.id, sid))
+    .limit(1);
+  if (!session) return c.json({ success: false, error: "Sweep session not found" }, 404);
+
+  return c.json({ success: true, session });
+});
+
+/** Approve the drafted plan and release the sweep. */
+showroomStoresRouter.post("/research/sweep-sessions/:sid/approve-plan", async (c) => {
+  const sid = Number(c.req.param("sid"));
+  if (!Number.isInteger(sid)) return c.json({ success: false, error: "Invalid session id" }, 400);
+  try {
+    const agent = await getShowroomResearchAgent(c.env);
+    const result = await agent.approveSweepPlan(sid);
+    return c.json(result, 202);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = message.includes("not awaiting") || message.includes("not found") ? 409 : 500;
+    return c.json({ success: false, error: message }, status);
+  }
+});
+
+/** Request changes — re-draft the plan with homeowner feedback. */
+showroomStoresRouter.post("/research/sweep-sessions/:sid/request-changes", async (c) => {
+  const sid = Number(c.req.param("sid"));
+  if (!Number.isInteger(sid)) return c.json({ success: false, error: "Invalid session id" }, 400);
+  const body = await c.req.json<{ feedback?: string }>().catch(() => ({}) as { feedback?: string });
+  const feedback = body?.feedback?.trim();
+  if (!feedback) return c.json({ success: false, error: "feedback is required" }, 400);
+  try {
+    const agent = await getShowroomResearchAgent(c.env);
+    const result = await agent.reviseSweepPlan(sid, feedback);
+    return c.json(result, 202);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    const status = message.includes("not awaiting") || message.includes("not found") ? 409 : 500;
+    return c.json({ success: false, error: message }, status);
+  }
 });
 
 // ─── STORES CRUD ──────────────────────────────────────────────────────────────

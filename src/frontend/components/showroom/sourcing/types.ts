@@ -124,6 +124,28 @@ export interface StoreResearchContext {
 
 export type ResearchMode = "quick" | "deep";
 
+/** Onboard-agent annotation on a drafted plan (mirrors the backend service). */
+export interface PlanAnnotation {
+  kind: "scope" | "gap" | "redundancy" | "constraint" | "risk";
+  note: string;
+}
+
+/** A plan-gated sweep session (`sourcing_sweep_sessions`). */
+export interface SweepSession {
+  id: number;
+  targetType: "product" | "store" | "category";
+  targetId: number;
+  researchMode: ResearchMode;
+  planMarkdown?: string | null;
+  planAnnotations?: string | null;
+  planStatus?: string | null;
+  planRevision?: number | null;
+  /** planning | awaiting_plan_approval | sweeping | complete | failed */
+  status: string;
+  resultJson?: string | null;
+  errorMessage?: string | null;
+}
+
 /** Which entity a sweep / ledger row targets. */
 export type SweepTarget =
   | { kind: "store"; storeId: number }

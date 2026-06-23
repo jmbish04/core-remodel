@@ -16,13 +16,18 @@ import { eq } from "drizzle-orm";
 
 import {
   showroomStores,
+  sourcingSweepSessions,
   storePaMapping,
   storeProductAreaDef,
 } from "@backend/db/schema/showroom/index";
 import {
+  createSweepSession,
   deepSweepCategory as runDeepSweepCategory,
   deepSweepProduct as runDeepSweepProduct,
   deepSweepStore as runDeepSweepStore,
+  draftSweepPlan,
+  runApprovedSweep,
+  type DiscoverSweepPlanInput,
 } from "./methods";
 import type {
   DeepSweepCategoryInput,
@@ -191,6 +196,88 @@ export class ShowroomResearchAgent extends AIChatAgent<
       this.markError(error);
       return failedResult("category", input.categoryId, error);
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Plan-review gate (Phase 2): draft → annotate → approve → run
+  // -------------------------------------------------------------------------
+
+  /**
+   * Start a plan-gated sweep: create a session, draft + annotate a plan in the
+   * background, and pause at `awaiting_plan_approval`. Returns the session id
+   * immediately so the caller can poll it.
+   */
+  @callable()
+  async discoverSweepPlan(
+    input: DiscoverSweepPlanInput,
+  ): Promise<{ sessionId: number; status: "planning" }> {
+    const sessionId = await createSweepSession(this.env, input);
+    this.ctx.waitUntil(
+      draftSweepPlan(this.env, sessionId, {
+        onProgress: (message, progress) => this.reportProgress(message, progress),
+      }),
+    );
+    return { sessionId, status: "planning" };
+  }
+
+  /** Approve the drafted plan and run the sweep in the background (gate c). */
+  @callable()
+  async approveSweepPlan(sessionId: number): Promise<{ success: boolean; status: string }> {
+    const db = drizzle(this.env.DB);
+    const [session] = await db
+      .select()
+      .from(sourcingSweepSessions)
+      .where(eq(sourcingSweepSessions.id, sessionId))
+      .limit(1);
+    if (!session) throw new Error(`Sweep session ${sessionId} not found`);
+    if (session.status !== "awaiting_plan_approval") {
+      throw new Error(`Sweep session ${sessionId} is not awaiting plan approval`);
+    }
+
+    await db
+      .update(sourcingSweepSessions)
+      .set({ status: "sweeping", planStatus: "approved", approvedAt: new Date() })
+      .where(eq(sourcingSweepSessions.id, sessionId));
+
+    this.ctx.waitUntil(
+      runApprovedSweep(this.env, sessionId, (message, progress) =>
+        this.reportProgress(message, progress),
+      ),
+    );
+    return { success: true, status: "sweeping" };
+  }
+
+  /** Request changes — re-draft the plan with homeowner feedback (gate c loop). */
+  @callable()
+  async reviseSweepPlan(
+    sessionId: number,
+    feedback: string,
+  ): Promise<{ success: boolean; status: string }> {
+    const db = drizzle(this.env.DB);
+    const [session] = await db
+      .select()
+      .from(sourcingSweepSessions)
+      .where(eq(sourcingSweepSessions.id, sessionId))
+      .limit(1);
+    if (!session) throw new Error(`Sweep session ${sessionId} not found`);
+    if (session.status !== "awaiting_plan_approval") {
+      throw new Error(`Sweep session ${sessionId} is not awaiting plan approval`);
+    }
+    const trimmed = feedback?.trim();
+    if (!trimmed) throw new Error("Feedback is required to request plan changes");
+
+    await db
+      .update(sourcingSweepSessions)
+      .set({ status: "planning", planStatus: "revising", planRevision: (session.planRevision ?? 0) + 1 })
+      .where(eq(sourcingSweepSessions.id, sessionId));
+
+    this.ctx.waitUntil(
+      draftSweepPlan(this.env, sessionId, {
+        feedback: trimmed,
+        onProgress: (message, progress) => this.reportProgress(message, progress),
+      }),
+    );
+    return { success: true, status: "planning" };
   }
 
   /**
