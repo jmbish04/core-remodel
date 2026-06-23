@@ -73,7 +73,7 @@ export function DimensionField({ label, feet, inches, onFeet, onInches, system }
             return;
           }
           const meters = Number.parseFloat(text);
-          if (!Number.isFinite(meters)) return;
+          if (!Number.isFinite(meters) || meters < 0) return;
           const { feet: f, inches: i } = metersToFeetInches(meters);
           onFeet(String(f));
           onInches(String(round4(i)));
@@ -143,7 +143,10 @@ function MetricLengthField({
           step="0.01"
           value={text}
           onChange={(e) => setText(e.target.value)}
-          onBlur={() => onCommit(text)}
+          onBlur={() => {
+            onCommit(text);
+            setText(seed); // snap back to the clean canonical value (invalid/non-round-trip input)
+          }}
           placeholder="0.00"
           aria-label={`${label} metres`}
         />
@@ -175,7 +178,7 @@ export function AreaField({ label, sqft, onChange, system }: AreaFieldProps) {
             return;
           }
           const sqm = Number.parseFloat(text);
-          if (!Number.isFinite(sqm)) return;
+          if (!Number.isFinite(sqm) || sqm < 0) return;
           onChange(String(round4(sqmToSqft(sqm))));
         }}
       />
@@ -224,7 +227,10 @@ function MetricAreaField({
         step="0.01"
         value={text}
         onChange={(e) => setText(e.target.value)}
-        onBlur={() => onCommit(text)}
+        onBlur={() => {
+          onCommit(text);
+          setText(seed); // snap back to the clean canonical value (invalid/non-round-trip input)
+        }}
         placeholder="optional"
       />
     </div>
