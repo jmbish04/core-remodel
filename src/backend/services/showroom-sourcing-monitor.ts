@@ -8,13 +8,14 @@
  */
 
 import { getAgentByName } from "agents";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
   showroomStoreCategory,
   showroomStoreCategoryMapping,
   showroomStores,
+  sourcingSweepSessions,
   storeRating,
 } from "@backend/db/schema/showroom/index";
 import type { ShowroomResearchAgent } from "@backend/ai/agents/ShowroomResearchAgent";
@@ -100,6 +101,28 @@ export async function monitorShowroomSourcingCoverage(env: Env): Promise<{
   for (const category of categories) {
     if (triggeredSweeps + queuedPlans >= MAX_AUTOMATIC_SWEEPS_PER_TICK) break;
     if (await wasRecentlySwept(env, category.id)) continue;
+
+    // When plan-gating, a pending plan can outlive the 24h throttle. Skip
+    // drafting a duplicate if this category already has an in-flight session
+    // (planning / awaiting approval / sweeping) the homeowner hasn't resolved.
+    if (planGate) {
+      const [activeSession] = await db
+        .select({ id: sourcingSweepSessions.id })
+        .from(sourcingSweepSessions)
+        .where(
+          and(
+            eq(sourcingSweepSessions.targetType, "category"),
+            eq(sourcingSweepSessions.targetId, category.id),
+            inArray(sourcingSweepSessions.status, [
+              "planning",
+              "awaiting_plan_approval",
+              "sweeping",
+            ]),
+          ),
+        )
+        .limit(1);
+      if (activeSession) continue;
+    }
 
     const rows = await db
       .select({
