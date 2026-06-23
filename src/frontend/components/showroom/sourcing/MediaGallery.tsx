@@ -96,7 +96,7 @@ export function MediaGallery({ images, specs = [], sweeping, scope, onReviewed }
                   className={cn(
                     "group relative aspect-square overflow-hidden rounded-lg bg-muted/30 ring-1 transition",
                     review_ === "rejected"
-                      ? "opacity-40 ring-rose-500/40"
+                      ? "ring-rose-500/40"
                       : review_ === "approved"
                         ? "ring-emerald-500/40"
                         : "ring-border/40",
@@ -107,7 +107,10 @@ export function MediaGallery({ images, specs = [], sweeping, scope, onReviewed }
                       src={img.deliveryUrl}
                       alt={img.altText ?? img.ogTitle ?? "Sourced image"}
                       loading="lazy"
-                      className="size-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      className={cn(
+                        "size-full object-cover transition-transform duration-300 group-hover:scale-105",
+                        review_ === "rejected" && "opacity-40",
+                      )}
                     />
                   ) : (
                     <div className="flex size-full items-center justify-center text-muted-foreground">

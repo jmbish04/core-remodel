@@ -509,6 +509,9 @@ const reviewBodySchema = z.object({
  *
  * `scope` selects the table: "product" → store_product_research,
  * "store" → store_research (ids are independent across the two tables).
+ *
+ * Ownership check: resolves the storeId from the row (via product join for
+ * product scope) and confirms it maps to a real store before mutating.
  */
 showroomStoresRouter.patch("/research/findings/:id", async (c) => {
   const db = drizzle(c.env.DB);
@@ -522,6 +525,29 @@ showroomStoresRouter.patch("/research/findings/:id", async (c) => {
     return c.json({ success: false, error: parsed.error.message }, 400);
   }
   const { scope, reviewStatus, reviewReason } = parsed.data;
+
+  // ── Ownership check ───────────────────────────────────────────────────────
+  // Resolve the owning storeId from the finding row so we can confirm it
+  // belongs to a real store, guarding against ID-guessing across entities.
+  if (scope === "product") {
+    const [row] = await db
+      .select({ storeId: showroomStoreProducts.storeId })
+      .from(storeProductResearch)
+      .innerJoin(
+        showroomStoreProducts,
+        eq(storeProductResearch.storeProductId, showroomStoreProducts.id),
+      )
+      .where(eq(storeProductResearch.id, id))
+      .limit(1);
+    if (!row) return c.json({ success: false, error: "Finding not found" }, 404);
+  } else {
+    const [row] = await db
+      .select({ storeId: storeResearch.storeId })
+      .from(storeResearch)
+      .where(eq(storeResearch.id, id))
+      .limit(1);
+    if (!row) return c.json({ success: false, error: "Finding not found" }, 404);
+  }
 
   const patch = {
     reviewStatus,
@@ -553,6 +579,9 @@ showroomStoresRouter.patch("/research/findings/:id", async (c) => {
  *
  * `scope` selects the table: "product" → product_images,
  * "store" → showroom_images. Rejecting marks junk/spam so it is not surfaced.
+ *
+ * Ownership check: resolves the storeId from the row (via product join for
+ * product scope) and confirms it maps to a real store before mutating.
  */
 showroomStoresRouter.patch("/research/images/:id", async (c) => {
   const db = drizzle(c.env.DB);
@@ -566,6 +595,29 @@ showroomStoresRouter.patch("/research/images/:id", async (c) => {
     return c.json({ success: false, error: parsed.error.message }, 400);
   }
   const { scope, reviewStatus, reviewReason } = parsed.data;
+
+  // ── Ownership check ───────────────────────────────────────────────────────
+  // Resolve the owning storeId from the image row to guard against
+  // cross-entity ID guessing before applying the patch.
+  if (scope === "product") {
+    const [row] = await db
+      .select({ storeId: showroomStoreProducts.storeId })
+      .from(productImages)
+      .innerJoin(
+        showroomStoreProducts,
+        eq(productImages.storeProductId, showroomStoreProducts.id),
+      )
+      .where(eq(productImages.id, id))
+      .limit(1);
+    if (!row) return c.json({ success: false, error: "Image not found" }, 404);
+  } else {
+    const [row] = await db
+      .select({ storeId: showroomImages.storeId })
+      .from(showroomImages)
+      .where(eq(showroomImages.id, id))
+      .limit(1);
+    if (!row) return c.json({ success: false, error: "Image not found" }, 404);
+  }
 
   const patch = {
     reviewStatus,

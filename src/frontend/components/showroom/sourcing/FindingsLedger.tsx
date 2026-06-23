@@ -18,6 +18,8 @@ import { Check, ExternalLink, Loader2, MessageSquareQuote, Sparkle, X } from "lu
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 import { reviewFinding, type ReviewScope } from "./api";
@@ -64,6 +66,9 @@ function reviewChip(status: ReviewStatus): string {
 export function FindingsLedger({ findings, sources = [], scope, onReviewed }: FindingsLedgerProps) {
   // Per-finding in-flight state, keyed by finding id.
   const [busy, setBusy] = useState<Set<number>>(new Set());
+  // Popover open state + reason text, keyed by finding id.
+  const [rejectOpen, setRejectOpen] = useState<Record<number, boolean>>({});
+  const [rejectReason, setRejectReason] = useState<Record<number, string>>({});
 
   function markBusy(id: number, on: boolean) {
     setBusy((cur) => {
@@ -74,14 +79,17 @@ export function FindingsLedger({ findings, sources = [], scope, onReviewed }: Fi
     });
   }
 
-  async function review(finding: ResearchFinding, status: ReviewStatus) {
+  async function review(finding: ResearchFinding, status: ReviewStatus, reason?: string) {
     markBusy(finding.id, true);
-    const result = await reviewFinding(scope, finding.id, status);
+    const result = await reviewFinding(scope, finding.id, status, reason?.trim() || undefined);
     markBusy(finding.id, false);
     if (!result.ok) {
       toast.error(`Review failed: ${result.error}`);
       return;
     }
+    // Close popover and clear reason on success.
+    setRejectOpen((o) => ({ ...o, [finding.id]: false }));
+    setRejectReason((r) => ({ ...r, [finding.id]: "" }));
     toast.success(status === "approved" ? "Finding approved." : "Finding rejected — it will steer future sweeps.");
     onReviewed();
   }
@@ -173,16 +181,59 @@ export function FindingsLedger({ findings, sources = [], scope, onReviewed }: Fi
                         </Button>
                       ) : null}
                       {status !== "rejected" ? (
-                        <Button
-                          size="xs"
-                          variant="ghost"
-                          onClick={() => review(f, "rejected")}
-                          disabled={rowBusy}
-                          className="text-rose-400 hover:bg-rose-500/10 hover:text-rose-300"
+                        <Popover
+                          open={rejectOpen[f.id] ?? false}
+                          onOpenChange={(open) =>
+                            setRejectOpen((o) => ({ ...o, [f.id]: open }))
+                          }
                         >
-                          {rowBusy ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />}
-                          Reject
-                        </Button>
+                          <PopoverTrigger
+                            render={
+                              <Button
+                                size="xs"
+                                variant="ghost"
+                                disabled={rowBusy}
+                                className="text-rose-400 hover:bg-rose-500/10 hover:text-rose-300"
+                              />
+                            }
+                          >
+                            {rowBusy ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />}
+                            Reject
+                          </PopoverTrigger>
+                          <PopoverContent className="w-72 space-y-2 p-3" align="end">
+                            <p className="text-[11px] font-medium text-foreground/80">
+                              Why is this finding wrong?
+                            </p>
+                            <Textarea
+                              placeholder="e.g. mis-attributed to wrong brand (optional)"
+                              className="h-20 resize-none text-xs"
+                              value={rejectReason[f.id] ?? ""}
+                              onChange={(e) =>
+                                setRejectReason((r) => ({ ...r, [f.id]: e.target.value }))
+                              }
+                            />
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                size="xs"
+                                variant="ghost"
+                                onClick={() =>
+                                  setRejectOpen((o) => ({ ...o, [f.id]: false }))
+                                }
+                              >
+                                Cancel
+                              </Button>
+                              <Button
+                                size="xs"
+                                variant="destructive"
+                                disabled={rowBusy}
+                                onClick={() => review(f, "rejected", rejectReason[f.id])}
+                              >
+                                {rowBusy ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                                Confirm reject
+                              </Button>
+                            </div>
+                          </PopoverContent>
+                        </Popover>
                       ) : null}
                     </div>
                   </div>
