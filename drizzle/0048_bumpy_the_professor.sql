@@ -18,8 +18,8 @@ CREATE TABLE `measurements` (
 	`accuracy_note` text,
 	`notes` text,
 	`metadata` text,
-	`datetime_created` integer DEFAULT (unixepoch()) NOT NULL,
-	`datetime_updated` integer DEFAULT (unixepoch()) NOT NULL,
+	`datetime_created` integer DEFAULT (unixepoch() * 1000) NOT NULL,
+	`datetime_updated` integer DEFAULT (unixepoch() * 1000) NOT NULL,	
 	FOREIGN KEY (`room_id`) REFERENCES `rooms`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`floor_id`) REFERENCES `floors`(`id`) ON UPDATE no action ON DELETE set null
 );
