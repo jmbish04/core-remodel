@@ -1,6 +1,11 @@
 import { DurableObject } from "cloudflare:workers";
 
-import { inboundMessageSchema, type ErrorMessage, type OutboundMessage } from "./floorplan-messages";
+import {
+  inboundMessageSchema,
+  wallTouchMessageSchema,
+  type ErrorMessage,
+  type OutboundMessage,
+} from "./floorplan-messages";
 
 /**
  * Per-connection metadata, attached to each socket via `serializeAttachment` so it
@@ -115,7 +120,39 @@ export class FloorplanSessionDO extends DurableObject<Env> {
       source: conn.source,
       ts: Date.now(),
     };
-    this.broadcastExcept(ws, JSON.stringify(outbound));
+    this.broadcast(JSON.stringify(outbound), ws);
+  }
+
+  /**
+   * Inject a `WALL_TOUCH` into the room from a NON-socket source — the measurement MCP
+   * bridge (i.e. Claude). The `highlight_wall` MCP tool calls this over the DO stub
+   * (`env.FLOORPLAN_SESSION.getByName(room).injectTouch(...)`): the server-side half of
+   * the bidirectional highlight loop, so a wall lights up (amber, "Claude is pointing
+   * here") on every connected screen — phone + desktop — without Claude holding a socket.
+   *
+   * This is the blessed DO **RPC** pattern (a public method on the stub), NOT the
+   * `stub.fetch` synthetic-request anti-pattern. `elementId` is validated with the SAME
+   * Zod schema as a client message; there is no sender to exclude, so it broadcasts to
+   * every live socket. If the DO is hibernating, the RPC wakes it and `getWebSockets()`
+   * returns the still-open sockets.
+   *
+   * @param elementId SVG segment id, e.g. `upper_wall_segment_12` / `lower_wall_segment_3`.
+   * @param source    Role label echoed on the broadcast envelope (defaults to "claude").
+   * @returns the number of connected screens the touch was delivered to.
+   */
+  async injectTouch(elementId: string, source = "claude"): Promise<number> {
+    const parsed = wallTouchMessageSchema.safeParse({ type: "WALL_TOUCH", elementId });
+    if (!parsed.success) {
+      throw new Error(`invalid elementId: ${String(elementId).slice(0, 64)}`);
+    }
+    const outbound: OutboundMessage = {
+      type: parsed.data.type,
+      elementId: parsed.data.elementId,
+      senderId: `server:${source}`.slice(0, 64),
+      source: source.slice(0, 32),
+      ts: Date.now(),
+    };
+    return this.broadcast(JSON.stringify(outbound), null);
   }
 
   /**
@@ -151,13 +188,15 @@ export class FloorplanSessionDO extends DurableObject<Env> {
   }
 
   /**
-   * Fan `message` out to every live socket in this room EXCEPT the sender.
-   * @returns the number of peers the message was delivered to.
+   * Fan `message` out to every live socket in this room, optionally excluding one.
+   * Pass the sender's socket to avoid echoing a client message back to itself, or
+   * `null` to reach everyone (server-injected touches have no sender socket).
+   * @returns the number of sockets the message was delivered to.
    */
-  private broadcastExcept(sender: WebSocket, message: string): number {
+  private broadcast(message: string, exclude: WebSocket | null): number {
     let delivered = 0;
     for (const socket of this.ctx.getWebSockets()) {
-      if (socket === sender) continue;
+      if (exclude && socket === exclude) continue;
       try {
         socket.send(message);
         delivered += 1;
