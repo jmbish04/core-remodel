@@ -33,9 +33,11 @@ interface Match {
 
 async function api<T>(url: string): Promise<T> {
   const res = await fetch(url, { credentials: "include" });
-  const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!res.ok) throw new Error((payload.error as string) ?? `Request failed (${res.status})`);
-  return payload as T;
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    throw new Error((payload.error as string) ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
 }
 
 export function MaterialViewportApp({ id }: { id: number }) {

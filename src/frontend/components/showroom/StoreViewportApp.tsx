@@ -28,9 +28,11 @@ interface StoreDetail {
 
 async function api<T>(url: string): Promise<T> {
   const res = await fetch(url, { credentials: "include" });
-  const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-  if (!res.ok) throw new Error((payload.error as string) ?? `Request failed (${res.status})`);
-  return payload as T;
+  if (!res.ok) {
+    const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+    throw new Error((payload.error as string) ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
 }
 
 export function StoreViewportApp({ id }: { id: number }) {
@@ -76,7 +78,7 @@ export function StoreViewportApp({ id }: { id: number }) {
       {store.description ? <p className="mt-2 text-sm text-muted-foreground">{store.description}</p> : null}
 
       <div className="mt-4 space-y-1.5 text-sm text-muted-foreground">
-        {store.locationAddress ? <div className="flex items-center gap-2"><MapPin className="h-4 w-4" /> {store.locationAddress}{store.cityName ? `, ${store.cityName}` : ""}</div> : null}
+        {(store.locationAddress || store.cityName) ? <div className="flex items-center gap-2"><MapPin className="h-4 w-4" /> {[store.locationAddress, store.cityName].filter(Boolean).join(", ")}</div> : null}
         {store.phoneNumber ? <div className="flex items-center gap-2"><Phone className="h-4 w-4" /> {store.phoneNumber}</div> : null}
         {store.websiteUrl ? <div className="flex items-center gap-2"><Globe className="h-4 w-4" /> <a href={store.websiteUrl} target="_blank" rel="noreferrer" className="text-sky-400 hover:underline">{store.websiteUrl}</a></div> : null}
         {(store.weekdayHours || store.weekendHours) ? <div>Hours: {[store.weekdayHours, store.weekendHours].filter(Boolean).join(" · ")}</div> : null}
@@ -119,7 +121,7 @@ export function StoreViewportApp({ id }: { id: number }) {
               {store.research.map((f) => (
                 <li key={f.id} className="text-sm">
                   {f.finding}{" "}
-                  {f.findingUrl ? <a href={f.findingUrl} target="_blank" rel="noreferrer" className="inline-flex text-sky-400"><ExternalLink className="h-3 w-3" /></a> : null}
+                  {f.findingUrl ? <a href={f.findingUrl} target="_blank" rel="noreferrer" className="inline-flex items-center text-sky-400"><ExternalLink className="h-3 w-3" /></a> : null}
                 </li>
               ))}
             </ul>
