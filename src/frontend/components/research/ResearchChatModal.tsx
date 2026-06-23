@@ -103,7 +103,7 @@ export function ResearchChatModal({
 
         <AssistantModalPrimitive.Content
           sideOffset={16}
-          className="z-50 flex h-[600px] max-h-[80vh] w-[min(400px,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl bg-popover text-popover-foreground shadow-xl ring-1 ring-border/40 outline-none"
+          className="z-50 flex h-[600px] max-h-[80vh] w-[min(400px,calc(100vw_-_2rem))] flex-col overflow-hidden rounded-xl bg-popover text-popover-foreground shadow-xl ring-1 ring-border/40 outline-none"
         >
           {/* Header */}
           <div className="flex items-center gap-2 border-b border-border/40 px-4 py-3">
