@@ -110,12 +110,12 @@ export async function annotatePlan(
         ? response
         : ((response as { response?: string })?.response ?? "");
 
-    const parsed = JSON.parse(stripFences(raw)) as { annotations?: unknown };
-    if (!Array.isArray(parsed.annotations)) return [];
+    const parsed = JSON.parse(stripFences(raw)) as { annotations?: unknown } | null;
+    if (!parsed || !Array.isArray(parsed.annotations)) return [];
 
     const allowed: PlanAnnotation["kind"][] = ["scope", "gap", "redundancy", "constraint", "risk"];
     return parsed.annotations
-      .map((a) => a as Partial<PlanAnnotation>)
+      .filter((a): a is Partial<PlanAnnotation> => typeof a === "object" && a !== null)
       .filter((a) => typeof a.note === "string" && a.note.trim().length > 0)
       .map((a) => ({
         kind: allowed.includes(a.kind as PlanAnnotation["kind"]) ? (a.kind as PlanAnnotation["kind"]) : "scope",
