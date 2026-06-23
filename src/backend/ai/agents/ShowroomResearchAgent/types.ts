@@ -26,6 +26,11 @@ export interface DeepSweepProductInput {
   deepResearchWaitMs?: number;
   enableMcpBridge?: boolean;
   mcpServerUrl?: string | null;
+  /**
+   * Citation URLs already discovered by an approved deep-research plan. Seeded
+   * into citation discovery so the plan's deep run isn't re-done after approval.
+   */
+  seedCitationUrls?: string[];
 }
 
 export interface DeepSweepStoreInput {
@@ -38,6 +43,11 @@ export interface DeepSweepStoreInput {
   deepResearchWaitMs?: number;
   enableMcpBridge?: boolean;
   mcpServerUrl?: string | null;
+  /**
+   * Citation URLs already discovered by an approved deep-research plan. Seeded
+   * into citation discovery so the plan's deep run isn't re-done after approval.
+   */
+  seedCitationUrls?: string[];
 }
 
 export interface DeepSweepCategoryInput {
@@ -50,6 +60,11 @@ export interface DeepSweepCategoryInput {
   deepResearchWaitMs?: number;
   enableMcpBridge?: boolean;
   mcpServerUrl?: string | null;
+  /**
+   * Citation URLs already discovered by an approved deep-research plan. Seeded
+   * into citation discovery so the plan's deep run isn't re-done after approval.
+   */
+  seedCitationUrls?: string[];
 }
 
 export interface ShowroomSweepResult {
