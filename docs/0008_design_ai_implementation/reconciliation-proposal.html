@@ -189,7 +189,7 @@ function render(){
   lines.push("Constraints: coordinate around the in-flight Deep Research agent session (core-remodel-0007-fe); follow cloudflare-jedi stack rules (Hono+zod-openapi, Drizzle/D1, Astro+shadcn, Monolith dark, no mock data). Update the PhaseScaffold cards to match reality and restore any buried working UI. Show me a plan before large edits.");
   document.getElementById("out").value = lines.join("\n");
 }
-function resetAll(){SECTIONS.forEach(s=>{["fe","be"].forEach(k=>{const recs=document.querySelectorAll(`input[name="${s.id}_${k}"]`);});});
+function resetAll(){
   // re-check recommended
   SECTIONS.forEach(s=>{[["fe",s.fe],["be",s.be]].forEach(([k,opts])=>{opts.forEach((o,i)=>{if(o[2])document.getElementById(`${s.id}_${k}_${i}`).checked=true;});});
     document.getElementById(`note_${s.id}`).value="";});
