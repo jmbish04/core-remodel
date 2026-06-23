@@ -58,6 +58,11 @@ export function CompareApp() {
   }, []);
 
   const load = useCallback(async () => {
+    if (ids.length === 0) {
+      setData({ products: [], specKeys: [], specMatrix: {} });
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       const d = await api<CompareData>(`/api/showroom-stores/catalog/compare?ids=${ids.join(",")}`);
@@ -73,23 +78,27 @@ export function CompareApp() {
     load();
   }, [load]);
 
-  const runSearch = useCallback(async () => {
+  useEffect(() => {
     if (!search.trim()) {
       setResults([]);
       return;
     }
-    try {
-      const d = await api<{ products: SearchRow[] }>(`/api/showroom-stores/catalog/products?search=${encodeURIComponent(search.trim())}`);
-      setResults(d.products.filter((p) => !ids.includes(p.id)).slice(0, 6));
-    } catch {
-      /* ignore */
-    }
+    let active = true;
+    const t = setTimeout(async () => {
+      try {
+        const d = await api<{ products: SearchRow[] }>(`/api/showroom-stores/catalog/products?search=${encodeURIComponent(search.trim())}`);
+        if (active) {
+          setResults(d.products.filter((p) => !ids.includes(p.id)).slice(0, 6));
+        }
+      } catch {
+        /* ignore */
+      }
+    }, 250);
+    return () => {
+      active = false;
+      clearTimeout(t);
+    };
   }, [search, ids]);
-
-  useEffect(() => {
-    const t = setTimeout(runSearch, 250);
-    return () => clearTimeout(t);
-  }, [runSearch]);
 
   const add = (id: number) => {
     const next = [...ids, id];

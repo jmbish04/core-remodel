@@ -83,10 +83,16 @@ showroomCatalogRouter.get("/catalog/products", async (c) => {
 showroomCatalogRouter.get("/catalog/compare", async (c) => {
   const db = drizzle(c.env.DB);
   const idsRaw = c.req.query("ids") ?? "";
-  const ids = idsRaw
-    .split(",")
-    .map((s) => Number.parseInt(s.trim(), 10))
-    .filter((n) => Number.isFinite(n) && n > 0);
+  // Dedupe and cap the parsed IDs to stay within Cloudflare D1's limit of
+  // 100 bound parameters per query (and avoid duplicate React keys downstream).
+  const ids = Array.from(
+    new Set(
+      idsRaw
+        .split(",")
+        .map((s) => Number.parseInt(s.trim(), 10))
+        .filter((n) => Number.isFinite(n) && n > 0),
+    ),
+  ).slice(0, 50);
 
   if (ids.length === 0) {
     return c.json({ products: [], specKeys: [], specMatrix: {} });
