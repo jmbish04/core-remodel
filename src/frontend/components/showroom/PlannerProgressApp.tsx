@@ -94,12 +94,13 @@ const PHASES: Phase[] = [
   {
     id: "6",
     title: "Phase 6 — Deep Research portal + Engine A",
-    status: "queued",
+    status: "done",
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/42",
     tasks: [
-      { label: "Typed launcher + engine selector", done: false },
-      { label: "Findings markdown tab (R2)", done: false },
-      { label: "Interactive visualizer (R2) + mindmap", done: false },
-      { label: "Assistant-UI chat (D1 + Vectorize tools, suggestions)", done: false },
+      { label: "Typed launcher + engine selector", done: true },
+      { label: "Findings markdown tab (R2)", done: true },
+      { label: "Interactive visualizer (R2) + mind map (mind-elixir)", done: true },
+      { label: "Assistant-UI chat (D1 tools + Vectorize RAG, suggestions)", done: true },
     ],
   },
   {
