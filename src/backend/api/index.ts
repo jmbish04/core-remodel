@@ -63,6 +63,7 @@ import { adminConfigRouter } from "./routes/admin-config";
 import { dialerRouter } from "./routes/dialer";
 import { showroomStoresRouter } from "./routes/showroom-stores";
 import { showroomSeedRouter } from "./routes/showroom-seed";
+import { materialsRouter } from "./routes/materials";
 import { requireAccessAuth } from "@backend/utils/access";
 
 export type Variables = {
@@ -96,6 +97,8 @@ app.use("/api/shopping-journal", requireAccessAuth);
 app.use("/api/shopping-journal/*", requireAccessAuth);
 app.use("/api/showroom-stores", requireAccessAuth);
 app.use("/api/showroom-stores/*", requireAccessAuth);
+app.use("/api/materials", requireAccessAuth);
+app.use("/api/materials/*", requireAccessAuth);
 app.use("/api/bid-portfolios/*", async (c, next) => {
   // Public routes do not require auth
   const path = new URL(c.req.url).pathname;
@@ -163,6 +166,7 @@ app.route("/api/truth-table", truthTableRouter);
 app.route("/api/shopping-journal", shoppingJournalRouter);
 app.route("/api/showroom-stores", showroomStoresRouter);
 app.route("/api/showroom-stores", showroomSeedRouter);
+app.route("/api/materials", materialsRouter);
 app.route("/", openapiRouter);
 
 export { app };
