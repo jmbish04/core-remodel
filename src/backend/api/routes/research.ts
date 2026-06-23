@@ -39,10 +39,14 @@ researchRouter.post("/", async (c) => {
     enableMcpBridge?: boolean;
     mode?: "standard" | "max";
     visualization?: "auto" | "off";
+    usePlanReview?: boolean;
   }>();
   const topic = body?.topic?.trim();
   const prompt = body?.prompt?.trim() || null;
   const researchPlan = body?.researchPlan?.trim() || null;
+  // Default ON: new sessions go through the HITL plan-review gate. Pass
+  // usePlanReview:false to preserve the legacy straight-through behavior.
+  const usePlanReview = body?.usePlanReview !== false;
 
   if (!topic || topic.length < 5) {
     return c.json(
@@ -66,7 +70,7 @@ researchRouter.post("/", async (c) => {
       c.env.RESEARCH_AGENT as any,
       `research-${session.id}`,
     );
-    // Call startResearch without awaiting — returns 202 immediately
+    // Call startResearch without awaiting — returns immediately
     (agent as any).startResearch({
       topic,
       sessionId: session.id,
@@ -76,6 +80,7 @@ researchRouter.post("/", async (c) => {
       mcpServerUrl: new URL("/api/mcp", c.req.url).toString(),
       mode: body?.mode === "max" ? "max" : "standard",
       visualization: body?.visualization === "auto" ? "auto" : "off",
+      usePlanReview,
     }).catch((err: unknown) => {
       console.error(`Research pipeline failed for session ${session.id}:`, err);
     });
@@ -97,7 +102,60 @@ researchRouter.post("/", async (c) => {
     );
   }
 
-  return c.json({ sessionId: session.id, status: "pending", topic }, 202);
+  return c.json(
+    { sessionId: session.id, status: usePlanReview ? "planning" : "researching", topic },
+    202,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// POST /:id/approve-plan — approve the drafted plan and release the run (gate c)
+// ---------------------------------------------------------------------------
+
+researchRouter.post("/:id/approve-plan", async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  if (isNaN(id)) return c.json({ error: "Invalid session ID" }, 400);
+
+  try {
+    const agent = await getAgentByName<Env, ResearchAgent>(
+      c.env.RESEARCH_AGENT as any,
+      `research-${id}`,
+    );
+    await agent.approvePlan(id);
+    return c.json({ success: true, sessionId: id, status: "researching" }, 202);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to approve plan";
+    const status = message.includes("not awaiting") || message.includes("not found") ? 409 : 500;
+    return c.json({ success: false, error: message }, status);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /:id/request-changes — re-plan with homeowner feedback (gate c loop)
+// ---------------------------------------------------------------------------
+
+researchRouter.post("/:id/request-changes", async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  if (isNaN(id)) return c.json({ error: "Invalid session ID" }, 400);
+
+  const body = await c.req.json<{ feedback?: string }>().catch(() => ({}) as { feedback?: string });
+  const feedback = body?.feedback?.trim();
+  if (!feedback) {
+    return c.json({ error: "feedback is required" }, 400);
+  }
+
+  try {
+    const agent = await getAgentByName<Env, ResearchAgent>(
+      c.env.RESEARCH_AGENT as any,
+      `research-${id}`,
+    );
+    await agent.revisePlan(id, feedback);
+    return c.json({ success: true, sessionId: id, status: "planning" }, 202);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to request plan changes";
+    const status = message.includes("not awaiting") || message.includes("not found") ? 409 : 500;
+    return c.json({ success: false, error: message }, status);
+  }
 });
 
 // ---------------------------------------------------------------------------

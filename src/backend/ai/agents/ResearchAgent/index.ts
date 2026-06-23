@@ -26,14 +26,20 @@ import { createWorkersAI } from "workers-ai-provider";
 import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 
-import { researchSessions } from "@backend/db/schema/admin/research_sessions";
 import {
+  researchSessions,
+  researchPlanRevisions,
+} from "@backend/db/schema/admin/research_sessions";
+import {
+  continueDeepResearchPlan,
   createDeepResearchInteraction,
   createResearchMcpToolConfig,
+  draftDeepResearchPlan,
   GEMINI_DEEP_RESEARCH_AGENT,
   GEMINI_DEEP_RESEARCH_MAX_AGENT,
   getDeepResearchInteraction,
 } from "@backend/services/gemini/deep-research";
+import { annotatePlan } from "@backend/ai/plan-review/annotate-plan";
 import {
   chunkMarkdown,
   embedAndUpsertChunks,
@@ -224,6 +230,13 @@ export class ResearchAgent extends AIChatAgent<Env, ResearchAgentState> {
     };
     const db = this.getDb();
 
+    // HITL plan-review gate: draft a plan in the background and pause for the
+    // homeowner. The straight-through path below is preserved for usePlanReview=false.
+    if (input.usePlanReview) {
+      this.ctx.waitUntil(this.draftPlanPhase(input));
+      return;
+    }
+
     try {
       this.updateProgress("researching", "Starting Gemini deep research...", {
         currentSessionId: input.sessionId,
@@ -291,6 +304,237 @@ export class ResearchAgent extends AIChatAgent<Env, ResearchAgentState> {
       this.updateProgress("failed", `Failed to start research: ${errorMessage}`);
       throw error;
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Plan-review gate (a)+(b): draft a collaborative plan, annotate it, pause
+  // -------------------------------------------------------------------------
+
+  /** Build the deep-research tool list (search/url/code + optional MCP bridge). */
+  private async buildResearchTools(input: {
+    enableMcpBridge?: boolean;
+    mcpServerUrl?: string | null;
+    sessionId: number;
+  }): Promise<Array<Record<string, unknown>>> {
+    const tools: Array<Record<string, unknown>> = [
+      { type: "google_search" },
+      { type: "url_context" },
+      { type: "code_execution" },
+    ];
+    if (input.enableMcpBridge) {
+      const mcpTool = await createResearchMcpToolConfig(this.env, {
+        serverUrl: input.mcpServerUrl,
+        scope: { type: "session", id: input.sessionId, sessionId: input.sessionId },
+      });
+      if (mcpTool) tools.push(mcpTool as unknown as Record<string, unknown>);
+    }
+    return tools;
+  }
+
+  /**
+   * Draft (or, with feedback + previousInteractionId, re-draft) a research plan
+   * via Gemini collaborative planning, have the onboard agent annotate it, then
+   * pause at `awaiting_plan_approval`. Runs in the background (waitUntil).
+   */
+  private async draftPlanPhase(
+    input: StartResearchInput,
+    previousInteractionId?: string,
+    feedback?: string,
+  ): Promise<void> {
+    const db = this.getDb();
+    try {
+      this.updateProgress(
+        "planning",
+        feedback ? "Revising research plan with your feedback..." : "Drafting a research plan...",
+        {
+          currentSessionId: input.sessionId,
+          currentTopic: input.topic,
+          mcpBridgeEnabled: input.enableMcpBridge ?? false,
+          planStatus: "drafting",
+        },
+      );
+      await db
+        .update(researchSessions)
+        .set({
+          status: "planning",
+          planStatus: "drafting",
+          interactionAgent:
+            input.mode === "max" ? GEMINI_DEEP_RESEARCH_MAX_AGENT : GEMINI_DEEP_RESEARCH_AGENT,
+          mcpBridgeEnabled: input.enableMcpBridge ?? false,
+        })
+        .where(eq(researchSessions.id, input.sessionId));
+
+      const tools = await this.buildResearchTools(input);
+      const planPrompt = feedback
+        ? `Please revise the research plan using this homeowner feedback before proceeding: ${feedback}`
+        : researchPrompt(input);
+
+      const plan = await draftDeepResearchPlan(
+        this.env,
+        { prompt: planPrompt, mode: input.mode, tools, previousInteractionId },
+        {
+          onStatus: (i) =>
+            this.updateProgress("planning", progressTextFromInteraction(i), { planStatus: "drafting" }),
+        },
+      );
+
+      const planMarkdown = plan.planMarkdown ?? "";
+      this.setState({
+        ...this.state,
+        planInteractionId: plan.interactionId,
+        currentSessionId: input.sessionId,
+        currentTopic: input.topic,
+      });
+
+      // Gate (b): onboard agent annotates the plan before the homeowner sees it.
+      this.updateProgress("planning", "Reviewing the plan...", { planStatus: "annotating" });
+      await db
+        .update(researchSessions)
+        .set({ planStatus: "annotating", planInteractionId: plan.interactionId, researchPlan: planMarkdown })
+        .where(eq(researchSessions.id, input.sessionId));
+
+      const annotations = await annotatePlan(this.env, {
+        planMarkdown,
+        topic: input.topic,
+      });
+      const annotationsJson = JSON.stringify(annotations);
+
+      const [session] = await db
+        .select()
+        .from(researchSessions)
+        .where(eq(researchSessions.id, input.sessionId))
+        .limit(1);
+      const revision = session?.planRevision ?? 0;
+
+      await db.insert(researchPlanRevisions).values({
+        sessionId: input.sessionId,
+        revision,
+        planMarkdown,
+        planAnnotations: annotationsJson,
+        homeownerFeedback: feedback ?? null,
+      });
+
+      await db
+        .update(researchSessions)
+        .set({
+          status: "awaiting_plan_approval",
+          planStatus: "awaiting_approval",
+          planAnnotations: annotationsJson,
+        })
+        .where(eq(researchSessions.id, input.sessionId));
+
+      this.updateProgress("awaiting_plan_approval", "Plan ready for your review.", {
+        planStatus: "awaiting_approval",
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      await db
+        .update(researchSessions)
+        .set({ status: "failed", errorMessage })
+        .where(eq(researchSessions.id, input.sessionId));
+      this.updateProgress("failed", `Plan drafting failed: ${errorMessage}`);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // @callable: Approve the plan and release the research run (gate c)
+  // -------------------------------------------------------------------------
+
+  @callable()
+  async approvePlan(sessionId: number): Promise<void> {
+    const db = this.getDb();
+    const [session] = await db
+      .select()
+      .from(researchSessions)
+      .where(eq(researchSessions.id, sessionId))
+      .limit(1);
+
+    if (!session) throw new Error(`Research session ${sessionId} not found`);
+    if (session.status !== "awaiting_plan_approval" || !session.planInteractionId) {
+      throw new Error(`Session ${sessionId} is not awaiting plan approval`);
+    }
+
+    try {
+      await db
+        .update(researchSessions)
+        .set({ status: "researching", planStatus: "approved", planApprovedAt: new Date() })
+        .where(eq(researchSessions.id, sessionId));
+      this.updateProgress("researching", "Plan approved — running the research...", {
+        currentSessionId: sessionId,
+        currentTopic: session.topic,
+        planStatus: "approved",
+      });
+
+      const mode = session.interactionAgent === GEMINI_DEEP_RESEARCH_MAX_AGENT ? "max" : "standard";
+      const tools = await this.buildResearchTools({
+        enableMcpBridge: session.mcpBridgeEnabled ?? false,
+        mcpServerUrl: null,
+        sessionId,
+      });
+      const interaction = await continueDeepResearchPlan(
+        this.env,
+        session.planInteractionId,
+        { kind: "approve" },
+        { mode, tools },
+      );
+
+      this.setState({
+        ...this.state,
+        interactionId: interaction.id,
+        currentSessionId: sessionId,
+        currentTopic: session.topic,
+      });
+      await db
+        .update(researchSessions)
+        .set({ interactionId: interaction.id })
+        .where(eq(researchSessions.id, sessionId));
+
+      this.ctx.waitUntil(this.monitorResearchStream(interaction.id, sessionId));
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      await db
+        .update(researchSessions)
+        .set({ status: "failed", errorMessage })
+        .where(eq(researchSessions.id, sessionId));
+      this.updateProgress("failed", `Failed to start approved run: ${errorMessage}`);
+      throw error;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // @callable: Request changes — re-plan with homeowner feedback (gate c loop)
+  // -------------------------------------------------------------------------
+
+  @callable()
+  async revisePlan(sessionId: number, feedback: string): Promise<void> {
+    const db = this.getDb();
+    const [session] = await db
+      .select()
+      .from(researchSessions)
+      .where(eq(researchSessions.id, sessionId))
+      .limit(1);
+
+    if (!session) throw new Error(`Research session ${sessionId} not found`);
+    if (session.status !== "awaiting_plan_approval" || !session.planInteractionId) {
+      throw new Error(`Session ${sessionId} is not awaiting plan approval`);
+    }
+    const trimmed = feedback?.trim();
+    if (!trimmed) throw new Error("Feedback is required to request plan changes");
+
+    await db
+      .update(researchSessions)
+      .set({ planStatus: "revising", status: "planning", planRevision: (session.planRevision ?? 0) + 1 })
+      .where(eq(researchSessions.id, sessionId));
+
+    const input: StartResearchInput = {
+      topic: session.topic,
+      sessionId,
+      prompt: session.prompt,
+      researchPlan: session.researchPlan,
+      enableMcpBridge: session.mcpBridgeEnabled ?? false,
+      mode: session.interactionAgent === GEMINI_DEEP_RESEARCH_MAX_AGENT ? "max" : "standard",
+    };
+    this.ctx.waitUntil(this.draftPlanPhase(input, session.planInteractionId, trimmed));
   }
 
   // -------------------------------------------------------------------------

@@ -15,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -43,6 +44,11 @@ import { toast } from "sonner";
 // Types
 // ---------------------------------------------------------------------------
 
+interface PlanAnnotation {
+  kind: "scope" | "gap" | "redundancy" | "constraint" | "risk";
+  note: string;
+}
+
 interface ResearchSession {
   id: number;
   topic: string;
@@ -54,6 +60,11 @@ interface ResearchSession {
   chunkCount: number | null;
   createdAt: number | string;
   completedAt: number | string | null;
+  /** Plan-review fields (HITL gate). */
+  researchPlan?: string | null;
+  planStatus?: string | null;
+  planAnnotations?: string | null;
+  planRevision?: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -115,7 +126,7 @@ export function ResearchDetailApp({ sessionId }: { sessionId?: string }) {
   useEffect(() => {
     if (
       !session ||
-      !["pending", "researching", "embedding", "generating"].includes(
+      !["pending", "planning", "awaiting_plan_approval", "researching", "embedding", "generating"].includes(
         session.status,
       )
     )
@@ -161,7 +172,8 @@ export function ResearchDetailApp({ sessionId }: { sessionId?: string }) {
   }
 
   const isComplete = session.status === "complete";
-  const isInProgress = ["pending", "researching", "embedding", "generating"].includes(session.status);
+  const isAwaitingPlan = session.status === "awaiting_plan_approval";
+  const isInProgress = ["pending", "planning", "researching", "embedding", "generating"].includes(session.status);
   const isFailed = session.status === "failed";
 
   return (
@@ -224,6 +236,17 @@ export function ResearchDetailApp({ sessionId }: { sessionId?: string }) {
             </div>
           </CardContent>
         </Card>
+      )}
+
+      {/* Plan-review gate */}
+      {isAwaitingPlan && (
+        <PlanReviewPanel
+          sessionId={session.id}
+          planMarkdown={session.researchPlan ?? ""}
+          annotations={parseAnnotations(session.planAnnotations)}
+          revision={session.planRevision ?? 0}
+          onChanged={fetchSession}
+        />
       )}
 
       {/* Failed status */}
@@ -300,6 +323,8 @@ export function ResearchDetailApp({ sessionId }: { sessionId?: string }) {
 function StatusBadge({ status }: { status: string }) {
   const configs: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline"; icon: any }> = {
     pending: { label: "Pending", variant: "secondary", icon: Clock },
+    planning: { label: "Planning", variant: "default", icon: Loader2 },
+    awaiting_plan_approval: { label: "Plan review", variant: "secondary", icon: FileText },
     researching: { label: "Researching", variant: "default", icon: Sparkles },
     embedding: { label: "Embedding", variant: "default", icon: Database },
     generating: { label: "Generating", variant: "default", icon: Loader2 },
@@ -314,6 +339,185 @@ function StatusBadge({ status }: { status: string }) {
       <Icon className="mr-1 h-3 w-3" />
       {cfg.label}
     </Badge>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Plan-review gate (a)+(b)+(c): plan markdown + agent annotations + actions
+// ---------------------------------------------------------------------------
+
+function parseAnnotations(raw: string | null | undefined): PlanAnnotation[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as PlanAnnotation[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+const ANNOTATION_TONE: Record<PlanAnnotation["kind"], string> = {
+  scope: "text-sky-400",
+  gap: "text-amber-400",
+  redundancy: "text-zinc-400",
+  constraint: "text-rose-400",
+  risk: "text-rose-400",
+};
+
+function PlanReviewPanel({
+  sessionId,
+  planMarkdown,
+  annotations,
+  revision,
+  onChanged,
+}: {
+  sessionId: number;
+  planMarkdown: string;
+  annotations: PlanAnnotation[];
+  revision: number;
+  onChanged: () => void | Promise<void>;
+}) {
+  const [feedback, setFeedback] = useState("");
+  const [showFeedback, setShowFeedback] = useState(false);
+  const [busy, setBusy] = useState<null | "approve" | "revise">(null);
+
+  async function approve() {
+    setBusy("approve");
+    try {
+      const res = await fetch(`/api/admin/research/${sessionId}/approve-plan`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const payload = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string };
+      if (!res.ok || payload?.success === false) throw new Error(payload?.error || "Approve failed");
+      toast.success("Plan approved — research is running.");
+      await onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Approve failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function requestChanges() {
+    const trimmed = feedback.trim();
+    if (!trimmed) {
+      toast.error("Add feedback so the plan can be revised.");
+      return;
+    }
+    setBusy("revise");
+    try {
+      const res = await fetch(`/api/admin/research/${sessionId}/request-changes`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ feedback: trimmed }),
+      });
+      const payload = (await res.json().catch(() => ({}))) as { success?: boolean; error?: string };
+      if (!res.ok || payload?.success === false) throw new Error(payload?.error || "Request failed");
+      toast.success("Re-planning with your feedback…");
+      setFeedback("");
+      setShowFeedback(false);
+      await onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Request failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <Card className="ring-1 ring-violet-800/40 bg-violet-950/10">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <FileText className="h-4 w-4 text-violet-400" />
+          Research plan — review &amp; approve
+        </CardTitle>
+        <CardDescription>
+          Gemini drafted this plan{revision > 0 ? ` (revision ${revision})` : ""}. Review the
+          onboard agent's notes, then approve to run or request changes.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {annotations.length > 0 && (
+          <div className="rounded-lg bg-card p-3 ring-1 ring-border/40">
+            <p className="mb-2 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+              Onboard agent review · {annotations.length}
+            </p>
+            <ul className="space-y-1.5">
+              {annotations.map((a, i) => (
+                <li key={i} className="flex gap-2 text-xs leading-relaxed">
+                  <span className={`shrink-0 font-mono uppercase ${ANNOTATION_TONE[a.kind] ?? "text-zinc-400"}`}>
+                    {a.kind}
+                  </span>
+                  <span className="text-foreground/80">{a.note}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="prose prose-invert max-w-none rounded-lg bg-muted/10 p-4 text-sm ring-1 ring-border/40">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {planMarkdown || "_No plan content yet._"}
+          </ReactMarkdown>
+        </div>
+
+        {showFeedback && (
+          <Textarea
+            value={feedback}
+            onChange={(e) => setFeedback(e.target.value)}
+            placeholder="What should change? e.g. also cover lighting showrooms; exclude anything north of the bridge."
+            className="min-h-20 text-sm"
+          />
+        )}
+
+        <div className="flex items-center justify-end gap-2">
+          {showFeedback ? (
+            <>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setShowFeedback(false);
+                  setFeedback("");
+                }}
+                disabled={busy !== null}
+              >
+                Cancel
+              </Button>
+              <Button size="sm" onClick={requestChanges} disabled={busy !== null}>
+                {busy === "revise" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                Send changes
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="ghost" size="sm" onClick={() => setShowFeedback(true)} disabled={busy !== null}>
+                Request changes
+              </Button>
+              <Button
+                size="sm"
+                onClick={approve}
+                disabled={busy !== null}
+                className="bg-emerald-500 text-emerald-950 hover:bg-emerald-500/90"
+              >
+                {busy === "approve" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckCircle className="h-4 w-4" />
+                )}
+                Approve &amp; run
+              </Button>
+            </>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
