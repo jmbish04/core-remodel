@@ -1,11 +1,37 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
-import { ShowroomDashboard } from "@/components/showroom/ShowroomDashboard";
+
+const links = [
+  { href: "/admin/showroom/schedule", title: "Materials Schedule", desc: "The master list of materials to source." },
+  { href: "/admin/showroom/showrooms", title: "Showrooms", desc: "Bay Area hub directory + coverage gaps." },
+  { href: "/admin/showroom/products", title: "Products", desc: "Cross-store product catalog." },
+  { href: "/admin/showroom/research", title: "Deep Research", desc: "Plan-gated sourcing research." },
+  { href: "/admin/showroom/compare", title: "Compare", desc: "Side-by-side product decisions." },
+  { href: "/admin/showroom/scan", title: "Field Scan", desc: "Capture products at showrooms." },
+  { href: "/admin/showroom/progress", title: "Build Progress", desc: "Phased build-out tracker." },
+];
 ---
 
 <BaseLayout
-  title="Showroom Dashboard — The Monolith"
-  description="Manage showroom stores, products, research, and barcode scanning for SF home renovation procurement."
+  title="Showroom Planner — The Monolith"
+  description="Launchpad for the showroom sourcing suite: materials, showrooms, products, research, compare, and field scan."
 >
-  <ShowroomDashboard client:only="react" />
+  <main class="container mx-auto max-w-4xl px-4 py-10">
+    <h1 class="text-2xl font-semibold tracking-tight">Showroom Planner</h1>
+    <p class="mt-1 text-sm text-muted-foreground">Materials-driven sourcing across Bay Area showrooms.</p>
+
+    <div class="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+      {
+        links.map((l) => (
+          <a
+            href={l.href}
+            class="rounded-lg bg-card p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] transition-colors hover:bg-muted/40"
+          >
+            <div class="font-medium">{l.title}</div>
+            <div class="mt-0.5 text-sm text-muted-foreground">{l.desc}</div>
+          </a>
+        ))
+      }
+    </div>
+  </main>
 </BaseLayout>

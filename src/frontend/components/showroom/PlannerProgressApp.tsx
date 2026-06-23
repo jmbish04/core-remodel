@@ -51,7 +51,8 @@ const PHASES: Phase[] = [
   {
     id: "2",
     title: "Phase 2 — Gap-intelligence engine (keystone)",
-    status: "active",
+    status: "done",
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/37",
     tasks: [
       { label: "showroom_gaps schema + lifecycle", done: true },
       { label: "Workers-AI gap detection (analyze, upsert by gapKey)", done: true },
@@ -62,12 +63,12 @@ const PHASES: Phase[] = [
   {
     id: "3",
     title: "Phase 3 — Showrooms directory + Products catalog",
-    status: "queued",
+    status: "active",
     tasks: [
-      { label: "Showrooms directory + Bay-Area hub map", done: false },
-      { label: "discover-from-materials endpoint", done: false },
-      { label: "Products catalog grid + flat list endpoint", done: false },
-      { label: "Retire ShowroomDashboard", done: false },
+      { label: "Showrooms directory + Bay-Area hub map + GapPanel", done: true },
+      { label: "discover-from-materials via showroom GapPanel", done: true },
+      { label: "Products catalog grid + /catalog/products endpoint", done: true },
+      { label: "Retire ShowroomDashboard (thin launcher at /admin/showroom)", done: true },
     ],
   },
   {
