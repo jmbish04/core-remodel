@@ -15,6 +15,8 @@ import { Pencil, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useUnitSystem } from "@/lib/use-unit-system";
+import { formatAreaFromSqFt, type UnitSystem } from "@/lib/units";
 
 import {
   SOURCE_LABELS,
@@ -42,10 +44,18 @@ export function MeasurementTable({
   onEdit: (m: Measurement) => void;
   onDelete: (m: Measurement) => void;
 }) {
+  // Read the active unit once here and thread it down (one subscription, not one per row).
+  const [unitSystem] = useUnitSystem();
   return (
     <div className="space-y-4">
       {groups.map((group) => (
-        <RoomGroupCard key={group.key} group={group} onEdit={onEdit} onDelete={onDelete} />
+        <RoomGroupCard
+          key={group.key}
+          group={group}
+          system={unitSystem}
+          onEdit={onEdit}
+          onDelete={onDelete}
+        />
       ))}
     </div>
   );
@@ -57,10 +67,12 @@ export function MeasurementTable({
  */
 function RoomGroupCard({
   group,
+  system,
   onEdit,
   onDelete,
 }: {
   group: RoomGroup;
+  system: UnitSystem;
   onEdit: (m: Measurement) => void;
   onDelete: (m: Measurement) => void;
 }) {
@@ -96,7 +108,13 @@ function RoomGroupCard({
             </p>
             <div className="divide-y divide-border/40">
               {items.map((m) => (
-                <MeasurementRow key={m.id} measurement={m} onEdit={onEdit} onDelete={onDelete} />
+                <MeasurementRow
+                  key={m.id}
+                  measurement={m}
+                  system={system}
+                  onEdit={onEdit}
+                  onDelete={onDelete}
+                />
               ))}
             </div>
           </div>
@@ -109,16 +127,18 @@ function RoomGroupCard({
 /** A single measurement row: identity + dims on the left, badges + actions on the right. */
 function MeasurementRow({
   measurement: m,
+  system,
   onEdit,
   onDelete,
 }: {
   measurement: Measurement;
+  system: UnitSystem;
   onEdit: (m: Measurement) => void;
   onDelete: (m: Measurement) => void;
 }) {
   const meta = [
-    formatDimensions(m),
-    m.areaSqFt != null ? `${m.areaSqFt} sq ft` : null,
+    formatDimensions(m, system),
+    formatAreaFromSqFt(m.areaSqFt, system),
     m.quantity > 1 ? `×${m.quantity}` : null,
     m.accuracyNote || null,
   ].filter((part): part is string => Boolean(part) && part !== "—");

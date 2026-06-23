@@ -9,6 +9,8 @@
  * lists in sync — the API rejects unknown values via Zod.
  */
 
+import { formatLength, type UnitSystem } from "@/lib/units";
+
 /** Badge variants offered by `@/components/ui/badge`. */
 type BadgeVariant = "default" | "secondary" | "destructive" | "outline" | "ghost" | "link";
 
@@ -162,21 +164,15 @@ export function toFloatOrNull(value: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Format one side as `12'6"`, or null when both feet and inches are absent. */
-export function formatSide(feet: number | null, inches: number | null): string | null {
-  if (feet == null && inches == null) return null;
-  return `${feet ?? 0}'${inches ?? 0}"`;
-}
-
 /**
- * Build a compact dimension string: `L × W × H` (omitting absent sides).
- * Returns "—" when no dimension is recorded.
+ * Build a compact dimension string `L × W × H` in the active unit system
+ * (omitting absent sides).  Returns "—" when no dimension is recorded.
  */
-export function formatDimensions(m: Measurement): string {
-  const l = formatSide(m.lengthFeet, m.lengthInches);
-  const w = formatSide(m.widthFeet, m.widthInches);
-  const h = formatSide(m.heightFeet, m.heightInches);
-  const present = [l, w, h].filter((side): side is string => side !== null);
-  if (present.length === 0) return "—";
-  return present.join(" × ");
+export function formatDimensions(m: Measurement, system: UnitSystem): string {
+  const sides = [
+    formatLength(m.lengthFeet, m.lengthInches, system),
+    formatLength(m.widthFeet, m.widthInches, system),
+    formatLength(m.heightFeet, m.heightInches, system),
+  ].filter((side): side is string => side !== null);
+  return sides.length > 0 ? sides.join(" × ") : "—";
 }
