@@ -296,6 +296,7 @@ function SidebarLinks({
           ])}
           {renderSection("Shopping Research", [
             { href: "/admin/showroom", label: "Showroom Dashboard" },
+            { href: "/admin/showroom/sourcing", label: "Sourcing Research" },
             { href: "/rooms/closets", label: "Closet Research" },
           ])}
         </>

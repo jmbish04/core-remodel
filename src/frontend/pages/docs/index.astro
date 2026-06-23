@@ -4,7 +4,7 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { BookOpen, User, HardHat, RefreshCw, ArrowRight } from "lucide-react";
+import { BookOpen, User, HardHat, RefreshCw, Cpu, ArrowRight } from "lucide-react";
 ---
 
 <BaseLayout
@@ -27,9 +27,10 @@ import { BookOpen, User, HardHat, RefreshCw, ArrowRight } from "lucide-react";
     <div class="space-y-12">
       {docsAudienceGroups.map((group) => {
         // Choose appropriate icon
-        const IconComponent = 
-          group.id === "homeowners" ? User : 
-          group.id === "contractors" ? HardHat : RefreshCw;
+        const IconComponent =
+          group.id === "homeowners" ? User :
+          group.id === "contractors" ? HardHat :
+          group.id === "platform" ? Cpu : RefreshCw;
 
         return (
           <section class="space-y-6">

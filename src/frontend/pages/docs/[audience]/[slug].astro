@@ -3,10 +3,11 @@ import { getDocsPageBySlug } from "@/lib/docs";
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { 
-  ExternalLink, 
-  CheckCircle2, 
-  ArrowLeft, 
+import { MermaidDiagram } from "@/components/docs/MermaidDiagram";
+import {
+  ExternalLink,
+  CheckCircle2,
+  ArrowLeft,
   AlertCircle
 } from "lucide-react";
 
@@ -80,6 +81,14 @@ if (!page) {
                 <p>{p}</p>
               ))}
             </div>
+
+            {section.diagrams && section.diagrams.length > 0 && (
+              <div class="space-y-4">
+                {section.diagrams.map((diagram) => (
+                  <MermaidDiagram client:only="react" code={diagram.code} caption={diagram.caption} />
+                ))}
+              </div>
+            )}
 
             {section.bullets && section.bullets.length > 0 && (
               <ul class="space-y-2.5 rounded-lg border border-border/20 bg-muted/5 p-5 pl-10 list-disc text-muted-foreground font-light">
