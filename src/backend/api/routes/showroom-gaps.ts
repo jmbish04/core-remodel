@@ -41,6 +41,9 @@ interface GapCandidate {
 
 const slug = (s: string) => s.trim().toLowerCase().replace(/\s+/g, " ");
 
+/** Max items per D1 query/batch — D1 caps bound parameters at 100 per query. */
+const CHUNK = 50;
+
 /**
  * Upsert candidates by (context, gapKey). Never re-opens a key that is already
  * dismissed or closed; refreshes description/suggestion for still-open keys.
@@ -54,13 +57,20 @@ async function upsertGaps(
   if (candidates.length === 0) return 0;
 
   const keys = candidates.map((c) => c.gapKey);
-  const existing = await db
-    .select({ gapKey: showroomGaps.gapKey, status: showroomGaps.status })
-    .from(showroomGaps)
-    .where(and(eq(showroomGaps.context, context), inArray(showroomGaps.gapKey, keys)));
+  // Chunk the lookup: inArray binds one parameter per key and D1 caps a query
+  // at 100 bound parameters, so stay well under that.
+  const existing: { gapKey: string; status: string }[] = [];
+  for (let i = 0; i < keys.length; i += CHUNK) {
+    const chunk = keys.slice(i, i + CHUNK);
+    const rows = await db
+      .select({ gapKey: showroomGaps.gapKey, status: showroomGaps.status })
+      .from(showroomGaps)
+      .where(and(eq(showroomGaps.context, context), inArray(showroomGaps.gapKey, chunk)));
+    existing.push(...rows);
+  }
 
   const existingStatus = new Map(existing.map((e) => [e.gapKey, e.status]));
-  let inserted = 0;
+  const inserts = [];
 
   for (const c of candidates) {
     const prior = existingStatus.get(c.gapKey);
@@ -68,19 +78,25 @@ async function upsertGaps(
     if (prior === "dismissed" || prior === "closed" || prior === "open" || prior === "researching") {
       continue;
     }
-    await db.insert(showroomGaps).values({
-      context,
-      gapKey: c.gapKey,
-      roomName: c.roomName,
-      name: c.name,
-      description: c.description,
-      suggestedAction: c.suggestedAction,
-      sourceSignalJson: JSON.stringify(c.sourceSignal ?? null),
-      status: "open",
-    });
-    inserted += 1;
+    inserts.push(
+      db.insert(showroomGaps).values({
+        context,
+        gapKey: c.gapKey,
+        roomName: c.roomName,
+        name: c.name,
+        description: c.description,
+        suggestedAction: c.suggestedAction,
+        sourceSignalJson: JSON.stringify(c.sourceSignal ?? null),
+        status: "open",
+      }),
+    );
   }
-  return inserted;
+
+  // Batch the inserts: one roundtrip per chunk instead of one per row.
+  for (let i = 0; i < inserts.length; i += CHUNK) {
+    await db.batch(inserts.slice(i, i + CHUNK) as [typeof inserts[number], ...typeof inserts]);
+  }
+  return inserts.length;
 }
 
 // ─── Detection ──────────────────────────────────────────────────────────────────
@@ -240,12 +256,12 @@ showroomGapsRouter.post("/meta/gaps/dismiss", async (c) => {
   } catch {
     return c.json({ error: "Invalid JSON body" }, 400);
   }
-  const parsed = z.object({ ids: z.array(z.number().int().positive()).min(1) }).safeParse(body);
-  if (!parsed.success) return c.json({ error: "ids must be a non-empty array" }, 400);
+  const parsed = z.object({ ids: z.array(z.number().int().positive()).min(1).max(100) }).safeParse(body);
+  if (!parsed.success) return c.json({ error: "ids must be a non-empty array of max 100 items" }, 400);
 
   await db
     .update(showroomGaps)
-    .set({ status: "dismissed", dismissedAt: new Date(), updatedAt: new Date() })
+    .set({ status: "dismissed", dismissedAt: sql`(unixepoch())`, updatedAt: sql`(unixepoch())` })
     .where(inArray(showroomGaps.id, parsed.data.ids));
   return c.json({ success: true, dismissed: parsed.data.ids.length });
 });
@@ -265,43 +281,67 @@ showroomGapsRouter.post("/meta/gaps/research", async (c) => {
   } catch {
     return c.json({ error: "Invalid JSON body" }, 400);
   }
-  const parsed = z.object({ ids: z.array(z.number().int().positive()).min(1) }).safeParse(body);
-  if (!parsed.success) return c.json({ error: "ids must be a non-empty array" }, 400);
+  const parsed = z.object({ ids: z.array(z.number().int().positive()).min(1).max(100) }).safeParse(body);
+  if (!parsed.success) return c.json({ error: "ids must be a non-empty array of max 100 items" }, 400);
 
   const gaps = await db.select().from(showroomGaps).where(inArray(showroomGaps.id, parsed.data.ids));
   const queued: { gapId: number; materialId: number | null; prompt: string }[] = [];
 
-  for (const gap of gaps) {
-    let materialId = gap.materialId;
-
-    // Materialize the thing we're researching for (material-context gaps).
-    if (gap.context === "material" && !materialId) {
-      const [material] = await db
+  // Materialize the thing we're researching for (material-context gaps) in one
+  // batched roundtrip instead of a sequential insert per gap.
+  const gapsNeedingMaterial = gaps.filter((g) => g.context === "material" && !g.materialId);
+  const insertedMaterials: { id: number }[] = [];
+  if (gapsNeedingMaterial.length > 0) {
+    const insertQueries = gapsNeedingMaterial.map((gap) =>
+      db
         .insert(materialScheduleItems)
         .values({
           title: gap.name,
           roomName: gap.roomName,
           notes: `Auto-created from gap research. ${gap.description ?? ""}`.trim(),
         })
-        .returning();
-      materialId = material.id;
+        .returning({ id: materialScheduleItems.id }),
+    );
+    for (let i = 0; i < insertQueries.length; i += CHUNK) {
+      const chunk = await db.batch(
+        insertQueries.slice(i, i + CHUNK) as [typeof insertQueries[number], ...typeof insertQueries],
+      );
+      for (const rows of chunk) insertedMaterials.push(...rows);
     }
+  }
 
+  // Map each material gap to its freshly-created material id (1:1, same order).
+  const gapToMaterialId = new Map<number, number>();
+  let insertIdx = 0;
+  for (const gap of gapsNeedingMaterial) {
+    const material = insertedMaterials[insertIdx++];
+    if (material) gapToMaterialId.set(gap.id, material.id);
+  }
+
+  const updateQueries = [];
+  for (const gap of gaps) {
+    const materialId = gap.materialId ?? gapToMaterialId.get(gap.id) ?? null;
     const prompt = composeResearchPrompt(gap);
-    await db
-      .update(showroomGaps)
-      .set({
-        status: "researching",
-        materialId,
-        sourceSignalJson: JSON.stringify({
-          ...(safeParseJson(gap.sourceSignalJson) ?? {}),
-          researchPrompt: prompt,
-        }),
-        updatedAt: new Date(),
-      })
-      .where(eq(showroomGaps.id, gap.id));
-
     queued.push({ gapId: gap.id, materialId, prompt });
+
+    updateQueries.push(
+      db
+        .update(showroomGaps)
+        .set({
+          status: "researching",
+          materialId,
+          sourceSignalJson: JSON.stringify({
+            ...(safeParseJson(gap.sourceSignalJson) ?? {}),
+            researchPrompt: prompt,
+          }),
+          updatedAt: sql`(unixepoch())`,
+        })
+        .where(eq(showroomGaps.id, gap.id)),
+    );
+  }
+
+  for (let i = 0; i < updateQueries.length; i += CHUNK) {
+    await db.batch(updateQueries.slice(i, i + CHUNK) as [typeof updateQueries[number], ...typeof updateQueries]);
   }
 
   return c.json({ success: true, queued });

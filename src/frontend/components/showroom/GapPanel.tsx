@@ -43,8 +43,12 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
 
 function ageDays(identifiedAt: string | number | null): number | null {
   if (identifiedAt == null) return null;
-  const t = typeof identifiedAt === "number" ? identifiedAt * (identifiedAt < 1e12 ? 1000 : 1) : Date.parse(identifiedAt);
+  let t = typeof identifiedAt === "number" ? identifiedAt : Date.parse(identifiedAt);
   if (Number.isNaN(t)) return null;
+  // DB stores seconds (unixepoch); drizzle mode:"timestamp" reads them as ms,
+  // so the API can serialize a 1970 ISO string. Treat plain numbers / parsed
+  // epochs below 1e12 as seconds and normalize to milliseconds.
+  if (t < 1e12) t *= 1000;
   return Math.max(0, Math.floor((Date.now() - t) / 86_400_000));
 }
 
