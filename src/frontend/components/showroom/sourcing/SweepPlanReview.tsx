@@ -64,14 +64,20 @@ export function SweepPlanReview({ sessionId, onComplete, onClose }: SweepPlanRev
     if (result.ok) setSession(result.data);
   }, [sessionId]);
 
-  // Poll while the session is actively progressing (drafting / sweeping).
+  // Poll while the session is actively progressing (drafting / sweeping). In
+  // terminal/idle states (awaiting_plan_approval / complete / failed) we stop
+  // the interval so we don't poll the backend forever.
   useEffect(() => {
     void poll();
+    const currentStatus = session?.status;
+    const isProgressing =
+      !currentStatus || currentStatus === "planning" || currentStatus === "sweeping";
+    if (!isProgressing) return;
     const interval = setInterval(() => {
       void poll();
     }, 2500);
     return () => clearInterval(interval);
-  }, [poll]);
+  }, [poll, session?.status]);
 
   // Fire onComplete once when the sweep finishes.
   useEffect(() => {

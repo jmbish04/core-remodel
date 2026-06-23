@@ -726,7 +726,7 @@ showroomStoresRouter.post("/research/sweep-sessions/:sid/request-changes", async
   const sid = Number(c.req.param("sid"));
   if (!Number.isInteger(sid)) return c.json({ success: false, error: "Invalid session id" }, 400);
   const body = await c.req.json<{ feedback?: string }>().catch(() => ({}) as { feedback?: string });
-  const feedback = body?.feedback?.trim();
+  const feedback = typeof body?.feedback === "string" ? body.feedback.trim() : undefined;
   if (!feedback) return c.json({ success: false, error: "feedback is required" }, 400);
   try {
     const agent = await getShowroomResearchAgent(c.env);

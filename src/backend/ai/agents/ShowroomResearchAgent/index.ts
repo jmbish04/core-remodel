@@ -263,7 +263,7 @@ export class ShowroomResearchAgent extends AIChatAgent<
     if (session.status !== "awaiting_plan_approval") {
       throw new Error(`Sweep session ${sessionId} is not awaiting plan approval`);
     }
-    const trimmed = feedback?.trim();
+    const trimmed = typeof feedback === "string" ? feedback.trim() : "";
     if (!trimmed) throw new Error("Feedback is required to request plan changes");
 
     await db
