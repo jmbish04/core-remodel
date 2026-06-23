@@ -8,7 +8,7 @@
 
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, desc, and, like, inArray } from "drizzle-orm";
+import { eq, desc, and, like, inArray, sql } from "drizzle-orm";
 
 import {
   materialScheduleItems,
@@ -54,6 +54,13 @@ const purchasedSchema = z.object({
 function parseId(raw: string | undefined): number | null {
   if (!raw || !/^\d+$/.test(raw)) return null;
   return Number(raw);
+}
+
+/** Split into chunks to stay under Cloudflare D1's ~100 bound-parameter limit. */
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
 }
 
 // ─── Material CRUD ──────────────────────────────────────────────────────────────
@@ -141,9 +148,12 @@ materialsRouter.post("/", async (c) => {
     .returning();
 
   if (specs && specs.length > 0) {
-    await db
-      .insert(materialRequiredSpecs)
-      .values(specs.map((s) => ({ materialId: material.id, key: s.key, value: s.value })));
+    // Chunk inserts (3 bound params/row) under D1's ~100-param limit.
+    for (const specChunk of chunk(specs, 30)) {
+      await db
+        .insert(materialRequiredSpecs)
+        .values(specChunk.map((s) => ({ materialId: material.id, key: s.key, value: s.value })));
+    }
   }
 
   return c.json({ material }, 201);
@@ -170,7 +180,7 @@ materialsRouter.put("/:id", async (c) => {
 
   const [material] = await db
     .update(materialScheduleItems)
-    .set({ ...parsed.data, updatedAt: new Date() })
+    .set({ ...parsed.data, updatedAt: sql`(unixepoch())` })
     .where(eq(materialScheduleItems.id, id))
     .returning();
   if (!material) return c.json({ error: "Material not found" }, 404);
@@ -219,7 +229,7 @@ materialsRouter.put("/:id/purchased", async (c) => {
     .set({
       isPurchased: parsed.data.isPurchased,
       purchasedShowroomProductId: parsed.data.purchasedShowroomProductId ?? null,
-      updatedAt: new Date(),
+      updatedAt: sql`(unixepoch())`,
     })
     .where(eq(materialScheduleItems.id, id))
     .returning();
@@ -291,10 +301,15 @@ materialsRouter.post("/:id/specs/batch", async (c) => {
     return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
   }
 
-  const specs = await db
-    .insert(materialRequiredSpecs)
-    .values(parsed.data.specs.map((s) => ({ materialId: id, key: s.key, value: s.value })))
-    .returning();
+  // Chunk inserts (3 bound params/row) under D1's ~100-param limit.
+  const specs: (typeof materialRequiredSpecs.$inferSelect)[] = [];
+  for (const specChunk of chunk(parsed.data.specs, 30)) {
+    const rows = await db
+      .insert(materialRequiredSpecs)
+      .values(specChunk.map((s) => ({ materialId: id, key: s.key, value: s.value })))
+      .returning();
+    specs.push(...rows);
+  }
   return c.json({ specs }, 201);
 });
 
@@ -366,15 +381,19 @@ materialsRouter.get("/:id/match", async (c) => {
 
   const keys = [...new Set(required.map((r) => r.key))];
 
-  // Candidate product specs that share any required key.
-  const candidateSpecs = await db
-    .select({
-      storeProductId: productSpecs.storeProductId,
-      specKey: productSpecs.specKey,
-      specValue: productSpecs.specValue,
-    })
-    .from(productSpecs)
-    .where(inArray(productSpecs.specKey, keys));
+  // Candidate product specs that share any required key (chunked under D1's limit).
+  const candidateSpecs: { storeProductId: number; specKey: string; specValue: string | null }[] = [];
+  for (const keyChunk of chunk(keys, 90)) {
+    const rows = await db
+      .select({
+        storeProductId: productSpecs.storeProductId,
+        specKey: productSpecs.specKey,
+        specValue: productSpecs.specValue,
+      })
+      .from(productSpecs)
+      .where(inArray(productSpecs.specKey, keyChunk));
+    candidateSpecs.push(...rows);
+  }
 
   // Required values keyed by lowercased spec key for case-insensitive matching.
   const requiredByKey = new Map<string, string[]>();
@@ -402,10 +421,14 @@ materialsRouter.get("/:id/match", async (c) => {
   }
 
   const productIds = [...perProduct.keys()];
-  const products = await db
-    .select()
-    .from(showroomStoreProducts)
-    .where(inArray(showroomStoreProducts.id, productIds));
+  const products: (typeof showroomStoreProducts.$inferSelect)[] = [];
+  for (const idChunk of chunk(productIds, 90)) {
+    const rows = await db
+      .select()
+      .from(showroomStoreProducts)
+      .where(inArray(showroomStoreProducts.id, idChunk));
+    products.push(...rows);
+  }
 
   const matches = products
     .map((p) => ({
