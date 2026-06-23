@@ -294,7 +294,13 @@ export function extractPlanFromInteraction(interaction: any): DeepResearchPlan {
  */
 export async function draftDeepResearchPlan(
   env: Env,
-  input: { prompt: string; mode?: DeepResearchAgentMode; tools?: Array<Record<string, unknown>> },
+  input: {
+    prompt: string;
+    mode?: DeepResearchAgentMode;
+    tools?: Array<Record<string, unknown>>;
+    /** Set to chain a revision off a prior plan (homeowner requested changes). */
+    previousInteractionId?: string;
+  },
   options: { maxWaitMs?: number; pollIntervalMs?: number; onStatus?: (i: any) => Promise<void> | void } = {},
 ): Promise<DeepResearchPlan> {
   const interaction = await createDeepResearchInteraction(env, {
@@ -302,6 +308,7 @@ export async function draftDeepResearchPlan(
     mode: input.mode,
     visualization: "off",
     collaborativePlanning: true,
+    previousInteractionId: input.previousInteractionId,
     tools: input.tools,
   });
 
