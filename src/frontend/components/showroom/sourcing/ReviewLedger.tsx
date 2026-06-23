@@ -83,22 +83,30 @@ export function ReviewLedger(props: ReviewLedgerProps) {
     onApproved(store.id);
   }
 
-  /** Bulk approve — sequential loop, never aborts on a single failure. */
+  /**
+   * Bulk approve — runs in parallel (the per-store ratings are independent) but
+   * never aborts the batch: `Promise.allSettled` lets a single failure fail
+   * alone while every other approval still lands.
+   */
   async function approveAll() {
     const targets = stores.filter((s) => selected.has(s.id));
     if (targets.length === 0) return;
     setBulkBusy(true);
+    const results = await Promise.allSettled(
+      targets.map((store) =>
+        rateStore(store.id, 5, "Bulk-approved from sourcing review ledger"),
+      ),
+    );
     let moved = 0;
     let failed = 0;
-    for (const store of targets) {
-      const result = await rateStore(store.id, 5, "Bulk-approved from sourcing review ledger");
-      if (result.ok) {
+    results.forEach((result, index) => {
+      if (result.status === "fulfilled" && result.value.ok) {
         moved += 1;
-        onApproved(store.id);
+        onApproved(targets[index].id);
       } else {
         failed += 1;
       }
-    }
+    });
     setBulkBusy(false);
     setSelected(new Set());
     if (failed === 0) toast.success(`Approved ${moved} showroom${moved === 1 ? "" : "s"}.`);

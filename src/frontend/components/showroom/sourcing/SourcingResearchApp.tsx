@@ -11,7 +11,7 @@
  * Self-fetches with plain `fetch` (see ./api), mounts via `client:only="react"`.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Radar, RefreshCw } from "lucide-react";
 
@@ -126,8 +126,14 @@ export function SourcingResearchApp() {
     void loadStores("");
   }, [loadStores]);
 
-  // Debounced search.
+  // Debounced search. Skip the initial render — the mount effect above already
+  // issues the first `loadStores("")`, so debouncing on mount would duplicate it.
+  const isFirstSearch = useRef(true);
   useEffect(() => {
+    if (isFirstSearch.current) {
+      isFirstSearch.current = false;
+      return;
+    }
     const t = setTimeout(() => void loadStores(search), 250);
     return () => clearTimeout(t);
   }, [search, loadStores]);

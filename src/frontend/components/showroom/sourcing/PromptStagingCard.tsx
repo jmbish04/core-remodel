@@ -209,7 +209,7 @@ export function PromptStagingCard(props: PromptStagingCardProps) {
               max={10}
               value={maxSources}
               onChange={(e) =>
-                setMaxSources(Math.min(10, Math.max(1, Number(e.target.value) || 1)))
+                setMaxSources(Math.min(10, Math.max(1, Math.floor(Number(e.target.value)) || 1)))
               }
               className="h-8 w-16"
               disabled={sweeping}
@@ -223,7 +223,7 @@ export function PromptStagingCard(props: PromptStagingCardProps) {
           >
             <Switch
               id="sourcing-mcp-bridge"
-              checked={enableMcpBridge}
+              checked={mode === "deep" && enableMcpBridge}
               onCheckedChange={setEnableMcpBridge}
               disabled={mode !== "deep" || sweeping}
             />
