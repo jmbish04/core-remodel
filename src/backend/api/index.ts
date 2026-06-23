@@ -64,6 +64,7 @@ import { dialerRouter } from "./routes/dialer";
 import { showroomStoresRouter } from "./routes/showroom-stores";
 import { showroomSeedRouter } from "./routes/showroom-seed";
 import { materialsRouter } from "./routes/materials";
+import { showroomGapsRouter } from "./routes/showroom-gaps";
 import { requireAccessAuth } from "@backend/utils/access";
 
 export type Variables = {
@@ -166,6 +167,7 @@ app.route("/api/truth-table", truthTableRouter);
 app.route("/api/shopping-journal", shoppingJournalRouter);
 app.route("/api/showroom-stores", showroomStoresRouter);
 app.route("/api/showroom-stores", showroomSeedRouter);
+app.route("/api/showroom-stores", showroomGapsRouter);
 app.route("/api/materials", materialsRouter);
 app.route("/", openapiRouter);
 
