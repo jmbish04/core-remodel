@@ -5,10 +5,16 @@ where ``blank_images/``, the reference images, ``ai_prompt.md``,
 ``ai_photo_coordinates.json``, and ``nano_bannana_output/`` live.
 """
 
+import os
+
 # =====================================================================
 # DESIGN CONFIGURATION TOKENS (reused from the proven script)
 # =====================================================================
-base_dir = "/Volumes/Projects/workers/core-remodel/proofs/tight/jason_20260615/upper_level/kitchen/ai_renders"
+# Override with AI_RENDERS_BASE_DIR for portability across machines.
+base_dir = os.path.abspath(os.environ.get(
+    "AI_RENDERS_BASE_DIR",
+    "/Volumes/Projects/workers/core-remodel/proofs/tight/jason_20260615/upper_level/kitchen/ai_renders",
+))
 
 FLOOR_INSTRUCTIONS = "dark wide-plank engineered wood flooring"
 WALL_FINISH = "clean white drywall plaster finish"
