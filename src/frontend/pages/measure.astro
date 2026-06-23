@@ -1,0 +1,20 @@
+---
+/**
+ * /measure — live measuring session surface (0006 Phase 2C).
+ *
+ * Hosts the <FloorplanLiveApp> island: a touch-to-flag floor plan synced in real time
+ * (via FloorplanSessionDO over a WebSocket) with Claude and any other device in the
+ * room. Open it on your phone while measuring; manual entry lives at /measurements.
+ */
+import { FloorplanLiveApp } from "@/components/FloorplanLiveApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Live Floor Plan - 126 Colby Remodel Mission Control"
+  description="Real-time collaborative floor plan: tap a wall to flag it for Claude while you measure; it flashes when Claude points to one."
+>
+  <main class="container mx-auto px-4 py-8">
+    <FloorplanLiveApp client:only="react" />
+  </main>
+</BaseLayout>

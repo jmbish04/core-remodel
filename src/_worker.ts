@@ -19,6 +19,7 @@ export { RenovationAgent } from "./backend/ai/agents/RenovationAgent";
 export { BudgetAgent } from "./backend/ai/agents/BudgetAgent";
 export { BidPortfolioAgent } from "./backend/ai/agents/BidPortfolioAgent";
 export { EstimateCollabHub } from "./backend/realtime/EstimateCollabHub";
+export { FloorplanSessionDO } from "./backend/realtime/FloorplanSessionDO";
 export { GAS_A2A } from "./backend/a2a-v2/server";
 export { ImageProcessingWorkflow } from "./backend/services/image-processor/workflow.js";
 export { ImageBatchProcessingWorkflow } from "./backend/services/image-processor/batch-workflow";
@@ -49,6 +50,16 @@ const handler: ExportedHandler<Env> = {
     if (url.pathname.startsWith("/api/realtime/estimates")) {
       const room = url.searchParams.get("room")?.trim() || "global";
       const stub = env.ESTIMATE_COLLAB.getByName(room);
+      return stub.fetch(request);
+    }
+
+    // Real-time floor-plan sessions: /api/room/:roomName/ws (WebSocket upgrade +
+    // /health). The Worker is a stateless gateway — it routes by room name to the
+    // matching FloorplanSessionDO instance and offloads the socket to the DO.
+    const floorplanRoom = url.pathname.match(/^\/api\/room\/([^/]+)\/(ws|health)$/);
+    if (floorplanRoom) {
+      const roomName = decodeURIComponent(floorplanRoom[1]);
+      const stub = env.FLOORPLAN_SESSION.getByName(roomName);
       return stub.fetch(request);
     }
 
