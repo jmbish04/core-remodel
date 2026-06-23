@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Showroom Planner — Reconciliation Decisions</title>
+<style>
+  :root{
+    --bg:#0a0a0c; --card:#111114; --card2:#16161a; --fg:#fafafa; --muted:#8a8a93;
+    --ring:rgba(255,255,255,.12); --ring2:rgba(255,255,255,.08);
+    --blue:oklch(0.74 0.18 240); --green:oklch(0.78 0.20 145);
+    --amber:oklch(0.79 0.18 75); --coral:oklch(0.71 0.21 25); --purple:oklch(0.69 0.21 320);
+    --accent:#5b9dff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+    font-feature-settings:"tnum";line-height:1.5;padding:32px 20px 220px}
+  .wrap{max-width:1040px;margin:0 auto}
+  h1{font-size:24px;font-weight:650;letter-spacing:-.02em;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:20px}
+  .legend{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 26px;font-size:11px;font-family:ui-monospace,"JetBrains Mono",Menlo,monospace}
+  .legend span{padding:4px 9px;border-radius:999px;background:var(--card2);color:var(--muted);box-shadow:inset 0 0 0 1px var(--ring2)}
+  .legend b{color:var(--fg);font-weight:600}
+  .card{background:var(--card);border-radius:14px;padding:18px 18px 16px;margin:0 0 14px;box-shadow:inset 0 0 0 1px var(--ring2)}
+  .card h2{font-size:15px;margin:0;font-weight:620;display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .pill{font-family:ui-monospace,"JetBrains Mono",Menlo,monospace;font-size:9.5px;text-transform:uppercase;letter-spacing:.08em;
+    padding:3px 7px;border-radius:999px;font-weight:600}
+  .pill.built{background:color-mix(in oklab,var(--green) 22%,transparent);color:var(--green)}
+  .pill.partial{background:color-mix(in oklab,var(--amber) 22%,transparent);color:var(--amber)}
+  .pill.missing{background:color-mix(in oklab,var(--coral) 22%,transparent);color:var(--coral)}
+  .pill.flight{background:color-mix(in oklab,var(--purple) 24%,transparent);color:var(--purple)}
+  .state{color:var(--muted);font-size:12.5px;margin:9px 0 4px}
+  .state code{background:var(--card2);padding:1px 5px;border-radius:5px;font-size:11px;color:#cfd3da}
+  .row{display:flex;gap:14px;flex-wrap:wrap;margin-top:12px}
+  .lane{flex:1;min-width:300px}
+  .lane .lab{font-size:10px;font-family:ui-monospace,Menlo,monospace;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:7px}
+  .opts{display:flex;flex-wrap:wrap;gap:6px}
+  .opt{position:relative}
+  .opt input{position:absolute;opacity:0;inset:0;cursor:pointer}
+  .opt label{display:inline-block;cursor:pointer;font-size:12px;padding:6px 10px;border-radius:8px;background:var(--card2);
+    color:#c7c9d1;box-shadow:inset 0 0 0 1px var(--ring2);transition:.12s}
+  .opt label .verb{font-family:ui-monospace,Menlo,monospace;font-size:9px;text-transform:uppercase;letter-spacing:.06em;
+    display:block;color:var(--muted);margin-bottom:1px}
+  .opt input:checked + label{background:color-mix(in oklab,var(--accent) 20%,var(--card2));color:#fff;
+    box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--accent) 60%,transparent)}
+  .opt input:checked + label .verb{color:#cfe0ff}
+  .opt label.rec::after{content:"★";color:var(--amber);margin-left:5px;font-size:10px}
+  .note{margin-top:11px}
+  .note input{width:100%;background:var(--card2);border:0;box-shadow:inset 0 0 0 1px var(--ring2);color:var(--fg);
+    border-radius:8px;padding:8px 10px;font-size:12px;font-family:inherit}
+  .note input::placeholder{color:#5e606a}
+  .dock{position:fixed;left:0;right:0;bottom:0;background:linear-gradient(180deg,rgba(10,10,12,.4),var(--bg) 30%);
+    backdrop-filter:blur(8px);box-shadow:0 -1px 0 var(--ring2);padding:12px 20px 16px}
+  .dock .inner{max-width:1040px;margin:0 auto}
+  .dock .bar{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+  .dock .bar b{font-size:12px;font-family:ui-monospace,Menlo,monospace;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+  .btns{display:flex;gap:8px}
+  button{font-family:inherit;font-size:12px;font-weight:600;padding:8px 14px;border-radius:9px;border:0;cursor:pointer;transition:.12s}
+  .copy{background:var(--accent);color:#04132e}.copy:hover{filter:brightness(1.08)}
+  .send{background:color-mix(in oklab,var(--green) 80%,#000);color:#04210f}.send:hover{filter:brightness(1.08)}
+  .ghost{background:var(--card2);color:#c7c9d1;box-shadow:inset 0 0 0 1px var(--ring2)}
+  textarea{width:100%;height:120px;resize:vertical;background:#0c0c0f;color:#d7dae1;border:0;border-radius:10px;padding:11px 12px;
+    font-family:ui-monospace,"JetBrains Mono",Menlo,monospace;font-size:11.5px;line-height:1.55;box-shadow:inset 0 0 0 1px var(--ring2)}
+  .toast{position:fixed;bottom:240px;left:50%;transform:translateX(-50%);background:var(--green);color:#04210f;
+    padding:8px 16px;border-radius:999px;font-size:12px;font-weight:600;opacity:0;transition:.25s;pointer-events:none}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Showroom Planner — Reconciliation Decisions</h1>
+  <div class="sub">Pick a <b>Frontend</b> and <b>Backend</b> action for each surface. The prompt at the bottom updates live — copy it back to me and I'll execute exactly those choices. ★ = my recommendation.</div>
+  <div class="legend">
+    <span><b>NEW</b> build from scratch</span>
+    <span><b>MODIFY</b> change existing in place</span>
+    <span><b>FORK</b> copy existing as a starting point</span>
+    <span><b>KEEP</b> leave as-is</span>
+    <span><b>RESTORE</b> undo my regression</span>
+    <span><b>HOLD</b> don't touch — in flight</span>
+    <span><b>DEFER</b> later phase</span>
+  </div>
+  <div id="cards"></div>
+</div>
+
+<div class="dock">
+  <div class="inner">
+    <div class="bar">
+      <b>Generated prompt</b>
+      <div class="btns">
+        <button class="ghost" onclick="resetAll()">Reset to ★</button>
+        <button class="send" id="sendBtn" style="display:none" onclick="sendIt()">Send to Claude</button>
+        <button class="copy" onclick="copyIt()">Copy prompt</button>
+      </div>
+    </div>
+    <textarea id="out" readonly></textarea>
+  </div>
+</div>
+<div class="toast" id="toast">Copied</div>
+
+<script>
+const SECTIONS = [
+  {
+    id:"nav", title:"Nav cleanup & section rename", status:["built","DONE THIS SESSION"],
+    state:'Renamed <code>Shopping Research</code> → <code>Admin - Shopping</code>, moved Shopping Journal in. Already committed.',
+    fe:[["KEEP","Keep the nav changes",true],["MODIFY","Tweak labels/order"],["RESTORE","Revert nav changes"]],
+    be:[["KEEP","No backend",true]]
+  },
+  {
+    id:"materials", title:"Materials Schedule", status:["missing","BACKEND MISSING"],
+    state:'No <code>material_schedule_items</code> table, no <code>/api/materials</code>. This is the real gap — the seed list everything else references. Frontend is a placeholder card.',
+    fe:[["NEW","Build the schedule dashboard",true],["KEEP","Keep placeholder card"],["DEFER","Later phase"]],
+    be:[["NEW","material_schedule_items + material_required_specs + /api/materials",true],["DEFER","Later phase"]]
+  },
+  {
+    id:"showrooms", title:"Showrooms (directory / bulk discovery)", status:["built","BACKEND BUILT"],
+    state:'<code>showroom_stores</code> + <code>/api/showroom-stores</code> (CRUD, filters, hubs, gap analysis) exist. <code>ShowroomDashboard.tsx</code> renders at /admin/showroom. My /showrooms page is a placeholder.',
+    fe:[["NEW","Build directory + hub map page",true],["FORK","Fork ShowroomDashboard as the base"],["KEEP","Keep placeholder card"]],
+    be:[["KEEP","Use existing /api/showroom-stores as-is"],["MODIFY","Add 'discover from materials list' endpoint",true],["NEW","New endpoints"]]
+  },
+  {
+    id:"products", title:"Products (catalog)", status:["built","BACKEND BUILT"],
+    state:'<code>showroom_store_products</code> exists; product CRUD is nested under stores. Likely no flat all-products list endpoint yet. Frontend is a placeholder.',
+    fe:[["NEW","Build filterable catalog grid",true],["KEEP","Keep placeholder card"],["DEFER","Later phase"]],
+    be:[["KEEP","Use per-store product endpoints"],["MODIFY","Add flat catalog list + filters (zone/hub/price/status)",true],["NEW","New endpoints"]]
+  },
+  {
+    id:"deepresearch", title:"Deep Research (was Sourcing Research)", status:["flight","IN FLIGHT — OTHER SESSION"],
+    state:'⚠️ I redirected /sourcing → placeholder, so the WORKING <code>SourcingResearchApp</code> (plan-gate, findings ledger, HITL, media gallery) is currently unreachable. Backend agent is being worked on by another session right now.',
+    fe:[["RESTORE","Re-point Deep Research at SourcingResearchApp",true],["MODIFY","Restore + extend: typed jobs + Closet-style portal (md tab / app tab / chat)"],["KEEP","Keep placeholder (leave app buried)"]],
+    be:[["HOLD","Don't touch agent — coordinate with other session",true],["MODIFY","Modify agent (risk: conflicts with other session)"]]
+  },
+  {
+    id:"compare", title:"Compare", status:["partial","SUBSTRATE EXISTS"],
+    state:'<code>store_product_similar_model_map</code> / <code>store_similar_map</code> tables exist but have no compare endpoints, and there is no compare UI.',
+    fe:[["NEW","Build side-by-side compare UI",true],["KEEP","Keep placeholder card"],["DEFER","Later phase"]],
+    be:[["MODIFY","Add compare endpoints over existing similar-maps",true],["NEW","Dedicated comparisons tables"],["DEFER","Later phase"]]
+  },
+  {
+    id:"scan", title:"Field Scan", status:["built","BACKEND BUILT"],
+    state:'<code>/scan</code> VLM pipeline + <code>showroom_scan_log</code> + <code>BarcodeScanner.tsx</code> exist. Missing: offline-queue UI + sync panel.',
+    fe:[["FORK","Extend BarcodeScanner + add offline queue/sync",true],["NEW","Build fresh scan page"],["KEEP","Keep placeholder card"]],
+    be:[["KEEP","Use existing /scan + /scan/log",true],["MODIFY","Add batch-sync endpoint"]]
+  },
+  {
+    id:"details", title:"Detail viewports (material / store / product)", status:["partial","2 OF 3 BUILT"],
+    state:'Store + product detail backends exist (<code>GET /api/showroom-stores/:id</code>, product context). Material detail backend depends on the missing materials domain. Frontend = placeholder [id] pages.',
+    fe:[["NEW","Build store + product viewports now",true],["KEEP","Keep placeholder cards"],["DEFER","Later phase"]],
+    be:[["KEEP","Store/product context exists; material detail follows materials",true],["NEW","Build material detail endpoint too"]]
+  },
+  {
+    id:"dashboard", title:"Showroom Dashboard vs new Showrooms page", status:["built","OVERLAP CHECK"],
+    state:'<code>ShowroomDashboard.tsx</code> already owns /admin/showroom. Decide how it relates to the new Showrooms directory page so they don\'t duplicate.',
+    fe:[["KEEP","Keep Dashboard = overview, Showrooms = directory/map",true],["MODIFY","Merge into one"],["DEFER","Decide later"]],
+    be:[["KEEP","No backend",true]]
+  }
+];
+
+const cardsEl = document.getElementById("cards");
+SECTIONS.forEach(s=>{
+  const card=document.createElement("div"); card.className="card";
+  const lanes = [["fe","Frontend",s.fe],["be","Backend",s.be]].map(([k,labl,opts])=>{
+    const buttons = opts.map((o,i)=>{
+      const [verb,desc,rec]=o; const id=`${s.id}_${k}_${i}`;
+      const checked = rec? "checked":"";
+      return `<span class="opt"><input type="radio" name="${s.id}_${k}" id="${id}" value="${verb}::${desc}" ${checked} onchange="render()"><label for="${id}" class="${rec?'rec':''}"><span class="verb">${verb}</span>${desc}</label></span>`;
+    }).join("");
+    return `<div class="lane"><div class="lab">${labl}</div><div class="opts">${buttons}</div></div>`;
+  }).join("");
+  card.innerHTML = `
+    <h2>${s.title} <span class="pill ${s.status[0]}">${s.status[1]}</span></h2>
+    <div class="state">${s.state}</div>
+    <div class="row">${lanes}</div>
+    <div class="note"><input type="text" id="note_${s.id}" placeholder="Notes for this surface (optional) — e.g. priority, constraints, defer reason" oninput="render()"></div>`;
+  cardsEl.appendChild(card);
+});
+
+function val(name){const el=document.querySelector(`input[name="${name}"]:checked`);return el?el.value.split("::"):["—","—"];}
+function render(){
+  let lines=["Execute the showroom-planner reconciliation with these per-surface decisions:",""];
+  SECTIONS.forEach(s=>{
+    const fe=val(`${s.id}_fe`), be=val(`${s.id}_be`);
+    const note=document.getElementById(`note_${s.id}`).value.trim();
+    lines.push(`• ${s.title}`);
+    lines.push(`    Frontend: ${fe[0]} — ${fe[1]}`);
+    lines.push(`    Backend:  ${be[0]} — ${be[1]}`);
+    if(note) lines.push(`    Note: ${note}`);
+  });
+  lines.push("");
+  lines.push("Constraints: coordinate around the in-flight Deep Research agent session (core-remodel-0007-fe); follow cloudflare-jedi stack rules (Hono+zod-openapi, Drizzle/D1, Astro+shadcn, Monolith dark, no mock data). Update the PhaseScaffold cards to match reality and restore any buried working UI. Show me a plan before large edits.");
+  document.getElementById("out").value = lines.join("\n");
+}
+function resetAll(){SECTIONS.forEach(s=>{["fe","be"].forEach(k=>{const recs=document.querySelectorAll(`input[name="${s.id}_${k}"]`);});});
+  // re-check recommended
+  SECTIONS.forEach(s=>{[["fe",s.fe],["be",s.be]].forEach(([k,opts])=>{opts.forEach((o,i)=>{if(o[2])document.getElementById(`${s.id}_${k}_${i}`).checked=true;});});
+    document.getElementById(`note_${s.id}`).value="";});
+  render();}
+function toast(t){const e=document.getElementById("toast");e.textContent=t;e.classList.add("show");setTimeout(()=>e.classList.remove("show"),1400);}
+function copyIt(){const t=document.getElementById("out");t.select();navigator.clipboard.writeText(t.value).then(()=>toast("Copied — paste it back to me")).catch(()=>{document.execCommand("copy");toast("Copied");});}
+function sendIt(){ if(typeof sendPrompt==="function"){sendPrompt(document.getElementById("out").value);toast("Sent to Claude");} }
+if(typeof sendPrompt==="function"){document.getElementById("sendBtn").style.display="inline-block";}
+render();
+</script>
+</body>
+</html>
