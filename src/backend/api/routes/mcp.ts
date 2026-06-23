@@ -9,7 +9,16 @@
  * (authorize/token/dynamic-client-registration via @cloudflare/workers-oauth-provider)
  * is a documented follow-up; Claude Code can use this today with a bearer header.
  */
-import { listingPhotos, moodBoardGenerations, renderCanvases, renderSessions } from "@backend/db";
+import {
+  MEASUREMENT_ELEMENT_TYPES,
+  MEASUREMENT_SOURCES,
+  listingPhotos,
+  moodBoardGenerations,
+  renderCanvases,
+  renderSessions,
+  type MeasurementElementType,
+  type MeasurementSource,
+} from "@backend/db";
 import { researchSessions } from "@backend/db/schema/admin/research_sessions";
 import {
   showroomStoreCategory,
@@ -24,6 +33,12 @@ import {
   type DeepResearchMcpScope,
   type DeepResearchMcpTokenRecord,
 } from "@backend/services/gemini/deep-research";
+import {
+  createMeasurement,
+  getMeasurementCoverage,
+  listActiveRooms,
+  listMeasurements,
+} from "@backend/services/measurements";
 import { isRequestAuthenticated } from "@backend/utils/access";
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -32,6 +47,7 @@ import { Hono } from "hono";
 import { generateMoodBoard } from "../../services/render/mood-board";
 import { runStage } from "../../services/render/stage-runner";
 import type { StageType } from "../../services/render/types";
+import { rowToDto } from "./measurements.schemas";
 
 const mcpRouter = new Hono<{ Bindings: Env }>();
 
@@ -105,6 +121,72 @@ const TOOLS: McpTool[] = [
       type: "object",
       properties: { q: { type: "string" }, roomId: { type: "number" } },
     },
+  },
+  // --- 0006 measurement bridge: live floor-plan "touch" + master measurements ---
+  {
+    name: "list_rooms",
+    description:
+      "List the home's ACTIVE rooms (id, roomCode, roomName, floorId, areaSqFt). Use a room's `id` as the `roomId` argument to add_measurement. Only active rooms are valid measurement targets.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "highlight_wall",
+    description:
+      "Point at a wall segment on the live collaborative floor plan: it flashes amber on every connected screen (the phone at /measure plus any open desktop tab) — i.e. 'Claude is pointing here'. This is how you 'touch' a wall during a measuring session so your human can confirm you mean the right one. `elementId` is the traced SVG segment id, e.g. 'upper_wall_segment_12' or 'lower_wall_segment_3'. `room` defaults to the house room '126-colby'. Returns how many screens it lit up.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        elementId: { type: "string" },
+        room: { type: "string" },
+      },
+      required: ["elementId"],
+    },
+  },
+  {
+    name: "add_measurement",
+    description:
+      "Record one measurement in the master measurements table. Dimensions are CANONICAL US units: feet (whole number) + inches (decimal) per side, plus optional areaSqFt — not every element has all sides (a window is width × height). `roomId` (optional) must be an ACTIVE room from list_rooms. Use source='measured' and isApproximate=false for a real tape/laser reading (measure twice, cut once); source defaults to 'estimated' and isApproximate to true.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        roomId: { type: "number" },
+        elementType: { type: "string", enum: [...MEASUREMENT_ELEMENT_TYPES] },
+        label: { type: "string" },
+        lengthFeet: { type: "number" },
+        lengthInches: { type: "number" },
+        widthFeet: { type: "number" },
+        widthInches: { type: "number" },
+        heightFeet: { type: "number" },
+        heightInches: { type: "number" },
+        areaSqFt: { type: "number" },
+        quantity: { type: "number" },
+        source: { type: "string", enum: [...MEASUREMENT_SOURCES] },
+        isApproximate: { type: "boolean" },
+        accuracyNote: { type: "string" },
+        notes: { type: "string" },
+      },
+      required: ["elementType"],
+    },
+  },
+  {
+    name: "list_measurements",
+    description:
+      "List recorded measurements (newest first), optionally filtered by roomId, elementType (single value or comma-separated list), or free-text q. Use this to see what's already captured before adding more.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        roomId: { type: "number" },
+        elementType: { type: "string" },
+        q: { type: "string" },
+        limit: { type: "number" },
+      },
+    },
+  },
+  {
+    name: "get_measurement_coverage",
+    description:
+      "Summarize measurement coverage across all active rooms — per-room counts and which element types are recorded — plus the active rooms that still have ZERO measurements. Answers 'what still needs measuring?'.",
+    inputSchema: { type: "object", properties: {} },
   },
   {
     name: "get_deep_research_context",
@@ -511,6 +593,92 @@ async function callTool(env: Env, auth: McpAuthContext, name: string, args: Reco
       return JSON.stringify(
         filtered.map((r) => ({ id: r.id, aiTitle: r.aiTitle, outputImageUrl: r.outputImageUrl })),
       );
+    }
+    case "list_rooms": {
+      const activeRooms = await listActiveRooms(db);
+      return JSON.stringify(activeRooms);
+    }
+    case "highlight_wall": {
+      const elementId = String(args.elementId ?? "").trim();
+      if (!elementId) throw new Error("elementId is required");
+      const room = (args.room ? String(args.room) : "126-colby").trim() || "126-colby";
+      // Server-side RPC into the room's DurableObject — broadcasts a WALL_TOUCH to every
+      // connected screen without Claude having to hold a WebSocket. See FloorplanSessionDO.
+      const delivered = await env.FLOORPLAN_SESSION.getByName(room).injectTouch(elementId, "claude");
+      return JSON.stringify({ room, elementId, delivered });
+    }
+    case "add_measurement": {
+      const elementType = String(args.elementType ?? "");
+      if (!(MEASUREMENT_ELEMENT_TYPES as readonly string[]).includes(elementType)) {
+        throw new Error(
+          `invalid elementType "${elementType}". Valid: ${MEASUREMENT_ELEMENT_TYPES.join(", ")}`,
+        );
+      }
+      let source: MeasurementSource | undefined;
+      if (args.source != null) {
+        const candidate = String(args.source);
+        if (!(MEASUREMENT_SOURCES as readonly string[]).includes(candidate)) {
+          throw new Error(
+            `invalid source "${candidate}". Valid: ${MEASUREMENT_SOURCES.join(", ")}`,
+          );
+        }
+        source = candidate as MeasurementSource;
+      }
+
+      // Coerce optional numerics defensively (the MCP path has no Zod gate): a stray
+      // non-numeric becomes null rather than poisoning the row with NaN.
+      const num = (v: unknown): number | null => {
+        if (v == null) return null;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+      };
+      const quantity =
+        args.quantity != null && Number.isFinite(Number(args.quantity))
+          ? Number(args.quantity)
+          : undefined;
+      const result = await createMeasurement(db, {
+        roomId: num(args.roomId),
+        elementType: elementType as MeasurementElementType,
+        label: args.label != null ? String(args.label) : null,
+        lengthFeet: num(args.lengthFeet),
+        lengthInches: num(args.lengthInches),
+        widthFeet: num(args.widthFeet),
+        widthInches: num(args.widthInches),
+        heightFeet: num(args.heightFeet),
+        heightInches: num(args.heightInches),
+        areaSqFt: num(args.areaSqFt),
+        quantity,
+        source,
+        isApproximate: args.isApproximate != null ? Boolean(args.isApproximate) : undefined,
+        accuracyNote: args.accuracyNote != null ? String(args.accuracyNote) : null,
+        notes: args.notes != null ? String(args.notes) : null,
+      });
+      if (!result.ok) throw new Error(result.error);
+      return JSON.stringify(rowToDto(result.row));
+    }
+    case "list_measurements": {
+      const elementTypes = args.elementType
+        ? String(args.elementType)
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : undefined;
+      const num = (v: unknown): number | undefined => {
+        if (v == null) return undefined;
+        const n = Number(v);
+        return Number.isFinite(n) ? n : undefined;
+      };
+      const rows = await listMeasurements(db, {
+        roomId: num(args.roomId),
+        elementTypes: elementTypes as MeasurementElementType[] | undefined,
+        q: args.q != null ? String(args.q) : undefined,
+        limit: num(args.limit),
+      });
+      return JSON.stringify(rows.map(rowToDto));
+    }
+    case "get_measurement_coverage": {
+      const coverage = await getMeasurementCoverage(db);
+      return JSON.stringify(coverage);
     }
     default:
       throw new Error(`Unknown tool: ${name}`);

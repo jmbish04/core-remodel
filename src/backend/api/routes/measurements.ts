@@ -24,13 +24,12 @@
  * now").  `/api/measurements` does not sit under any `requireAccessAuth` prefix.
  */
 
+import { type MeasurementElementType, type MeasurementSource, measurements } from "@backend/db";
 import {
-  type MeasurementElementType,
-  type MeasurementSource,
-  floors,
-  measurements,
-  rooms,
-} from "@backend/db";
+  createMeasurement,
+  floorExists,
+  validateRoomTarget,
+} from "@backend/services/measurements";
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { and, asc, desc, eq, inArray, like, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -44,33 +43,9 @@ import {
   rowToDto,
 } from "./measurements.schemas";
 
-// ---------------------------------------------------------------------------
-// Validation helpers (room/floor target rules)
-// ---------------------------------------------------------------------------
-
-/**
- * Validate that a roomId points to an ACTIVE room.
- * Returns an error code string when invalid, or null when ok.
- */
-async function validateRoomTarget(
-  db: ReturnType<typeof drizzle>,
-  roomId: number,
-): Promise<"room_not_found" | "room_inactive" | null> {
-  const room = await db
-    .select({ id: rooms.id, isActive: rooms.isActive })
-    .from(rooms)
-    .where(eq(rooms.id, roomId))
-    .get();
-  if (!room) return "room_not_found";
-  if (!room.isActive) return "room_inactive";
-  return null;
-}
-
-/** Validate that a floorId references an existing floor. */
-async function floorExists(db: ReturnType<typeof drizzle>, floorId: number): Promise<boolean> {
-  const floor = await db.select({ id: floors.id }).from(floors).where(eq(floors.id, floorId)).get();
-  return Boolean(floor);
-}
+// Room/floor target validation (only ACTIVE rooms are valid) lives in the shared
+// measurement service so the HTTP and MCP create paths can't drift — see
+// `@backend/services/measurements` (validateRoomTarget / floorExists / createMeasurement).
 
 // ---------------------------------------------------------------------------
 // Router
@@ -200,40 +175,10 @@ measurementsRouter.openapi(
     const body = c.req.valid("json");
     const db = drizzle(c.env.DB);
 
-    // Only active rooms are valid targets.
-    if (typeof body.roomId === "number") {
-      const roomError = await validateRoomTarget(db, body.roomId);
-      if (roomError) return c.json({ error: roomError }, 400);
-    }
-    if (typeof body.floorId === "number" && !(await floorExists(db, body.floorId))) {
-      return c.json({ error: "floor_not_found" }, 400);
-    }
+    const result = await createMeasurement(db, body);
+    if (!result.ok) return c.json({ error: result.error }, 400);
 
-    const [created] = await db
-      .insert(measurements)
-      .values({
-        roomId: body.roomId ?? null,
-        floorId: body.floorId ?? null,
-        elementType: body.elementType,
-        label: body.label ?? null,
-        lengthFeet: body.lengthFeet ?? null,
-        lengthInches: body.lengthInches ?? null,
-        widthFeet: body.widthFeet ?? null,
-        widthInches: body.widthInches ?? null,
-        heightFeet: body.heightFeet ?? null,
-        heightInches: body.heightInches ?? null,
-        spanJson: body.span != null ? JSON.stringify(body.span) : null,
-        areaSqFt: body.areaSqFt ?? null,
-        quantity: body.quantity ?? 1,
-        source: body.source ?? "estimated",
-        isApproximate: body.isApproximate ?? true,
-        accuracyNote: body.accuracyNote ?? null,
-        notes: body.notes ?? null,
-        metadata: body.metadata != null ? JSON.stringify(body.metadata) : null,
-      })
-      .returning();
-
-    return c.json(rowToDto(created), 201);
+    return c.json(rowToDto(result.row), 201);
   },
 );
 
