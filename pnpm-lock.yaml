@@ -34,7 +34,7 @@ importers:
         specifier: ^1.4.1
         version: 1.4.1(@types/react@19.2.14)(date-fns@4.4.0)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       '@cloudflare/ai-chat':
-        specifier: ^0.7.1
+        specifier: 0.7.1
         version: 0.7.1(@ai-sdk/react@3.0.176(react@19.2.5)(zod@4.4.2))(agents@0.12.3)(ai@6.0.174(zod@4.4.2))(react@19.2.5)(zod@4.4.2)
       '@cloudflare/workers-types':
         specifier: ^4.20260503.1
@@ -118,7 +118,7 @@ importers:
         specifier: ^0.23.0
         version: 0.23.0
       agents:
-        specifier: ^0.12.3
+        specifier: 0.12.3
         version: 0.12.3(@babel/core@7.29.0)(@babel/runtime@7.29.2)(@cloudflare/ai-chat@0.7.1)(@cloudflare/workers-types@4.20260503.1)(ai@6.0.174(zod@4.4.2))(react@19.2.5)(rolldown@1.0.1)(vite@8.0.13(@types/node@24.12.2)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))(zod@4.4.2)
       ai:
         specifier: ^6.0.174

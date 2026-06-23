@@ -22,6 +22,31 @@ export const researchSessions = sqliteTable("research_sessions", {
   /** The structured research plan (markdown) */
   researchPlan: text("research_plan"),
 
+  /**
+   * Which research backend produced (or is producing) this session.
+   *   gemini  — Engine A: Google hosted Deep Research (default, existing).
+   *   cf      — Engine B: self-hosted 6-agent loop on Cloudflare Agents.
+   * Both engines emit the SAME output contract (R2 markdown + Vectorize
+   * namespace + chunk count + visualizer), so the portal is engine-agnostic.
+   */
+  engine: text("engine", { enum: ["gemini", "cf"] })
+    .notNull()
+    .default("gemini"),
+
+  /**
+   * Engine-B (CF) run configuration snapshot (JSON). Mirrors the OSS
+   * `stores/setting` shape: tone, depth, breadth (wide), parallelism,
+   * iteration cap, thinking budget, core/task model selection.
+   */
+  cfEngineConfig: text("cf_engine_config"),
+
+  /**
+   * Engine-B (CF) live loop state (JSON): current phase, per-tier task
+   * counts, QnA, report plan, findings tally, source URLs. Persisted by the
+   * DeepResearchAgent so the portal can poll progress without a WebSocket.
+   */
+  cfEngineState: text("cf_engine_state"),
+
   /** Gemini Interactions API ID for the background Deep Research task */
   interactionId: text("interaction_id"),
 

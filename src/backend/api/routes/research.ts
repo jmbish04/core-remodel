@@ -24,8 +24,14 @@ import { deleteSessionVectors, embedAndUpsertChunks } from "@backend/ai/agents/R
 import { chunkMarkdown } from "@backend/ai/agents/ResearchAgent/methods/chunk-markdown";
 import { r2MarkdownKey, r2WebappKey } from "@backend/ai/agents/ResearchAgent/types";
 import type { ResearchAgent } from "@backend/ai/agents/ResearchAgent";
+import { cfResearchRouter } from "./cf-research";
 
 export const researchRouter = new Hono<{ Bindings: Env }>();
+
+// Engine B — self-hosted Cloudflare Agents Deep Research engine.
+// Mounted here so it inherits /api/admin/research + requireAccessAuth and
+// writes into the same research_sessions table as Engine A.
+researchRouter.route("/cf-engine", cfResearchRouter);
 
 // ---------------------------------------------------------------------------
 // POST / — Create a new research session
