@@ -62,6 +62,15 @@ function errorText(err) {
     .join("\n");
 }
 
+/** True if a split statement contains only SQL comments / whitespace. */
+function isCommentOnly(s) {
+  const stripped = s
+    .replace(/\/\*[\s\S]*?\*\//g, "") // block comments
+    .replace(/^\s*--.*$/gm, "") // whole-line comments
+    .trim();
+  return stripped.length === 0;
+}
+
 console.log(`d1-migrate: applying migrations ${mode}`);
 
 // 1. Ensure the journal table exists (matches wrangler's schema; no-op if present).
@@ -100,7 +109,12 @@ for (const name of files) {
   const statements = sql
     .split(STATEMENT_BREAK)
     .map((s) => s.trim().replace(/;\s*$/, ""))
-    .filter(Boolean);
+    .filter(Boolean)
+    // Drop comment-only chunks. drizzle-kit emits a trailing `/* … */` note for
+    // some ALTERs (e.g. adding a FK column); D1 rejects a comment-only command
+    // with "SQL code did not contain a statement" [7500]. Real statements that
+    // merely contain a comment keep their SQL and are not dropped.
+    .filter((s) => !isCommentOnly(s));
 
   try {
     // Fast path: apply the whole migration in one call (keeps a fresh full apply to
