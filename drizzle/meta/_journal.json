@@ -337,6 +337,13 @@
       "when": 1782094071984,
       "tag": "0047_sharp_starjammers",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1782104725422,
+      "tag": "0048_bumpy_the_professor",
+      "breakpoints": true
     }
   ]
 }

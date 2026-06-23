@@ -2,6 +2,7 @@
  * @fileoverview OpenAPI documentation routes
  */
 
+import { MEASUREMENT_ELEMENT_TYPES, MEASUREMENT_SOURCES } from "@backend/db";
 import { swaggerUI } from "@hono/swagger-ui";
 import { apiReference } from "@scalar/hono-api-reference";
 import { Hono } from "hono";
@@ -860,6 +861,147 @@ const openApiSpec = {
           "200": {
             description: "Push sync requested",
           },
+        },
+      },
+    },
+    "/measurements": {
+      get: {
+        operationId: "listMeasurements",
+        summary: "List master measurements (filter + search)",
+        tags: ["Measurements"],
+        parameters: [
+          {
+            name: "roomId",
+            in: "query",
+            schema: { type: "integer" },
+            description: "Filter to a single room id",
+          },
+          {
+            name: "floorId",
+            in: "query",
+            schema: { type: "integer" },
+            description: "Filter to a single floor id",
+          },
+          {
+            name: "elementType",
+            in: "query",
+            schema: { type: "string" },
+            description: "Element type, or a comma-separated list of element types",
+          },
+          {
+            name: "source",
+            in: "query",
+            schema: { type: "string" },
+            description: "Source, or a comma-separated list of sources",
+          },
+          {
+            name: "q",
+            in: "query",
+            schema: { type: "string" },
+            description: "Search label / notes / accuracy note / element type",
+          },
+          { name: "limit", in: "query", schema: { type: "integer", default: 500 } },
+          { name: "offset", in: "query", schema: { type: "integer", default: 0 } },
+          {
+            name: "sort",
+            in: "query",
+            schema: {
+              type: "string",
+              enum: ["element_type", "label", "room_id", "datetime_created", "datetime_updated"],
+              default: "element_type",
+            },
+          },
+          {
+            name: "order",
+            in: "query",
+            schema: { type: "string", enum: ["asc", "desc"], default: "asc" },
+          },
+        ],
+        responses: {
+          "200": { description: "Measurement list" },
+        },
+      },
+      post: {
+        operationId: "createMeasurement",
+        summary: "Create a master measurement",
+        tags: ["Measurements"],
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["elementType"],
+                properties: {
+                  roomId: {
+                    type: "integer",
+                    nullable: true,
+                    description: "Owning room (must be active) or null for house-wide",
+                  },
+                  floorId: { type: "integer", nullable: true },
+                  elementType: { type: "string", enum: [...MEASUREMENT_ELEMENT_TYPES] },
+                  label: { type: "string", nullable: true },
+                  lengthFeet: { type: "integer", nullable: true },
+                  lengthInches: { type: "number", nullable: true },
+                  widthFeet: { type: "integer", nullable: true },
+                  widthInches: { type: "number", nullable: true },
+                  heightFeet: { type: "integer", nullable: true },
+                  heightInches: { type: "number", nullable: true },
+                  span: { type: "object", nullable: true, additionalProperties: true },
+                  areaSqFt: { type: "number", nullable: true },
+                  quantity: { type: "integer", default: 1 },
+                  source: { type: "string", enum: [...MEASUREMENT_SOURCES], default: "estimated" },
+                  isApproximate: { type: "boolean", default: true },
+                  accuracyNote: { type: "string", nullable: true },
+                  notes: { type: "string", nullable: true },
+                  metadata: { type: "object", nullable: true, additionalProperties: true },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "201": { description: "Measurement created" },
+          "400": { description: "Invalid room/floor target" },
+        },
+      },
+    },
+    "/measurements/{id}": {
+      get: {
+        operationId: "getMeasurement",
+        summary: "Get a single measurement",
+        tags: ["Measurements"],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+        responses: {
+          "200": { description: "Measurement" },
+          "404": { description: "Not found" },
+        },
+      },
+      patch: {
+        operationId: "updateMeasurement",
+        summary: "Update a measurement (partial; explicit null clears a field)",
+        tags: ["Measurements"],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: { type: "object", additionalProperties: true },
+            },
+          },
+        },
+        responses: {
+          "200": { description: "Measurement updated" },
+          "400": { description: "Invalid room/floor target" },
+          "404": { description: "Not found" },
+        },
+      },
+      delete: {
+        operationId: "deleteMeasurement",
+        summary: "Delete a measurement",
+        tags: ["Measurements"],
+        parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+        responses: {
+          "200": { description: "Measurement deleted" },
+          "404": { description: "Not found" },
         },
       },
     },

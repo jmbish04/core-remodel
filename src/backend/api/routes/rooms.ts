@@ -459,6 +459,9 @@ async function loadRoomDetail(env: Env, roomCode: string) {
       floorName: catalogRoom.floorName,
       floorId: roomFloorId,
       dimensionLabel: formatRoomDimensions(roomRecord),
+      // 0006 P1: prefer the explicit area override (computed in getHomeCatalog →
+      // computeRoomSqft) so irregular rooms (e.g. the L-shaped foyer) report true area.
+      sqft: catalogRoom.sqft,
     },
     summary: summaryRow
       ? {
