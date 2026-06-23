@@ -18,6 +18,8 @@ import { Check, ExternalLink, Loader2, MessageSquareQuote, Sparkle, X } from "lu
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 import { reviewFinding, type ReviewScope } from "./api";
@@ -61,31 +63,147 @@ function reviewChip(status: ReviewStatus): string {
   return "bg-zinc-500/10 text-zinc-400 ring-zinc-500/25";
 }
 
-export function FindingsLedger({ findings, sources = [], scope, onReviewed }: FindingsLedgerProps) {
-  // Per-finding in-flight state, keyed by finding id.
-  const [busy, setBusy] = useState<Set<number>>(new Set());
+function FindingRow({ finding: f, scope, onReviewed }: { finding: ResearchFinding; scope: ReviewScope; onReviewed: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
 
-  function markBusy(id: number, on: boolean) {
-    setBusy((cur) => {
-      const next = new Set(cur);
-      if (on) next.add(id);
-      else next.delete(id);
-      return next;
-    });
-  }
-
-  async function review(finding: ResearchFinding, status: ReviewStatus) {
-    markBusy(finding.id, true);
-    const result = await reviewFinding(scope, finding.id, status);
-    markBusy(finding.id, false);
+  async function review(status: ReviewStatus, reason?: string) {
+    setBusy(true);
+    const result = await reviewFinding(scope, f.id, status, reason?.trim() || undefined);
+    setBusy(false);
     if (!result.ok) {
       toast.error(`Review failed: ${result.error}`);
       return;
     }
+    setRejectOpen(false);
+    setRejectReason("");
     toast.success(status === "approved" ? "Finding approved." : "Finding rejected — it will steer future sweeps.");
     onReviewed();
   }
 
+  const isNew = isNewlySourced(f.timestamp);
+  const status: ReviewStatus = f.reviewStatus ?? "pending";
+
+  return (
+    <li
+      className={cn(
+        "rounded-lg p-3 ring-1 transition",
+        status === "rejected"
+          ? "bg-card/40 opacity-60 ring-border/40"
+          : "bg-card ring-border/40",
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <p
+          className={cn(
+            "min-w-0 flex-1 text-sm leading-relaxed text-foreground/90",
+            status === "rejected" && "line-through",
+          )}
+        >
+          {f.finding}
+        </p>
+        <SentimentBadge sentiment={f.sentiment} />
+      </div>
+      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+        {isNew ? (
+          <Badge variant="outline" className="border-violet-500/30 bg-violet-500/10 text-[9px] text-violet-300">
+            <Sparkle className="mr-0.5 size-2.5" /> New
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="text-[9px] text-muted-foreground">
+            Existing
+          </Badge>
+        )}
+        <span
+          className={cn(
+            "rounded-full px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider ring-1",
+            reviewChip(status),
+          )}
+        >
+          {status}
+        </span>
+        {f.findingUrl ? (
+          <a
+            href={f.findingUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1 text-[11px] text-sky-400 hover:underline"
+          >
+            <ExternalLink className="size-3" />
+            Source
+          </a>
+        ) : null}
+
+        <div className="ml-auto flex items-center gap-1.5">
+          {status !== "approved" ? (
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() => review("approved")}
+              disabled={busy}
+              className="text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
+            >
+              {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
+              Approve
+            </Button>
+          ) : null}
+          {status !== "rejected" ? (
+            <Popover
+              open={rejectOpen}
+              onOpenChange={setRejectOpen}
+            >
+              <PopoverTrigger
+                render={
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    disabled={busy}
+                    className="text-rose-400 hover:bg-rose-500/10 hover:text-rose-300"
+                  />
+                }
+              >
+                {busy ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />}
+                Reject
+              </PopoverTrigger>
+              <PopoverContent className="w-72 space-y-2 p-3" align="end">
+                <p className="text-[11px] font-medium text-foreground/80">
+                  Why is this finding wrong?
+                </p>
+                <Textarea
+                  placeholder="e.g. mis-attributed to wrong brand (optional)"
+                  className="h-20 resize-none text-xs"
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                />
+                <div className="flex justify-end gap-2">
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    onClick={() => setRejectOpen(false)}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="destructive"
+                    disabled={busy}
+                    onClick={() => review("rejected", rejectReason)}
+                  >
+                    {busy ? <Loader2 className="size-3.5 animate-spin" /> : null}
+                    Confirm reject
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+          ) : null}
+        </div>
+      </div>
+    </li>
+  );
+}
+
+export function FindingsLedger({ findings, sources = [], scope, onReviewed }: FindingsLedgerProps) {
   const isEmpty = findings.length === 0 && sources.length === 0;
   if (isEmpty) {
     return (
@@ -103,92 +221,9 @@ export function FindingsLedger({ findings, sources = [], scope, onReviewed }: Fi
             Findings · {findings.length}
           </h4>
           <ul className="space-y-2">
-            {findings.map((f) => {
-              const isNew = isNewlySourced(f.timestamp);
-              const status: ReviewStatus = f.reviewStatus ?? "pending";
-              const rowBusy = busy.has(f.id);
-              return (
-                <li
-                  key={f.id}
-                  className={cn(
-                    "rounded-lg p-3 ring-1 transition",
-                    status === "rejected"
-                      ? "bg-card/40 opacity-60 ring-border/40"
-                      : "bg-card ring-border/40",
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <p
-                      className={cn(
-                        "min-w-0 flex-1 text-sm leading-relaxed text-foreground/90",
-                        status === "rejected" && "line-through",
-                      )}
-                    >
-                      {f.finding}
-                    </p>
-                    <SentimentBadge sentiment={f.sentiment} />
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-2">
-                    {isNew ? (
-                      <Badge variant="outline" className="border-violet-500/30 bg-violet-500/10 text-[9px] text-violet-300">
-                        <Sparkle className="mr-0.5 size-2.5" /> New
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="text-[9px] text-muted-foreground">
-                        Existing
-                      </Badge>
-                    )}
-                    <span
-                      className={cn(
-                        "rounded-full px-2 py-0.5 font-mono text-[9px] uppercase tracking-wider ring-1",
-                        reviewChip(status),
-                      )}
-                    >
-                      {status}
-                    </span>
-                    {f.findingUrl ? (
-                      <a
-                        href={f.findingUrl}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-[11px] text-sky-400 hover:underline"
-                      >
-                        <ExternalLink className="size-3" />
-                        Source
-                      </a>
-                    ) : null}
-
-                    {/* Per-fact HITL controls — hidden for the state already set. */}
-                    <div className="ml-auto flex items-center gap-1.5">
-                      {status !== "approved" ? (
-                        <Button
-                          size="xs"
-                          variant="ghost"
-                          onClick={() => review(f, "approved")}
-                          disabled={rowBusy}
-                          className="text-emerald-400 hover:bg-emerald-500/10 hover:text-emerald-300"
-                        >
-                          {rowBusy ? <Loader2 className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}
-                          Approve
-                        </Button>
-                      ) : null}
-                      {status !== "rejected" ? (
-                        <Button
-                          size="xs"
-                          variant="ghost"
-                          onClick={() => review(f, "rejected")}
-                          disabled={rowBusy}
-                          className="text-rose-400 hover:bg-rose-500/10 hover:text-rose-300"
-                        >
-                          {rowBusy ? <Loader2 className="size-3.5 animate-spin" /> : <X className="size-3.5" />}
-                          Reject
-                        </Button>
-                      ) : null}
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
+            {findings.map((f) => (
+              <FindingRow key={f.id} finding={f} scope={scope} onReviewed={onReviewed} />
+            ))}
           </ul>
         </section>
       ) : null}
