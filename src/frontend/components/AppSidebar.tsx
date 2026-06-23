@@ -303,6 +303,7 @@ function SidebarLinks({
             { href: "/admin/showroom/scan", label: "Field Scan" },
             { href: "/admin/shopping-journal", label: "Shopping Journal" },
             { href: "/rooms/closets", label: "Closet Research" },
+            { href: "/admin/showroom/progress", label: "Build Progress" },
           ])}
         </>
       ) : (

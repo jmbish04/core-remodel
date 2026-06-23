@@ -70,7 +70,7 @@ export function PhaseScaffold({
 
         <CardContent>
           <h2 className="text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
-            Implementation steps
+            Tasks
           </h2>
           <ol className="mt-3 space-y-3">
             {steps.map((step, index) => (
