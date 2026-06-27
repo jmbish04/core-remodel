@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import {
   budgetTrackerItemRooms,
   budgetTrackerItems,
@@ -101,7 +101,7 @@ function formatRoomDimensions(
   return formatSide(room.widthFeet, room.widthInches);
 }
 
-async function ensureAccess(c: Parameters<typeof roomsRouter.get>[1]) {
+async function ensureAccess(c: Context<{ Bindings: Env }>) {
   const authenticated = await isRequestAuthenticated(c.req.raw, c.env);
   if (!authenticated) {
     return c.json({ error: "Unauthorized" }, 401);
@@ -256,6 +256,8 @@ async function loadRoomDetail(env: Env, roomCode: string) {
             and(
               inArray(images.id, inspirationImageIds),
               eq(images.inspirationScope, "room"),
+              eq(images.isDuplicate, false),
+              eq(images.isDeleted, false),
             ),
           )
           .orderBy(desc(images.datetimeCreated))
@@ -270,6 +272,8 @@ async function loadRoomDetail(env: Env, roomCode: string) {
             and(
               eq(images.inspirationScope, "level"),
               eq(images.scopeFloorId, roomFloorId),
+              eq(images.isDuplicate, false),
+              eq(images.isDeleted, false),
             ),
           )
           .orderBy(desc(images.datetimeCreated))
@@ -279,7 +283,13 @@ async function loadRoomDetail(env: Env, roomCode: string) {
     db
       .select()
       .from(images)
-      .where(eq(images.inspirationScope, "home"))
+      .where(
+        and(
+          eq(images.inspirationScope, "home"),
+          eq(images.isDuplicate, false),
+          eq(images.isDeleted, false),
+        ),
+      )
       .orderBy(desc(images.datetimeCreated))
       .all(),
     documentIds.length > 0
@@ -808,12 +818,27 @@ roomsRouter.post("/code/:roomCode/summary", async (c) => {
         ...detail.inspirationLevel,
         ...detail.inspirationHome,
       ],
-      supportingDocuments: detail.supportingDocuments,
+      supportingDocuments: detail.supportingDocuments.map(
+        (doc: Record<string, unknown>) => ({
+          title: doc.title as string,
+          sourceType: doc.sourceType as string,
+          description: (doc.description as string | null) ?? null,
+        }),
+      ),
       actionItems: detail.actionItems,
       scenarioPlans: detail.scenarioPlans,
       budgetItems: detail.budget.items,
       estimates: detail.estimates,
-      visionNodes: detail.visionNodes,
+      visionNodes: detail.visionNodes.map(
+        (node: Record<string, unknown>) => ({
+          title: node.title as string,
+          summary: (node.summary as string | null) ?? null,
+          status: node.status as string,
+          nodeType: node.nodeType as string,
+          estimatedCostCents:
+            (node.estimatedCostCents as number | null) ?? null,
+        }),
+      ),
       userPrompt: prompt,
       voiceTranscript,
     });

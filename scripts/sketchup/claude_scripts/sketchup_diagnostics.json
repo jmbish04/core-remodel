@@ -1,0 +1,3985 @@
+{
+  "model_name": "base_colby",
+  "export_time": "2026-06-27 05:29:10 -0700",
+  "objects": [
+    {
+      "type": "Group",
+      "path": "Door - Garage to Foyer",
+      "tag": "Interior Door",
+      "visible": true,
+      "dimensions": {
+        "width_x": 1.8,
+        "depth_y": 36.0,
+        "height_z": 80.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 80.0
+      },
+      "x_bounds": {
+        "min": 79.85,
+        "max": 81.65
+      },
+      "y_bounds": {
+        "min": 160.0,
+        "max": 196.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Door - Under-Stair",
+      "tag": "Interior Door",
+      "visible": true,
+      "dimensions": {
+        "width_x": 1.8,
+        "depth_y": 32.0,
+        "height_z": 80.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 80.0
+      },
+      "x_bounds": {
+        "min": 185.35,
+        "max": 187.15
+      },
+      "y_bounds": {
+        "min": 305.0,
+        "max": 337.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Door - Guest Bath",
+      "tag": "Interior Door",
+      "visible": true,
+      "dimensions": {
+        "width_x": 1.8,
+        "depth_y": 32.0,
+        "height_z": 80.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 80.0
+      },
+      "x_bounds": {
+        "min": 185.35,
+        "max": 187.15
+      },
+      "y_bounds": {
+        "min": 360.0,
+        "max": 392.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Door - Guest Bed",
+      "tag": "Interior Door",
+      "visible": true,
+      "dimensions": {
+        "width_x": 32.0,
+        "depth_y": 1.8,
+        "height_z": 80.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 80.0
+      },
+      "x_bounds": {
+        "min": 150.0,
+        "max": 182.0
+      },
+      "y_bounds": {
+        "min": 445.35,
+        "max": 447.15
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Door - Closet (Double)",
+      "tag": "Interior Door",
+      "visible": true,
+      "dimensions": {
+        "width_x": 72.0,
+        "depth_y": 1.8,
+        "height_z": 80.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 80.0
+      },
+      "x_bounds": {
+        "min": 210.0,
+        "max": 282.0
+      },
+      "y_bounds": {
+        "min": 445.35,
+        "max": 447.15
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Pivot Front Door",
+      "tag": "Front door",
+      "visible": true,
+      "dimensions": {
+        "width_x": 43.0,
+        "depth_y": 2.5,
+        "height_z": 115.5
+      },
+      "z_bounds": {
+        "min": 0.5,
+        "max": 116.0
+      },
+      "x_bounds": {
+        "min": 21.5,
+        "max": 64.5
+      },
+      "y_bounds": {
+        "min": 61.0,
+        "max": 63.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Slider - Family",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 72.0,
+        "depth_y": 2.0,
+        "height_z": 94.0
+      },
+      "z_bounds": {
+        "min": 1.0,
+        "max": 95.0
+      },
+      "x_bounds": {
+        "min": 38.75,
+        "max": 110.75
+      },
+      "y_bounds": {
+        "min": 583.0,
+        "max": 585.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Slider - Bedroom",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 72.0,
+        "depth_y": 2.0,
+        "height_z": 94.0
+      },
+      "z_bounds": {
+        "min": 1.0,
+        "max": 95.0
+      },
+      "x_bounds": {
+        "min": 184.5,
+        "max": 256.5
+      },
+      "y_bounds": {
+        "min": 583.0,
+        "max": 585.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Garage Door Panel",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 194.4,
+        "depth_y": 0.85,
+        "height_z": 104.0
+      },
+      "z_bounds": {
+        "min": 1.0,
+        "max": 105.0
+      },
+      "x_bounds": {
+        "min": 90.0,
+        "max": 284.4
+      },
+      "y_bounds": {
+        "min": 0.65,
+        "max": 1.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Master Structure",
+      "tag": "Master Structure",
+      "visible": true,
+      "dimensions": {
+        "width_x": 289.54,
+        "depth_y": 588.0,
+        "height_z": 216.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 6.5,
+        "max": 296.04
+      },
+      "y_bounds": {
+        "min": 0.0,
+        "max": 588.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Master Structure > Front Garage Exterior",
+      "tag": "Front Garage Exterior",
+      "visible": true,
+      "dimensions": {
+        "width_x": 217.54,
+        "depth_y": 6.5,
+        "height_z": 112.8
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 112.8
+      },
+      "x_bounds": {
+        "min": 78.5,
+        "max": 296.04
+      },
+      "y_bounds": {
+        "min": 0.0,
+        "max": 6.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Master Structure > Stairs 1 / HVAC Divider (North)",
+      "tag": "Stairs 1 / HVAC Divider (North)",
+      "visible": true,
+      "dimensions": {
+        "width_x": 135.0,
+        "depth_y": 4.5,
+        "height_z": 108.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 108.0
+      },
+      "x_bounds": {
+        "min": 158.5,
+        "max": 293.5
+      },
+      "y_bounds": {
+        "min": 262.5,
+        "max": 267.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Master Structure > Bath / Stair Divider",
+      "tag": "Bath / Stair Divider",
+      "visible": true,
+      "dimensions": {
+        "width_x": 109.5,
+        "depth_y": 4.5,
+        "height_z": 216.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 184.0,
+        "max": 293.5
+      },
+      "y_bounds": {
+        "min": 345.0,
+        "max": 349.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Master Structure > Bath West (Hallway)",
+      "tag": "Bath West (Hallway)",
+      "visible": true,
+      "dimensions": {
+        "width_x": 4.5,
+        "depth_y": 66.5,
+        "height_z": 96.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 96.0
+      },
+      "x_bounds": {
+        "min": 184.0,
+        "max": 188.5
+      },
+      "y_bounds": {
+        "min": 349.5,
+        "max": 416.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Master Structure > Bath / Closet Divider",
+      "tag": "Bath / Closet Divider",
+      "visible": true,
+      "dimensions": {
+        "width_x": 109.5,
+        "depth_y": 4.5,
+        "height_z": 96.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 96.0
+      },
+      "x_bounds": {
+        "min": 184.0,
+        "max": 293.5
+      },
+      "y_bounds": {
+        "min": 416.0,
+        "max": 420.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Master Structure > Closet West (Hallway Return)",
+      "tag": "Closet West (Hallway Return)",
+      "visible": true,
+      "dimensions": {
+        "width_x": 4.5,
+        "depth_y": 23.5,
+        "height_z": 96.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 96.0
+      },
+      "x_bounds": {
+        "min": 184.0,
+        "max": 188.5
+      },
+      "y_bounds": {
+        "min": 420.5,
+        "max": 444.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Master Structure > Guest Bed Closet Front",
+      "tag": "Guest Bed Closet Front",
+      "visible": true,
+      "dimensions": {
+        "width_x": 109.5,
+        "depth_y": 4.5,
+        "height_z": 96.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 96.0
+      },
+      "x_bounds": {
+        "min": 184.0,
+        "max": 293.5
+      },
+      "y_bounds": {
+        "min": 444.0,
+        "max": 448.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Master Structure > Family / Guest Bed Divider",
+      "tag": "Family / Guest Bed Divider",
+      "visible": true,
+      "dimensions": {
+        "width_x": 4.5,
+        "depth_y": 133.0,
+        "height_z": 96.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 96.0
+      },
+      "x_bounds": {
+        "min": 143.0,
+        "max": 147.5
+      },
+      "y_bounds": {
+        "min": 448.5,
+        "max": 581.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Master Structure > Porch Front Wall (Gate Infill)",
+      "tag": "Porch Front Wall (Gate Infill)",
+      "visible": true,
+      "dimensions": {
+        "width_x": 30.0,
+        "depth_y": 4.5,
+        "height_z": 107.95
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 107.95
+      },
+      "x_bounds": {
+        "min": 6.5,
+        "max": 36.5
+      },
+      "y_bounds": {
+        "min": 0.0,
+        "max": 4.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Master Structure > Guest Bed Entrance Wall",
+      "tag": "Guest Bed Entrance Wall",
+      "visible": true,
+      "dimensions": {
+        "width_x": 45.5,
+        "depth_y": 4.5,
+        "height_z": 96.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 96.0
+      },
+      "x_bounds": {
+        "min": 143.0,
+        "max": 188.5
+      },
+      "y_bounds": {
+        "min": 444.0,
+        "max": 448.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Master Structure > Foyer / Garage Divider (Main)",
+      "tag": "Foyer / Garage Divider (Main)",
+      "visible": true,
+      "dimensions": {
+        "width_x": 4.5,
+        "depth_y": 226.11,
+        "height_z": 108.04
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 108.04
+      },
+      "x_bounds": {
+        "min": 78.5,
+        "max": 83.0
+      },
+      "y_bounds": {
+        "min": 2.24,
+        "max": 228.35
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Master Structure > Foyer / HVAC Divider (West)",
+      "tag": "Foyer / HVAC Divider (West)",
+      "visible": true,
+      "dimensions": {
+        "width_x": 4.5,
+        "depth_y": 24.0,
+        "height_z": 108.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 108.0
+      },
+      "x_bounds": {
+        "min": 154.0,
+        "max": 158.5
+      },
+      "y_bounds": {
+        "min": 243.0,
+        "max": 267.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Master Structure > Foyer Red Wall (Sloped Pony Wall)",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 70.5,
+        "depth_y": 4.5,
+        "height_z": 162.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 162.0
+      },
+      "x_bounds": {
+        "min": 185.1,
+        "max": 255.6
+      },
+      "y_bounds": {
+        "min": 298.0,
+        "max": 302.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Master Structure > Foyer Red Wall (Hallway 108)",
+      "tag": "Foyer Red Wall (Hallway 108)",
+      "visible": true,
+      "dimensions": {
+        "width_x": 85.7,
+        "depth_y": 4.5,
+        "height_z": 108.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 108.0
+      },
+      "x_bounds": {
+        "min": 72.8,
+        "max": 158.5
+      },
+      "y_bounds": {
+        "min": 228.6,
+        "max": 233.1
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Master Structure > Foyer Red Wall (Hallway 108)",
+      "tag": "Foyer Red Wall (Hallway 108)",
+      "visible": true,
+      "dimensions": {
+        "width_x": 106.6,
+        "depth_y": 4.5,
+        "height_z": 108.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 108.0
+      },
+      "x_bounds": {
+        "min": 78.5,
+        "max": 185.1
+      },
+      "y_bounds": {
+        "min": 298.0,
+        "max": 302.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Staircase",
+      "tag": "Stairs - Lower Level",
+      "visible": false,
+      "dimensions": {
+        "width_x": 120.0,
+        "depth_y": 78.0,
+        "height_z": 112.5
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 112.5
+      },
+      "x_bounds": {
+        "min": 173.5,
+        "max": 293.5
+      },
+      "y_bounds": {
+        "min": 267.0,
+        "max": 345.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Modern Gate",
+      "tag": "security gate",
+      "visible": true,
+      "dimensions": {
+        "width_x": 42.0,
+        "depth_y": 2.7,
+        "height_z": 112.82
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 112.82
+      },
+      "x_bounds": {
+        "min": 36.5,
+        "max": 78.5
+      },
+      "y_bounds": {
+        "min": 0.3,
+        "max": 3.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Modern Gate > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 42.0,
+        "depth_y": 2.7,
+        "height_z": 112.82
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 112.82
+      },
+      "x_bounds": {
+        "min": 36.5,
+        "max": 78.5
+      },
+      "y_bounds": {
+        "min": 0.3,
+        "max": 3.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Modern Gate > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 36.0,
+        "depth_y": 1.6,
+        "height_z": 103.82
+      },
+      "z_bounds": {
+        "min": 6.0,
+        "max": 109.82
+      },
+      "x_bounds": {
+        "min": 39.5,
+        "max": 75.5
+      },
+      "y_bounds": {
+        "min": 1.2,
+        "max": 2.8
+      }
+    },
+    {
+      "type": "Group",
+      "path": "House Numbers 126",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 10.03,
+        "depth_y": 1.0,
+        "height_z": 4.84
+      },
+      "z_bounds": {
+        "min": 46.92,
+        "max": 51.76
+      },
+      "x_bounds": {
+        "min": 12.0,
+        "max": 22.03
+      },
+      "y_bounds": {
+        "min": -1.0,
+        "max": 0.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "MEP - Plumbing",
+      "tag": "Plumbing - Sewer & Waste",
+      "visible": true,
+      "dimensions": {
+        "width_x": 209.26,
+        "depth_y": 708.0,
+        "height_z": 144.49
+      },
+      "z_bounds": {
+        "min": -24.0,
+        "max": 120.49
+      },
+      "x_bounds": {
+        "min": 67.24,
+        "max": 276.5
+      },
+      "y_bounds": {
+        "min": -120.0,
+        "max": 588.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "MEP - Plumbing > Main Sewer Stack (4in)",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 4.0,
+        "depth_y": 4.0,
+        "height_z": 132.0
+      },
+      "z_bounds": {
+        "min": -24.0,
+        "max": 108.0
+      },
+      "x_bounds": {
+        "min": 199.0,
+        "max": 203.0
+      },
+      "y_bounds": {
+        "min": 416.0,
+        "max": 420.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "MEP - Plumbing > Under-Slab Drain (4in)",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 4.0,
+        "depth_y": 708.0,
+        "height_z": 4.0
+      },
+      "z_bounds": {
+        "min": -14.0,
+        "max": -10.0
+      },
+      "x_bounds": {
+        "min": 118.0,
+        "max": 122.0
+      },
+      "y_bounds": {
+        "min": -120.0,
+        "max": 588.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "MEP - Plumbing > Lower Bath Drains",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 78.25,
+        "depth_y": 37.69,
+        "height_z": 48.0
+      },
+      "z_bounds": {
+        "min": -14.0,
+        "max": 34.0
+      },
+      "x_bounds": {
+        "min": 198.25,
+        "max": 276.5
+      },
+      "y_bounds": {
+        "min": 381.75,
+        "max": 419.44
+      }
+    },
+    {
+      "type": "Group",
+      "path": "MEP - Plumbing > Upper Bath Drains (plenum)",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 89.0,
+        "depth_y": 66.5,
+        "height_z": 17.5
+      },
+      "z_bounds": {
+        "min": 98.5,
+        "max": 116.0
+      },
+      "x_bounds": {
+        "min": 187.5,
+        "max": 276.5
+      },
+      "y_bounds": {
+        "min": 381.75,
+        "max": 448.25
+      }
+    },
+    {
+      "type": "Group",
+      "path": "MEP - Plumbing > Hall Bath Run (existing, sloped)",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 143.07,
+        "depth_y": 75.72,
+        "height_z": 24.68
+      },
+      "z_bounds": {
+        "min": 95.81,
+        "max": 120.49
+      },
+      "x_bounds": {
+        "min": 67.24,
+        "max": 210.32
+      },
+      "y_bounds": {
+        "min": 391.6,
+        "max": 467.32
+      }
+    },
+    {
+      "type": "Group",
+      "path": "MEP - Plumbing > Sewer Lateral to Stack",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 81.0,
+        "depth_y": 4.0,
+        "height_z": 4.0
+      },
+      "z_bounds": {
+        "min": -14.0,
+        "max": -10.0
+      },
+      "x_bounds": {
+        "min": 120.0,
+        "max": 201.0
+      },
+      "y_bounds": {
+        "min": 416.0,
+        "max": 420.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Bath Fixtures",
+      "tag": "Bath Fixtures",
+      "visible": true,
+      "dimensions": {
+        "width_x": 110.0,
+        "depth_y": 140.0,
+        "height_z": 150.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 150.0
+      },
+      "x_bounds": {
+        "min": 183.5,
+        "max": 293.5
+      },
+      "y_bounds": {
+        "min": 345.0,
+        "max": 485.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Hot Lines",
+      "tag": "Plumbing - Hot Water",
+      "visible": true,
+      "dimensions": {
+        "width_x": 222.2,
+        "depth_y": 231.89,
+        "height_z": 118.31
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 118.31
+      },
+      "x_bounds": {
+        "min": 69.9,
+        "max": 292.1
+      },
+      "y_bounds": {
+        "min": 235.1,
+        "max": 466.99
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Hot Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 1.0,
+        "depth_y": 1.0,
+        "height_z": 92.7
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 92.7
+      },
+      "x_bounds": {
+        "min": 214.8,
+        "max": 215.8
+      },
+      "y_bounds": {
+        "min": 260.0,
+        "max": 261.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Hot Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 72.8,
+        "depth_y": 1.0,
+        "height_z": 1.0
+      },
+      "z_bounds": {
+        "min": 92.2,
+        "max": 93.2
+      },
+      "x_bounds": {
+        "min": 215.3,
+        "max": 288.1
+      },
+      "y_bounds": {
+        "min": 260.0,
+        "max": 261.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Hot Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 3.1,
+        "depth_y": 93.63,
+        "height_z": 3.0
+      },
+      "z_bounds": {
+        "min": 92.2,
+        "max": 95.2
+      },
+      "x_bounds": {
+        "min": 287.6,
+        "max": 290.7
+      },
+      "y_bounds": {
+        "min": 260.48,
+        "max": 354.12
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Hot Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 2.3,
+        "depth_y": 54.73,
+        "height_z": 2.1
+      },
+      "z_bounds": {
+        "min": 94.2,
+        "max": 96.3
+      },
+      "x_bounds": {
+        "min": 289.7,
+        "max": 292.0
+      },
+      "y_bounds": {
+        "min": 354.08,
+        "max": 408.82
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Hot Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 106.21,
+        "depth_y": 1.7,
+        "height_z": 2.3
+      },
+      "z_bounds": {
+        "min": 94.2,
+        "max": 96.5
+      },
+      "x_bounds": {
+        "min": 183.99,
+        "max": 290.21
+      },
+      "y_bounds": {
+        "min": 353.6,
+        "max": 355.3
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Hot Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 1.1,
+        "depth_y": 7.23,
+        "height_z": 1.2
+      },
+      "z_bounds": {
+        "min": 95.3,
+        "max": 96.5
+      },
+      "x_bounds": {
+        "min": 291.0,
+        "max": 292.1
+      },
+      "y_bounds": {
+        "min": 408.78,
+        "max": 416.02
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Hot Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 40.4,
+        "depth_y": 1.0,
+        "height_z": 1.0
+      },
+      "z_bounds": {
+        "min": 95.5,
+        "max": 96.5
+      },
+      "x_bounds": {
+        "min": 251.2,
+        "max": 291.6
+      },
+      "y_bounds": {
+        "min": 415.5,
+        "max": 416.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Hot Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 2.27,
+        "depth_y": 5.47,
+        "height_z": 71.37
+      },
+      "z_bounds": {
+        "min": 24.67,
+        "max": 96.03
+      },
+      "x_bounds": {
+        "min": 289.81,
+        "max": 292.09
+      },
+      "y_bounds": {
+        "min": 415.52,
+        "max": 420.98
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Hot Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 41.0,
+        "depth_y": 1.0,
+        "height_z": 1.0
+      },
+      "z_bounds": {
+        "min": 24.2,
+        "max": 25.2
+      },
+      "x_bounds": {
+        "min": 249.3,
+        "max": 290.3
+      },
+      "y_bounds": {
+        "min": 420.0,
+        "max": 421.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Hot Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 50.4,
+        "depth_y": 1.0,
+        "height_z": 1.0
+      },
+      "z_bounds": {
+        "min": 24.2,
+        "max": 25.2
+      },
+      "x_bounds": {
+        "min": 198.9,
+        "max": 249.3
+      },
+      "y_bounds": {
+        "min": 420.0,
+        "max": 421.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Hot Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 103.61,
+        "depth_y": 2.0,
+        "height_z": 1.2
+      },
+      "z_bounds": {
+        "min": 95.3,
+        "max": 96.5
+      },
+      "x_bounds": {
+        "min": 187.9,
+        "max": 291.5
+      },
+      "y_bounds": {
+        "min": 407.3,
+        "max": 409.3
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Hot Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 2.7,
+        "depth_y": 24.27,
+        "height_z": 1.0
+      },
+      "z_bounds": {
+        "min": 95.5,
+        "max": 96.5
+      },
+      "x_bounds": {
+        "min": 185.7,
+        "max": 188.4
+      },
+      "y_bounds": {
+        "min": 407.76,
+        "max": 432.04
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Hot Lines > Unnamed Group",
+      "tag": "AI - Fix Plumbing",
+      "visible": true,
+      "dimensions": {
+        "width_x": 7.55,
+        "depth_y": 16.62,
+        "height_z": 22.61
+      },
+      "z_bounds": {
+        "min": 95.69,
+        "max": 118.31
+      },
+      "x_bounds": {
+        "min": 185.72,
+        "max": 193.28
+      },
+      "y_bounds": {
+        "min": 431.59,
+        "max": 448.21
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Hot Lines > Hot Water Header",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 21.8,
+        "depth_y": 21.8,
+        "height_z": 54.0
+      },
+      "z_bounds": {
+        "min": 0.0,
+        "max": 54.0
+      },
+      "x_bounds": {
+        "min": 205.1,
+        "max": 226.9
+      },
+      "y_bounds": {
+        "min": 235.1,
+        "max": 256.9
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Hot Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 66.57,
+        "depth_y": 26.93,
+        "height_z": 8.0
+      },
+      "z_bounds": {
+        "min": 95.5,
+        "max": 103.5
+      },
+      "x_bounds": {
+        "min": 119.82,
+        "max": 186.38
+      },
+      "y_bounds": {
+        "min": 431.53,
+        "max": 458.47
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Hot Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 50.19,
+        "depth_y": 9.49,
+        "height_z": 6.0
+      },
+      "z_bounds": {
+        "min": 102.5,
+        "max": 108.5
+      },
+      "x_bounds": {
+        "min": 69.9,
+        "max": 120.1
+      },
+      "y_bounds": {
+        "min": 457.51,
+        "max": 466.99
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Hot Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 52.57,
+        "depth_y": 4.8,
+        "height_z": 1.0
+      },
+      "z_bounds": {
+        "min": 95.5,
+        "max": 96.5
+      },
+      "x_bounds": {
+        "min": 131.46,
+        "max": 184.04
+      },
+      "y_bounds": {
+        "min": 350.5,
+        "max": 355.3
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Hot Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 2.4,
+        "depth_y": 2.4,
+        "height_z": 1.4
+      },
+      "z_bounds": {
+        "min": 95.4,
+        "max": 96.8
+      },
+      "x_bounds": {
+        "min": 130.3,
+        "max": 132.7
+      },
+      "y_bounds": {
+        "min": 349.8,
+        "max": 352.2
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Cold Lines",
+      "tag": "Plumbing - Cold Water",
+      "visible": true,
+      "dimensions": {
+        "width_x": 139.05,
+        "depth_y": 576.19,
+        "height_z": 101.81
+      },
+      "z_bounds": {
+        "min": 25.11,
+        "max": 126.91
+      },
+      "x_bounds": {
+        "min": 66.38,
+        "max": 205.43
+      },
+      "y_bounds": {
+        "min": 12.3,
+        "max": 588.49
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Cold Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 1.0,
+        "depth_y": 4.0,
+        "height_z": 67.74
+      },
+      "z_bounds": {
+        "min": 28.28,
+        "max": 96.02
+      },
+      "x_bounds": {
+        "min": 82.5,
+        "max": 83.5
+      },
+      "y_bounds": {
+        "min": 12.3,
+        "max": 16.3
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Cold Lines > Unnamed Group",
+      "tag": "AI - Conceal in ceiling",
+      "visible": true,
+      "dimensions": {
+        "width_x": 20.8,
+        "depth_y": 209.81,
+        "height_z": 13.0
+      },
+      "z_bounds": {
+        "min": 95.5,
+        "max": 108.5
+      },
+      "x_bounds": {
+        "min": 82.5,
+        "max": 103.3
+      },
+      "y_bounds": {
+        "min": 15.75,
+        "max": 225.55
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Cold Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 19.66,
+        "depth_y": 16.91,
+        "height_z": 31.23
+      },
+      "z_bounds": {
+        "min": 95.69,
+        "max": 126.91
+      },
+      "x_bounds": {
+        "min": 185.77,
+        "max": 205.43
+      },
+      "y_bounds": {
+        "min": 415.54,
+        "max": 432.46
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Cold Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 43.9,
+        "depth_y": 42.72,
+        "height_z": 1.0
+      },
+      "z_bounds": {
+        "min": 95.5,
+        "max": 96.5
+      },
+      "x_bounds": {
+        "min": 142.65,
+        "max": 186.55
+      },
+      "y_bounds": {
+        "min": 431.64,
+        "max": 474.36
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Cold Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 1.0,
+        "depth_y": 109.1,
+        "height_z": 1.0
+      },
+      "z_bounds": {
+        "min": 95.5,
+        "max": 96.5
+      },
+      "x_bounds": {
+        "min": 142.5,
+        "max": 143.5
+      },
+      "y_bounds": {
+        "min": 474.0,
+        "max": 583.1
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Cold Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 13.28,
+        "depth_y": 5.89,
+        "height_z": 70.98
+      },
+      "z_bounds": {
+        "min": 25.11,
+        "max": 96.09
+      },
+      "x_bounds": {
+        "min": 130.21,
+        "max": 143.49
+      },
+      "y_bounds": {
+        "min": 582.61,
+        "max": 588.49
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Cold Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 28.14,
+        "depth_y": 74.84,
+        "height_z": 8.99
+      },
+      "z_bounds": {
+        "min": 99.5,
+        "max": 108.5
+      },
+      "x_bounds": {
+        "min": 102.33,
+        "max": 130.47
+      },
+      "y_bounds": {
+        "min": 225.33,
+        "max": 300.17
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Cold Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 1.0,
+        "depth_y": 51.08,
+        "height_z": 5.0
+      },
+      "z_bounds": {
+        "min": 95.5,
+        "max": 100.5
+      },
+      "x_bounds": {
+        "min": 129.5,
+        "max": 130.5
+      },
+      "y_bounds": {
+        "min": 299.96,
+        "max": 351.04
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Cold Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 43.13,
+        "depth_y": 5.0,
+        "height_z": 5.0
+      },
+      "z_bounds": {
+        "min": 95.5,
+        "max": 100.5
+      },
+      "x_bounds": {
+        "min": 99.94,
+        "max": 143.06
+      },
+      "y_bounds": {
+        "min": 469.5,
+        "max": 474.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Cold Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 33.74,
+        "depth_y": 6.98,
+        "height_z": 6.98
+      },
+      "z_bounds": {
+        "min": 99.51,
+        "max": 106.49
+      },
+      "x_bounds": {
+        "min": 66.38,
+        "max": 100.12
+      },
+      "y_bounds": {
+        "min": 463.51,
+        "max": 470.49
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Water - Cold Lines > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 2.4,
+        "depth_y": 2.4,
+        "height_z": 1.4
+      },
+      "z_bounds": {
+        "min": 95.4,
+        "max": 96.8
+      },
+      "x_bounds": {
+        "min": 128.8,
+        "max": 131.2
+      },
+      "y_bounds": {
+        "min": 349.8,
+        "max": 352.2
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Plumbing Fixtures & Blanks",
+      "tag": "Plumbing - Cold Water",
+      "visible": true,
+      "dimensions": {
+        "width_x": 54.0,
+        "depth_y": 581.0,
+        "height_z": 40.0
+      },
+      "z_bounds": {
+        "min": 18.0,
+        "max": 58.0
+      },
+      "x_bounds": {
+        "min": 80.0,
+        "max": 134.0
+      },
+      "y_bounds": {
+        "min": 11.0,
+        "max": 592.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Blank - Red Wall (Sewer+Hot+Cold)",
+      "tag": "Plumbing - Sewer & Waste",
+      "visible": true,
+      "dimensions": {
+        "width_x": 6.0,
+        "depth_y": 6.0,
+        "height_z": 8.0
+      },
+      "z_bounds": {
+        "min": -2.0,
+        "max": 6.0
+      },
+      "x_bounds": {
+        "min": 127.0,
+        "max": 133.0
+      },
+      "y_bounds": {
+        "min": 348.0,
+        "max": 354.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Note - H/C Capped",
+      "tag": "Plumbing - Cold Water",
+      "visible": true,
+      "dimensions": {
+        "width_x": 71.8,
+        "depth_y": 4.15,
+        "height_z": 0.4
+      },
+      "z_bounds": {
+        "min": 97.0,
+        "max": 97.4
+      },
+      "x_bounds": {
+        "min": 96.0,
+        "max": 167.8
+      },
+      "y_bounds": {
+        "min": 342.07,
+        "max": 346.22
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Wishlist - Hot to Patio Bib",
+      "tag": "Wishlist",
+      "visible": true,
+      "dimensions": {
+        "width_x": 14.0,
+        "depth_y": 130.57,
+        "height_z": 81.51
+      },
+      "z_bounds": {
+        "min": 21.99,
+        "max": 103.5
+      },
+      "x_bounds": {
+        "min": 119.5,
+        "max": 133.5
+      },
+      "y_bounds": {
+        "min": 457.93,
+        "max": 588.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Wishlist - Hot to Patio Bib > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 13.99,
+        "depth_y": 102.14,
+        "height_z": 8.0
+      },
+      "z_bounds": {
+        "min": 95.5,
+        "max": 103.5
+      },
+      "x_bounds": {
+        "min": 119.5,
+        "max": 133.5
+      },
+      "y_bounds": {
+        "min": 457.93,
+        "max": 560.07
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Wishlist - Hot to Patio Bib > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 1.0,
+        "depth_y": 28.21,
+        "height_z": 6.98
+      },
+      "z_bounds": {
+        "min": 89.51,
+        "max": 96.49
+      },
+      "x_bounds": {
+        "min": 132.5,
+        "max": 133.5
+      },
+      "y_bounds": {
+        "min": 559.9,
+        "max": 588.1
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Wishlist - Hot to Patio Bib > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 3.0,
+        "depth_y": 1.0,
+        "height_z": 68.03
+      },
+      "z_bounds": {
+        "min": 21.99,
+        "max": 90.01
+      },
+      "x_bounds": {
+        "min": 130.5,
+        "max": 133.5
+      },
+      "y_bounds": {
+        "min": 587.5,
+        "max": 588.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Site - Irrigation Line",
+      "tag": "Site - Irrigation",
+      "visible": true,
+      "dimensions": {
+        "width_x": 1.5,
+        "depth_y": 144.78,
+        "height_z": 52.75
+      },
+      "z_bounds": {
+        "min": -30.0,
+        "max": 22.75
+      },
+      "x_bounds": {
+        "min": 130.25,
+        "max": 131.75
+      },
+      "y_bounds": {
+        "min": 587.97,
+        "max": 732.75
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Site - Irrigation Line > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 1.5,
+        "depth_y": 52.06,
+        "height_z": 3.5
+      },
+      "z_bounds": {
+        "min": 19.25,
+        "max": 22.75
+      },
+      "x_bounds": {
+        "min": 130.25,
+        "max": 131.75
+      },
+      "y_bounds": {
+        "min": 587.97,
+        "max": 640.03
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Site - Irrigation Line > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 1.5,
+        "depth_y": 92.07,
+        "height_z": 5.5
+      },
+      "z_bounds": {
+        "min": 15.25,
+        "max": 20.75
+      },
+      "x_bounds": {
+        "min": 130.25,
+        "max": 131.75
+      },
+      "y_bounds": {
+        "min": 639.97,
+        "max": 732.03
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Site - Irrigation Line > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 1.5,
+        "depth_y": 1.5,
+        "height_z": 46.0
+      },
+      "z_bounds": {
+        "min": -30.0,
+        "max": 16.0
+      },
+      "x_bounds": {
+        "min": 130.25,
+        "max": 131.75
+      },
+      "y_bounds": {
+        "min": 731.25,
+        "max": 732.75
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Site - Electrical Line",
+      "tag": "Site - Electrical",
+      "visible": true,
+      "dimensions": {
+        "width_x": 1.5,
+        "depth_y": 147.78,
+        "height_z": 72.75
+      },
+      "z_bounds": {
+        "min": -30.0,
+        "max": 42.75
+      },
+      "x_bounds": {
+        "min": 184.25,
+        "max": 185.75
+      },
+      "y_bounds": {
+        "min": 584.97,
+        "max": 732.75
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Site - Electrical Line > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 1.5,
+        "depth_y": 55.05,
+        "height_z": 3.5
+      },
+      "z_bounds": {
+        "min": 39.25,
+        "max": 42.75
+      },
+      "x_bounds": {
+        "min": 184.25,
+        "max": 185.75
+      },
+      "y_bounds": {
+        "min": 584.97,
+        "max": 640.03
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Site - Electrical Line > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 1.5,
+        "depth_y": 92.03,
+        "height_z": 3.5
+      },
+      "z_bounds": {
+        "min": 37.25,
+        "max": 40.75
+      },
+      "x_bounds": {
+        "min": 184.25,
+        "max": 185.75
+      },
+      "y_bounds": {
+        "min": 639.98,
+        "max": 732.02
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Site - Electrical Line > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 1.5,
+        "depth_y": 1.5,
+        "height_z": 68.0
+      },
+      "z_bounds": {
+        "min": -30.0,
+        "max": 38.0
+      },
+      "x_bounds": {
+        "min": 184.25,
+        "max": 185.75
+      },
+      "y_bounds": {
+        "min": 731.25,
+        "max": 732.75
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Electrical - Panels",
+      "tag": "Electrical - Panels",
+      "visible": true,
+      "dimensions": {
+        "width_x": 3.0,
+        "depth_y": 102.0,
+        "height_z": 30.0
+      },
+      "z_bounds": {
+        "min": 36.0,
+        "max": 66.0
+      },
+      "x_bounds": {
+        "min": 83.0,
+        "max": 86.0
+      },
+      "y_bounds": {
+        "min": 20.0,
+        "max": 122.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Electrical - Panels > Main Sub Panel",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 3.0,
+        "depth_y": 14.0,
+        "height_z": 30.0
+      },
+      "z_bounds": {
+        "min": 36.0,
+        "max": 66.0
+      },
+      "x_bounds": {
+        "min": 83.0,
+        "max": 86.0
+      },
+      "y_bounds": {
+        "min": 20.0,
+        "max": 34.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Electrical - Panels > Circuit Breaker",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 3.0,
+        "depth_y": 14.0,
+        "height_z": 30.0
+      },
+      "z_bounds": {
+        "min": 36.0,
+        "max": 66.0
+      },
+      "x_bounds": {
+        "min": 83.0,
+        "max": 86.0
+      },
+      "y_bounds": {
+        "min": 64.0,
+        "max": 78.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Electrical - Panels > Solar Battery TDS",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 3.0,
+        "depth_y": 14.0,
+        "height_z": 30.0
+      },
+      "z_bounds": {
+        "min": 36.0,
+        "max": 66.0
+      },
+      "x_bounds": {
+        "min": 83.0,
+        "max": 86.0
+      },
+      "y_bounds": {
+        "min": 108.0,
+        "max": 122.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "lbl: MAIN SUB PANEL",
+      "tag": "Electrical - Panels",
+      "visible": true,
+      "dimensions": {
+        "width_x": 27.44,
+        "depth_y": 2.45,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 68.0,
+        "max": 68.3
+      },
+      "x_bounds": {
+        "min": 88.0,
+        "max": 115.44
+      },
+      "y_bounds": {
+        "min": 15.96,
+        "max": 18.41
+      }
+    },
+    {
+      "type": "Group",
+      "path": "lbl: CIRCUIT BREAKER",
+      "tag": "Electrical - Panels",
+      "visible": true,
+      "dimensions": {
+        "width_x": 29.99,
+        "depth_y": 2.45,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 68.0,
+        "max": 68.3
+      },
+      "x_bounds": {
+        "min": 88.0,
+        "max": 117.99
+      },
+      "y_bounds": {
+        "min": 59.96,
+        "max": 62.41
+      }
+    },
+    {
+      "type": "Group",
+      "path": "lbl: SOLAR BATTERY TDS",
+      "tag": "Electrical - Panels",
+      "visible": true,
+      "dimensions": {
+        "width_x": 34.67,
+        "depth_y": 2.45,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 68.0,
+        "max": 68.3
+      },
+      "x_bounds": {
+        "min": 88.0,
+        "max": 122.67
+      },
+      "y_bounds": {
+        "min": 103.96,
+        "max": 106.41
+      }
+    },
+    {
+      "type": "Group",
+      "path": "New Kitchen Appliances (est)",
+      "tag": "Appliances",
+      "visible": true,
+      "dimensions": {
+        "width_x": 24.0,
+        "depth_y": 30.0,
+        "height_z": 50.0
+      },
+      "z_bounds": {
+        "min": 150.0,
+        "max": 200.0
+      },
+      "x_bounds": {
+        "min": 267.0,
+        "max": 291.0
+      },
+      "y_bounds": {
+        "min": 66.0,
+        "max": 96.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Elec - Induction Cooktop 240V",
+      "tag": "Electrical - Appliances",
+      "visible": true,
+      "dimensions": {
+        "width_x": 1.2,
+        "depth_y": 1.2,
+        "height_z": 34.0
+      },
+      "z_bounds": {
+        "min": 116.0,
+        "max": 150.0
+      },
+      "x_bounds": {
+        "min": 278.4,
+        "max": 279.6
+      },
+      "y_bounds": {
+        "min": 80.4,
+        "max": 81.6
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard Labels",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 239.19,
+        "depth_y": 703.77,
+        "height_z": 180.3
+      },
+      "z_bounds": {
+        "min": 1.0,
+        "max": 181.3
+      },
+      "x_bounds": {
+        "min": 40.0,
+        "max": 279.19
+      },
+      "y_bounds": {
+        "min": 599.88,
+        "max": 1303.65
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard Labels > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 65.74,
+        "depth_y": 13.48,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 1.0,
+        "max": 1.3
+      },
+      "x_bounds": {
+        "min": 95.0,
+        "max": 160.74
+      },
+      "y_bounds": {
+        "min": 611.98,
+        "max": 625.46
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard Labels > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 160.11,
+        "depth_y": 14.51,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 1.0,
+        "max": 1.3
+      },
+      "x_bounds": {
+        "min": 75.0,
+        "max": 235.11
+      },
+      "y_bounds": {
+        "min": 756.75,
+        "max": 771.26
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard Labels > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 73.64,
+        "depth_y": 7.36,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 1.0,
+        "max": 1.3
+      },
+      "x_bounds": {
+        "min": 46.0,
+        "max": 119.64
+      },
+      "y_bounds": {
+        "min": 599.88,
+        "max": 607.24
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard Labels > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 89.19,
+        "depth_y": 7.36,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 1.0,
+        "max": 1.3
+      },
+      "x_bounds": {
+        "min": 190.0,
+        "max": 279.19
+      },
+      "y_bounds": {
+        "min": 599.88,
+        "max": 607.24
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard Labels > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 21.65,
+        "depth_y": 7.94,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 46.0,
+        "max": 46.3
+      },
+      "x_bounds": {
+        "min": 250.0,
+        "max": 271.65
+      },
+      "y_bounds": {
+        "min": 900.0,
+        "max": 907.94
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard Labels > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 23.1,
+        "depth_y": 7.94,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 91.0,
+        "max": 91.3
+      },
+      "x_bounds": {
+        "min": 250.0,
+        "max": 273.1
+      },
+      "y_bounds": {
+        "min": 998.0,
+        "max": 1005.94
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard Labels > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 23.18,
+        "depth_y": 8.08,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 136.0,
+        "max": 136.3
+      },
+      "x_bounds": {
+        "min": 250.0,
+        "max": 273.18
+      },
+      "y_bounds": {
+        "min": 1095.86,
+        "max": 1103.94
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard Labels > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 23.14,
+        "depth_y": 7.91,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 181.0,
+        "max": 181.3
+      },
+      "x_bounds": {
+        "min": 250.0,
+        "max": 273.14
+      },
+      "y_bounds": {
+        "min": 1194.0,
+        "max": 1201.91
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard Labels > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 71.65,
+        "depth_y": 9.81,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 46.0,
+        "max": 46.3
+      },
+      "x_bounds": {
+        "min": 110.0,
+        "max": 181.65
+      },
+      "y_bounds": {
+        "min": 944.84,
+        "max": 954.65
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard Labels > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 73.39,
+        "depth_y": 9.81,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 91.0,
+        "max": 91.3
+      },
+      "x_bounds": {
+        "min": 110.0,
+        "max": 183.39
+      },
+      "y_bounds": {
+        "min": 1039.84,
+        "max": 1049.65
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard Labels > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 73.48,
+        "depth_y": 9.82,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 136.0,
+        "max": 136.3
+      },
+      "x_bounds": {
+        "min": 110.0,
+        "max": 183.48
+      },
+      "y_bounds": {
+        "min": 1139.83,
+        "max": 1149.65
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard Labels > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 113.37,
+        "depth_y": 12.45,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 181.0,
+        "max": 181.3
+      },
+      "x_bounds": {
+        "min": 95.0,
+        "max": 208.37
+      },
+      "y_bounds": {
+        "min": 1237.21,
+        "max": 1249.66
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard Labels > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 8.5,
+        "depth_y": 7.15,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 46.0,
+        "max": 46.3
+      },
+      "x_bounds": {
+        "min": 40.0,
+        "max": 48.5
+      },
+      "y_bounds": {
+        "min": 975.0,
+        "max": 982.15
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard Labels > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 9.81,
+        "depth_y": 7.15,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 91.0,
+        "max": 91.3
+      },
+      "x_bounds": {
+        "min": 40.0,
+        "max": 49.81
+      },
+      "y_bounds": {
+        "min": 1070.0,
+        "max": 1077.15
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard Labels > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 38.82,
+        "depth_y": 8.18,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 1.0,
+        "max": 1.3
+      },
+      "x_bounds": {
+        "min": 40.0,
+        "max": 78.82
+      },
+      "y_bounds": {
+        "min": 914.87,
+        "max": 923.04
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard Labels > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 59.33,
+        "depth_y": 7.36,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 7.0,
+        "max": 7.3
+      },
+      "x_bounds": {
+        "min": 158.0,
+        "max": 217.33
+      },
+      "y_bounds": {
+        "min": 774.88,
+        "max": 782.24
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard Labels > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 49.23,
+        "depth_y": 6.93,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 3.0,
+        "max": 3.3
+      },
+      "x_bounds": {
+        "min": 128.0,
+        "max": 177.23
+      },
+      "y_bounds": {
+        "min": 695.51,
+        "max": 702.44
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard Labels > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 83.02,
+        "depth_y": 9.81,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 73.0,
+        "max": 73.3
+      },
+      "x_bounds": {
+        "min": 110.0,
+        "max": 193.02
+      },
+      "y_bounds": {
+        "min": 1293.84,
+        "max": 1303.65
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Backyard",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 300.0,
+        "depth_y": 708.0,
+        "height_z": 259.84
+      },
+      "z_bounds": {
+        "min": -12.0,
+        "max": 247.84
+      },
+      "x_bounds": {
+        "min": 0.0,
+        "max": 300.0
+      },
+      "y_bounds": {
+        "min": 588.0,
+        "max": 1296.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure",
+      "tag": "Tag1",
+      "visible": false,
+      "dimensions": {
+        "width_x": 295.74,
+        "depth_y": 684.0,
+        "height_z": 102.39
+      },
+      "z_bounds": {
+        "min": 114.81,
+        "max": 217.2
+      },
+      "x_bounds": {
+        "min": 0.0,
+        "max": 295.74
+      },
+      "y_bounds": {
+        "min": -24.0,
+        "max": 660.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Rear Window (Back-Left Bedroom)",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 60.0,
+        "depth_y": 1.5,
+        "height_z": 48.0
+      },
+      "z_bounds": {
+        "min": 150.0,
+        "max": 198.0
+      },
+      "x_bounds": {
+        "min": 47.0,
+        "max": 107.0
+      },
+      "y_bounds": {
+        "min": 657.0,
+        "max": 658.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Rear Window (Primary Bedroom)",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 60.0,
+        "depth_y": 1.5,
+        "height_z": 48.0
+      },
+      "z_bounds": {
+        "min": 150.0,
+        "max": 198.0
+      },
+      "x_bounds": {
+        "min": 192.75,
+        "max": 252.75
+      },
+      "y_bounds": {
+        "min": 657.0,
+        "max": 658.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Primary Bath West Wall (ext)",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 4.5,
+        "depth_y": 138.5,
+        "height_z": 100.0
+      },
+      "z_bounds": {
+        "min": 116.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 184.0,
+        "max": 188.5
+      },
+      "y_bounds": {
+        "min": 349.5,
+        "max": 488.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Primary Bath Skylight",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 36.72,
+        "depth_y": 24.48,
+        "height_z": 1.02
+      },
+      "z_bounds": {
+        "min": 216.18,
+        "max": 217.2
+      },
+      "x_bounds": {
+        "min": 222.91,
+        "max": 259.63
+      },
+      "y_bounds": {
+        "min": 379.28,
+        "max": 403.76
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Central Spine (Bed7/Bed8)",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 4.5,
+        "depth_y": 172.0,
+        "height_z": 100.0
+      },
+      "z_bounds": {
+        "min": 116.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 147.5,
+        "max": 152.0
+      },
+      "y_bounds": {
+        "min": 488.0,
+        "max": 660.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Hall Bath South Wall",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 104.5,
+        "depth_y": 4.5,
+        "height_z": 100.0
+      },
+      "z_bounds": {
+        "min": 116.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 6.5,
+        "max": 111.0
+      },
+      "y_bounds": {
+        "min": 424.5,
+        "max": 429.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Lightwell East Wall",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 4.5,
+        "depth_y": 47.0,
+        "height_z": 100.0
+      },
+      "z_bounds": {
+        "min": 116.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 128.5,
+        "max": 133.0
+      },
+      "y_bounds": {
+        "min": 377.5,
+        "max": 424.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Lightwell Skylight",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 122.0,
+        "depth_y": 47.0,
+        "height_z": 2.0
+      },
+      "z_bounds": {
+        "min": 212.0,
+        "max": 214.0
+      },
+      "x_bounds": {
+        "min": 6.5,
+        "max": 128.5
+      },
+      "y_bounds": {
+        "min": 377.5,
+        "max": 424.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Lightwell South Wall",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 126.5,
+        "depth_y": 4.5,
+        "height_z": 100.0
+      },
+      "z_bounds": {
+        "min": 116.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 6.5,
+        "max": 133.0
+      },
+      "y_bounds": {
+        "min": 373.0,
+        "max": 377.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Lightwell Slider (from Middle Bedroom)",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 72.0,
+        "depth_y": 0.5,
+        "height_z": 80.0
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 200.0
+      },
+      "x_bounds": {
+        "min": 36.0,
+        "max": 108.0
+      },
+      "y_bounds": {
+        "min": 375.0,
+        "max": 375.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Hall Closet South Wall",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 10.0,
+        "depth_y": 4.5,
+        "height_z": 100.0
+      },
+      "z_bounds": {
+        "min": 116.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 133.0,
+        "max": 143.0
+      },
+      "y_bounds": {
+        "min": 373.0,
+        "max": 377.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Hall Closet North Wall",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 36.16,
+        "depth_y": 4.5,
+        "height_z": 100.0
+      },
+      "z_bounds": {
+        "min": 116.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 111.0,
+        "max": 147.16
+      },
+      "y_bounds": {
+        "min": 424.5,
+        "max": 429.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Back-Left Bedroom Front Wall",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 141.0,
+        "depth_y": 4.5,
+        "height_z": 100.0
+      },
+      "z_bounds": {
+        "min": 116.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 6.5,
+        "max": 147.5
+      },
+      "y_bounds": {
+        "min": 488.0,
+        "max": 492.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Hall Bath East Wall",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 4.5,
+        "depth_y": 59.0,
+        "height_z": 100.0
+      },
+      "z_bounds": {
+        "min": 116.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 106.5,
+        "max": 111.0
+      },
+      "y_bounds": {
+        "min": 429.0,
+        "max": 488.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Hallway West Wall",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 4.5,
+        "depth_y": 51.5,
+        "height_z": 100.0
+      },
+      "z_bounds": {
+        "min": 116.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 143.0,
+        "max": 147.5
+      },
+      "y_bounds": {
+        "min": 373.0,
+        "max": 424.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Bed6 Closet East Wall",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 4.5,
+        "depth_y": 66.0,
+        "height_z": 100.0
+      },
+      "z_bounds": {
+        "min": 116.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 90.0,
+        "max": 94.5
+      },
+      "y_bounds": {
+        "min": 191.0,
+        "max": 257.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Bed6 Closet South Wall",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 83.5,
+        "depth_y": 4.5,
+        "height_z": 100.0
+      },
+      "z_bounds": {
+        "min": 116.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 6.5,
+        "max": 90.0
+      },
+      "y_bounds": {
+        "min": 216.5,
+        "max": 221.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Bed6 South Wall",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 136.5,
+        "depth_y": 4.5,
+        "height_z": 100.0
+      },
+      "z_bounds": {
+        "min": 116.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 6.5,
+        "max": 143.0
+      },
+      "y_bounds": {
+        "min": 252.5,
+        "max": 257.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Primary Bedroom Front Wall",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 141.5,
+        "depth_y": 4.5,
+        "height_z": 100.0
+      },
+      "z_bounds": {
+        "min": 116.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 152.0,
+        "max": 293.5
+      },
+      "y_bounds": {
+        "min": 488.0,
+        "max": 492.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Kitchen Cabinet Run (16ft)",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 24.0,
+        "depth_y": 187.5,
+        "height_z": 96.0
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 271.38,
+        "max": 295.38
+      },
+      "y_bounds": {
+        "min": 7.27,
+        "max": 194.77
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Kitchen Cabinet Run (16ft) > Unnamed Group",
+      "tag": "Dark Walnut",
+      "visible": true,
+      "dimensions": {
+        "width_x": 24.0,
+        "depth_y": 31.5,
+        "height_z": 96.0
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 271.38,
+        "max": 295.38
+      },
+      "y_bounds": {
+        "min": 7.27,
+        "max": 38.77
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Kitchen Cabinet Run (16ft) > Unnamed Group",
+      "tag": "Dark Walnut",
+      "visible": true,
+      "dimensions": {
+        "width_x": 24.0,
+        "depth_y": 120.0,
+        "height_z": 34.5
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 154.5
+      },
+      "x_bounds": {
+        "min": 271.38,
+        "max": 295.38
+      },
+      "y_bounds": {
+        "min": 38.77,
+        "max": 158.77
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Kitchen Cabinet Run (16ft) > Unnamed Group",
+      "tag": "Calacatta Viola Stone",
+      "visible": true,
+      "dimensions": {
+        "width_x": 24.0,
+        "depth_y": 120.0,
+        "height_z": 1.5
+      },
+      "z_bounds": {
+        "min": 154.5,
+        "max": 156.0
+      },
+      "x_bounds": {
+        "min": 271.38,
+        "max": 295.38
+      },
+      "y_bounds": {
+        "min": 38.77,
+        "max": 158.77
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Kitchen Cabinet Run (16ft) > Unnamed Group",
+      "tag": "Dark Walnut",
+      "visible": true,
+      "dimensions": {
+        "width_x": 24.0,
+        "depth_y": 36.0,
+        "height_z": 96.0
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 271.38,
+        "max": 295.38
+      },
+      "y_bounds": {
+        "min": 158.77,
+        "max": 194.77
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Kitchen Cabinet Run (16ft) > Unnamed Group",
+      "tag": "Dark Walnut",
+      "visible": true,
+      "dimensions": {
+        "width_x": 18.0,
+        "depth_y": 48.0,
+        "height_z": 30.0
+      },
+      "z_bounds": {
+        "min": 186.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 271.38,
+        "max": 289.38
+      },
+      "y_bounds": {
+        "min": 74.77,
+        "max": 122.77
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Kitchen Island (11ft, waterfall)",
+      "tag": "Calacatta Viola Stone",
+      "visible": true,
+      "dimensions": {
+        "width_x": 48.0,
+        "depth_y": 132.0,
+        "height_z": 36.0
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 156.0
+      },
+      "x_bounds": {
+        "min": 173.5,
+        "max": 221.5
+      },
+      "y_bounds": {
+        "min": 30.0,
+        "max": 162.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Box Bay (squared)",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 294.73,
+        "depth_y": 30.5,
+        "height_z": 96.0
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 1.01,
+        "max": 295.74
+      },
+      "y_bounds": {
+        "min": -24.0,
+        "max": 6.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Box Bay (squared) > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 133.49,
+        "depth_y": 6.41,
+        "height_z": 96.0
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 1.01,
+        "max": 134.5
+      },
+      "y_bounds": {
+        "min": 0.09,
+        "max": 6.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Box Bay (squared) > Difference",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 130.0,
+        "depth_y": 4.5,
+        "height_z": 96.0
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 134.5,
+        "max": 264.5
+      },
+      "y_bounds": {
+        "min": -24.0,
+        "max": -19.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Box Bay (squared) > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 31.24,
+        "depth_y": 6.12,
+        "height_z": 96.0
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 264.5,
+        "max": 295.74
+      },
+      "y_bounds": {
+        "min": 0.0,
+        "max": 6.12
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Box Bay (squared) > Difference",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 4.5,
+        "depth_y": 28.5,
+        "height_z": 96.0
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 134.5,
+        "max": 139.0
+      },
+      "y_bounds": {
+        "min": -24.0,
+        "max": 4.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Box Bay (squared) > Difference",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 4.5,
+        "depth_y": 30.21,
+        "height_z": 96.0
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 260.0,
+        "max": 264.5
+      },
+      "y_bounds": {
+        "min": -24.0,
+        "max": 6.21
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Box Bay (squared) > UP - Bay Front Window (glass)",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 119.0,
+        "depth_y": 1.5,
+        "height_z": 60.0
+      },
+      "z_bounds": {
+        "min": 144.0,
+        "max": 204.0
+      },
+      "x_bounds": {
+        "min": 140.0,
+        "max": 259.0
+      },
+      "y_bounds": {
+        "min": -22.5,
+        "max": -21.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Box Bay (squared) > UP - Bay Left Side Window",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 2.0,
+        "depth_y": 15.0,
+        "height_z": 48.0
+      },
+      "z_bounds": {
+        "min": 150.0,
+        "max": 198.0
+      },
+      "x_bounds": {
+        "min": 135.5,
+        "max": 137.5
+      },
+      "y_bounds": {
+        "min": -19.0,
+        "max": -4.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Box Bay (squared) > UP - Bay Right Side Window",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 2.0,
+        "depth_y": 15.0,
+        "height_z": 48.0
+      },
+      "z_bounds": {
+        "min": 150.0,
+        "max": 198.0
+      },
+      "x_bounds": {
+        "min": 261.5,
+        "max": 263.5
+      },
+      "y_bounds": {
+        "min": -19.0,
+        "max": -4.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > PB - Double Vanity",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 25.0,
+        "depth_y": 80.0,
+        "height_z": 24.0
+      },
+      "z_bounds": {
+        "min": 132.0,
+        "max": 156.0
+      },
+      "x_bounds": {
+        "min": 188.5,
+        "max": 213.5
+      },
+      "y_bounds": {
+        "min": 406.0,
+        "max": 486.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > PB - Double Vanity > Unnamed Group",
+      "tag": "Dark Walnut",
+      "visible": true,
+      "dimensions": {
+        "width_x": 24.0,
+        "depth_y": 80.0,
+        "height_z": 20.0
+      },
+      "z_bounds": {
+        "min": 132.0,
+        "max": 152.0
+      },
+      "x_bounds": {
+        "min": 188.5,
+        "max": 212.5
+      },
+      "y_bounds": {
+        "min": 406.0,
+        "max": 486.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > PB - Double Vanity > Unnamed Group",
+      "tag": "Calacatta Viola Stone",
+      "visible": true,
+      "dimensions": {
+        "width_x": 25.0,
+        "depth_y": 80.0,
+        "height_z": 4.0
+      },
+      "z_bounds": {
+        "min": 152.0,
+        "max": 156.0
+      },
+      "x_bounds": {
+        "min": 188.5,
+        "max": 213.5
+      },
+      "y_bounds": {
+        "min": 406.0,
+        "max": 486.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > PB - Toilet (open)",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 18.0,
+        "depth_y": 22.0,
+        "height_z": 18.0
+      },
+      "z_bounds": {
+        "min": 120.22,
+        "max": 138.22
+      },
+      "x_bounds": {
+        "min": 188.89,
+        "max": 206.89
+      },
+      "y_bounds": {
+        "min": 371.18,
+        "max": 393.18
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > PB - Toilet (open) > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 18.0,
+        "depth_y": 22.0,
+        "height_z": 18.0
+      },
+      "z_bounds": {
+        "min": 120.22,
+        "max": 138.22
+      },
+      "x_bounds": {
+        "min": 188.89,
+        "max": 206.89
+      },
+      "y_bounds": {
+        "min": 371.18,
+        "max": 393.18
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > PB - Utility Niche",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 32.0,
+        "depth_y": 72.0,
+        "height_z": 96.0
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 261.5,
+        "max": 293.5
+      },
+      "y_bounds": {
+        "min": 416.0,
+        "max": 488.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > PB - Utility Niche > Unnamed Group",
+      "tag": "Dark Walnut",
+      "visible": true,
+      "dimensions": {
+        "width_x": 32.0,
+        "depth_y": 36.0,
+        "height_z": 96.0
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 261.5,
+        "max": 293.5
+      },
+      "y_bounds": {
+        "min": 416.0,
+        "max": 452.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > PB - Utility Niche > Unnamed Group",
+      "tag": "Dark Walnut",
+      "visible": true,
+      "dimensions": {
+        "width_x": 32.0,
+        "depth_y": 36.0,
+        "height_z": 96.0
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 261.5,
+        "max": 293.5
+      },
+      "y_bounds": {
+        "min": 452.0,
+        "max": 488.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > PB - Shower Enclosure",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 46.5,
+        "depth_y": 66.5,
+        "height_z": 96.0
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 247.0,
+        "max": 293.5
+      },
+      "y_bounds": {
+        "min": 349.5,
+        "max": 416.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > PB - Shower Enclosure > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 46.5,
+        "depth_y": 64.26,
+        "height_z": 2.87
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 122.87
+      },
+      "x_bounds": {
+        "min": 247.0,
+        "max": 293.5
+      },
+      "y_bounds": {
+        "min": 349.5,
+        "max": 413.76
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > PB - Shower Enclosure > Unnamed Group",
+      "tag": "Calacatta Viola Stone",
+      "visible": true,
+      "dimensions": {
+        "width_x": 46.5,
+        "depth_y": 2.24,
+        "height_z": 50.25
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 170.25
+      },
+      "x_bounds": {
+        "min": 247.0,
+        "max": 293.5
+      },
+      "y_bounds": {
+        "min": 413.76,
+        "max": 416.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > PB - Shower Enclosure > Unnamed Group",
+      "tag": "Calacatta Viola Stone",
+      "visible": true,
+      "dimensions": {
+        "width_x": 4.5,
+        "depth_y": 62.0,
+        "height_z": 92.0
+      },
+      "z_bounds": {
+        "min": 124.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 289.0,
+        "max": 293.5
+      },
+      "y_bounds": {
+        "min": 349.5,
+        "max": 411.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > PB - Shower Enclosure > Unnamed Group",
+      "tag": "Calacatta Viola Stone",
+      "visible": true,
+      "dimensions": {
+        "width_x": 2.5,
+        "depth_y": 62.0,
+        "height_z": 6.0
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 126.0
+      },
+      "x_bounds": {
+        "min": 247.0,
+        "max": 249.5
+      },
+      "y_bounds": {
+        "min": 354.0,
+        "max": 416.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > PB - Shower Enclosure > Unnamed Group",
+      "tag": "Calacatta Viola Stone",
+      "visible": true,
+      "dimensions": {
+        "width_x": 46.5,
+        "depth_y": 2.2,
+        "height_z": 6.0
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 126.0
+      },
+      "x_bounds": {
+        "min": 247.0,
+        "max": 293.5
+      },
+      "y_bounds": {
+        "min": 413.8,
+        "max": 416.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > PB - Shower Enclosure > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 2.5,
+        "depth_y": 66.5,
+        "height_z": 78.0
+      },
+      "z_bounds": {
+        "min": 126.0,
+        "max": 204.0
+      },
+      "x_bounds": {
+        "min": 247.0,
+        "max": 249.5
+      },
+      "y_bounds": {
+        "min": 349.5,
+        "max": 416.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > PB - Shower Enclosure > Unnamed Group",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 44.0,
+        "depth_y": 2.2,
+        "height_z": 34.0
+      },
+      "z_bounds": {
+        "min": 170.0,
+        "max": 204.0
+      },
+      "x_bounds": {
+        "min": 249.5,
+        "max": 293.5
+      },
+      "y_bounds": {
+        "min": 413.8,
+        "max": 416.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Roof Drain Chase",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 23.0,
+        "depth_y": 6.0,
+        "height_z": 100.0
+      },
+      "z_bounds": {
+        "min": 116.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 120.0,
+        "max": 143.0
+      },
+      "y_bounds": {
+        "min": 257.5,
+        "max": 263.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Living Room Front Window",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 43.0,
+        "depth_y": 1.5,
+        "height_z": 54.0
+      },
+      "z_bounds": {
+        "min": 150.0,
+        "max": 204.0
+      },
+      "x_bounds": {
+        "min": 22.0,
+        "max": 65.0
+      },
+      "y_bounds": {
+        "min": 1.5,
+        "max": 3.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Stair Rail (North)",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 112.9,
+        "depth_y": 4.5,
+        "height_z": 42.0
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 162.0
+      },
+      "x_bounds": {
+        "min": 180.6,
+        "max": 293.5
+      },
+      "y_bounds": {
+        "min": 262.5,
+        "max": 267.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Stair Rail (West)",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 4.5,
+        "depth_y": 39.0,
+        "height_z": 42.0
+      },
+      "z_bounds": {
+        "min": 120.0,
+        "max": 162.0
+      },
+      "x_bounds": {
+        "min": 180.6,
+        "max": 185.1
+      },
+      "y_bounds": {
+        "min": 263.5,
+        "max": 302.5
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper Level Structure > UP - Bed6 East (Hallway Divider)",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 4.5,
+        "depth_y": 120.5,
+        "height_z": 100.0
+      },
+      "z_bounds": {
+        "min": 116.0,
+        "max": 216.0
+      },
+      "x_bounds": {
+        "min": 143.0,
+        "max": 147.5
+      },
+      "y_bounds": {
+        "min": 252.5,
+        "max": 373.0
+      }
+    },
+    {
+      "type": "Component",
+      "path": "Back Fence",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 48.77,
+        "depth_y": 1.0,
+        "height_z": 7.75
+      },
+      "z_bounds": {
+        "min": 209.18,
+        "max": 216.92
+      },
+      "x_bounds": {
+        "min": 144.98,
+        "max": 193.75
+      },
+      "y_bounds": {
+        "min": 1291.0,
+        "max": 1292.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "Upper - Primary Bath",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 98.5,
+        "depth_y": 62.0,
+        "height_z": 36.0
+      },
+      "z_bounds": {
+        "min": 116.0,
+        "max": 152.0
+      },
+      "x_bounds": {
+        "min": 195.0,
+        "max": 293.5
+      },
+      "y_bounds": {
+        "min": 354.0,
+        "max": 416.0
+      }
+    },
+    {
+      "type": "Group",
+      "path": "lbl: SHOWER",
+      "tag": "Layer0",
+      "visible": true,
+      "dimensions": {
+        "width_x": 34.35,
+        "depth_y": 5.73,
+        "height_z": 0.3
+      },
+      "z_bounds": {
+        "min": 121.0,
+        "max": 121.3
+      },
+      "x_bounds": {
+        "min": 258.0,
+        "max": 292.35
+      },
+      "y_bounds": {
+        "min": 394.91,
+        "max": 400.63
+      }
+    }
+  ]
+}

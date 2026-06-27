@@ -150,10 +150,14 @@ def tui_select(blanks):
     Up/Down (or k/j) to move, Enter to choose, q/Esc to quit. Falls back to a
     plain numbered prompt if the terminal can't drive curses.
     """
-    import curses
-
     items = [(b, b) for b in blanks]
     items.append(("__ALL__", ">> Run entire pipeline (all images, one at a time)"))
+
+    try:
+        import curses
+    except ImportError:
+        # No curses (e.g. Windows without windows-curses) — use the text fallback.
+        return _text_select(items)
 
     def _menu(stdscr):
         try:

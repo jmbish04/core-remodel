@@ -1,0 +1,36 @@
+Tag / Layer,Type,Definition Name,Instance Name,Volume (cu in),Entity ID
+Interior Door,Group,Door - Garage to Foyer,Door - Garage to Foyer,5184.000000000039,225537
+Interior Door,Group,Door - Under-Stair,Door - Under-Stair,4608.000000000019,225538
+Interior Door,Group,Door - Guest Bath,Door - Guest Bath,4608.000000000019,225539
+Interior Door,Group,Door - Guest Bed,Door - Guest Bed,4607.999999999949,225540
+Interior Door,Group,Door - Closet (Double),Door - Closet (Double),10367.999999999789,225541
+Front door,Group,Pivot Front Door,Pivot Front Door,11314.375000000005,225542
+Layer0,Group,Slider - Family,Slider - Family,13536.0,225543
+Layer0,Group,Slider - Bedroom,Slider - Bedroom,13536.0,225544
+Layer0,Group,Garage Door Panel,Garage Door Panel,15450.268989534869,225545
+Master Structure,Group,Master Structure,Master Structure,-1.0,225546
+Stairs - Lower Level,Group,Staircase,Staircase,-1.0,225547
+security gate,Group,Modern Gate,Modern Gate,-1.0,225548
+Layer0,Group,House Numbers 126,House Numbers 126,16.247635656574023,225549
+Plumbing - Sewer & Waste,Group,MEP - Plumbing,MEP - Plumbing,-1.0,225550
+Bath Fixtures,Group,Bath Fixtures,Bath Fixtures,-1.0,225551
+Plumbing - Hot Water,Group,Water - Hot Lines,Water - Hot Lines,-1.0,225552
+Plumbing - Cold Water,Group,Water - Cold Lines,Water - Cold Lines,-1.0,225553
+Plumbing - Cold Water,Group,Plumbing Fixtures & Blanks,Plumbing Fixtures & Blanks,-1.0,225554
+Plumbing - Sewer & Waste,Group,Blank - Red Wall (Sewer+Hot+Cold),Blank - Red Wall (Sewer+Hot+Cold),216.00000000000023,225555
+Plumbing - Cold Water,Group,Note - H/C Capped,Note - H/C Capped,25.51114210397287,225556
+Wishlist,Group,Wishlist - Hot to Patio Bib,Wishlist - Hot to Patio Bib,-1.0,225557
+Site - Irrigation,Group,Site - Irrigation Line,Site - Irrigation Line,-1.0,225558
+Site - Electrical,Group,Site - Electrical Line,Site - Electrical Line,-1.0,225559
+Electrical - Panels,Group,Electrical - Panels,Electrical - Panels,-1.0,225561
+Electrical - Panels,Group,lbl: MAIN SUB PANEL,lbl: MAIN SUB PANEL,6.438733949006237,225562
+Electrical - Panels,Group,lbl: CIRCUIT BREAKER,lbl: CIRCUIT BREAKER,7.078156363016228,225563
+Electrical - Panels,Group,lbl: SOLAR BATTERY TDS,lbl: SOLAR BATTERY TDS,7.604160083341932,225564
+Appliances,Group,New Kitchen Appliances (est),New Kitchen Appliances (est),-1.0,225573
+Electrical - Appliances,Group,Elec - Induction Cooktop 240V,Elec - Induction Cooktop 240V,36.720000000001015,225574
+Layer0,Group,Backyard Labels,Backyard Labels,-1.0,225583
+Layer0,Group,Backyard,Backyard,-1.0,225584
+Tag1,Group,Upper Level Structure,Upper Level Structure,-1.0,225585
+Layer0,Component,Back Fence,"",115.59554227912834,225532
+Layer0,Group,Upper - Primary Bath,Upper - Primary Bath,-1.0,225595
+Layer0,Group,lbl: SHOWER,lbl: SHOWER,19.920903082820324,225597

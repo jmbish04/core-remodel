@@ -1,0 +1,34 @@
+#!/usr/bin/expect -f
+set timeout -1
+spawn bash -c "source ~/.zshrc && pnpm run db:generate"
+expect {
+  "Is company_id column in bid_portfolios table created or renamed" {
+    send "\r"
+    exp_continue
+  }
+  "Is company_id column in bid_portfolio_selected_photos table created or renamed" {
+    send "\r"
+    exp_continue
+  }
+  "Is contact_id column in bid_portfolios table dropped" {
+    send "\r"
+    exp_continue
+  }
+  "Is business_type column in contacts table dropped" {
+    send "\r"
+    exp_continue
+  }
+  "Is company_name column in contacts table dropped" {
+    send "\r"
+    exp_continue
+  }
+  "Is license_number column in contacts table dropped" {
+    send "\r"
+    exp_continue
+  }
+  "Is website column in contacts table dropped" {
+    send "\r"
+    exp_continue
+  }
+  eof
+}

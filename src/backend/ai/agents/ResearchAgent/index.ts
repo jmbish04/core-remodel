@@ -141,7 +141,9 @@ export class ResearchAgent extends AIChatAgent<Env, ResearchAgentState> {
   private async getGeminiClient(): Promise<GoogleGenAI> {
     const geminiApiKey = await this.env.GEMINI_API_KEY.get();
     const cloudflareAccountId = await this.env.CLOUDFLARE_ACCOUNT_ID.get();
-
+    const CF_AIG_TOKEN = await this.env.CLOUDFLARE_AI_GATEWAY_TOKEN.get();
+    
+    if (!CF_AIG_TOKEN) throw new Error("CLOUDFLARE_AI_GATEWAY_TOKEN not configured");
     if (!geminiApiKey) throw new Error("GEMINI_API_KEY not configured");
     if (!cloudflareAccountId) throw new Error("CLOUDFLARE_ACCOUNT_ID not configured");
 
@@ -149,6 +151,9 @@ export class ResearchAgent extends AIChatAgent<Env, ResearchAgentState> {
       apiKey: geminiApiKey,
       httpOptions: {
         baseUrl: `https://gateway.ai.cloudflare.com/v1/${cloudflareAccountId}/${this.env.AI_GATEWAY_ID}/google-ai-studio`,
+        headers: {
+          "cf-aig-authorization": `Bearer ${CF_AIG_TOKEN}`,
+        },
       },
     });
   }

@@ -1,4 +1,5 @@
 import {
+  Copy,
   Crop,
   Eye,
   FileImage,
@@ -10,6 +11,7 @@ import {
   RefreshCw,
   Save,
   Tag,
+  Trash2,
   X,
 } from "lucide-react";
 import React, {
@@ -92,6 +94,7 @@ interface ApiImage {
   metadata?: string | null;
   photoCategory: string;
   isDuplicate?: boolean;
+  isDeleted?: boolean;
   roomType?: string | null;
   roomLabels?: string[];
   tags?: string[];
@@ -326,7 +329,7 @@ function PhotoCodingWorkspace() {
       const response = await fetch("/api/images");
       const payload = (await response.json()) as { images?: ApiImage[] };
       const list = (payload.images ?? [])
-        .filter((image) => !image.isDuplicate)
+        .filter((image) => !image.isDuplicate && !image.isDeleted)
         .filter((image) => image.photoCategory === "inspirational")
         .map(buildReviewImage);
       setImages(list);
@@ -576,6 +579,69 @@ function PhotoCodingWorkspace() {
     selectedImage,
   ]);
 
+  // ----- dismiss (mark duplicate / deleted) -----
+
+  const dismissImage = useCallback(
+    async (action: "duplicate" | "deleted") => {
+      if (!selectedImage) return;
+      const queueIndex = queuedImages.findIndex(
+        (image) => image.id === selectedImage.id,
+      );
+      const nextQueued =
+        queuedImages[queueIndex + 1] ??
+        queuedImages.find((image) => image.id !== selectedImage.id) ??
+        null;
+      const dismissedId = selectedImage.id;
+
+      // Optimistic: remove from local state and advance
+      setImages((previous) =>
+        previous.filter((image) => image.id !== dismissedId),
+      );
+      loadImageIntoPanel(nextQueued);
+
+      const endpoint =
+        action === "duplicate"
+          ? `/api/images/${dismissedId}/duplicate`
+          : `/api/images/${dismissedId}/soft-delete`;
+      const bodyKey = action === "duplicate" ? "isDuplicate" : "isDeleted";
+      const label = action === "duplicate" ? "duplicate" : "deleted";
+
+      try {
+        const response = await fetch(endpoint, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ [bodyKey]: true }),
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to mark as ${label}`);
+        }
+        toast.success(`Marked as ${label}`, {
+          action: {
+            label: "Undo",
+            onClick: async () => {
+              try {
+                await fetch(endpoint, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ [bodyKey]: false }),
+                });
+                void fetchImages();
+                toast.success(`Undo: photo restored`);
+              } catch {
+                toast.error("Failed to undo — please refresh");
+              }
+            },
+          },
+        });
+      } catch {
+        // Rollback optimistic removal
+        toast.error(`Failed to mark as ${label} — restoring`);
+        void fetchImages();
+      }
+    },
+    [fetchImages, loadImageIntoPanel, queuedImages, selectedImage],
+  );
+
   // ----- crop / replace -----
 
   const openCrop = useCallback(() => {
@@ -723,6 +789,26 @@ function PhotoCodingWorkspace() {
                 <Button variant="outline" size="sm" onClick={openCrop} className="hidden sm:inline-flex">
                   <Crop className="mr-1.5 size-4" />
                   Crop
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void dismissImage("duplicate")}
+                  className="hidden sm:inline-flex text-amber-500 hover:text-amber-400"
+                  title="Mark as duplicate — removes from review queue"
+                >
+                  <Copy className="mr-1.5 size-4" />
+                  Duplicate
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void dismissImage("deleted")}
+                  className="hidden sm:inline-flex text-rose-500 hover:text-rose-400"
+                  title="Mark as deleted — removes from review queue"
+                >
+                  <Trash2 className="mr-1.5 size-4" />
+                  Delete
                 </Button>
                 <Button size="sm" onClick={saveSelected} disabled={isSaving}>
                   {isSaving ? (

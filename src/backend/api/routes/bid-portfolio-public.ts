@@ -133,7 +133,10 @@ bidPortfolioPublicRouter.get("/:token", async (c) => {
             .from(inspirationalImageRooms)
             .leftJoin(images, eq(inspirationalImageRooms.imageId, images.id))
             .all()
-            .then((all) => all.filter((row) => configuredRoomIds.includes(row.mapping.roomId)))
+            .then((all) => all.filter((row) =>
+              configuredRoomIds.includes(row.mapping.roomId) &&
+              !row.image?.isDuplicate && !row.image?.isDeleted
+            ))
         : [];
 
     // Build per-room image maps

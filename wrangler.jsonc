@@ -134,7 +134,7 @@
       "secret_name": "WORKER_API_KEY",
     },
     {
-      "binding": "AI_GATEWAY_TOKEN",
+      "binding": "CLOUDFLARE_AI_GATEWAY_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "CLOUDFLARE_AI_GATEWAY_TOKEN",
     },
@@ -213,6 +213,14 @@
         "name": "SHOWROOM_RESEARCH_AGENT",
         "class_name": "ShowroomResearchAgent",
       },
+      {
+        "name": "FLOORPLAN_SESSION",
+        "class_name": "FloorplanSessionDO",
+      },
+      {
+        "name": "DEEP_RESEARCH_AGENT",
+        "class_name": "DeepResearchAgent",
+      },
     ],
   },
   "migrations": [
@@ -256,6 +264,14 @@
     {
       "tag": "v9",
       "new_sqlite_classes": ["ShowroomResearchAgent"],
+    },
+    {
+      "tag": "v10",
+      "new_sqlite_classes": ["FloorplanSessionDO"],
+    },
+    {
+      "tag": "v11",
+      "new_sqlite_classes": ["DeepResearchAgent"],
     },
   ],
   "worker_loaders": [

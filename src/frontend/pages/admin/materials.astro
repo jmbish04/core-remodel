@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { MaterialsDashboard } from "@/components/showroom/MaterialsDashboard";
+---
+
+<BaseLayout
+  title="Materials Schedule — The Monolith"
+  description="Grouped remodeling materials schedule, budget allocation tracking, and procurement milestones."
+>
+  <MaterialsDashboard client:only="react" />
+</BaseLayout>

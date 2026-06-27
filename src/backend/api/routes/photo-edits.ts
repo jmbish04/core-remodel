@@ -507,8 +507,8 @@ photoEditsRouter.get("/decision-room", async (c) => {
       db.select().from(imageEditRevisions).all(),
     ]);
 
-    // Exclude duplicate-flagged images from the decision room
-    const allImages = allImagesRaw.filter((img) => !img.isDuplicate);
+    // Exclude duplicate-flagged and soft-deleted images from the decision room
+    const allImages = allImagesRaw.filter((img) => !img.isDuplicate && !img.isDeleted);
 
     const imagesById = new Map<string, typeof images.$inferSelect>();
     for (const image of allImages) {

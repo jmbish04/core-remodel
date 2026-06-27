@@ -1,0 +1,151 @@
+/* ============================================
+   Shadcn Dark — Design Tokens
+   Source: shadcn-ui/ui apps/v4/app/globals.css (new-york-v4)
+   ============================================ */
+
+/* ---- Fonts ---- */
+/* Shadcn defaults: Geist Sans (body/heading) + Geist Mono (code) */
+@import url("https://fonts.googleapis.com/css2?family=Geist:wght@100..900&family=Geist+Mono:wght@100..900&display=swap");
+
+:root {
+  /* Font families */
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-heading: "Geist", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Radius scale — derived from --radius: 0.625rem (10px) */
+  --radius: 0.625rem;
+  --radius-sm: calc(var(--radius) * 0.6);  /* 6px */
+  --radius-md: calc(var(--radius) * 0.8);  /* 8px */
+  --radius-lg: var(--radius);              /* 10px */
+  --radius-xl: calc(var(--radius) * 1.4);  /* 14px */
+  --radius-2xl: calc(var(--radius) * 1.8); /* 18px */
+  --radius-3xl: calc(var(--radius) * 2.2); /* 22px */
+
+  /* Type scale (Tailwind v4 defaults, used throughout shadcn) */
+  --text-xs: 0.75rem;    /* 12px */
+  --text-sm: 0.875rem;   /* 14px */
+  --text-base: 1rem;     /* 16px */
+  --text-lg: 1.125rem;   /* 18px */
+  --text-xl: 1.25rem;    /* 20px */
+  --text-2xl: 1.5rem;    /* 24px */
+  --text-3xl: 1.875rem;  /* 30px */
+  --text-4xl: 2.25rem;   /* 36px */
+  --text-5xl: 3rem;      /* 48px */
+  --text-6xl: 3.75rem;   /* 60px */
+
+  /* Spacing (Tailwind base: 0.25rem) */
+  --spacing: 0.25rem;
+}
+
+/* ============================================
+   DARK THEME (default for this system)
+   ============================================ */
+:root,
+.dark,
+[data-theme="dark"] {
+  /* Surfaces */
+  --background:          oklch(0.145 0 0);    /* near-black page */
+  --foreground:          oklch(0.985 0 0);    /* near-white text */
+  --card:                oklch(0.205 0 0);    /* elevated card */
+  --card-foreground:     oklch(0.985 0 0);
+  --popover:             oklch(0.205 0 0);
+  --popover-foreground:  oklch(0.985 0 0);
+  --surface:             oklch(0.2   0 0);    /* subtle surface */
+  --surface-foreground:  oklch(0.708 0 0);
+
+  /* Primary — inverted: light button on dark bg */
+  --primary:             oklch(0.922 0 0);
+  --primary-foreground:  oklch(0.205 0 0);
+
+  /* Secondary / muted / accent — neutral grays */
+  --secondary:           oklch(0.269 0 0);
+  --secondary-foreground:oklch(0.985 0 0);
+  --muted:               oklch(0.269 0 0);
+  --muted-foreground:    oklch(0.708 0 0);
+  --accent:              oklch(0.371 0 0);
+  --accent-foreground:   oklch(0.985 0 0);
+
+  /* Semantic */
+  --destructive:             oklch(0.704 0.191 22.216);
+  --destructive-foreground:  oklch(0.58  0.22  27);
+
+  /* Lines / inputs / focus ring */
+  --border:  oklch(1 0 0 / 10%);
+  --input:   oklch(1 0 0 / 15%);
+  --ring:    oklch(0.556 0 0);
+
+  /* Charts — blue family */
+  --chart-1: oklch(0.809 0.105 251.813); /* blue-300 */
+  --chart-2: oklch(0.623 0.188 259.813); /* blue-500 */
+  --chart-3: oklch(0.546 0.215 262.881); /* blue-600 */
+  --chart-4: oklch(0.488 0.243 264.376); /* blue-700 */
+  --chart-5: oklch(0.424 0.199 265.638); /* blue-800 */
+
+  /* Sidebar */
+  --sidebar:                         oklch(0.205 0 0);
+  --sidebar-foreground:              oklch(0.985 0 0);
+  --sidebar-primary:                 oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground:      oklch(0.985 0 0);
+  --sidebar-accent:                  oklch(0.269 0 0);
+  --sidebar-accent-foreground:       oklch(0.985 0 0);
+  --sidebar-border:                  oklch(1 0 0 / 10%);
+  --sidebar-ring:                    oklch(0.439 0 0);
+
+  /* Code */
+  --code:            var(--surface);
+  --code-foreground: var(--surface-foreground);
+  --code-highlight:  oklch(0.27 0 0);
+  --code-number:     oklch(0.72 0 0);
+
+  /* Selection */
+  --selection:            oklch(0.922 0 0);
+  --selection-foreground: oklch(0.205 0 0);
+}
+
+/* ============================================
+   SEMANTIC TYPOGRAPHY
+   Applied via Tailwind utilities in shadcn, but
+   exposed here as real CSS for vanilla use.
+   ============================================ */
+html { font-family: var(--font-sans); color: var(--foreground); background: var(--background); }
+body { font-family: var(--font-sans); font-synthesis-weight: none; text-rendering: optimizeLegibility; }
+
+h1, .h1 { font-family: var(--font-heading); font-size: var(--text-4xl); font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; }
+h2, .h2 { font-family: var(--font-heading); font-size: var(--text-3xl); font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; }
+h3, .h3 { font-family: var(--font-heading); font-size: var(--text-2xl); font-weight: 600; letter-spacing: -0.015em; line-height: 1.2; }
+h4, .h4 { font-family: var(--font-heading); font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; }
+h5, .h5 { font-family: var(--font-heading); font-size: var(--text-lg); font-weight: 600; line-height: 1.4; }
+
+p, .p    { font-size: var(--text-base); line-height: 1.6; color: var(--foreground); }
+.lead    { font-size: var(--text-xl);  line-height: 1.5; color: var(--muted-foreground); }
+.small   { font-size: var(--text-sm);  line-height: 1.45; }
+.muted   { font-size: var(--text-sm);  color: var(--muted-foreground); }
+
+code, .code, kbd {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--code);
+  color: var(--code-foreground);
+  padding: 0.15em 0.35em;
+  border-radius: var(--radius-sm);
+}
+
+a { color: inherit; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: color-mix(in oklab, currentColor 30%, transparent); }
+a:hover { text-decoration-color: currentColor; }
+
+::selection { background: var(--selection); color: var(--selection-foreground); }
+
+/* ============================================
+   ELEVATION / SHADOWS
+   shadcn is minimal on shadows; dark theme
+   relies on border + card bg for elevation.
+   ============================================ */
+:root {
+  --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.20);
+  --shadow-sm: 0 1px 3px 0 oklch(0 0 0 / 0.30), 0 1px 2px -1px oklch(0 0 0 / 0.30);
+  --shadow-md: 0 4px 6px -1px oklch(0 0 0 / 0.40), 0 2px 4px -2px oklch(0 0 0 / 0.40);
+  --shadow-lg: 0 10px 15px -3px oklch(0 0 0 / 0.50), 0 4px 6px -4px oklch(0 0 0 / 0.50);
+  --shadow-xl: 0 20px 25px -5px oklch(0 0 0 / 0.60), 0 8px 10px -6px oklch(0 0 0 / 0.60);
+  --shadow-2xl: 0 25px 50px -12px oklch(0 0 0 / 0.70);
+}

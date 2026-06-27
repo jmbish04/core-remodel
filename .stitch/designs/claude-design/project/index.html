@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Monolith — index</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,16..72,400;0,16..72,500;1,16..72,400&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  html, body { background: #09090b; color: #fafafa; font-family: 'Inter', system-ui, sans-serif; }
+  ::selection { background: rgba(244,244,245,0.15); color: #fafafa; }
+  .serif { font-family: 'Newsreader', ui-serif, Georgia, serif; font-weight: 500; }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+</style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-screen">
+
+<header class="border-b border-zinc-800 sticky top-0 bg-zinc-950 z-30">
+  <div class="mx-auto max-w-[1200px] flex items-center justify-between px-8 h-14">
+    <span class="mono tracking-tighter text-zinc-100"><span class="text-zinc-500">/</span>the_monolith</span>
+    <div class="text-[11px] uppercase tracking-[0.22em] text-zinc-500">Mock surfaces · v1</div>
+  </div>
+</header>
+
+<main class="mx-auto max-w-[1200px] px-8 py-20">
+  <div class="text-[11px] uppercase tracking-[0.22em] text-zinc-500 mb-5">Renovation management · admin</div>
+  <h1 class="text-5xl tracking-tight serif text-zinc-50 leading-[1.05] max-w-3xl">Five surfaces, one whole-home remodel.</h1>
+  <p class="mt-7 text-base text-zinc-400 leading-relaxed max-w-2xl">
+    Each surface stacks all five UI states top-to-bottom (DATA · EMPTY · LOADING · ERROR · MOBILE) for review in one scroll.
+    Moody Modern · zinc-950 base · perpetual no-borders rule. Open each in turn — no live API; every value is mock data.
+  </p>
+
+  <div class="mt-16 grid grid-cols-1 md:grid-cols-2 gap-4">
+
+    <a href="01-truth-table.html" class="group rounded-xl bg-zinc-900/60 ring-1 ring-zinc-800/60 p-7 hover:ring-zinc-600 transition-all block">
+      <div class="flex items-start justify-between mb-6">
+        <div class="text-[11px] uppercase tracking-[0.22em] text-zinc-500">Surface 01 · Catalog</div>
+        <div class="text-zinc-600 group-hover:text-zinc-300 transition-colors">→</div>
+      </div>
+      <h2 class="text-2xl font-semibold text-zinc-50 tracking-tight">Truth Table editor</h2>
+      <p class="mt-3 text-sm text-zinc-400 leading-relaxed">Per-SF baseline cost catalog. Inline-edit row, insurance-baseline delta chips, AI-inferred confidence bars.</p>
+      <div class="mt-6 flex items-center gap-2 text-[11px] mono text-zinc-500">
+        <span>16 activities</span><span class="text-zinc-700">·</span><span>5 states</span><span class="text-zinc-700">·</span><span>375 mobile</span>
+      </div>
+    </a>
+
+    <a href="02-bid-analyzer.html" class="group rounded-xl bg-zinc-900/60 ring-1 ring-zinc-800/60 p-7 hover:ring-zinc-600 transition-all block">
+      <div class="flex items-start justify-between mb-6">
+        <div class="text-[11px] uppercase tracking-[0.22em] text-zinc-500">Surface 02 · Bid teardown</div>
+        <div class="text-zinc-600 group-hover:text-zinc-300 transition-colors">→</div>
+      </div>
+      <h2 class="text-2xl font-semibold text-zinc-50 tracking-tight">Bid Analyzer</h2>
+      <p class="mt-3 text-sm text-zinc-400 leading-relaxed">Single-bid variance dashboard. Line items mapped to Truth Table, by-trade chart, AI-generated negotiation levers in the right rail.</p>
+      <div class="mt-6 flex items-center gap-2 text-[11px] mono text-zinc-500">
+        <span>+21.7% variance</span><span class="text-zinc-700">·</span><span>10 mappings</span><span class="text-zinc-700">·</span><span>4 levers</span>
+      </div>
+    </a>
+
+    <a href="03-material-cart.html" class="group rounded-xl bg-zinc-900/60 ring-1 ring-zinc-800/60 p-7 hover:ring-zinc-600 transition-all block">
+      <div class="flex items-start justify-between mb-6">
+        <div class="text-[11px] uppercase tracking-[0.22em] text-zinc-500">Surface 03 · Procurement</div>
+        <div class="text-zinc-600 group-hover:text-zinc-300 transition-colors">→</div>
+      </div>
+      <h2 class="text-2xl font-semibold text-zinc-50 tracking-tight">Material Cart + Compare</h2>
+      <p class="mt-3 text-sm text-zinc-400 leading-relaxed">Card grid of finishes and fixtures with status chips. Compare drawer for side-by-side specs. Mobile state collapses to 2-col grid.</p>
+      <div class="mt-6 flex items-center gap-2 text-[11px] mono text-zinc-500">
+        <span>12 materials</span><span class="text-zinc-700">·</span><span>8 categories</span><span class="text-zinc-700">·</span><span>compare 3</span>
+      </div>
+    </a>
+
+    <a href="04-scenario-builder.html" class="group rounded-xl bg-zinc-900/60 ring-2 ring-zinc-700 p-7 hover:ring-emerald-400/70 transition-all block relative overflow-hidden">
+      <div class="absolute top-3 right-3"><span class="text-[10px] uppercase tracking-wider text-emerald-300 bg-emerald-400/10 ring-1 ring-emerald-400/30 rounded-full px-2 py-0.5">Centerpiece</span></div>
+      <div class="flex items-start justify-between mb-6">
+        <div class="text-[11px] uppercase tracking-[0.22em] text-zinc-500">Surface 04 · Scenarios</div>
+        <div class="text-zinc-600 group-hover:text-emerald-300 transition-colors">→</div>
+      </div>
+      <h2 class="text-2xl font-semibold text-zinc-50 tracking-tight">Scenario builder</h2>
+      <p class="mt-3 text-sm text-zinc-400 leading-relaxed">Drag-and-drop puzzle interface. Three drop zones (must-now / optional / parked), live radial budget gauge, by-trade + by-category breakdowns, warning rail.</p>
+      <div class="mt-6 flex items-center gap-2 text-[11px] mono text-zinc-500">
+        <span>15 toggles</span><span class="text-zinc-700">·</span><span>3-col layout</span><span class="text-zinc-700">·</span><span>live recompute</span>
+      </div>
+    </a>
+
+    <a href="05-contractor-portal.html" class="group rounded-xl bg-zinc-900/60 ring-1 ring-zinc-800/60 p-7 hover:ring-zinc-600 transition-all block md:col-span-2">
+      <div class="flex items-start justify-between mb-6">
+        <div class="text-[11px] uppercase tracking-[0.22em] text-zinc-500">Surface 05 · External</div>
+        <div class="text-zinc-600 group-hover:text-zinc-300 transition-colors">→</div>
+      </div>
+      <h2 class="text-2xl font-semibold text-zinc-50 tracking-tight">Contractor Portal</h2>
+      <p class="mt-3 text-sm text-zinc-400 leading-relaxed">Read-only public view via share token. <span class="text-amber-300">Zero pricing visible anywhere</span>. Quieter type, more whitespace, same no-borders rule.</p>
+      <div class="mt-6 flex items-center gap-2 text-[11px] mono text-zinc-500">
+        <span>10 rooms</span><span class="text-zinc-700">·</span><span>7 toggles</span><span class="text-zinc-700">·</span><span>8 materials</span><span class="text-zinc-700">·</span><span class="text-amber-300">no $</span>
+      </div>
+    </a>
+
+  </div>
+
+  <section class="mt-24 pt-12 border-t border-zinc-900">
+    <div class="text-[11px] uppercase tracking-[0.22em] text-zinc-500 mb-5">Design system check</div>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-[11px]">
+      <div class="rounded-lg bg-zinc-900/40 ring-1 ring-zinc-800/40 p-4">
+        <div class="text-zinc-400">No borders</div>
+        <div class="mono text-emerald-300 mt-1">enforced</div>
+        <div class="text-zinc-600 mt-2">Rings + bg contrast everywhere except navbar bottom.</div>
+      </div>
+      <div class="rounded-lg bg-zinc-900/40 ring-1 ring-zinc-800/40 p-4">
+        <div class="text-zinc-400">Mono tabular</div>
+        <div class="mono text-emerald-300 mt-1">on every $/% number</div>
+        <div class="text-zinc-600 mt-2">JetBrains Mono · tnum feature on.</div>
+      </div>
+      <div class="rounded-lg bg-zinc-900/40 ring-1 ring-zinc-800/40 p-4">
+        <div class="text-zinc-400">Chart palette</div>
+        <div class="mono text-emerald-300 mt-1">OKLCH c1–c5</div>
+        <div class="text-zinc-600 mt-2">Emerald · amber · rose · sky · violet.</div>
+      </div>
+      <div class="rounded-lg bg-zinc-900/40 ring-1 ring-zinc-800/40 p-4">
+        <div class="text-zinc-400">Banned</div>
+        <div class="mono text-rose-300 mt-1">gradients · glass · emoji</div>
+        <div class="text-zinc-600 mt-2">Zero. Brutalist signature held.</div>
+      </div>
+    </div>
+  </section>
+</main>
+
+</body>
+</html>

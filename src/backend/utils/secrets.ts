@@ -130,3 +130,19 @@ export async function getReplicateApiToken(env: Env): Promise<string> {
   }
   throw new Error("Missing env.REPLICATE_API_TOKEN in Worker Secret Bindings");
 }
+
+
+
+/**
+ * Helper to fetch the  AI Gateway token.
+ * Used as the `Authorization: Bearer <token>` credential for Cloudflare AI
+ * Gateway's provider path. Maps to CLOUDFLARE_AI_GATEWAY_TOKEN.
+ */
+export async function getCloudflareAiGatewayToken(env: Env): Promise<string> {
+  if (env.CLOUDFLARE_AI_GATEWAY_TOKEN) {
+    return typeof env.CLOUDFLARE_AI_GATEWAY_TOKEN === "string"
+      ? env.CLOUDFLARE_AI_GATEWAY_TOKEN
+      : await (env.CLOUDFLARE_AI_GATEWAY_TOKEN as any).get();
+  }
+  throw new Error("Missing env.REPLICATE_API_TOKEN in Worker Secret Bindings");
+}

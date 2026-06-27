@@ -1,0 +1,56 @@
+[
+  {
+    "id": "TASK-1",
+    "title": "Bootstrap Stitch UX Configuration",
+    "description": "Create DESIGN.md, SITE.md, PRD, and first page baton inside the .stitch directory to initialize the loop.",
+    "status": "completed",
+    "dependsOn": [],
+    "assignee": "chief-engineer",
+    "effort": "1h"
+  },
+  {
+    "id": "TASK-2",
+    "title": "Build Materials Schedule & Budget Dashboard",
+    "description": "Implement the main /admin/showroom entry page with budget status horizontal bar charts and grouped materials tables.",
+    "status": "pending",
+    "dependsOn": ["TASK-1"],
+    "assignee": "frontend-specialist",
+    "effort": "4h"
+  },
+  {
+    "id": "TASK-3",
+    "title": "Build Showroom Directory & Hub Map",
+    "description": "Implement the showroom directory page with geographic map marker cards, hub route filters, and wishlist count details.",
+    "status": "pending",
+    "dependsOn": ["TASK-2"],
+    "assignee": "frontend-specialist",
+    "effort": "5h"
+  },
+  {
+    "id": "TASK-4",
+    "title": "Build Material Detail Viewport with AI warnings",
+    "description": "Implement the material specification viewport, connecting to note timelines, similar models feed, and compatibility alerts from the agent DO.",
+    "status": "pending",
+    "dependsOn": ["TASK-2"],
+    "assignee": "frontend-specialist",
+    "effort": "4h"
+  },
+  {
+    "id": "TASK-5",
+    "title": "Build Showroom Profile Viewport",
+    "description": "Implement the showroom detail profile layout featuring notes journal logging, ratings, and wishlist mapping.",
+    "status": "pending",
+    "dependsOn": ["TASK-3"],
+    "assignee": "frontend-specialist",
+    "effort": "3h"
+  },
+  {
+    "id": "TASK-6",
+    "title": "Build Mobile Barcode Scanner & Sync Panel",
+    "description": "Implement the camera scanning overlay with local storage offline queue mapping and auto-sync triggers.",
+    "status": "pending",
+    "dependsOn": ["TASK-4"],
+    "assignee": "frontend-specialist",
+    "effort": "5h"
+  }
+]

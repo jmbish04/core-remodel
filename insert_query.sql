@@ -1,0 +1,1 @@
+INSERT INTO research_sessions (topic, status, r2_markdown_key, r2_webapp_key, vector_namespace, chunk_count, created_at, completed_at) VALUES ('SF Primary Suite | Boutique Layout & Cost Explorer', 'complete', 'research/4/report.md', 'research/4/visualizer.html', 'research:4', 1, unixepoch(), unixepoch());

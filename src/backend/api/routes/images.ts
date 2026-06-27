@@ -1063,6 +1063,22 @@ imagesRouter.post("/upload", async (c) => {
               .run();
           }
 
+          // Auto-create listing_photos row for listing uploads so blank-canvas
+          // upload buttons are available immediately without a backfill step.
+          if (photoCategory === "listing" && deliveryToken) {
+            await db
+              .insert(listingPhotos)
+              .values({
+                imageId,
+                cfImageId: deliveryToken,
+                roomId: selectedRoom?.id ?? null,
+                roomName: roomHint || "Unassigned",
+                description: displayName,
+              })
+              .onConflictDoNothing()
+              .run();
+          }
+
           await db
             .insert(imageUploadStaging)
             .values({
@@ -1962,12 +1978,12 @@ imagesRouter.get("/", async (c) => {
     let query = db.select().from(images);
 
     // Apply filters (this is simplified - in production use proper query builder)
-    const includeDuplicates = c.req.query("includeDuplicates") === "true";
+    const includeExcluded = c.req.query("includeDuplicates") === "true";
     const allImages = await query.all();
 
-    let filtered = includeDuplicates
+    let filtered = includeExcluded
       ? allImages
-      : allImages.filter((img) => !img.isDuplicate);
+      : allImages.filter((img) => !img.isDuplicate && !img.isDeleted);
 
     if (roomType) {
       filtered = filtered.filter((img) => img.roomType === roomType);
@@ -2271,6 +2287,76 @@ imagesRouter.patch("/:imageId/duplicate", async (c) => {
 });
 
 /**
+ * PATCH /api/images/:imageId/soft-delete
+ * Toggle the isDeleted soft-delete flag for an image.
+ * Body: { isDeleted: boolean }
+ * Mirrors the isDuplicate endpoint — when marking as deleted, staging is also
+ * updated to 'mapped' so the image drops out of pending queues.
+ */
+imagesRouter.patch("/:imageId/soft-delete", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const imageId = c.req.param("imageId");
+    const body = (await c.req.json()) as { isDeleted?: boolean };
+
+    if (typeof body.isDeleted !== "boolean") {
+      return c.json({ error: "isDeleted (boolean) is required" }, 400);
+    }
+
+    const image = await db
+      .select()
+      .from(images)
+      .where(eq(images.id, imageId))
+      .get();
+    if (!image) {
+      return c.json({ error: "Image not found" }, 404);
+    }
+
+    await db
+      .update(images)
+      .set({
+        isDeleted: body.isDeleted,
+        deletedMarkedBy: body.isDeleted ? "admin" : null,
+        deletedMarkedAt: body.isDeleted ? new Date() : null,
+      })
+      .where(eq(images.id, imageId))
+      .run();
+
+    // If marking as deleted, also remove from pending staging
+    if (body.isDeleted) {
+      await db
+        .update(imageUploadStaging)
+        .set({
+          mappingStatus: "mapped",
+          datetimeMapped: new Date(),
+        })
+        .where(eq(imageUploadStaging.imageId, imageId))
+        .run();
+    }
+
+    const updated = await db
+      .select()
+      .from(images)
+      .where(eq(images.id, imageId))
+      .get();
+
+    return c.json({
+      success: true,
+      image: updated,
+    });
+  } catch (error) {
+    console.error("Soft-delete error:", error);
+    return c.json(
+      {
+        error: "Failed to update deleted status",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
  * GET /api/images/tags
  * List available tag definitions
  */
@@ -2428,6 +2514,9 @@ imagesRouter.get("/inspiration/scoped", async (c) => {
         : eq(images.inspirationScope, "home");
 
     let imageRows = await db.select().from(images).where(whereConditions).all();
+
+    // Exclude soft-deleted / duplicate inspiration images
+    imageRows = imageRows.filter((img) => !img.isDuplicate && !img.isDeleted);
 
     if (categoryFilter) {
       imageRows = imageRows.filter((img) => img.inspirationCategory === categoryFilter);
@@ -3281,14 +3370,16 @@ imagesRouter.post("/search", async (c) => {
       ),
     );
 
+    // Filter out soft-deleted / duplicate images from search results
+    const validResults = results.matches
+      .map((match, idx) => ({ ...match, image: imageDetails[idx] }))
+      .filter((entry) => entry.image && !entry.image.isDuplicate && !entry.image.isDeleted);
+
     return c.json({
       success: true,
       query,
-      count: results.matches.length,
-      results: results.matches.map((match, idx) => ({
-        ...match,
-        image: imageDetails[idx],
-      })),
+      count: validResults.length,
+      results: validResults,
     });
   } catch (error) {
     console.error("Search error:", error);
