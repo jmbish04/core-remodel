@@ -26,6 +26,20 @@ export const storeProductResearch = sqliteTable("store_product_research", {
   sentiment: text("sentiment", {
     enum: ["good", "bad", "neutral"],
   }),
+
+  /**
+   * Human-in-the-loop review state. Workers AI parses findings and binds them
+   * to a fixed target, so a fact can be mis-attributed; the homeowner approves
+   * correct facts and rejects wrong/junk ones. Rejections (with a reason) feed
+   * the sweep's negative constraints so the system learns from corrections.
+   */
+  reviewStatus: text("review_status", {
+    enum: ["pending", "approved", "rejected"],
+  })
+    .notNull()
+    .default("pending"),
+  reviewReason: text("review_reason"),
+  reviewedAt: integer("reviewed_at", { mode: "timestamp" }),
 });
 
 /**
@@ -50,6 +64,15 @@ export const storeResearch = sqliteTable("store_research", {
   sentiment: text("sentiment", {
     enum: ["good", "bad", "neutral"],
   }),
+
+  /** HITL review state — see store_product_research.review_status. */
+  reviewStatus: text("review_status", {
+    enum: ["pending", "approved", "rejected"],
+  })
+    .notNull()
+    .default("pending"),
+  reviewReason: text("review_reason"),
+  reviewedAt: integer("reviewed_at", { mode: "timestamp" }),
 });
 
 export type StoreProductResearchType = typeof storeProductResearch.$inferSelect;

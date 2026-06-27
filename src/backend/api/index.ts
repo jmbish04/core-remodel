@@ -34,6 +34,7 @@ import { estimatesRouter } from "./routes/estimates";
 import { healthRouter } from "./routes/health";
 import { imagesRouter } from "./routes/images";
 import { listingPhotosRouter } from "./routes/listing-photos";
+import { measurementsRouter } from "./routes/measurements";
 import { moodBoardsRouter } from "./routes/moodboards";
 import { notificationsRouter } from "./routes/notifications";
 import { openapiRouter } from "./routes/openapi";
@@ -62,6 +63,10 @@ import { adminConfigRouter } from "./routes/admin-config";
 import { dialerRouter } from "./routes/dialer";
 import { showroomStoresRouter } from "./routes/showroom-stores";
 import { showroomSeedRouter } from "./routes/showroom-seed";
+import { materialsRouter } from "./routes/materials";
+import { showroomGapsRouter } from "./routes/showroom-gaps";
+import { showroomCatalogRouter } from "./routes/showroom-catalog";
+import { showroomScanRouter } from "./routes/showroom-scan";
 import { requireAccessAuth } from "@backend/utils/access";
 
 export type Variables = {
@@ -95,6 +100,8 @@ app.use("/api/shopping-journal", requireAccessAuth);
 app.use("/api/shopping-journal/*", requireAccessAuth);
 app.use("/api/showroom-stores", requireAccessAuth);
 app.use("/api/showroom-stores/*", requireAccessAuth);
+app.use("/api/materials", requireAccessAuth);
+app.use("/api/materials/*", requireAccessAuth);
 app.use("/api/bid-portfolios/*", async (c, next) => {
   // Public routes do not require auth
   const path = new URL(c.req.url).pathname;
@@ -138,6 +145,7 @@ app.route("/api/planning", planningExtendedRouter);
 // /code/:roomCode/options-summary take priority over the broader /:id catch-all.
 app.route("/api/rooms", roomsExtendedRouter);
 app.route("/api/rooms", roomsRouter);
+app.route("/api/measurements", measurementsRouter);
 app.route("/api/estimate-statuses", estimateStatusesRouter);
 app.route("/api/estimate-companies", estimateCompaniesRouter);
 app.route("/api/estimate-contacts", estimateContactsRouter);
@@ -161,6 +169,10 @@ app.route("/api/truth-table", truthTableRouter);
 app.route("/api/shopping-journal", shoppingJournalRouter);
 app.route("/api/showroom-stores", showroomStoresRouter);
 app.route("/api/showroom-stores", showroomSeedRouter);
+app.route("/api/showroom-stores", showroomGapsRouter);
+app.route("/api/showroom-stores", showroomCatalogRouter);
+app.route("/api/showroom-stores", showroomScanRouter);
+app.route("/api/materials", materialsRouter);
 app.route("/", openapiRouter);
 
 export { app };

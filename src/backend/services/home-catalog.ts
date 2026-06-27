@@ -48,7 +48,7 @@
  */
 
 import { floors, images, inspirationalImageRooms, roomAiSummaries, rooms } from "@backend/db";
-import { and, asc, count, eq, inArray } from "drizzle-orm";
+import { and, asc, count, eq, inArray, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 interface SeedFloor {
@@ -67,6 +67,13 @@ interface SeedRoom {
   lengthInches: number | null;
   widthFeet: number | null;
   widthInches: number | null;
+  /**
+   * Explicit square-footage override (0006 P1) for irregular / non-rectangular
+   * rooms whose length × width estimate is wrong.  Optional — omit for rooms whose
+   * rectangular estimate is fine.  Backfilled onto existing rows (see
+   * _doSeedHomeCatalog) since the seed insert uses onConflictDoNothing.
+   */
+  areaSqFt?: number | null;
   isLivingSpace: boolean;
   /** Floorplan canvas identifier (matches floors.key). null = sidebar-only room. */
   floorplanFloorKey: string | null;
@@ -217,6 +224,8 @@ const DEFAULT_ROOMS: SeedRoom[] = [
     lengthInches: null,
     widthFeet: null,
     widthInches: null,
+    // L-shaped footprint — its true area is not length × width.  0006 P1 seed.
+    areaSqFt: 77.28,
     isLivingSpace: true,
     floorplanFloorKey: "lower_level",
     floorplanXPct: 7,
@@ -460,12 +469,29 @@ async function _doSeedHomeCatalog(env: Env): Promise<void> {
         lengthInches: room.lengthInches,
         widthFeet: room.widthFeet,
         widthInches: room.widthInches,
+        areaSqFt: room.areaSqFt ?? null,
         isLivingSpace: room.isLivingSpace,
         floorplanFloorKey: room.floorplanFloorKey,
         floorplanXPct: room.floorplanXPct,
         floorplanYPct: room.floorplanYPct,
       })
       .onConflictDoNothing()
+      .run();
+  }
+
+  // ── 0006 P1: backfill explicit area overrides onto already-seeded rows ──────
+  //
+  // The insert loop above uses onConflictDoNothing, so a room that already exists
+  // (e.g. the live `lower-foyer`) never receives the seed's new `areaSqFt`.  Apply
+  // any DEFAULT_ROOMS areaSqFt to existing rows that don't have one yet.  The
+  // `IS NULL` guard keeps this idempotent and never clobbers a value the owner has
+  // since entered by hand.
+  for (const room of DEFAULT_ROOMS) {
+    if (typeof room.areaSqFt !== "number") continue;
+    await db
+      .update(rooms)
+      .set({ areaSqFt: room.areaSqFt })
+      .where(and(eq(rooms.roomCode, room.roomCode), isNull(rooms.areaSqFt)))
       .run();
   }
 }
@@ -509,16 +535,26 @@ function formatRoomDimensions(
 }
 
 /**
- * Compute the approximate square footage of a room from its dimension fields.
- * Formula: (lengthFeet + lengthInches/12) * (widthFeet + widthInches/12), rounded.
- * Returns null when either the length or the width dimension set is absent.
+ * Resolve a room's square footage.
+ *
+ * 0006 P1: an explicit `areaSqFt` override always wins — irregular / L-shaped rooms
+ * (e.g. the lower foyer = 77.28) store their true area there and it is returned
+ * verbatim (not rounded), so the real value surfaces everywhere the catalog `sqft`
+ * field is consumed.  When no override is set, fall back to the rectangular estimate:
+ * (lengthFeet + lengthInches/12) * (widthFeet + widthInches/12), rounded.
+ * Returns null when neither an override nor a full length+width pair is present.
  */
 function computeRoomSqft(
   room: Pick<
     typeof rooms.$inferSelect,
-    "lengthFeet" | "lengthInches" | "widthFeet" | "widthInches"
+    "lengthFeet" | "lengthInches" | "widthFeet" | "widthInches" | "areaSqFt"
   >,
 ): number | null {
+  // Authoritative override (irregular footprints) takes precedence over any math.
+  if (typeof room.areaSqFt === "number") {
+    return room.areaSqFt;
+  }
+
   const lengthSet =
     typeof room.lengthFeet === "number" || typeof room.lengthInches === "number";
   const widthSet =

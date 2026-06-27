@@ -1,0 +1,17 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ProductViewportApp } from "@/components/showroom/ProductViewportApp";
+
+const { id } = Astro.params;
+const productId = id ? Number.parseInt(id, 10) : NaN;
+if (!Number.isFinite(productId)) {
+  return Astro.redirect("/admin/showroom/products");
+}
+---
+
+<BaseLayout
+  title={`Product ${productId} — The Monolith`}
+  description="Single product viewport: specs, research findings, images, and store link."
+>
+  <ProductViewportApp client:only="react" id={productId} />
+</BaseLayout>

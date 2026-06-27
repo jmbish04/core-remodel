@@ -1,0 +1,127 @@
+{
+  "feature": "0007_sourcing_deep_research",
+  "status": "planned",
+  "tasks": [
+    {
+      "id": "SDR-001",
+      "title": "Map existing research, showroom, image, agent, and cron systems",
+      "owner": "current-agent",
+      "status": "complete",
+      "dependencies": [],
+      "deliverables": [
+        "Confirm existing ShowroomResearchAgent and ResearchAgent extension points",
+        "Confirm Browser Rendering helper and ImageProcessorService contracts",
+        "Confirm RESEARCH_INDEX and scheduled-handler bindings"
+      ]
+    },
+    {
+      "id": "SDR-002",
+      "title": "Add schema for product images, product specs, and showroom images",
+      "owner": "database",
+      "status": "pending",
+      "dependencies": ["SDR-001"],
+      "deliverables": [
+        "src/backend/db/schema/showroom/product_images.ts",
+        "src/backend/db/schema/showroom/product_specs.ts",
+        "src/backend/db/schema/showroom/showroom_images.ts",
+        "showroom index export",
+        "generated Drizzle migration"
+      ]
+    },
+    {
+      "id": "SDR-003",
+      "title": "Expose reusable Gemini AI Gateway client from existing Gemini provider module",
+      "owner": "agents-sdk",
+      "status": "pending",
+      "dependencies": ["SDR-001"],
+      "deliverables": [
+        "Shared createGeminiAiGatewayClient helper",
+        "Shared Deep Research Interactions API helper",
+        "Existing GeminiStageProvider uses the helper",
+        "ResearchAgent Gemini client factory uses the helper"
+      ]
+    },
+    {
+      "id": "SDR-004",
+      "title": "Implement showroom prompt and context assembly helpers",
+      "owner": "api",
+      "status": "pending",
+      "dependencies": ["SDR-001"],
+      "deliverables": [
+        "Live D1 product/store context assembly",
+        "Homeowner rejection negative constraints",
+        "Workers AI draft prompt generation through AI Gateway"
+      ]
+    },
+    {
+      "id": "SDR-005",
+      "title": "Extend ShowroomResearchAgent with deep sweep callable methods",
+      "owner": "agents-sdk",
+      "status": "pending",
+      "dependencies": ["SDR-002", "SDR-003", "SDR-004"],
+      "deliverables": [
+        "deepSweepProduct RPC method",
+        "deepSweepStore RPC method",
+        "deepSweepCategory RPC method",
+        "Gemini citation discovery",
+        "Optional Gemini Deep Research Interactions API citation discovery",
+        "Optional scoped MCP bridge with allowed_tools",
+        "Browser Rendering semantic extraction",
+        "Cloudflare Images upload through ImageProcessorService",
+        "D1 upserts",
+        "Vectorize upserts"
+      ]
+    },
+    {
+      "id": "SDR-006",
+      "title": "Add OpenAPI-backed showroom research endpoints",
+      "owner": "api",
+      "status": "pending",
+      "dependencies": ["SDR-004", "SDR-005"],
+      "deliverables": [
+        "POST /api/showroom-stores/products/{productId}/research/draft-prompt",
+        "POST /api/showroom-stores/products/{productId}/research/deep-sweep",
+        "POST /api/showroom-stores/{storeId}/research/deep-sweep",
+        "POST /api/showroom-stores/meta/categories/{categoryId}/research/deep-sweep",
+        "researchMode/deepResearchWaitMs/enableMcpBridge request fields",
+        "OpenAPI path entries with unique operation IDs"
+      ]
+    },
+    {
+      "id": "SDR-007",
+      "title": "Add autonomous category coverage monitor",
+      "owner": "api",
+      "status": "pending",
+      "dependencies": ["SDR-005"],
+      "deliverables": [
+        "showroom sourcing monitor service",
+        "Existing * * * * * scheduled handler calls the monitor",
+        "Rejected showroom rating notes flow into negative constraints"
+      ]
+    },
+    {
+      "id": "SDR-008",
+      "title": "Merge project-agent workflow guidance",
+      "owner": "current-agent",
+      "status": "pending",
+      "dependencies": ["SDR-006", "SDR-007"],
+      "deliverables": [
+        "Add sourcing deep research conventions to .agents/rules without overwriting existing questionnaire rules",
+        "Add implementation workflow section for sourcing deep research without overwriting the existing workflow"
+      ]
+    },
+    {
+      "id": "SDR-009",
+      "title": "Verification",
+      "owner": "current-agent",
+      "status": "pending",
+      "dependencies": ["SDR-002", "SDR-006", "SDR-007", "SDR-008"],
+      "deliverables": [
+        "pnpm run db:generate",
+        "pnpm run cf-typegen",
+        "agent invocation anti-pattern scan",
+        "type/lint/build verification as feasible"
+      ]
+    }
+  ]
+}

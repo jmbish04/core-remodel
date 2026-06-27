@@ -392,8 +392,7 @@ renderRouter.get("/realtime", async (c) => {
     return c.json({ error: "Expected WebSocket upgrade" }, 400);
   }
   const session = new URL(c.req.url).searchParams.get("session") || "global";
-  const id = c.env.ESTIMATE_COLLAB.idFromName(`render:${session}`);
-  const stub = c.env.ESTIMATE_COLLAB.get(id);
+  const stub = c.env.ESTIMATE_COLLAB.getByName(`render:${session}`);
   return stub.fetch(c.req.raw);
 });
 

@@ -17,6 +17,8 @@ export interface ResearchAgentState {
   /** Orchestration lifecycle status */
   status:
     | "idle"
+    | "planning"
+    | "awaiting_plan_approval"
     | "researching"
     | "embedding"
     | "generating"
@@ -26,10 +28,16 @@ export interface ResearchAgentState {
   progress: string;
   /** Number of chunks embedded for the current session */
   chunkCount: number;
-  /** Deep Research interaction ID */
+  /** Deep Research interaction ID (the execution run) */
   interactionId?: string;
+  /** Collaborative-planning interaction ID (the plan phase) */
+  planInteractionId?: string;
+  /** Plan-review sub-state */
+  planStatus?: "none" | "drafting" | "annotating" | "awaiting_approval" | "approved" | "revising";
   /** Deep Research stream last event ID */
   lastEventId?: string;
+  /** Whether this run attached a scoped remote MCP bridge */
+  mcpBridgeEnabled?: boolean;
 }
 
 export const DEFAULT_RESEARCH_STATE: ResearchAgentState = {
@@ -72,6 +80,27 @@ export interface EmbedResult {
 export interface VisualizerResult {
   r2Key: string;
   sizeBytes: number;
+}
+
+export interface StartResearchOptions {
+  prompt?: string | null;
+  researchPlan?: string | null;
+  enableMcpBridge?: boolean;
+  mcpServerUrl?: string | null;
+  mode?: "standard" | "max";
+  visualization?: "auto" | "off";
+  /**
+   * When true, run the HITL plan-review gate: Gemini drafts a collaborative
+   * plan, the onboard agent annotates it, and the run pauses at
+   * `awaiting_plan_approval` until `approvePlan`. When false/omitted the legacy
+   * straight-through behavior is preserved.
+   */
+  usePlanReview?: boolean;
+}
+
+export interface StartResearchInput extends StartResearchOptions {
+  topic: string;
+  sessionId: number;
 }
 
 // ---------------------------------------------------------------------------

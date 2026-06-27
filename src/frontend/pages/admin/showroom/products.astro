@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ProductsCatalogApp } from "@/components/showroom/ProductsCatalogApp";
+---
+
+<BaseLayout
+  title="Products — The Monolith"
+  description="The cross-store product catalog, filterable by hub and material link, with AI product-coverage gap detection."
+>
+  <ProductsCatalogApp client:only="react" />
+</BaseLayout>

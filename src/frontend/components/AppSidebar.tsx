@@ -5,6 +5,7 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import { UnitToggle } from "@/components/ui/unit-toggle";
 import { siteConfig } from "@/lib/config";
 import { docsAudienceGroups, getDocsPageByPath } from "@/lib/docs";
 import { cn } from "@/lib/utils";
@@ -259,6 +260,8 @@ function SidebarLinks({
       {accessAuthenticated ? (
         <>
           {renderSection("Admin - Planning", [
+            { href: "/measure", label: "Live Floor Plan" },
+            { href: "/measurements", label: "Measurements" },
             { href: "/admin/planning/decision-room", label: "Decision Room" },
             { href: "/admin/planning/moodboards", label: "Mood Boards" },
           ])}
@@ -289,11 +292,18 @@ function SidebarLinks({
           {renderSection("Admin - Tools", [
             { href: "/admin", label: "Analytics" },
             { href: "/admin/research", label: "Research Center" },
-            { href: "/admin/shopping-journal", label: "Shopping Journal" },
           ])}
-          {renderSection("Shopping Research", [
+          {renderSection("Admin - Shopping", [
             { href: "/admin/showroom", label: "Showroom Dashboard" },
+            { href: "/admin/showroom/schedule", label: "Materials Schedule" },
+            { href: "/admin/showroom/showrooms", label: "Showrooms" },
+            { href: "/admin/showroom/products", label: "Products" },
+            { href: "/admin/showroom/research", label: "Deep Research" },
+            { href: "/admin/showroom/compare", label: "Compare" },
+            { href: "/admin/showroom/scan", label: "Field Scan" },
+            { href: "/admin/shopping-journal", label: "Shopping Journal" },
             { href: "/rooms/closets", label: "Closet Research" },
+            { href: "/admin/showroom/progress", label: "Build Progress" },
           ])}
         </>
       ) : (
@@ -361,6 +371,10 @@ function SidebarContent({
         <div className="flex items-center justify-between rounded-md border border-border/50 bg-card/60 px-2 py-1">
           <span className="text-xs text-muted-foreground">Theme</span>
           <ThemeToggle />
+        </div>
+        <div className="flex items-center justify-between rounded-md border border-border/50 bg-card/60 px-2 py-1">
+          <span className="text-xs text-muted-foreground">Units</span>
+          <UnitToggle />
         </div>
       </div>
     </div>

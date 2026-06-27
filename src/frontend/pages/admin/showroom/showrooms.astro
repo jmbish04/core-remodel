@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ShowroomsDirectoryApp } from "@/components/showroom/ShowroomsDirectoryApp";
+---
+
+<BaseLayout
+  title="Showrooms — The Monolith"
+  description="Bay Area showroom directory with a hub map, filters, and AI coverage-gap discovery driven by your materials list."
+>
+  <ShowroomsDirectoryApp client:only="react" />
+</BaseLayout>

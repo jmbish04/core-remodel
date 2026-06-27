@@ -27,3 +27,6 @@ proofs/
 __pycache__/
 *.py[cod]
 .venv/
+
+# Local D1 / miniflare state (created by migrate:local / wrangler dev)
+.wrangler/

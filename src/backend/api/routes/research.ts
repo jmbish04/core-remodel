@@ -22,20 +22,37 @@ import { getAgentByName } from "agents";
 import { researchSessions } from "@backend/db/schema/admin/research_sessions";
 import { deleteSessionVectors, embedAndUpsertChunks } from "@backend/ai/agents/ResearchAgent/methods/embed-chunks";
 import { chunkMarkdown } from "@backend/ai/agents/ResearchAgent/methods/chunk-markdown";
-import { r2MarkdownKey, r2WebappKey, vectorNamespace } from "@backend/ai/agents/ResearchAgent/types";
+import { r2MarkdownKey, r2WebappKey } from "@backend/ai/agents/ResearchAgent/types";
 import type { ResearchAgent } from "@backend/ai/agents/ResearchAgent";
+import { cfResearchRouter } from "./cf-research";
 
 export const researchRouter = new Hono<{ Bindings: Env }>();
+
+// Engine B — self-hosted Cloudflare Agents Deep Research engine.
+// Mounted here so it inherits /api/admin/research + requireAccessAuth and
+// writes into the same research_sessions table as Engine A.
+researchRouter.route("/cf-engine", cfResearchRouter);
 
 // ---------------------------------------------------------------------------
 // POST / — Create a new research session
 // ---------------------------------------------------------------------------
 
 researchRouter.post("/", async (c) => {
-  const body = await c.req.json<{ topic?: string; prompt?: string; researchPlan?: string }>();
+  const body = await c.req.json<{
+    topic?: string;
+    prompt?: string;
+    researchPlan?: string;
+    enableMcpBridge?: boolean;
+    mode?: "standard" | "max";
+    visualization?: "auto" | "off";
+    usePlanReview?: boolean;
+  }>();
   const topic = body?.topic?.trim();
   const prompt = body?.prompt?.trim() || null;
   const researchPlan = body?.researchPlan?.trim() || null;
+  // Default ON: new sessions go through the HITL plan-review gate. Pass
+  // usePlanReview:false to preserve the legacy straight-through behavior.
+  const usePlanReview = body?.usePlanReview !== false;
 
   if (!topic || topic.length < 5) {
     return c.json(
@@ -52,17 +69,44 @@ researchRouter.post("/", async (c) => {
     .values({ topic, prompt, researchPlan, status: "pending" })
     .returning();
 
-  // Fire-and-forget: trigger the ResearchAgent asynchronously
-  // The frontend connects via WebSocket to watch state transitions
+  // Trigger the ResearchAgent asynchronously and return 202 immediately. The
+  // dispatch MUST be registered with executionCtx.waitUntil — otherwise the
+  // unawaited RPC is dropped when the response is sent and the session is left
+  // stuck at "pending" (the agent's startResearch never runs).
   try {
     const agent = await getAgentByName<Env, ResearchAgent>(
       c.env.RESEARCH_AGENT as any,
       `research-${session.id}`,
     );
-    // Call startResearch without awaiting — returns 202 immediately
-    (agent as any).startResearch(topic, session.id).catch((err: unknown) => {
-      console.error(`Research pipeline failed for session ${session.id}:`, err);
-    });
+    c.executionCtx.waitUntil(
+      (agent as any)
+        .startResearch({
+          topic,
+          sessionId: session.id,
+          prompt,
+          researchPlan,
+          enableMcpBridge: body?.enableMcpBridge === true,
+          mcpServerUrl: new URL("/api/mcp", c.req.url).toString(),
+          mode: body?.mode === "max" ? "max" : "standard",
+          visualization: body?.visualization === "auto" ? "auto" : "off",
+          usePlanReview,
+        })
+        .catch(async (err: unknown) => {
+          console.error(`Research pipeline failed for session ${session.id}:`, err);
+          // Don't leave the session stuck at "pending" if the RPC itself rejects.
+          try {
+            await db
+              .update(researchSessions)
+              .set({
+                status: "failed",
+                errorMessage: err instanceof Error ? err.message : "Failed to execute agent",
+              })
+              .where(eq(researchSessions.id, session.id));
+          } catch (dbErr) {
+            console.error(`Failed to mark research session ${session.id} failed:`, dbErr);
+          }
+        }),
+    );
   } catch (err) {
     console.error("Failed to dispatch research agent:", err);
     // Update session to failed if we can't even reach the agent
@@ -81,7 +125,60 @@ researchRouter.post("/", async (c) => {
     );
   }
 
-  return c.json({ sessionId: session.id, status: "pending", topic }, 202);
+  return c.json(
+    { sessionId: session.id, status: usePlanReview ? "planning" : "researching", topic },
+    202,
+  );
+});
+
+// ---------------------------------------------------------------------------
+// POST /:id/approve-plan — approve the drafted plan and release the run (gate c)
+// ---------------------------------------------------------------------------
+
+researchRouter.post("/:id/approve-plan", async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  if (isNaN(id)) return c.json({ error: "Invalid session ID" }, 400);
+
+  try {
+    const agent = await getAgentByName<Env, ResearchAgent>(
+      c.env.RESEARCH_AGENT as any,
+      `research-${id}`,
+    );
+    await agent.approvePlan(id);
+    return c.json({ success: true, sessionId: id, status: "researching" }, 202);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to approve plan";
+    const status = message.includes("not awaiting") || message.includes("not found") ? 409 : 500;
+    return c.json({ success: false, error: message }, status);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /:id/request-changes — re-plan with homeowner feedback (gate c loop)
+// ---------------------------------------------------------------------------
+
+researchRouter.post("/:id/request-changes", async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  if (isNaN(id)) return c.json({ error: "Invalid session ID" }, 400);
+
+  const body = await c.req.json<{ feedback?: string }>().catch(() => ({}) as { feedback?: string });
+  const feedback = body?.feedback?.trim();
+  if (!feedback) {
+    return c.json({ error: "feedback is required" }, 400);
+  }
+
+  try {
+    const agent = await getAgentByName<Env, ResearchAgent>(
+      c.env.RESEARCH_AGENT as any,
+      `research-${id}`,
+    );
+    await agent.revisePlan(id, feedback);
+    return c.json({ success: true, sessionId: id, status: "planning" }, 202);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Failed to request plan changes";
+    const status = message.includes("not awaiting") || message.includes("not found") ? 409 : 500;
+    return c.json({ success: false, error: message }, status);
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { MaterialsScheduleApp } from "@/components/materials/MaterialsScheduleApp";
+---
+
+<BaseLayout
+  title="Materials Schedule — The Monolith"
+  description="The master materials list that seeds all downstream showroom discovery, product sourcing, and deep research."
+>
+  <MaterialsScheduleApp client:only="react" />
+</BaseLayout>

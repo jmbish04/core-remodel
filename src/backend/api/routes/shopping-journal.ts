@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { z } from "zod";
 import { getAgentByName } from "agents";
 
@@ -12,7 +12,6 @@ import { researchSessions } from "@backend/db/schema/admin/research_sessions";
 import { GoogleMapsService } from "../../services/google/maps";
 import { getGoogleMapsApiKey } from "@/backend/utils/secrets";
 import { generateStructuredOutput } from "../../ai/providers";
-import { getProvider } from "../../ai/providers";
 import type { ResearchAgent } from "../../ai/agents/ResearchAgent";
 import type { BudgetAgent } from "../../ai/agents/BudgetAgent";
 
@@ -259,7 +258,14 @@ shoppingJournalRouter.post("/", async (c) => {
                   c.env.RESEARCH_AGENT as any,
                   `research-${session.id}`
                 );
-                (agent as any).startResearch(researchTopic, session.id).catch((err: unknown) => {
+                (agent as any).startResearch({
+                  topic: researchTopic,
+                  sessionId: session.id,
+                  prompt: promptText,
+                  mode: "standard",
+                  visualization: "off",
+                  enableMcpBridge: false,
+                }).catch((err: unknown) => {
                   console.error(`Automated research dispatch failed for session ${session.id}:`, err);
                 });
               } catch (err) {

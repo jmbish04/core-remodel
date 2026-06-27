@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { FieldScanApp } from "@/components/showroom/FieldScanApp";
+---
+
+<BaseLayout
+  title="Field Scan — The Monolith"
+  description="Offline-first field capture: photo-group product cards at the showroom, synced (in-store or at home) into product drafts with queued deep research."
+>
+  <FieldScanApp client:only="react" />
+</BaseLayout>

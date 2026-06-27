@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { PlannerProgressApp } from "@/components/showroom/PlannerProgressApp";
+---
+
+<BaseLayout
+  title="Build Progress — The Monolith"
+  description="Live progress tracker for the phased Showroom Planner build-out: per-phase tasks, status, merged PR links, and the canonical implementation plan."
+>
+  <PlannerProgressApp client:load />
+</BaseLayout>

@@ -10,16 +10,15 @@
  * summarizes with Workers AI vision (llama-3.2-11b) into ai_title + ai_description,
  * and stores the request + result in `mood_board_generations`.
  */
-import { GoogleGenAI } from "@google/genai";
 import { moodBoardGenerations } from "@backend/db";
 import { drizzle } from "drizzle-orm/d1";
 
-import { getCloudflareAccountId, resolveCloudflareImagesCredentials } from "../../utils/secrets";
+import { resolveCloudflareImagesCredentials } from "../../utils/secrets";
 import { ImageProcessorService } from "../image-processor";
 import { uploadBytesToCfImages } from "./cf-images";
+import { createGeminiAiGatewayClient } from "./providers/gemini-stage-provider";
 
-export const MOOD_BOARD_PROMPT =
-  "CREATE A PHOTOGRAPH OF AN INTERIOR DESIGN MOOD BOARD THAT INCORPORATES ELEMENTS FROM ALL THE UPLOADED IMAGES. THE MOOD BOARD SHOULD BE ORGANIZED, THOUGHT OUT, AND CRAFTED LIKE A PROFESSIONAL INTERIOR DESIGN MOOD BOARD FLATLAY FOR DESIGN PURPOSES. MINIMALLY OVERLAP ELEMENTS WHEN APPLICABLE AND USE DESIGN TECHNIQUES LIKE COLLAGING AND TRANSPARENCY. WHITE BACKGROUND. DO NOT INCLUDE ANY TEXT.";
+export const MOOD_BOARD_PROMPT = `CREATE A PHOTOGRAPH OF AN INTERIOR DESIGN MOOD BOARD THAT INCORPORATES ELEMENTS FROM ALL THE UPLOADED IMAGES. THE MOOD BOARD SHOULD BE ORGANIZED, THOUGHT OUT, AND CRAFTED LIKE A PROFESSIONAL INTERIOR DESIGN MOOD BOARD FLATLAY FOR DESIGN PURPOSES. MINIMALLY OVERLAP ELEMENTS WHEN APPLICABLE AND USE DESIGN TECHNIQUES LIKE COLLAGING AND TRANSPARENCY. WHITE BACKGROUND. DO NOT INCLUDE ANY TEXT.`;
 
 function base64ToArrayBuffer(b64: string): ArrayBuffer {
   const bin = atob(b64);
@@ -61,20 +60,12 @@ export async function generateMoodBoard(args: GenerateMoodBoardArgs): Promise<Mo
   const { env } = args;
   const userCtx = args.prompt?.trim() || "";
   const fullPrompt = userCtx
-    ? `${MOOD_BOARD_PROMPT}\n\nDesign context / instructions for these elements: ${userCtx}`
+    ? `${MOOD_BOARD_PROMPT}
+
+Design context / instructions for these elements: ${userCtx}`
     : MOOD_BOARD_PROMPT;
 
-  const apiKey = await env.GEMINI_API_KEY.get();
-  const accountId = await getCloudflareAccountId(env);
-  if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
-  if (!accountId) throw new Error("CLOUDFLARE_ACCOUNT_ID is not configured");
-
-  const ai = new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      baseUrl: `https://gateway.ai.cloudflare.com/v1/${accountId}/${env.AI_GATEWAY_ID}/google-ai-studio`,
-    },
-  });
+  const ai = await createGeminiAiGatewayClient(env);
 
   const parts: Array<Record<string, unknown>> = [{ text: fullPrompt }];
   for (const url of args.imageUrls ?? []) {

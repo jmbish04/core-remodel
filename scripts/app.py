@@ -8,15 +8,13 @@ import time
 from datetime import datetime
 from flask import Flask, jsonify, request, send_from_directory, render_template_string
 
+
 app = Flask(__name__)
 
 # Absolute base directory of the ai_renders assets (coordinates, blank_images,
 # revisions, templates). This script lives under scripts/ now, but its assets stay
 # put in the proofs/.../ai_renders directory, so BASE_DIR points there explicitly.
-BASE_DIR = os.environ.get(
-    "AI_RENDERS_BASE_DIR",
-    "/Volumes/Projects/workers/core-remodel/proofs/tight/jason_20260615/upper_level/kitchen/ai_renders",
-)
+from ai_photo_pipeline.config import base_dir as BASE_DIR
 COORDINATES_FILE = os.path.join(BASE_DIR, "ai_photo_coordinates.json")
 BLANK_IMAGES_DIR = os.path.join(BASE_DIR, "blank_images")
 REVISIONS_DIR = os.path.join(BASE_DIR, "revisions")

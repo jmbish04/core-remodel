@@ -1,41 +1,32 @@
 import { sql } from "drizzle-orm";
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
-import { showroomStoreProducts } from "../showroom/store_products";
-
 /**
- * Material Schedule Items — the master list of materials needed for the remodel.
+ * Material Schedule Items — the master list of materials/components to source
+ * for the renovation (e.g. "Induction cooktop", "Primary closet system").
  *
- * Each row is a line item like "Induction Cooktop" or "Primary Bath Vanity".
- * When a showroom product is purchased for this item, `isPurchased` flips to
- * true and `purchasedShowroomProductId` links to the actual product.
+ * This is the seed that feeds downstream showroom discovery, product sourcing,
+ * gap analysis, and deep research.
  */
 export const materialScheduleItems = sqliteTable("material_schedule_items", {
   id: integer("id").primaryKey({ autoIncrement: true }),
-
-  /** When this item was added to the schedule. */
   dateAdded: integer("date_added", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),
 
-  /** Human-readable title — e.g. "Induction Cooktop", "Primary Bath Faucet". */
   title: text("title").notNull(),
-
-  /** Preferred or required brand (optional). */
+  roomName: text("room_name"),
   brand: text("brand"),
-
-  /** Preferred or required model number (optional). */
   model: text("model"),
+  notes: text("notes"),
 
-  /** Whether this material has been purchased. */
   isPurchased: integer("is_purchased", { mode: "boolean" }).default(false),
-
   /**
-   * FK to showroom_store_products.id — the specific product that was purchased
-   * to fulfill this material need. Nullable until purchased.
+   * The showroom product this material was ultimately purchased as (if any).
+   * Plain column rather than a hard FK to avoid a circular schema import with
+   * `showroom_store_products` (which references `material_schedule_items`).
    */
-  purchasedShowroomProductId: integer("purchased_showroom_product_id")
-    .references(() => showroomStoreProducts.id, { onDelete: "set null" }),
+  purchasedShowroomProductId: integer("purchased_showroom_product_id"),
 
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
@@ -46,5 +37,4 @@ export const materialScheduleItems = sqliteTable("material_schedule_items", {
 });
 
 export type MaterialScheduleItem = typeof materialScheduleItems.$inferSelect;
-export type MaterialScheduleItemInsert =
-  typeof materialScheduleItems.$inferInsert;
+export type MaterialScheduleItemInsert = typeof materialScheduleItems.$inferInsert;

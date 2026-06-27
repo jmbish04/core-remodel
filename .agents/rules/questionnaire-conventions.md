@@ -69,3 +69,32 @@ loop.
   `new WebSocket(\`${protocol}//${host}/api/realtime/estimates?room=${room}\`)`.
 - Do NOT create a new realtime endpoint — the `EstimateCollabHub` DO is generic
   and broadcasts to any room name.
+
+## 7. Sourcing deep research conventions
+
+These rules apply to showroom/product sourcing research, category gap sweeps,
+Browser Rendering extraction, Cloudflare Images ingestion, and Vectorize RAG.
+
+- Extend `ShowroomResearchAgent` / `ResearchAgent`; do NOT create a parallel
+  research worker or invoke agent methods through `stub.fetch(new Request(...))`.
+- Worker/API/cron callers MUST use native Agents SDK RPC:
+  `getAgentByName(env.SHOWROOM_RESEARCH_AGENT, "showroom-research")` followed
+  by a typed method call.
+- Gemini calls MUST use the shared AI Gateway client helper exported from
+  `src/backend/services/render/providers/gemini-stage-provider.ts`.
+- Workers AI calls that support Gateway options SHOULD pass
+  `{ gateway: { id: env.AI_GATEWAY_ID } }`.
+- Browser Rendering must go through
+  `src/backend/ai/tools/browser-rendering.ts` and the
+  `CF_BROWSER_RENDER_TOKEN` binding. Do NOT import `cloudflare:browser-rendering`.
+- Scraped images must upload through `ImageProcessorService` before writing D1
+  delivery URLs.
+- Product/store/category source evidence must be embedded into
+  `RESEARCH_INDEX` with target metadata (`productId`, `storeId`, `categoryId`,
+  `sourceUrl`, namespace).
+- AI prompts must be ES6 template literals with real newlines. Do not build
+  prompts with string-array newline joins.
+- New showroom sourcing endpoints must be `@hono/zod-openapi` routes with
+  unique `operationId` values and matching `/openapi.json` entries.
+- Category monitoring runs from the existing `* * * * *` master tick and must
+  throttle automatic sweeps to avoid repeated category searches.

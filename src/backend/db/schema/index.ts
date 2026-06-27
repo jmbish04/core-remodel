@@ -16,6 +16,7 @@ export * from "./contracts/contracts";
 
 export * from "./home/floors";
 export * from "./home/rooms";
+export * from "./home/measurements";
 export * from "./home/remodel_scenarios";
 export * from "./home/scenario_room_plans";
 export * from "./home/room_action_items";
@@ -84,5 +85,7 @@ export * from "./system/google-maps-usage";
 
 export * from "./dialer/prospects";
 export * from "./dialer/state";
+
+export * from "./materials/index";
 
 export * from "./showroom/index";

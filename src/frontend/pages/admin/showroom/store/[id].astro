@@ -1,0 +1,17 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { StoreViewportApp } from "@/components/showroom/StoreViewportApp";
+
+const { id } = Astro.params;
+const storeId = id ? Number.parseInt(id, 10) : NaN;
+if (!Number.isFinite(storeId)) {
+  return Astro.redirect("/admin/showroom/showrooms");
+}
+---
+
+<BaseLayout
+  title={`Showroom ${storeId} — The Monolith`}
+  description="Single showroom viewport: location, hours, products carried, and research findings."
+>
+  <StoreViewportApp client:only="react" id={storeId} />
+</BaseLayout>

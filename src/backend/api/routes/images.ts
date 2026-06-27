@@ -2445,8 +2445,7 @@ imagesRouter.get("/realtime", async (c) => {
   if (c.req.header("Upgrade") !== "websocket") {
     return c.json({ error: "Expected WebSocket upgrade" }, 400);
   }
-  const id = c.env.ESTIMATE_COLLAB.idFromName("uploads");
-  const stub = c.env.ESTIMATE_COLLAB.get(id);
+  const stub = c.env.ESTIMATE_COLLAB.getByName("uploads");
   // Forward the raw upgrade request (preserves the Upgrade header) to the DO.
   // Legitimate WS-proxy use of stub.fetch — not RPC-over-HTTP.
   return stub.fetch(c.req.raw);

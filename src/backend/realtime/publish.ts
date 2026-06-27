@@ -4,8 +4,7 @@ export async function publishRealtimeEvent(
   payload: Record<string, unknown>,
 ): Promise<void> {
   const roomKey = room.trim().length > 0 ? room.trim() : "global";
-  const id = env.ESTIMATE_COLLAB.idFromName(roomKey);
-  const stub = env.ESTIMATE_COLLAB.get(id);
+  const stub = env.ESTIMATE_COLLAB.getByName(roomKey);
   await stub.fetch("https://realtime.internal/emit", {
     method: "POST",
     headers: {

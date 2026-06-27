@@ -1,26 +1,11 @@
-import { GoogleGenAI } from "@google/genai";
+import { createGeminiAiGatewayClient } from "@backend/services/render/providers/gemini-stage-provider";
 
 export async function processImageEdit(
   env: Env,
   prompt: string,
   base64Images: { data: string; mimeType: string }[],
 ): Promise<string | null> {
-  const geminiApiKey = await env.GEMINI_API_KEY.get();
-  const cloudflareAccountId = await env.CLOUDFLARE_ACCOUNT_ID.get();
-
-  if (!geminiApiKey) {
-    throw new Error("GEMINI_API_KEY is not configured");
-  }
-  if (!cloudflareAccountId) {
-    throw new Error("CLOUDFLARE_ACCOUNT_ID is not configured");
-  }
-
-  const ai = new GoogleGenAI({
-    apiKey: geminiApiKey,
-    httpOptions: {
-      baseUrl: `https://gateway.ai.cloudflare.com/v1/${cloudflareAccountId}/${env.AI_GATEWAY_ID}/google-ai-studio`,
-    },
-  });
+  const ai = await createGeminiAiGatewayClient(env);
 
   const input = [
     { type: "text", text: prompt },

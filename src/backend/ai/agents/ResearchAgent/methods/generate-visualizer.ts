@@ -7,7 +7,7 @@
  * safe to serve inside a sandboxed Dynamic Worker iframe.
  */
 
-import { GoogleGenAI } from "@google/genai";
+import { createGeminiAiGatewayClient } from "@backend/services/render/providers/gemini-stage-provider";
 
 /**
  * Generate a single-file HTML visualizer webapp from research markdown.
@@ -22,26 +22,15 @@ export async function generateVisualizerWebapp(
   topic: string,
   markdown: string,
 ): Promise<string> {
-  const geminiApiKey = await env.GEMINI_API_KEY.get();
-  const cloudflareAccountId = await env.CLOUDFLARE_ACCOUNT_ID.get();
-
-  if (!geminiApiKey) {
-    throw new Error("GEMINI_API_KEY is not configured");
-  }
-  if (!cloudflareAccountId) {
-    throw new Error("CLOUDFLARE_ACCOUNT_ID is not configured");
-  }
-
-  const ai = new GoogleGenAI({
-    apiKey: geminiApiKey,
-    httpOptions: {
-      baseUrl: `https://gateway.ai.cloudflare.com/v1/${cloudflareAccountId}/${env.AI_GATEWAY_ID}/google-ai-studio`,
-    },
-  });
+  const ai = await createGeminiAiGatewayClient(env);
 
   // Truncate markdown if extremely long to fit in context window
   const truncatedMarkdown =
-    markdown.length > 80_000 ? markdown.slice(0, 80_000) + "\n\n[...truncated]" : markdown;
+    markdown.length > 80_000
+      ? `${markdown.slice(0, 80_000)}
+
+[...truncated]`
+      : markdown;
 
   const prompt = `You are a data visualization engineer. Given the following research report on "${topic}", create a SINGLE self-contained HTML file that acts as an interactive research dashboard.
 

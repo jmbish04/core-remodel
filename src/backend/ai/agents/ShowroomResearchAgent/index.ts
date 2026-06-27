@@ -1,44 +1,40 @@
 /**
  * @fileoverview ShowroomResearchAgent — Specialized AI agent for showroom
- * product research, compatibility checking, and cost-saving intelligence.
+ * product research, compatibility checking, image sourcing, and category gap
+ * monitoring.
  *
- * Capabilities:
- *   1. Product Review Aggregation — web search for reviews, ratings, warranty
- *   2. Compatibility Checking — cross-ref products vs room plans & materials
- *   3. Moodboard-Aware Style Advice — query mood_boards to advise on fit
- *   4. Cost-Saving Analysis — trade discounts, Costco rebates, bulk pricing
- *   5. Similar Product Discovery — find alternatives at different price points
- *   6. Vendor Category Gap Detection — surface missing vendor categories
- *   7. AI Highlights — flag how a store location aligns with user renovation needs
- *
- * Triggers:
- *   - store.created → research reputation, verify address/hours
- *   - product.created → find reviews, check compatibility, find similars
- *   - scan.processed → if new product auto-created, run full pipeline
- *   - user.request → manual "Research this" from the frontend
- *
- * Extends AIChatAgent for WebSocket chat over findings.
- * Model: gemini-2.5-flash for research chat, Workers AI VLM for scans.
+ * The agent extends AIChatAgent for future WebSocket chat over showroom
+ * findings, but long-running research is exposed as native Agents SDK RPC
+ * methods. Worker routes and cron jobs must call these methods through
+ * `getAgentByName(env.SHOWROOM_RESEARCH_AGENT, "showroom-research")`.
  */
 
 import { AIChatAgent } from "@cloudflare/ai-chat";
 import { callable } from "agents";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, and, isNull, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import {
   showroomStores,
-  showroomStoreProducts,
-  storeResearch,
-  storeProductResearch,
-  showroomStoreRatings,
+  sourcingSweepSessions,
   storePaMapping,
   storeProductAreaDef,
-  showroomStoreCategoryMapping,
-  showroomStoreCategory,
 } from "@backend/db/schema/showroom/index";
-
-// ─── State ────────────────────────────────────────────────────────────────────
+import {
+  createSweepSession,
+  deepSweepCategory as runDeepSweepCategory,
+  deepSweepProduct as runDeepSweepProduct,
+  deepSweepStore as runDeepSweepStore,
+  draftSweepPlan,
+  runApprovedSweep,
+  type DiscoverSweepPlanInput,
+} from "./methods";
+import type {
+  DeepSweepCategoryInput,
+  DeepSweepProductInput,
+  DeepSweepStoreInput,
+  ShowroomSweepResult,
+} from "./types";
 
 export type ShowroomResearchState = {
   status: "idle" | "researching" | "complete" | "error";
@@ -51,49 +47,79 @@ const DEFAULT_STATE: ShowroomResearchState = {
   status: "idle",
 };
 
-// ─── Agent ────────────────────────────────────────────────────────────────────
+function failedResult(
+  targetType: "product" | "store" | "category",
+  targetId: number,
+  error: unknown,
+): ShowroomSweepResult {
+  return {
+    success: false,
+    targetType,
+    targetId,
+    citationsFound: 0,
+    sourcesProcessed: 0,
+    findingsWritten: 0,
+    imagesWritten: 0,
+    specsWritten: 0,
+    vectorsWritten: 0,
+    warnings: [error instanceof Error ? error.message : String(error)],
+  };
+}
 
 export class ShowroomResearchAgent extends AIChatAgent<
   Env,
   ShowroomResearchState
 > {
-  // Metadata for /docs endpoint
   static docsMetadata() {
     return {
       name: "ShowroomResearchAgent",
       className: "ShowroomResearchAgent",
       description:
         "Specialized AI agent for showroom product research, compatibility checking, " +
-        "cost-saving intelligence, moodboard-aware style advice, and vendor gap detection.",
+        "cost-saving intelligence, image sourcing, Vectorize RAG, and vendor gap detection.",
       docsPath: "/docs/agents/showroom-research",
       methods: [
         {
+          name: "deepSweepProduct",
+          description:
+            "Run citation-backed product sourcing research, scrape semantic images, persist specs/findings, and embed into RESEARCH_INDEX.",
+          params: "DeepSweepProductInput",
+          returns: "ShowroomSweepResult",
+        },
+        {
+          name: "deepSweepStore",
+          description:
+            "Run citation-backed showroom research, scrape storefront/showroom images, persist findings/ratings, and embed into RESEARCH_INDEX.",
+          params: "DeepSweepStoreInput",
+          returns: "ShowroomSweepResult",
+        },
+        {
+          name: "deepSweepCategory",
+          description:
+            "Research category coverage gaps with homeowner rejection constraints and embed source evidence into RESEARCH_INDEX.",
+          params: "DeepSweepCategoryInput",
+          returns: "ShowroomSweepResult",
+        },
+        {
           name: "researchStore",
           description:
-            "Run full research pipeline on a store: reputation, reviews, hours verification",
+            "Compatibility wrapper for existing store-created/manual triggers.",
           params: "storeId: number",
-          returns: "void (broadcasts progress via WebSocket state)",
+          returns: "{ success: boolean; findingsCount: number }",
         },
         {
           name: "researchProduct",
           description:
-            "Run product research: reviews, compatibility checks, similar products",
+            "Compatibility wrapper for existing product-created/manual triggers.",
           params: "productId: number",
-          returns: "void (broadcasts progress via WebSocket state)",
-        },
-        {
-          name: "analyzeGaps",
-          description:
-            "Detect missing vendor categories across tracked stores",
-          params: "none",
-          returns: "GapAnalysisResult",
+          returns: "{ success: boolean; findingsCount: number }",
         },
         {
           name: "generateHighlights",
           description:
-            "Generate ai_highlights_for_user_renovation for a store based on D1 context",
+            "Generate ai_highlights_for_user_renovation for a store based on D1 context.",
           params: "storeId: number",
-          returns: "string (highlights text)",
+          returns: "string | null",
         },
       ],
     };
@@ -101,196 +127,187 @@ export class ShowroomResearchAgent extends AIChatAgent<
 
   initialState = DEFAULT_STATE;
 
+  private reportProgress(message: string, progress?: number) {
+    this.setState({
+      ...this.state,
+      status: "researching",
+      currentTask: message,
+      progress,
+      lastError: undefined,
+    });
+  }
+
+  private markComplete() {
+    this.setState({
+      ...this.state,
+      status: "complete",
+      currentTask: undefined,
+      progress: 100,
+      lastError: undefined,
+    });
+  }
+
+  private markError(error: unknown) {
+    this.setState({
+      ...this.state,
+      status: "error",
+      currentTask: undefined,
+      lastError: error instanceof Error ? error.message : String(error),
+    });
+  }
+
+  @callable()
+  async deepSweepProduct(input: DeepSweepProductInput): Promise<ShowroomSweepResult> {
+    try {
+      const result = await runDeepSweepProduct(this.env, input, (message, progress) =>
+        this.reportProgress(message, progress),
+      );
+      this.markComplete();
+      return result;
+    } catch (error) {
+      this.markError(error);
+      return failedResult("product", input.productId, error);
+    }
+  }
+
+  @callable()
+  async deepSweepStore(input: DeepSweepStoreInput): Promise<ShowroomSweepResult> {
+    try {
+      const result = await runDeepSweepStore(this.env, input, (message, progress) =>
+        this.reportProgress(message, progress),
+      );
+      this.markComplete();
+      return result;
+    } catch (error) {
+      this.markError(error);
+      return failedResult("store", input.storeId, error);
+    }
+  }
+
+  @callable()
+  async deepSweepCategory(input: DeepSweepCategoryInput): Promise<ShowroomSweepResult> {
+    try {
+      const result = await runDeepSweepCategory(this.env, input, (message, progress) =>
+        this.reportProgress(message, progress),
+      );
+      this.markComplete();
+      return result;
+    } catch (error) {
+      this.markError(error);
+      return failedResult("category", input.categoryId, error);
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // Plan-review gate (Phase 2): draft → annotate → approve → run
+  // -------------------------------------------------------------------------
+
   /**
-   * Research a store: reputation, reviews, address verification, AI highlights.
+   * Start a plan-gated sweep: create a session, draft + annotate a plan in the
+   * background, and pause at `awaiting_plan_approval`. Returns the session id
+   * immediately so the caller can poll it.
+   */
+  @callable()
+  async discoverSweepPlan(
+    input: DiscoverSweepPlanInput,
+  ): Promise<{ sessionId: number; status: "planning" }> {
+    const sessionId = await createSweepSession(this.env, input);
+    this.ctx.waitUntil(
+      draftSweepPlan(this.env, sessionId, {
+        onProgress: (message, progress) => this.reportProgress(message, progress),
+      }),
+    );
+    return { sessionId, status: "planning" };
+  }
+
+  /** Approve the drafted plan and run the sweep in the background (gate c). */
+  @callable()
+  async approveSweepPlan(sessionId: number): Promise<{ success: boolean; status: string }> {
+    const db = drizzle(this.env.DB);
+    const [session] = await db
+      .select()
+      .from(sourcingSweepSessions)
+      .where(eq(sourcingSweepSessions.id, sessionId))
+      .limit(1);
+    if (!session) throw new Error(`Sweep session ${sessionId} not found`);
+    if (session.status !== "awaiting_plan_approval") {
+      throw new Error(`Sweep session ${sessionId} is not awaiting plan approval`);
+    }
+
+    await db
+      .update(sourcingSweepSessions)
+      .set({ status: "sweeping", planStatus: "approved", approvedAt: new Date() })
+      .where(eq(sourcingSweepSessions.id, sessionId));
+
+    this.ctx.waitUntil(
+      runApprovedSweep(this.env, sessionId, (message, progress) =>
+        this.reportProgress(message, progress),
+      ),
+    );
+    return { success: true, status: "sweeping" };
+  }
+
+  /** Request changes — re-draft the plan with homeowner feedback (gate c loop). */
+  @callable()
+  async reviseSweepPlan(
+    sessionId: number,
+    feedback: string,
+  ): Promise<{ success: boolean; status: string }> {
+    const db = drizzle(this.env.DB);
+    const [session] = await db
+      .select()
+      .from(sourcingSweepSessions)
+      .where(eq(sourcingSweepSessions.id, sessionId))
+      .limit(1);
+    if (!session) throw new Error(`Sweep session ${sessionId} not found`);
+    if (session.status !== "awaiting_plan_approval") {
+      throw new Error(`Sweep session ${sessionId} is not awaiting plan approval`);
+    }
+    const trimmed = typeof feedback === "string" ? feedback.trim() : "";
+    if (!trimmed) throw new Error("Feedback is required to request plan changes");
+
+    await db
+      .update(sourcingSweepSessions)
+      .set({ status: "planning", planStatus: "revising", planRevision: (session.planRevision ?? 0) + 1 })
+      .where(eq(sourcingSweepSessions.id, sessionId));
+
+    this.ctx.waitUntil(
+      draftSweepPlan(this.env, sessionId, {
+        feedback: trimmed,
+        onProgress: (message, progress) => this.reportProgress(message, progress),
+      }),
+    );
+    return { success: true, status: "planning" };
+  }
+
+  /**
+   * Compatibility method retained for existing `store.created` style triggers.
    */
   @callable()
   async researchStore(storeId: number): Promise<{ success: boolean; findingsCount: number }> {
-    const db = drizzle(this.env.DB);
-    this.setState({ ...this.state, status: "researching", currentTask: `Researching store ${storeId}` });
-
-    try {
-      // 1. Load store data
-      const [store] = await db
-        .select()
-        .from(showroomStores)
-        .where(eq(showroomStores.id, storeId))
-        .limit(1);
-
-      if (!store) {
-        this.setState({ ...this.state, status: "error", lastError: "Store not found" });
-        return { success: false, findingsCount: 0 };
-      }
-
-      // 2. Use Gemini to research the store
-      const researchPrompt = `Research the following showroom/store and provide findings about their reputation, product quality, customer experience, and any notable information for a San Francisco home renovation project.
-
-Store: ${store.name}
-Address: ${store.locationAddress ?? "Unknown"}
-Website: ${store.websiteUrl ?? "Unknown"}
-Description: ${store.description ?? "No description"}
-Inventory Focus: ${store.inventoryFocus ?? "Unknown"}
-
-For each finding, provide:
-1. A concise finding statement
-2. The sentiment (good, bad, or neutral)
-3. A URL source if available
-
-Return JSON array: [{ "finding": "...", "sentiment": "good|bad|neutral", "finding_url": "..." }]`;
-
-      const response = await this.env.AI.run(
-        "@cf/moonshotai/kimi-k2.6" as any,
-        {
-          messages: [
-            { role: "system", content: "You are a showroom research analyst. Return ONLY valid JSON." },
-            { role: "user", content: researchPrompt },
-          ],
-        } as any
-      );
-
-      const rawOutput =
-        typeof response === "string"
-          ? response
-          : (response as any)?.response ?? "[]";
-
-      // Clean and parse
-      const cleaned = rawOutput
-        .replace(/```json\n?/g, "")
-        .replace(/```\n?/g, "")
-        .trim();
-
-      let findings: Array<{ finding: string; sentiment: string; finding_url?: string }> = [];
-      try {
-        findings = JSON.parse(cleaned);
-      } catch {
-        // If parsing fails, create a single finding from the raw response
-        findings = [{ finding: cleaned.slice(0, 500), sentiment: "neutral" }];
-      }
-
-      // 3. Insert findings into D1
-      for (const f of findings) {
-        await db.insert(storeResearch).values({
-          storeId,
-          finding: f.finding,
-          findingUrl: f.finding_url ?? null,
-          sentiment: (f.sentiment as "good" | "bad" | "neutral") ?? "neutral",
-        } as typeof storeResearch.$inferInsert);
-      }
-
-      // 4. Generate AI highlights
-      const highlights = await this.generateHighlights(storeId);
-      if (highlights) {
-        await db
-          .update(showroomStores)
-          .set({ aiHighlightsForUserRenovation: highlights } as Partial<typeof showroomStores.$inferInsert>)
-          .where(eq(showroomStores.id, storeId));
-      }
-
-      this.setState({ ...this.state, status: "complete", currentTask: undefined });
-      return { success: true, findingsCount: findings.length };
-    } catch (err: any) {
-      this.setState({ ...this.state, status: "error", lastError: err.message });
-      return { success: false, findingsCount: 0 };
-    }
+    const result = await this.deepSweepStore({
+      storeId,
+      maxSources: 5,
+      triggerSource: "store-created",
+    });
+    return { success: result.success, findingsCount: result.findingsWritten };
   }
 
   /**
-   * Research a product: reviews, compatibility, similar items.
+   * Compatibility method retained for existing `product.created` style triggers.
    */
   @callable()
   async researchProduct(productId: number): Promise<{ success: boolean; findingsCount: number }> {
-    const db = drizzle(this.env.DB);
-    this.setState({ ...this.state, status: "researching", currentTask: `Researching product ${productId}` });
-
-    try {
-      const [product] = await db
-        .select()
-        .from(showroomStoreProducts)
-        .where(eq(showroomStoreProducts.id, productId))
-        .limit(1);
-
-      if (!product) {
-        this.setState({ ...this.state, status: "error", lastError: "Product not found" });
-        return { success: false, findingsCount: 0 };
-      }
-
-      // Load the store for context
-      const [store] = await db
-        .select()
-        .from(showroomStores)
-        .where(eq(showroomStores.id, product.storeId))
-        .limit(1);
-
-      const researchPrompt = `Research this product and provide findings about quality, reviews, pricing, compatibility considerations, and cost-saving opportunities.
-
-Product: ${product.itemName}
-SKU: ${product.sku ?? "Unknown"}
-Price: ${product.price ?? "Unknown"}
-Store: ${store?.name ?? "Unknown"}
-Description: ${product.description ?? "No description"}
-Colors: ${product.colors ?? "Unknown"}
-
-Important compatibility checks:
-- If this is an InvisaCook product, flag that it requires specific 12-20mm Porcelanosa-certified porcelain and is NOT compatible with marble, granite, or natural stone.
-- If this is a steam shower component, flag voltage requirements and ventilation needs.
-- If this is a frameless door, flag wall thickness requirements.
-
-For each finding, provide:
-1. A concise finding statement
-2. The sentiment (good, bad, or neutral)
-3. A URL source if available
-
-Return JSON array: [{ "finding": "...", "sentiment": "good|bad|neutral", "finding_url": "..." }]`;
-
-      const response = await this.env.AI.run(
-        "@cf/moonshotai/kimi-k2.6" as any,
-        {
-          messages: [
-            { role: "system", content: "You are a product research analyst specializing in high-end home renovation materials. Return ONLY valid JSON." },
-            { role: "user", content: researchPrompt },
-          ],
-        } as any
-      );
-
-      const rawOutput =
-        typeof response === "string"
-          ? response
-          : (response as any)?.response ?? "[]";
-
-      const cleaned = rawOutput
-        .replace(/```json\n?/g, "")
-        .replace(/```\n?/g, "")
-        .trim();
-
-      let findings: Array<{ finding: string; sentiment: string; finding_url?: string }> = [];
-      try {
-        findings = JSON.parse(cleaned);
-      } catch {
-        findings = [{ finding: cleaned.slice(0, 500), sentiment: "neutral" }];
-      }
-
-      for (const f of findings) {
-        await db.insert(storeProductResearch).values({
-          storeProductId: productId,
-          finding: f.finding,
-          findingUrl: f.finding_url ?? null,
-          sentiment: (f.sentiment as "good" | "bad" | "neutral") ?? "neutral",
-        } as typeof storeProductResearch.$inferInsert);
-      }
-
-      this.setState({ ...this.state, status: "complete", currentTask: undefined });
-      return { success: true, findingsCount: findings.length };
-    } catch (err: any) {
-      this.setState({ ...this.state, status: "error", lastError: err.message });
-      return { success: false, findingsCount: 0 };
-    }
+    const result = await this.deepSweepProduct({
+      productId,
+      maxSources: 5,
+      triggerSource: "product-created",
+    });
+    return { success: result.success, findingsCount: result.findingsWritten };
   }
 
   /**
-   * Generate ai_highlights_for_user_renovation by scanning D1 context.
-   *
-   * Checks journal entries, room plans, moodboards, and action items
-   * to find alignment between a store's offerings and the user's needs.
+   * Generate ai_highlights_for_user_renovation by scanning D1 store context.
    */
   @callable()
   async generateHighlights(storeId: number): Promise<string | null> {
@@ -304,9 +321,7 @@ Return JSON array: [{ "finding": "...", "sentiment": "good|bad|neutral", "findin
 
     if (!store) return null;
 
-    // Gather context about what the user is looking for
-    // (simplified — full implementation would scan rooms, journals, moodboards)
-    const prompt = `Given this showroom store, generate a brief (2-3 sentences) highlight explaining how this store is specifically relevant to a high-end San Francisco home renovation. Focus on unique offerings that would be hard to find elsewhere.
+    const prompt = `Given this showroom store, generate a brief 2-3 sentence highlight explaining how this store is specifically relevant to a high-end San Francisco home renovation. Focus on unique offerings that would be hard to find elsewhere.
 
 Store: ${store.name}
 Description: ${store.description ?? ""}
@@ -315,20 +330,22 @@ Target Demographic: ${store.targetDemographic ?? ""}
 Scale: ${store.scale ?? ""}`;
 
     try {
-      const response = await this.env.AI.run(
+      const response = (await this.env.AI.run(
         "@cf/moonshotai/kimi-k2.6" as any,
         {
           messages: [
-            { role: "system", content: "You are a renovation consultant. Be specific and concise." },
+            {
+              role: "system",
+              content: `You are a renovation consultant. Be specific and concise.`,
+            },
             { role: "user", content: prompt },
           ],
-        } as any
-      );
+        } as any,
+        { gateway: { id: this.env.AI_GATEWAY_ID } },
+      )) as string | { response?: string };
 
       const rawOutput =
-        typeof response === "string"
-          ? response
-          : (response as any)?.response ?? "";
+        typeof response === "string" ? response : response.response ?? "";
 
       return rawOutput.trim() || null;
     } catch {
@@ -337,7 +354,7 @@ Scale: ${store.scale ?? ""}`;
   }
 
   /**
-   * Analyze vendor category gaps.
+   * Analyze vendor category gaps across product-area definitions.
    */
   @callable()
   async analyzeGaps(): Promise<{
@@ -373,15 +390,10 @@ Scale: ${store.scale ?? ""}`;
     };
   }
 
-  /**
-   * Chat handler — RAG over research findings.
-   */
   async onChatMessage(
     _onFinish: Parameters<AIChatAgent["onChatMessage"]>[0],
     _options?: Parameters<AIChatAgent["onChatMessage"]>[1],
   ): Promise<Response | undefined> {
-    // Simplified: stream a response using research context
-    // Full implementation would search Vectorize for relevant findings
     return undefined;
   }
 }

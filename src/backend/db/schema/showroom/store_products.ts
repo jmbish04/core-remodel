@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
 import { showroomStores } from "./stores";
+import { materialScheduleItems } from "../materials/schedule_item";
 
 /**
  * Store Products — individual items sourced or tracked at a showroom location.
@@ -11,6 +12,15 @@ export const showroomStoreProducts = sqliteTable("showroom_store_products", {
   storeId: integer("store_id")
     .notNull()
     .references(() => showroomStores.id, { onDelete: "cascade" }),
+
+  /**
+   * The material schedule item this product is sourced for (nullable — a
+   * product may be tracked before it's tied to a specific material).
+   */
+  materialId: integer("material_id").references(
+    () => materialScheduleItems.id,
+    { onDelete: "set null" }
+  ),
 
   timestamp: integer("timestamp", { mode: "timestamp" }).default(
     sql`(unixepoch())`

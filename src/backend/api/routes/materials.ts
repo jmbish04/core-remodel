@@ -1,52 +1,79 @@
 /**
  * @fileoverview Materials Schedule API
  *
- * CRUD for material schedule items and their required specs.
- * Includes a spec-match endpoint that finds showroom products matching
- * a material's requirements. Mounts at /api/materials.
+ * CRUD for the master materials list (material_schedule_items) and their
+ * required specs (material_required_specs), plus spec-based matching against
+ * sourced showroom products. Mounts at /api/materials.
  */
 
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, desc, and, like } from "drizzle-orm";
-import { z } from "zod";
+import { eq, desc, and, like, inArray, sql } from "drizzle-orm";
 
 import {
   materialScheduleItems,
   materialRequiredSpecs,
 } from "@backend/db/schema/materials/index";
-
 import {
   showroomStoreProducts,
-  showroomProductSpecs,
-  showroomStores,
+  productSpecs,
 } from "@backend/db/schema/showroom/index";
+import { z } from "zod";
 
 export const materialsRouter = new Hono<{ Bindings: Env }>();
 
-// ─── Validation Schemas ───────────────────────────────────────────────────────
+// ─── Validation Schemas ────────────────────────────────────────────────────────
 
-const createMaterialSchema = z.object({
-  title: z.string().min(1),
-  brand: z.string().optional().nullable(),
-  model: z.string().optional().nullable(),
-});
-
-const createRequiredSpecSchema = z.object({
+const specInputSchema = z.object({
   key: z.string().min(1),
   value: z.string().min(1),
 });
 
-// ─── SCHEDULE ITEMS CRUD ──────────────────────────────────────────────────────
+const createMaterialSchema = z.object({
+  title: z.string().min(1),
+  roomName: z.string().optional().nullable(),
+  brand: z.string().optional().nullable(),
+  model: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+  specs: z.array(specInputSchema).optional(),
+});
+
+const updateMaterialSchema = z.object({
+  title: z.string().min(1).optional(),
+  roomName: z.string().optional().nullable(),
+  brand: z.string().optional().nullable(),
+  model: z.string().optional().nullable(),
+  notes: z.string().optional().nullable(),
+});
+
+const purchasedSchema = z.object({
+  isPurchased: z.boolean(),
+  purchasedShowroomProductId: z.number().int().positive().optional().nullable(),
+});
+
+function parseId(raw: string | undefined): number | null {
+  if (!raw || !/^\d+$/.test(raw)) return null;
+  return Number(raw);
+}
+
+/** Split into chunks to stay under Cloudflare D1's ~100 bound-parameter limit. */
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+}
+
+// ─── Material CRUD ──────────────────────────────────────────────────────────────
 
 /**
- * GET / — List all material schedule items with their required specs.
- * Query params: ?search=cooktop&purchased=true|false
+ * GET / — List material schedule items.
+ * Query params: ?search=cooktop&purchased=false&room=Kitchen
  */
 materialsRouter.get("/", async (c) => {
   const db = drizzle(c.env.DB);
   const search = c.req.query("search");
-  const purchasedFilter = c.req.query("purchased");
+  const purchased = c.req.query("purchased");
+  const room = c.req.query("room");
 
   let query = db
     .select()
@@ -55,363 +82,361 @@ materialsRouter.get("/", async (c) => {
     .$dynamic();
 
   const conditions = [];
-  if (search) {
-    conditions.push(like(materialScheduleItems.title, `%${search}%`));
+  if (search) conditions.push(like(materialScheduleItems.title, `%${search}%`));
+  if (room) conditions.push(eq(materialScheduleItems.roomName, room));
+  if (purchased === "true" || purchased === "false") {
+    conditions.push(eq(materialScheduleItems.isPurchased, purchased === "true"));
   }
-  if (purchasedFilter === "true") {
-    conditions.push(eq(materialScheduleItems.isPurchased, true));
-  } else if (purchasedFilter === "false") {
-    conditions.push(eq(materialScheduleItems.isPurchased, false));
-  }
+  if (conditions.length > 0) query = query.where(and(...conditions));
 
-  if (conditions.length > 0) {
-    query = query.where(and(...conditions));
-  }
-
-  const items = await query;
-
-  // Batch-load specs for all items
-  const allSpecs = await db
-    .select()
-    .from(materialRequiredSpecs)
-    .orderBy(materialRequiredSpecs.key);
-
-  const specsByMaterial = new Map<number, typeof allSpecs>();
-  for (const spec of allSpecs) {
-    const existing = specsByMaterial.get(spec.materialId) ?? [];
-    existing.push(spec);
-    specsByMaterial.set(spec.materialId, existing);
-  }
-
-  return c.json({
-    items: items.map((item) => ({
-      ...item,
-      requiredSpecs: specsByMaterial.get(item.id) ?? [],
-    })),
-  });
+  const materials = await query;
+  return c.json({ materials });
 });
 
 /**
- * GET /:id — Get a single material item with its required specs and linked product.
+ * GET /:id — Material detail with required specs and the linked purchased product.
  */
 materialsRouter.get("/:id", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (id === null) return c.json({ error: "Invalid material id" }, 400);
   const db = drizzle(c.env.DB);
-  const materialId = Number(c.req.param("id"));
 
-  const [item] = await db
+  const [material] = await db
     .select()
     .from(materialScheduleItems)
-    .where(eq(materialScheduleItems.id, materialId))
-    .limit(1);
+    .where(eq(materialScheduleItems.id, id));
+  if (!material) return c.json({ error: "Material not found" }, 404);
 
-  if (!item) return c.json({ error: "Material not found" }, 404);
+  const specs = await db
+    .select()
+    .from(materialRequiredSpecs)
+    .where(eq(materialRequiredSpecs.materialId, id))
+    .orderBy(materialRequiredSpecs.id);
 
-  const [specs, linkedProduct] = await Promise.all([
-    db
+  let purchasedProduct = null;
+  if (material.purchasedShowroomProductId) {
+    const [product] = await db
       .select()
-      .from(materialRequiredSpecs)
-      .where(eq(materialRequiredSpecs.materialId, materialId))
-      .orderBy(materialRequiredSpecs.key),
-    item.purchasedShowroomProductId
-      ? db
-          .select({
-            product: showroomStoreProducts,
-            storeName: showroomStores.name,
-          })
-          .from(showroomStoreProducts)
-          .innerJoin(
-            showroomStores,
-            eq(showroomStoreProducts.storeId, showroomStores.id)
-          )
-          .where(
-            eq(showroomStoreProducts.id, item.purchasedShowroomProductId)
-          )
-          .limit(1)
-      : Promise.resolve([]),
-  ]);
+      .from(showroomStoreProducts)
+      .where(eq(showroomStoreProducts.id, material.purchasedShowroomProductId));
+    purchasedProduct = product ?? null;
+  }
 
-  return c.json({
-    ...item,
-    requiredSpecs: specs,
-    purchasedProduct: linkedProduct[0]
-      ? {
-          ...linkedProduct[0].product,
-          storeName: linkedProduct[0].storeName,
-        }
-      : null,
-  });
+  return c.json({ material, specs, purchasedProduct });
 });
 
 /**
- * POST / — Create a new material schedule item.
+ * POST / — Create a material, optionally with initial required specs.
  */
 materialsRouter.post("/", async (c) => {
   const db = drizzle(c.env.DB);
-  const body = await c.req.json();
-  const data = createMaterialSchema.parse(body);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const parsed = createMaterialSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
+  }
+  const { specs, ...data } = parsed.data;
 
-  const [inserted] = await db
+  const [material] = await db
     .insert(materialScheduleItems)
     .values(data)
     .returning();
 
-  return c.json({ item: inserted }, 201);
+  if (specs && specs.length > 0) {
+    // Chunk inserts (3 bound params/row) under D1's ~100-param limit.
+    for (const specChunk of chunk(specs, 30)) {
+      await db
+        .insert(materialRequiredSpecs)
+        .values(specChunk.map((s) => ({ materialId: material.id, key: s.key, value: s.value })));
+    }
+  }
+
+  return c.json({ material }, 201);
 });
 
 /**
- * PUT /:id — Update a material schedule item.
+ * PUT /:id — Update a material's editable fields.
  */
 materialsRouter.put("/:id", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (id === null) return c.json({ error: "Invalid material id" }, 400);
   const db = drizzle(c.env.DB);
-  const materialId = Number(c.req.param("id"));
-  const body = await c.req.json();
-  const data = createMaterialSchema.partial().parse(body);
 
-  const [updated] = await db
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const parsed = updateMaterialSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
+  }
+
+  const [material] = await db
     .update(materialScheduleItems)
-    .set({
-      ...data,
-      updatedAt: new Date(),
-    } as Partial<typeof materialScheduleItems.$inferInsert>)
-    .where(eq(materialScheduleItems.id, materialId))
+    .set({ ...parsed.data, updatedAt: sql`(unixepoch())` })
+    .where(eq(materialScheduleItems.id, id))
     .returning();
+  if (!material) return c.json({ error: "Material not found" }, 404);
 
-  if (!updated) return c.json({ error: "Material not found" }, 404);
-
-  return c.json({ item: updated });
+  return c.json({ material });
 });
 
 /**
- * DELETE /:id — Delete a material schedule item (cascades required specs).
+ * DELETE /:id — Delete a material (cascades its required specs).
  */
 materialsRouter.delete("/:id", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (id === null) return c.json({ error: "Invalid material id" }, 400);
   const db = drizzle(c.env.DB);
-  const materialId = Number(c.req.param("id"));
 
-  await db
+  const [deleted] = await db
     .delete(materialScheduleItems)
-    .where(eq(materialScheduleItems.id, materialId));
+    .where(eq(materialScheduleItems.id, id))
+    .returning();
+  if (!deleted) return c.json({ error: "Material not found" }, 404);
 
   return c.json({ success: true });
 });
 
 /**
- * PUT /:id/purchased — Mark a material as purchased and link to a showroom product.
- * Body: { isPurchased: boolean, purchasedShowroomProductId?: number }
+ * PUT /:id/purchased — Mark a material purchased and link the showroom product.
  */
 materialsRouter.put("/:id/purchased", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (id === null) return c.json({ error: "Invalid material id" }, 400);
   const db = drizzle(c.env.DB);
-  const materialId = Number(c.req.param("id"));
-  const { isPurchased, purchasedShowroomProductId } = await c.req.json<{
-    isPurchased: boolean;
-    purchasedShowroomProductId?: number;
-  }>();
 
-  const [updated] = await db
-    .update(materialScheduleItems)
-    .set({
-      isPurchased,
-      purchasedShowroomProductId: purchasedShowroomProductId ?? null,
-      updatedAt: new Date(),
-    } as Partial<typeof materialScheduleItems.$inferInsert>)
-    .where(eq(materialScheduleItems.id, materialId))
-    .returning();
-
-  if (!updated) return c.json({ error: "Material not found" }, 404);
-
-  // If purchased + linked, also set materialId on the product side
-  if (isPurchased && purchasedShowroomProductId) {
-    await db
-      .update(showroomStoreProducts)
-      .set({
-        materialId,
-        updatedAt: new Date(),
-      } as Partial<typeof showroomStoreProducts.$inferInsert>)
-      .where(eq(showroomStoreProducts.id, purchasedShowroomProductId));
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const parsed = purchasedSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
   }
 
-  return c.json({ item: updated });
+  const [material] = await db
+    .update(materialScheduleItems)
+    .set({
+      isPurchased: parsed.data.isPurchased,
+      purchasedShowroomProductId: parsed.data.purchasedShowroomProductId ?? null,
+      updatedAt: sql`(unixepoch())`,
+    })
+    .where(eq(materialScheduleItems.id, id))
+    .returning();
+  if (!material) return c.json({ error: "Material not found" }, 404);
+
+  return c.json({ material });
 });
 
-// ─── REQUIRED SPECS CRUD ──────────────────────────────────────────────────────
+// ─── Required Specs ─────────────────────────────────────────────────────────────
 
 /**
  * GET /:id/specs — List required specs for a material.
  */
 materialsRouter.get("/:id/specs", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (id === null) return c.json({ error: "Invalid material id" }, 400);
   const db = drizzle(c.env.DB);
-  const materialId = Number(c.req.param("id"));
 
   const specs = await db
     .select()
     .from(materialRequiredSpecs)
-    .where(eq(materialRequiredSpecs.materialId, materialId))
-    .orderBy(materialRequiredSpecs.key);
-
+    .where(eq(materialRequiredSpecs.materialId, id))
+    .orderBy(materialRequiredSpecs.id);
   return c.json({ specs });
 });
 
 /**
- * POST /:id/specs — Add a required spec to a material.
+ * POST /:id/specs — Add a single required spec.
  */
 materialsRouter.post("/:id/specs", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (id === null) return c.json({ error: "Invalid material id" }, 400);
   const db = drizzle(c.env.DB);
-  const materialId = Number(c.req.param("id"));
-  const body = await c.req.json();
-  const data = createRequiredSpecSchema.parse(body);
 
-  const [inserted] = await db
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const parsed = specInputSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
+  }
+
+  const [spec] = await db
     .insert(materialRequiredSpecs)
-    .values({ materialId, ...data })
+    .values({ materialId: id, key: parsed.data.key, value: parsed.data.value })
     .returning();
-
-  return c.json({ spec: inserted }, 201);
+  return c.json({ spec }, 201);
 });
 
 /**
  * POST /:id/specs/batch — Add multiple required specs at once.
  */
 materialsRouter.post("/:id/specs/batch", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (id === null) return c.json({ error: "Invalid material id" }, 400);
   const db = drizzle(c.env.DB);
-  const materialId = Number(c.req.param("id"));
-  const body = await c.req.json<{ specs: { key: string; value: string }[] }>();
-  const validated = z.array(createRequiredSpecSchema).parse(body.specs);
 
-  const inserted = await db
-    .insert(materialRequiredSpecs)
-    .values(validated.map((s) => ({ materialId, ...s })))
-    .returning();
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const parsed = z.object({ specs: z.array(specInputSchema).min(1) }).safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
+  }
 
-  return c.json({ specs: inserted }, 201);
+  // Chunk inserts (3 bound params/row) under D1's ~100-param limit.
+  const specs: (typeof materialRequiredSpecs.$inferSelect)[] = [];
+  for (const specChunk of chunk(parsed.data.specs, 30)) {
+    const rows = await db
+      .insert(materialRequiredSpecs)
+      .values(specChunk.map((s) => ({ materialId: id, key: s.key, value: s.value })))
+      .returning();
+    specs.push(...rows);
+  }
+  return c.json({ specs }, 201);
 });
 
 /**
  * PUT /:id/specs/:sid — Update a required spec.
  */
 materialsRouter.put("/:id/specs/:sid", async (c) => {
+  const sid = parseId(c.req.param("sid"));
+  if (sid === null) return c.json({ error: "Invalid spec id" }, 400);
   const db = drizzle(c.env.DB);
-  const specId = Number(c.req.param("sid"));
-  const body = await c.req.json();
-  const data = createRequiredSpecSchema.partial().parse(body);
 
-  const [updated] = await db
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const parsed = specInputSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
+  }
+
+  const [spec] = await db
     .update(materialRequiredSpecs)
-    .set(data)
-    .where(eq(materialRequiredSpecs.id, specId))
+    .set({ key: parsed.data.key, value: parsed.data.value })
+    .where(eq(materialRequiredSpecs.id, sid))
     .returning();
+  if (!spec) return c.json({ error: "Spec not found" }, 404);
 
-  if (!updated) return c.json({ error: "Spec not found" }, 404);
-
-  return c.json({ spec: updated });
+  return c.json({ spec });
 });
 
 /**
  * DELETE /:id/specs/:sid — Delete a required spec.
  */
 materialsRouter.delete("/:id/specs/:sid", async (c) => {
+  const sid = parseId(c.req.param("sid"));
+  if (sid === null) return c.json({ error: "Invalid spec id" }, 400);
   const db = drizzle(c.env.DB);
-  const specId = Number(c.req.param("sid"));
 
-  await db
+  const [deleted] = await db
     .delete(materialRequiredSpecs)
-    .where(eq(materialRequiredSpecs.id, specId));
+    .where(eq(materialRequiredSpecs.id, sid))
+    .returning();
+  if (!deleted) return c.json({ error: "Spec not found" }, 404);
 
   return c.json({ success: true });
 });
 
-// ─── SPEC MATCHING ────────────────────────────────────────────────────────────
+// ─── Spec Matching ──────────────────────────────────────────────────────────────
 
 /**
- * GET /:id/match — Find showroom products whose specs match this material's
- * required specs. Returns products ranked by how many spec keys overlap.
- *
- * The matching is case-insensitive on the spec key and performs a substring
- * match on the value (so "3" matches "3 zones" or "3").
+ * GET /:id/match — Find showroom products whose specs satisfy this material's
+ * required specs. Ranks products by the number of matching spec keys/values.
  */
 materialsRouter.get("/:id/match", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (id === null) return c.json({ error: "Invalid material id" }, 400);
   const db = drizzle(c.env.DB);
-  const materialId = Number(c.req.param("id"));
 
-  // Load the material's required specs
-  const requiredSpecs = await db
+  const required = await db
     .select()
     .from(materialRequiredSpecs)
-    .where(eq(materialRequiredSpecs.materialId, materialId));
+    .where(eq(materialRequiredSpecs.materialId, id));
 
-  if (requiredSpecs.length === 0) {
-    return c.json({
-      matches: [],
-      message: "No required specs defined for this material.",
-    });
+  if (required.length === 0) {
+    return c.json({ requiredSpecCount: 0, matches: [] });
   }
 
-  // Load all product specs and their parent products
-  const allProductSpecs = await db
-    .select({
-      spec: showroomProductSpecs,
-      product: showroomStoreProducts,
-      storeName: showroomStores.name,
-    })
-    .from(showroomProductSpecs)
-    .innerJoin(
-      showroomStoreProducts,
-      eq(showroomProductSpecs.showroomProductId, showroomStoreProducts.id)
-    )
-    .innerJoin(
-      showroomStores,
-      eq(showroomStoreProducts.storeId, showroomStores.id)
-    );
+  const keys = [...new Set(required.map((r) => r.key))];
 
-  // Score each product by how many required specs it matches
-  const productScores = new Map<
-    number,
-    {
-      product: typeof showroomStoreProducts.$inferSelect;
-      storeName: string;
-      matchedKeys: string[];
-      totalRequired: number;
-    }
-  >();
-
-  for (const reqSpec of requiredSpecs) {
-    const normalizedKey = reqSpec.key.toLowerCase();
-
-    for (const row of allProductSpecs) {
-      const specKey = row.spec.key.toLowerCase();
-      const specValue = row.spec.value.toLowerCase();
-      const reqValue = reqSpec.value.toLowerCase();
-
-      if (specKey === normalizedKey && specValue.includes(reqValue)) {
-        const existing = productScores.get(row.product.id);
-        if (existing) {
-          if (!existing.matchedKeys.includes(reqSpec.key)) {
-            existing.matchedKeys.push(reqSpec.key);
-          }
-        } else {
-          productScores.set(row.product.id, {
-            product: row.product,
-            storeName: row.storeName,
-            matchedKeys: [reqSpec.key],
-            totalRequired: requiredSpecs.length,
-          });
-        }
-      }
-    }
+  // Candidate product specs that share any required key (chunked under D1's limit).
+  const candidateSpecs: { storeProductId: number; specKey: string; specValue: string | null }[] = [];
+  for (const keyChunk of chunk(keys, 90)) {
+    const rows = await db
+      .select({
+        storeProductId: productSpecs.storeProductId,
+        specKey: productSpecs.specKey,
+        specValue: productSpecs.specValue,
+      })
+      .from(productSpecs)
+      .where(inArray(productSpecs.specKey, keyChunk));
+    candidateSpecs.push(...rows);
   }
 
-  // Sort by match count descending
-  const matches = Array.from(productScores.values())
-    .sort((a, b) => b.matchedKeys.length - a.matchedKeys.length)
-    .map((m) => ({
-      ...m.product,
-      storeName: m.storeName,
-      matchedSpecs: m.matchedKeys,
-      matchScore: m.matchedKeys.length,
-      totalRequired: m.totalRequired,
-      matchPercentage: Math.round(
-        (m.matchedKeys.length / m.totalRequired) * 100
-      ),
-    }));
+  // Required values keyed by lowercased spec key for case-insensitive matching.
+  const requiredByKey = new Map<string, string[]>();
+  for (const r of required) {
+    const k = r.key.toLowerCase();
+    requiredByKey.set(k, [...(requiredByKey.get(k) ?? []), r.value.toLowerCase()]);
+  }
 
-  return c.json({ matches });
+  // Tally per-product matches: a product spec matches when its key is required
+  // and its value contains (or is contained by) a required value.
+  const perProduct = new Map<number, Set<string>>();
+  for (const ps of candidateSpecs) {
+    const wanted = requiredByKey.get(ps.specKey.toLowerCase());
+    if (!wanted) continue;
+    const val = (ps.specValue ?? "").toLowerCase();
+    const hit = wanted.some((w) => val.includes(w) || w.includes(val));
+    if (!hit) continue;
+    const set = perProduct.get(ps.storeProductId) ?? new Set<string>();
+    set.add(ps.specKey.toLowerCase());
+    perProduct.set(ps.storeProductId, set);
+  }
+
+  if (perProduct.size === 0) {
+    return c.json({ requiredSpecCount: keys.length, matches: [] });
+  }
+
+  const productIds = [...perProduct.keys()];
+  const products: (typeof showroomStoreProducts.$inferSelect)[] = [];
+  for (const idChunk of chunk(productIds, 90)) {
+    const rows = await db
+      .select()
+      .from(showroomStoreProducts)
+      .where(inArray(showroomStoreProducts.id, idChunk));
+    products.push(...rows);
+  }
+
+  const matches = products
+    .map((p) => ({
+      product: p,
+      matchedSpecKeys: [...(perProduct.get(p.id) ?? [])],
+      matchCount: perProduct.get(p.id)?.size ?? 0,
+    }))
+    .sort((a, b) => b.matchCount - a.matchCount);
+
+  return c.json({ requiredSpecCount: keys.length, matches });
 });

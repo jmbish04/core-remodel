@@ -13,7 +13,9 @@ import {
   companyContacts,
   bidPortfolioSelectedPhotos,
 } from "@backend/db";
-import { and, desc, eq, like } from "drizzle-orm";
+import type { PermitIntelligenceAgent } from "@backend/ai/agents/PermitIntelligenceAgent";
+import { getAgentByName } from "agents";
+import { desc, eq, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
@@ -105,8 +107,10 @@ bidPortfoliosRouter.post("/companies", async (c) => {
 
     // Trigger PermitIntelligenceAgent if it's a contractor/architect/engineer
     if (businessTypeName.includes("contractor") || businessTypeName.includes("architect") || businessTypeName.includes("engineer")) {
-      const id = c.env.PERMIT_INTELLIGENCE_AGENT.idFromName(body.name.trim());
-      const agent = c.env.PERMIT_INTELLIGENCE_AGENT.get(id);
+      const agent = await getAgentByName<Env, PermitIntelligenceAgent>(
+        c.env.PERMIT_INTELLIGENCE_AGENT as any,
+        body.name.trim(),
+      );
       c.executionCtx.waitUntil(agent.runIntelligence(body.name.trim()));
     }
 

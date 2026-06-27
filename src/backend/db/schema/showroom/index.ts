@@ -10,3 +10,8 @@ export * from "./similar_maps";
 export * from "./tags";
 export * from "./ratings";
 export * from "./scan_log";
+export * from "./product_images";
+export * from "./product_specs";
+export * from "./showroom_images";
+export * from "./sweep_sessions";
+export * from "./gaps";

@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { CompareApp } from "@/components/showroom/CompareApp";
+---
+
+<BaseLayout
+  title="Compare — The Monolith"
+  description="Side-by-side product spec comparison with shareable links and per-material decisions."
+>
+  <CompareApp client:only="react" />
+</BaseLayout>
