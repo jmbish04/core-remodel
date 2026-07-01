@@ -89,3 +89,5 @@ export * from "./dialer/state";
 export * from "./materials/index";
 
 export * from "./showroom/index";
+
+export * from "./scrum/index";

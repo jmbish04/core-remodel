@@ -223,6 +223,16 @@
         "name": "DEEP_RESEARCH_AGENT",
         "class_name": "DeepResearchAgent",
       },
+      {
+        // ClickUp integration: autonomous project auditor (4h alarm cycle).
+        "name": "REMODEL_ORCHESTRATOR",
+        "class_name": "RemodelOrchestrator",
+      },
+      {
+        // General-purpose admin chat assistant (Workers AI, multi-model).
+        "name": "ADMIN_CHAT_AGENT",
+        "class_name": "AdminChatAgent",
+      },
     ],
   },
   "migrations": [
@@ -274,6 +284,14 @@
     {
       "tag": "v11",
       "new_sqlite_classes": ["DeepResearchAgent"],
+    },
+    {
+      "tag": "v12",
+      "new_sqlite_classes": ["RemodelOrchestrator"],
+    },
+    {
+      "tag": "v13",
+      "new_sqlite_classes": ["AdminChatAgent"],
     },
   ],
   "worker_loaders": [
