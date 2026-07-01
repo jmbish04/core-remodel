@@ -19,7 +19,7 @@
  */
 
 import { Agent, callable } from "agents";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, ne, or, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { clickupSystemAlerts, clickupTaskFlags } from "@backend/db";
@@ -213,9 +213,13 @@ export class RemodelOrchestrator extends Agent<Env, RemodelOrchestratorState> {
       alertsGenerated++;
     }
 
+    // Collect every flag first, then bulk-insert in chunked batches below —
+    // avoids one D1 round-trip per task across the three flag-producing passes.
+    const flagsToInsert: (typeof clickupTaskFlags.$inferInsert)[] = [];
+
     // Write CRITICAL_PATH flags for tasks on the critical path
     for (const task of criticalPath) {
-      await db.insert(clickupTaskFlags).values({
+      flagsToInsert.push({
         clickupTaskId: task.id,
         flagType: "CRITICAL_PATH",
         severity: "warning",
@@ -239,7 +243,7 @@ export class RemodelOrchestrator extends Agent<Env, RemodelOrchestratorState> {
         const daysOverdue = Math.ceil(
           (now.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24),
         );
-        await db.insert(clickupTaskFlags).values({
+        flagsToInsert.push({
           clickupTaskId: task.id,
           flagType: "OVERDUE",
           severity: "critical",
@@ -291,7 +295,7 @@ export class RemodelOrchestrator extends Agent<Env, RemodelOrchestratorState> {
         };
 
         if (analysis.flag_needed) {
-          await db.insert(clickupTaskFlags).values({
+          flagsToInsert.push({
             clickupTaskId: task.id,
             flagType: "AI_AUDIT",
             severity: "warning",
@@ -309,16 +313,34 @@ export class RemodelOrchestrator extends Agent<Env, RemodelOrchestratorState> {
       }
     }
 
+    // Bulk-insert the collected flags in chunks. Single-row inserts via
+    // db.batch() keep each query under D1's 100-bound-parameter limit while
+    // collapsing many round-trips into one batch call.
+    const FLAG_BATCH_SIZE = 50;
+    for (let i = 0; i < flagsToInsert.length; i += FLAG_BATCH_SIZE) {
+      const chunk = flagsToInsert.slice(i, i + FLAG_BATCH_SIZE);
+      await db.batch(
+        chunk.map((flag) =>
+          db.insert(clickupTaskFlags).values(flag),
+        ) as unknown as Parameters<typeof db.batch>[0],
+      );
+    }
+
     // ── Cleanup: Resolve stale flags from previous runs ─────────
     // Any unresolved flag from a DIFFERENT auditRunId is considered stale
-    // because it wasn't regenerated in this cycle.
+    // because it wasn't regenerated in this cycle. `auditRunId <> ?` alone
+    // evaluates to UNKNOWN for NULL rows, so those would never resolve —
+    // isNull() catches legacy/NULL-tagged flags too.
     await db
       .update(clickupTaskFlags)
       .set({ resolved: true, resolvedAt: new Date().toISOString() })
       .where(
         and(
           eq(clickupTaskFlags.resolved, false),
-          ne(clickupTaskFlags.auditRunId, auditRunId),
+          or(
+            ne(clickupTaskFlags.auditRunId, auditRunId),
+            isNull(clickupTaskFlags.auditRunId),
+          ),
         ),
       );
 

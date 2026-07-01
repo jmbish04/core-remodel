@@ -195,13 +195,16 @@ function buildNodes(tasks: ClickUpTask[]): Map<string, TaskNode> {
 
 function calculateDurationDays(task: ClickUpTask): number {
   if (task.start_date && task.due_date) {
-    const start = new Date(Number(task.start_date));
-    const end = new Date(Number(task.due_date));
-    const diffMs = end.getTime() - start.getTime();
-    const days = Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
-    return days;
+    const startNum = Number(task.start_date);
+    const endNum = Number(task.due_date);
+    // Guard against non-numeric timestamps — a NaN would propagate through the
+    // CPM math and later crash endDate.toISOString() with a RangeError.
+    if (!Number.isNaN(startNum) && !Number.isNaN(endNum)) {
+      const diffMs = endNum - startNum;
+      return Math.max(1, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
+    }
   }
-  // Default: 1 day for tasks without date ranges
+  // Default: 1 day for tasks without (valid) date ranges
   return 1;
 }
 
@@ -218,8 +221,11 @@ function findProjectStartDate(tasks: ClickUpTask[]): Date {
 
   for (const task of tasks) {
     if (task.start_date) {
-      const start = new Date(Number(task.start_date));
-      if (start < earliest) earliest = start;
+      const startNum = Number(task.start_date);
+      if (!Number.isNaN(startNum)) {
+        const start = new Date(startNum);
+        if (start < earliest) earliest = start;
+      }
     }
   }
 
