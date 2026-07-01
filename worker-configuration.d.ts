@@ -15,6 +15,8 @@ interface __BaseEnv_Env {
 	CLOUDFLARE_WRANGLER_API_TOKEN: SecretsStoreSecret;
 	WORKER_API_KEY: SecretsStoreSecret;
 	AI_GATEWAY_TOKEN: SecretsStoreSecret;
+	CLICKUP_TOKEN: SecretsStoreSecret;
+	CLICKUP_TEAM_ID: SecretsStoreSecret;
 	CF_BROWSER_RENDER_TOKEN: SecretsStoreSecret;
 	JULES_API_KEY: SecretsStoreSecret;
 	GEMINI_API_KEY: SecretsStoreSecret;
@@ -37,6 +39,8 @@ interface __BaseEnv_Env {
 	SHOWROOM_RESEARCH_AGENT: DurableObjectNamespace<import("./src/_worker").ShowroomResearchAgent>;
 	FLOORPLAN_SESSION: DurableObjectNamespace<import("./src/_worker").FloorplanSessionDO>;
 	DEEP_RESEARCH_AGENT: DurableObjectNamespace<import("./src/_worker").DeepResearchAgent>;
+	REMODEL_ORCHESTRATOR: DurableObjectNamespace<import("./src/_worker").RemodelOrchestrator>;
+	ADMIN_CHAT_AGENT: DurableObjectNamespace<import("./src/_worker").AdminChatAgent>;
 	IMAGE_PROCESSING_WORKFLOW: Workflow<Parameters<import("./src/_worker").ImageProcessingWorkflow['run']>[0]['payload']>;
 	CHECKLIST_RATIONALE_WORKFLOW: Workflow<Parameters<import("./src/_worker").ChecklistRationaleWorkflow['run']>[0]['payload']>;
 	IMAGE_BATCH_WORKFLOW: Workflow<Parameters<import("./src/_worker").ImageBatchProcessingWorkflow['run']>[0]['payload']>;
