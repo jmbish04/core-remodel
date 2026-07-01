@@ -1188,18 +1188,17 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                 </div>
                 <div className="flex flex-col gap-3">
                   <div className="flex items-center justify-between">
-                    <Label>Open Weekends</Label>
-                    <Switch checked={form.isOpenWeekends} onCheckedChange={(v) => update({ isOpenWeekends: v })} />
+                    <Label htmlFor="isOpenWeekends">Open Weekends</Label>
+                    <Switch id="isOpenWeekends" checked={form.isOpenWeekends} onCheckedChange={(v) => update({ isOpenWeekends: v })} />
                   </div>
                   <div className="flex items-center justify-between">
-                    <Label>Appointment Only</Label>
-                    <Switch checked={form.isAppointmentOnly} onCheckedChange={(v) => update({ isAppointmentOnly: v })} />
+                    <Label htmlFor="isAppointmentOnly">Appointment Only</Label>
+                    <Switch id="isAppointmentOnly" checked={form.isAppointmentOnly} onCheckedChange={(v) => update({ isAppointmentOnly: v })} />
                   </div>
                   <div className="flex items-center justify-between">
-                    <Label>Flagship Location</Label>
-                    <Switch checked={form.isFlagshipLocation} onCheckedChange={(v) => update({ isFlagshipLocation: v })} />
+                    <Label htmlFor="isFlagshipLocation">Flagship Location</Label>
+                    <Switch id="isFlagshipLocation" checked={form.isFlagshipLocation} onCheckedChange={(v) => update({ isFlagshipLocation: v })} />
                   </div>
-                </div>
                 <div>
                   <Label htmlFor="scale">Scale</Label>
                   <Input id="scale" value={form.scale} onChange={(e) => update({ scale: e.target.value })} placeholder="e.g. Massive, dual-wing facility" />
