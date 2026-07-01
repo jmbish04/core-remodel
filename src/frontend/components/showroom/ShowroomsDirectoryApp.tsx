@@ -1219,6 +1219,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                     <Label htmlFor="isFlagshipLocation">Flagship Location</Label>
                     <Switch id="isFlagshipLocation" checked={form.isFlagshipLocation} onCheckedChange={(v) => update({ isFlagshipLocation: v })} />
                   </div>
+                </div>
                 <div>
                   <Label htmlFor="scale">Scale</Label>
                   <Input id="scale" value={form.scale} onChange={(e) => update({ scale: e.target.value })} placeholder="e.g. Massive, dual-wing facility" />
