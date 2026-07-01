@@ -8,7 +8,7 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, desc, and, like } from "drizzle-orm";
+import { eq, desc, and, like, inArray } from "drizzle-orm";
 import { getAgentByName } from "agents";
 
 import {
@@ -814,6 +814,7 @@ showroomStoresRouter.get("/", async (c) => {
             showroomStoreCategory,
             eq(showroomStoreCategoryMapping.categoryId, showroomStoreCategory.id)
           )
+          .where(inArray(showroomStoreCategoryMapping.storeId, storeIds))
           .then((catRows) => {
             const map = new Map<number, string[]>();
             for (const r of catRows) {
@@ -831,7 +832,7 @@ showroomStoresRouter.get("/", async (c) => {
             rating: storeRating.rating,
           })
           .from(storeRating)
-          .where(eq(storeRating.isActive, true))
+          .where(and(eq(storeRating.isActive, true), inArray(storeRating.storeId, storeIds)))
           .then((rRows) => {
             // At most one active rating per store — last write wins.
             const map = new Map<number, number>();
@@ -846,6 +847,7 @@ showroomStoresRouter.get("/", async (c) => {
             rating: showroomStoreRatings.rating,
           })
           .from(showroomStoreRatings)
+          .where(inArray(showroomStoreRatings.storeId, storeIds))
           .then((rRows) => {
             const map = new Map<number, { sum: number; count: number }>();
             for (const r of rRows) {

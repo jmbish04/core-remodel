@@ -275,10 +275,29 @@ function computePst(): PstNow {
   return { day: DAY_INDEX[wd] ?? 0, minutes, label: fmt12(minutes) };
 }
 
+/**
+ * Whether a weekend-hours string applies on the given PST day. "Sat 10AM-4PM"
+ * applies only Saturday, "Sun …" only Sunday; a range naming both days, saying
+ * "weekend"/"wknd", or naming no day at all applies to both. (Weekday hours are
+ * assumed to apply on all weekdays — this guard is weekend-only.)
+ */
+function weekendHoursApplyToday(text: string | null, day: number): boolean {
+  if (!text) return false;
+  const t = text.toLowerCase();
+  const sat = t.includes("sat");
+  const sun = t.includes("sun");
+  if (t.includes("weekend") || t.includes("wknd") || (sat && sun) || (!sat && !sun)) return true;
+  if (day === 6) return sat; // Saturday
+  if (day === 0) return sun; // Sunday
+  return false;
+}
+
 function isOpenNow(store: Store, pst: PstNow): boolean {
   if (store.isAppointmentOnly) return false;
   const isWeekday = pst.day >= 1 && pst.day <= 5;
-  const range = parseHoursRange(isWeekday ? store.weekdayHours : store.weekendHours);
+  const text = isWeekday ? store.weekdayHours : store.weekendHours;
+  if (!isWeekday && !weekendHoursApplyToday(text, pst.day)) return false;
+  const range = parseHoursRange(text);
   if (!range) return false;
   return pst.minutes >= range.open && pst.minutes < range.close;
 }
@@ -445,6 +464,7 @@ function HoursColumn({
 
 function HoursFooter({ store, pst, className }: { store: Store; pst: PstNow; className?: string }) {
   const isWeekday = pst.day >= 1 && pst.day <= 5;
+  const weekendAppliesToday = !isWeekday && weekendHoursApplyToday(store.weekendHours, pst.day);
   return (
     <div className={`grid grid-cols-3 gap-2 border-t border-border/40 pt-2 ${className ?? ""}`}>
       <HoursColumn
@@ -456,7 +476,7 @@ function HoursFooter({ store, pst, className }: { store: Store; pst: PstNow; cla
       <HoursColumn
         label="Weekend"
         text={store.weekendHours}
-        appliesToday={!isWeekday}
+        appliesToday={weekendAppliesToday}
         nowMin={pst.minutes}
         emptyBadge="No weekend hours"
       />
