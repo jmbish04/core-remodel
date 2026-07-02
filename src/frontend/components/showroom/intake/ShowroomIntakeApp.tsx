@@ -113,13 +113,15 @@ const EMPTY_VALUES: ShowroomIntakeInput = {
  * contains the live name (handles "Bathroom Tile" ⊇ "tile" both directions).
  */
 function resolveCategoryIds(
-  labels: string[],
-  categories: Category[],
+  labels: string[] | null | undefined,
+  categories: Category[] | null | undefined,
 ): number[] {
+  const safeLabels = labels ?? [];
+  const safeCategories = categories ?? [];
   const ids = new Set<number>();
-  for (const label of labels) {
+  for (const label of safeLabels) {
     const l = label.toLowerCase();
-    for (const cat of categories) {
+    for (const cat of safeCategories) {
       const n = cat.name.toLowerCase();
       if (n === l || n.includes(l) || l.includes(n)) ids.add(cat.id);
     }

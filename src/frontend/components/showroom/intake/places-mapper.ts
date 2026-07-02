@@ -358,10 +358,11 @@ const CATEGORY_RULES: { test: RegExp; labels: string[] }[] = [
  *          empty when nothing matches — the UI then leaves categories blank.
  */
 export function inferCategoryLabels(
-  types: string[],
+  types: string[] | null | undefined,
   primaryType?: string,
 ): string[] {
-  const haystack = [...types, primaryType ?? ""].join(" ").toLowerCase();
+  const safeTypes = types ?? [];
+  const haystack = [...safeTypes, primaryType ?? ""].join(" ").toLowerCase();
   const out: string[] = [];
   for (const { test, labels } of CATEGORY_RULES) {
     if (test.test(haystack)) {

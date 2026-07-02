@@ -63,17 +63,29 @@ function escapeHtml(input: string): string {
 /** Inline marks: bold (`**x**`/`__x__`), italic (`*x*`/`_x_`), links. */
 function renderInline(raw: string): string {
   let out = escapeHtml(raw);
-  // Links: [text](url). The url has already been entity-escaped by escapeHtml.
+
+  // Extract links to placeholder tokens FIRST, so the bold/italic passes below
+  // can't inject <strong>/<em> into a URL that contains `_` or `*` (which would
+  // corrupt the href). Links are restored after the mark passes run.
+  const links: string[] = [];
   out = out.replace(
     /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-    (_m, text: string, url: string) =>
-      `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`,
+    (_m, text: string, url: string) => {
+      links.push(
+        `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`,
+      );
+      return `LINKZZ${links.length - 1}`;
+    },
   );
+
   // Bold before italic so `**x**` isn't consumed by the single-char italic rule.
   out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/__([^_]+)__/g, "<strong>$1</strong>");
   out = out.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
   out = out.replace(/(^|[^_])_([^_\n]+)_/g, "$1<em>$2</em>");
+
+  // Restore the extracted links.
+  out = out.replace(/LINKZZ(\d+)/g, (_m, i: string) => links[Number(i)]);
   return out;
 }
 

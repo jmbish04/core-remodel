@@ -119,16 +119,6 @@ export class FaviconService {
       });
 
       if (response.ok) {
-        const html = await response.text();
-
-        /**
-         * Regex to match <link> tags carrying icon hrefs.
-         * Captures: rel attribute value, href attribute value, sizes attribute value.
-         * Written as a single expression to avoid multi-line template literal noise.
-         */
-        const linkTagRegex =
-          /<link\s+[^>]*?(?:rel=["']([^"']+)["'][^>]*?href=["']([^"']+)["']|href=["']([^"']+)["'][^>]*?rel=["']([^"']+)["'])[^>]*?(?:sizes=["']([^"']+)["'])?[^>]*?>/gi;
-
         const iconRels = new Set([
           "icon",
           "shortcut icon",
@@ -140,17 +130,22 @@ export class FaviconService {
         type LinkCandidate = { rel: string; href: string; sizes: string };
         const candidates: LinkCandidate[] = [];
 
-        let match: RegExpExecArray | null;
-        while ((match = linkTagRegex.exec(html)) !== null) {
-          // Handle both attribute orderings captured by the two branches.
-          const rel = (match[1] ?? match[4] ?? "").toLowerCase().trim();
-          const href = (match[2] ?? match[3] ?? "").trim();
-          const sizes = (match[5] ?? "").trim();
-
-          if (rel && href && iconRels.has(rel)) {
-            candidates.push({ rel, href, sizes });
-          }
-        }
+        // Parse <link> tags with the Workers-native, streaming HTMLRewriter API
+        // instead of a regex. It reliably handles attributes in any order,
+        // unquoted values, and extra attributes — cases a single regex cannot.
+        await new HTMLRewriter()
+          .on("link", {
+            element(el) {
+              const rel = (el.getAttribute("rel") ?? "").toLowerCase().trim();
+              const href = (el.getAttribute("href") ?? "").trim();
+              const sizes = (el.getAttribute("sizes") ?? "").trim();
+              if (rel && href && iconRels.has(rel)) {
+                candidates.push({ rel, href, sizes });
+              }
+            },
+          })
+          .transform(response)
+          .arrayBuffer();
 
         if (candidates.length > 0) {
           // Scoring: prefer apple-touch-icon (score 100), then by declared size.

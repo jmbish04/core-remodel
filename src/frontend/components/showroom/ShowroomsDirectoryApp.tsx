@@ -210,7 +210,8 @@ function categoryIconStyleFor(label: string): CategoryIconStyle {
  * Format a US 10-digit phone as "(###) ### - ####". Any string that doesn't
  * reduce to exactly 10 digits is returned unchanged (still valid for a tel: link).
  */
-function formatPhone(raw: string): string {
+function formatPhone(raw: string | null | undefined): string {
+  if (!raw) return "";
   const digits = raw.replace(/\D/g, "");
   const ten = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
   if (ten.length !== 10) return raw;
