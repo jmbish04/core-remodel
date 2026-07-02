@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { AdminIntegrationsUsageApp } from "@/components/admin/AdminIntegrationsUsageApp";
+---
+
+<BaseLayout
+  title="Integrations · Usage — The Monolith"
+  description="Monitor monthly Google Maps API usage against the 10,000-call free-tier quota, with per-endpoint quota bars and a circuit-breaker warning state."
+>
+  <AdminIntegrationsUsageApp client:only="react" />
+</BaseLayout>

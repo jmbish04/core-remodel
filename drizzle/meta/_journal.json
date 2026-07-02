@@ -386,6 +386,13 @@
       "when": 1782241394617,
       "tag": "0054_clear_daimon_hellstrom",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1783008736094,
+      "tag": "0055_glossy_hex",
+      "breakpoints": true
     }
   ]
 }

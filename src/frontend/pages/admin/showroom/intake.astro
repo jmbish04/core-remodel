@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ShowroomIntakeApp } from "@/components/showroom/intake/ShowroomIntakeApp";
+---
+
+<BaseLayout
+  title="Add Showroom — The Monolith"
+  description="Google-powered showroom intake: search a business, auto-fill the details, review, and save to the Bay Area directory."
+>
+  <ShowroomIntakeApp client:only="react" />
+</BaseLayout>

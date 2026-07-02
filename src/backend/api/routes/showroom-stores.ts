@@ -68,6 +68,13 @@ const createStoreSchema = z.object({
   distanceFromSfTime: z.string().optional().nullable(),
   distanceFromSfMiles: z.string().optional().nullable(),
   locationNotes: z.string().optional().nullable(),
+  /**
+   * Optional array of category IDs to attach to the store on creation.
+   * Rows are inserted into `showroom_store_category_mapping` after the store
+   * is persisted. This field is NOT a column on `showroom_stores` and is
+   * stripped before the DB insert.
+   */
+  categoryIds: z.array(z.number().int()).optional().default([]),
 });
 
 const createProductSchema = z.object({
@@ -997,16 +1004,36 @@ showroomStoresRouter.get("/:id", async (c) => {
 
 /**
  * POST / — Create a new store.
+ *
+ * Accepts an optional `categoryIds` array. After the store row is inserted the
+ * IDs are attached via `showroom_store_category_mapping`. `categoryIds` is
+ * stripped from the object before the DB insert because it is not a column on
+ * `showroom_stores`.
  */
 showroomStoresRouter.post("/", async (c) => {
   const db = drizzle(c.env.DB);
   const body = await c.req.json();
   const data = createStoreSchema.parse(body);
 
+  // Strip the virtual field before inserting into showroom_stores.
+  const { categoryIds, ...storeValues } = data;
+
   const [inserted] = await db
     .insert(showroomStores)
-    .values(data)
+    .values(storeValues)
     .returning();
+
+  // Attach inferred category mappings when provided.
+  if (categoryIds && categoryIds.length > 0) {
+    await db
+      .insert(showroomStoreCategoryMapping)
+      .values(
+        categoryIds.map((categoryId) => ({
+          storeId: inserted.id,
+          categoryId,
+        })),
+      );
+  }
 
   c.executionCtx.waitUntil(
     (async () => {

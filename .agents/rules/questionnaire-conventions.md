@@ -98,3 +98,30 @@ Browser Rendering extraction, Cloudflare Images ingestion, and Vectorize RAG.
   unique `operationId` values and matching `/openapi.json` entries.
 - Category monitoring runs from the existing `* * * * *` master tick and must
   throttle automatic sweeps to avoid repeated category searches.
+
+## 8. Google Places intake & Maps usage
+
+These rules apply to any code that calls Google Maps / Places (New) APIs or
+surfaces their usage.
+
+- The Google Maps API key is server-side only (`getGoogleMapsApiKey(env)` →
+  `env.GOOGLE_MAPS_API`). NEVER return it to the client or embed it in a page.
+  All Places/Routes traffic MUST proxy through Hono, never the browser.
+- `GoogleMapsService` (`src/backend/services/google/maps.ts`) is the single
+  choke point. Route new Maps calls through a method on it — do NOT `fetch`
+  `places.googleapis.com` from a route handler directly. Each method MUST check
+  the circuit breaker (`isUnderMonthlyQuota()` /
+  `MAPS_MONTHLY_FREE_TIER_LIMIT = 10000` month-to-date) and log via
+  `logUsage(apiType, req, res, { endpoint, sessionToken, statusCode })`.
+- Usage logging goes to the single `google_maps_usage_log` table via
+  `c.executionCtx.waitUntil(...)` so it never blocks the HTTP response. Do NOT
+  add a second usage/quota table.
+- `timestamp` in `google_maps_usage_log` is Drizzle `mode:"timestamp"` → Unix
+  **seconds**. Month filters use `datetime(timestamp,'unixepoch')` (no `/1000`).
+- Places Autocomplete → Details is one billed session: generate one
+  `sessionToken` (UUID) on the client, pass it to every autocomplete keystroke
+  and the final details call, and regenerate only after details resolves.
+- `placeDetails()` uses a strict comma-joined `X-Goog-FieldMask`. Extend the
+  mask when you need more fields — never fetch the unmasked default.
+- Showroom intake reuses `showroom_stores` (via `POST /api/showroom-stores`);
+  do NOT create a parallel `showrooms` entity.

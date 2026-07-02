@@ -83,3 +83,64 @@ This extension covers `docs/0007_sourcing_deep_research/`.
 2. Run `pnpm run db:generate`.
 3. Run `pnpm run cf-typegen`.
 4. Run focused lint and build checks.
+
+## Extension: Google Places Intake & Maps Usage
+
+This extension covers the Google Places (New) autocomplete intake form and the
+Google Maps API monthly-quota usage dashboard. It was implemented by **extending
+existing infrastructure in place** — no parallel `showrooms` or `Maps_usage`
+tables were created. See `.agents/rules/questionnaire-conventions.md` §8.
+
+### D1 schema
+
+1. `google_maps_usage_log` (`src/backend/db/schema/system/google-maps-usage.ts`)
+   is the single append-only Maps usage log. It gained three nullable columns:
+   `endpoint` (normalized sub-operation, e.g. `autocomplete`/`details`),
+   `session_token` (Places Autocomplete session bundling), and `status_code`
+   (upstream HTTP status). Columns are nullable so the legacy
+   `logUsage(apiType, req, res)` callsites keep working. Migration:
+   `drizzle/0055_glossy_hex.sql`. Do NOT add a second usage table.
+2. The Showroom Intake Form writes to the existing `showroom_stores` table via
+   `POST /api/showroom-stores`; it does not introduce a new showroom entity.
+   `createStoreSchema` gained an optional `categoryIds: number[]` that the POST
+   handler fans out into `showroom_store_category_mapping` rows.
+
+### Service layer
+
+1. `GoogleMapsService` (`src/backend/services/google/maps.ts`) is the single
+   choke point for all Maps traffic. It owns the circuit breaker
+   (`isUnderMonthlyQuota()` against `MAPS_MONTHLY_FREE_TIER_LIMIT = 10000`,
+   counted month-to-date), the `getMonthlyUsage()` aggregate (grouped by
+   `endpoint`, filtered with `strftime('%Y-%m', datetime(timestamp,'unixepoch'))`
+   because `timestamp` is stored in Unix **seconds**), and the Places New
+   proxies `placesAutocomplete()` / `placeDetails()`.
+2. The Google Maps API key stays server-side (`getGoogleMapsApiKey(env)` →
+   `env.GOOGLE_MAPS_API`). It is NEVER returned to the client. All Places calls
+   go through the Hono proxy, and every call logs usage via
+   `c.executionCtx.waitUntil(...)` so logging never blocks the response.
+3. `placeDetails()` sends a strict, comma-joined `X-Goog-FieldMask`; extend that
+   mask (never drop fields) when the intake form needs more data.
+
+### API surface
+
+1. `placesRouter` (`src/backend/api/routes/places.ts`) mounts at `/api/places`,
+   gated by `requireAccessAuth`: `GET /autocomplete?q=&sessionToken=` and
+   `GET /details/{placeId}?sessionToken=`. Quota trips return `429`; upstream
+   failures return `502`.
+2. `adminIntegrationsRouter` (`src/backend/api/routes/admin-integrations.ts`)
+   mounts at `/api/admin/integrations` (already covered by the `/api/admin/*`
+   auth middleware): `GET /usage` returns `{ month, limit, total_requests,
+   percentage_used, by_endpoint, plan }` with `autocomplete`/`details` always
+   present.
+
+### Frontend
+
+1. `ShowroomIntakeApp` (`src/frontend/components/showroom/intake/`) is a
+   react-hook-form + zod island: debounced Combobox autocomplete → details →
+   `mapPlaceToIntake` / `formatOpeningHours` / `inferCategoryLabels` mapper →
+   fully editable review form → `POST /api/showroom-stores`. Mounted at
+   `/admin/showroom/intake`.
+2. `AdminIntegrationsUsageApp` (`src/frontend/components/admin/`) renders the
+   two fixed quota rows (85% warn, 100% breaker) + a Monolith recharts summary,
+   with a "Current Plan: Free Tier" badge. Mounted at
+   `/admin/integrations/usage`.
