@@ -159,6 +159,16 @@ function PlaceSearch({
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
+  // On unmount, clear any pending debounce timer and abort any in-flight
+  // autocomplete fetch — prevents a late timeout/response from calling setState
+  // on an unmounted component (memory leak / "update on unmounted" warning).
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      abortRef.current?.abort();
+    };
+  }, []);
+
   const runSearch = useCallback(async (text: string) => {
     abortRef.current?.abort();
     const controller = new AbortController();

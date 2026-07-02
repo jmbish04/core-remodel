@@ -90,6 +90,14 @@ export class GoogleMapsService {
     const now = new Date();
     const month = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
 
+    // Start-of-month as a Unix SECONDS boundary (the `timestamp` column is
+    // Drizzle `mode:"timestamp"` → seconds). Computing this in JS and doing a
+    // plain numeric `timestamp >= …` keeps the query SARGABLE, so SQLite can use
+    // an index on `timestamp` instead of a full table scan on every quota check.
+    // (Replaces the earlier non-sargable `strftime(datetime(...))` predicate.)
+    const startOfMonth = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+    const startOfMonthSeconds = Math.floor(startOfMonth / 1000);
+
     try {
       /**
        * Group rows by coalesced endpoint label.
@@ -102,9 +110,7 @@ export class GoogleMapsService {
           count: sql<number>`count(${googleMapsUsage.id})`,
         })
         .from(googleMapsUsage)
-        .where(
-          sql`strftime('%Y-%m', datetime(${googleMapsUsage.timestamp}, 'unixepoch')) = strftime('%Y-%m','now')`,
-        )
+        .where(sql`${googleMapsUsage.timestamp} >= ${startOfMonthSeconds}`)
         .groupBy(
           sql`coalesce(${googleMapsUsage.endpoint}, ${googleMapsUsage.apiType})`,
         )

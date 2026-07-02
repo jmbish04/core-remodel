@@ -1024,15 +1024,25 @@ showroomStoresRouter.post("/", async (c) => {
     .returning();
 
   // Attach inferred category mappings when provided.
+  //
+  // De-duplicate first: repeated IDs would insert duplicate rows (and trip a
+  // unique constraint on the mapping table, failing the whole create). Then
+  // write in chunks via db.batch() of single-row inserts so we never approach
+  // Cloudflare D1's 100-bound-parameter-per-query limit on large category sets.
   if (categoryIds && categoryIds.length > 0) {
-    await db
-      .insert(showroomStoreCategoryMapping)
-      .values(
-        categoryIds.map((categoryId) => ({
+    const uniqueCategoryIds = [...new Set(categoryIds)];
+    const CATEGORY_BATCH_SIZE = 50;
+    for (let i = 0; i < uniqueCategoryIds.length; i += CATEGORY_BATCH_SIZE) {
+      const chunk = uniqueCategoryIds.slice(i, i + CATEGORY_BATCH_SIZE);
+      const stmts = chunk.map((categoryId) =>
+        db.insert(showroomStoreCategoryMapping).values({
           storeId: inserted.id,
           categoryId,
-        })),
+        }),
       );
+      // chunk is always non-empty here; cast to the non-empty tuple db.batch expects.
+      await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
+    }
   }
 
   c.executionCtx.waitUntil(

@@ -38,7 +38,7 @@ import { z } from "zod";
  * keeps react-hook-form's default-value typing simple.
  */
 export const showroomIntakeSchema = z.object({
-  name: z.string().min(1, "Name is required"),
+  name: z.string().trim().min(1, "Name is required"),
   description: z.string().optional(),
   pricePoint: z.enum(["$", "$$", "$$$", "$$$$"]).optional(),
   locationAddress: z.string().optional(),
@@ -167,9 +167,13 @@ function extractSummary(place: GooglePlaceDetails): string | undefined {
  */
 function parseZip(formattedAddress?: string | null): string | undefined {
   if (!formattedAddress) return undefined;
-  // Match a 5-digit ZIP (optionally +4) that is NOT part of a longer number.
-  const m = formattedAddress.match(/\b(\d{5})(?:-\d{4})?\b(?!\d)/);
-  return m ? m[1] : undefined;
+  // Collect ALL 5-digit numbers (optionally +4) and return the LAST one. A
+  // non-global first match can grab a 5-digit street number (e.g. "10123 Lark
+  // Ave, Los Gatos, CA 95032" → "10123"); in US formatted addresses the ZIP is
+  // the trailing 5-digit group, so the last match is the correct one.
+  const matches = [...formattedAddress.matchAll(/\b(\d{5})(?:-\d{4})?\b/g)];
+  if (matches.length === 0) return undefined;
+  return matches[matches.length - 1][1];
 }
 
 // ─── mapPlaceToIntake ─────────────────────────────────────────────────────────
