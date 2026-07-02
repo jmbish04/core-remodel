@@ -15,3 +15,5 @@ export * from "./product_specs";
 export * from "./showroom_images";
 export * from "./sweep_sessions";
 export * from "./gaps";
+export * from "./pocs";
+export * from "./product_mappings";

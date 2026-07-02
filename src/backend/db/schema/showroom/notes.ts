@@ -19,7 +19,28 @@ export const storeNotes = sqliteTable("store_notes", {
     sql`(unixepoch())`
   ),
 
-  note: text("note").notNull(),
+  /**
+   * Legacy plain-text note body. Nullable so legacy rows remain valid while
+   * new notes use the rich-text fields below instead.
+   */
+  note: text("note"),
+
+  /** Short display title for the note (optional — legacy rows leave this null). */
+  title: text("title"),
+
+  /**
+   * PlateJS-rendered HTML for the note body.
+   * Served as-is in the UI — no further transformation needed.
+   */
+  contentHtml: text("content_html"),
+
+  /**
+   * The SAME note body serialized to Markdown by PlateJS.
+   * Portable source of truth — use for export, search indexing, or AI context.
+   */
+  contentMarkdown: text("content_markdown"),
+
+  /** Soft delete — set false when a note is superseded or deleted. */
   isActive: integer("is_active", { mode: "boolean" }).default(true),
 });
 

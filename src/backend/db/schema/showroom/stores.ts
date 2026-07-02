@@ -98,6 +98,29 @@ export const showroomStores = sqliteTable("showroom_stores", {
   // ── Notes (quick freeform from user) ──────────────────────────────────
   locationNotes: text("location_notes"),
 
+  // ── Latest-visit rating (denormalized for quick display) ─────────────
+  // NOTE: a full visit-history log lives in the `store_rating` table
+  // (showroom/ratings.ts). The columns below are the denormalized snapshot
+  // of the MOST RECENT visit so UIs can render the star badge without a join.
+
+  /**
+   * Latest visit star rating, 1–5.
+   * Null means the store has never been rated.
+   */
+  rating: integer("rating"),
+
+  /**
+   * PlateJS-rendered HTML for the rating context note from the latest visit.
+   * Served as-is in the UI — no further transformation needed.
+   */
+  ratingContextHtml: text("rating_context_html"),
+
+  /**
+   * The SAME rating context note serialized to Markdown by PlateJS.
+   * Portable source of truth — use for export, search indexing, or AI context.
+   */
+  ratingContextMarkdown: text("rating_context_markdown"),
+
   // ── Social & brand media ──────────────────────────────────────────────
   /**
    * Public Instagram profile URL for this showroom location.

@@ -8,7 +8,7 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, desc, and, like, inArray } from "drizzle-orm";
+import { eq, desc, and, like, inArray, sql } from "drizzle-orm";
 import { getAgentByName } from "agents";
 
 import {
@@ -33,11 +33,16 @@ import {
   productSpecs,
   showroomImages,
   sourcingSweepSessions,
+  showroomPocs,
+  showroomProductMappings,
 } from "@backend/db/schema/showroom/index";
 import {
   brands,
   showroomBrandMappings,
 } from "@backend/db/schema/brands/index";
+import { businessCardService } from "@backend/services/business-card";
+import { ImageProcessorService } from "@backend/services/image-processor";
+import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { faviconService } from "@backend/services/favicon";
 import {
   generateProductDraftPrompt,
@@ -938,7 +943,7 @@ showroomStoresRouter.get("/:id", async (c) => {
   if (!store) return c.json({ error: "Store not found" }, 404);
 
   // Parallel data loads
-  const [products, categories, notes, ratings, externalRatings, research, tags, mappedBrands] =
+  const [products, categories, notes, ratings, externalRatings, research, tags, directBrands, productBrands] =
     await Promise.all([
       db
         .select()
@@ -993,7 +998,7 @@ showroomStoresRouter.get("/:id", async (c) => {
           eq(storeTagMapping.showroomTagId, showroomTagDef.id)
         )
         .where(eq(storeTagMapping.storeId, storeId)),
-      // Brands mapped to this showroom via showroom_brand_mappings.
+      // (a) Brands explicitly mapped via showroom_brand_mappings.
       db
         .select({
           brand: brands,
@@ -1004,7 +1009,53 @@ showroomStoresRouter.get("/:id", async (c) => {
         .innerJoin(brands, eq(showroomBrandMappings.brandId, brands.id))
         .where(eq(showroomBrandMappings.showroomId, storeId))
         .orderBy(brands.name),
+      // (b) Brands derived from products mapped via showroom_product_mappings.
+      // Join: showroom_product_mappings → showroom_store_products.brandId → brands.
+      db
+        .select({
+          brand: brands,
+        })
+        .from(showroomProductMappings)
+        .innerJoin(
+          showroomStoreProducts,
+          eq(showroomProductMappings.productId, showroomStoreProducts.id),
+        )
+        .innerJoin(brands, eq(showroomStoreProducts.brandId, brands.id))
+        .where(eq(showroomProductMappings.showroomId, storeId)),
     ]);
+
+  // Build the DISTINCT UNION of (a) direct brand mappings and (b) product-derived brands.
+  // De-dupe by brand id; direct mappings carry the showroom mapping metadata.
+  const brandMap = new Map<number, {
+    id: number; name: string; description: string | null; websiteUrl: string | null;
+    instagramUrl: string | null; iconCfImagesUrl: string | null;
+    createdAt: Date; updatedAt: Date;
+    showroomMappingId: number | null; showroomMappingCreatedAt: Date | null;
+    source: "direct" | "product";
+  }>();
+
+  for (const r of directBrands) {
+    brandMap.set(r.brand.id, {
+      ...r.brand,
+      showroomMappingId: r.mappingId,
+      showroomMappingCreatedAt: r.mappingCreatedAt,
+      source: "direct",
+    });
+  }
+  for (const r of productBrands) {
+    if (!brandMap.has(r.brand.id)) {
+      brandMap.set(r.brand.id, {
+        ...r.brand,
+        showroomMappingId: null,
+        showroomMappingCreatedAt: null,
+        source: "product",
+      });
+    }
+  }
+
+  const mergedBrands = [...brandMap.values()].sort((a, b) =>
+    a.name.localeCompare(b.name)
+  );
 
   return c.json({
     ...store.store,
@@ -1026,11 +1077,7 @@ showroomStoresRouter.get("/:id", async (c) => {
       tagName: r.tag.name,
       tagColor: r.tag.color,
     })),
-    brands: mappedBrands.map((r) => ({
-      ...r.brand,
-      showroomMappingId: r.mappingId,
-      showroomMappingCreatedAt: r.mappingCreatedAt,
-    })),
+    brands: mergedBrands,
   });
 });
 
@@ -1660,4 +1707,781 @@ showroomStoresRouter.get("/meta/product-areas", async (c) => {
     .where(eq(storeProductAreaDef.isActive, true));
 
   return c.json({ productAreas: areas });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── VISIT RATING (migration 0057 denormalized columns) ──────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// `POST /:id/rate` (above) writes to the `store_rating` history table and keeps
+// the full audit trail. This `PUT /:id/visit-rating` endpoint writes the THREE
+// denormalized columns on `showroom_stores` that were added in migration 0057:
+//   - rating                (integer 1–5)
+//   - ratingContextHtml     (PlateJS HTML)
+//   - ratingContextMarkdown (PlateJS Markdown)
+//
+// These are displayed as the "latest visit" star badge on the showroom card
+// without needing to join to `store_rating`.
+
+/**
+ * PUT /:id/visit-rating — Update the denormalized latest-visit rating snapshot.
+ *
+ * Request body:
+ *   {
+ *     "rating": 4,
+ *     "ratingContextHtml": "<p>Great showroom, Waterworks display impressive.</p>",
+ *     "ratingContextMarkdown": "Great showroom, Waterworks display impressive."
+ *   }
+ *
+ * Response 200:
+ *   { "store": { ...updatedStoreRow } }
+ */
+showroomStoresRouter.put("/:id/visit-rating", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isFinite(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  const visitRatingSchema = z.object({
+    rating: z.number().int().min(1).max(5),
+    ratingContextHtml: z.string().optional().nullable(),
+    ratingContextMarkdown: z.string().optional().nullable(),
+  });
+
+  const parsed = visitRatingSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+
+  const [updated] = await db
+    .update(showroomStores)
+    .set({
+      rating: parsed.data.rating,
+      ratingContextHtml: parsed.data.ratingContextHtml ?? null,
+      ratingContextMarkdown: parsed.data.ratingContextMarkdown ?? null,
+      updatedAt: new Date(),
+    } as Partial<typeof showroomStores.$inferInsert>)
+    .where(eq(showroomStores.id, storeId))
+    .returning();
+
+  if (!updated) {
+    return c.json({ success: false, error: "Store not found" }, 404);
+  }
+
+  return c.json({ store: updated });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── POCS ────────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Points of contact captured during showroom visits (typically from business
+// card scans). Each showroom may have many POCs. Soft-deleted via `isActive`.
+
+/**
+ * GET /:id/pocs — List active POCs for a showroom, newest first.
+ *
+ * Response 200:
+ *   { "pocs": [ { id, showroomId, fullName, title, company, phone, email, website,
+ *                 address, businessCardFrontUrl, businessCardBackUrl, extractedJson,
+ *                 isActive, createdAt, updatedAt }, ... ] }
+ */
+showroomStoresRouter.get("/:id/pocs", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isFinite(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  const pocs = await db
+    .select()
+    .from(showroomPocs)
+    .where(
+      and(
+        eq(showroomPocs.showroomId, storeId),
+        eq(showroomPocs.isActive, true),
+      ),
+    )
+    .orderBy(desc(showroomPocs.createdAt));
+
+  return c.json({ pocs });
+});
+
+/**
+ * POST /:id/pocs/extract-card — Upload card images + run VLM extraction.
+ *
+ * Accepts one or both sides of a business card as base64 data URLs. Uploads
+ * each provided side to Cloudflare Images and runs Workers AI VLM extraction.
+ * DOES NOT create a POC row — the client reviews the extracted data first, then
+ * calls POST /:id/pocs to persist.
+ *
+ * Request body (at least one of frontImage / backImage required):
+ *   {
+ *     "frontImage": "data:image/jpeg;base64,...",
+ *     "backImage":  "data:image/jpeg;base64,..."
+ *   }
+ *
+ * Response 200:
+ *   {
+ *     "businessCardFrontUrl": "https://imagedelivery.net/.../public",
+ *     "businessCardBackUrl":  null,
+ *     "extracted": {
+ *       "fullName": "Jane Smith",
+ *       "title": "Senior Design Consultant",
+ *       "company": "Studio Belmont",
+ *       "phone": "+1 415 555 0100",
+ *       "email": "jane@studiobelmont.com",
+ *       "website": "https://studiobelmont.com",
+ *       "address": "1234 Market St, San Francisco CA 94102"
+ *     }
+ *   }
+ */
+showroomStoresRouter.post("/:id/pocs/extract-card", async (c) => {
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isFinite(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  const extractCardSchema = z.object({
+    frontImage: z.string().optional().nullable(),
+    backImage: z.string().optional().nullable(),
+  });
+
+  const parsed = extractCardSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+
+  const { frontImage, backImage } = parsed.data;
+
+  if (!frontImage && !backImage) {
+    return c.json(
+      { success: false, error: "At least one of frontImage or backImage is required" },
+      400,
+    );
+  }
+
+  // Upload both sides in parallel (nulls are handled gracefully inside uploadCard).
+  const [businessCardFrontUrl, businessCardBackUrl] = await Promise.all([
+    frontImage
+      ? businessCardService.uploadCard(c.env, "front", frontImage)
+      : Promise.resolve(null),
+    backImage
+      ? businessCardService.uploadCard(c.env, "back", backImage)
+      : Promise.resolve(null),
+  ]);
+
+  // Run VLM extraction. Prefer delivery URLs when available (smaller payload to
+  // the AI gateway); fall back to original data URLs if upload failed.
+  const extractionImages: { front?: string; back?: string } = {};
+  if (frontImage) extractionImages.front = businessCardFrontUrl ?? frontImage;
+  if (backImage) extractionImages.back = businessCardBackUrl ?? backImage;
+
+  const extracted = await businessCardService.extractFromImages(c.env, extractionImages);
+
+  return c.json({
+    businessCardFrontUrl,
+    businessCardBackUrl,
+    extracted,
+  });
+});
+
+/**
+ * POST /:id/pocs — Create a new POC for a showroom.
+ *
+ * The client typically calls this after reviewing the output of extract-card.
+ * All fields are optional — a POC can be created with just a name, or with
+ * full card URLs + extracted data if the card scan succeeded.
+ *
+ * Request body:
+ *   {
+ *     "fullName": "Jane Smith",
+ *     "title": "Senior Design Consultant",
+ *     "company": "Studio Belmont",
+ *     "phone": "+1 415 555 0100",
+ *     "email": "jane@studiobelmont.com",
+ *     "website": "https://studiobelmont.com",
+ *     "address": "1234 Market St, San Francisco CA 94102",
+ *     "businessCardFrontUrl": "https://imagedelivery.net/.../public",
+ *     "businessCardBackUrl": null,
+ *     "extractedJson": { ... }
+ *   }
+ *
+ * Response 201:
+ *   { "poc": { id, showroomId, fullName, ... } }
+ */
+showroomStoresRouter.post("/:id/pocs", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isFinite(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  const createPocSchema = z.object({
+    fullName: z.string().optional().nullable(),
+    title: z.string().optional().nullable(),
+    company: z.string().optional().nullable(),
+    phone: z.string().optional().nullable(),
+    email: z.string().optional().nullable(),
+    website: z.string().optional().nullable(),
+    address: z.string().optional().nullable(),
+    businessCardFrontUrl: z.string().optional().nullable(),
+    businessCardBackUrl: z.string().optional().nullable(),
+    extractedJson: z.unknown().optional().nullable(),
+  });
+
+  const parsed = createPocSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+
+  const { extractedJson, ...rest } = parsed.data;
+
+  const [inserted] = await db
+    .insert(showroomPocs)
+    .values({
+      showroomId: storeId,
+      ...rest,
+      extractedJson: extractedJson !== undefined ? extractedJson : null,
+    } as typeof showroomPocs.$inferInsert)
+    .returning();
+
+  return c.json({ poc: inserted }, 201);
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── NOTES (rich titled notes, migration 0057) ───────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// The `store_notes` table was extended in migration 0057 with `title`,
+// `contentHtml`, `contentMarkdown`, and `isActive` (soft-delete). The old
+// `note` plain-text column is still present for backward compatibility.
+//
+// NOTE: `POST /:id/notes` above in the original NOTES block only accepted a
+// plain `note` string. The routes here supersede that with the full rich-text
+// schema. The old route is left in place for backward compatibility; these new
+// routes live in a separate clearly-sectioned block.
+
+/**
+ * GET /:id/notes — List active notes for a showroom, newest first.
+ *
+ * Response 200:
+ *   { "notes": [ { id, storeId, title, note, contentHtml, contentMarkdown,
+ *                  isActive, timestamp }, ... ] }
+ */
+showroomStoresRouter.get("/:id/notes", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isFinite(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  const notes = await db
+    .select()
+    .from(storeNotes)
+    .where(
+      and(
+        eq(storeNotes.storeId, storeId),
+        eq(storeNotes.isActive, true),
+      ),
+    )
+    .orderBy(desc(storeNotes.timestamp));
+
+  return c.json({ notes });
+});
+
+/**
+ * POST /:id/notes — Create a new titled rich note for a showroom.
+ *
+ * Request body:
+ *   {
+ *     "title": "Post-visit impressions",
+ *     "contentHtml": "<p>Waterworks display was incredible.</p>",
+ *     "contentMarkdown": "Waterworks display was incredible.",
+ *     "note": "plain text fallback (optional)"
+ *   }
+ *
+ * Response 201:
+ *   { "note": { id, storeId, title, note, contentHtml, contentMarkdown, isActive, timestamp } }
+ */
+showroomStoresRouter.post("/:id/notes", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isFinite(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  const createNoteSchema = z.object({
+    title: z.string().optional().nullable(),
+    contentHtml: z.string().optional().nullable(),
+    contentMarkdown: z.string().optional().nullable(),
+    note: z.string().optional().nullable(),
+  });
+
+  const parsed = createNoteSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+
+  const [inserted] = await db
+    .insert(storeNotes)
+    .values({
+      storeId,
+      title: parsed.data.title ?? null,
+      contentHtml: parsed.data.contentHtml ?? null,
+      contentMarkdown: parsed.data.contentMarkdown ?? null,
+      note: parsed.data.note ?? null,
+      isActive: true,
+    } as typeof storeNotes.$inferInsert)
+    .returning();
+
+  return c.json({ note: inserted }, 201);
+});
+
+/**
+ * PUT /notes/:noteId — Update the title and/or rich content of a note.
+ *
+ * Request body (all optional; only provided fields are updated):
+ *   {
+ *     "title": "Updated title",
+ *     "contentHtml": "<p>New content.</p>",
+ *     "contentMarkdown": "New content."
+ *   }
+ *
+ * Response 200:
+ *   { "note": { ...updatedRow } }
+ */
+showroomStoresRouter.put("/notes/:noteId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const noteId = Number(c.req.param("noteId"));
+  if (!Number.isFinite(noteId)) {
+    return c.json({ success: false, error: "Invalid note id" }, 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  const updateNoteSchema = z.object({
+    title: z.string().optional().nullable(),
+    contentHtml: z.string().optional().nullable(),
+    contentMarkdown: z.string().optional().nullable(),
+    note: z.string().optional().nullable(),
+  });
+
+  const parsed = updateNoteSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+
+  const patch: Partial<typeof storeNotes.$inferInsert> = {};
+  if (parsed.data.title !== undefined) patch.title = parsed.data.title;
+  if (parsed.data.contentHtml !== undefined) patch.contentHtml = parsed.data.contentHtml;
+  if (parsed.data.contentMarkdown !== undefined) patch.contentMarkdown = parsed.data.contentMarkdown;
+  if (parsed.data.note !== undefined) patch.note = parsed.data.note;
+
+  const [updated] = await db
+    .update(storeNotes)
+    .set(patch)
+    .where(eq(storeNotes.id, noteId))
+    .returning();
+
+  if (!updated) {
+    return c.json({ success: false, error: "Note not found" }, 404);
+  }
+
+  return c.json({ note: updated });
+});
+
+/**
+ * DELETE /notes/:noteId — Soft-delete a note (sets isActive=false).
+ *
+ * Guards against phantom deletes: confirms the note exists before patching.
+ *
+ * Response 200:
+ *   { "success": true }
+ */
+showroomStoresRouter.delete("/notes/:noteId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const noteId = Number(c.req.param("noteId"));
+  if (!Number.isFinite(noteId)) {
+    return c.json({ success: false, error: "Invalid note id" }, 400);
+  }
+
+  // Guard: confirm the note exists before soft-deleting.
+  const [existing] = await db
+    .select({ id: storeNotes.id })
+    .from(storeNotes)
+    .where(eq(storeNotes.id, noteId))
+    .limit(1);
+
+  if (!existing) {
+    return c.json({ success: false, error: "Note not found" }, 404);
+  }
+
+  await db
+    .update(storeNotes)
+    .set({ isActive: false } as Partial<typeof storeNotes.$inferInsert>)
+    .where(eq(storeNotes.id, noteId));
+
+  return c.json({ success: true });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── VISIT PHOTOS (showroom_images + polaroid-back note) ─────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Visit-uploaded photos are stored in `showroom_images` with imageKind='visit'.
+// Each photo has a polaroid-back note (noteHtml / noteMarkdown) that can be
+// added or updated after the initial upload.
+
+/**
+ * GET /:id/photos — List all images for a showroom, newest first.
+ *
+ * Response 200:
+ *   { "photos": [ { id, storeId, sourceUrl, deliveryUrl, cfImageId, altText,
+ *                   imageKind, noteHtml, noteMarkdown, reviewStatus, createdAt,
+ *                   ... }, ... ] }
+ */
+showroomStoresRouter.get("/:id/photos", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isFinite(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  const photos = await db
+    .select()
+    .from(showroomImages)
+    .where(eq(showroomImages.storeId, storeId))
+    .orderBy(desc(showroomImages.createdAt));
+
+  return c.json({ photos });
+});
+
+/**
+ * POST /:id/photos — Upload a visit photo to Cloudflare Images and record it.
+ *
+ * The image is uploaded to CF Images; the resulting delivery URL is stored in
+ * both `sourceUrl` and `deliveryUrl` so the row satisfies the NOT NULL on
+ * `source_url`. `imageKind` is fixed to 'visit' for homeowner-uploaded images.
+ *
+ * Request body:
+ *   {
+ *     "image": "data:image/jpeg;base64,...",
+ *     "altText": "Showroom entrance (optional)"
+ *   }
+ *
+ * Response 201:
+ *   { "photo": { id, storeId, sourceUrl, deliveryUrl, cfImageId, altText,
+ *                imageKind, noteHtml, noteMarkdown, reviewStatus, createdAt, ... } }
+ */
+showroomStoresRouter.post("/:id/photos", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isFinite(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  const uploadPhotoSchema = z.object({
+    image: z.string().min(1),
+    altText: z.string().optional().nullable(),
+  });
+
+  const parsed = uploadPhotoSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+
+  // Upload to Cloudflare Images.
+  let deliveryUrl: string;
+  let cfImageId: string | null = null;
+  try {
+    const { accountId, apiTokens } = await resolveCloudflareImagesCredentials(c.env);
+    if (!accountId || apiTokens.length === 0) {
+      return c.json({ success: false, error: "Cloudflare Images credentials not configured" }, 500);
+    }
+
+    const [primaryToken, ...fallbackApiTokens] = apiTokens;
+    const processor = new ImageProcessorService(c.env, accountId, primaryToken, {
+      fallbackApiTokens,
+    });
+
+    // Decode dataUrl → Blob.
+    const match = /^data:([^;]+);base64,(.*)$/s.exec(parsed.data.image);
+    if (!match) {
+      return c.json({ success: false, error: "Invalid image data URL" }, 400);
+    }
+    const [, mime, b64] = match;
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const blob = new Blob([bytes], { type: mime });
+
+    const customId = `showroom-visit-${storeId}-${crypto.randomUUID()}`;
+    const uploadResponse = await processor.uploadToCloudflareImages(
+      blob,
+      customId,
+      `visit-${storeId}.jpg`,
+    );
+    cfImageId = uploadResponse.result?.id ?? customId;
+    deliveryUrl = processor.getDeliveryUrl(uploadResponse, customId);
+  } catch (err) {
+    console.error("[showroom-stores] POST /:id/photos upload error:", err);
+    return c.json({ success: false, error: "Image upload failed" }, 500);
+  }
+
+  const imageInsertValues = {
+    storeId,
+    sourceUrl: deliveryUrl,
+    deliveryUrl,
+    cfImageId,
+    altText: parsed.data.altText ?? null,
+    imageKind: "visit" as const,
+  };
+
+  const [inserted] = await db
+    .insert(showroomImages)
+    .values(imageInsertValues as unknown as typeof showroomImages.$inferInsert)
+    .returning();
+
+  return c.json({ photo: inserted }, 201);
+});
+
+/**
+ * PUT /photos/:imageId/note — Update the polaroid-back note on a visit photo.
+ *
+ * Request body:
+ *   {
+ *     "noteHtml": "<p>Beautiful Waterworks display.</p>",
+ *     "noteMarkdown": "Beautiful Waterworks display."
+ *   }
+ *
+ * Response 200:
+ *   { "photo": { ...updatedRow } }
+ */
+showroomStoresRouter.put("/photos/:imageId/note", async (c) => {
+  const db = drizzle(c.env.DB);
+  const imageId = Number(c.req.param("imageId"));
+  if (!Number.isFinite(imageId)) {
+    return c.json({ success: false, error: "Invalid image id" }, 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  const noteSchema = z.object({
+    noteHtml: z.string().optional().nullable(),
+    noteMarkdown: z.string().optional().nullable(),
+  });
+
+  const parsed = noteSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+
+  const [updated] = await db
+    .update(showroomImages)
+    .set({
+      noteHtml: parsed.data.noteHtml ?? null,
+      noteMarkdown: parsed.data.noteMarkdown ?? null,
+      updatedAt: new Date(),
+    } as Partial<typeof showroomImages.$inferInsert>)
+    .where(eq(showroomImages.id, imageId))
+    .returning();
+
+  if (!updated) {
+    return c.json({ success: false, error: "Image not found" }, 404);
+  }
+
+  return c.json({ photo: updated });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── PRODUCT MAPPINGS (showroom_product_mappings) ─────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Many-to-many join between showroom locations and products. Used to associate
+// products from the global product catalogue with a specific showroom so the
+// homeowner can discover which showrooms stock a desired product.
+
+/**
+ * GET /:id/mapped-products — Products mapped to this showroom.
+ *
+ * Returns the full product row joined to its brand name.
+ *
+ * Response 200:
+ *   {
+ *     "mappings": [
+ *       {
+ *         "mappingId": 1,
+ *         "mappingCreatedAt": "...",
+ *         "product": { id, storeId, itemName, brandId, ... },
+ *         "brandName": "Waterworks"
+ *       },
+ *       ...
+ *     ]
+ *   }
+ */
+showroomStoresRouter.get("/:id/mapped-products", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isFinite(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  const rows = await db
+    .select({
+      mappingId: showroomProductMappings.id,
+      mappingCreatedAt: showroomProductMappings.createdAt,
+      product: showroomStoreProducts,
+      brandName: brands.name,
+    })
+    .from(showroomProductMappings)
+    .innerJoin(
+      showroomStoreProducts,
+      eq(showroomProductMappings.productId, showroomStoreProducts.id),
+    )
+    .leftJoin(brands, eq(showroomStoreProducts.brandId, brands.id))
+    .where(eq(showroomProductMappings.showroomId, storeId))
+    .orderBy(desc(showroomProductMappings.createdAt));
+
+  return c.json({
+    mappings: rows.map((r) => ({
+      mappingId: r.mappingId,
+      mappingCreatedAt: r.mappingCreatedAt,
+      product: r.product,
+      brandName: r.brandName ?? null,
+    })),
+  });
+});
+
+/**
+ * POST /:id/mapped-products — Map a product to this showroom.
+ *
+ * Duplicate mappings (same showroomId + productId) are silently ignored via
+ * the unique constraint catch, consistent with the existing brands mapping pattern.
+ *
+ * Request body:
+ *   { "productId": 42 }
+ *
+ * Response 201:
+ *   { "mapping": { id, showroomId, productId, createdAt } }
+ *
+ * Response 200 (duplicate):
+ *   { "mapping": { ... }, "alreadyExists": true }
+ */
+showroomStoresRouter.post("/:id/mapped-products", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isFinite(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  const schema = z.object({ productId: z.number().int().positive() });
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+
+  try {
+    const [inserted] = await db
+      .insert(showroomProductMappings)
+      .values({ showroomId: storeId, productId: parsed.data.productId })
+      .returning();
+    return c.json({ mapping: inserted }, 201);
+  } catch (err: any) {
+    // SQLite unique constraint violation — mapping already exists.
+    if (err?.message?.includes("UNIQUE") || err?.message?.includes("unique")) {
+      const [existing] = await db
+        .select()
+        .from(showroomProductMappings)
+        .where(
+          and(
+            eq(showroomProductMappings.showroomId, storeId),
+            eq(showroomProductMappings.productId, parsed.data.productId),
+          ),
+        )
+        .limit(1);
+      return c.json({ mapping: existing, alreadyExists: true }, 200);
+    }
+    console.error("[showroom-stores] POST /:id/mapped-products error:", err);
+    return c.json({ success: false, error: "Failed to add product mapping" }, 500);
+  }
+});
+
+/**
+ * DELETE /:id/mapped-products/:productId — Remove a product mapping from a showroom.
+ *
+ * Response 200:
+ *   { "success": true }
+ */
+showroomStoresRouter.delete("/:id/mapped-products/:productId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const productId = Number(c.req.param("productId"));
+  if (!Number.isFinite(storeId) || !Number.isFinite(productId)) {
+    return c.json({ success: false, error: "Invalid id" }, 400);
+  }
+
+  await db
+    .delete(showroomProductMappings)
+    .where(
+      and(
+        eq(showroomProductMappings.showroomId, storeId),
+        eq(showroomProductMappings.productId, productId),
+      ),
+    );
+
+  return c.json({ success: true });
 });

@@ -18,6 +18,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   AppWindow,
   Archive,
+  Armchair,
   Blocks,
   CalendarClock,
   ChevronDown,
@@ -71,8 +72,6 @@ import {
   MarkerContent,
   MarkerPopup,
 } from "@/components/ui/map";
-import { GapPanel } from "@/components/showroom/GapPanel";
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Store {
@@ -167,7 +166,61 @@ const CATEGORY_ICONS: { test: RegExp; Icon: ComponentType<{ className?: string }
   { test: /hardware|hinge|lock|handle|knob/i, Icon: Wrench },
 ];
 
+/**
+ * List-tab category-group header icons — colorful, semantic tints (POP, not muted).
+ * Keyed by a keyword regex against the category-group label so it matches whatever
+ * the backend names its categories (e.g. "Lighting", "Bath & Plumbing", "Tile / Stone").
+ */
+interface CategoryIconStyle {
+  Icon: ComponentType<{ className?: string }>;
+  className: string; // tint bg + fg
+}
+
+const CATEGORY_ICON_RULES: { test: RegExp; style: CategoryIconStyle }[] = [
+  { test: /light|led|lamp|chandelier|sconce|illumin/i, style: { Icon: Lightbulb, className: "bg-amber-500/15 text-amber-400" } },
+  { test: /plumb|bath|faucet|sink|shower|tub|toilet|valve|steam|vanity/i, style: { Icon: Droplets, className: "bg-sky-500/15 text-sky-400" } },
+  { test: /tile|stone|porcelain|ceramic|slab|paver|mosaic|marble|quartz|granite/i, style: { Icon: Grid3x3, className: "bg-stone-400/15 text-stone-300" } },
+  { test: /kitchen|appliance|cook|range|oven|refriger|hood|induction|dishwash/i, style: { Icon: Utensils, className: "bg-emerald-500/15 text-emerald-400" } },
+  { test: /hardware|hinge|lock|handle|knob/i, style: { Icon: Wrench, className: "bg-orange-500/15 text-orange-400" } },
+  { test: /door|entry|pivot/i, style: { Icon: DoorOpen, className: "bg-rose-500/15 text-rose-400" } },
+  { test: /floor|wood|hardwood|vinyl|plank|laminate/i, style: { Icon: Layers, className: "bg-yellow-600/15 text-yellow-500" } },
+  { test: /furnitur|sofa|seat|chair|cabinet|millwork/i, style: { Icon: Armchair, className: "bg-fuchsia-500/15 text-fuchsia-400" } },
+  { test: /paint|color|finish/i, style: { Icon: PaintBucket, className: "bg-violet-500/15 text-violet-400" } },
+  { test: /window|sash|glaz/i, style: { Icon: AppWindow, className: "bg-cyan-500/15 text-cyan-400" } },
+  { test: /closet|wardrobe|storage|pantry|organiz/i, style: { Icon: Archive, className: "bg-lime-500/15 text-lime-400" } },
+  { test: /concrete|microcement|cement|masonry|plaster|stucco/i, style: { Icon: Blocks, className: "bg-zinc-400/15 text-zinc-300" } },
+  { test: /fireplace|hearth/i, style: { Icon: Flame, className: "bg-red-500/15 text-red-400" } },
+];
+
+const DEFAULT_CATEGORY_ICON: CategoryIconStyle = {
+  Icon: StoreIcon,
+  className: "bg-muted text-muted-foreground",
+};
+
+function categoryIconStyleFor(label: string): CategoryIconStyle {
+  for (const { test, style } of CATEGORY_ICON_RULES) {
+    if (test.test(label)) return style;
+  }
+  return DEFAULT_CATEGORY_ICON;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Format a US 10-digit phone as "(###) ### - ####". Any string that doesn't
+ * reduce to exactly 10 digits is returned unchanged (still valid for a tel: link).
+ */
+function formatPhone(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  const ten = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+  if (ten.length !== 10) return raw;
+  return `(${ten.slice(0, 3)}) ${ten.slice(3, 6)} - ${ten.slice(6)}`;
+}
+
+/** tel: href — strip to dialable characters (digits + leading +). */
+function telHref(raw: string): string {
+  return `tel:${raw.replace(/[^\d+]/g, "")}`;
+}
 
 async function api<T>(url: string): Promise<T> {
   const res = await fetch(url, { credentials: "include" });
@@ -478,7 +531,7 @@ function HoursFooter({ store, pst, className }: { store: Store; pst: PstNow; cla
   const isWeekday = pst.day >= 1 && pst.day <= 5;
   const weekendAppliesToday = !isWeekday && weekendHoursApplyToday(store.weekendHours, pst.day);
   return (
-    <div className={`grid grid-cols-3 gap-2 border-t border-border/40 pt-2 ${className ?? ""}`}>
+    <div className={`grid grid-cols-3 gap-2 ${className ?? ""}`}>
       <HoursColumn
         label="Mon–Fri"
         text={store.weekdayHours}
@@ -570,45 +623,51 @@ function ContactRow({ store, className }: { store: Store; className?: string }) 
 
 function ShowroomCard({ store, pst }: { store: Store; pst: PstNow }) {
   return (
-    <article className="group relative flex flex-col rounded-xl border border-border/60 bg-background/40 p-4 transition-colors hover:bg-background/60">
-      <div className="flex items-start gap-3">
-        <LogoBadge store={store} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            {/* Stretched link makes the whole card clickable; inner links opt out via z-10. */}
-            <a
-              href={`/admin/showroom/store/${store.id}`}
-              className="line-clamp-1 text-sm font-medium after:absolute after:inset-0 after:content-['']"
-            >
-              {store.name}
-            </a>
-            {store.isFlagshipLocation && <FlagshipBadge />}
+    <article className="group relative flex flex-col gap-4 rounded-xl bg-card p-4 ring-1 ring-border/40 transition-colors hover:bg-muted/40 sm:flex-row sm:items-stretch">
+      {/* Left: identity + focus */}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start gap-3">
+          <LogoBadge store={store} />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Stretched link makes the whole card clickable; inner links opt out via z-10. */}
+              <a
+                href={`/admin/showroom/store/${store.id}`}
+                className="line-clamp-1 text-sm font-medium after:absolute after:inset-0 after:content-['']"
+              >
+                {store.name}
+              </a>
+              {store.isFlagshipLocation && <FlagshipBadge />}
+            </div>
+            {store.cityName && (
+              <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                <MapPin className="size-3" />
+                {store.cityName}
+              </div>
+            )}
+            {store.categories.length > 0 && (
+              <div className="mt-1.5">
+                <CategoryTags categories={store.categories} max={5} />
+              </div>
+            )}
           </div>
-          {store.cityName && (
-            <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-              <MapPin className="size-3" />
-              {store.cityName}
-            </div>
-          )}
-          {store.categories.length > 0 && (
-            <div className="mt-1.5">
-              <CategoryTags categories={store.categories} />
-            </div>
-          )}
         </div>
+
+        <div className="mt-3">
+          <RatingRow store={store} />
+        </div>
+
+        {store.inventoryFocus && (
+          <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{store.inventoryFocus}</p>
+        )}
+
+        <ContactRow store={store} className="mt-3" />
       </div>
 
-      <div className="mt-3">
-        <RatingRow store={store} />
+      {/* Right: hours (fixed-ish width on desktop, full-width stacked on mobile) */}
+      <div className="shrink-0 border-t border-border/40 pt-3 sm:w-64 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
+        <HoursFooter store={store} pst={pst} />
       </div>
-
-      {store.inventoryFocus && (
-        <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{store.inventoryFocus}</p>
-      )}
-
-      <HoursFooter store={store} pst={pst} className="mt-3" />
-
-      <ContactRow store={store} className="mt-2" />
     </article>
   );
 }
@@ -906,7 +965,7 @@ function EmptyState() {
 
 function CardGrid({ stores, pst }: { stores: Store[]; pst: PstNow }) {
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="flex flex-col gap-3">
       {stores.map((s) => (
         <ShowroomCard key={s.id} store={s} pst={pst} />
       ))}
@@ -978,25 +1037,38 @@ function MapView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
 function GroupedView({
   groups,
   pst,
+  withCategoryIcon = false,
 }: {
   groups: [string, Store[]][];
   pst: PstNow;
+  /** List tab: render a colorful lucide icon chip in each group header. */
+  withCategoryIcon?: boolean;
 }) {
   if (groups.length === 0) return <EmptyState />;
   return (
     <div>
-      {groups.map(([label, groupStores]) => (
-        <section key={label} className="mt-10 first:mt-0">
-          <div className="mb-3 flex items-center gap-3">
-            <h2 className="text-base font-semibold">{label}</h2>
-            <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
-              {groupStores.length}
-            </span>
-            <span className="ml-auto h-px flex-1 bg-border/40" />
-          </div>
-          <CardGrid stores={groupStores} pst={pst} />
-        </section>
-      ))}
+      {groups.map(([label, groupStores]) => {
+        const style = withCategoryIcon ? categoryIconStyleFor(label) : null;
+        return (
+          <section key={label} className="mt-10 first:mt-0">
+            <div className="mb-3 flex items-center gap-3">
+              {style && (
+                <span
+                  className={`flex size-7 shrink-0 items-center justify-center rounded-lg ${style.className}`}
+                >
+                  <style.Icon className="size-4" />
+                </span>
+              )}
+              <h2 className="text-base font-semibold">{label}</h2>
+              <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+                {groupStores.length}
+              </span>
+              <span className="ml-auto h-px flex-1 bg-border/40" />
+            </div>
+            <CardGrid stores={groupStores} pst={pst} />
+          </section>
+        );
+      })}
     </div>
   );
 }
@@ -1016,23 +1088,152 @@ function ListView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
     return [...map.entries()].sort((a, b) => b[1].length - a[1].length);
   }, [stores]);
 
-  return <GroupedView groups={groups} pst={pst} />;
+  return <GroupedView groups={groups} pst={pst} withCategoryIcon />;
 }
 
-// ─── Directory View (grouped by city / location) ───────────────────────────────
+// ─── Directory View (condensed field sheet, grouped by hub city) ────────────────
+
+/** A short "open now / closes …" cue for the condensed directory card. */
+function hoursCue(store: Store, pst: PstNow): { text: string; className: string } {
+  if (store.isAppointmentOnly)
+    return { text: "By appt", className: "bg-violet-500/15 text-violet-300" };
+  if (isOpenNow(store, pst)) {
+    const isWeekday = pst.day >= 1 && pst.day <= 5;
+    const range = parseHoursRange(isWeekday ? store.weekdayHours : store.weekendHours);
+    if (range && pst.minutes >= range.close - 60)
+      return { text: `Closing ${fmt12(range.close)}`, className: "bg-amber-500/15 text-amber-300" };
+    return {
+      text: range ? `Open · ${fmt12(range.close)}` : "Open now",
+      className: "bg-emerald-500/15 text-emerald-300",
+    };
+  }
+  return { text: "Closed now", className: "bg-rose-500/15 text-rose-300" };
+}
+
+/** Dense contact card — favors phone-first density over imagery. */
+function DirectoryCard({ store, pst }: { store: Store; pst: PstNow }) {
+  const cue = hoursCue(store, pst);
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
+  return (
+    <article className="group relative flex items-center gap-3 rounded-lg bg-card px-3 py-2.5 ring-1 ring-border/40 transition-colors hover:bg-muted/40">
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={`/admin/showroom/store/${store.id}`}
+            className="line-clamp-1 text-sm font-medium after:absolute after:inset-0 after:content-['']"
+          >
+            {store.name}
+          </a>
+          {store.isFlagshipLocation && <FlagshipBadge />}
+          <span
+            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-medium ${cue.className}`}
+          >
+            <Clock className="size-2.5" />
+            {cue.text}
+          </span>
+        </div>
+
+        {/* Phone-first contact row */}
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
+          {store.phoneNumber && (
+            <a
+              href={telHref(store.phoneNumber)}
+              onClick={stop}
+              className="relative z-10 inline-flex items-center gap-1.5 font-medium text-sky-400 hover:text-sky-300"
+            >
+              <Phone className="size-3.5" />
+              {formatPhone(store.phoneNumber)}
+            </a>
+          )}
+          {store.websiteUrl && (
+            <a
+              href={store.websiteUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={stop}
+              aria-label="Website"
+              className="relative z-10 inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+            >
+              <Globe className="size-3.5" />
+            </a>
+          )}
+          {store.instagramUrl && (
+            <a
+              href={store.instagramUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={stop}
+              aria-label="Instagram"
+              className="relative z-10 inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+            >
+              <Instagram className="size-3.5" />
+            </a>
+          )}
+          {store.cityName && (
+            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/70">
+              <MapPin className="size-3" />
+              {store.cityName}
+            </span>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+/** Sort hub groups: known hubs in geographic order, then alpha, "Other" last. */
+const HUB_GROUP_ORDER: Record<string, number> = {
+  "SF Design District": 0,
+  "Silicon Valley & South Bay": 1,
+  "Peninsula / Mid-Market": 2,
+  "East Bay": 3,
+  "North Bay": 4,
+};
 
 function DirectoryView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
   const groups = useMemo(() => {
     const map = new Map<string, Store[]>();
     for (const s of stores) {
-      const city = s.cityName ?? "Other / Unassigned";
-      map.set(city, [...(map.get(city) ?? []), s]);
+      // Group by the map-hub city name so Alameda/Emeryville/Hayward → "East Bay".
+      const hub = s.hubName ?? "Other";
+      map.set(hub, [...(map.get(hub) ?? []), s]);
     }
-    // Alphabetical by city — the sheet is scanned by location.
-    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    return [...map.entries()].sort((a, b) => {
+      const aOther = a[0] === "Other";
+      const bOther = b[0] === "Other";
+      if (aOther !== bOther) return aOther ? 1 : -1; // Other last
+      const ao = HUB_GROUP_ORDER[a[0]];
+      const bo = HUB_GROUP_ORDER[b[0]];
+      if (ao !== undefined && bo !== undefined) return ao - bo;
+      if (ao !== undefined) return -1;
+      if (bo !== undefined) return 1;
+      return a[0].localeCompare(b[0]);
+    });
   }, [stores]);
 
-  return <GroupedView groups={groups} pst={pst} />;
+  if (groups.length === 0) return <EmptyState />;
+
+  return (
+    <div>
+      {groups.map(([hub, hubStores]) => (
+        <section key={hub} className="mt-8 first:mt-0">
+          <div className="mb-2 flex items-center gap-2">
+            <MapPin className="size-4 text-sky-400" />
+            <h2 className="text-sm font-semibold uppercase tracking-wide">{hub}</h2>
+            <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+              {hubStores.length}
+            </span>
+            <span className="ml-auto h-px flex-1 bg-border/40" />
+          </div>
+          <div className="flex flex-col gap-2">
+            {hubStores.map((s) => (
+              <DirectoryCard key={s.id} store={s} pst={pst} />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
 }
 
 // ─── Add Showroom Modal ───────────────────────────────────────────────────────
@@ -1317,14 +1518,41 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
-export function ShowroomsDirectoryApp() {
+const VALID_TABS: ViewMode[] = ["map", "list", "directory"];
+
+function isViewMode(v: string | undefined | null): v is ViewMode {
+  return v != null && (VALID_TABS as string[]).includes(v);
+}
+
+export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: ViewMode }) {
   const [allStores, setAllStores] = useState<Store[]>([]);
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<Category[]>([]);
   const [cities, setCities] = useState<City[]>([]);
   const [filters, setFilters] = useState<Filters>({ ...EMPTY_FILTERS });
-  const [viewMode, setViewMode] = useState<ViewMode>("map");
+  const [viewMode, setViewMode] = useState<ViewMode>(initialTab);
   const [pst, setPst] = useState<PstNow>(() => computePst());
+
+  // Tab ↔ URL sync. Clicking a tab pushes /admin/showroom/showrooms/<tab>;
+  // browser back/forward (popstate) restores the tab from the path.
+  const selectTab = useCallback((tab: ViewMode) => {
+    setViewMode(tab);
+    if (typeof window !== "undefined") {
+      const next = `/admin/showroom/showrooms/${tab}`;
+      if (window.location.pathname !== next) {
+        window.history.pushState(null, "", next);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const onPop = () => {
+      const seg = window.location.pathname.split("/").filter(Boolean).pop();
+      setViewMode(isViewMode(seg) ? seg : "map");
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   // Keep the PST clock (Open Now filter + live hours cues) fresh each minute.
   useEffect(() => {
@@ -1412,7 +1640,7 @@ export function ShowroomsDirectoryApp() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <ViewToggle value={viewMode} onChange={setViewMode} />
+          <ViewToggle value={viewMode} onChange={selectTab} />
           <AddShowroomModal cities={cities} onCreated={fetchStores} />
         </div>
       </div>
@@ -1437,11 +1665,6 @@ export function ShowroomsDirectoryApp() {
       ) : (
         <DirectoryView stores={filtered} pst={pst} />
       )}
-
-      {/* Gap Panel */}
-      <div className="mt-8">
-        <GapPanel context="showroom" />
-      </div>
     </main>
   );
 }

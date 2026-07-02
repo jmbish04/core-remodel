@@ -20,7 +20,7 @@
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, like } from "drizzle-orm";
 
 import { brands } from "@backend/db/schema/brands/brands";
 import { brandTypesDef } from "@backend/db/schema/brands/brand_types_def";
@@ -211,10 +211,14 @@ brandsRouter.delete("/types/:typeId", async (c) => {
 // ─── BRANDS CRUD ──────────────────────────────────────────────────────────────
 
 /**
- * GET / — list all brands.
+ * GET / — list all brands, with optional autocomplete search.
  *
  * Query params:
+ *   `?search=<q>`    — filter brands whose name contains `q` (case-insensitive,
+ *                       SQLite LIKE), max 20 results, ordered by name.
+ *                       When omitted, returns the full list (no limit applied).
  *   `?include=types` — attach each brand's type mappings (joined with brand_types_def).
+ *                       Compatible with `?search=`.
  *
  * `iconCfImagesUrl` and `instagramUrl` are always included in every response.
  */
@@ -224,10 +228,12 @@ brandsRouter.openapi(
     path: "/",
     operationId: "listBrands",
     tags: ["Brands"],
-    summary: "List all brands",
+    summary: "List all brands (supports ?search= autocomplete)",
     request: {
       query: z.object({
         include: z.string().optional(),
+        /** Partial name match for autocomplete — max 20 results returned. */
+        search: z.string().min(1).optional(),
       }),
     },
     responses: {
@@ -243,10 +249,23 @@ brandsRouter.openapi(
   }),
   async (c) => {
     const db = drizzle(c.env.DB);
-    const includeParam = c.req.valid("query").include ?? "";
+    const { include: includeParam = "", search } = c.req.valid("query");
     const includes = new Set(includeParam.split(",").map((s) => s.trim()).filter(Boolean));
 
-    const brandRows = await db.select().from(brands).orderBy(brands.name);
+    // Build the base query.  When `search` is present, apply a LIKE filter and
+    // cap results at 20.  SQLite LIKE is case-insensitive for ASCII characters
+    // by default, which is sufficient for brand name matching.
+    let brandRows: (typeof brands.$inferSelect)[];
+    if (search && search.length > 0) {
+      brandRows = await db
+        .select()
+        .from(brands)
+        .where(like(brands.name, `%${search}%`))
+        .orderBy(brands.name)
+        .limit(20);
+    } else {
+      brandRows = await db.select().from(brands).orderBy(brands.name);
+    }
 
     if (!includes.has("types") || brandRows.length === 0) {
       return c.json({ brands: brandRows });
