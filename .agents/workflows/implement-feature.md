@@ -247,3 +247,42 @@ URL-routed showrooms directory, and a bento viewport.
   `src/frontend/components/showroom/{visit,associate,notes,photos,bento}/`.
 - Create endpoints return WRAPPED rows (`{ brand }`, `{ product }`) — consumers
   must read `resp.brand.id` / `resp.product.id`, never a top-level `id`.
+
+## Extension: Ecommerce Journeys (Global Brands/Products + Showroom-Brand split)
+
+Migration `0058`. Adds global brand/product management viewports on top of the
+existing tables — NO `brand_product_mappings` or global `products` table: a
+brand's products are `showroomStoreProducts WHERE brand_id`, showroom↔product is
+`showroom_product_mappings`, brand "category" is the `brand_types` taxonomy.
+
+### D1 schema (0058)
+
+- `brands`: `personal_notes` (text), `online_rating` / `user_rating` (real).
+- `showroom_store_products`: `product_type` (text) for grouping the global list.
+
+### API (efficient aggregations — `count`/`group by`, no N+1)
+
+- `GET /api/showroom-stores/:id/brands/:brandId/products` → `{ brandName,
+  showroomName, associated[], unassociated[] }` (brand's products split by
+  whether mapped to the showroom) + `POST …/associate-all` (chunked batch map).
+- `GET /api/brands` gains `productCount` + `onlineRating`/`userRating`;
+  `GET /api/brands/:id` returns `{ brand, types, showrooms (carrying it),
+  products (+imageUrl), productCount }`; `PUT /api/brands/:id` accepts
+  `personalNotes`/`onlineRating`/`userRating`.
+- `GET /api/showroom-products` global list: brand/showroom/type + newest image +
+  active `storeProductRating`. Products accept `productType` on create/update.
+
+### Frontend (client:only islands, live data — the spec's SSR-frontmatter and
+mock arrays were intentionally NOT used; the whole app is auth-cookie client
+islands)
+
+- `ShowroomBrandProducts` + `/admin/showrooms/[id]/brands/[brandId].astro`:
+  associated (full color) vs unassociated (grayscale/blur, click to associate)
+  split grid. The showroom viewport's brand chips link here.
+- `GlobalProductsLanding` + `/admin/products/index.astro` (group by
+  brand/showroom/type); `/admin/products/[id].astro` reuses `ProductViewportApp`.
+- `BrandsDirectoryApp` (`/admin/brands`) enhanced: type-grouped, product-count +
+  rating badges, category/rating filters. `BrandDetailViewport` +
+  `/admin/brands/[brandId].astro` (hero "which showrooms carry this brand",
+  notes, ratings, product grid). Both linked from the `AppSidebar` Admin-Shopping
+  section (`Brands`, `Global Products`).

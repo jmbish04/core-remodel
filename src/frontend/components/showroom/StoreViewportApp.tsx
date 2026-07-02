@@ -618,6 +618,7 @@ export function StoreViewportApp({
       <div className="mt-6">
         {section === "brands-products" ? (
           <BrandsProductsSection
+            storeId={id}
             brands={store.brands}
             products={mappedProducts}
             removingBrandId={removingBrandId}
@@ -694,6 +695,7 @@ export function StoreViewportApp({
 // ─── Section: Brands & Products ─────────────────────────────────────────────────
 
 function BrandsProductsSection({
+  storeId,
   brands,
   products,
   removingBrandId,
@@ -703,6 +705,7 @@ function BrandsProductsSection({
   onAssociateBrands,
   onAssociateProducts,
 }: {
+  storeId: number;
   brands: StoreBrand[];
   products: MappedProduct[];
   removingBrandId: number | null;
@@ -731,9 +734,18 @@ function BrandsProductsSection({
             {brands.map((brand) => (
               <span
                 key={brand.id}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-muted/40 py-1.5 pl-1.5 pr-2 text-sm ring-1 ring-border/40"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-muted/40 py-1.5 pl-1.5 pr-2 text-sm ring-1 ring-border/40 transition-colors hover:bg-muted/70"
               >
-                <BrandLogo image={brand.iconCfImagesUrl} alt={brand.name} />
+                {/* Icon + name links into the brand↔showroom split viewport; the
+                    remove-× / "via product" affordances stay OUTSIDE the anchor so
+                    removing a brand never navigates. */}
+                <a
+                  href={`/admin/showrooms/${storeId}/brands/${brand.id}`}
+                  className="inline-flex items-center rounded-lg hover:opacity-90"
+                  aria-label={`View ${brand.name} products at this showroom`}
+                >
+                  <BrandLogo image={brand.iconCfImagesUrl} alt={brand.name} />
+                </a>
                 {brand.source === "direct" ? (
                   <button
                     type="button"

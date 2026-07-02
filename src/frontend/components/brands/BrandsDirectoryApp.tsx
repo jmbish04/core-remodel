@@ -1,16 +1,21 @@
 /**
  * @fileoverview BrandsDirectoryApp — brand listing + full CRUD.
  *
- * A card grid over `/api/brands?include=types`. Each card surfaces:
+ * A card grid over `/api/brands?include=types`, grouped into sections by brand
+ * TYPE (a multi-typed brand appears under each; untyped brands fall under
+ * "Uncategorized"). Each card surfaces:
  *   - the auto-scraped favicon (iconCfImagesUrl) with an initials fallback,
  *   - name, website (Globe) + Instagram links,
+ *   - metric badges: productCount (PackageSearch) + online/user rating stars,
  *   - type badges with inline add / remove chip management,
+ *   - a "View Details" link to /admin/brands/:id,
  *   - edit (dialog → PUT) and delete (AlertDialog confirm → DELETE).
  *
- * Create dialog collects name/description/website/instagram + a multi-select
- * of brand types (from `/api/brands/types?activeOnly=true`) and POSTs typeIds.
- * The favicon fills in asynchronously after create (favicon scrape), so we
- * refetch on a short delay and surface an "icon pending" state meanwhile.
+ * Filters: search + category (brand type) Select + min-rating Select, plus
+ * name/newest sort. Create dialog collects name/description/website/instagram +
+ * a multi-select of brand types (from `/api/brands/types?activeOnly=true`) and
+ * POSTs typeIds. The favicon fills in asynchronously after create (favicon
+ * scrape), so we refetch on a short delay and surface an "icon pending" state.
  *
  * Monolith dark: no 1px borders (ring-1 ring-border/40, bg-card,
  * divide-y divide-border/40), sort + filter, loading/empty/error states,
@@ -21,18 +26,19 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowDownAZ,
   ArrowUpAZ,
+  ArrowUpRight,
   Building2,
-  Check,
   ChevronDown,
-  Filter,
   Globe,
   ImageOff,
   Instagram,
   Loader2,
+  PackageSearch,
   Pencil,
   Plus,
   RotateCcw,
   Search,
+  Star,
   Trash2,
   X,
 } from "lucide-react";
@@ -44,6 +50,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { MultipleSelector } from "@/components/ui/multiple-selector";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -77,6 +90,10 @@ interface Brand {
   websiteUrl: string | null;
   instagramUrl: string | null;
   iconCfImagesUrl: string | null;
+  personalNotes?: string | null;
+  onlineRating?: number | null;
+  userRating?: number | null;
+  productCount?: number | null;
   createdAt: string | null;
   updatedAt: string | null;
   types?: BrandTypeRef[];
@@ -92,6 +109,17 @@ interface BrandTypeDef {
 
 type SortKey = "name" | "createdAt";
 type SortDir = "asc" | "desc";
+
+// Sentinel section id for brands with no assigned type.
+const UNCATEGORIZED = "uncategorized";
+// Sentinel value for "no filter" in the Select controls (Radix disallows "").
+const FILTER_ALL = "__all__";
+const MIN_RATING_OPTIONS = [
+  { value: FILTER_ALL, label: "Any rating" },
+  { value: "3", label: "3★ & up" },
+  { value: "4", label: "4★ & up" },
+  { value: "4.5", label: "4.5★ & up" },
+];
 
 // Deterministic initials-avatar palette (JIT-safe literal classes).
 const AVATAR_COLORS = [
@@ -131,6 +159,37 @@ function avatarColor(name: string): string {
 
 function brandTypes(b: Brand): BrandTypeRef[] {
   return b.types ?? [];
+}
+
+// The higher of the two ratings — used for the min-rating filter.
+function bestRating(b: Brand): number {
+  return Math.max(b.onlineRating ?? 0, b.userRating ?? 0);
+}
+
+// ─── Rating star pill ─────────────────────────────────────────────────────────
+
+function RatingPill({
+  value,
+  variant,
+  label,
+}: {
+  value: number;
+  variant: "online" | "user";
+  label: string;
+}) {
+  const tint =
+    variant === "online"
+      ? "bg-amber-500/15 text-amber-300"
+      : "bg-primary/15 text-primary";
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${tint}`}
+      title={`${label}: ${value.toFixed(1)} / 5`}
+    >
+      <Star className="size-2.5 fill-current" />
+      {value.toFixed(1)}
+    </span>
+  );
 }
 
 // ─── Favicon / initials avatar ────────────────────────────────────────────────
@@ -298,6 +357,7 @@ function BrandCard({
   onDelete: (b: Brand) => void;
   onTypesChanged: () => void;
 }) {
+  const productCount = brand.productCount ?? 0;
   return (
     <article className="flex flex-col gap-3 rounded-xl bg-card p-4 ring-1 ring-border/40 transition-colors hover:bg-muted/20">
       <div className="flex items-start gap-3">
@@ -339,6 +399,20 @@ function BrandCard({
               </span>
             )}
           </div>
+
+          {/* Metric badges: product count + ratings */}
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              <PackageSearch className="size-2.5" />
+              {productCount} {productCount === 1 ? "Product" : "Products"}
+            </span>
+            {typeof brand.onlineRating === "number" && brand.onlineRating > 0 && (
+              <RatingPill value={brand.onlineRating} variant="online" label="Online rating" />
+            )}
+            {typeof brand.userRating === "number" && brand.userRating > 0 && (
+              <RatingPill value={brand.userRating} variant="user" label="Your rating" />
+            )}
+          </div>
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <Button
@@ -362,8 +436,16 @@ function BrandCard({
         </div>
       </div>
 
-      <div className="mt-auto border-t border-border/40 pt-2.5">
+      <div className="mt-auto flex items-end justify-between gap-2 pt-2.5">
         <TypeChips brand={brand} allTypes={allTypes} onChanged={onTypesChanged} />
+        <a
+          href={`/admin/brands/${brand.id}`}
+          className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary transition hover:bg-primary/20"
+          aria-label={`View details for ${brand.name}`}
+        >
+          View Details
+          <ArrowUpRight className="size-2.5" />
+        </a>
       </div>
     </article>
   );
@@ -620,7 +702,7 @@ export function BrandsDirectoryApp() {
 
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<number | null>(null);
-  const [typeFilterOpen, setTypeFilterOpen] = useState(false);
+  const [minRating, setMinRating] = useState(0);
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
@@ -668,6 +750,7 @@ export function BrandsDirectoryApp() {
     [fetchBrands],
   );
 
+  // Search + type + min-rating filter, then sort.
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     let rows = brands.filter((b) => {
@@ -678,6 +761,7 @@ export function BrandsDirectoryApp() {
       )
         return false;
       if (typeFilter !== null && !brandTypes(b).some((t) => t.typeId === typeFilter)) return false;
+      if (minRating > 0 && bestRating(b) < minRating) return false;
       return true;
     });
     rows = [...rows].sort((a, b) => {
@@ -687,7 +771,33 @@ export function BrandsDirectoryApp() {
       return sortDir === "asc" ? cmp : -cmp;
     });
     return rows;
-  }, [brands, search, typeFilter, sortKey, sortDir]);
+  }, [brands, search, typeFilter, minRating, sortKey, sortDir]);
+
+  // Group the filtered brands under one section per brand TYPE. A brand with
+  // multiple types appears under each; a brand with no type falls under
+  // "Uncategorized". When a type filter is active, only that section shows.
+  const groups = useMemo(() => {
+    // Preserve loaded type order for stable section ordering.
+    const orderedTypes =
+      typeFilter !== null ? allTypes.filter((t) => t.id === typeFilter) : allTypes;
+
+    const sections: { key: string; label: string; brands: Brand[] }[] = orderedTypes
+      .map((t) => ({
+        key: String(t.id),
+        label: t.name,
+        brands: visible.filter((b) => brandTypes(b).some((r) => r.typeId === t.id)),
+      }))
+      .filter((s) => s.brands.length > 0);
+
+    // Uncategorized only when no explicit type filter is applied.
+    if (typeFilter === null) {
+      const uncategorized = visible.filter((b) => brandTypes(b).length === 0);
+      if (uncategorized.length > 0) {
+        sections.push({ key: UNCATEGORIZED, label: "Uncategorized", brands: uncategorized });
+      }
+    }
+    return sections;
+  }, [visible, allTypes, typeFilter]);
 
   const openCreate = () => {
     setEditing(null);
@@ -698,11 +808,20 @@ export function BrandsDirectoryApp() {
     setEditorOpen(true);
   };
 
-  const activeTypeFilterName = typeFilter
-    ? allTypes.find((t) => t.id === typeFilter)?.name
-    : null;
+  const hasFilters = Boolean(search) || typeFilter !== null || minRating > 0;
 
-  const hasFilters = Boolean(search) || typeFilter !== null;
+  const resetFilters = () => {
+    setSearch("");
+    setTypeFilter(null);
+    setMinRating(0);
+  };
+
+  const typeFilterValue = typeFilter === null ? FILTER_ALL : String(typeFilter);
+  const typeSelectItems = [
+    { value: FILTER_ALL, label: "All categories" },
+    ...allTypes.map((t) => ({ value: String(t.id), label: t.name })),
+  ];
+  const minRatingValue = minRating === 0 ? FILTER_ALL : String(minRating);
 
   return (
     <main className="container mx-auto max-w-6xl px-4 py-10">
@@ -714,7 +833,7 @@ export function BrandsDirectoryApp() {
             Brands
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Brand directory with auto-scraped icons and type badges.
+            Brand directory grouped by category, with auto-scraped icons, ratings, and product counts.
           </p>
         </div>
         <Button size="sm" className="gap-1.5" onClick={openCreate}>
@@ -724,8 +843,8 @@ export function BrandsDirectoryApp() {
       </div>
 
       {/* Controls */}
-      <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="relative flex-1">
+      <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+        <div className="relative min-w-[180px] flex-1">
           <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search brands…"
@@ -735,48 +854,45 @@ export function BrandsDirectoryApp() {
           />
         </div>
 
-        {/* Type filter */}
-        <div className="relative shrink-0">
-          <Button
-            size="sm"
-            variant={typeFilter !== null ? "default" : "outline"}
-            onClick={() => setTypeFilterOpen((v) => !v)}
-            className="h-9 gap-1 text-xs"
+        {/* Category (type) filter */}
+        <Select
+          value={typeFilterValue}
+          onValueChange={(v) => setTypeFilter(!v || v === FILTER_ALL ? null : Number(v))}
+        >
+          <SelectTrigger
+            className="h-9 w-full shrink-0 text-xs sm:w-44"
+            aria-label="Filter by category"
           >
-            <Filter className="size-3.5" />
-            {activeTypeFilterName ?? "Type"}
-            <ChevronDown className="size-3.5" />
-          </Button>
-          {typeFilterOpen && (
-            <div className="absolute right-0 top-full z-50 mt-1 max-h-64 min-w-[180px] overflow-y-auto rounded-md bg-popover p-1 shadow-lg ring-1 ring-border/40">
-              <button
-                type="button"
-                onClick={() => {
-                  setTypeFilter(null);
-                  setTypeFilterOpen(false);
-                }}
-                className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left text-xs text-foreground/80 transition hover:bg-muted/60"
-              >
-                {typeFilter === null && <Check className="size-3 text-primary" />}
-                <span className={typeFilter === null ? "" : "ml-5"}>All types</span>
-              </button>
-              {allTypes.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => {
-                    setTypeFilter(t.id);
-                    setTypeFilterOpen(false);
-                  }}
-                  className="flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left text-xs text-foreground/80 transition hover:bg-muted/60"
-                >
-                  {typeFilter === t.id && <Check className="size-3 text-primary" />}
-                  <span className={typeFilter === t.id ? "" : "ml-5"}>{t.name}</span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+            <SelectValue items={typeSelectItems} placeholder="Category" />
+          </SelectTrigger>
+          <SelectContent>
+            {typeSelectItems.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        {/* Min-rating filter */}
+        <Select
+          value={minRatingValue}
+          onValueChange={(v) => setMinRating(!v || v === FILTER_ALL ? 0 : Number(v))}
+        >
+          <SelectTrigger
+            className="h-9 w-full shrink-0 text-xs sm:w-36"
+            aria-label="Filter by minimum rating"
+          >
+            <SelectValue items={MIN_RATING_OPTIONS} placeholder="Rating" />
+          </SelectTrigger>
+          <SelectContent>
+            {MIN_RATING_OPTIONS.map((o) => (
+              <SelectItem key={o.value} value={o.value}>
+                {o.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         {/* Sort */}
         <div className="flex shrink-0 items-center gap-1">
@@ -820,10 +936,7 @@ export function BrandsDirectoryApp() {
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => {
-              setSearch("");
-              setTypeFilter(null);
-            }}
+            onClick={resetFilters}
             className="h-9 shrink-0 gap-1 text-xs text-muted-foreground hover:text-foreground"
           >
             <RotateCcw className="size-3" />
@@ -860,16 +973,33 @@ export function BrandsDirectoryApp() {
           )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {visible.map((b) => (
-            <BrandCard
-              key={b.id}
-              brand={b}
-              allTypes={allTypes}
-              onEdit={openEdit}
-              onDelete={setDeleteTarget}
-              onTypesChanged={fetchBrands}
-            />
+        <div className="space-y-8">
+          {groups.map((section) => (
+            <section key={section.key}>
+              <div className="mb-3 flex items-center gap-2">
+                <h2 className="text-sm font-semibold tracking-tight text-foreground/90">
+                  {section.label}
+                </h2>
+                <Badge
+                  variant="secondary"
+                  className="rounded-full px-1.5 py-0 text-[10px] font-medium"
+                >
+                  {section.brands.length}
+                </Badge>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {section.brands.map((b) => (
+                  <BrandCard
+                    key={`${section.key}-${b.id}`}
+                    brand={b}
+                    allTypes={allTypes}
+                    onEdit={openEdit}
+                    onDelete={setDeleteTarget}
+                    onTypesChanged={fetchBrands}
+                  />
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       )}

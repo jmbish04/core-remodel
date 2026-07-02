@@ -297,6 +297,8 @@ function SidebarLinks({
             { href: "/admin/showroom", label: "Showroom Dashboard" },
             { href: "/admin/showroom/schedule", label: "Materials Schedule" },
             { href: "/admin/showroom/showrooms", label: "Showrooms" },
+            { href: "/admin/brands", label: "Brands" },
+            { href: "/admin/products", label: "Global Products" },
             { href: "/admin/showroom/products", label: "Products" },
             { href: "/admin/showroom/research", label: "Deep Research" },
             { href: "/admin/showroom/compare", label: "Compare" },
