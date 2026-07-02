@@ -17,6 +17,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { CollapsibleGroup, useAccordionGroup } from "@/components/CollapsibleGroup";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -128,7 +129,7 @@ function ProductCard({ product, secondary }: { product: Product; secondary: stri
 
 function GroupHeader({ label, count }: { label: string; count: number }) {
   return (
-    <div className="mb-3 flex items-center gap-3">
+    <div className="flex flex-1 items-center gap-3">
       <h2 className="text-base font-semibold">{label}</h2>
       <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
         {count}
@@ -235,6 +236,10 @@ export function GlobalProductsLanding() {
     });
   }, [filtered, groupBy]);
 
+  /** Group keys in render order — drives the single-open accordion. */
+  const orderedKeys = useMemo(() => groups.map(([label]) => label), [groups]);
+  const { openKey, toggle } = useAccordionGroup(orderedKeys);
+
   return (
     <main className="container mx-auto max-w-6xl px-4 py-10">
       {/* Header */}
@@ -310,14 +315,18 @@ export function GlobalProductsLanding() {
       ) : (
         <div className="space-y-10">
           {groups.map(([label, groupProducts]) => (
-            <section key={label}>
-              <GroupHeader label={label} count={groupProducts.length} />
+            <CollapsibleGroup
+              key={label}
+              open={openKey === label}
+              onToggle={() => toggle(label)}
+              header={<GroupHeader label={label} count={groupProducts.length} />}
+            >
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
                 {groupProducts.map((p) => (
                   <ProductCard key={p.id} product={p} secondary={secondaryFor(p, groupBy)} />
                 ))}
               </div>
-            </section>
+            </CollapsibleGroup>
           ))}
         </div>
       )}

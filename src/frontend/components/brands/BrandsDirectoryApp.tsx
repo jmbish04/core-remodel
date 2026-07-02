@@ -46,6 +46,7 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { CollapsibleGroup, useAccordionGroup } from "@/components/CollapsibleGroup";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -799,6 +800,10 @@ export function BrandsDirectoryApp() {
     return sections;
   }, [visible, allTypes, typeFilter]);
 
+  // Single-open accordion: exactly one category section expanded at a time.
+  const orderedKeys = useMemo(() => groups.map((s) => s.key), [groups]);
+  const { openKey, toggle } = useAccordionGroup(orderedKeys);
+
   const openCreate = () => {
     setEditing(null);
     setEditorOpen(true);
@@ -975,18 +980,24 @@ export function BrandsDirectoryApp() {
       ) : (
         <div className="space-y-8">
           {groups.map((section) => (
-            <section key={section.key}>
-              <div className="mb-3 flex items-center gap-2">
-                <h2 className="text-sm font-semibold tracking-tight text-foreground/90">
-                  {section.label}
-                </h2>
-                <Badge
-                  variant="secondary"
-                  className="rounded-full px-1.5 py-0 text-[10px] font-medium"
-                >
-                  {section.brands.length}
-                </Badge>
-              </div>
+            <CollapsibleGroup
+              key={section.key}
+              open={openKey === section.key}
+              onToggle={() => toggle(section.key)}
+              header={
+                <div className="flex items-center gap-2">
+                  <h2 className="text-sm font-semibold tracking-tight text-foreground/90">
+                    {section.label}
+                  </h2>
+                  <Badge
+                    variant="secondary"
+                    className="rounded-full px-1.5 py-0 text-[10px] font-medium"
+                  >
+                    {section.brands.length}
+                  </Badge>
+                </div>
+              }
+            >
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {section.brands.map((b) => (
                   <BrandCard
@@ -999,7 +1010,7 @@ export function BrandsDirectoryApp() {
                   />
                 ))}
               </div>
-            </section>
+            </CollapsibleGroup>
           ))}
         </div>
       )}

@@ -52,6 +52,7 @@ import {
 import type { ComponentType } from "react";
 import { toast } from "sonner";
 
+import { CollapsibleGroup, useAccordionGroup } from "@/components/CollapsibleGroup";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -986,6 +987,10 @@ function MapView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
     return map;
   }, [stores]);
 
+  const hubEntries = useMemo(() => [...byHub.entries()], [byHub]);
+  const hubKeys = useMemo(() => hubEntries.map(([route]) => route), [hubEntries]);
+  const { openKey, toggle } = useAccordionGroup(hubKeys);
+
   return (
     <div className="space-y-4">
       <Card className="overflow-hidden">
@@ -1028,7 +1033,34 @@ function MapView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
         </GeoMap>
       </Card>
 
-      {stores.length === 0 ? <EmptyState /> : <CardGrid stores={stores} pst={pst} />}
+      {stores.length === 0 ? (
+        <EmptyState />
+      ) : (
+        <div>
+          {hubEntries.map(([route, hubStores]) => (
+            <CollapsibleGroup
+              key={route}
+              open={openKey === route}
+              onToggle={() => toggle(route)}
+              className="mt-8 first:mt-0"
+              header={
+                <>
+                  <MapPin className="size-4 text-sky-400" />
+                  <h2 className="text-sm font-semibold uppercase tracking-wide">
+                    {HUB_LABEL[route]}
+                  </h2>
+                  <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+                    {hubStores.length}
+                  </span>
+                  <span className="ml-auto h-px flex-1 bg-border/40" />
+                </>
+              }
+            >
+              <CardGrid stores={hubStores} pst={pst} />
+            </CollapsibleGroup>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1045,29 +1077,39 @@ function GroupedView({
   /** List tab: render a colorful lucide icon chip in each group header. */
   withCategoryIcon?: boolean;
 }) {
+  const orderedKeys = useMemo(() => groups.map(([label]) => label), [groups]);
+  const { openKey, toggle } = useAccordionGroup(orderedKeys);
+
   if (groups.length === 0) return <EmptyState />;
   return (
     <div>
       {groups.map(([label, groupStores]) => {
         const style = withCategoryIcon ? categoryIconStyleFor(label) : null;
         return (
-          <section key={label} className="mt-10 first:mt-0">
-            <div className="mb-3 flex items-center gap-3">
-              {style && (
-                <span
-                  className={`flex size-7 shrink-0 items-center justify-center rounded-lg ${style.className}`}
-                >
-                  <style.Icon className="size-4" />
+          <CollapsibleGroup
+            key={label}
+            open={openKey === label}
+            onToggle={() => toggle(label)}
+            className="mt-10 first:mt-0"
+            header={
+              <>
+                {style && (
+                  <span
+                    className={`flex size-7 shrink-0 items-center justify-center rounded-lg ${style.className}`}
+                  >
+                    <style.Icon className="size-4" />
+                  </span>
+                )}
+                <h2 className="text-base font-semibold">{label}</h2>
+                <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+                  {groupStores.length}
                 </span>
-              )}
-              <h2 className="text-base font-semibold">{label}</h2>
-              <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
-                {groupStores.length}
-              </span>
-              <span className="ml-auto h-px flex-1 bg-border/40" />
-            </div>
+                <span className="ml-auto h-px flex-1 bg-border/40" />
+              </>
+            }
+          >
             <CardGrid stores={groupStores} pst={pst} />
-          </section>
+          </CollapsibleGroup>
         );
       })}
     </div>
@@ -1212,26 +1254,36 @@ function DirectoryView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
     });
   }, [stores]);
 
+  const orderedKeys = useMemo(() => groups.map(([hub]) => hub), [groups]);
+  const { openKey, toggle } = useAccordionGroup(orderedKeys);
+
   if (groups.length === 0) return <EmptyState />;
 
   return (
     <div>
       {groups.map(([hub, hubStores]) => (
-        <section key={hub} className="mt-8 first:mt-0">
-          <div className="mb-2 flex items-center gap-2">
-            <MapPin className="size-4 text-sky-400" />
-            <h2 className="text-sm font-semibold uppercase tracking-wide">{hub}</h2>
-            <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
-              {hubStores.length}
-            </span>
-            <span className="ml-auto h-px flex-1 bg-border/40" />
-          </div>
+        <CollapsibleGroup
+          key={hub}
+          open={openKey === hub}
+          onToggle={() => toggle(hub)}
+          className="mt-8 first:mt-0"
+          header={
+            <>
+              <MapPin className="size-4 text-sky-400" />
+              <h2 className="text-sm font-semibold uppercase tracking-wide">{hub}</h2>
+              <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+                {hubStores.length}
+              </span>
+              <span className="ml-auto h-px flex-1 bg-border/40" />
+            </>
+          }
+        >
           <div className="flex flex-col gap-2">
             {hubStores.map((s) => (
               <DirectoryCard key={s.id} store={s} pst={pst} />
             ))}
           </div>
-        </section>
+        </CollapsibleGroup>
       ))}
     </div>
   );
