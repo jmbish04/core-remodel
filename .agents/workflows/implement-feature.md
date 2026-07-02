@@ -202,3 +202,48 @@ website-URL change.
    exact (`@platejs/markdown`, `@platejs/basic-nodes`, `@platejs/list`).
 5. `BrandsDirectoryApp` + `BrandTypesAdminApp` (`src/frontend/components/brands/`)
    at `/admin/brands` and `/admin/brands/types`.
+
+## Extension: Showroom Visit Capture, Associations, Notes & Photos
+
+Migration `0057`. Adds visit rating, business-card POC capture with AI
+extraction, brand/product associations, titled rich notes, visit photos, a
+URL-routed showrooms directory, and a bento viewport.
+
+### D1 schema (0057)
+
+- `showroom_stores`: `rating`, `rating_context_html`, `rating_context_markdown`
+  (latest-visit; note the `store_rating` history table also exists).
+- `store_notes`: `title`, `content_html`, `content_markdown` (PlateJS dual);
+  `note` is now nullable; `is_active` soft-delete.
+- `showroom_images`: `note_html`, `note_markdown` (polaroid-back note).
+- NEW `showroom_pocs` (business-card front/back URLs + `extracted_json`),
+  `showroom_product_mappings` (unique `(showroom_id, product_id)`).
+
+### Services & API
+
+- `BusinessCardService` (`src/backend/services/business-card/`): CF Images
+  upload + Workers-AI VLM structured extraction of contact fields from card
+  images (routed through AI Gateway). Reuse it — do not add a second card parser.
+- `showroom-stores.ts` sub-routes: `PUT /:id/visit-rating`; POC
+  (`GET /:id/pocs`, `POST /:id/pocs/extract-card` → upload+extract WITHOUT
+  persisting, `POST /:id/pocs`); notes (`GET/POST /:id/notes`,
+  `PUT/DELETE /notes/:noteId`); photos (`GET/POST /:id/photos`,
+  `PUT /photos/:imageId/note`); product mappings
+  (`GET/POST /:id/mapped-products`, `DELETE .../:productId`). `GET /:id` `brands`
+  is the DISTINCT UNION of `showroom_brand_mappings` + mapped-products' `brandId`
+  (each carries `source: "direct" | "product"`).
+- `showroom-products.ts` (`/api/showroom-products/search?q=`) + brand
+  autocomplete (`GET /api/brands?search=`) power the associate modals.
+
+### Frontend
+
+- Directory (`ShowroomsDirectoryApp`): URL-routed tabs
+  (`/showrooms` → map default, `/showrooms/[tab]`), single-column cards, colorful
+  list category-group icons, directory grouped by `hubName` with full `tel:`
+  phone + conditional globe/IG. Coverage gaps moved to `/admin/showroom/gaps`.
+- Viewport (`StoreViewportApp` + `store/[id]/[section].astro`): enriched hero
+  (favicon, card info, visit rating) + action bar + URL-routed bento
+  (`brands-products` / `notes` / `photos`). Self-contained components under
+  `src/frontend/components/showroom/{visit,associate,notes,photos,bento}/`.
+- Create endpoints return WRAPPED rows (`{ brand }`, `{ product }`) — consumers
+  must read `resp.brand.id` / `resp.product.id`, never a top-level `id`.
