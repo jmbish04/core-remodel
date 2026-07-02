@@ -125,3 +125,27 @@ surfaces their usage.
   mask when you need more fields — never fetch the unmasked default.
 - Showroom intake reuses `showroom_stores` (via `POST /api/showroom-stores`);
   do NOT create a parallel `showrooms` entity.
+
+## 9. Brands, favicons & PlateJS overview notes
+
+- **Favicon extraction is centralized** in `FaviconService`
+  (`src/backend/services/favicon/`). Never scrape favicons or call CF Images
+  inline in a route — call `hydrateShowroomIcon` / `hydrateBrandIcon`, always via
+  `c.executionCtx.waitUntil(...)`, on create and on website-URL change. The
+  service must never throw (it runs detached). It reuses the shared
+  `ImageProcessorService` + `resolveCloudflareImagesCredentials` — do not
+  hand-roll a second CF Images uploader. `icon_cf_images_url` columns are
+  SERVER-MANAGED — never accept them from client request bodies.
+- **Cross-domain schema FKs** (e.g. `store_products.brand_id → brands.id`,
+  `showroom_brand_mappings → showroom_stores`) import the referenced table's
+  LEAF file directly (`../brands/brands`), NOT the domain `index.ts` barrel —
+  importing the barrel creates a circular module graph that yields `undefined`
+  table refs at init.
+- **Rich-text notes** (showroom overview note) use PlateJS via the shared
+  `OverviewNoteEditor` (`src/frontend/components/showroom/`). Persist BOTH
+  representations: `*_note_html` (rendered on the viewport via
+  `dangerouslySetInnerHTML`) and `*_note_markdown` (source of truth, seeds the
+  editor). Serialize with `editor.api.markdown.serialize()`. Pin every
+  `@platejs/*` subpackage to an EXACT version matching `platejs` (no caret) —
+  they ship breaking changes across patch releases. Verify with `pnpm run build`
+  (PlateJS serialization is a bundler-sensitive path).

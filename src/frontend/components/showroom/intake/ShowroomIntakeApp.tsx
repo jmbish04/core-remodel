@@ -50,6 +50,8 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
+import { OverviewNoteEditor } from "../OverviewNoteEditor";
+
 import {
   formatOpeningHours,
   mapPlaceToIntake,
@@ -87,6 +89,7 @@ const EMPTY_VALUES: ShowroomIntakeInput = {
   phoneNumber: "",
   emailAddress: "",
   websiteUrl: "",
+  instagramUrl: "",
   googleMapsLink: "",
   weekdayHours: "",
   weekendHours: "",
@@ -97,6 +100,8 @@ const EMPTY_VALUES: ShowroomIntakeInput = {
   inventoryFocus: "",
   targetDemographic: "",
   locationNotes: "",
+  overviewNoteHtml: "",
+  overviewNoteMarkdown: "",
   categoryIds: [],
 };
 
@@ -452,6 +457,7 @@ export function ShowroomIntakeApp() {
       "phoneNumber",
       "emailAddress",
       "websiteUrl",
+      "instagramUrl",
       "googleMapsLink",
       "weekdayHours",
       "weekendHours",
@@ -459,6 +465,8 @@ export function ShowroomIntakeApp() {
       "inventoryFocus",
       "targetDemographic",
       "locationNotes",
+      "overviewNoteHtml",
+      "overviewNoteMarkdown",
     ];
     for (const key of optionalStringKeys) {
       const v = values[key];
@@ -629,13 +637,26 @@ export function ShowroomIntakeApp() {
               </FormRow>
             </div>
 
-            <FormRow label="Website" htmlFor="websiteUrl">
-              <Input
-                id="websiteUrl"
-                {...register("websiteUrl")}
-                placeholder="https://…"
-              />
-            </FormRow>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <FormRow label="Website" htmlFor="websiteUrl">
+                <Input
+                  id="websiteUrl"
+                  {...register("websiteUrl")}
+                  placeholder="https://…"
+                />
+              </FormRow>
+              <FormRow
+                label="Instagram"
+                htmlFor="instagramUrl"
+                hint="Not filled by Google — paste the profile URL"
+              >
+                <Input
+                  id="instagramUrl"
+                  {...register("instagramUrl")}
+                  placeholder="https://instagram.com/…"
+                />
+              </FormRow>
+            </div>
           </Card>
 
           {/* Categories */}
@@ -774,6 +795,18 @@ export function ShowroomIntakeApp() {
                 placeholder="Parking, entrance, who to ask for…"
               />
             </FormRow>
+            <div className="space-y-1.5">
+              <Label>Overview note</Label>
+              <OverviewNoteEditor
+                onChange={({ html, markdown }) => {
+                  setValue("overviewNoteHtml", html, { shouldDirty: true });
+                  setValue("overviewNoteMarkdown", markdown, { shouldDirty: true });
+                }}
+              />
+              <p className="text-[11px] text-muted-foreground">
+                Rich narrative — headings, bold, lists. Saved with the showroom.
+              </p>
+            </div>
           </Card>
 
           <Separator className="bg-border/40" />

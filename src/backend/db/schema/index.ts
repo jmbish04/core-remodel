@@ -90,4 +90,6 @@ export * from "./materials/index";
 
 export * from "./showroom/index";
 
+export * from "./brands/index";
+
 export * from "./scrum/index";

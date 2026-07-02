@@ -46,6 +46,9 @@ export const showroomIntakeSchema = z.object({
   phoneNumber: z.string().optional(),
   emailAddress: z.string().optional(),
   websiteUrl: z.string().optional(),
+  // Instagram profile URL. Google Places Details has no IG field, so this stays
+  // blank on auto-fill and is entered by hand.
+  instagramUrl: z.string().optional(),
   googleMapsLink: z.string().optional(),
   weekdayHours: z.string().optional(),
   weekendHours: z.string().optional(),
@@ -56,6 +59,10 @@ export const showroomIntakeSchema = z.object({
   inventoryFocus: z.string().optional(),
   targetDemographic: z.string().optional(),
   locationNotes: z.string().optional(),
+  // Rich-text "overview note" (PlateJS). Stored as BOTH HTML (for render) and
+  // Markdown (source of truth / round-trip). Both optional; only sent when set.
+  overviewNoteHtml: z.string().optional(),
+  overviewNoteMarkdown: z.string().optional(),
   categoryIds: z.array(z.number()).default([]),
 });
 

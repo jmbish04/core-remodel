@@ -98,6 +98,33 @@ export const showroomStores = sqliteTable("showroom_stores", {
   // ── Notes (quick freeform from user) ──────────────────────────────────
   locationNotes: text("location_notes"),
 
+  // ── Social & brand media ──────────────────────────────────────────────
+  /**
+   * Public Instagram profile URL for this showroom location.
+   * Example: "https://www.instagram.com/studiobelmontbath/"
+   */
+  instagramUrl: text("instagram_url"),
+
+  /**
+   * Cloudflare Images delivery URL of the showroom's scraped favicon / brand icon.
+   * Auto-populated by the favicon worker whenever `websiteUrl` is set or changed.
+   * Example: "https://imagedelivery.net/<accountHash>/<imageId>/public"
+   */
+  iconCfImagesUrl: text("icon_cf_images_url"),
+
+  // ── Rich overview note (homeowner-authored) ───────────────────────────
+  /**
+   * Homeowner's rich overview note serialized to HTML by PlateJS.
+   * Served as-is on the showroom viewport — no further transformation needed.
+   */
+  overviewNoteHtml: text("overview_note_html"),
+
+  /**
+   * The SAME overview note serialized to Markdown by PlateJS.
+   * Portable / source form — use this for export, search indexing, or AI context.
+   */
+  overviewNoteMarkdown: text("overview_note_markdown"),
+
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),

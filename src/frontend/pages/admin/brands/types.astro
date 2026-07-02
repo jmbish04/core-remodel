@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { BrandTypesAdminApp } from "@/components/brands/BrandTypesAdminApp";
+---
+
+<BaseLayout
+  title="Brand Types — The Monolith"
+  description="Manage brand type definitions (plumbing, lighting, tile, …) used to tag brands."
+>
+  <BrandTypesAdminApp client:only="react" />
+</BaseLayout>

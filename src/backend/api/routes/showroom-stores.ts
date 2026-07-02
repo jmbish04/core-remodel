@@ -35,6 +35,11 @@ import {
   sourcingSweepSessions,
 } from "@backend/db/schema/showroom/index";
 import {
+  brands,
+  showroomBrandMappings,
+} from "@backend/db/schema/brands/index";
+import { faviconService } from "@backend/services/favicon";
+import {
   generateProductDraftPrompt,
 } from "@backend/ai/agents/ShowroomResearchAgent/methods";
 import type { ShowroomResearchAgent } from "@backend/ai/agents/ShowroomResearchAgent";
@@ -68,6 +73,15 @@ const createStoreSchema = z.object({
   distanceFromSfTime: z.string().optional().nullable(),
   distanceFromSfMiles: z.string().optional().nullable(),
   locationNotes: z.string().optional().nullable(),
+  /** Public Instagram profile URL for this showroom location. */
+  instagramUrl: z.string().optional().nullable(),
+  /**
+   * Homeowner's rich overview note serialized to HTML by PlateJS.
+   * Not accepted for `iconCfImagesUrl` — that column is server-managed via FaviconService.
+   */
+  overviewNoteHtml: z.string().optional().nullable(),
+  /** The same overview note serialized to Markdown by PlateJS (portable form). */
+  overviewNoteMarkdown: z.string().optional().nullable(),
   /**
    * Optional array of category IDs to attach to the store on creation.
    * Rows are inserted into `showroom_store_category_mapping` after the store
@@ -90,6 +104,8 @@ const createProductSchema = z.object({
   leadTime: z.string().optional().nullable(),
   possibleDiscounts: z.string().optional().nullable(),
   tradeDiscount: z.string().optional().nullable(),
+  /** FK → brands.id — nullable, server accepts null to unlink. */
+  brandId: z.number().int().optional().nullable(),
 });
 
 const productIdParamsSchema = z.object({
@@ -922,7 +938,7 @@ showroomStoresRouter.get("/:id", async (c) => {
   if (!store) return c.json({ error: "Store not found" }, 404);
 
   // Parallel data loads
-  const [products, categories, notes, ratings, externalRatings, research, tags] =
+  const [products, categories, notes, ratings, externalRatings, research, tags, mappedBrands] =
     await Promise.all([
       db
         .select()
@@ -977,6 +993,17 @@ showroomStoresRouter.get("/:id", async (c) => {
           eq(storeTagMapping.showroomTagId, showroomTagDef.id)
         )
         .where(eq(storeTagMapping.storeId, storeId)),
+      // Brands mapped to this showroom via showroom_brand_mappings.
+      db
+        .select({
+          brand: brands,
+          mappingId: showroomBrandMappings.id,
+          mappingCreatedAt: showroomBrandMappings.createdAt,
+        })
+        .from(showroomBrandMappings)
+        .innerJoin(brands, eq(showroomBrandMappings.brandId, brands.id))
+        .where(eq(showroomBrandMappings.showroomId, storeId))
+        .orderBy(brands.name),
     ]);
 
   return c.json({
@@ -998,6 +1025,11 @@ showroomStoresRouter.get("/:id", async (c) => {
       ...r.mapping,
       tagName: r.tag.name,
       tagColor: r.tag.color,
+    })),
+    brands: mappedBrands.map((r) => ({
+      ...r.brand,
+      showroomMappingId: r.mappingId,
+      showroomMappingCreatedAt: r.mappingCreatedAt,
     })),
   });
 });
@@ -1045,6 +1077,7 @@ showroomStoresRouter.post("/", async (c) => {
     }
   }
 
+  // Fire background work: AI research + favicon hydration (if websiteUrl present).
   c.executionCtx.waitUntil(
     (async () => {
       try {
@@ -1056,17 +1089,36 @@ showroomStoresRouter.post("/", async (c) => {
     })(),
   );
 
+  if (data.websiteUrl && data.websiteUrl.length > 0) {
+    c.executionCtx.waitUntil(
+      faviconService.hydrateShowroomIcon(c.env, inserted.id, data.websiteUrl),
+    );
+  }
+
   return c.json({ store: inserted }, 201);
 });
 
 /**
  * PUT /:id — Update a store.
+ *
+ * If the incoming `websiteUrl` is non-empty AND differs from the stored value
+ * (or the store has no icon yet), we fire a favicon re-hydration in the
+ * background via `waitUntil`.
  */
 showroomStoresRouter.put("/:id", async (c) => {
   const db = drizzle(c.env.DB);
   const storeId = Number(c.req.param("id"));
   const body = await c.req.json();
   const data = createStoreSchema.partial().parse(body);
+
+  // Fetch existing row so we can compare websiteUrl + icon before updating.
+  const [existing] = await db
+    .select({ websiteUrl: showroomStores.websiteUrl, iconCfImagesUrl: showroomStores.iconCfImagesUrl })
+    .from(showroomStores)
+    .where(eq(showroomStores.id, storeId))
+    .limit(1);
+
+  if (!existing) return c.json({ error: "Store not found" }, 404);
 
   const [updated] = await db
     .update(showroomStores)
@@ -1075,6 +1127,19 @@ showroomStoresRouter.put("/:id", async (c) => {
     .returning();
 
   if (!updated) return c.json({ error: "Store not found" }, 404);
+
+  // Trigger favicon refresh when websiteUrl changed or icon is missing.
+  const incomingUrl = data.websiteUrl ?? null;
+  const shouldRefreshIcon =
+    incomingUrl &&
+    incomingUrl.length > 0 &&
+    (incomingUrl !== existing.websiteUrl || !existing.iconCfImagesUrl);
+
+  if (shouldRefreshIcon) {
+    c.executionCtx.waitUntil(
+      faviconService.hydrateShowroomIcon(c.env, storeId, incomingUrl),
+    );
+  }
 
   return c.json({ store: updated });
 });
@@ -1428,6 +1493,119 @@ showroomStoresRouter.post("/scan", async (c) => {
     console.error("Scan processing error:", err);
     return c.json({ error: "Scan processing failed", details: err.message }, 500);
   }
+});
+
+// ─── SHOWROOM BRAND MAPPINGS ──────────────────────────────────────────────────
+
+const storeBrandIdParamsSchema = z.object({
+  id: z.string().regex(/^\d+$/).transform(Number),
+  brandId: z.string().regex(/^\d+$/).transform(Number),
+});
+
+/**
+ * GET /:id/brands — List brands mapped to this showroom.
+ *
+ * Returns the full brand rows (including `iconCfImagesUrl`, `instagramUrl`)
+ * joined from `showroom_brand_mappings` → `brands`.
+ */
+showroomStoresRouter.get("/:id/brands", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  const rows = await db
+    .select({
+      brand: brands,
+      mappingId: showroomBrandMappings.id,
+      mappingCreatedAt: showroomBrandMappings.createdAt,
+    })
+    .from(showroomBrandMappings)
+    .innerJoin(brands, eq(showroomBrandMappings.brandId, brands.id))
+    .where(eq(showroomBrandMappings.showroomId, storeId))
+    .orderBy(brands.name);
+
+  return c.json({
+    brands: rows.map((r) => ({
+      ...r.brand,
+      showroomMappingId: r.mappingId,
+      showroomMappingCreatedAt: r.mappingCreatedAt,
+    })),
+  });
+});
+
+const addShowroomBrandSchema = z.object({
+  brandId: z.number().int().positive(),
+});
+
+/**
+ * POST /:id/brands — Map a brand to this showroom.
+ *
+ * Body: { brandId: number }
+ * Duplicate mappings are silently ignored (unique constraint catch).
+ */
+showroomStoresRouter.post("/:id/brands", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  const body = await c.req.json();
+  const parsed = addShowroomBrandSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+  const { brandId } = parsed.data;
+
+  try {
+    const [inserted] = await db
+      .insert(showroomBrandMappings)
+      .values({ showroomId: storeId, brandId })
+      .returning();
+    return c.json({ mapping: inserted }, 201);
+  } catch (err: any) {
+    // SQLite unique constraint violation — mapping already exists.
+    if (err?.message?.includes("UNIQUE") || err?.message?.includes("unique")) {
+      const [existing] = await db
+        .select()
+        .from(showroomBrandMappings)
+        .where(
+          and(
+            eq(showroomBrandMappings.showroomId, storeId),
+            eq(showroomBrandMappings.brandId, brandId),
+          ),
+        )
+        .limit(1);
+      return c.json({ mapping: existing, alreadyExists: true }, 200);
+    }
+    console.error("[showroom-stores] POST /:id/brands error:", err);
+    return c.json({ success: false, error: "Failed to add brand mapping" }, 500);
+  }
+});
+
+/**
+ * DELETE /:id/brands/:brandId — Remove a brand mapping from a showroom.
+ */
+showroomStoresRouter.delete("/:id/brands/:brandId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const brandId = Number(c.req.param("brandId"));
+  if (!Number.isInteger(storeId) || !Number.isInteger(brandId)) {
+    return c.json({ success: false, error: "Invalid id" }, 400);
+  }
+
+  await db
+    .delete(showroomBrandMappings)
+    .where(
+      and(
+        eq(showroomBrandMappings.showroomId, storeId),
+        eq(showroomBrandMappings.brandId, brandId),
+      ),
+    );
+
+  return c.json({ success: true });
 });
 
 // ─── GAP ANALYSIS ─────────────────────────────────────────────────────────────

@@ -3,6 +3,8 @@ import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
 import { showroomStores } from "./stores";
 import { materialScheduleItems } from "../materials/schedule_item";
+// Direct leaf import — avoids circular reference through the brands barrel
+import { brands } from "../brands/brands";
 
 /**
  * Store Products — individual items sourced or tracked at a showroom location.
@@ -21,6 +23,15 @@ export const showroomStoreProducts = sqliteTable("showroom_store_products", {
     () => materialScheduleItems.id,
     { onDelete: "set null" }
   ),
+
+  /**
+   * The brand this product belongs to (nullable — may be populated after
+   * initial entry, or left null for unbranded / generic items).
+   * References the top-level brands table; cascades to null on brand deletion.
+   */
+  brandId: integer("brand_id").references(() => brands.id, {
+    onDelete: "set null",
+  }),
 
   timestamp: integer("timestamp", { mode: "timestamp" }).default(
     sql`(unixepoch())`

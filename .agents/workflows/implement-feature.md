@@ -144,3 +144,61 @@ tables were created. See `.agents/rules/questionnaire-conventions.md` §8.
    two fixed quota rows (85% warn, 100% breaker) + a Monolith recharts summary,
    with a "Current Plan: Free Tier" badge. Mounted at
    `/admin/integrations/usage`.
+
+## Extension: Brands, Showroom Icons & Overview Notes
+
+Adds a brands taxonomy, auto-scraped favicons, showroom Instagram links, and a
+PlateJS overview note. Everything extends existing infra in place. See
+`.agents/rules/questionnaire-conventions.md` §9.
+
+### D1 schema (migration `0056_lean_captain_america.sql`)
+
+1. `showroom_stores` gained `instagram_url`, `icon_cf_images_url` (server-managed
+   favicon), `overview_note_html`, `overview_note_markdown` (PlateJS dual
+   serialization — HTML for render, Markdown as source of truth).
+2. `showroom_store_products` gained a nullable `brand_id` FK → `brands.id`.
+3. New `brands` domain (`src/backend/db/schema/brands/`): `brands`,
+   `brand_types_def`, `brand_type_mappings` (unique `(brand_id, type_id)`;
+   carries `brand_icon_cf_images_url` per the product spec, mirrored from
+   `brands.icon_cf_images_url`), `showroom_brand_mappings` (unique
+   `(showroom_id, brand_id)`). Cross-domain FK columns import the referenced
+   table's LEAF file directly (`../showroom/stores`, `../brands/brands`), never
+   the domain barrel, to avoid a circular module graph.
+
+### Favicon service
+
+`FaviconService` (`src/backend/services/favicon/`) is the single choke point for
+brand/showroom icon extraction: `resolveFaviconUrl` (fetch HTML → parse
+`<link rel~=icon>`/`apple-touch-icon`, fallbacks `/favicon.ico` then Google
+`s2/favicons`) → `fetchIconBlob` (image-type + size guard) → upload via the
+shared `ImageProcessorService.uploadToCloudflareImages` (creds from
+`resolveCloudflareImagesCredentials`). `hydrateShowroomIcon` / `hydrateBrandIcon`
+persist the delivery URL. It NEVER throws — it runs inside
+`c.executionCtx.waitUntil(...)`, fired on showroom/brand create and on
+website-URL change.
+
+### API
+
+1. `showroom-stores.ts`: create/update accept `instagramUrl`,
+   `overviewNoteHtml`, `overviewNoteMarkdown` (icon is server-managed);
+   `GET /:id` returns a `brands` array; `GET/POST /:id/brands` +
+   `DELETE /:id/brands/:brandId` manage showroom↔brand mappings; products accept
+   `brandId`.
+2. `brandsRouter` (`src/backend/api/routes/brands.ts`, mounted `/api/brands`,
+   auth-gated): brand-types CRUD (`/types`), brands CRUD, and brand↔type
+   mapping (`/:id/types`). Website-URL changes trigger `waitUntil` favicon
+   hydration.
+
+### Frontend
+
+1. `ShowroomCard` (in `ShowroomsDirectoryApp`) shows the favicon as its logo and
+   a conditional Instagram link.
+2. `StoreViewportApp` renders favicon + Instagram + the HTML overview note (with
+   inline PlateJS edit → `PUT`) + showroom↔brand chips.
+3. `ShowroomIntakeApp` adds an Instagram field + the overview-note editor.
+4. `OverviewNoteEditor` (`src/frontend/components/showroom/`) is the shared
+   PlateJS editor: seeds from Markdown, emits `{ html, markdown }` on change
+   (`@platejs/markdown` serialize + a scoped markdown→HTML converter). Pins are
+   exact (`@platejs/markdown`, `@platejs/basic-nodes`, `@platejs/list`).
+5. `BrandsDirectoryApp` + `BrandTypesAdminApp` (`src/frontend/components/brands/`)
+   at `/admin/brands` and `/admin/brands/types`.

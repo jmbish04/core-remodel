@@ -28,6 +28,7 @@ import {
   Flame,
   Globe,
   Grid3x3,
+  Instagram,
   Layers,
   LayoutList,
   Lightbulb,
@@ -99,6 +100,8 @@ interface Store {
   emailAddress: string | null;
   locationAddress: string | null;
   scale: string | null;
+  instagramUrl: string | null;
+  iconCfImagesUrl: string | null;
 }
 
 interface Category {
@@ -307,9 +310,18 @@ function isOpenNow(store: Store, pst: PstNow): boolean {
 /** Rounded logo placeholder + floating price badge. */
 function LogoBadge({ store }: { store: Store }) {
   const Icon = categoryIconFor(store);
+  const [iconBroken, setIconBroken] = useState(false);
+  const showFavicon = Boolean(store.iconCfImagesUrl) && !iconBroken;
   return (
     <div className="relative shrink-0">
-      {Icon ? (
+      {showFavicon ? (
+        <img
+          src={store.iconCfImagesUrl as string}
+          alt=""
+          onError={() => setIconBroken(true)}
+          className="size-11 rounded-full bg-card object-contain ring-1 ring-border/40"
+        />
+      ) : Icon ? (
         <div className="flex size-11 items-center justify-center rounded-full bg-muted text-muted-foreground ring-1 ring-border/60">
           <Icon className="size-5" />
         </div>
@@ -494,7 +506,13 @@ function HoursFooter({ store, pst, className }: { store: Store; pst: PstNow; cla
 
 /** Click-to-call / click-to-email / website links (stop card navigation). */
 function ContactRow({ store, className }: { store: Store; className?: string }) {
-  if (!store.phoneNumber && !store.emailAddress && !store.websiteUrl) return null;
+  if (
+    !store.phoneNumber &&
+    !store.emailAddress &&
+    !store.websiteUrl &&
+    !store.instagramUrl
+  )
+    return null;
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   return (
     <div
@@ -530,6 +548,18 @@ function ContactRow({ store, className }: { store: Store; className?: string }) 
         >
           <Globe className="size-3" />
           Website
+        </a>
+      )}
+      {store.instagramUrl && (
+        <a
+          href={store.instagramUrl}
+          target="_blank"
+          rel="noreferrer"
+          onClick={stop}
+          className="relative z-10 inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+        >
+          <Instagram className="size-3" />
+          Instagram
         </a>
       )}
     </div>

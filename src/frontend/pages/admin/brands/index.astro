@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { BrandsDirectoryApp } from "@/components/brands/BrandsDirectoryApp";
+---
+
+<BaseLayout
+  title="Brands — The Monolith"
+  description="Brand directory with auto-scraped favicons, type badges, and full CRUD."
+>
+  <BrandsDirectoryApp client:only="react" />
+</BaseLayout>
