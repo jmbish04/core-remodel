@@ -42,6 +42,7 @@ import { AssociateProductsModal } from "./associate/AssociateProductsModal";
 import { ShowroomNoteModal, type ShowroomNote } from "./notes/ShowroomNoteModal";
 import { ShowroomPhotoPolaroid, type ShowroomPhoto } from "./photos/ShowroomPhotoPolaroid";
 import { ShowroomBento, type ShowroomBentoSection } from "./bento/ShowroomBento";
+import { BrandLogo } from "./brands/BrandLogo";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -730,14 +731,9 @@ function BrandsProductsSection({
             {brands.map((brand) => (
               <span
                 key={brand.id}
-                className="inline-flex items-center gap-1.5 rounded-full bg-muted/40 py-1 pl-1.5 pr-2 text-sm ring-1 ring-border/40"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-muted/40 py-1.5 pl-1.5 pr-2 text-sm ring-1 ring-border/40"
               >
-                <FaviconImg
-                  src={brand.iconCfImagesUrl}
-                  alt={`${brand.name} icon`}
-                  className="h-5 w-5 rounded-full"
-                />
-                <span>{brand.name}</span>
+                <BrandLogo image={brand.iconCfImagesUrl} alt={brand.name} />
                 {brand.source === "direct" ? (
                   <button
                     type="button"
