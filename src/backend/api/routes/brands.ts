@@ -8,7 +8,11 @@
  *   - brands                  — top-level brand registry
  *   - brand_types_def         — reference list of brand classifications
  *   - brand_type_mappings     — many-to-many brand ↔ type
- *   - showroom_brand_mappings — resolved via showroom-stores.ts (read here for brand detail)
+ *   - showroom_brand_mappings — direct brand ↔ showroom relationship
+ *   - showroom_product_mappings — showroom carries product (product has brandId)
+ *   - showroom_store_products — product rows with brandId
+ *   - product_images          — per-product imagery (newest used as imageUrl)
+ *   - showroom_stores         — showroom metadata joined for brand detail
  *
  * Conventions:
  *   - Hand-written Zod v4 schemas (drizzle-zod is banned — breaks pnpm run build).
@@ -20,12 +24,16 @@
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, and, inArray, like } from "drizzle-orm";
+import { eq, and, inArray, like, desc, sql } from "drizzle-orm";
 
 import { brands } from "@backend/db/schema/brands/brands";
 import { brandTypesDef } from "@backend/db/schema/brands/brand_types_def";
 import { brandTypeMappings } from "@backend/db/schema/brands/brand_type_mappings";
 import { showroomBrandMappings } from "@backend/db/schema/brands/showroom_brand_mappings";
+import { showroomStoreProducts } from "@backend/db/schema/showroom/store_products";
+import { showroomProductMappings } from "@backend/db/schema/showroom/product_mappings";
+import { showroomStores } from "@backend/db/schema/showroom/stores";
+import { productImages } from "@backend/db/schema/showroom/product_images";
 import { faviconService } from "@backend/services/favicon";
 
 export const brandsRouter = new OpenAPIHono<{ Bindings: Env }>();
@@ -79,6 +87,31 @@ const createBrandSchema = z.object({
   typeIds: z.array(z.number().int().positive()).optional().default([]),
 });
 
+/**
+ * Schema for updating a brand — superset of createBrandSchema adding the
+ * new editable rating/notes fields introduced in migration 0058.
+ */
+const updateBrandSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional().nullable(),
+  websiteUrl: z.string().optional().nullable(),
+  instagramUrl: z.string().optional().nullable(),
+  /** Freeform homeowner notes on this brand. */
+  personalNotes: z.string().optional().nullable(),
+  /**
+   * Aggregate online rating (0–5).
+   * Must be between 0 and 5 inclusive, or null to clear.
+   */
+  onlineRating: z.number().min(0).max(5).optional().nullable(),
+  /**
+   * Homeowner's personal rating (0–5).
+   * Must be between 0 and 5 inclusive, or null to clear.
+   */
+  userRating: z.number().min(0).max(5).optional().nullable(),
+  /** Virtual — type mappings to attach; ignored on partial updates. */
+  typeIds: z.array(z.number().int().positive()).optional(),
+});
+
 /** Body for the brand-type add sub-route. */
 const addBrandTypeSchema = z.object({
   typeId: z.number().int().positive(),
@@ -87,8 +120,7 @@ const addBrandTypeSchema = z.object({
 // ─── OpenAPI response schemas ─────────────────────────────────────────────────
 
 /**
- * Lean brand shape returned in list endpoints.
- * Matches `brands.$inferSelect` column set — hand-written to avoid drizzle-zod.
+ * Full brand shape — all columns including the new 0058 fields.
  * Timestamps are `Date | null` because Drizzle maps integer timestamp columns
  * with mode:"timestamp" to Date objects at the ORM layer.
  */
@@ -99,8 +131,59 @@ const brandSchema = z.object({
   websiteUrl: z.string().nullable(),
   instagramUrl: z.string().nullable(),
   iconCfImagesUrl: z.string().nullable(),
+  personalNotes: z.string().nullable(),
+  onlineRating: z.number().nullable(),
+  userRating: z.number().nullable(),
   createdAt: z.union([z.date(), z.number()]).nullable(),
   updatedAt: z.union([z.date(), z.number()]).nullable(),
+});
+
+/**
+ * Brand list item — full brand columns plus `productCount`.
+ * Optionally includes `types` when `?include=types`.
+ */
+const brandListItemSchema = brandSchema.extend({
+  productCount: z.number(),
+  types: z
+    .array(
+      z.object({
+        typeId: z.number(),
+        name: z.string(),
+      }),
+    )
+    .optional(),
+});
+
+/** Lean showroom shape returned in brand detail. */
+const showroomRefSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  locationAddress: z.string().nullable(),
+});
+
+/** Product item with its newest image URL (or null). */
+const brandProductSchema = z.object({
+  id: z.number(),
+  itemName: z.string(),
+  productType: z.string().nullable(),
+  imageUrl: z.string().nullable(),
+});
+
+/** Full brand detail response. */
+const brandDetailSchema = z.object({
+  brand: brandSchema,
+  types: z.array(
+    z.object({
+      mappingId: z.number(),
+      typeId: z.number(),
+      typeName: z.string(),
+      typeDescription: z.string().nullable(),
+      brandIconCfImagesUrl: z.string().nullable(),
+    }),
+  ),
+  showrooms: z.array(showroomRefSchema),
+  products: z.array(brandProductSchema),
+  productCount: z.number(),
 });
 
 const brandTypeDefSchema = z.object({
@@ -211,7 +294,7 @@ brandsRouter.delete("/types/:typeId", async (c) => {
 // ─── BRANDS CRUD ──────────────────────────────────────────────────────────────
 
 /**
- * GET / — list all brands, with optional autocomplete search.
+ * GET / — list all brands with product counts and ratings.
  *
  * Query params:
  *   `?search=<q>`    — filter brands whose name contains `q` (case-insensitive,
@@ -220,7 +303,10 @@ brandsRouter.delete("/types/:typeId", async (c) => {
  *   `?include=types` — attach each brand's type mappings (joined with brand_types_def).
  *                       Compatible with `?search=`.
  *
- * `iconCfImagesUrl` and `instagramUrl` are always included in every response.
+ * Always included: `iconCfImagesUrl`, `instagramUrl`, `onlineRating`, `userRating`,
+ * and `productCount` (count of showroom_store_products rows for each brand).
+ *
+ * `productCount` is computed with a single grouped aggregate — NOT per-brand queries.
  */
 brandsRouter.openapi(
   createRoute({
@@ -228,7 +314,7 @@ brandsRouter.openapi(
     path: "/",
     operationId: "listBrands",
     tags: ["Brands"],
-    summary: "List all brands (supports ?search= autocomplete)",
+    summary: "List all brands (supports ?search= autocomplete, includes productCount)",
     request: {
       query: z.object({
         include: z.string().optional(),
@@ -238,10 +324,10 @@ brandsRouter.openapi(
     },
     responses: {
       200: {
-        description: "Brand list",
+        description: "Brand list with product counts and ratings",
         content: {
           "application/json": {
-            schema: z.object({ brands: z.array(brandSchema) }),
+            schema: z.object({ brands: z.array(brandListItemSchema) }),
           },
         },
       },
@@ -252,9 +338,8 @@ brandsRouter.openapi(
     const { include: includeParam = "", search } = c.req.valid("query");
     const includes = new Set(includeParam.split(",").map((s) => s.trim()).filter(Boolean));
 
-    // Build the base query.  When `search` is present, apply a LIKE filter and
-    // cap results at 20.  SQLite LIKE is case-insensitive for ASCII characters
-    // by default, which is sufficient for brand name matching.
+    // Build the base brand query.  When `search` is present, apply a LIKE filter
+    // and cap results at 20.  SQLite LIKE is case-insensitive for ASCII by default.
     let brandRows: (typeof brands.$inferSelect)[];
     if (search && search.length > 0) {
       brandRows = await db
@@ -267,13 +352,41 @@ brandsRouter.openapi(
       brandRows = await db.select().from(brands).orderBy(brands.name);
     }
 
-    if (!includes.has("types") || brandRows.length === 0) {
-      return c.json({ brands: brandRows });
+    if (brandRows.length === 0) {
+      return c.json({ brands: [] });
     }
 
-    // Fetch type mappings for all brands in one query.
-    // brandRows.length > 0 is guaranteed by the early-return above.
     const brandIds = brandRows.map((b) => b.id) as [number, ...number[]];
+
+    // ── Product counts — single grouped aggregate query ──────────────────────
+    // SELECT brand_id, COUNT(*) AS cnt FROM showroom_store_products
+    // WHERE brand_id IN (...) GROUP BY brand_id
+    const productCountRows = await db
+      .select({
+        brandId: showroomStoreProducts.brandId,
+        cnt: sql<number>`count(*)`.as("cnt"),
+      })
+      .from(showroomStoreProducts)
+      .where(inArray(showroomStoreProducts.brandId, brandIds))
+      .groupBy(showroomStoreProducts.brandId);
+
+    const productCountMap = new Map<number, number>();
+    for (const r of productCountRows) {
+      if (r.brandId !== null) {
+        productCountMap.set(r.brandId, r.cnt);
+      }
+    }
+
+    // ── Optional type mappings ───────────────────────────────────────────────
+    if (!includes.has("types")) {
+      const enriched = brandRows.map((b) => ({
+        ...b,
+        productCount: productCountMap.get(b.id) ?? 0,
+      }));
+      return c.json({ brands: enriched });
+    }
+
+    // Fetch type mappings for all returned brands in one query.
     const typeMappingRows = await db
       .select({
         brandId: brandTypeMappings.brandId,
@@ -294,6 +407,7 @@ brandsRouter.openapi(
 
     const enriched = brandRows.map((b) => ({
       ...b,
+      productCount: productCountMap.get(b.id) ?? 0,
       types: typesMap.get(b.id) ?? [],
     }));
 
@@ -302,45 +416,141 @@ brandsRouter.openapi(
 );
 
 /**
- * GET /:id — brand detail with type mappings and showroom locations that carry it.
+ * GET /:id — brand detail with type mappings, showroom locations, and products.
+ *
+ * Returns:
+ *   - `brand`: full row including personalNotes, onlineRating, userRating.
+ *   - `types`: array of type mappings joined to brand_types_def.
+ *   - `showrooms`: DISTINCT showrooms carrying this brand — union of:
+ *       (a) showroom_brand_mappings rows for brandId
+ *       (b) showrooms that have a product of this brand via showroom_product_mappings
+ *     Joined to showroom_stores for { id, name, locationAddress }. De-duped by id.
+ *   - `products`: brand's products with newest image URL (or null).
+ *     Uses two queries + JS-side merge — avoids N+1 and handles SQLite group-by limits.
+ *   - `productCount`: total count of products.
+ *
+ * Uses a plain `.get()` handler (not `openapi()`) to avoid the Drizzle Date ↔
+ * JSON string type mismatch that the strict `RouteConfigToTypedResponse` check
+ * enforces — consistent with the original pattern in this file.
  */
 brandsRouter.get("/:id", async (c) => {
-  const db = drizzle(c.env.DB);
-  const brandId = Number(c.req.param("id"));
-  if (!Number.isInteger(brandId)) {
-    return c.json({ success: false, error: "Invalid brand id" }, 400);
-  }
+    const db = drizzle(c.env.DB);
+    const brandId = Number(c.req.param("id"));
 
-  const [brand] = await db.select().from(brands).where(eq(brands.id, brandId)).limit(1);
-  if (!brand) return c.json({ success: false, error: "Brand not found" }, 404);
+    if (!Number.isFinite(brandId) || brandId <= 0) {
+      return c.json({ success: false, error: "Invalid brand id" }, 400);
+    }
 
-  const [typeMappingRows, showroomRows] = await Promise.all([
-    db
-      .select({
-        mappingId: brandTypeMappings.id,
-        typeId: brandTypesDef.id,
-        typeName: brandTypesDef.name,
-        typeDescription: brandTypesDef.description,
-        brandIconCfImagesUrl: brandTypeMappings.brandIconCfImagesUrl,
-      })
-      .from(brandTypeMappings)
-      .innerJoin(brandTypesDef, eq(brandTypeMappings.typeId, brandTypesDef.id))
-      .where(eq(brandTypeMappings.brandId, brandId)),
-    db
-      .select({
-        mappingId: showroomBrandMappings.id,
-        showroomId: showroomBrandMappings.showroomId,
-        createdAt: showroomBrandMappings.createdAt,
-      })
-      .from(showroomBrandMappings)
-      .where(eq(showroomBrandMappings.brandId, brandId)),
-  ]);
+    const [brand] = await db.select().from(brands).where(eq(brands.id, brandId)).limit(1);
+    if (!brand) {
+      return c.json({ success: false, error: "Brand not found" }, 404);
+    }
 
-  return c.json({
-    brand,
-    types: typeMappingRows,
-    showrooms: showroomRows,
-  });
+    // ── Fire all three independent queries concurrently ──────────────────────
+    const [typeMappingRows, showroomBrandRows, showroomProductRows, productRows] =
+      await Promise.all([
+        // (1) Type mappings
+        db
+          .select({
+            mappingId: brandTypeMappings.id,
+            typeId: brandTypesDef.id,
+            typeName: brandTypesDef.name,
+            typeDescription: brandTypesDef.description,
+            brandIconCfImagesUrl: brandTypeMappings.brandIconCfImagesUrl,
+          })
+          .from(brandTypeMappings)
+          .innerJoin(brandTypesDef, eq(brandTypeMappings.typeId, brandTypesDef.id))
+          .where(eq(brandTypeMappings.brandId, brandId)),
+
+        // (2a) Showrooms via direct brand mapping
+        db
+          .select({
+            id: showroomStores.id,
+            name: showroomStores.name,
+            locationAddress: showroomStores.locationAddress,
+          })
+          .from(showroomBrandMappings)
+          .innerJoin(showroomStores, eq(showroomBrandMappings.showroomId, showroomStores.id))
+          .where(eq(showroomBrandMappings.brandId, brandId)),
+
+        // (2b) Showrooms via product mapping (showroom carries a product of this brand)
+        db
+          .select({
+            id: showroomStores.id,
+            name: showroomStores.name,
+            locationAddress: showroomStores.locationAddress,
+          })
+          .from(showroomProductMappings)
+          .innerJoin(
+            showroomStoreProducts,
+            eq(showroomProductMappings.productId, showroomStoreProducts.id),
+          )
+          .innerJoin(showroomStores, eq(showroomProductMappings.showroomId, showroomStores.id))
+          .where(eq(showroomStoreProducts.brandId, brandId)),
+
+        // (3) Products for this brand
+        db
+          .select({
+            id: showroomStoreProducts.id,
+            itemName: showroomStoreProducts.itemName,
+            productType: showroomStoreProducts.productType,
+          })
+          .from(showroomStoreProducts)
+          .where(eq(showroomStoreProducts.brandId, brandId)),
+      ]);
+
+    // ── De-dupe showrooms by id (UNION of brand-mapping + product-mapping) ───
+    const showroomMap = new Map<number, { id: number; name: string; locationAddress: string | null }>();
+    for (const r of showroomBrandRows) {
+      showroomMap.set(r.id, r);
+    }
+    for (const r of showroomProductRows) {
+      if (!showroomMap.has(r.id)) {
+        showroomMap.set(r.id, r);
+      }
+    }
+    const showrooms = Array.from(showroomMap.values());
+
+    // ── Newest product image per product — single query, JS-side max ─────────
+    // Fetch the latest image row per product. We query ALL images for these
+    // products in one round-trip, then take the highest id per product in JS.
+    // Using MAX(id) as a proxy for "newest created" avoids a subquery while
+    // being safe given autoIncrement semantics.
+    let imageUrlMap = new Map<number, string>();
+    if (productRows.length > 0) {
+      const productIds = productRows.map((p) => p.id) as [number, ...number[]];
+      const imageRows = await db
+        .select({
+          storeProductId: productImages.storeProductId,
+          deliveryUrl: productImages.deliveryUrl,
+          imgId: productImages.id,
+        })
+        .from(productImages)
+        .where(inArray(productImages.storeProductId, productIds))
+        .orderBy(desc(productImages.id));
+
+      // Keep only the first (highest id = newest) image per product.
+      for (const row of imageRows) {
+        if (!imageUrlMap.has(row.storeProductId)) {
+          imageUrlMap.set(row.storeProductId, row.deliveryUrl);
+        }
+      }
+    }
+
+    const products = productRows.map((p) => ({
+      id: p.id,
+      itemName: p.itemName,
+      productType: p.productType ?? null,
+      imageUrl: imageUrlMap.get(p.id) ?? null,
+    }));
+
+    return c.json({
+      brand,
+      types: typeMappingRows,
+      showrooms,
+      products,
+      productCount: products.length,
+    });
 });
 
 /**
@@ -415,7 +625,7 @@ brandsRouter.openapi(
       }
 
       return c.json({ brand: inserted }, 201);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("[brands] POST / error:", err);
       return c.json({ success: false as const, error: "Failed to create brand" }, 500);
     }
@@ -425,21 +635,32 @@ brandsRouter.openapi(
 /**
  * PUT /:id — update brand fields.
  *
+ * Accepts all original fields plus the new 0058 additions:
+ *   - `personalNotes`  (string | null)
+ *   - `onlineRating`   (number 0–5 | null)
+ *   - `userRating`     (number 0–5 | null)
+ *
  * If `websiteUrl` is present in the body AND differs from the stored value
  * (or the brand has no icon yet), triggers a favicon re-hydration in background.
+ *
+ * Uses a plain `.put()` handler (not `openapi()`) to avoid the Drizzle Date ↔
+ * JSON string type mismatch — consistent with the original pattern in this file.
  */
 brandsRouter.put("/:id", async (c) => {
   const db = drizzle(c.env.DB);
   const brandId = Number(c.req.param("id"));
-  if (!Number.isInteger(brandId)) {
+
+  if (!Number.isFinite(brandId) || brandId <= 0) {
     return c.json({ success: false, error: "Invalid brand id" }, 400);
   }
 
   const body = await c.req.json();
-  const parsed = createBrandSchema.partial().safeParse(body);
+  const parsed = updateBrandSchema.safeParse(body);
   if (!parsed.success) {
     return c.json({ success: false, error: parsed.error.message }, 400);
   }
+
+  const { typeIds: _typeIds, ...updateFields } = parsed.data;
 
   // Fetch existing row to compare websiteUrl + icon.
   const [existing] = await db
@@ -448,32 +669,39 @@ brandsRouter.put("/:id", async (c) => {
     .where(eq(brands.id, brandId))
     .limit(1);
 
-  if (!existing) return c.json({ success: false, error: "Brand not found" }, 404);
-
-  const { typeIds: _typeIds, ...updateValues } = parsed.data;
-
-  const [updated] = await db
-    .update(brands)
-    .set({ ...updateValues, updatedAt: new Date() } as Partial<typeof brands.$inferInsert>)
-    .where(eq(brands.id, brandId))
-    .returning();
-
-  if (!updated) return c.json({ success: false, error: "Brand not found" }, 404);
-
-  // Trigger favicon refresh when websiteUrl changed or icon is missing.
-  const incomingUrl = updateValues.websiteUrl ?? null;
-  const shouldRefreshIcon =
-    incomingUrl &&
-    incomingUrl.length > 0 &&
-    (incomingUrl !== existing.websiteUrl || !existing.iconCfImagesUrl);
-
-  if (shouldRefreshIcon) {
-    c.executionCtx.waitUntil(
-      faviconService.hydrateBrandIcon(c.env, brandId, incomingUrl),
-    );
+  if (!existing) {
+    return c.json({ success: false, error: "Brand not found" }, 404);
   }
 
-  return c.json({ brand: updated });
+  try {
+    const [updated] = await db
+      .update(brands)
+      .set({ ...updateFields, updatedAt: new Date() } as Partial<typeof brands.$inferInsert>)
+      .where(eq(brands.id, brandId))
+      .returning();
+
+    if (!updated) {
+      return c.json({ success: false, error: "Brand not found" }, 404);
+    }
+
+    // Trigger favicon refresh when websiteUrl changed or icon is missing.
+    const incomingUrl = updateFields.websiteUrl ?? null;
+    const shouldRefreshIcon =
+      incomingUrl &&
+      incomingUrl.length > 0 &&
+      (incomingUrl !== existing.websiteUrl || !existing.iconCfImagesUrl);
+
+    if (shouldRefreshIcon) {
+      c.executionCtx.waitUntil(
+        faviconService.hydrateBrandIcon(c.env, brandId, incomingUrl),
+      );
+    }
+
+    return c.json({ brand: updated });
+  } catch (err: unknown) {
+    console.error("[brands] PUT /:id error:", err);
+    return c.json({ success: false, error: "Failed to update brand" }, 500);
+  }
 });
 
 /**
@@ -518,9 +746,10 @@ brandsRouter.post("/:id/types", async (c) => {
       .values({ brandId, typeId: parsed.data.typeId })
       .returning();
     return c.json({ mapping: inserted }, 201);
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
     // SQLite unique constraint violation — mapping already exists.
-    if (err?.message?.includes("UNIQUE") || err?.message?.includes("unique")) {
+    if (msg.includes("UNIQUE") || msg.includes("unique")) {
       const [existing] = await db
         .select()
         .from(brandTypeMappings)

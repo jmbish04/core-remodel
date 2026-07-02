@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
 
 /**
  * Brands — top-level brand registry, independent of any showroom or product.
@@ -35,6 +35,27 @@ export const brands = sqliteTable("brands", {
    * Example: "https://imagedelivery.net/<accountHash>/<imageId>/public"
    */
   iconCfImagesUrl: text("icon_cf_images_url"),
+
+  /**
+   * Freeform homeowner notes on the brand (plain text; shown in a Textarea).
+   * Nullable — populated only when the homeowner has something to say about
+   * this brand. Not synced from any external source.
+   */
+  personalNotes: text("personal_notes"),
+
+  /**
+   * Aggregate online / consensus rating for the brand on a 0–5 scale.
+   * Sourced from public review aggregators (e.g. Google, Yelp). Nullable —
+   * not all brands have a meaningful aggregate score.
+   */
+  onlineRating: real("online_rating"),
+
+  /**
+   * The homeowner's personal rating of the brand on a 0–5 scale.
+   * Nullable — populated only after the homeowner has had enough experience
+   * to form a considered opinion.
+   */
+  userRating: real("user_rating"),
 
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()

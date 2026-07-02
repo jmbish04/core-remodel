@@ -52,6 +52,13 @@ export const showroomStoreProducts = sqliteTable("showroom_store_products", {
   possibleDiscounts: text("possible_discounts"),
   tradeDiscount: text("trade_discount"),
 
+  /**
+   * Coarse product type / category used to group the global product list across
+   * all brands (e.g. "Faucet", "Range", "Tile", "Sink"). Nullable — user-set;
+   * populated when the homeowner categorises a product.
+   */
+  productType: text("product_type"),
+
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),

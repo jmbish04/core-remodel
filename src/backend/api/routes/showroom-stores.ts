@@ -111,6 +111,11 @@ const createProductSchema = z.object({
   tradeDiscount: z.string().optional().nullable(),
   /** FK → brands.id — nullable, server accepts null to unlink. */
   brandId: z.number().int().optional().nullable(),
+  /**
+   * Coarse product type / category used to group the global product list
+   * (e.g. "Faucet", "Range", "Tile", "Sink"). Nullable — user-set.
+   */
+  productType: z.string().optional().nullable(),
 });
 
 const productIdParamsSchema = z.object({
@@ -1653,6 +1658,218 @@ showroomStoresRouter.delete("/:id/brands/:brandId", async (c) => {
     );
 
   return c.json({ success: true });
+});
+
+// ─── BRAND-SCOPED PRODUCT SPLIT ───────────────────────────────────────────────
+//
+// The Showroom-Brand viewport needs to know which of a brand's products are
+// already mapped to a given showroom (associated) and which are not (unassociated).
+// A single query that joins + groups in D1 is more efficient than N+1 lookups.
+
+/**
+ * GET /:id/brands/:brandId/products — Split a brand's products into
+ * associated / unassociated for this showroom.
+ *
+ * "Brand's products" = showroom_store_products WHERE brandId = :brandId.
+ * "Associated"       = those whose id IS in showroom_product_mappings for :id.
+ * "Unassociated"     = the rest.
+ *
+ * Each product item: { id, name, imageUrl } where imageUrl is the newest
+ * productImages.deliveryUrl for that product, or null.
+ *
+ * Response 200:
+ *   {
+ *     "brandName": "Waterworks",
+ *     "showroomName": "Studio Belmont SF",
+ *     "associated":   [{ id, name, imageUrl }, ...],
+ *     "unassociated": [{ id, name, imageUrl }, ...]
+ *   }
+ *
+ * Response 404: brand or showroom not found.
+ */
+showroomStoresRouter.get("/:id/brands/:brandId/products", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const brandId = Number(c.req.param("brandId"));
+
+  if (!Number.isInteger(storeId) || !Number.isInteger(brandId)) {
+    return c.json({ success: false, error: "Invalid id" }, 400);
+  }
+
+  // Validate both the showroom and the brand exist.
+  const [[store], [brand]] = await Promise.all([
+    db
+      .select({ id: showroomStores.id, name: showroomStores.name })
+      .from(showroomStores)
+      .where(eq(showroomStores.id, storeId))
+      .limit(1),
+    db
+      .select({ id: brands.id, name: brands.name })
+      .from(brands)
+      .where(eq(brands.id, brandId))
+      .limit(1),
+  ]);
+
+  if (!store) return c.json({ success: false, error: "Showroom not found" }, 404);
+  if (!brand) return c.json({ success: false, error: "Brand not found" }, 404);
+
+  // 1. All products for this brand.
+  const brandProducts = await db
+    .select({
+      id: showroomStoreProducts.id,
+      itemName: showroomStoreProducts.itemName,
+    })
+    .from(showroomStoreProducts)
+    .where(eq(showroomStoreProducts.brandId, brandId));
+
+  if (brandProducts.length === 0) {
+    return c.json({
+      brandName: brand.name,
+      showroomName: store.name,
+      associated: [],
+      unassociated: [],
+    });
+  }
+
+  const productIds = brandProducts.map((p) => p.id);
+
+  // 2. Which of those product IDs are already mapped to this showroom?
+  const mappedRows = await db
+    .select({ productId: showroomProductMappings.productId })
+    .from(showroomProductMappings)
+    .where(
+      and(
+        eq(showroomProductMappings.showroomId, storeId),
+        inArray(showroomProductMappings.productId, productIds),
+      ),
+    );
+
+  const mappedSet = new Set(mappedRows.map((r) => r.productId));
+
+  // 3. Newest image per product — single query, group client-side.
+  //    We select ALL product_images rows for these products and keep the one
+  //    with the greatest createdAt per product. D1/SQLite does not support
+  //    lateral joins, so we sort DESC and de-dupe in JS.
+  const allImages = await db
+    .select({
+      storeProductId: productImages.storeProductId,
+      deliveryUrl: productImages.deliveryUrl,
+      createdAt: productImages.createdAt,
+    })
+    .from(productImages)
+    .where(inArray(productImages.storeProductId, productIds))
+    .orderBy(desc(productImages.createdAt));
+
+  // Keep the first (newest) image per product.
+  const imageMap = new Map<number, string>();
+  for (const row of allImages) {
+    if (!imageMap.has(row.storeProductId)) {
+      imageMap.set(row.storeProductId, row.deliveryUrl);
+    }
+  }
+
+  // 4. Split into associated / unassociated.
+  const associated: { id: number; name: string; imageUrl: string | null }[] = [];
+  const unassociated: { id: number; name: string; imageUrl: string | null }[] = [];
+
+  for (const p of brandProducts) {
+    const item = { id: p.id, name: p.itemName, imageUrl: imageMap.get(p.id) ?? null };
+    if (mappedSet.has(p.id)) {
+      associated.push(item);
+    } else {
+      unassociated.push(item);
+    }
+  }
+
+  return c.json({
+    brandName: brand.name,
+    showroomName: store.name,
+    associated,
+    unassociated,
+  });
+});
+
+/**
+ * POST /:id/brands/:brandId/associate-all — Map every unassociated brand
+ * product to this showroom in a single batched operation.
+ *
+ * Deduplication: existing mappings are identified first; only the delta is
+ * inserted. Inserts are issued as single-row statements in db.batch() chunks
+ * of 50 to stay well within D1's 100-parameter-per-query limit.
+ *
+ * Response 200:
+ *   { "success": true, "added": <count> }
+ */
+showroomStoresRouter.post("/:id/brands/:brandId/associate-all", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const brandId = Number(c.req.param("brandId"));
+
+  if (!Number.isInteger(storeId) || !Number.isInteger(brandId)) {
+    return c.json({ success: false, error: "Invalid id" }, 400);
+  }
+
+  // Validate showroom and brand.
+  const [[store], [brand]] = await Promise.all([
+    db
+      .select({ id: showroomStores.id })
+      .from(showroomStores)
+      .where(eq(showroomStores.id, storeId))
+      .limit(1),
+    db
+      .select({ id: brands.id })
+      .from(brands)
+      .where(eq(brands.id, brandId))
+      .limit(1),
+  ]);
+
+  if (!store) return c.json({ success: false, error: "Showroom not found" }, 404);
+  if (!brand) return c.json({ success: false, error: "Brand not found" }, 404);
+
+  // All brand products.
+  const brandProducts = await db
+    .select({ id: showroomStoreProducts.id })
+    .from(showroomStoreProducts)
+    .where(eq(showroomStoreProducts.brandId, brandId));
+
+  if (brandProducts.length === 0) {
+    return c.json({ success: true, added: 0 });
+  }
+
+  const productIds = brandProducts.map((p) => p.id);
+
+  // Already-mapped products for this showroom.
+  const alreadyMapped = await db
+    .select({ productId: showroomProductMappings.productId })
+    .from(showroomProductMappings)
+    .where(
+      and(
+        eq(showroomProductMappings.showroomId, storeId),
+        inArray(showroomProductMappings.productId, productIds),
+      ),
+    );
+
+  const mappedSet = new Set(alreadyMapped.map((r) => r.productId));
+  const toInsert = productIds.filter((id) => !mappedSet.has(id));
+
+  if (toInsert.length === 0) {
+    return c.json({ success: true, added: 0 });
+  }
+
+  // Batch inserts in chunks of 50 (single-row statements; no risk of hitting
+  // D1's 100-parameter limit since each insert binds exactly 2 values).
+  const BATCH_SIZE = 50;
+  for (let i = 0; i < toInsert.length; i += BATCH_SIZE) {
+    const chunk = toInsert.slice(i, i + BATCH_SIZE);
+    const stmts = chunk.map((productId) =>
+      db
+        .insert(showroomProductMappings)
+        .values({ showroomId: storeId, productId }),
+    );
+    await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
+  }
+
+  return c.json({ success: true, added: toInsert.length });
 });
 
 // ─── GAP ANALYSIS ─────────────────────────────────────────────────────────────
