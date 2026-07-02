@@ -98,24 +98,6 @@ function coerceContact(raw: Record<string, unknown>): ExtractedContact {
   };
 }
 
-/**
- * Merge two extracted contacts, preferring any non-empty value from `primary`
- * and falling back to `secondary` for each field.
- */
-function mergeContacts(
-  primary: ExtractedContact,
-  secondary: ExtractedContact,
-): ExtractedContact {
-  return {
-    fullName: primary.fullName ?? secondary.fullName,
-    title: primary.title ?? secondary.title,
-    company: primary.company ?? secondary.company,
-    phone: primary.phone ?? secondary.phone,
-    email: primary.email ?? secondary.email,
-    website: primary.website ?? secondary.website,
-    address: primary.address ?? secondary.address,
-  };
-}
 
 // ─── BusinessCardService ───────────────────────────────────────────────────────
 

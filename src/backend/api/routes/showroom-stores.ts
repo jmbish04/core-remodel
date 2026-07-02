@@ -2112,6 +2112,21 @@ showroomStoresRouter.put("/notes/:noteId", async (c) => {
   if (parsed.data.contentMarkdown !== undefined) patch.contentMarkdown = parsed.data.contentMarkdown;
   if (parsed.data.note !== undefined) patch.note = parsed.data.note;
 
+  // Guard against an empty patch: Drizzle `.set({})` emits an empty UPDATE,
+  // which is a SQL syntax error in SQLite/D1. With nothing to change, return
+  // the current row (or 404 if it doesn't exist) instead of issuing the query.
+  if (Object.keys(patch).length === 0) {
+    const [existing] = await db
+      .select()
+      .from(storeNotes)
+      .where(eq(storeNotes.id, noteId))
+      .limit(1);
+    if (!existing) {
+      return c.json({ success: false, error: "Note not found" }, 404);
+    }
+    return c.json({ note: existing });
+  }
+
   const [updated] = await db
     .update(storeNotes)
     .set(patch)

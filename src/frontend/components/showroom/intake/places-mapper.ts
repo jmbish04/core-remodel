@@ -174,13 +174,13 @@ function extractSummary(place: GooglePlaceDetails): string | undefined {
  */
 function parseZip(formattedAddress?: string | null): string | undefined {
   if (!formattedAddress) return undefined;
-  // Collect ALL 5-digit numbers (optionally +4) and return the LAST one. A
-  // non-global first match can grab a 5-digit street number (e.g. "10123 Lark
-  // Ave, Los Gatos, CA 95032" → "10123"); in US formatted addresses the ZIP is
-  // the trailing 5-digit group, so the last match is the correct one.
-  const matches = [...formattedAddress.matchAll(/\b(\d{5})(?:-\d{4})?\b/g)];
-  if (matches.length === 0) return undefined;
-  return matches[matches.length - 1][1];
+  // Match a 5-digit ZIP (optionally +4) that is preceded by a 2-letter state
+  // abbreviation, e.g. "…, Los Gatos, CA 95032, USA". Anchoring on the state
+  // avoids mis-grabbing a 5-digit STREET number when the address has no ZIP
+  // (e.g. "12345 5th Ave, New York, NY" → undefined, not "12345"). For an
+  // intake form the user reviews, leaving it blank beats a wrong value.
+  const match = /\b[A-Z]{2}\s+(\d{5})(?:-\d{4})?\b/i.exec(formattedAddress);
+  return match ? match[1] : undefined;
 }
 
 // ─── mapPlaceToIntake ─────────────────────────────────────────────────────────

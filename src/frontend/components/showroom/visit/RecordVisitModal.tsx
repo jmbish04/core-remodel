@@ -558,7 +558,20 @@ export function RecordVisitModal({
           </DialogDescription>
         </DialogHeader>
 
-        <Stepper steps={3} value={step} onValueChange={setStep} className="space-y-5">
+        <Stepper
+          steps={3}
+          value={step}
+          onValueChange={(next) => {
+            // Guard step-header clicks so a user can't jump forward past the
+            // step-2 gate (contact/business-card flow). Backward is always
+            // allowed; forward only one step at a time, and 2→3 only when the
+            // step-2 requirements are satisfied.
+            if (next < step) setStep(next);
+            else if (next === 2 && step === 1) setStep(2);
+            else if (next === 3 && step === 2 && canLeaveStep2) setStep(3);
+          }}
+          className="space-y-5"
+        >
           {/* Stepper header */}
           <StepperList>
             {STEPS.map((s, i) => (
