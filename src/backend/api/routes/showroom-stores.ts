@@ -40,6 +40,8 @@ import {
 } from "@backend/db/schema/showroom/index";
 import {
   brands,
+  brandTypesDef,
+  brandTypeMappings,
   showroomBrandMappings,
 } from "@backend/db/schema/brands/index";
 import { businessCardService } from "@backend/services/business-card";
@@ -348,6 +350,13 @@ const createStoreSchema = z.object({
     )
     .max(5)
     .optional(),
+  /**
+   * Full structured Gemini review-insight object from the Places-details proxy.
+   * Persisted verbatim to `showroom_stores.review_ai_insight` (text json column).
+   * A lenient passthrough object — individual boolean columns remain authoritative
+   * for filtering; this blob is display/context only.
+   */
+  reviewAiInsight: z.object({}).passthrough().optional().nullable(),
 });
 
 const createProductSchema = z.object({
@@ -1355,7 +1364,9 @@ showroomStoresRouter.post("/", async (c) => {
 
   // Strip virtual fields before inserting into showroom_stores.
   // `categoryIds` and `photos` are not columns on `showroom_stores`.
-  const { categoryIds, photos, ...storeValues } = data;
+  // `reviewAiInsight` IS a column but its .$type<> is tighter than z.passthrough(),
+  // so we pull it out, cast it, and re-attach below.
+  const { categoryIds, photos, reviewAiInsight, ...storeValues } = data;
 
   // When hoursJson is provided, derive the back-compat display fields
   // server-side so filters and legacy display remain correct.
@@ -1370,7 +1381,12 @@ showroomStoresRouter.post("/", async (c) => {
 
   const [inserted] = await db
     .insert(showroomStores)
-    .values(storeValues)
+    .values({
+      ...storeValues,
+      // Cast the lenient passthrough object to the column's typed shape.
+      // The column is text-json; any JSON-serialisable object is safe at runtime.
+      reviewAiInsight: (reviewAiInsight ?? null) as typeof showroomStores.$inferInsert["reviewAiInsight"],
+    })
     .returning();
 
   // Attach inferred category mappings when provided.
@@ -1517,6 +1533,106 @@ showroomStoresRouter.post("/", async (c) => {
     );
   }
 
+  // Brand create / map / type pipeline from reviewAiInsight.brands.
+  // Runs entirely in the background — never throws out of waitUntil.
+  // Cap at 15 entries; dedupe by trimmed lowercase name before processing.
+  const insightBrands = data.reviewAiInsight?.brands;
+  if (Array.isArray(insightBrands) && insightBrands.length > 0) {
+    const showroomIdForBrands = inserted.id;
+    c.executionCtx.waitUntil(
+      (async () => {
+        try {
+          const db2 = drizzle(c.env.DB);
+          // Dedupe: keep first occurrence of each lowercase-trimmed name.
+          const seen = new Set<string>();
+          const uniqueBrands: Array<{ name: string; type: string; websiteUrl: string }> = [];
+          for (const b of insightBrands) {
+            if (!b || typeof b.name !== "string") continue;
+            const key = b.name.trim().toLowerCase();
+            if (!key || seen.has(key)) continue;
+            seen.add(key);
+            uniqueBrands.push({
+              name: b.name.trim(),
+              type: typeof b.type === "string" ? b.type.trim() : "",
+              websiteUrl: typeof b.websiteUrl === "string" ? b.websiteUrl.trim() : "",
+            });
+            if (uniqueBrands.length >= 15) break;
+          }
+
+          for (const { name, type, websiteUrl } of uniqueBrands) {
+            try {
+              // 1. Find or create the brand row.
+              let brandId: number;
+              const [existingBrand] = await db2
+                .select({ id: brands.id })
+                .from(brands)
+                .where(sql`lower(${brands.name}) = lower(${name})`)
+                .limit(1);
+
+              if (existingBrand) {
+                brandId = existingBrand.id;
+              } else {
+                const [newBrand] = await db2
+                  .insert(brands)
+                  .values({
+                    name,
+                    websiteUrl: websiteUrl || null,
+                  } as typeof brands.$inferInsert)
+                  .returning({ id: brands.id });
+                brandId = newBrand.id;
+              }
+
+              // 2. Map the brand to this showroom (ignore duplicate).
+              await db2
+                .insert(showroomBrandMappings)
+                .values({
+                  showroomId: showroomIdForBrands,
+                  brandId,
+                } as typeof showroomBrandMappings.$inferInsert)
+                .onConflictDoNothing();
+
+              // 3. Find or create the type row and create the brand→type mapping.
+              if (type) {
+                let typeId: number;
+                const [existingType] = await db2
+                  .select({ id: brandTypesDef.id })
+                  .from(brandTypesDef)
+                  .where(sql`lower(${brandTypesDef.name}) = lower(${type})`)
+                  .limit(1);
+
+                if (existingType) {
+                  typeId = existingType.id;
+                } else {
+                  const [newType] = await db2
+                    .insert(brandTypesDef)
+                    .values({
+                      name: type,
+                      isActive: true,
+                    } as typeof brandTypesDef.$inferInsert)
+                    .returning({ id: brandTypesDef.id });
+                  typeId = newType.id;
+                }
+
+                await db2
+                  .insert(brandTypeMappings)
+                  .values({
+                    brandId,
+                    typeId,
+                  } as typeof brandTypeMappings.$inferInsert)
+                  .onConflictDoNothing();
+              }
+            } catch (brandErr) {
+              console.error(`[showroom-stores] brand pipeline: error processing brand "${name}" for store ${showroomIdForBrands}:`, brandErr);
+              // Continue — one brand failure must not abort the rest.
+            }
+          }
+        } catch (outerErr) {
+          console.error(`[showroom-stores] brand pipeline: outer error for store ${inserted.id}:`, outerErr);
+        }
+      })(),
+    );
+  }
+
   return c.json({ store: inserted }, 201);
 });
 
@@ -1636,9 +1752,20 @@ showroomStoresRouter.put("/:id", async (c) => {
     data.isOpenWeekends = derived.isOpenWeekends;
   }
 
+  // Strip virtual / specially-cast fields before the update spread.
+  // reviewAiInsight needs a manual cast to match the column's .$type<> shape.
+  const { categoryIds: _catIds, photos: _photos, reviewAiInsight: putInsight, ...putValues } = data;
+
   const [updated] = await db
     .update(showroomStores)
-    .set({ ...data, updatedAt: new Date() } as Partial<typeof showroomStores.$inferInsert>)
+    .set({
+      ...putValues,
+      // Only include reviewAiInsight in the patch when the caller sent it.
+      ...(putInsight !== undefined
+        ? { reviewAiInsight: (putInsight ?? null) as typeof showroomStores.$inferInsert["reviewAiInsight"] }
+        : {}),
+      updatedAt: new Date(),
+    } as Partial<typeof showroomStores.$inferInsert>)
     .where(eq(showroomStores.id, storeId))
     .returning();
 

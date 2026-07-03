@@ -1479,6 +1479,35 @@ function DiagNote({ diag }: { diag?: FieldDiag }) {
   );
 }
 
+/** Human-friendly labels for the AI attribute-flag rationale notes. */
+const ATTR_RATIONALE_LABELS: { key: string; label: string }[] = [
+  { key: "isAppointmentOnly", label: "Appointment only" },
+  { key: "isFlagshipLocation", label: "Flagship location" },
+  { key: "isLargeSelection", label: "Large selection" },
+  { key: "isBespoke", label: "Bespoke / curated" },
+  { key: "isTradeRepRequired", label: "Trade rep required" },
+];
+
+/** Color-coded styling per review-authenticity assessment. */
+function authenticityStyle(assessment: string | undefined): {
+  className: string;
+  label: string;
+} {
+  switch (assessment) {
+    case "AUTHENTIC":
+      return { className: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30", label: "Authentic" };
+    case "MOSTLY_AUTHENTIC":
+      return { className: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30", label: "Mostly authentic" };
+    case "MIXED":
+      return { className: "bg-amber-500/15 text-amber-300 ring-amber-500/30", label: "Mixed" };
+    case "SUSPICIOUS":
+      return { className: "bg-rose-500/15 text-rose-300 ring-rose-500/30", label: "Suspicious" };
+    case "UNVERIFIED":
+    default:
+      return { className: "bg-muted text-muted-foreground ring-border/40", label: "Unverified" };
+  }
+}
+
 function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: () => void }) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(0);
@@ -1514,6 +1543,25 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
   // because Google returned no structured priceLevel — drives the amber note.
   const [priceInferred, setPriceInferred] = useState(false);
   const [priceReasoning, setPriceReasoning] = useState<string | null>(null);
+  // Note shown when the AI reviewed the reviews but found no pricing signal at
+  // all (Google returned no priceLevel AND the AI returned the "unspecified"
+  // enum). Rendered on the Details tab beside the price picker.
+  const [priceNoSignal, setPriceNoSignal] = useState<string | null>(null);
+  // AI rationales keyed by flag name (e.g. "isLargeSelection") — an amber
+  // "AI: {rationale}" note is rendered beneath each flag the AI set.
+  const [attrRationales, setAttrRationales] = useState<Record<string, string>>({});
+  // Review-authenticity assessment + brand list surfaced from the AI insight.
+  const [reviewAuthenticity, setReviewAuthenticity] = useState<
+    NonNullable<GooglePlaceDetails["aiInference"]>["reviewAuthenticity"] | null
+  >(null);
+  const [detectedBrands, setDetectedBrands] = useState<
+    NonNullable<GooglePlaceDetails["aiInference"]>["brands"] | null
+  >(null);
+  // The full AI-inference object — forwarded verbatim on the create body so the
+  // backend persists it and auto-creates the detected brands.
+  const [reviewAiInsight, setReviewAiInsight] = useState<
+    GooglePlaceDetails["aiInference"] | null
+  >(null);
   // Bumped whenever an autofill lands so the (seed-once) rich-text description
   // editor remounts and re-seeds from the freshly mapped description.
   const [descSeedKey, setDescSeedKey] = useState(0);
@@ -1576,14 +1624,56 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
         setDiagnostics(mapped._diagnostics ?? {});
         setPlacePhotos(mapped._photos ?? []);
 
-        // Price: prefer Google's structured priceLevel; else fall back to the
-        // AI-inferred price point (present only when reviews existed).
+        // AI insight from the backend Places proxy. Store the full object for
+        // the create body; the backend persists it + auto-creates the brands.
         const ai = place.aiInference ?? null;
+        setReviewAiInsight(ai);
+        setReviewAuthenticity(ai?.reviewAuthenticity ?? null);
+        setDetectedBrands(ai?.brands ?? null);
+
+        // Price: prefer Google's structured priceLevel. Else, only apply the
+        // AI-inferred tier when it is a REAL tier ($, $$, $$$, $$$$). If the AI
+        // reviewed the reviews and found no pricing signal at all, it returns
+        // the "PRICE_LEVEL_UNSPECIFIED" enum — never surface that literal in the
+        // Select; instead show a "no signal" note.
+        const REAL_TIERS = new Set(["$", "$$", "$$$", "$$$$"]);
+        const aiTier = ai?.inferredPricePoint ?? null;
         const inferredPrice =
-          !mapped.pricePoint && ai?.inferredPricePoint ? ai.inferredPricePoint : null;
+          !mapped.pricePoint && aiTier && REAL_TIERS.has(aiTier) ? aiTier : null;
         const resolvedPrice = mapped.pricePoint ?? inferredPrice ?? "";
         setPriceInferred(Boolean(inferredPrice));
         setPriceReasoning(inferredPrice ? ai?.priceReasoning ?? null : null);
+        setPriceNoSignal(
+          !mapped.pricePoint && aiTier === "PRICE_LEVEL_UNSPECIFIED"
+            ? "AI reviewed the reviews and found no pricing signal (PRICE_LEVEL_UNSPECIFIED)."
+            : null,
+        );
+
+        // AI attributes → boolean flags, plus per-flag rationales for display.
+        const attrs = ai?.attributes ?? null;
+        const flagPatch: Partial<typeof form> = attrs
+          ? {
+              isAppointmentOnly: !!attrs.appointmentOnly?.value,
+              isFlagshipLocation: !!attrs.flagshipLocation?.value,
+              isLargeSelection: !!attrs.largeSelection?.value,
+              isBespoke: !!attrs.bespokeCurated?.value,
+              isTradeRepRequired: !!attrs.tradeRepRequired?.value,
+            }
+          : {};
+        if (attrs) {
+          const rationales: Record<string, string> = {};
+          const addRationale = (key: string, set?: { value?: boolean; rationale?: string }) => {
+            if (set?.value && set.rationale) rationales[key] = set.rationale;
+          };
+          addRationale("isAppointmentOnly", attrs.appointmentOnly);
+          addRationale("isFlagshipLocation", attrs.flagshipLocation);
+          addRationale("isLargeSelection", attrs.largeSelection);
+          addRationale("isBespoke", attrs.bespokeCurated);
+          addRationale("isTradeRepRequired", attrs.tradeRepRequired);
+          setAttrRationales(rationales);
+        } else {
+          setAttrRationales({});
+        }
 
         update({
           name: mapped.name ?? form.name,
@@ -1598,8 +1688,8 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
           userRatingCount: mapped.userRatingCount,
           reviewSummary: mapped.reviewSummary ?? "",
           hoursJson: mapPlaceToHoursJson(place.regularOpeningHours) ?? DEFAULT_HOURS,
-          // AI signal: large selection seeds the corresponding flag.
-          ...(ai?.isLargeSelection ? { isLargeSelection: true } : {}),
+          // AI attribute detections seed the corresponding flags.
+          ...flagPatch,
           ...(cityId ? { bayAreaCityId: cityId } : {}),
         });
 
@@ -1651,6 +1741,8 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
       body.isLargeSelection = form.isLargeSelection;
       body.isBespoke = form.isBespoke;
       body.isTradeRepRequired = form.isTradeRepRequired;
+      // Full AI-inference object — backend persists it + auto-creates the brands.
+      if (reviewAiInsight) body.reviewAiInsight = reviewAiInsight;
 
       const res = await fetch("/api/showroom-stores", {
         method: "POST",
@@ -1672,6 +1764,11 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
       setPlacePhotos([]);
       setPriceInferred(false);
       setPriceReasoning(null);
+      setPriceNoSignal(null);
+      setAttrRationales({});
+      setReviewAuthenticity(null);
+      setDetectedBrands(null);
+      setReviewAiInsight(null);
       setDescSeedKey((k) => k + 1);
       setReviewSeedKey((k) => k + 1);
       sessionTokenRef.current = crypto.randomUUID();
@@ -1890,6 +1987,9 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                   ) : (
                     <DiagNote diag={diagnostics.pricePoint} />
                   )}
+                  {priceNoSignal && (
+                    <p className="mt-1 text-[11px] text-muted-foreground">{priceNoSignal}</p>
+                  )}
                 </div>
                 <div>
                   <Label>Attributes</Label>
@@ -1905,7 +2005,89 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                       onChange={(v) => update(v)}
                     />
                   </div>
+                  {/* AI rationale for each attribute the AI set. */}
+                  {Object.keys(attrRationales).length > 0 && (
+                    <div className="mt-2 space-y-1">
+                      {ATTR_RATIONALE_LABELS.filter(({ key }) => attrRationales[key]).map(
+                        ({ key, label }) => (
+                          <p key={key} className="text-[11px] text-amber-400">
+                            <span className="font-medium">AI · {label}:</span>{" "}
+                            {attrRationales[key]}
+                          </p>
+                        ),
+                      )}
+                    </div>
+                  )}
                 </div>
+
+                {/* Review authenticity — color-coded assessment + sources. */}
+                {reviewAuthenticity && (
+                  <div>
+                    <Label>Review authenticity</Label>
+                    {(() => {
+                      const style = authenticityStyle(reviewAuthenticity.assessment);
+                      return (
+                        <div className="mt-1.5 rounded-lg bg-card p-3 ring-1 ring-border/40">
+                          <span
+                            className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider ring-1 ${style.className}`}
+                          >
+                            {style.label}
+                          </span>
+                          {reviewAuthenticity.rationale && (
+                            <p className="mt-2 text-[11px] text-muted-foreground">
+                              {reviewAuthenticity.rationale}
+                            </p>
+                          )}
+                          {reviewAuthenticity.sources &&
+                            reviewAuthenticity.sources.length > 0 && (
+                              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                                {reviewAuthenticity.sources.map((src, i) => (
+                                  <a
+                                    key={`${src}-${i}`}
+                                    href={src}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex items-center gap-1 text-[11px] text-sky-400 hover:text-sky-300"
+                                  >
+                                    <Globe className="size-3 shrink-0" />
+                                    <span className="max-w-[220px] truncate">{src}</span>
+                                  </a>
+                                ))}
+                              </div>
+                            )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {/* Detected brands — created on save. */}
+                {detectedBrands && detectedBrands.length > 0 && (
+                  <div>
+                    <Label>Detected brands</Label>
+                    <div className="mt-1.5 rounded-lg bg-card p-3 ring-1 ring-border/40">
+                      <div className="flex flex-wrap gap-1.5">
+                        {detectedBrands
+                          .filter((b) => b?.name)
+                          .map((b, i) => (
+                            <Badge
+                              key={`${b.name}-${i}`}
+                              variant="secondary"
+                              className="px-1.5 py-0.5 text-[10px] font-normal"
+                            >
+                              {b.name}
+                              {b.type ? (
+                                <span className="ml-1 text-muted-foreground/70">· {b.type}</span>
+                              ) : null}
+                            </Badge>
+                          ))}
+                      </div>
+                      <p className="mt-2 text-[11px] text-muted-foreground">
+                        These will be added to this showroom on save.
+                      </p>
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </div>

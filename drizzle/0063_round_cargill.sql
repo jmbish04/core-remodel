@@ -1,0 +1,1 @@
+ALTER TABLE `showroom_stores` ADD `review_ai_insight` text;

@@ -259,46 +259,167 @@ const PlaceDetailsResponseSchema = z
       }),
     businessStatus: z.string().optional().nullable(),
     /**
-     * Workers-AI structured inference derived from the review sample.
+     * Rich Gemini-powered structured inference derived from the review sample.
      * Present only when the AI call succeeded and reviews were available.
-     * `inferredPricePoint` fills in as a fallback when Google omits `priceLevel`.
+     * Includes homeowner-framed attributes, brand extraction, and review
+     * authenticity assessment (with Google Search grounding when available).
      */
     aiInference: z
       .object({
+        // 2-3 sentence homeowner-facing summary (mirrors reviewSummary text).
+        summary: z.string().optional().nullable(),
+
+        // Price tier inferred from review language.
+        // "PRICE_LEVEL_UNSPECIFIED" = consciously no signal found (clean exit).
+        // null = field couldn't be produced.
         inferredPricePoint: z
-          .enum(["$", "$$", "$$$", "$$$$"])
+          .enum(["$", "$$", "$$$", "$$$$", "PRICE_LEVEL_UNSPECIFIED"])
           .nullable()
           .optional()
           .openapi({
             description:
-              'Price tier inferred from explicit pricing language in review text. ' +
-              'Null when reviews contain no pricing signal. ' +
-              'Use as a fallback when Google\'s `priceLevel` field is absent.',
+              "Price tier inferred from explicit pricing language in the reviews. " +
+              '"PRICE_LEVEL_UNSPECIFIED" when the model consciously finds no pricing signal ' +
+              "(clean, trustworthy exit — not an error). " +
+              "null only when the field genuinely couldn't be produced. " +
+              "Use as a fallback when Google's `priceLevel` field is absent.",
           }),
+
         priceReasoning: z
           .string()
           .nullable()
           .optional()
           .openapi({
             description:
-              "Quoted phrase(s) from the reviews that drove the inferred_price_point, " +
-              "or null when no inference was made.",
+              "Quoted phrase(s) from the reviews that drove the inferred price tier. " +
+              "null when no pricing inference was made.",
           }),
-        isLargeSelection: z
-          .boolean()
+
+        // Per-attribute flags with rationale, each sourced from review language.
+        attributes: z
+          .object({
+            appointmentOnly: z
+              .object({ value: z.boolean(), rationale: z.string() })
+              .passthrough()
+              .optional()
+              .nullable(),
+            flagshipLocation: z
+              .object({ value: z.boolean(), rationale: z.string() })
+              .passthrough()
+              .optional()
+              .nullable(),
+            largeSelection: z
+              .object({ value: z.boolean(), rationale: z.string() })
+              .passthrough()
+              .optional()
+              .nullable(),
+            bespokeCurated: z
+              .object({ value: z.boolean(), rationale: z.string() })
+              .passthrough()
+              .optional()
+              .nullable()
+              .openapi({
+                description:
+                  "True when reviews rave about unique/mold-breaking selection. " +
+                  "False when reviews call the selection overpriced, stale, or generic.",
+              }),
+            tradeRepRequired: z
+              .object({ value: z.boolean(), rationale: z.string() })
+              .passthrough()
+              .optional()
+              .nullable()
+              .openapi({
+                description:
+                  "True when reviews indicate homeowners are turned away or must bring a " +
+                  "trade pro to visit or buy. Trade-only pricing games are a RED FLAG. " +
+                  "If non-trade visitors were welcomed despite signage, value=false with nuance in rationale.",
+              }),
+          })
+          .passthrough()
           .optional()
+          .nullable()
+          .openapi({ description: "Per-attribute boolean flags derived from review language." }),
+
+        // Review authenticity cross-check via Google Search grounding.
+        reviewAuthenticity: z
+          .object({
+            assessment: z
+              .enum([
+                "AUTHENTIC",
+                "MOSTLY_AUTHENTIC",
+                "MIXED",
+                "SUSPICIOUS",
+                "UNVERIFIED",
+              ])
+              .optional()
+              .nullable()
+              .openapi({
+                description:
+                  '"UNVERIFIED" when Google Search grounding was unavailable. ' +
+                  '"SUSPICIOUS" when cross-checking found evidence of bought/bot reviews.',
+              }),
+            rationale: z.string().optional().nullable(),
+            sources: z
+              .array(z.string())
+              .optional()
+              .nullable()
+              .openapi({
+                description:
+                  "URLs consulted during the authenticity cross-check (e.g. Reddit threads). " +
+                  "Empty array when grounding was unavailable.",
+              }),
+          })
+          .passthrough()
+          .optional()
+          .nullable()
           .openapi({
             description:
-              "True when reviews mention a large/extensive selection, outlet, warehouse, " +
-              'huge inventory, "shifting inventory", or lots of options.',
+              "Gemini review-authenticity assessment using Google Search grounding. " +
+              'assessment="UNVERIFIED" when grounding was not available.',
           }),
+
+        // Brands carried or affiliated with the showroom.
+        brands: z
+          .array(
+            z
+              .object({
+                name: z.string(),
+                type: z
+                  .string()
+                  .openapi({
+                    description:
+                      'Category label e.g. "Plumbing", "Tile", "Slabs", "Appliances".',
+                  }),
+                websiteUrl: z.string().optional().nullable(),
+              })
+              .passthrough(),
+          )
+          .optional()
+          .nullable()
+          .openapi({
+            description:
+              "Brands the showroom carries or affiliates with, extracted from reviews " +
+              "and Gemini's knowledge.",
+          }),
+
+        // Internal metadata — not for display; useful for debugging.
+        _meta: z
+          .object({
+            groundingUsed: z.boolean().optional(),
+            model: z.string().optional(),
+          })
+          .passthrough()
+          .optional()
+          .nullable(),
       })
       .passthrough()
       .optional()
       .nullable()
       .openapi({
         description:
-          "Structured inference from Workers-AI based on the review sample. " +
+          "Rich Gemini-powered structured inference based on the review sample. " +
+          "Includes homeowner-framed attributes, brand list, and review-authenticity " +
+          "assessment (Google Search grounded when available). " +
           "Absent when reviews were unavailable or the AI call failed.",
       }),
   })

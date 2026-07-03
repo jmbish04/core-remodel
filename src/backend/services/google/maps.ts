@@ -345,17 +345,22 @@ export class GoogleMapsService {
       throw new Error(`PLACES_DETAILS_ERROR: ${errMsg}`);
     }
 
-    // ── Gemini review summary + structured inference (via AI Gateway) ────────
-    // Replace Google's `reviewSummary` (which duplicates `generativeSummary`)
-    // with a Gemini structured response routed through the Cloudflare AI Gateway
-    // (google-ai-studio path). Yields four fields:
-    //   summary              — 2-3 sentence homeowner-facing précis  (→ reviewSummary)
-    //   inferred_price_point — "$"|"$$"|"$$$"|"$$$$"|null            (→ aiInference)
-    //   price_reasoning      — quoted phrase(s) from reviews         (→ aiInference)
-    //   is_large_selection   — warehouse/outlet/huge-inventory flag  (→ aiInference)
+    // ── Gemini review analysis + structured inference (via AI Gateway) ──────
+    // Replaces Google's `reviewSummary` with a richer homeowner-framed Gemini
+    // analysis using Google-Search grounding.
     //
-    // On any Gemini failure: block skipped entirely; Google's original reviewSummary
-    // is left intact and no `aiInference` key is written.
+    // Strategy:
+    //   1. PRIMARY PATH — enable grounding via config.tools=[{googleSearch:{}}].
+    //      Do NOT set responseSchema/responseMimeType (Gemini can't combine them
+    //      with grounding). Instruct the model in the prompt to emit exactly one
+    //      JSON object. Parse defensively (strip ```json fences, slice first {
+    //      to last }).
+    //   2. FALLBACK PATH — if the grounded call fails, retry with no tools +
+    //      responseMimeType:"application/json" + responseSchema. In this path,
+    //      reviewAuthenticity.assessment is forced to "UNVERIFIED".
+    //
+    // On any failure: block skipped; Google's original reviewSummary is left
+    // intact and no aiInference key is written.
     const reviews = data.reviews as
       | Array<{
           rating?: number;
@@ -393,78 +398,293 @@ export class GoogleMapsService {
           formattedAddress ? `Address: ${formattedAddress}` : null,
           googleMapsUri ? `Google Maps URL: ${googleMapsUri}` : null,
           placeId ? `Place ID: ${placeId}` : null,
-          rating != null ? `Overall rating: ${rating}/5 (${userRatingCount ?? "unknown"} total reviews)` : null,
+          rating != null
+            ? `Overall rating: ${rating}/5 (${userRatingCount ?? "unknown"} total reviews)`
+            : null,
         ]
           .filter(Boolean)
           .join("\n");
 
-        const prompt =
-          `You are writing for a HOMEOWNER (not a designer or trade pro) who is deciding whether to visit and buy from this Bay Area remodel showroom. ` +
-          `Give a FAIR, balanced summary — strengths and any caveats (trade-only vibes, appointment requirements, pricing).\n\n` +
-          `PLACE CONTEXT:\n${placeContext}\n\n` +
-          `REVIEW SAMPLE (${n} of ${userRatingCount ?? "unknown"} total reviews, overall ${rating ?? "unknown"}/5 stars):\n${reviewLines}\n\n` +
-          `Instructions:\n` +
-          `1. Write 2-3 concise, factual sentences on overall sentiment and what stands out. ` +
-          `Note that this is based on a sample of ${n} of ${userRatingCount ?? "unknown"} reviews and whether the sample seems consistent with the ${rating ?? "unknown"}-star average. No marketing fluff.\n` +
-          `2. Infer a price tier ONLY from explicit pricing language in the reviews: ` +
-          `budget/cheap/affordable → "$"; moderate/reasonable/mid-range → "$$"; mid-to-high/premium/upper-mid → "$$$"; luxury/very expensive/high-end-only → "$$$$". ` +
-          `If reviews mix tiers (e.g. "affordable tile" AND "mid-to-high-end slabs"), pick the CENTRAL tier ("$$" or "$$$") and explain in price_reasoning. ` +
-          `Return null for inferred_price_point when there is no pricing signal. Quote the relevant phrase(s) in price_reasoning.\n` +
-          `3. Set is_large_selection = true when reviews mention a large/extensive selection, outlet, warehouse, huge inventory, "shifting inventory", or lots of options; else false.\n\n` +
-          `Respond ONLY with a JSON object — no prose outside the JSON.`;
+        // ── JSON schema description embedded in prompt (for grounded path) ────
+        // Must describe every field because responseSchema is NOT set when
+        // grounding tools are active.
+        const JSON_SCHEMA_DESCRIPTION = `
+Output ONLY a single JSON object with this exact shape (no prose before or after):
+{
+  "summary": "<string: 2-3 fair, homeowner-facing sentences on overall sentiment and standout points — strengths AND caveats; no marketing fluff>",
+  "inferredPricePoint": "<one of: '$' | '$$' | '$$$' | '$$$$' | 'PRICE_LEVEL_UNSPECIFIED' | null>",
+  "priceReasoning": "<string or null: quote the review phrase(s) that drove the tier; null when no inference made>",
+  "attributes": {
+    "appointmentOnly":  { "value": <boolean>, "rationale": "<string: cite review language>" },
+    "flagshipLocation": { "value": <boolean>, "rationale": "<string: cite review language or knowledge>" },
+    "largeSelection":   { "value": <boolean>, "rationale": "<string: cite review language>" },
+    "bespokeCurated":   { "value": <boolean>, "rationale": "<string: cite review language; false if generic/overpriced/stale>" },
+    "tradeRepRequired": { "value": <boolean>, "rationale": "<string: quote review; if non-trade visitors welcomed despite signage, value=false and note that nuance>" }
+  },
+  "reviewAuthenticity": {
+    "assessment": "<one of: 'AUTHENTIC' | 'MOSTLY_AUTHENTIC' | 'MIXED' | 'SUSPICIOUS' | 'UNVERIFIED'>",
+    "rationale": "<string: explain your assessment>",
+    "sources": ["<URL used to cross-check>", "..."]
+  },
+  "brands": [
+    { "name": "<brand name>", "type": "<category e.g. Plumbing|Tile|Slabs|Appliances>", "websiteUrl": "<URL or empty string>" }
+  ]
+}
 
-        // Gemini responseSchema for structured JSON output.
-        const REVIEW_INSIGHT_SCHEMA = {
+Rules for each field:
+- inferredPricePoint: map explicit pricing language → budget/cheap/affordable="$", moderate/reasonable/mid-range="$$", mid-to-high/premium/upper-mid="$$$", luxury/very-expensive/high-end-only="$$$$". Mixed signals → central tier. Use "PRICE_LEVEL_UNSPECIFIED" when you consciously find NO pricing signal in the reviews (this is a clean, deliberate exit — NOT an error or a guess). Use null ONLY when the field genuinely cannot be produced.
+- priceReasoning: required when inferredPricePoint is one of the $ tiers; null otherwise.
+- attributes.tradeRepRequired: true when reviews indicate homeowners are turned away or must bring a trade pro to visit or buy. "Trade-only" pricing games (hidden prices, contractor discounts) are a RED FLAG for homeowners. But if reviews say non-trade visitors were welcomed despite trade-only signage, set value=false and capture that nuance in the rationale.
+- attributes.bespokeCurated: true when reviews genuinely rave about unique/mold-breaking selection even without marketing language; false when reviews call the selection overpriced, stale, or generic.
+- reviewAuthenticity: USE your Google Search grounding to cross-check whether the Google reviews look genuine vs bought/bot. Look for corroborating discussion on Reddit (r/ subreddit threads like "best tile SF", "best plumber Bay Area") and other sources. Put any URLs you consulted in the sources array.
+- brands: extract every brand the showroom carries or affiliates with from reviews + your knowledge. Include websiteUrl as a real URL when known, or empty string.`;
+
+        // ── System prompt ─────────────────────────────────────────────────────
+        const systemPrompt =
+          `You are a trusted advisor writing for a HOMEOWNER (not a designer or trade professional) ` +
+          `who is deciding whether to visit and potentially buy from this Bay Area remodel showroom. ` +
+          `Be FAIR and BALANCED — acknowledge genuine strengths but surface any caveats ` +
+          `(trade-only hostility, appointment requirements, pricing opacity, fake reviews). ` +
+          `Homeowner-hostile showrooms that require a trade rep or hide pricing are RED FLAGS — flag them clearly. ` +
+          `Showrooms that welcome non-trade visitors despite trade-only signage are a GOOD sign — note that.`;
+
+        // ── User prompt ───────────────────────────────────────────────────────
+        const userPrompt =
+          `PLACE CONTEXT:\n${placeContext}\n\n` +
+          `REVIEW SAMPLE (${n} of ${userRatingCount ?? "unknown"} total reviews, overall ${rating ?? "unknown"}/5 stars):\n` +
+          `${reviewLines}\n\n` +
+          `Note: this is a sample of ${n} of ${userRatingCount ?? "unknown"} reviews. ` +
+          `Consider whether the sample seems representative of the ${rating ?? "unknown"}-star average.\n\n` +
+          `${JSON_SCHEMA_DESCRIPTION}`;
+
+        // ── Gemini responseSchema for fallback (no-grounding) path ────────────
+        const FALLBACK_RESPONSE_SCHEMA = {
           type: "OBJECT",
           properties: {
             summary: { type: "STRING" },
-            inferred_price_point: {
+            inferredPricePoint: {
               type: "STRING",
               nullable: true,
-              enum: ["$", "$$", "$$$", "$$$$"],
+              enum: ["$", "$$", "$$$", "$$$$", "PRICE_LEVEL_UNSPECIFIED"],
             },
-            price_reasoning: { type: "STRING" },
-            is_large_selection: { type: "BOOLEAN" },
+            priceReasoning: { type: "STRING", nullable: true },
+            attributes: {
+              type: "OBJECT",
+              properties: {
+                appointmentOnly: {
+                  type: "OBJECT",
+                  properties: {
+                    value: { type: "BOOLEAN" },
+                    rationale: { type: "STRING" },
+                  },
+                  required: ["value", "rationale"],
+                },
+                flagshipLocation: {
+                  type: "OBJECT",
+                  properties: {
+                    value: { type: "BOOLEAN" },
+                    rationale: { type: "STRING" },
+                  },
+                  required: ["value", "rationale"],
+                },
+                largeSelection: {
+                  type: "OBJECT",
+                  properties: {
+                    value: { type: "BOOLEAN" },
+                    rationale: { type: "STRING" },
+                  },
+                  required: ["value", "rationale"],
+                },
+                bespokeCurated: {
+                  type: "OBJECT",
+                  properties: {
+                    value: { type: "BOOLEAN" },
+                    rationale: { type: "STRING" },
+                  },
+                  required: ["value", "rationale"],
+                },
+                tradeRepRequired: {
+                  type: "OBJECT",
+                  properties: {
+                    value: { type: "BOOLEAN" },
+                    rationale: { type: "STRING" },
+                  },
+                  required: ["value", "rationale"],
+                },
+              },
+              required: [
+                "appointmentOnly",
+                "flagshipLocation",
+                "largeSelection",
+                "bespokeCurated",
+                "tradeRepRequired",
+              ],
+            },
+            reviewAuthenticity: {
+              type: "OBJECT",
+              properties: {
+                assessment: {
+                  type: "STRING",
+                  enum: [
+                    "AUTHENTIC",
+                    "MOSTLY_AUTHENTIC",
+                    "MIXED",
+                    "SUSPICIOUS",
+                    "UNVERIFIED",
+                  ],
+                },
+                rationale: { type: "STRING" },
+                sources: { type: "ARRAY", items: { type: "STRING" } },
+              },
+              required: ["assessment", "rationale", "sources"],
+            },
+            brands: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  name: { type: "STRING" },
+                  type: { type: "STRING" },
+                  websiteUrl: { type: "STRING" },
+                },
+                required: ["name", "type", "websiteUrl"],
+              },
+            },
           },
-          required: ["summary", "inferred_price_point", "price_reasoning", "is_large_selection"],
+          required: [
+            "summary",
+            "inferredPricePoint",
+            "priceReasoning",
+            "attributes",
+            "reviewAuthenticity",
+            "brands",
+          ],
         };
 
-        const ai = await createGeminiAiGatewayClient(this.env);
-        const geminiResponse = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: [{ role: "user", parts: [{ text: prompt }] }],
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: REVIEW_INSIGHT_SCHEMA,
-          },
-        } as Parameters<typeof ai.models.generateContent>[0]);
-
-        // Extract text from the standard Gemini candidate parts shape.
-        const rawJson = (
-          (geminiResponse as any)?.candidates?.[0]?.content?.parts?.[0]?.text ??
-          (geminiResponse as any)?.text ??
-          ""
-        ).trim();
-
-        if (rawJson) {
-          type ReviewInsight = {
-            summary?: string;
-            inferred_price_point?: "$" | "$$" | "$$$" | "$$$$" | null;
-            price_reasoning?: string;
-            is_large_selection?: boolean;
+        // ── Type for the parsed rich AI inference ─────────────────────────────
+        type AttributeFlag = { value: boolean; rationale: string };
+        type RichReviewInsight = {
+          summary?: string;
+          inferredPricePoint?: "$" | "$$" | "$$$" | "$$$$" | "PRICE_LEVEL_UNSPECIFIED" | null;
+          priceReasoning?: string | null;
+          attributes?: {
+            appointmentOnly?: AttributeFlag;
+            flagshipLocation?: AttributeFlag;
+            largeSelection?: AttributeFlag;
+            bespokeCurated?: AttributeFlag;
+            tradeRepRequired?: AttributeFlag;
           };
+          reviewAuthenticity?: {
+            assessment?:
+              | "AUTHENTIC"
+              | "MOSTLY_AUTHENTIC"
+              | "MIXED"
+              | "SUSPICIOUS"
+              | "UNVERIFIED";
+            rationale?: string;
+            sources?: string[];
+          };
+          brands?: Array<{ name: string; type: string; websiteUrl: string }>;
+        };
 
-          let parsed: ReviewInsight | null = null;
+        // ── Helper: extract raw JSON text from a Gemini response ──────────────
+        function extractRawJson(geminiResp: unknown): string {
+          const raw = (
+            (geminiResp as any)?.candidates?.[0]?.content?.parts?.[0]?.text ??
+            (geminiResp as any)?.text ??
+            ""
+          ).trim();
+          return raw;
+        }
 
+        // ── Helper: parse JSON defensively (strips ```json fences) ───────────
+        function parseInsightJson(raw: string): RichReviewInsight | null {
+          // Strip possible ```json ... ``` fences.
+          let cleaned = raw.replace(/^```json\s*/i, "").replace(/```\s*$/, "").trim();
+          // Find the outermost JSON object.
+          const first = cleaned.indexOf("{");
+          const last = cleaned.lastIndexOf("}");
+          if (first === -1 || last === -1 || last <= first) return null;
+          cleaned = cleaned.slice(first, last + 1);
           try {
-            parsed = JSON.parse(rawJson) as ReviewInsight;
+            return JSON.parse(cleaned) as RichReviewInsight;
           } catch {
-            // Gemini output is not valid JSON — use raw text as the summary
-            // and skip structured inference fields.
-            console.warn("[placeDetails] Gemini returned non-JSON; using raw as summary.");
+            return null;
           }
+        }
 
-          const aiSummary = parsed?.summary ?? rawJson;
+        const ai = await createGeminiAiGatewayClient(this.env);
+        let parsed: RichReviewInsight | null = null;
+        let usedGrounding = false;
+
+        // ── PRIMARY: grounded call (Google Search + free-form JSON in prompt) ─
+        try {
+          const groundedResponse = await (ai.models.generateContent as Function)({
+            model: "gemini-2.5-flash",
+            contents: [
+              { role: "user", parts: [{ text: userPrompt }] },
+            ],
+            config: {
+              systemInstruction: systemPrompt,
+              tools: [{ googleSearch: {} }],
+              // NOTE: responseSchema and responseMimeType intentionally omitted —
+              // Gemini cannot combine structured JSON mode with grounding tools.
+            },
+          });
+
+          const rawJson = extractRawJson(groundedResponse);
+          if (rawJson) {
+            parsed = parseInsightJson(rawJson);
+            if (parsed) {
+              usedGrounding = true;
+              console.info("[placeDetails] Gemini grounded path succeeded.");
+            } else {
+              console.warn(
+                "[placeDetails] Gemini grounded response was not parseable JSON; falling back.",
+              );
+            }
+          }
+        } catch (groundedErr) {
+          console.warn(
+            "[placeDetails] Gemini grounded call failed; falling back to ungrounded JSON mode.",
+            groundedErr,
+          );
+        }
+
+        // ── FALLBACK: no-tools + strict JSON mode ─────────────────────────────
+        if (!parsed) {
+          const fallbackUserPrompt =
+            userPrompt +
+            `\n\nIMPORTANT: Google Search is NOT available for this call. ` +
+            `Set reviewAuthenticity.assessment = "UNVERIFIED" and reviewAuthenticity.sources = [].`;
+
+          const fallbackResponse = await (ai.models.generateContent as Function)({
+            model: "gemini-2.5-flash",
+            contents: [
+              { role: "user", parts: [{ text: fallbackUserPrompt }] },
+            ],
+            config: {
+              systemInstruction: systemPrompt,
+              responseMimeType: "application/json",
+              responseSchema: FALLBACK_RESPONSE_SCHEMA,
+            },
+          });
+
+          const rawJson = extractRawJson(fallbackResponse);
+          if (rawJson) {
+            parsed = parseInsightJson(rawJson) ?? (JSON.parse(rawJson) as RichReviewInsight);
+            // Enforce UNVERIFIED when grounding wasn't used.
+            if (parsed?.reviewAuthenticity) {
+              parsed.reviewAuthenticity.assessment = "UNVERIFIED";
+              parsed.reviewAuthenticity.sources = [];
+            }
+            console.info("[placeDetails] Gemini fallback (no-grounding) path succeeded.");
+          }
+        }
+
+        // ── Write results to data ─────────────────────────────────────────────
+        if (parsed) {
+          const aiSummary = parsed.summary ?? "";
 
           data.reviewSummary = {
             text: {
@@ -473,13 +693,19 @@ export class GoogleMapsService {
             },
           };
 
-          if (parsed) {
-            data.aiInference = {
-              inferredPricePoint: parsed.inferred_price_point ?? null,
-              priceReasoning: parsed.price_reasoning ?? null,
-              isLargeSelection: !!parsed.is_large_selection,
-            };
-          }
+          data.aiInference = {
+            summary: aiSummary,
+            inferredPricePoint: parsed.inferredPricePoint ?? null,
+            priceReasoning: parsed.priceReasoning ?? null,
+            attributes: parsed.attributes ?? null,
+            reviewAuthenticity: parsed.reviewAuthenticity ?? {
+              assessment: "UNVERIFIED",
+              rationale: "No authenticity data produced.",
+              sources: [],
+            },
+            brands: parsed.brands ?? [],
+            _meta: { groundingUsed: usedGrounding, model: "gemini-2.5-flash" },
+          };
         }
       } catch (aiErr) {
         // Gemini failure is non-fatal — leave Google's original reviewSummary intact

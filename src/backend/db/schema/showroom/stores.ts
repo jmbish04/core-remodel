@@ -329,6 +329,69 @@ export const showroomStores = sqliteTable("showroom_stores", {
    */
   accessLevelReasoning: text("access_level_reasoning"),
 
+  // ── AI review insight (Places-details proxy output) ───────────────────
+
+  /**
+   * Full structured Gemini review-insight object produced by the Places-details
+   * proxy after analysing Google reviews for this showroom.
+   *
+   * Shape:
+   * ```json
+   * {
+   *   "summary": "...",
+   *   "inferredPricePoint": "$$$$",
+   *   "priceReasoning": "...",
+   *   "attributes": {
+   *     "appointmentOnly":    { "value": true,  "rationale": "..." },
+   *     "flagshipLocation":   { "value": false, "rationale": "..." },
+   *     "largeSelection":     { "value": true,  "rationale": "..." },
+   *     "bespokeCurated":     { "value": false, "rationale": "..." },
+   *     "tradeRepRequired":   { "value": true,  "rationale": "..." }
+   *   },
+   *   "reviewAuthenticity": {
+   *     "assessment": "HIGH",
+   *     "rationale": "...",
+   *     "sources": ["..."]
+   *   },
+   *   "brands": [
+   *     { "name": "Waterworks", "type": "plumbing", "websiteUrl": "https://..." }
+   *   ]
+   * }
+   * ```
+   *
+   * IMPORTANT: the individual boolean columns (`isAppointmentOnly`,
+   * `isFlagshipLocation`, `isLargeSelection`, `isBespoke`, `isTradeRepRequired`)
+   * remain the authoritative queryable source of truth for filtering and
+   * badge logic.  This column preserves the AI's full rationale, review-
+   * authenticity assessment, and detected brand list for display-only use.
+   * Do NOT drive query predicates from this JSON blob — read the typed boolean
+   * columns instead.
+   *
+   * Nullable — null until the Places-details proxy has run for this store.
+   */
+  reviewAiInsight: text("review_ai_insight", { mode: "json" }).$type<{
+    summary: string;
+    inferredPricePoint: "$" | "$$" | "$$$" | "$$$$";
+    priceReasoning: string;
+    attributes: {
+      appointmentOnly: { value: boolean; rationale: string };
+      flagshipLocation: { value: boolean; rationale: string };
+      largeSelection: { value: boolean; rationale: string };
+      bespokeCurated: { value: boolean; rationale: string };
+      tradeRepRequired: { value: boolean; rationale: string };
+    };
+    reviewAuthenticity: {
+      assessment: string;
+      rationale: string;
+      sources: string[];
+    };
+    brands: Array<{
+      name: string;
+      type: string;
+      websiteUrl: string;
+    }>;
+  }>(),
+
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),

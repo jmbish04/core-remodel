@@ -159,9 +159,24 @@ export interface GooglePlaceDetails {
    * structured `priceLevel`; `isLargeSelection` seeds the Large-selection flag.
    */
   aiInference?: {
-    inferredPricePoint?: "$" | "$$" | "$$$" | "$$$$" | null;
+    inferredPricePoint?: "$" | "$$" | "$$$" | "$$$$" | "PRICE_LEVEL_UNSPECIFIED" | null;
     priceReasoning?: string | null;
-    isLargeSelection?: boolean;
+    /** Per-attribute detection with AI rationale, from the review analysis. */
+    attributes?: {
+      appointmentOnly?: { value?: boolean; rationale?: string };
+      flagshipLocation?: { value?: boolean; rationale?: string };
+      largeSelection?: { value?: boolean; rationale?: string };
+      bespokeCurated?: { value?: boolean; rationale?: string };
+      tradeRepRequired?: { value?: boolean; rationale?: string };
+    } | null;
+    /** Whether the Google reviews look genuine (Gemini + Google-Search grounding). */
+    reviewAuthenticity?: {
+      assessment?: string;
+      rationale?: string;
+      sources?: string[];
+    } | null;
+    /** Brands the showroom carries, extracted from reviews/knowledge. */
+    brands?: Array<{ name?: string; type?: string; websiteUrl?: string }> | null;
   } | null;
 }
 
