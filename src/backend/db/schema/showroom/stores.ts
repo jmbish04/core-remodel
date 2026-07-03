@@ -211,6 +211,41 @@ export const showroomStores = sqliteTable("showroom_stores", {
    */
   overviewNoteMarkdown: text("overview_note_markdown"),
 
+  // ── Scrape / RAG fields ───────────────────────────────────────────────
+  /**
+   * Stable UUID minted once per showroom before the Browser Rendering scrape
+   * begins.  Every Vectorize embedding produced from this showroom's scraped
+   * pages is tagged with this value so all content can be retrieved together
+   * for RAG queries.  Also used as the logical FK in `browser_run_pages.rag_uuid`
+   * (documented soft-link; not a hard FK because it targets a text column).
+   */
+  ragUuid: text("rag_uuid"),
+
+  /**
+   * Cloudflare Images delivery URL of the scraped storefront or interior photo
+   * chosen as the hero background in the showroom viewport.
+   * Populated by the browser scrape workflow after the best candidate image is
+   * uploaded to CF Images.
+   * Example: "https://imagedelivery.net/<accountHash>/<imageId>/public"
+   */
+  heroImageCfImagesUrl: text("hero_image_cf_images_url"),
+
+  /**
+   * Scrape pipeline status for this showroom.  Drives the status badge in the
+   * showroom viewport and gates the "Start Scrape" / "Re-scrape" UI actions.
+   *
+   * - "idle"     — no scrape has been requested yet (default).
+   * - "pending"  — scrape job enqueued but Browser Rendering has not started.
+   * - "running"  — Browser Rendering workflow is actively crawling pages.
+   * - "complete" — scrape finished; `browser_run_pages` rows are populated.
+   * - "failed"   — scrape workflow terminated with an unrecoverable error.
+   */
+  scrapeStatus: text("scrape_status", {
+    enum: ["idle", "pending", "running", "complete", "failed"],
+  })
+    .notNull()
+    .default("idle"),
+
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),

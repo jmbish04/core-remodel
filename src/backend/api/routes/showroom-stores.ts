@@ -35,6 +35,7 @@ import {
   sourcingSweepSessions,
   showroomPocs,
   showroomProductMappings,
+  browserRunPages,
 } from "@backend/db/schema/showroom/index";
 import {
   brands,
@@ -1350,9 +1351,120 @@ showroomStoresRouter.post("/", async (c) => {
     c.executionCtx.waitUntil(
       faviconService.hydrateShowroomIcon(c.env, inserted.id, data.websiteUrl),
     );
+
+    // Post-submit website SCRAPE workflow: mint a RAG UUID, mark the store
+    // "pending", then kick the ShowroomScrapeWorkflow. The workflow crawls the
+    // site, archives markdown to R2, screenshots to CF Images, embeds into
+    // Vectorize, extracts brands/Instagram/hours/hero, and hydrates the store.
+    const ragUuid = crypto.randomUUID();
+    c.executionCtx.waitUntil(
+      (async () => {
+        try {
+          await db
+            .update(showroomStores)
+            .set({ ragUuid, scrapeStatus: "pending", updatedAt: new Date() })
+            .where(eq(showroomStores.id, inserted.id));
+          await c.env.SHOWROOM_SCRAPE_WORKFLOW.create({
+            params: {
+              showroomId: inserted.id,
+              websiteUrl: data.websiteUrl as string,
+              ragUuid,
+            },
+          });
+        } catch (error) {
+          console.error(
+            `showroom scrape workflow trigger failed for ${inserted.id}:`,
+            error,
+          );
+        }
+      })(),
+    );
   }
 
   return c.json({ store: inserted }, 201);
+});
+
+/**
+ * GET /:id/scrape — Scrape status + persisted browser-run pages for a showroom.
+ *
+ * Powers the viewport scrape-status badge and the results modal:
+ *   {
+ *     scrapeStatus: "idle"|"pending"|"running"|"complete"|"failed",
+ *     ragUuid: string | null,
+ *     heroImageCfImagesUrl: string | null,
+ *     pages: BrowserRunPage[]   // newest first
+ *   }
+ */
+showroomStoresRouter.get("/:id/scrape", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  const [store] = await db
+    .select({
+      scrapeStatus: showroomStores.scrapeStatus,
+      ragUuid: showroomStores.ragUuid,
+      heroImageCfImagesUrl: showroomStores.heroImageCfImagesUrl,
+    })
+    .from(showroomStores)
+    .where(eq(showroomStores.id, storeId))
+    .limit(1);
+
+  if (!store) return c.json({ success: false, error: "Store not found" }, 404);
+
+  const pages = await db
+    .select()
+    .from(browserRunPages)
+    .where(eq(browserRunPages.showroomId, storeId))
+    .orderBy(desc(browserRunPages.timestamp));
+
+  return c.json({
+    scrapeStatus: store.scrapeStatus,
+    ragUuid: store.ragUuid,
+    heroImageCfImagesUrl: store.heroImageCfImagesUrl,
+    pages,
+  });
+});
+
+/**
+ * POST /:id/scrape — Manually (re-)trigger the scrape workflow for a showroom
+ * that already has a websiteUrl. Mints a fresh ragUuid, sets status "pending",
+ * and creates the workflow. Useful for retries after a "failed" run.
+ */
+showroomStoresRouter.post("/:id/scrape", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  const [store] = await db
+    .select({ websiteUrl: showroomStores.websiteUrl })
+    .from(showroomStores)
+    .where(eq(showroomStores.id, storeId))
+    .limit(1);
+
+  if (!store) return c.json({ success: false, error: "Store not found" }, 404);
+  if (!store.websiteUrl || store.websiteUrl.length === 0) {
+    return c.json(
+      { success: false, error: "Store has no websiteUrl to scrape" },
+      400,
+    );
+  }
+
+  const ragUuid = crypto.randomUUID();
+  await db
+    .update(showroomStores)
+    .set({ ragUuid, scrapeStatus: "pending", updatedAt: new Date() })
+    .where(eq(showroomStores.id, storeId));
+
+  await c.env.SHOWROOM_SCRAPE_WORKFLOW.create({
+    params: { showroomId: storeId, websiteUrl: store.websiteUrl, ragUuid },
+  });
+
+  return c.json({ success: true, ragUuid, scrapeStatus: "pending" }, 202);
 });
 
 /**

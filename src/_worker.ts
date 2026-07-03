@@ -24,6 +24,7 @@ export { GAS_A2A } from "./backend/a2a-v2/server";
 export { ImageProcessingWorkflow } from "./backend/services/image-processor/workflow.js";
 export { ImageBatchProcessingWorkflow } from "./backend/services/image-processor/batch-workflow";
 export { ChecklistRationaleWorkflow } from "./backend/services/checklist-rationale-workflow";
+export { ShowroomScrapeWorkflow } from "./backend/services/showroom-scrape-workflow";
 export { ResearchAgent } from "./backend/ai/agents/ResearchAgent";
 export { PermitIntelligenceAgent } from "./backend/ai/agents/PermitIntelligenceAgent/index";
 export { ShowroomResearchAgent } from "./backend/ai/agents/ShowroomResearchAgent/index";
