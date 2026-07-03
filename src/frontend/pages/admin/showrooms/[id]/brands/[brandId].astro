@@ -1,0 +1,18 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ShowroomBrandProducts } from "@/components/showroom/ShowroomBrandProducts";
+
+const { id, brandId } = Astro.params;
+const showroomId = id ? Number.parseInt(id, 10) : NaN;
+const brand = brandId ? Number.parseInt(brandId, 10) : NaN;
+if (!Number.isFinite(showroomId) || !Number.isFinite(brand)) {
+  return Astro.redirect("/admin/showroom/showrooms");
+}
+---
+
+<BaseLayout
+  title={`Showroom ${showroomId} · Brand ${brand} — The Monolith`}
+  description="Split viewport: this brand's products associated with the showroom vs. available to associate."
+>
+  <ShowroomBrandProducts client:only="react" showroomId={showroomId} brandId={brand} />
+</BaseLayout>

@@ -3,6 +3,8 @@ import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
 import { showroomStores } from "./stores";
 import { materialScheduleItems } from "../materials/schedule_item";
+// Direct leaf import — avoids circular reference through the brands barrel
+import { brands } from "../brands/brands";
 
 /**
  * Store Products — individual items sourced or tracked at a showroom location.
@@ -22,6 +24,15 @@ export const showroomStoreProducts = sqliteTable("showroom_store_products", {
     { onDelete: "set null" }
   ),
 
+  /**
+   * The brand this product belongs to (nullable — may be populated after
+   * initial entry, or left null for unbranded / generic items).
+   * References the top-level brands table; cascades to null on brand deletion.
+   */
+  brandId: integer("brand_id").references(() => brands.id, {
+    onDelete: "set null",
+  }),
+
   timestamp: integer("timestamp", { mode: "timestamp" }).default(
     sql`(unixepoch())`
   ),
@@ -40,6 +51,13 @@ export const showroomStoreProducts = sqliteTable("showroom_store_products", {
   leadTime: text("lead_time"),
   possibleDiscounts: text("possible_discounts"),
   tradeDiscount: text("trade_discount"),
+
+  /**
+   * Coarse product type / category used to group the global product list across
+   * all brands (e.g. "Faucet", "Range", "Tile", "Sink"). Nullable — user-set;
+   * populated when the homeowner categorises a product.
+   */
+  productType: text("product_type"),
 
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()

@@ -1,11 +1,14 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import { ShowroomsDirectoryApp } from "@/components/showroom/ShowroomsDirectoryApp";
+
+// Bare /admin/showroom/showrooms defaults to the map tab. The island rewrites
+// the URL to /admin/showroom/showrooms/map on first tab interaction.
 ---
 
 <BaseLayout
   title="Showrooms — The Monolith"
-  description="Bay Area showroom directory with a hub map, filters, and AI coverage-gap discovery driven by your materials list."
+  description="Bay Area showroom directory with a hub map, filters, and grouped list/directory views."
 >
-  <ShowroomsDirectoryApp client:only="react" />
+  <ShowroomsDirectoryApp client:only="react" initialTab="map" />
 </BaseLayout>

@@ -42,6 +42,19 @@ export const showroomImages = sqliteTable(
     ogDescription: text("og_description"),
     metadataJson: text("metadata_json"),
 
+    // ── Polaroid back note ────────────────────────────────────────────────
+    /**
+     * PlateJS-rendered HTML shown on the back of the polaroid card for this
+     * visit photo. Null when no note has been added.
+     */
+    noteHtml: text("note_html"),
+
+    /**
+     * The SAME polaroid note serialized to Markdown by PlateJS.
+     * Portable source of truth for export or AI context.
+     */
+    noteMarkdown: text("note_markdown"),
+
     /** HITL review state — see product_images.review_status (junk rejection). */
     reviewStatus: text("review_status", {
       enum: ["pending", "approved", "rejected"],

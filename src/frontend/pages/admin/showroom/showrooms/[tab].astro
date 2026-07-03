@@ -1,0 +1,28 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ShowroomsDirectoryApp } from "@/components/showroom/ShowroomsDirectoryApp";
+
+type Tab = "map" | "list" | "directory";
+const VALID: Tab[] = ["map", "list", "directory"];
+
+const raw = Astro.params.tab;
+const tab: Tab = VALID.includes(raw as Tab) ? (raw as Tab) : "map";
+
+// Normalize unknown segments to the map default so the URL always matches state.
+if (!VALID.includes(raw as Tab)) {
+  return Astro.redirect("/admin/showroom/showrooms/map");
+}
+
+const TAB_LABEL: Record<Tab, string> = {
+  map: "Map",
+  list: "List",
+  directory: "Directory",
+};
+---
+
+<BaseLayout
+  title={`Showrooms · ${TAB_LABEL[tab]} — The Monolith`}
+  description="Bay Area showroom directory with a hub map, filters, and grouped list/directory views."
+>
+  <ShowroomsDirectoryApp client:only="react" initialTab={tab} />
+</BaseLayout>

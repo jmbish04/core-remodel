@@ -1,0 +1,24 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { StoreViewportApp } from "@/components/showroom/StoreViewportApp";
+
+const VALID_SECTIONS = ["brands-products", "notes", "photos"] as const;
+type SectionKey = (typeof VALID_SECTIONS)[number];
+
+const { id, section } = Astro.params;
+const storeId = id ? Number.parseInt(id, 10) : NaN;
+if (!Number.isFinite(storeId)) {
+  return Astro.redirect("/admin/showroom/showrooms");
+}
+
+const initialSection: SectionKey = VALID_SECTIONS.includes(section as SectionKey)
+  ? (section as SectionKey)
+  : "brands-products";
+---
+
+<BaseLayout
+  title={`Showroom ${storeId} — The Monolith`}
+  description="Single showroom viewport: brands, products, visit notes, and photos."
+>
+  <StoreViewportApp client:only="react" id={storeId} initialSection={initialSection} />
+</BaseLayout>

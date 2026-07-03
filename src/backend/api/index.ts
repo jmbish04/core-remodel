@@ -62,11 +62,15 @@ import { shoppingJournalRouter } from "./routes/shopping-journal";
 import { adminConfigRouter } from "./routes/admin-config";
 import { dialerRouter } from "./routes/dialer";
 import { showroomStoresRouter } from "./routes/showroom-stores";
+import { showroomProductsRouter } from "./routes/showroom-products";
+import { brandsRouter } from "./routes/brands";
 import { showroomSeedRouter } from "./routes/showroom-seed";
 import { materialsRouter } from "./routes/materials";
 import { showroomGapsRouter } from "./routes/showroom-gaps";
 import { showroomCatalogRouter } from "./routes/showroom-catalog";
 import { showroomScanRouter } from "./routes/showroom-scan";
+import { placesRouter } from "./routes/places";
+import { adminIntegrationsRouter } from "./routes/admin-integrations";
 import { requireAccessAuth } from "@backend/utils/access";
 
 export type Variables = {
@@ -100,8 +104,14 @@ app.use("/api/shopping-journal", requireAccessAuth);
 app.use("/api/shopping-journal/*", requireAccessAuth);
 app.use("/api/showroom-stores", requireAccessAuth);
 app.use("/api/showroom-stores/*", requireAccessAuth);
+app.use("/api/showroom-products", requireAccessAuth);
+app.use("/api/showroom-products/*", requireAccessAuth);
+app.use("/api/brands", requireAccessAuth);
+app.use("/api/brands/*", requireAccessAuth);
 app.use("/api/materials", requireAccessAuth);
 app.use("/api/materials/*", requireAccessAuth);
+app.use("/api/places", requireAccessAuth);
+app.use("/api/places/*", requireAccessAuth);
 app.use("/api/bid-portfolios/*", async (c, next) => {
   // Public routes do not require auth
   const path = new URL(c.req.url).pathname;
@@ -168,11 +178,17 @@ app.route("/api/analytics", analyticsRouter);
 app.route("/api/truth-table", truthTableRouter);
 app.route("/api/shopping-journal", shoppingJournalRouter);
 app.route("/api/showroom-stores", showroomStoresRouter);
+app.route("/api/showroom-products", showroomProductsRouter);
+app.route("/api/brands", brandsRouter);
 app.route("/api/showroom-stores", showroomSeedRouter);
 app.route("/api/showroom-stores", showroomGapsRouter);
 app.route("/api/showroom-stores", showroomCatalogRouter);
 app.route("/api/showroom-stores", showroomScanRouter);
 app.route("/api/materials", materialsRouter);
+app.route("/api/places", placesRouter);
+// adminIntegrationsRouter mounts under /api/admin/integrations — already covered
+// by the /api/admin/* requireAccessAuth middleware above.
+app.route("/api/admin/integrations", adminIntegrationsRouter);
 app.route("/", openapiRouter);
 
 export { app };

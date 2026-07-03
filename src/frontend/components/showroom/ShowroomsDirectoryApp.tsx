@@ -14,10 +14,11 @@
  * / click-to-email contact links.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AppWindow,
   Archive,
+  Armchair,
   Blocks,
   CalendarClock,
   ChevronDown,
@@ -28,6 +29,7 @@ import {
   Flame,
   Globe,
   Grid3x3,
+  Instagram,
   Layers,
   LayoutList,
   Lightbulb,
@@ -50,6 +52,7 @@ import {
 import type { ComponentType } from "react";
 import { toast } from "sonner";
 
+import { CollapsibleGroup, useAccordionGroup } from "@/components/CollapsibleGroup";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -70,8 +73,15 @@ import {
   MarkerContent,
   MarkerPopup,
 } from "@/components/ui/map";
-import { GapPanel } from "@/components/showroom/GapPanel";
-
+import {
+  formatOpeningHours,
+  mapPlaceToHoursJson,
+  mapPlaceToIntake,
+  type GooglePlaceDetails,
+} from "./intake/places-mapper";
+import { HoursEditor } from "./intake/HoursEditor";
+import { FlagsEditor } from "./intake/FlagsEditor";
+import { DEFAULT_HOURS, type HoursJson } from "./intake/hours-types";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Store {
@@ -99,6 +109,8 @@ interface Store {
   emailAddress: string | null;
   locationAddress: string | null;
   scale: string | null;
+  instagramUrl: string | null;
+  iconCfImagesUrl: string | null;
 }
 
 interface Category {
@@ -164,7 +176,62 @@ const CATEGORY_ICONS: { test: RegExp; Icon: ComponentType<{ className?: string }
   { test: /hardware|hinge|lock|handle|knob/i, Icon: Wrench },
 ];
 
+/**
+ * List-tab category-group header icons — colorful, semantic tints (POP, not muted).
+ * Keyed by a keyword regex against the category-group label so it matches whatever
+ * the backend names its categories (e.g. "Lighting", "Bath & Plumbing", "Tile / Stone").
+ */
+interface CategoryIconStyle {
+  Icon: ComponentType<{ className?: string }>;
+  className: string; // tint bg + fg
+}
+
+const CATEGORY_ICON_RULES: { test: RegExp; style: CategoryIconStyle }[] = [
+  { test: /light|led|lamp|chandelier|sconce|illumin/i, style: { Icon: Lightbulb, className: "bg-amber-500/15 text-amber-400" } },
+  { test: /plumb|bath|faucet|sink|shower|tub|toilet|valve|steam|vanity/i, style: { Icon: Droplets, className: "bg-sky-500/15 text-sky-400" } },
+  { test: /tile|stone|porcelain|ceramic|slab|paver|mosaic|marble|quartz|granite/i, style: { Icon: Grid3x3, className: "bg-stone-400/15 text-stone-300" } },
+  { test: /kitchen|appliance|cook|range|oven|refriger|hood|induction|dishwash/i, style: { Icon: Utensils, className: "bg-emerald-500/15 text-emerald-400" } },
+  { test: /hardware|hinge|lock|handle|knob/i, style: { Icon: Wrench, className: "bg-orange-500/15 text-orange-400" } },
+  { test: /door|entry|pivot/i, style: { Icon: DoorOpen, className: "bg-rose-500/15 text-rose-400" } },
+  { test: /floor|wood|hardwood|vinyl|plank|laminate/i, style: { Icon: Layers, className: "bg-yellow-600/15 text-yellow-500" } },
+  { test: /furnitur|sofa|seat|chair|cabinet|millwork/i, style: { Icon: Armchair, className: "bg-fuchsia-500/15 text-fuchsia-400" } },
+  { test: /paint|color|finish/i, style: { Icon: PaintBucket, className: "bg-violet-500/15 text-violet-400" } },
+  { test: /window|sash|glaz/i, style: { Icon: AppWindow, className: "bg-cyan-500/15 text-cyan-400" } },
+  { test: /closet|wardrobe|storage|pantry|organiz/i, style: { Icon: Archive, className: "bg-lime-500/15 text-lime-400" } },
+  { test: /concrete|microcement|cement|masonry|plaster|stucco/i, style: { Icon: Blocks, className: "bg-zinc-400/15 text-zinc-300" } },
+  { test: /fireplace|hearth/i, style: { Icon: Flame, className: "bg-red-500/15 text-red-400" } },
+];
+
+const DEFAULT_CATEGORY_ICON: CategoryIconStyle = {
+  Icon: StoreIcon,
+  className: "bg-muted text-muted-foreground",
+};
+
+function categoryIconStyleFor(label: string): CategoryIconStyle {
+  for (const { test, style } of CATEGORY_ICON_RULES) {
+    if (test.test(label)) return style;
+  }
+  return DEFAULT_CATEGORY_ICON;
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Format a US 10-digit phone as "(###) ### - ####". Any string that doesn't
+ * reduce to exactly 10 digits is returned unchanged (still valid for a tel: link).
+ */
+function formatPhone(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const digits = raw.replace(/\D/g, "");
+  const ten = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+  if (ten.length !== 10) return raw;
+  return `(${ten.slice(0, 3)}) ${ten.slice(3, 6)} - ${ten.slice(6)}`;
+}
+
+/** tel: href — strip to dialable characters (digits + leading +). */
+function telHref(raw: string): string {
+  return `tel:${raw.replace(/[^\d+]/g, "")}`;
+}
 
 async function api<T>(url: string): Promise<T> {
   const res = await fetch(url, { credentials: "include" });
@@ -307,9 +374,18 @@ function isOpenNow(store: Store, pst: PstNow): boolean {
 /** Rounded logo placeholder + floating price badge. */
 function LogoBadge({ store }: { store: Store }) {
   const Icon = categoryIconFor(store);
+  const [iconBroken, setIconBroken] = useState(false);
+  const showFavicon = Boolean(store.iconCfImagesUrl) && !iconBroken;
   return (
     <div className="relative shrink-0">
-      {Icon ? (
+      {showFavicon ? (
+        <img
+          src={store.iconCfImagesUrl as string}
+          alt=""
+          onError={() => setIconBroken(true)}
+          className="size-11 rounded-full bg-card object-contain ring-1 ring-border/40"
+        />
+      ) : Icon ? (
         <div className="flex size-11 items-center justify-center rounded-full bg-muted text-muted-foreground ring-1 ring-border/60">
           <Icon className="size-5" />
         </div>
@@ -466,7 +542,7 @@ function HoursFooter({ store, pst, className }: { store: Store; pst: PstNow; cla
   const isWeekday = pst.day >= 1 && pst.day <= 5;
   const weekendAppliesToday = !isWeekday && weekendHoursApplyToday(store.weekendHours, pst.day);
   return (
-    <div className={`grid grid-cols-3 gap-2 border-t border-border/40 pt-2 ${className ?? ""}`}>
+    <div className={`grid grid-cols-3 gap-2 ${className ?? ""}`}>
       <HoursColumn
         label="Mon–Fri"
         text={store.weekdayHours}
@@ -494,7 +570,13 @@ function HoursFooter({ store, pst, className }: { store: Store; pst: PstNow; cla
 
 /** Click-to-call / click-to-email / website links (stop card navigation). */
 function ContactRow({ store, className }: { store: Store; className?: string }) {
-  if (!store.phoneNumber && !store.emailAddress && !store.websiteUrl) return null;
+  if (
+    !store.phoneNumber &&
+    !store.emailAddress &&
+    !store.websiteUrl &&
+    !store.instagramUrl
+  )
+    return null;
   const stop = (e: React.MouseEvent) => e.stopPropagation();
   return (
     <div
@@ -532,6 +614,18 @@ function ContactRow({ store, className }: { store: Store; className?: string }) 
           Website
         </a>
       )}
+      {store.instagramUrl && (
+        <a
+          href={store.instagramUrl}
+          target="_blank"
+          rel="noreferrer"
+          onClick={stop}
+          className="relative z-10 inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+        >
+          <Instagram className="size-3" />
+          Instagram
+        </a>
+      )}
     </div>
   );
 }
@@ -540,45 +634,51 @@ function ContactRow({ store, className }: { store: Store; className?: string }) 
 
 function ShowroomCard({ store, pst }: { store: Store; pst: PstNow }) {
   return (
-    <article className="group relative flex flex-col rounded-xl border border-border/60 bg-background/40 p-4 transition-colors hover:bg-background/60">
-      <div className="flex items-start gap-3">
-        <LogoBadge store={store} />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
-            {/* Stretched link makes the whole card clickable; inner links opt out via z-10. */}
-            <a
-              href={`/admin/showroom/store/${store.id}`}
-              className="line-clamp-1 text-sm font-medium after:absolute after:inset-0 after:content-['']"
-            >
-              {store.name}
-            </a>
-            {store.isFlagshipLocation && <FlagshipBadge />}
+    <article className="group relative flex flex-col gap-4 rounded-xl bg-card p-4 ring-1 ring-border/40 transition-colors hover:bg-muted/40 sm:flex-row sm:items-stretch">
+      {/* Left: identity + focus */}
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start gap-3">
+          <LogoBadge store={store} />
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Stretched link makes the whole card clickable; inner links opt out via z-10. */}
+              <a
+                href={`/admin/showroom/store/${store.id}`}
+                className="line-clamp-1 text-sm font-medium after:absolute after:inset-0 after:content-['']"
+              >
+                {store.name}
+              </a>
+              {store.isFlagshipLocation && <FlagshipBadge />}
+            </div>
+            {store.cityName && (
+              <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
+                <MapPin className="size-3" />
+                {store.cityName}
+              </div>
+            )}
+            {store.categories.length > 0 && (
+              <div className="mt-1.5">
+                <CategoryTags categories={store.categories} max={5} />
+              </div>
+            )}
           </div>
-          {store.cityName && (
-            <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-              <MapPin className="size-3" />
-              {store.cityName}
-            </div>
-          )}
-          {store.categories.length > 0 && (
-            <div className="mt-1.5">
-              <CategoryTags categories={store.categories} />
-            </div>
-          )}
         </div>
+
+        <div className="mt-3">
+          <RatingRow store={store} />
+        </div>
+
+        {store.inventoryFocus && (
+          <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{store.inventoryFocus}</p>
+        )}
+
+        <ContactRow store={store} className="mt-3" />
       </div>
 
-      <div className="mt-3">
-        <RatingRow store={store} />
+      {/* Right: hours (fixed-ish width on desktop, full-width stacked on mobile) */}
+      <div className="shrink-0 border-t border-border/40 pt-3 sm:w-64 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
+        <HoursFooter store={store} pst={pst} />
       </div>
-
-      {store.inventoryFocus && (
-        <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{store.inventoryFocus}</p>
-      )}
-
-      <HoursFooter store={store} pst={pst} className="mt-3" />
-
-      <ContactRow store={store} className="mt-2" />
     </article>
   );
 }
@@ -876,7 +976,7 @@ function EmptyState() {
 
 function CardGrid({ stores, pst }: { stores: Store[]; pst: PstNow }) {
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+    <div className="flex flex-col gap-3">
       {stores.map((s) => (
         <ShowroomCard key={s.id} store={s} pst={pst} />
       ))}
@@ -895,6 +995,10 @@ function MapView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
     }
     return map;
   }, [stores]);
+
+  const hubEntries = useMemo(() => [...byHub.entries()], [byHub]);
+  const hubKeys = useMemo(() => hubEntries.map(([route]) => route), [hubEntries]);
+  const { openKey, toggle } = useAccordionGroup(hubKeys);
 
   return (
     <div className="space-y-4">
@@ -938,7 +1042,34 @@ function MapView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
         </GeoMap>
       </Card>
 
-      {stores.length === 0 ? <EmptyState /> : <CardGrid stores={stores} pst={pst} />}
+      {stores.length === 0 ? (
+        <EmptyState />
+      ) : (
+        <div>
+          {hubEntries.map(([route, hubStores]) => (
+            <CollapsibleGroup
+              key={route}
+              open={openKey === route}
+              onToggle={() => toggle(route)}
+              className="mt-8 first:mt-0"
+              header={
+                <>
+                  <MapPin className="size-4 text-sky-400" />
+                  <h2 className="text-sm font-semibold uppercase tracking-wide">
+                    {HUB_LABEL[route]}
+                  </h2>
+                  <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+                    {hubStores.length}
+                  </span>
+                  <span className="ml-auto h-px flex-1 bg-border/40" />
+                </>
+              }
+            >
+              <CardGrid stores={hubStores} pst={pst} />
+            </CollapsibleGroup>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -948,25 +1079,48 @@ function MapView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
 function GroupedView({
   groups,
   pst,
+  withCategoryIcon = false,
 }: {
   groups: [string, Store[]][];
   pst: PstNow;
+  /** List tab: render a colorful lucide icon chip in each group header. */
+  withCategoryIcon?: boolean;
 }) {
+  const orderedKeys = useMemo(() => groups.map(([label]) => label), [groups]);
+  const { openKey, toggle } = useAccordionGroup(orderedKeys);
+
   if (groups.length === 0) return <EmptyState />;
   return (
     <div>
-      {groups.map(([label, groupStores]) => (
-        <section key={label} className="mt-10 first:mt-0">
-          <div className="mb-3 flex items-center gap-3">
-            <h2 className="text-base font-semibold">{label}</h2>
-            <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
-              {groupStores.length}
-            </span>
-            <span className="ml-auto h-px flex-1 bg-border/40" />
-          </div>
-          <CardGrid stores={groupStores} pst={pst} />
-        </section>
-      ))}
+      {groups.map(([label, groupStores]) => {
+        const style = withCategoryIcon ? categoryIconStyleFor(label) : null;
+        return (
+          <CollapsibleGroup
+            key={label}
+            open={openKey === label}
+            onToggle={() => toggle(label)}
+            className="mt-10 first:mt-0"
+            header={
+              <>
+                {style && (
+                  <span
+                    className={`flex size-7 shrink-0 items-center justify-center rounded-lg ${style.className}`}
+                  >
+                    <style.Icon className="size-4" />
+                  </span>
+                )}
+                <h2 className="text-base font-semibold">{label}</h2>
+                <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+                  {groupStores.length}
+                </span>
+                <span className="ml-auto h-px flex-1 bg-border/40" />
+              </>
+            }
+          >
+            <CardGrid stores={groupStores} pst={pst} />
+          </CollapsibleGroup>
+        );
+      })}
     </div>
   );
 }
@@ -986,26 +1140,322 @@ function ListView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
     return [...map.entries()].sort((a, b) => b[1].length - a[1].length);
   }, [stores]);
 
-  return <GroupedView groups={groups} pst={pst} />;
+  return <GroupedView groups={groups} pst={pst} withCategoryIcon />;
 }
 
-// ─── Directory View (grouped by city / location) ───────────────────────────────
+// ─── Directory View (condensed field sheet, grouped by hub city) ────────────────
+
+/** A short "open now / closes …" cue for the condensed directory card. */
+function hoursCue(store: Store, pst: PstNow): { text: string; className: string } {
+  if (store.isAppointmentOnly)
+    return { text: "By appt", className: "bg-violet-500/15 text-violet-300" };
+  if (isOpenNow(store, pst)) {
+    const isWeekday = pst.day >= 1 && pst.day <= 5;
+    const range = parseHoursRange(isWeekday ? store.weekdayHours : store.weekendHours);
+    if (range && pst.minutes >= range.close - 60)
+      return { text: `Closing ${fmt12(range.close)}`, className: "bg-amber-500/15 text-amber-300" };
+    return {
+      text: range ? `Open · ${fmt12(range.close)}` : "Open now",
+      className: "bg-emerald-500/15 text-emerald-300",
+    };
+  }
+  return { text: "Closed now", className: "bg-rose-500/15 text-rose-300" };
+}
+
+/** Dense contact card — favors phone-first density over imagery. */
+function DirectoryCard({ store, pst }: { store: Store; pst: PstNow }) {
+  const cue = hoursCue(store, pst);
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
+  return (
+    <article className="group relative flex items-center gap-3 rounded-lg bg-card px-3 py-2.5 ring-1 ring-border/40 transition-colors hover:bg-muted/40">
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <a
+            href={`/admin/showroom/store/${store.id}`}
+            className="line-clamp-1 text-sm font-medium after:absolute after:inset-0 after:content-['']"
+          >
+            {store.name}
+          </a>
+          {store.isFlagshipLocation && <FlagshipBadge />}
+          <span
+            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-medium ${cue.className}`}
+          >
+            <Clock className="size-2.5" />
+            {cue.text}
+          </span>
+        </div>
+
+        {/* Phone-first contact row */}
+        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
+          {store.phoneNumber && (
+            <a
+              href={telHref(store.phoneNumber)}
+              onClick={stop}
+              className="relative z-10 inline-flex items-center gap-1.5 font-medium text-sky-400 hover:text-sky-300"
+            >
+              <Phone className="size-3.5" />
+              {formatPhone(store.phoneNumber)}
+            </a>
+          )}
+          {store.websiteUrl && (
+            <a
+              href={store.websiteUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={stop}
+              aria-label="Website"
+              className="relative z-10 inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+            >
+              <Globe className="size-3.5" />
+            </a>
+          )}
+          {store.instagramUrl && (
+            <a
+              href={store.instagramUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={stop}
+              aria-label="Instagram"
+              className="relative z-10 inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+            >
+              <Instagram className="size-3.5" />
+            </a>
+          )}
+          {store.cityName && (
+            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/70">
+              <MapPin className="size-3" />
+              {store.cityName}
+            </span>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+/** Sort hub groups: known hubs in geographic order, then alpha, "Other" last. */
+const HUB_GROUP_ORDER: Record<string, number> = {
+  "SF Design District": 0,
+  "Silicon Valley & South Bay": 1,
+  "Peninsula / Mid-Market": 2,
+  "East Bay": 3,
+  "North Bay": 4,
+};
 
 function DirectoryView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
   const groups = useMemo(() => {
     const map = new Map<string, Store[]>();
     for (const s of stores) {
-      const city = s.cityName ?? "Other / Unassigned";
-      map.set(city, [...(map.get(city) ?? []), s]);
+      // Group by the map-hub city name so Alameda/Emeryville/Hayward → "East Bay".
+      const hub = s.hubName ?? "Other";
+      map.set(hub, [...(map.get(hub) ?? []), s]);
     }
-    // Alphabetical by city — the sheet is scanned by location.
-    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+    return [...map.entries()].sort((a, b) => {
+      const aOther = a[0] === "Other";
+      const bOther = b[0] === "Other";
+      if (aOther !== bOther) return aOther ? 1 : -1; // Other last
+      const ao = HUB_GROUP_ORDER[a[0]];
+      const bo = HUB_GROUP_ORDER[b[0]];
+      if (ao !== undefined && bo !== undefined) return ao - bo;
+      if (ao !== undefined) return -1;
+      if (bo !== undefined) return 1;
+      return a[0].localeCompare(b[0]);
+    });
   }, [stores]);
 
-  return <GroupedView groups={groups} pst={pst} />;
+  const orderedKeys = useMemo(() => groups.map(([hub]) => hub), [groups]);
+  const { openKey, toggle } = useAccordionGroup(orderedKeys);
+
+  if (groups.length === 0) return <EmptyState />;
+
+  return (
+    <div>
+      {groups.map(([hub, hubStores]) => (
+        <CollapsibleGroup
+          key={hub}
+          open={openKey === hub}
+          onToggle={() => toggle(hub)}
+          className="mt-8 first:mt-0"
+          header={
+            <>
+              <MapPin className="size-4 text-sky-400" />
+              <h2 className="text-sm font-semibold uppercase tracking-wide">{hub}</h2>
+              <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
+                {hubStores.length}
+              </span>
+              <span className="ml-auto h-px flex-1 bg-border/40" />
+            </>
+          }
+        >
+          <div className="flex flex-col gap-2">
+            {hubStores.map((s) => (
+              <DirectoryCard key={s.id} store={s} pst={pst} />
+            ))}
+          </div>
+        </CollapsibleGroup>
+      ))}
+    </div>
+  );
 }
 
 // ─── Add Showroom Modal ───────────────────────────────────────────────────────
+
+/**
+ * Google Places (New) autocomplete typeahead for the showroom NAME field.
+ *
+ * Mirrors `PlaceSearch` from ShowroomIntakeApp: a controlled `<Input>` that
+ * still drives `form.name` (so the user can just type a name manually) plus a
+ * debounced (~300ms) suggestions dropdown fed by
+ * `GET /api/places/autocomplete?q=&sessionToken=`. Selecting a suggestion hands
+ * the `placeId` back to the parent, which fetches Place Details and autofills.
+ *
+ * Session token: one `crypto.randomUUID()` per search session is held in
+ * `sessionTokenRef` and sent with every keystroke's autocomplete call AND the
+ * terminal details call — grouping them into ONE Google billing session. The
+ * parent regenerates it (via `sessionTokenRef`, shared by ref) after a
+ * successful selection.
+ */
+function ShowroomNameSearch({
+  value,
+  onChange,
+  onSelect,
+  sessionTokenRef,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSelect: (placeId: string) => void;
+  sessionTokenRef: React.MutableRefObject<string>;
+  disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [suggestions, setSuggestions] = useState<{ placeId: string; text: string }[]>([]);
+  const [loading, setLoading] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Close the dropdown when clicking outside the search container.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  // On unmount, clear any pending debounce timer and abort any in-flight fetch.
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  const runSearch = useCallback(
+    async (text: string) => {
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      setLoading(true);
+      try {
+        const url = `/api/places/autocomplete?q=${encodeURIComponent(text)}&sessionToken=${sessionTokenRef.current}`;
+        const res = await fetch(url, { credentials: "include", signal: controller.signal });
+        if (res.status === 429) {
+          toast.error("Google Maps monthly quota reached. Try again later.");
+          setSuggestions([]);
+          return;
+        }
+        if (!res.ok) {
+          const payload = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(payload.error ?? `Autocomplete failed (${res.status})`);
+        }
+        const data = (await res.json()) as {
+          suggestions?: { placeId: string; text: string }[];
+        };
+        setSuggestions(data.suggestions ?? []);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error("[directory/autocomplete]", err);
+        toast.error(err instanceof Error ? err.message : "Autocomplete failed");
+        setSuggestions([]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [sessionTokenRef],
+  );
+
+  const handleChange = (next: string) => {
+    onChange(next);
+    setOpen(true);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    const trimmed = next.trim();
+    if (trimmed.length < 2) {
+      setSuggestions([]);
+      setLoading(false);
+      return;
+    }
+    debounceRef.current = setTimeout(() => runSearch(trimmed), 300);
+  };
+
+  return (
+    <div ref={containerRef} className="relative w-full">
+      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        id="name"
+        value={value}
+        disabled={disabled}
+        onChange={(e) => handleChange(e.target.value)}
+        onFocus={() => value.trim().length >= 2 && setOpen(true)}
+        placeholder="e.g. Ferguson Bath, Kitchen & Lighting"
+        className="pl-9"
+        aria-label="Search Google Places by showroom name"
+      />
+      {loading && (
+        <Loader2 className="absolute right-3 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+      )}
+
+      {open && !disabled && (
+        <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-72 overflow-y-auto rounded-lg bg-popover p-1 shadow-md ring-1 ring-border/40">
+          {loading && suggestions.length === 0 ? (
+            <div className="flex items-center gap-2 px-3 py-4 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" /> Searching…
+            </div>
+          ) : suggestions.length === 0 ? (
+            <div className="px-3 py-4 text-sm text-muted-foreground">
+              {value.trim().length < 2
+                ? "Type at least 2 characters to search Google, or enter a name manually."
+                : "No matches — you can still type a name manually."}
+            </div>
+          ) : (
+            <ul className="divide-y divide-border/40">
+              {suggestions.map((s) => (
+                <li key={s.placeId}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpen(false);
+                      setSuggestions([]);
+                      onSelect(s.placeId);
+                    }}
+                    className="flex w-full items-start gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-muted/60"
+                  >
+                    <MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                    <span className="line-clamp-2">{s.text}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: () => void }) {
   const [open, setOpen] = useState(false);
@@ -1016,6 +1466,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
     description: "",
     pricePoint: "",
     websiteUrl: "",
+    instagramUrl: "",
     phoneNumber: "",
     emailAddress: "",
     bayAreaCityId: "",
@@ -1025,8 +1476,12 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
     weekdayHours: "",
     weekendHours: "",
     isOpenWeekends: false,
+    hoursJson: DEFAULT_HOURS as HoursJson,
     isAppointmentOnly: false,
     isFlagshipLocation: false,
+    isLargeSelection: false,
+    isBespoke: false,
+    isDesignerOnly: false,
     scale: "",
     inventoryFocus: "",
     targetDemographic: "",
@@ -1035,8 +1490,91 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
     mainPocEmailAddress: "",
   };
   const [form, setForm] = useState({ ...emptyForm });
+  const [loadingPlace, setLoadingPlace] = useState(false);
+  // One session token per search session: shared with the child typeahead by ref
+  // so every autocomplete keystroke + the terminal details call bill as ONE
+  // Google session. Regenerated after a successful selection.
+  const sessionTokenRef = useRef<string>(crypto.randomUUID());
 
   const update = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
+
+  /**
+   * Resolve a Bay Area city ID from a mapped address/city string by matching
+   * (case-insensitive, contains) against the `cities` prop's `bayAreaCityName`.
+   * Prefers the longest matching city name so "South San Francisco" wins over
+   * "San Francisco" when both are substrings of the address.
+   */
+  const resolveBayAreaCityId = useCallback(
+    (address: string | undefined): string => {
+      if (!address) return "";
+      const hay = address.toLowerCase();
+      let best: { id: number; len: number } | null = null;
+      for (const c of cities) {
+        const name = c.bayAreaCityName?.trim().toLowerCase();
+        if (!name) continue;
+        if (hay.includes(name) && (!best || name.length > best.len)) {
+          best = { id: c.id, len: name.length };
+        }
+      }
+      return best ? String(best.id) : "";
+    },
+    [cities],
+  );
+
+  // Fetch Place Details for the selected suggestion, map it, and autofill the
+  // form. POC fields are intentionally left untouched. Instagram is never filled
+  // by Google — it stays whatever the user typed.
+  const handleSelectPlace = useCallback(
+    async (placeId: string) => {
+      setLoadingPlace(true);
+      try {
+        const url = `/api/places/details/${encodeURIComponent(placeId)}?sessionToken=${sessionTokenRef.current}`;
+        const res = await fetch(url, { credentials: "include" });
+        if (res.status === 429) {
+          toast.error("Google Maps monthly quota reached. Try again later.");
+          return;
+        }
+        if (!res.ok) {
+          const payload = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(payload.error ?? `Details failed (${res.status})`);
+        }
+        const place = (await res.json()) as GooglePlaceDetails;
+
+        const mapped = mapPlaceToIntake(place);
+        const hours = formatOpeningHours(place.regularOpeningHours);
+        const cityId = resolveBayAreaCityId(mapped.locationAddress);
+
+        update({
+          name: mapped.name ?? form.name,
+          description: mapped.description ?? "",
+          pricePoint: mapped.pricePoint ?? "",
+          websiteUrl: mapped.websiteUrl ?? "",
+          locationAddress: mapped.locationAddress ?? "",
+          zipCode: mapped.zipCode ?? "",
+          googleMapsLink: mapped.googleMapsLink ?? "",
+          phoneNumber: mapped.phoneNumber ?? "",
+          emailAddress: mapped.emailAddress ?? "",
+          weekdayHours: hours.weekdayHours,
+          weekendHours: hours.weekendHours,
+          isOpenWeekends: hours.isOpenWeekends,
+          ...(cityId ? { bayAreaCityId: cityId } : {}),
+        });
+
+        const h = mapPlaceToHoursJson(place.regularOpeningHours);
+        if (h) update({ hoursJson: h });
+
+        // Successful details call closes the billing session → new token next search.
+        sessionTokenRef.current = crypto.randomUUID();
+        toast.success("Details pulled from Google — review and edit as needed.");
+      } catch (e) {
+        console.error("[directory/details]", e);
+        toast.error(e instanceof Error ? e.message : "Failed to load place details");
+      } finally {
+        setLoadingPlace(false);
+      }
+    },
+    [form.name, resolveBayAreaCityId],
+  );
 
   const handleSubmit = async () => {
     if (!form.name.trim()) {
@@ -1049,20 +1587,21 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
       if (form.description) body.description = form.description;
       if (form.pricePoint) body.pricePoint = form.pricePoint;
       if (form.websiteUrl) body.websiteUrl = form.websiteUrl;
+      if (form.instagramUrl) body.instagramUrl = form.instagramUrl;
       if (form.phoneNumber) body.phoneNumber = form.phoneNumber;
       if (form.emailAddress) body.emailAddress = form.emailAddress;
       if (form.bayAreaCityId) body.bayAreaCityId = Number(form.bayAreaCityId);
       if (form.locationAddress) body.locationAddress = form.locationAddress;
       if (form.zipCode) body.zipCode = form.zipCode;
       if (form.googleMapsLink) body.googleMapsLink = form.googleMapsLink;
-      if (form.weekdayHours) body.weekdayHours = form.weekdayHours;
-      if (form.weekendHours) body.weekendHours = form.weekendHours;
-      body.isOpenWeekends = form.isOpenWeekends;
+      // Server derives isOpenWeekends / weekdayHours / weekendHours from hoursJson.
+      body.hoursJson = form.hoursJson;
       body.isAppointmentOnly = form.isAppointmentOnly;
       body.isFlagshipLocation = form.isFlagshipLocation;
-      if (form.scale) body.scale = form.scale;
+      body.isLargeSelection = form.isLargeSelection;
+      body.isBespoke = form.isBespoke;
+      body.isDesignerOnly = form.isDesignerOnly;
       if (form.inventoryFocus) body.inventoryFocus = form.inventoryFocus;
-      if (form.targetDemographic) body.targetDemographic = form.targetDemographic;
       if (form.mainPocFullname) body.mainPocFullname = form.mainPocFullname;
       if (form.mainPocPhoneNumber) body.mainPocPhoneNumber = form.mainPocPhoneNumber;
       if (form.mainPocEmailAddress) body.mainPocEmailAddress = form.mainPocEmailAddress;
@@ -1083,6 +1622,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
       setOpen(false);
       setStep(0);
       setForm({ ...emptyForm });
+      sessionTokenRef.current = crypto.randomUUID();
       onCreated();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to create showroom");
@@ -1131,7 +1671,23 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
               <>
                 <div>
                   <Label htmlFor="name">Name *</Label>
-                  <Input id="name" value={form.name} onChange={(e) => update({ name: e.target.value })} placeholder="e.g. Ferguson Bath, Kitchen & Lighting" />
+                  <ShowroomNameSearch
+                    value={form.name}
+                    onChange={(v) => update({ name: v })}
+                    onSelect={handleSelectPlace}
+                    sessionTokenRef={sessionTokenRef}
+                    disabled={loadingPlace}
+                  />
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Start typing to search Google — pick a result to auto-fill the
+                    rest, or just type a name manually.
+                  </p>
+                  {loadingPlace && (
+                    <div className="mt-1.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <Loader2 className="size-3.5 animate-spin" /> Fetching details from
+                      Google…
+                    </div>
+                  )}
                 </div>
                 <div>
                   <Label htmlFor="desc">Description</Label>
@@ -1157,6 +1713,22 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                 <div>
                   <Label htmlFor="website">Website</Label>
                   <Input id="website" value={form.websiteUrl} onChange={(e) => update({ websiteUrl: e.target.value })} placeholder="https://..." />
+                </div>
+                <div>
+                  <Label htmlFor="instagram">Instagram</Label>
+                  <div className="relative">
+                    <Instagram className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      id="instagram"
+                      value={form.instagramUrl}
+                      onChange={(e) => update({ instagramUrl: e.target.value })}
+                      placeholder="https://instagram.com/..."
+                      className="pl-9"
+                    />
+                  </div>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Not filled by Google — paste the profile URL.
+                  </p>
                 </div>
               </>
             )}
@@ -1196,41 +1768,35 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
 
             {step === 2 && (
               <>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label htmlFor="weekday">Weekday Hours</Label>
-                    <Input id="weekday" value={form.weekdayHours} onChange={(e) => update({ weekdayHours: e.target.value })} placeholder="M-F 9AM-5PM" />
-                  </div>
-                  <div>
-                    <Label htmlFor="weekend">Weekend Hours</Label>
-                    <Input id="weekend" value={form.weekendHours} onChange={(e) => update({ weekendHours: e.target.value })} placeholder="Sat 10AM-4PM" />
-                  </div>
+                <div>
+                  <Label>Hours</Label>
+                  <p className="mb-2 mt-0.5 text-[11px] text-muted-foreground">
+                    Toggle open days and set times. Weekend + weekday summaries are
+                    derived automatically.
+                  </p>
+                  <HoursEditor value={form.hoursJson} onChange={(h) => update({ hoursJson: h })} />
                 </div>
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="isOpenWeekends">Open Weekends</Label>
-                    <Switch id="isOpenWeekends" checked={form.isOpenWeekends} onCheckedChange={(v) => update({ isOpenWeekends: v })} />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="isAppointmentOnly">Appointment Only</Label>
-                    <Switch id="isAppointmentOnly" checked={form.isAppointmentOnly} onCheckedChange={(v) => update({ isAppointmentOnly: v })} />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="isFlagshipLocation">Flagship Location</Label>
-                    <Switch id="isFlagshipLocation" checked={form.isFlagshipLocation} onCheckedChange={(v) => update({ isFlagshipLocation: v })} />
-                  </div>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="isAppointmentOnly">Appointment Only</Label>
+                  <Switch id="isAppointmentOnly" checked={form.isAppointmentOnly} onCheckedChange={(v) => update({ isAppointmentOnly: v })} />
                 </div>
                 <div>
-                  <Label htmlFor="scale">Scale</Label>
-                  <Input id="scale" value={form.scale} onChange={(e) => update({ scale: e.target.value })} placeholder="e.g. Massive, dual-wing facility" />
+                  <Label>Attributes</Label>
+                  <div className="mt-2">
+                    <FlagsEditor
+                      value={{
+                        isFlagshipLocation: form.isFlagshipLocation,
+                        isLargeSelection: form.isLargeSelection,
+                        isBespoke: form.isBespoke,
+                        isDesignerOnly: form.isDesignerOnly,
+                      }}
+                      onChange={(v) => update(v)}
+                    />
+                  </div>
                 </div>
                 <div>
                   <Label htmlFor="focus">Inventory Focus</Label>
                   <Input id="focus" value={form.inventoryFocus} onChange={(e) => update({ inventoryFocus: e.target.value })} placeholder="What this location specializes in" />
-                </div>
-                <div>
-                  <Label htmlFor="demo">Target Demographic</Label>
-                  <Input id="demo" value={form.targetDemographic} onChange={(e) => update({ targetDemographic: e.target.value })} placeholder="e.g. Urban architects, tech executives" />
                 </div>
               </>
             )}
@@ -1287,14 +1853,41 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
-export function ShowroomsDirectoryApp() {
+const VALID_TABS: ViewMode[] = ["map", "list", "directory"];
+
+function isViewMode(v: string | undefined | null): v is ViewMode {
+  return v != null && (VALID_TABS as string[]).includes(v);
+}
+
+export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: ViewMode }) {
   const [allStores, setAllStores] = useState<Store[]>([]);
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<Category[]>([]);
   const [cities, setCities] = useState<City[]>([]);
   const [filters, setFilters] = useState<Filters>({ ...EMPTY_FILTERS });
-  const [viewMode, setViewMode] = useState<ViewMode>("map");
+  const [viewMode, setViewMode] = useState<ViewMode>(initialTab);
   const [pst, setPst] = useState<PstNow>(() => computePst());
+
+  // Tab ↔ URL sync. Clicking a tab pushes /admin/showroom/showrooms/<tab>;
+  // browser back/forward (popstate) restores the tab from the path.
+  const selectTab = useCallback((tab: ViewMode) => {
+    setViewMode(tab);
+    if (typeof window !== "undefined") {
+      const next = `/admin/showroom/showrooms/${tab}`;
+      if (window.location.pathname !== next) {
+        window.history.pushState(null, "", next);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    const onPop = () => {
+      const seg = window.location.pathname.split("/").filter(Boolean).pop();
+      setViewMode(isViewMode(seg) ? seg : "map");
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
 
   // Keep the PST clock (Open Now filter + live hours cues) fresh each minute.
   useEffect(() => {
@@ -1382,7 +1975,7 @@ export function ShowroomsDirectoryApp() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <ViewToggle value={viewMode} onChange={setViewMode} />
+          <ViewToggle value={viewMode} onChange={selectTab} />
           <AddShowroomModal cities={cities} onCreated={fetchStores} />
         </div>
       </div>
@@ -1407,11 +2000,6 @@ export function ShowroomsDirectoryApp() {
       ) : (
         <DirectoryView stores={filtered} pst={pst} />
       )}
-
-      {/* Gap Panel */}
-      <div className="mt-8">
-        <GapPanel context="showroom" />
-      </div>
     </main>
   );
 }

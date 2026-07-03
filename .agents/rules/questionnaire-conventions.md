@@ -98,3 +98,54 @@ Browser Rendering extraction, Cloudflare Images ingestion, and Vectorize RAG.
   unique `operationId` values and matching `/openapi.json` entries.
 - Category monitoring runs from the existing `* * * * *` master tick and must
   throttle automatic sweeps to avoid repeated category searches.
+
+## 8. Google Places intake & Maps usage
+
+These rules apply to any code that calls Google Maps / Places (New) APIs or
+surfaces their usage.
+
+- The Google Maps API key is server-side only (`getGoogleMapsApiKey(env)` →
+  `env.GOOGLE_MAPS_API`). NEVER return it to the client or embed it in a page.
+  All Places/Routes traffic MUST proxy through Hono, never the browser.
+- `GoogleMapsService` (`src/backend/services/google/maps.ts`) is the single
+  choke point. Route new Maps calls through a method on it — do NOT `fetch`
+  `places.googleapis.com` from a route handler directly. Each method MUST check
+  the circuit breaker (`isUnderMonthlyQuota()` /
+  `MAPS_MONTHLY_FREE_TIER_LIMIT = 10000` month-to-date) and log via
+  `logUsage(apiType, req, res, { endpoint, sessionToken, statusCode })`.
+- Usage logging goes to the single `google_maps_usage_log` table via
+  `c.executionCtx.waitUntil(...)` so it never blocks the HTTP response. Do NOT
+  add a second usage/quota table.
+- `timestamp` in `google_maps_usage_log` is Drizzle `mode:"timestamp"` → Unix
+  **seconds**. Month filters use `datetime(timestamp,'unixepoch')` (no `/1000`).
+- Places Autocomplete → Details is one billed session: generate one
+  `sessionToken` (UUID) on the client, pass it to every autocomplete keystroke
+  and the final details call, and regenerate only after details resolves.
+- `placeDetails()` uses a strict comma-joined `X-Goog-FieldMask`. Extend the
+  mask when you need more fields — never fetch the unmasked default.
+- Showroom intake reuses `showroom_stores` (via `POST /api/showroom-stores`);
+  do NOT create a parallel `showrooms` entity.
+
+## 9. Brands, favicons & PlateJS overview notes
+
+- **Favicon extraction is centralized** in `FaviconService`
+  (`src/backend/services/favicon/`). Never scrape favicons or call CF Images
+  inline in a route — call `hydrateShowroomIcon` / `hydrateBrandIcon`, always via
+  `c.executionCtx.waitUntil(...)`, on create and on website-URL change. The
+  service must never throw (it runs detached). It reuses the shared
+  `ImageProcessorService` + `resolveCloudflareImagesCredentials` — do not
+  hand-roll a second CF Images uploader. `icon_cf_images_url` columns are
+  SERVER-MANAGED — never accept them from client request bodies.
+- **Cross-domain schema FKs** (e.g. `store_products.brand_id → brands.id`,
+  `showroom_brand_mappings → showroom_stores`) import the referenced table's
+  LEAF file directly (`../brands/brands`), NOT the domain `index.ts` barrel —
+  importing the barrel creates a circular module graph that yields `undefined`
+  table refs at init.
+- **Rich-text notes** (showroom overview note) use PlateJS via the shared
+  `OverviewNoteEditor` (`src/frontend/components/showroom/`). Persist BOTH
+  representations: `*_note_html` (rendered on the viewport via
+  `dangerouslySetInnerHTML`) and `*_note_markdown` (source of truth, seeds the
+  editor). Serialize with `editor.api.markdown.serialize()`. Pin every
+  `@platejs/*` subpackage to an EXACT version matching `platejs` (no caret) —
+  they ship breaking changes across patch releases. Verify with `pnpm run build`
+  (PlateJS serialization is a bundler-sensitive path).

@@ -1,0 +1,17 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { BrandDetailViewport } from "@/components/brands/BrandDetailViewport";
+
+const { brandId } = Astro.params;
+const parsedId = brandId ? Number.parseInt(brandId, 10) : NaN;
+if (!Number.isFinite(parsedId) || parsedId <= 0) {
+  return Astro.redirect("/admin/brands");
+}
+---
+
+<BaseLayout
+  title={`Brand ${parsedId} — The Monolith`}
+  description="Single brand viewport: showrooms carrying it, personal notes, ratings, and products."
+>
+  <BrandDetailViewport client:only="react" brandId={parsedId} />
+</BaseLayout>
