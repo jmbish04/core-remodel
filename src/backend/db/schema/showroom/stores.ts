@@ -34,6 +34,37 @@ export const showroomStores = sqliteTable("showroom_stores", {
   googleMapsLink: text("google_maps_link"),
 
   // ── Hours & access ────────────────────────────────────────────────────
+  /**
+   * Structured opening hours — source of truth for the hours UI.
+   *
+   * Shape (all 7 keys always present; value is `null` when closed that day):
+   * ```json
+   * {
+   *   "mon": { "open": "09:00", "close": "17:00" },
+   *   "tue": { "open": "09:00", "close": "17:00" },
+   *   "wed": { "open": "09:00", "close": "17:00" },
+   *   "thu": { "open": "09:00", "close": "17:00" },
+   *   "fri": { "open": "09:00", "close": "17:00" },
+   *   "sat": { "open": "10:00", "close": "15:00" },
+   *   "sun": null
+   * }
+   * ```
+   * Times are 24-hour `"HH:MM"` strings in local showroom time (no timezone offset stored).
+   *
+   * `weekdayHours` and `weekendHours` are retained as derived human-readable summaries
+   * for backward-compat display.  `isOpenWeekends` is derived from whether `sat`/`sun`
+   * are non-null.
+   */
+  hoursJson: text("hours_json", { mode: "json" }).$type<{
+    mon: { open: string; close: string } | null;
+    tue: { open: string; close: string } | null;
+    wed: { open: string; close: string } | null;
+    thu: { open: string; close: string } | null;
+    fri: { open: string; close: string } | null;
+    sat: { open: string; close: string } | null;
+    sun: { open: string; close: string } | null;
+  }>(),
+
   weekdayHours: text("weekday_hours"),
   weekendHours: text("weekend_hours"),
   isOpenWeekends: integer("is_open_weekends", { mode: "boolean" }).default(
@@ -47,6 +78,38 @@ export const showroomStores = sqliteTable("showroom_stores", {
   isFlagshipLocation: integer("is_flagship_location", {
     mode: "boolean",
   }).default(false),
+
+  /**
+   * Large-selection flag — indicates a warehouse-scale or unusually broad
+   * inventory (e.g. "Massive, dual-wing facility").  Replaces the free-text
+   * `scale` field for intake filtering; `scale` is retained for legacy display.
+   */
+  isLargeSelection: integer("is_large_selection", {
+    mode: "boolean",
+  })
+    .notNull()
+    .default(false),
+
+  /**
+   * Bespoke / hand-curated flag — showroom carries exclusive, hand-selected,
+   * or made-to-order collections.  Complements the free-text `scale` descriptor.
+   */
+  isBespoke: integer("is_bespoke", {
+    mode: "boolean",
+  })
+    .notNull()
+    .default(false),
+
+  /**
+   * Designer-only access flag — showroom explicitly requires or strongly
+   * prefers working through a licensed designer or trade account.
+   * Maps to `targetDemographic` language like "trade only" / "by referral".
+   */
+  isDesignerOnly: integer("is_designer_only", {
+    mode: "boolean",
+  })
+    .notNull()
+    .default(false),
 
   /**
    * Scale descriptor — free text describing showroom size & depth.

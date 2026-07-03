@@ -52,8 +52,12 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { OverviewNoteEditor } from "../OverviewNoteEditor";
 
+import { HoursEditor } from "./HoursEditor";
+import { FlagsEditor } from "./FlagsEditor";
+import { DEFAULT_HOURS, type HoursJson } from "./hours-types";
+
 import {
-  formatOpeningHours,
+  mapPlaceToHoursJson,
   mapPlaceToIntake,
   showroomIntakeSchema,
   type GooglePlaceDetails,
@@ -93,9 +97,13 @@ const EMPTY_VALUES: ShowroomIntakeInput = {
   googleMapsLink: "",
   weekdayHours: "",
   weekendHours: "",
+  hoursJson: DEFAULT_HOURS,
   isOpenWeekends: false,
   isAppointmentOnly: false,
   isFlagshipLocation: false,
+  isLargeSelection: false,
+  isBespoke: false,
+  isDesignerOnly: false,
   scale: "",
   inventoryFocus: "",
   targetDemographic: "",
@@ -349,9 +357,7 @@ export function ShowroomIntakeApp() {
 
   const categoryIds = watch("categoryIds") ?? [];
   const pricePoint = watch("pricePoint");
-  const isOpenWeekends = watch("isOpenWeekends");
   const isAppointmentOnly = watch("isAppointmentOnly");
-  const isFlagshipLocation = watch("isFlagshipLocation");
 
   // ── Load the live category vocabulary on mount ──
   useEffect(() => {
@@ -399,7 +405,7 @@ export function ShowroomIntakeApp() {
         const place = (await res.json()) as GooglePlaceDetails;
 
         const mapped = mapPlaceToIntake(place);
-        const hours = formatOpeningHours(place.regularOpeningHours);
+        const h = mapPlaceToHoursJson(place.regularOpeningHours);
         const resolvedIds = resolveCategoryIds(
           mapped._inferredCategoryLabels,
           categories,
@@ -408,9 +414,7 @@ export function ShowroomIntakeApp() {
         reset({
           ...EMPTY_VALUES,
           ...mapped,
-          weekdayHours: hours.weekdayHours,
-          weekendHours: hours.weekendHours,
-          isOpenWeekends: hours.isOpenWeekends,
+          hoursJson: h ?? DEFAULT_HOURS,
           categoryIds: resolvedIds,
         });
 
@@ -461,11 +465,7 @@ export function ShowroomIntakeApp() {
       "websiteUrl",
       "instagramUrl",
       "googleMapsLink",
-      "weekdayHours",
-      "weekendHours",
-      "scale",
       "inventoryFocus",
-      "targetDemographic",
       "locationNotes",
       "overviewNoteHtml",
       "overviewNoteMarkdown",
@@ -475,9 +475,14 @@ export function ShowroomIntakeApp() {
       if (typeof v === "string" && v.trim()) body[key] = v.trim();
     }
     if (values.pricePoint) body.pricePoint = values.pricePoint;
-    body.isOpenWeekends = !!values.isOpenWeekends;
+    // Send structured hours; the server derives isOpenWeekends / weekdayHours /
+    // weekendHours from this — so we intentionally omit those from the body.
+    if (values.hoursJson) body.hoursJson = values.hoursJson;
     body.isAppointmentOnly = !!values.isAppointmentOnly;
     body.isFlagshipLocation = !!values.isFlagshipLocation;
+    body.isLargeSelection = !!values.isLargeSelection;
+    body.isBespoke = !!values.isBespoke;
+    body.isDesignerOnly = !!values.isDesignerOnly;
     body.categoryIds = values.categoryIds;
 
     try {
@@ -726,52 +731,40 @@ export function ShowroomIntakeApp() {
           {/* Hours */}
           <Card className="space-y-4 p-4 sm:p-5">
             <span className="text-sm font-medium">Hours &amp; access</span>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <FormRow
-                label="Weekday hours"
-                htmlFor="weekdayHours"
-                hint="Mon–Fri, one row per line"
-              >
-                <Textarea
-                  id="weekdayHours"
-                  rows={5}
-                  {...register("weekdayHours")}
-                  placeholder="Monday: 9 AM–5 PM"
-                />
-              </FormRow>
-              <FormRow
-                label="Weekend hours"
-                htmlFor="weekendHours"
-                hint="Sat/Sun, one row per line"
-              >
-                <Textarea
-                  id="weekendHours"
-                  rows={5}
-                  {...register("weekendHours")}
-                  placeholder="Saturday: Closed"
-                />
-              </FormRow>
+            <HoursEditor
+              value={(watch("hoursJson") as HoursJson | undefined) ?? null}
+              onChange={(h) => setValue("hoursJson", h, { shouldDirty: true })}
+            />
+            <ToggleRow
+              id="isAppointmentOnly"
+              label="Appointment only"
+              checked={!!isAppointmentOnly}
+              onChange={(v) => setValue("isAppointmentOnly", v, { shouldDirty: true })}
+            />
+          </Card>
+
+          {/* Traits */}
+          <Card className="space-y-3 p-4 sm:p-5">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">Traits</span>
+              <span className="text-[11px] text-muted-foreground">
+                Select all that apply
+              </span>
             </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <ToggleRow
-                id="isOpenWeekends"
-                label="Open weekends"
-                checked={!!isOpenWeekends}
-                onChange={(v) => setValue("isOpenWeekends", v, { shouldDirty: true })}
-              />
-              <ToggleRow
-                id="isAppointmentOnly"
-                label="Appointment only"
-                checked={!!isAppointmentOnly}
-                onChange={(v) => setValue("isAppointmentOnly", v, { shouldDirty: true })}
-              />
-              <ToggleRow
-                id="isFlagshipLocation"
-                label="Flagship"
-                checked={!!isFlagshipLocation}
-                onChange={(v) => setValue("isFlagshipLocation", v, { shouldDirty: true })}
-              />
-            </div>
+            <FlagsEditor
+              value={{
+                isFlagshipLocation: !!watch("isFlagshipLocation"),
+                isLargeSelection: !!watch("isLargeSelection"),
+                isBespoke: !!watch("isBespoke"),
+                isDesignerOnly: !!watch("isDesignerOnly"),
+              }}
+              onChange={(v) => {
+                setValue("isFlagshipLocation", v.isFlagshipLocation, { shouldDirty: true });
+                setValue("isLargeSelection", v.isLargeSelection, { shouldDirty: true });
+                setValue("isBespoke", v.isBespoke, { shouldDirty: true });
+                setValue("isDesignerOnly", v.isDesignerOnly, { shouldDirty: true });
+              }}
+            />
           </Card>
 
           {/* Notes */}

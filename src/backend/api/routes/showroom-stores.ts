@@ -53,6 +53,185 @@ export const showroomStoresRouter = new OpenAPIHono<{ Bindings: Env }>();
 
 // ─── Validation Schemas ───────────────────────────────────────────────────────
 
+/**
+ * One-day hours slot.
+ *
+ * Both `open` and `close` are 24-hour "HH:MM" strings in local showroom time.
+ * A `null` value means the showroom is closed on that day.
+ */
+const daySlotSchema = z
+  .object({
+    open: z.string(),
+    close: z.string(),
+  })
+  .nullable();
+
+/**
+ * Structured opening hours for all 7 days of the week.
+ *
+ * All keys must be present. Set the value to `null` for days the showroom is
+ * closed. Times must be 24-hour `"HH:MM"` strings in local showroom time.
+ *
+ * @example
+ * ```json
+ * {
+ *   "mon": { "open": "09:00", "close": "17:00" },
+ *   "tue": { "open": "09:00", "close": "17:00" },
+ *   "wed": { "open": "09:00", "close": "17:00" },
+ *   "thu": { "open": "09:00", "close": "17:00" },
+ *   "fri": { "open": "09:00", "close": "17:00" },
+ *   "sat": { "open": "10:00", "close": "15:00" },
+ *   "sun": null
+ * }
+ * ```
+ */
+const hoursJsonSchema = z
+  .object({
+    mon: daySlotSchema,
+    tue: daySlotSchema,
+    wed: daySlotSchema,
+    thu: daySlotSchema,
+    fri: daySlotSchema,
+    sat: daySlotSchema,
+    sun: daySlotSchema,
+  })
+  .optional()
+  .nullable();
+
+// ─── Hours Derivation Helper ──────────────────────────────────────────────────
+
+/**
+ * Day abbreviation labels used for human-readable summary strings.
+ */
+const DAY_LABELS: Record<
+  "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun",
+  string
+> = {
+  mon: "Mon",
+  tue: "Tue",
+  wed: "Wed",
+  thu: "Thu",
+  fri: "Fri",
+  sat: "Sat",
+  sun: "Sun",
+};
+
+/**
+ * Convert a 24-hour "HH:MM" string to a 12-hour "h:MM AM/PM" display string.
+ *
+ * @example
+ * to12h("09:00") // "9:00 AM"
+ * to12h("13:30") // "1:30 PM"
+ * to12h("00:00") // "12:00 AM"
+ * to12h("12:00") // "12:00 PM"
+ */
+function to12h(time: string): string {
+  const [hStr, mStr] = time.split(":");
+  const h = parseInt(hStr, 10);
+  const m = mStr ?? "00";
+  const period = h < 12 ? "AM" : "PM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${m} ${period}`;
+}
+
+/**
+ * Collapse a list of same-hours consecutive days into range strings.
+ *
+ * For example, if Mon–Fri all share "9:00 AM–5:00 PM", this returns a single
+ * "Mon–Fri 9:00 AM–5:00 PM" entry rather than five separate lines.
+ * Days with different hours are listed individually.
+ * Closed days (null slot) are omitted.
+ *
+ * @param days - Ordered list of day keys to collapse.
+ * @param hoursJson - The full hoursJson object (source of truth).
+ * @returns Array of human-readable strings, one per group of same-hours days.
+ */
+function collapseHoursGroups(
+  days: Array<"mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun">,
+  hoursJson: NonNullable<NonNullable<z.infer<typeof hoursJsonSchema>>>,
+): string[] {
+  // Filter to open days only.
+  const openDays = days.filter((d) => hoursJson[d] !== null);
+  if (openDays.length === 0) return [];
+
+  const groups: Array<{
+    label: string;
+    open: string;
+    close: string;
+    startDay: string;
+    endDay: string;
+  }> = [];
+
+  for (const day of openDays) {
+    const slot = hoursJson[day]!;
+    const last = groups[groups.length - 1];
+
+    if (last && last.open === slot.open && last.close === slot.close) {
+      // Extend the current range to include this day.
+      last.endDay = DAY_LABELS[day];
+    } else {
+      // Start a new group.
+      groups.push({
+        label: DAY_LABELS[day],
+        open: slot.open,
+        close: slot.close,
+        startDay: DAY_LABELS[day],
+        endDay: DAY_LABELS[day],
+      });
+    }
+  }
+
+  return groups.map((g) => {
+    const dayRange =
+      g.startDay === g.endDay ? g.startDay : `${g.startDay}–${g.endDay}`;
+    return `${dayRange} ${to12h(g.open)}–${to12h(g.close)}`;
+  });
+}
+
+/**
+ * Derive the three back-compat / filter fields from a structured `hoursJson`.
+ *
+ * **Derivation rules:**
+ *
+ * - `isOpenWeekends` — `true` when either `sat` or `sun` is non-null.
+ *
+ * - `weekdayHours` — A human-readable summary of Mon–Fri.  Consecutive days
+ *   that share the same opening and closing time are collapsed into a range
+ *   (e.g. "Mon–Fri 9:00 AM–5:00 PM").  Days with different hours are listed
+ *   separately.  Closed weekdays are omitted.  Example output:
+ *   `"Mon–Thu 9:00 AM–5:00 PM, Fri 9:00 AM–3:00 PM"`
+ *
+ * - `weekendHours` — Same treatment for Sat and Sun.  When both are closed the
+ *   string is `"Closed"`.  Example: `"Sat 10:00 AM–4:00 PM"`.
+ *
+ * Times in `hoursJson` are 24-hour `"HH:MM"` strings; the derived summaries
+ * render them as 12-hour `"h:MM AM/PM"` strings for display.
+ *
+ * @param hoursJson - Source-of-truth hours object with all 7 day keys.
+ * @returns Object with `weekdayHours`, `weekendHours`, and `isOpenWeekends`.
+ */
+function deriveHoursSummary(
+  hoursJson: NonNullable<NonNullable<z.infer<typeof hoursJsonSchema>>>,
+): {
+  weekdayHours: string;
+  weekendHours: string;
+  isOpenWeekends: boolean;
+} {
+  const weekdayGroups = collapseHoursGroups(
+    ["mon", "tue", "wed", "thu", "fri"],
+    hoursJson,
+  );
+  const weekendGroups = collapseHoursGroups(["sat", "sun"], hoursJson);
+
+  const weekdayHours =
+    weekdayGroups.length > 0 ? weekdayGroups.join(", ") : "Closed";
+  const weekendHours =
+    weekendGroups.length > 0 ? weekendGroups.join(", ") : "Closed";
+  const isOpenWeekends = Boolean(hoursJson.sat || hoursJson.sun);
+
+  return { weekdayHours, weekendHours, isOpenWeekends };
+}
+
 const createStoreSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional().nullable(),
@@ -64,11 +243,26 @@ const createStoreSchema = z.object({
   websiteUrl: z.string().optional().nullable(),
   zipCode: z.string().optional().nullable(),
   googleMapsLink: z.string().optional().nullable(),
+  /**
+   * Structured opening hours — source of truth when provided.
+   *
+   * When present on create or update, the server derives and overwrites
+   * `weekdayHours`, `weekendHours`, and `isOpenWeekends` server-side.
+   * Client-supplied values for those three fields are ignored whenever
+   * `hoursJson` is also present.
+   */
+  hoursJson: hoursJsonSchema,
   weekdayHours: z.string().optional().nullable(),
   weekendHours: z.string().optional().nullable(),
   isOpenWeekends: z.boolean().optional().default(false),
   isAppointmentOnly: z.boolean().optional().default(false),
   isFlagshipLocation: z.boolean().optional().default(false),
+  /** Indicates a warehouse-scale or unusually broad inventory. */
+  isLargeSelection: z.boolean().optional(),
+  /** Showroom carries exclusive, hand-selected, or made-to-order collections. */
+  isBespoke: z.boolean().optional(),
+  /** Showroom explicitly requires or strongly prefers trade/designer access. */
+  isDesignerOnly: z.boolean().optional(),
   scale: z.string().optional().nullable(),
   inventoryFocus: z.string().optional().nullable(),
   targetDemographic: z.string().optional().nullable(),
@@ -1102,6 +1296,17 @@ showroomStoresRouter.post("/", async (c) => {
   // Strip the virtual field before inserting into showroom_stores.
   const { categoryIds, ...storeValues } = data;
 
+  // When hoursJson is provided, derive the back-compat display fields
+  // server-side so filters and legacy display remain correct.
+  // Client-supplied weekdayHours / weekendHours / isOpenWeekends are
+  // intentionally overwritten — do NOT trust them when hoursJson is present.
+  if (storeValues.hoursJson != null) {
+    const derived = deriveHoursSummary(storeValues.hoursJson);
+    storeValues.weekdayHours = derived.weekdayHours;
+    storeValues.weekendHours = derived.weekendHours;
+    storeValues.isOpenWeekends = derived.isOpenWeekends;
+  }
+
   const [inserted] = await db
     .insert(showroomStores)
     .values(storeValues)
@@ -1171,6 +1376,17 @@ showroomStoresRouter.put("/:id", async (c) => {
     .limit(1);
 
   if (!existing) return c.json({ error: "Store not found" }, 404);
+
+  // When hoursJson is provided in a PUT, derive the back-compat display fields
+  // server-side so filters and legacy display remain correct.
+  // Client-supplied weekdayHours / weekendHours / isOpenWeekends are
+  // intentionally overwritten — do NOT trust them when hoursJson is present.
+  if (data.hoursJson != null) {
+    const derived = deriveHoursSummary(data.hoursJson);
+    data.weekdayHours = derived.weekdayHours;
+    data.weekendHours = derived.weekendHours;
+    data.isOpenWeekends = derived.isOpenWeekends;
+  }
 
   const [updated] = await db
     .update(showroomStores)

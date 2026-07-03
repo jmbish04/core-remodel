@@ -414,6 +414,13 @@
       "when": 1783026876007,
       "tag": "0058_wealthy_lightspeed",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1783042398084,
+      "tag": "0059_abandoned_morph",
+      "breakpoints": true
     }
   ]
 }

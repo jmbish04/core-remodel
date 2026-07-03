@@ -25,6 +25,8 @@
 
 import { z } from "zod";
 
+import { DAY_KEYS, type DayKey, type HoursJson } from "./hours-types";
+
 // ─── Zod schema (mirrors createStoreSchema on the backend) ────────────────────
 
 /**
@@ -52,9 +54,18 @@ export const showroomIntakeSchema = z.object({
   googleMapsLink: z.string().optional(),
   weekdayHours: z.string().optional(),
   weekendHours: z.string().optional(),
+  // Structured weekly hours (source of truth going forward). The server derives
+  // isOpenWeekends/weekdayHours/weekendHours from this when present, so the client
+  // must NOT also send those. A permissive `z.custom` is fine here — this is the
+  // form validator, not the server one.
+  hoursJson: z.custom<HoursJson>().optional(),
   isOpenWeekends: z.boolean().optional(),
   isAppointmentOnly: z.boolean().optional(),
   isFlagshipLocation: z.boolean().optional(),
+  // "Select all that apply" showroom traits (see FlagsEditor).
+  isLargeSelection: z.boolean().optional(),
+  isBespoke: z.boolean().optional(),
+  isDesignerOnly: z.boolean().optional(),
   scale: z.string().optional(),
   inventoryFocus: z.string().optional(),
   targetDemographic: z.string().optional(),
@@ -372,4 +383,118 @@ export function inferCategoryLabels(
     }
   }
   return out;
+}
+
+// ─── mapPlaceToHoursJson ──────────────────────────────────────────────────────
+
+/**
+ * Google Places (New) day index → our `DayKey`. Google uses 0 = Sunday …
+ * 6 = Saturday; our `DAY_KEYS` array is Monday-first, so we can't index it
+ * directly.
+ */
+const GOOGLE_DAY_TO_KEY: Record<number, DayKey> = {
+  0: "sun",
+  1: "mon",
+  2: "tue",
+  3: "wed",
+  4: "thu",
+  5: "fri",
+  6: "sat",
+};
+
+/** A single point of a Google `regularOpeningHours.periods[]` entry. */
+interface GooglePeriodPoint {
+  day?: number | null;
+  hour?: number | null;
+  minute?: number | null;
+}
+
+interface GooglePeriod {
+  open?: GooglePeriodPoint | null;
+  close?: GooglePeriodPoint | null;
+}
+
+/** Format a Google hour/minute pair into a 24-hour "HH:MM" string (clamped). */
+function formatGoogleTime(point: GooglePeriodPoint): string {
+  const h = Math.min(Math.max(Math.trunc(point.hour ?? 0), 0), 23);
+  const m = Math.min(Math.max(Math.trunc(point.minute ?? 0), 0), 59);
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}`;
+}
+
+/**
+ * Map a Google Places (New) `regularOpeningHours` object onto the structured
+ * `HoursJson` model (see ./hours-types).
+ *
+ * Google returns `regularOpeningHours.periods` as an array of
+ * `{ open: { day, hour, minute }, close: { day, hour, minute } }` where `day`
+ * is 0 = Sunday … 6 = Saturday. We key each period by its OPEN day and write
+ * the open/close window. Multiple periods for the same day (split hours) collapse
+ * to a single span from the earliest open to the latest close — the structured
+ * model holds one window per day, and the `HoursEditor` custom-hours pane is the
+ * escape hatch for anything finer.
+ *
+ * Any day with no period is left `null` (closed). A 24-hour venue (Google emits
+ * a single open with no close) maps to `00:00`–`23:59`.
+ *
+ * Returns `null` when `periods` is missing/empty — the caller then falls back to
+ * the free-text `weekdayDescriptions` path (`formatOpeningHours`), which is
+ * handled elsewhere.
+ *
+ * @param regularOpeningHours The raw `place.regularOpeningHours` (typed `unknown`
+ *   because callers pass it straight off a permissive payload).
+ */
+export function mapPlaceToHoursJson(regularOpeningHours: unknown): HoursJson | null {
+  const roh = regularOpeningHours as { periods?: unknown } | null | undefined;
+  const periods = roh?.periods;
+  if (!Array.isArray(periods) || periods.length === 0) return null;
+
+  // Track earliest open + latest close (in minutes) per day so split periods
+  // collapse to a single span.
+  const spans = {} as Record<DayKey, { openMin: number; open: string; closeMin: number; close: string } | undefined>;
+
+  const toMin = (hhmm: string): number => {
+    const p = hhmm.split(":");
+    return parseInt(p[0], 10) * 60 + parseInt(p[1], 10);
+  };
+
+  for (const raw of periods as GooglePeriod[]) {
+    const openPoint = raw?.open;
+    if (!openPoint || typeof openPoint.day !== "number") continue;
+    const key = GOOGLE_DAY_TO_KEY[openPoint.day];
+    if (!key) continue;
+
+    const open = formatGoogleTime(openPoint);
+    // A missing close (24h venue) → end of day.
+    const close = raw?.close ? formatGoogleTime(raw.close) : "23:59";
+    const openMin = toMin(open);
+    const closeMin = toMin(close);
+
+    const existing = spans[key];
+    if (!existing) {
+      spans[key] = { openMin, open, closeMin, close };
+    } else {
+      if (openMin < existing.openMin) {
+        existing.openMin = openMin;
+        existing.open = open;
+      }
+      if (closeMin > existing.closeMin) {
+        existing.closeMin = closeMin;
+        existing.close = close;
+      }
+    }
+  }
+
+  const out = {} as HoursJson;
+  let any = false;
+  for (const key of DAY_KEYS) {
+    const span = spans[key];
+    if (span) {
+      out[key] = { open: span.open, close: span.close };
+      any = true;
+    } else {
+      out[key] = null;
+    }
+  }
+
+  return any ? out : null;
 }

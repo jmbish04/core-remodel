@@ -75,9 +75,13 @@ import {
 } from "@/components/ui/map";
 import {
   formatOpeningHours,
+  mapPlaceToHoursJson,
   mapPlaceToIntake,
   type GooglePlaceDetails,
 } from "./intake/places-mapper";
+import { HoursEditor } from "./intake/HoursEditor";
+import { FlagsEditor } from "./intake/FlagsEditor";
+import { DEFAULT_HOURS, type HoursJson } from "./intake/hours-types";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Store {
@@ -1472,8 +1476,12 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
     weekdayHours: "",
     weekendHours: "",
     isOpenWeekends: false,
+    hoursJson: DEFAULT_HOURS as HoursJson,
     isAppointmentOnly: false,
     isFlagshipLocation: false,
+    isLargeSelection: false,
+    isBespoke: false,
+    isDesignerOnly: false,
     scale: "",
     inventoryFocus: "",
     targetDemographic: "",
@@ -1552,6 +1560,9 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
           ...(cityId ? { bayAreaCityId: cityId } : {}),
         });
 
+        const h = mapPlaceToHoursJson(place.regularOpeningHours);
+        if (h) update({ hoursJson: h });
+
         // Successful details call closes the billing session → new token next search.
         sessionTokenRef.current = crypto.randomUUID();
         toast.success("Details pulled from Google — review and edit as needed.");
@@ -1583,14 +1594,14 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
       if (form.locationAddress) body.locationAddress = form.locationAddress;
       if (form.zipCode) body.zipCode = form.zipCode;
       if (form.googleMapsLink) body.googleMapsLink = form.googleMapsLink;
-      if (form.weekdayHours) body.weekdayHours = form.weekdayHours;
-      if (form.weekendHours) body.weekendHours = form.weekendHours;
-      body.isOpenWeekends = form.isOpenWeekends;
+      // Server derives isOpenWeekends / weekdayHours / weekendHours from hoursJson.
+      body.hoursJson = form.hoursJson;
       body.isAppointmentOnly = form.isAppointmentOnly;
       body.isFlagshipLocation = form.isFlagshipLocation;
-      if (form.scale) body.scale = form.scale;
+      body.isLargeSelection = form.isLargeSelection;
+      body.isBespoke = form.isBespoke;
+      body.isDesignerOnly = form.isDesignerOnly;
       if (form.inventoryFocus) body.inventoryFocus = form.inventoryFocus;
-      if (form.targetDemographic) body.targetDemographic = form.targetDemographic;
       if (form.mainPocFullname) body.mainPocFullname = form.mainPocFullname;
       if (form.mainPocPhoneNumber) body.mainPocPhoneNumber = form.mainPocPhoneNumber;
       if (form.mainPocEmailAddress) body.mainPocEmailAddress = form.mainPocEmailAddress;
@@ -1757,41 +1768,35 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
 
             {step === 2 && (
               <>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <Label htmlFor="weekday">Weekday Hours</Label>
-                    <Input id="weekday" value={form.weekdayHours} onChange={(e) => update({ weekdayHours: e.target.value })} placeholder="M-F 9AM-5PM" />
-                  </div>
-                  <div>
-                    <Label htmlFor="weekend">Weekend Hours</Label>
-                    <Input id="weekend" value={form.weekendHours} onChange={(e) => update({ weekendHours: e.target.value })} placeholder="Sat 10AM-4PM" />
-                  </div>
+                <div>
+                  <Label>Hours</Label>
+                  <p className="mb-2 mt-0.5 text-[11px] text-muted-foreground">
+                    Toggle open days and set times. Weekend + weekday summaries are
+                    derived automatically.
+                  </p>
+                  <HoursEditor value={form.hoursJson} onChange={(h) => update({ hoursJson: h })} />
                 </div>
-                <div className="flex flex-col gap-3">
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="isOpenWeekends">Open Weekends</Label>
-                    <Switch id="isOpenWeekends" checked={form.isOpenWeekends} onCheckedChange={(v) => update({ isOpenWeekends: v })} />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="isAppointmentOnly">Appointment Only</Label>
-                    <Switch id="isAppointmentOnly" checked={form.isAppointmentOnly} onCheckedChange={(v) => update({ isAppointmentOnly: v })} />
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <Label htmlFor="isFlagshipLocation">Flagship Location</Label>
-                    <Switch id="isFlagshipLocation" checked={form.isFlagshipLocation} onCheckedChange={(v) => update({ isFlagshipLocation: v })} />
-                  </div>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="isAppointmentOnly">Appointment Only</Label>
+                  <Switch id="isAppointmentOnly" checked={form.isAppointmentOnly} onCheckedChange={(v) => update({ isAppointmentOnly: v })} />
                 </div>
                 <div>
-                  <Label htmlFor="scale">Scale</Label>
-                  <Input id="scale" value={form.scale} onChange={(e) => update({ scale: e.target.value })} placeholder="e.g. Massive, dual-wing facility" />
+                  <Label>Attributes</Label>
+                  <div className="mt-2">
+                    <FlagsEditor
+                      value={{
+                        isFlagshipLocation: form.isFlagshipLocation,
+                        isLargeSelection: form.isLargeSelection,
+                        isBespoke: form.isBespoke,
+                        isDesignerOnly: form.isDesignerOnly,
+                      }}
+                      onChange={(v) => update(v)}
+                    />
+                  </div>
                 </div>
                 <div>
                   <Label htmlFor="focus">Inventory Focus</Label>
                   <Input id="focus" value={form.inventoryFocus} onChange={(e) => update({ inventoryFocus: e.target.value })} placeholder="What this location specializes in" />
-                </div>
-                <div>
-                  <Label htmlFor="demo">Target Demographic</Label>
-                  <Input id="demo" value={form.targetDemographic} onChange={(e) => update({ targetDemographic: e.target.value })} placeholder="e.g. Urban architects, tech executives" />
                 </div>
               </>
             )}
