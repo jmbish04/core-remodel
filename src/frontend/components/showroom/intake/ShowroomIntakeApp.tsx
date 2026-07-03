@@ -8,14 +8,20 @@
  *           session; it is regenerated only after a successful details fetch.
  *   Step 2  On select, we fetch Place Details, map the payload onto the store
  *           schema (via places-mapper), and `form.reset(...)` a fully-editable
- *           react-hook-form organized into THREE tabs — Location, Hours,
+ *           react-hook-form organized into FOUR tabs — Search, Location, Hours,
  *           Details. Inferred categories prefill as removable badges.
  *           Submit POSTs to the EXISTING `/api/showroom-stores` create endpoint
  *           (reusing showroom_stores — no new entity).
  *
+ *           Selecting a Place is NOT required: an "enter manually" escape lets
+ *           the user skip Google entirely and hand-fill the form. Submit is
+ *           gated only on `name` (per the schema).
+ *
  * Tab layout:
- *   - Location  Name, Description (rich OverviewNoteEditor → `description`),
- *               Address, Bay Area City, ZIP, Google Maps link, Phone, Website.
+ *   - Search    Google Places typeahead + autofill, the Name field, the rich
+ *               Description (OverviewNoteEditor → `description`), and the
+ *               "enter manually" escape that jumps to the Location tab.
+ *   - Location  Address, Bay Area City, ZIP, Google Maps link, Phone, Website.
  *   - Hours     Structured weekly HoursEditor.
  *   - Details   Read-only Google rating + review summary, editable price level,
  *               and the boolean Attributes (FlagsEditor).
@@ -36,6 +42,7 @@ import {
   Clock,
   Loader2,
   MapPin,
+  PencilLine,
   Plus,
   Search,
   SlidersHorizontal,
@@ -167,12 +174,15 @@ const BUSINESS_STATUS_COPY: Record<string, string> = {
 function PlaceSearch({
   onSelect,
   disabled,
+  query,
+  onQueryChange,
 }: {
   onSelect: (placeId: string) => void;
   disabled: boolean;
+  query: string;
+  onQueryChange: (value: string) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(false);
   // One session token per search session; regenerated when this component is
@@ -237,7 +247,7 @@ function PlaceSearch({
   }, []);
 
   const handleChange = (value: string) => {
-    setQuery(value);
+    onQueryChange(value);
     setOpen(true);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     const trimmed = value.trim();
@@ -285,7 +295,7 @@ function PlaceSearch({
                     type="button"
                     onClick={() => {
                       setOpen(false);
-                      setQuery(s.text);
+                      onQueryChange(s.text);
                       onSelect(s.placeId);
                     }}
                     className="flex w-full items-start gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-muted/60"
@@ -359,7 +369,12 @@ export function ShowroomIntakeApp() {
   const [cities, setCities] = useState<City[]>([]);
   const [bayAreaCityId, setBayAreaCityId] = useState<string>("");
   const [loadingPlace, setLoadingPlace] = useState(false);
-  const [hydrated, setHydrated] = useState(false);
+  // Controlled tab: default "search"; the "enter manually" escape jumps to
+  // "location", and a place selection surfaces the form on "search".
+  const [activeTab, setActiveTab] = useState<string>("search");
+  // Lifted so the "enter manually" escape can seed the Name field with whatever
+  // the user already typed into the Places typeahead.
+  const [searchQuery, setSearchQuery] = useState<string>("");
   const [context, setContext] = useState<{
     businessStatus?: string;
     rating?: number;
@@ -476,7 +491,6 @@ export function ShowroomIntakeApp() {
           rating: mapped._rating,
           userRatingCount: mapped._userRatingCount,
         });
-        setHydrated(true);
 
         // Successful details call closes the billing session → new token next search.
         sessionTokenRef.current = crypto.randomUUID();
@@ -489,6 +503,15 @@ export function ShowroomIntakeApp() {
     },
     [categories, reset],
   );
+
+  // ── "Enter manually" escape ──
+  // Skip Place selection entirely: keep any typed name and jump straight to the
+  // Location tab so the user can hand-fill. Submit stays gated only on `name`.
+  const handleEnterManually = useCallback(() => {
+    const typed = searchQuery.trim();
+    if (typed) setValue("name", typed, { shouldDirty: true });
+    setActiveTab("location");
+  }, [searchQuery, setValue]);
 
   const addCategory = (id: number) => {
     if (!categoryIds.includes(id)) {
@@ -560,7 +583,8 @@ export function ShowroomIntakeApp() {
       reset({ ...EMPTY_VALUES });
       setBayAreaCityId("");
       setContext({});
-      setHydrated(false);
+      setSearchQuery("");
+      setActiveTab("search");
       sessionTokenRef.current = crypto.randomUUID();
       setSessionEpoch((n) => n + 1);
     } catch (err) {
@@ -587,79 +611,164 @@ export function ShowroomIntakeApp() {
         </p>
       </div>
 
-      {/* Step 1 — Search */}
-      <Card className="p-4 sm:p-5">
-        <div className="mb-2 flex items-center gap-2">
-          <span className="flex size-5 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary ring-1 ring-primary/30">
-            1
-          </span>
-          <span className="text-sm font-medium">Find the business</span>
-        </div>
-        <PlaceSearch
-          key={sessionEpoch}
-          onSelect={handleSelectPlace}
-          disabled={loadingPlace}
-        />
-        {loadingPlace && (
-          <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" /> Fetching details from Google…
+      {/* Review & edit — four tabs: Search · Location · Hours · Details */}
+      <form onSubmit={onSubmit} className="space-y-5">
+        {/* Business-status warning strip (rating now lives in the Details tab) */}
+        {statusWarning && (
+          <div className="flex flex-wrap items-center gap-3 rounded-lg bg-card px-4 py-3 ring-1 ring-border/40">
+            <Badge className="gap-1 bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/40">
+              <AlertTriangle className="size-3.5" />
+              {statusWarning}
+            </Badge>
           </div>
         )}
-      </Card>
 
-      {/* Step 2 — Review & edit (three tabs: Location · Hours · Details) */}
-      {hydrated && (
-        <form onSubmit={onSubmit} className="mt-5 space-y-5">
-          {/* Business-status warning strip (rating now lives in the Details tab) */}
-          {statusWarning && (
-            <div className="flex flex-wrap items-center gap-3 rounded-lg bg-card px-4 py-3 ring-1 ring-border/40">
-              <Badge className="gap-1 bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/40">
-                <AlertTriangle className="size-3.5" />
-                {statusWarning}
-              </Badge>
-            </div>
-          )}
+        <Tabs
+          value={activeTab}
+          onValueChange={setActiveTab}
+          className="w-full"
+        >
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4">
+            <TabsTrigger value="search" className="gap-1.5">
+              <Search className="size-4" /> Search
+            </TabsTrigger>
+            <TabsTrigger value="location" className="gap-1.5">
+              <MapPin className="size-4" /> Location
+            </TabsTrigger>
+            <TabsTrigger value="hours" className="gap-1.5">
+              <Clock className="size-4" /> Hours
+            </TabsTrigger>
+            <TabsTrigger value="details" className="gap-1.5">
+              <SlidersHorizontal className="size-4" /> Details
+            </TabsTrigger>
+          </TabsList>
 
-          <Tabs defaultValue="location" className="w-full">
-            <TabsList className="grid w-full grid-cols-3">
-              <TabsTrigger value="location" className="gap-1.5">
-                <MapPin className="size-4" /> Location
-              </TabsTrigger>
-              <TabsTrigger value="hours" className="gap-1.5">
-                <Clock className="size-4" /> Hours
-              </TabsTrigger>
-              <TabsTrigger value="details" className="gap-1.5">
-                <SlidersHorizontal className="size-4" /> Details
-              </TabsTrigger>
-            </TabsList>
-
-            {/* ── Tab 1 — Location ── */}
-            <TabsContent value="location" className="mt-4 space-y-5">
-              <Card className="space-y-4 p-4 sm:p-5">
-                <FormRow label="Name" htmlFor="name">
-                  <Input id="name" {...register("name")} placeholder="Business name" />
-                  {errors.name && (
-                    <p className="text-[11px] text-destructive">
-                      {errors.name.message}
-                    </p>
-                  )}
-                </FormRow>
-
-                <div className="space-y-1.5">
-                  <Label>Description</Label>
-                  <OverviewNoteEditor
-                    key={`description-${sessionEpoch}`}
-                    initialMarkdown={watch("description") ?? ""}
-                    onChange={({ markdown }) =>
-                      setValue("description", markdown, { shouldDirty: true })
-                    }
-                  />
-                  <p className="text-[11px] text-muted-foreground">
-                    Seeded from Google&rsquo;s summary — edit as needed.
-                  </p>
+          {/* ── Tab 1 — Search ── */}
+          <TabsContent value="search" className="mt-4 space-y-5">
+            <Card className="space-y-4 p-4 sm:p-5">
+              <div className="flex items-center gap-2">
+                <span className="flex size-5 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary ring-1 ring-primary/30">
+                  1
+                </span>
+                <span className="text-sm font-medium">Find the business</span>
+              </div>
+              <PlaceSearch
+                key={sessionEpoch}
+                onSelect={handleSelectPlace}
+                disabled={loadingPlace}
+                query={searchQuery}
+                onQueryChange={setSearchQuery}
+              />
+              {loadingPlace ? (
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <Loader2 className="size-4 animate-spin" /> Fetching details from
+                  Google…
                 </div>
+              ) : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={handleEnterManually}
+                  className="h-auto gap-1.5 px-2 py-1.5 text-sm text-muted-foreground hover:text-foreground"
+                >
+                  <PencilLine className="size-4" />
+                  Can&rsquo;t find it? Enter the showroom manually
+                </Button>
+              )}
+            </Card>
 
-                <FormRow label="Address" htmlFor="locationAddress">
+            <Card className="space-y-4 p-4 sm:p-5">
+              <FormRow label="Name" htmlFor="name">
+                <Input id="name" {...register("name")} placeholder="Business name" />
+                {errors.name && (
+                  <p className="text-[11px] text-destructive">
+                    {errors.name.message}
+                  </p>
+                )}
+              </FormRow>
+
+              <div className="w-full space-y-1.5 [&_[contenteditable]]:min-h-[220px]">
+                <Label>Description</Label>
+                <OverviewNoteEditor
+                  key={`description-${sessionEpoch}`}
+                  initialMarkdown={watch("description") ?? ""}
+                  onChange={({ markdown }) =>
+                    setValue("description", markdown, { shouldDirty: true })
+                  }
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Seeded from Google&rsquo;s summary — edit as needed.
+                </p>
+              </div>
+            </Card>
+
+            {/* Categories — inferred from Google, visible alongside search */}
+            <Card className="space-y-3 p-4 sm:p-5">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium">Categories</span>
+                <span className="text-[11px] text-muted-foreground">
+                  Inferred from Google — edit freely
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {categoryIds.length === 0 && (
+                  <span className="text-sm text-muted-foreground">
+                    No categories yet.
+                  </span>
+                )}
+                {categoryIds.map((id) => {
+                  const cat = categoriesById.get(id);
+                  if (!cat) return null;
+                  return (
+                    <Badge
+                      key={id}
+                      variant="secondary"
+                      className="gap-1 py-1 pl-2.5 pr-1"
+                    >
+                      {cat.name}
+                      <button
+                        type="button"
+                        onClick={() => removeCategory(id)}
+                        className="ml-0.5 rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
+                        aria-label={`Remove ${cat.name}`}
+                      >
+                        <X className="size-3" />
+                      </button>
+                    </Badge>
+                  );
+                })}
+              </div>
+              {availableCategories.length > 0 && (
+                <div className="pt-1">
+                  <Select
+                    value=""
+                    onValueChange={(v) => {
+                      const id = Number(v);
+                      if (Number.isFinite(id) && id > 0) addCategory(id);
+                    }}
+                  >
+                    <SelectTrigger className="w-full sm:w-64">
+                      <span className="flex items-center gap-1.5 text-muted-foreground">
+                        <Plus className="size-3.5" /> Add category
+                      </span>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableCategories.map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </Card>
+          </TabsContent>
+
+          {/* ── Tab 2 — Location ── */}
+          <TabsContent value="location" className="mt-4 space-y-5">
+            <Card className="space-y-4 p-4 sm:p-5">
+              <FormRow label="Address" htmlFor="locationAddress">
                   <Input
                     id="locationAddress"
                     {...register("locationAddress")}
@@ -714,68 +823,6 @@ export function ShowroomIntakeApp() {
                     />
                   </FormRow>
                 </div>
-              </Card>
-
-              {/* Categories */}
-              <Card className="space-y-3 p-4 sm:p-5">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium">Categories</span>
-                  <span className="text-[11px] text-muted-foreground">
-                    Inferred from Google — edit freely
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {categoryIds.length === 0 && (
-                    <span className="text-sm text-muted-foreground">
-                      No categories yet.
-                    </span>
-                  )}
-                  {categoryIds.map((id) => {
-                    const cat = categoriesById.get(id);
-                    if (!cat) return null;
-                    return (
-                      <Badge
-                        key={id}
-                        variant="secondary"
-                        className="gap-1 py-1 pl-2.5 pr-1"
-                      >
-                        {cat.name}
-                        <button
-                          type="button"
-                          onClick={() => removeCategory(id)}
-                          className="ml-0.5 rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground"
-                          aria-label={`Remove ${cat.name}`}
-                        >
-                          <X className="size-3" />
-                        </button>
-                      </Badge>
-                    );
-                  })}
-                </div>
-                {availableCategories.length > 0 && (
-                  <div className="pt-1">
-                    <Select
-                      value=""
-                      onValueChange={(v) => {
-                        const id = Number(v);
-                        if (Number.isFinite(id) && id > 0) addCategory(id);
-                      }}
-                    >
-                      <SelectTrigger className="w-full sm:w-64">
-                        <span className="flex items-center gap-1.5 text-muted-foreground">
-                          <Plus className="size-3.5" /> Add category
-                        </span>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {availableCategories.map((c) => (
-                          <SelectItem key={c.id} value={String(c.id)}>
-                            {c.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
               </Card>
 
               {/* Overview / visit note */}
@@ -923,7 +970,8 @@ export function ShowroomIntakeApp() {
                 reset({ ...EMPTY_VALUES });
                 setBayAreaCityId("");
                 setContext({});
-                setHydrated(false);
+                setSearchQuery("");
+                setActiveTab("search");
                 sessionTokenRef.current = crypto.randomUUID();
                 setSessionEpoch((n) => n + 1);
               }}
@@ -941,7 +989,6 @@ export function ShowroomIntakeApp() {
             </Button>
           </div>
         </form>
-      )}
     </main>
   );
 }
