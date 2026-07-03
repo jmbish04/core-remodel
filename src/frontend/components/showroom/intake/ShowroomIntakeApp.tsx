@@ -40,13 +40,17 @@ import {
   Building2,
   Check,
   Clock,
+  ExternalLink,
   Loader2,
   MapPin,
   PencilLine,
   Plus,
   Search,
+  ShieldCheck,
+  Sparkles,
   SlidersHorizontal,
   Star,
+  Tag,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -85,6 +89,11 @@ import {
 } from "./places-mapper";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+
+/** The backend's AI review-inference block (from `GooglePlaceDetails.aiInference`). */
+type AiInference = NonNullable<GooglePlaceDetails["aiInference"]>;
+/** A single AI-detected brand entry. */
+type AiBrand = NonNullable<NonNullable<AiInference["brands"]>[number]>;
 
 interface Suggestion {
   placeId: string;
@@ -387,6 +396,73 @@ function DiagNote({ diag }: { diag?: FieldDiag }) {
   );
 }
 
+/** Human-readable label for each AI-set attribute flag (keyed by field name). */
+const FLAG_LABELS: Record<string, string> = {
+  isAppointmentOnly: "Appointment only",
+  isFlagshipLocation: "Flagship location",
+  isLargeSelection: "Large selection",
+  isBespoke: "Bespoke / curated",
+  isTradeRepRequired: "Trade rep required",
+};
+
+/**
+ * Amber "AI: {rationale}" notes rendered under the FlagsEditor — one line per
+ * AI-asserted attribute. Renders nothing when the AI turned on no flags.
+ */
+function AttrRationaleNotes({
+  rationales,
+}: {
+  rationales: Record<string, string>;
+}) {
+  const entries = Object.entries(rationales).filter(([, r]) => !!r);
+  if (entries.length === 0) return null;
+  return (
+    <div className="space-y-1.5 rounded-md bg-amber-500/5 px-3 py-2 ring-1 ring-amber-500/20">
+      {entries.map(([key, rationale]) => (
+        <p key={key} className="flex items-start gap-1.5 text-[11px] text-amber-400">
+          <Sparkles className="mt-px size-3 shrink-0" />
+          <span>
+            <span className="font-medium">{FLAG_LABELS[key] ?? key} — AI:</span>{" "}
+            {rationale}
+          </span>
+        </p>
+      ))}
+    </div>
+  );
+}
+
+/** Assessment → Monolith color treatment for the review-authenticity badge/card. */
+const AUTHENTICITY_STYLES: Record<
+  string,
+  { badge: string; ring: string; label: string }
+> = {
+  AUTHENTIC: {
+    badge: "bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/40",
+    ring: "ring-emerald-500/25",
+    label: "Authentic",
+  },
+  MOSTLY_AUTHENTIC: {
+    badge: "bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/40",
+    ring: "ring-emerald-500/25",
+    label: "Mostly authentic",
+  },
+  MIXED: {
+    badge: "bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/40",
+    ring: "ring-amber-500/25",
+    label: "Mixed",
+  },
+  SUSPICIOUS: {
+    badge: "bg-red-500/15 text-red-300 ring-1 ring-red-500/40",
+    ring: "ring-red-500/25",
+    label: "Suspicious",
+  },
+  UNVERIFIED: {
+    badge: "bg-muted text-muted-foreground ring-1 ring-border/40",
+    ring: "ring-border/40",
+    label: "Unverified",
+  },
+};
+
 // ─── Main app ─────────────────────────────────────────────────────────────────
 
 export function ShowroomIntakeApp() {
@@ -416,6 +492,20 @@ export function ShowroomIntakeApp() {
   const [priceInferred, setPriceInferred] = useState(false);
   // The AI's price reasoning string, shown in the amber note when `priceInferred`.
   const [priceReasoning, setPriceReasoning] = useState<string | null>(null);
+  // Set when the AI returned PRICE_LEVEL_UNSPECIFIED (no usable price signal from
+  // reviews) — drives a muted "no price signal" note under the Price select.
+  const [priceNoSignal, setPriceNoSignal] = useState(false);
+  // Per-flag AI rationales (keyed by the ShowroomIntake boolean field name) so the
+  // Details tab can render an amber "AI: {rationale}" note under each AI-set flag.
+  const [attrRationales, setAttrRationales] = useState<Record<string, string>>({});
+  // AI review-authenticity assessment (color-coded badge + rationale + sources).
+  const [reviewAuthenticity, setReviewAuthenticity] =
+    useState<AiInference["reviewAuthenticity"]>(null);
+  // Brands the AI detected — displayed as a note; auto-created by the backend on save.
+  const [detectedBrands, setDetectedBrands] = useState<AiBrand[]>([]);
+  // Full AI inference object, forwarded verbatim in the submit body so the backend
+  // can persist it + auto-create brands. Cleared on discard/save.
+  const [reviewAiInsight, setReviewAiInsight] = useState<AiInference | null>(null);
 
   const form = useForm<ShowroomIntakeInput, unknown, ShowroomIntakeValues>({
     resolver: zodResolver(showroomIntakeSchema),
@@ -506,20 +596,72 @@ export function ShowroomIntakeApp() {
           categories,
         );
 
-        // ── Price fallback ──
-        // Prefer Google's structured priceLevel (already in mapped.pricePoint);
-        // otherwise fall back to the backend's AI review-inference. Track whether
-        // the value came from AI so the Details tab can flag it in amber.
         const ai = place.aiInference ?? null;
-        const inferredPrice = ai?.inferredPricePoint ?? undefined;
-        const resolvedPricePoint = mapped.pricePoint ?? inferredPrice;
-        const didInferPrice = !mapped.pricePoint && !!inferredPrice;
+
+        // ── Attributes ── seed each boolean flag from the AI's per-attribute
+        // detection, and stash the AI rationales so the Details tab can render an
+        // amber "AI: {rationale}" note under each AI-set flag.
+        const attrs = ai?.attributes ?? null;
+        const aiAppointmentOnly = !!attrs?.appointmentOnly?.value;
+        const aiFlagshipLocation = !!attrs?.flagshipLocation?.value;
+        const aiLargeSelection = !!attrs?.largeSelection?.value;
+        const aiBespoke = !!attrs?.bespokeCurated?.value;
+        const aiTradeRepRequired = !!attrs?.tradeRepRequired?.value;
+
+        // OR the AI-detected flags with any Google/mapper-derived flags.
+        const resolvedAppointmentOnly =
+          aiAppointmentOnly || !!mapped.isAppointmentOnly;
+        const resolvedFlagshipLocation =
+          aiFlagshipLocation || !!mapped.isFlagshipLocation;
+        const resolvedLargeSelection = aiLargeSelection || !!mapped.isLargeSelection;
+        const resolvedBespoke = aiBespoke || !!mapped.isBespoke;
+        const resolvedTradeRepRequired =
+          aiTradeRepRequired || !!mapped.isTradeRepRequired;
+
+        // Only carry a rationale when the AI actually asserted the attribute — so
+        // the note appears solely under flags the AI turned on.
+        const rationales: Record<string, string> = {};
+        if (aiAppointmentOnly && attrs?.appointmentOnly?.rationale)
+          rationales.isAppointmentOnly = attrs.appointmentOnly.rationale;
+        if (aiFlagshipLocation && attrs?.flagshipLocation?.rationale)
+          rationales.isFlagshipLocation = attrs.flagshipLocation.rationale;
+        if (aiLargeSelection && attrs?.largeSelection?.rationale)
+          rationales.isLargeSelection = attrs.largeSelection.rationale;
+        if (aiBespoke && attrs?.bespokeCurated?.rationale)
+          rationales.isBespoke = attrs.bespokeCurated.rationale;
+        if (aiTradeRepRequired && attrs?.tradeRepRequired?.rationale)
+          rationales.isTradeRepRequired = attrs.tradeRepRequired.rationale;
+        setAttrRationales(rationales);
+
+        // ── Price fallback ──
+        // Prefer Google's structured priceLevel (already in mapped.pricePoint).
+        // Otherwise fall back to the AI's inferred tier — but ONLY when it is a
+        // real `$` tier. `PRICE_LEVEL_UNSPECIFIED` (or null) means the AI found no
+        // usable price signal: do NOT apply it (the enum must never reach the
+        // Select) — instead surface a muted "no signal" note.
+        const rawInferred = ai?.inferredPricePoint ?? null;
+        const isRealTier =
+          rawInferred === "$" ||
+          rawInferred === "$$" ||
+          rawInferred === "$$$" ||
+          rawInferred === "$$$$";
+        const didInferPrice = !mapped.pricePoint && isRealTier;
+        const resolvedPricePoint = mapped.pricePoint
+          ? mapped.pricePoint
+          : isRealTier
+            ? (rawInferred as ShowroomIntakeInput["pricePoint"])
+            : undefined;
         setPriceInferred(didInferPrice);
         setPriceReasoning(didInferPrice ? (ai?.priceReasoning ?? null) : null);
+        setPriceNoSignal(
+          !mapped.pricePoint && rawInferred === "PRICE_LEVEL_UNSPECIFIED",
+        );
 
-        // ── Large selection ── OR of the AI flag and any Google-derived flag.
-        const resolvedLargeSelection =
-          !!ai?.isLargeSelection || !!mapped.isLargeSelection;
+        // ── AI insight surfaces ── authenticity, brands, and the full object for
+        // the submit body (backend persists it + auto-creates brands).
+        setReviewAuthenticity(ai?.reviewAuthenticity ?? null);
+        setDetectedBrands((ai?.brands ?? []).filter((b): b is AiBrand => !!b));
+        setReviewAiInsight(ai);
 
         // ── Review summary ── the "[gemini summarized] …" copy (editable below).
         const resolvedReviewSummary = mapped.reviewSummary ?? "";
@@ -532,7 +674,11 @@ export function ShowroomIntakeApp() {
           ...EMPTY_VALUES,
           ...mapped,
           pricePoint: resolvedPricePoint,
+          isAppointmentOnly: resolvedAppointmentOnly,
+          isFlagshipLocation: resolvedFlagshipLocation,
           isLargeSelection: resolvedLargeSelection,
+          isBespoke: resolvedBespoke,
+          isTradeRepRequired: resolvedTradeRepRequired,
           googleRating: mapped.googleRating,
           userRatingCount: mapped.userRatingCount,
           reviewSummary: resolvedReviewSummary,
@@ -627,6 +773,10 @@ export function ShowroomIntakeApp() {
     // Raw Google photo references (first 5) so the server can fetch + persist the
     // media. Sent as-is; empty array when the place had no photos / manual entry.
     body.photos = placePhotos;
+    // Full AI review-inference object — the backend persists the price reasoning,
+    // attribute rationales, and review-authenticity, and auto-creates any detected
+    // brands. Sent verbatim; null on manual entry / places without an AI block.
+    body.reviewAiInsight = reviewAiInsight;
 
     try {
       const res = await fetch("/api/showroom-stores", {
@@ -649,6 +799,11 @@ export function ShowroomIntakeApp() {
       setPlacePhotos([]);
       setPriceInferred(false);
       setPriceReasoning(null);
+      setPriceNoSignal(false);
+      setAttrRationales({});
+      setReviewAuthenticity(null);
+      setDetectedBrands([]);
+      setReviewAiInsight(null);
       sessionTokenRef.current = crypto.randomUUID();
       setSessionEpoch((n) => n + 1);
     } catch (err) {
@@ -998,10 +1153,18 @@ export function ShowroomIntakeApp() {
                   </Select>
                   {priceInferred ? (
                     <p className="flex items-start gap-1 text-[11px] text-amber-400">
-                      <Star className="mt-px size-3 shrink-0" />
+                      <Sparkles className="mt-px size-3 shrink-0" />
                       <span>
                         Inferred from reviews (AI)
                         {priceReasoning ? `: ${priceReasoning}` : ""}
+                      </span>
+                    </p>
+                  ) : priceNoSignal ? (
+                    <p className="flex items-start gap-1 text-[11px] text-muted-foreground/70">
+                      <Sparkles className="mt-px size-3 shrink-0" />
+                      <span>
+                        AI found no reliable price signal in the reviews — set the
+                        price level manually if you know it.
                       </span>
                     </p>
                   ) : (
@@ -1042,7 +1205,89 @@ export function ShowroomIntakeApp() {
                     });
                   }}
                 />
+                {/* Amber AI rationale for each AI-asserted attribute. */}
+                <AttrRationaleNotes rationales={attrRationales} />
               </Card>
+
+              {/* Review authenticity (AI + Google-Search grounding) */}
+              {reviewAuthenticity?.assessment &&
+                (() => {
+                  const style =
+                    AUTHENTICITY_STYLES[reviewAuthenticity.assessment] ??
+                    AUTHENTICITY_STYLES.UNVERIFIED;
+                  const sources = (reviewAuthenticity.sources ?? []).filter(
+                    (s): s is string => typeof s === "string" && s.trim().length > 0,
+                  );
+                  return (
+                    <Card
+                      className={`space-y-3 p-4 sm:p-5 ring-1 ${style.ring}`}
+                    >
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="flex items-center gap-1.5 text-sm font-medium">
+                          <ShieldCheck className="size-4 text-muted-foreground" />
+                          Review authenticity
+                        </span>
+                        <Badge className={`gap-1 ${style.badge}`}>
+                          {style.label}
+                        </Badge>
+                      </div>
+                      {reviewAuthenticity.rationale && (
+                        <p className="text-[13px] leading-relaxed text-muted-foreground">
+                          {reviewAuthenticity.rationale}
+                        </p>
+                      )}
+                      {sources.length > 0 && (
+                        <div className="space-y-1.5">
+                          <p className="text-[11px] font-medium text-muted-foreground/80">
+                            Sources
+                          </p>
+                          <ul className="space-y-1">
+                            {sources.map((src, i) => (
+                              <li key={`${src}-${i}`}>
+                                <a
+                                  href={src}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-start gap-1.5 text-[12px] text-primary underline-offset-2 hover:underline"
+                                >
+                                  <ExternalLink className="mt-0.5 size-3 shrink-0" />
+                                  <span className="break-all">{src}</span>
+                                </a>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </Card>
+                  );
+                })()}
+
+              {/* Detected brands (auto-created on save) */}
+              {detectedBrands.length > 0 && (
+                <Card className="space-y-3 p-4 sm:p-5">
+                  <span className="flex items-center gap-1.5 text-sm font-medium">
+                    <Tag className="size-4 text-muted-foreground" />
+                    Detected brands
+                  </span>
+                  <div className="flex flex-wrap gap-2">
+                    {detectedBrands.map((b, i) => (
+                      <Badge
+                        key={`${b.name ?? "brand"}-${i}`}
+                        variant="secondary"
+                        className="gap-1 py-1"
+                      >
+                        {b.name ?? "Unnamed brand"}
+                        {b.type ? (
+                          <span className="text-muted-foreground">· {b.type}</span>
+                        ) : null}
+                      </Badge>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground/70">
+                    Added to this showroom on save.
+                  </p>
+                </Card>
+              )}
             </TabsContent>
           </Tabs>
 
@@ -1062,6 +1307,11 @@ export function ShowroomIntakeApp() {
                 setPlacePhotos([]);
                 setPriceInferred(false);
                 setPriceReasoning(null);
+                setPriceNoSignal(false);
+                setAttrRationales({});
+                setReviewAuthenticity(null);
+                setDetectedBrands([]);
+                setReviewAiInsight(null);
                 sessionTokenRef.current = crypto.randomUUID();
                 setSessionEpoch((n) => n + 1);
               }}
