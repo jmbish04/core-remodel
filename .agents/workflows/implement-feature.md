@@ -286,3 +286,37 @@ islands)
   `/admin/brands/[brandId].astro` (hero "which showrooms carry this brand",
   notes, ratings, product grid). Both linked from the `AppSidebar` Admin-Shopping
   section (`Brands`, `Global Products`).
+
+## Extension: Places-connected Intake, Structured Hours/Flags & Website Scrape Workflow
+
+Migrations `0059`–`0060`. Intake is Google-Places-driven and, on submit, kicks off
+a Browser-Rendering scrape of the showroom website.
+
+### Intake (Add-Showroom modal in `ShowroomsDirectoryApp` AND `ShowroomIntakeApp`)
+
+- The showroom-NAME field is a Google Places autocomplete (`/api/places/*`).
+  Selecting a place autofills name/description/pricePoint/website/address/zip/
+  maps-link/phone, resolves the Bay Area city, and prefills hours via
+  `mapPlaceToHoursJson`. Instagram is a manual field (Places has no IG).
+- **Hours** (`hours_json`, 7-day `{open,close}|null`) via `HoursEditor` (7 day
+  toggles, curated open/close, Custom AM/PM table). The server DERIVES
+  `isOpenWeekends` + `weekdayHours`/`weekendHours` summaries from `hours_json`; the
+  open-weekends toggle was removed. Shared model in `intake/hours-types.ts`.
+- **Flags** (`FlagsEditor`) replace free-text scale/demographic:
+  `is_flagship_location`, `is_large_selection`, `is_bespoke`, `is_designer_only`.
+
+### Scrape workflow (`ShowroomScrapeWorkflow`, binding `SHOWROOM_SCRAPE_WORKFLOW`)
+
+- Schema `0060`: showroom `rag_uuid`, `hero_image_cf_images_url`, `scrape_status`;
+  new `browser_run_pages` table. New workflow classes must be BOTH exported from
+  `src/_worker.ts` AND bound in `wrangler.jsonc` `workflows[]` (then `pnpm run types`).
+- Triggered from `POST /api/showroom-stores` (when `websiteUrl` present) via
+  `waitUntil(env.SHOWROOM_SCRAPE_WORKFLOW.create({ params }))` after minting a
+  `rag_uuid`. `POST /:id/scrape` re-triggers; `GET /:id/scrape` returns status+pages.
+- Steps (~10 pages cap): discover same-domain links → per page `scrapeUrl`
+  (Browser Rendering) → screenshot→CF Images, markdown→R2 (`ARTIFACTS_BUCKET`),
+  embeddings→Vectorize `RESEARCH_INDEX` (namespaced by `rag_uuid`), Workers-AI
+  structured extraction → `browser_run_pages`. Aggregate: favicon, hero image,
+  Instagram, create+map brands (dedup by name).
+- Viewport: hero from `hero_image_cf_images_url` + favicon circle; a scrape badge
+  polls `GET /:id/scrape` → `ScrapeResultsModal` on complete.
