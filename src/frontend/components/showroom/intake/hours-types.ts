@@ -145,6 +145,90 @@ export function formatHoursSummary(h: HoursJson): string {
   return segments.join(" · ");
 }
 
+// ─── Smart summary (weekday-uniform detection + weekend substring) ────────────
+
+/** Render a single day's window as a 12h "9:00 AM–5:00 PM" span. */
+function windowLabel(d: DayHours): string {
+  const o = to12h(d.open);
+  const c = to12h(d.close);
+  return `${o.time} ${o.period}–${c.time} ${c.period}`;
+}
+
+const WEEKDAY_KEYS: DayKey[] = ["mon", "tue", "wed", "thu", "fri"];
+const WEEKEND_KEYS: DayKey[] = ["sat", "sun"];
+
+/**
+ * Produce a compact, human "smart" summary of a `HoursJson` plus a
+ * `weekdaysUniform` flag the editor uses to decide whether to auto-open the
+ * custom-hours pane.
+ *
+ * Weekday uniformity (Mon–Fri): `weekdaysUniform` is `true` when every OPEN
+ * weekday shares the identical `{ open, close }` window. Closed weekdays are
+ * ignored for the comparison — a store open only Mon/Wed/Fri at the same window
+ * is still "uniform". A week with zero open weekdays is treated as not uniform
+ * (there is no Mon–Fri time to state), and the label falls through to the
+ * whatever's-open / "Hours not set" branches.
+ *
+ * Weekend substring: built from Sat/Sun, e.g. "Sat–Sun Closed",
+ * "Sat 11:00 AM–3:00 PM · Sun Closed", "Sat–Sun 10:00 AM–4:00 PM".
+ *
+ * Label shapes:
+ *   - uniform + ≥1 weekday open →
+ *       "Mon–Fri 9:00 AM–5:00 PM · Sat–Sun Closed"
+ *   - not uniform (≥2 differing open weekdays) →
+ *       "M–F times vary · {weekendSummary}"
+ *   - no weekday open → summarize whatever days ARE open, else "Hours not set".
+ */
+export function summarizeHours(h: HoursJson): { label: string; weekdaysUniform: boolean } {
+  const src = h ?? ({} as HoursJson);
+
+  const openWeekdays = WEEKDAY_KEYS
+    .map((k) => src[k] ?? null)
+    .filter((d): d is DayHours => d !== null);
+
+  // Uniform when all open weekdays share one identical window.
+  const weekdaysUniform =
+    openWeekdays.length > 0 &&
+    openWeekdays.every(
+      (d) => d.open === openWeekdays[0].open && d.close === openWeekdays[0].close,
+    );
+
+  // ── weekend summary substring (Sat / Sun) ──
+  const weekendParts: string[] = [];
+  const sat = src.sat ?? null;
+  const sun = src.sun ?? null;
+  if (sat === null && sun === null) {
+    weekendParts.push("Sat–Sun Closed");
+  } else if (sat && sun && sat.open === sun.open && sat.close === sun.close) {
+    weekendParts.push(`Sat–Sun ${windowLabel(sat)}`);
+  } else {
+    weekendParts.push(sat ? `Sat ${windowLabel(sat)}` : "Sat Closed");
+    weekendParts.push(sun ? `Sun ${windowLabel(sun)}` : "Sun Closed");
+  }
+  const weekendSummary = weekendParts.join(" · ");
+
+  if (openWeekdays.length > 0) {
+    if (weekdaysUniform) {
+      return {
+        label: `Mon–Fri ${windowLabel(openWeekdays[0])} · ${weekendSummary}`,
+        weekdaysUniform: true,
+      };
+    }
+    return {
+      label: `M–F times vary · ${weekendSummary}`,
+      weekdaysUniform: false,
+    };
+  }
+
+  // No weekday open — summarize whatever days are open (weekend included), else
+  // report "Hours not set".
+  const openAny = DAY_KEYS.some((k) => (src[k] ?? null) !== null);
+  if (!openAny) {
+    return { label: "Hours not set", weekdaysUniform: false };
+  }
+  return { label: formatHoursSummary(src), weekdaysUniform: false };
+}
+
 // ─── Curated option lists (for the standard-hours Selects) ────────────────────
 
 /** A selectable time option: 24h value + a 12h display label. */

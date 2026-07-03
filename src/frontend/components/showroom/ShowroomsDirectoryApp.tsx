@@ -65,7 +65,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import {
   Map as GeoMap,
   MapControls,
@@ -74,13 +73,13 @@ import {
   MarkerPopup,
 } from "@/components/ui/map";
 import {
-  formatOpeningHours,
   mapPlaceToHoursJson,
   mapPlaceToIntake,
   type GooglePlaceDetails,
 } from "./intake/places-mapper";
 import { HoursEditor } from "./intake/HoursEditor";
 import { FlagsEditor } from "./intake/FlagsEditor";
+import { OverviewNoteEditor } from "./OverviewNoteEditor";
 import { DEFAULT_HOURS, type HoursJson } from "./intake/hours-types";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1466,31 +1465,26 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
     description: "",
     pricePoint: "",
     websiteUrl: "",
-    instagramUrl: "",
     phoneNumber: "",
-    emailAddress: "",
     bayAreaCityId: "",
     locationAddress: "",
     zipCode: "",
     googleMapsLink: "",
-    weekdayHours: "",
-    weekendHours: "",
-    isOpenWeekends: false,
     hoursJson: DEFAULT_HOURS as HoursJson,
+    googleRating: undefined as number | undefined,
+    userRatingCount: undefined as number | undefined,
+    reviewSummary: "",
     isAppointmentOnly: false,
     isFlagshipLocation: false,
     isLargeSelection: false,
     isBespoke: false,
-    isDesignerOnly: false,
-    scale: "",
-    inventoryFocus: "",
-    targetDemographic: "",
-    mainPocFullname: "",
-    mainPocPhoneNumber: "",
-    mainPocEmailAddress: "",
+    isTradeRepRequired: false,
   };
   const [form, setForm] = useState({ ...emptyForm });
   const [loadingPlace, setLoadingPlace] = useState(false);
+  // Bumped whenever an autofill lands so the (seed-once) rich-text description
+  // editor remounts and re-seeds from the freshly mapped description.
+  const [descSeedKey, setDescSeedKey] = useState(0);
   // One session token per search session: shared with the child typeahead by ref
   // so every autocomplete keystroke + the terminal details call bill as ONE
   // Google session. Regenerated after a successful selection.
@@ -1522,8 +1516,8 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
   );
 
   // Fetch Place Details for the selected suggestion, map it, and autofill the
-  // form. POC fields are intentionally left untouched. Instagram is never filled
-  // by Google — it stays whatever the user typed.
+  // form. Rating / review-count / review-summary come straight from Google and
+  // are read-only in the UI.
   const handleSelectPlace = useCallback(
     async (placeId: string) => {
       setLoadingPlace(true);
@@ -1541,7 +1535,6 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
         const place = (await res.json()) as GooglePlaceDetails;
 
         const mapped = mapPlaceToIntake(place);
-        const hours = formatOpeningHours(place.regularOpeningHours);
         const cityId = resolveBayAreaCityId(mapped.locationAddress);
 
         update({
@@ -1553,15 +1546,15 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
           zipCode: mapped.zipCode ?? "",
           googleMapsLink: mapped.googleMapsLink ?? "",
           phoneNumber: mapped.phoneNumber ?? "",
-          emailAddress: mapped.emailAddress ?? "",
-          weekdayHours: hours.weekdayHours,
-          weekendHours: hours.weekendHours,
-          isOpenWeekends: hours.isOpenWeekends,
+          googleRating: mapped.googleRating,
+          userRatingCount: mapped.userRatingCount,
+          reviewSummary: mapped.reviewSummary ?? "",
+          hoursJson: mapPlaceToHoursJson(place.regularOpeningHours) ?? DEFAULT_HOURS,
           ...(cityId ? { bayAreaCityId: cityId } : {}),
         });
 
-        const h = mapPlaceToHoursJson(place.regularOpeningHours);
-        if (h) update({ hoursJson: h });
+        // Re-seed the (seed-once) rich-text description editor.
+        setDescSeedKey((k) => k + 1);
 
         // Successful details call closes the billing session → new token next search.
         sessionTokenRef.current = crypto.randomUUID();
@@ -1587,24 +1580,22 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
       if (form.description) body.description = form.description;
       if (form.pricePoint) body.pricePoint = form.pricePoint;
       if (form.websiteUrl) body.websiteUrl = form.websiteUrl;
-      if (form.instagramUrl) body.instagramUrl = form.instagramUrl;
       if (form.phoneNumber) body.phoneNumber = form.phoneNumber;
-      if (form.emailAddress) body.emailAddress = form.emailAddress;
       if (form.bayAreaCityId) body.bayAreaCityId = Number(form.bayAreaCityId);
       if (form.locationAddress) body.locationAddress = form.locationAddress;
       if (form.zipCode) body.zipCode = form.zipCode;
       if (form.googleMapsLink) body.googleMapsLink = form.googleMapsLink;
+      // Google-sourced review signals (read-only in the UI).
+      if (typeof form.googleRating === "number") body.googleRating = form.googleRating;
+      if (typeof form.userRatingCount === "number") body.userRatingCount = form.userRatingCount;
+      if (form.reviewSummary) body.reviewSummary = form.reviewSummary;
       // Server derives isOpenWeekends / weekdayHours / weekendHours from hoursJson.
       body.hoursJson = form.hoursJson;
       body.isAppointmentOnly = form.isAppointmentOnly;
       body.isFlagshipLocation = form.isFlagshipLocation;
       body.isLargeSelection = form.isLargeSelection;
       body.isBespoke = form.isBespoke;
-      body.isDesignerOnly = form.isDesignerOnly;
-      if (form.inventoryFocus) body.inventoryFocus = form.inventoryFocus;
-      if (form.mainPocFullname) body.mainPocFullname = form.mainPocFullname;
-      if (form.mainPocPhoneNumber) body.mainPocPhoneNumber = form.mainPocPhoneNumber;
-      if (form.mainPocEmailAddress) body.mainPocEmailAddress = form.mainPocEmailAddress;
+      body.isTradeRepRequired = form.isTradeRepRequired;
 
       const res = await fetch("/api/showroom-stores", {
         method: "POST",
@@ -1622,6 +1613,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
       setOpen(false);
       setStep(0);
       setForm({ ...emptyForm });
+      setDescSeedKey((k) => k + 1);
       sessionTokenRef.current = crypto.randomUUID();
       onCreated();
     } catch (e) {
@@ -1631,7 +1623,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
     }
   };
 
-  const steps = ["Identity", "Location", "Details", "Contact"];
+  const steps = ["Location", "Hours", "Details"];
 
   return (
     <>
@@ -1690,51 +1682,19 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                   )}
                 </div>
                 <div>
-                  <Label htmlFor="desc">Description</Label>
-                  <Input id="desc" value={form.description} onChange={(e) => update({ description: e.target.value })} placeholder="Brief description" />
-                </div>
-                <div>
-                  <Label htmlFor="price">Price Point</Label>
-                  <div className="flex gap-1.5">
-                    {PRICE_POINTS.map((pp) => (
-                      <Button
-                        key={pp}
-                        size="sm"
-                        type="button"
-                        variant={form.pricePoint === pp ? "default" : "outline"}
-                        onClick={() => update({ pricePoint: form.pricePoint === pp ? "" : pp })}
-                        className="font-mono"
-                      >
-                        {pp}
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <Label htmlFor="website">Website</Label>
-                  <Input id="website" value={form.websiteUrl} onChange={(e) => update({ websiteUrl: e.target.value })} placeholder="https://..." />
-                </div>
-                <div>
-                  <Label htmlFor="instagram">Instagram</Label>
-                  <div className="relative">
-                    <Instagram className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                      id="instagram"
-                      value={form.instagramUrl}
-                      onChange={(e) => update({ instagramUrl: e.target.value })}
-                      placeholder="https://instagram.com/..."
-                      className="pl-9"
+                  <Label>Description</Label>
+                  <div className="mt-1">
+                    <OverviewNoteEditor
+                      key={descSeedKey}
+                      initialMarkdown={form.description}
+                      onChange={({ markdown }) => update({ description: markdown })}
                     />
                   </div>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    Not filled by Google — paste the profile URL.
-                  </p>
                 </div>
-              </>
-            )}
-
-            {step === 1 && (
-              <>
+                <div>
+                  <Label htmlFor="address">Address</Label>
+                  <Input id="address" value={form.locationAddress} onChange={(e) => update({ locationAddress: e.target.value })} placeholder="123 Design St" />
+                </div>
                 <div>
                   <Label htmlFor="city">Bay Area City</Label>
                   <select
@@ -1752,10 +1712,6 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                   </select>
                 </div>
                 <div>
-                  <Label htmlFor="address">Address</Label>
-                  <Input id="address" value={form.locationAddress} onChange={(e) => update({ locationAddress: e.target.value })} placeholder="123 Design St" />
-                </div>
-                <div>
                   <Label htmlFor="zip">Zip Code</Label>
                   <Input id="zip" value={form.zipCode} onChange={(e) => update({ zipCode: e.target.value })} placeholder="94103" />
                 </div>
@@ -1763,65 +1719,93 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                   <Label htmlFor="maps">Google Maps Link</Label>
                   <Input id="maps" value={form.googleMapsLink} onChange={(e) => update({ googleMapsLink: e.target.value })} placeholder="https://maps.google.com/..." />
                 </div>
+                <div>
+                  <Label htmlFor="phone">Phone Number</Label>
+                  <Input id="phone" value={form.phoneNumber} onChange={(e) => update({ phoneNumber: e.target.value })} placeholder="(415) 555-0100" />
+                </div>
+                <div>
+                  <Label htmlFor="website">Website URL</Label>
+                  <Input id="website" value={form.websiteUrl} onChange={(e) => update({ websiteUrl: e.target.value })} placeholder="https://..." />
+                </div>
               </>
+            )}
+
+            {step === 1 && (
+              <div>
+                <Label>Hours</Label>
+                <p className="mb-2 mt-0.5 text-[11px] text-muted-foreground">
+                  Toggle open days and set times. Weekend + weekday summaries are
+                  derived automatically.
+                </p>
+                <HoursEditor value={form.hoursJson} onChange={(h) => update({ hoursJson: h })} />
+              </div>
             )}
 
             {step === 2 && (
               <>
                 <div>
-                  <Label>Hours</Label>
-                  <p className="mb-2 mt-0.5 text-[11px] text-muted-foreground">
-                    Toggle open days and set times. Weekend + weekday summaries are
-                    derived automatically.
-                  </p>
-                  <HoursEditor value={form.hoursJson} onChange={(h) => update({ hoursJson: h })} />
+                  <Label>Rating</Label>
+                  <div className="mt-1.5 flex items-center gap-2 rounded-lg bg-card px-3 py-2 ring-1 ring-border/40">
+                    {typeof form.googleRating === "number" ? (
+                      <>
+                        <Stars rating={form.googleRating} />
+                        <span className="text-xs text-muted-foreground">
+                          {form.googleRating.toFixed(1)}
+                          {typeof form.userRatingCount === "number"
+                            ? ` (${form.userRatingCount} review${form.userRatingCount === 1 ? "" : "s"})`
+                            : ""}
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-xs text-muted-foreground/60">
+                        No rating yet — autofilled from Google when available.
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center justify-between">
-                  <Label htmlFor="isAppointmentOnly">Appointment Only</Label>
-                  <Switch id="isAppointmentOnly" checked={form.isAppointmentOnly} onCheckedChange={(v) => update({ isAppointmentOnly: v })} />
+                <div>
+                  <Label>Review summary</Label>
+                  <div className="mt-1.5 rounded-lg bg-card px-3 py-2 ring-1 ring-border/40">
+                    {form.reviewSummary ? (
+                      <p className="whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
+                        {form.reviewSummary}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground/60">No review summary yet</p>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <Label>Price level</Label>
+                  <div className="mt-1.5 flex gap-1.5">
+                    {PRICE_POINTS.map((pp) => (
+                      <Button
+                        key={pp}
+                        size="sm"
+                        type="button"
+                        variant={form.pricePoint === pp ? "default" : "outline"}
+                        onClick={() => update({ pricePoint: form.pricePoint === pp ? "" : pp })}
+                        className="font-mono"
+                      >
+                        {pp}
+                      </Button>
+                    ))}
+                  </div>
                 </div>
                 <div>
                   <Label>Attributes</Label>
                   <div className="mt-2">
                     <FlagsEditor
                       value={{
+                        isAppointmentOnly: form.isAppointmentOnly,
                         isFlagshipLocation: form.isFlagshipLocation,
                         isLargeSelection: form.isLargeSelection,
                         isBespoke: form.isBespoke,
-                        isDesignerOnly: form.isDesignerOnly,
+                        isTradeRepRequired: form.isTradeRepRequired,
                       }}
                       onChange={(v) => update(v)}
                     />
                   </div>
-                </div>
-                <div>
-                  <Label htmlFor="focus">Inventory Focus</Label>
-                  <Input id="focus" value={form.inventoryFocus} onChange={(e) => update({ inventoryFocus: e.target.value })} placeholder="What this location specializes in" />
-                </div>
-              </>
-            )}
-
-            {step === 3 && (
-              <>
-                <div>
-                  <Label htmlFor="phone">Phone</Label>
-                  <Input id="phone" value={form.phoneNumber} onChange={(e) => update({ phoneNumber: e.target.value })} placeholder="(415) 555-0100" />
-                </div>
-                <div>
-                  <Label htmlFor="email">Email</Label>
-                  <Input id="email" value={form.emailAddress} onChange={(e) => update({ emailAddress: e.target.value })} placeholder="hello@showroom.com" />
-                </div>
-                <div>
-                  <Label htmlFor="pocName">POC Name</Label>
-                  <Input id="pocName" value={form.mainPocFullname} onChange={(e) => update({ mainPocFullname: e.target.value })} placeholder="Full name" />
-                </div>
-                <div>
-                  <Label htmlFor="pocPhone">POC Phone</Label>
-                  <Input id="pocPhone" value={form.mainPocPhoneNumber} onChange={(e) => update({ mainPocPhoneNumber: e.target.value })} placeholder="(415) 555-0100" />
-                </div>
-                <div>
-                  <Label htmlFor="pocEmail">POC Email</Label>
-                  <Input id="pocEmail" value={form.mainPocEmailAddress} onChange={(e) => update({ mainPocEmailAddress: e.target.value })} placeholder="name@showroom.com" />
                 </div>
               </>
             )}

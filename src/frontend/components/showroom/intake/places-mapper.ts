@@ -74,6 +74,11 @@ export const showroomIntakeSchema = z.object({
   // Markdown (source of truth / round-trip). Both optional; only sent when set.
   overviewNoteHtml: z.string().optional(),
   overviewNoteMarkdown: z.string().optional(),
+  // Google Places–sourced signals (persisted so consumers can send them).
+  googleRating: z.number().optional(),
+  userRatingCount: z.number().optional(),
+  reviewSummary: z.string().optional(),
+  isTradeRepRequired: z.boolean().optional(),
   categoryIds: z.array(z.number()).default([]),
 });
 
@@ -120,6 +125,8 @@ export interface GooglePlaceDetails {
   editorialSummary?: LocalizedText | null;
   /** Google returns this as an object; `.text` (or `.overview.text`) holds the copy. */
   generativeSummary?: Record<string, unknown> | null;
+  /** Google "review summary" (AI-condensed review copy); `.text.text` holds it. */
+  reviewSummary?: { text?: { text?: string | null } | null } | null;
   types?: string[] | null;
   primaryType?: string | null;
   businessStatus?: string | null;
@@ -255,7 +262,26 @@ export function mapPlaceToIntake(place: GooglePlaceDetails): MappedIntake {
     mapped._userRatingCount = place.userRatingCount;
   }
 
+  // Persisted (server-bound) Google signals so consumers can send them.
+  if (typeof place.rating === "number") mapped.googleRating = place.rating;
+  if (typeof place.userRatingCount === "number") {
+    mapped.userRatingCount = place.userRatingCount;
+  }
+  const reviewSummary = extractReviewSummary(place);
+  if (reviewSummary) mapped.reviewSummary = reviewSummary;
+
   return mapped;
+}
+
+/**
+ * Pull the best available review-summary text: Google's condensed
+ * `reviewSummary.text.text` when present, else the generative/editorial summary
+ * (`extractSummary`), else undefined.
+ */
+function extractReviewSummary(place: GooglePlaceDetails): string | undefined {
+  const rs = place.reviewSummary?.text?.text;
+  if (rs && rs.trim()) return rs.trim();
+  return extractSummary(place);
 }
 
 // ─── formatOpeningHours ───────────────────────────────────────────────────────

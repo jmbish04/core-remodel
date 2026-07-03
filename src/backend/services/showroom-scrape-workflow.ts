@@ -25,6 +25,7 @@ import {
 } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, sql } from "drizzle-orm";
+import { z } from "zod";
 
 import {
   browserRunPages,
@@ -82,6 +83,72 @@ const EXTRACTION_JSON_SCHEMA = {
 } as const;
 
 // ---------------------------------------------------------------------------
+// Access-level classification (homeowner access to the showroom)
+// ---------------------------------------------------------------------------
+
+/** The canonical homeowner access-level enum (mirrors `showroom_stores.access_level`). */
+const ACCESS_LEVEL_VALUES = [
+  "PUBLIC_UNRESTRICTED",
+  "STRICT_TRADE_ONLY",
+  "HYBRID_ACCOMPANIED",
+  "HYBRID_DEALER_NETWORK",
+  "HYBRID_APPOINTMENT_ONLY",
+  "UNKNOWN",
+] as const;
+
+type AccessLevel = (typeof ACCESS_LEVEL_VALUES)[number];
+
+/** Zod schema for parsing/validating the Workers-AI classification response. */
+const AccessLevelResult = z.object({
+  access_level: z.enum(ACCESS_LEVEL_VALUES),
+  reasoning: z.string(),
+  requires_trade_rep: z.boolean(),
+});
+
+type AccessLevelResultShape = z.infer<typeof AccessLevelResult>;
+
+/** JSON Schema constraining the Workers-AI access-level classification. */
+const ACCESS_LEVEL_SCHEMA = {
+  type: "object",
+  properties: {
+    access_level: {
+      type: "string",
+      enum: [...ACCESS_LEVEL_VALUES],
+    },
+    reasoning: { type: "string" },
+    requires_trade_rep: { type: "boolean" },
+  },
+  required: ["access_level", "reasoning", "requires_trade_rep"],
+} as const;
+
+/** Access-level classifications that inherently require a trade rep to visit/buy. */
+const TRADE_REP_IMPLIED: ReadonlySet<AccessLevel> = new Set<AccessLevel>([
+  "STRICT_TRADE_ONLY",
+  "HYBRID_ACCOMPANIED",
+]);
+
+/** Path/content fragments we prioritize when assembling the classification text. */
+const ACCESS_PRIORITY_RE = /about|visit|faq|trade/i;
+
+/** Character budget for the combined text handed to the classifier (~token budget). */
+const ACCESS_LEVEL_CHAR_BUDGET = 12_000;
+
+/** System instruction driving the homeowner access-level classification. */
+const ACCESS_LEVEL_SYSTEM_INSTRUCTION = `You are an expert analyst classifying the Homeowner Access Level of stone, tile, and fixture showrooms. Many showrooms use wishy-washy language about public access: some allow homeowners to browse but not buy (purchases go through a dealer network), others require homeowners to be physically accompanied by a licensed trade professional. Evaluate the scraped website text and classify the showroom into EXACTLY ONE of these enum values:
+- PUBLIC_UNRESTRICTED: open to the general public for BOTH browsing AND purchasing.
+- STRICT_TRADE_ONLY: explicitly closed to homeowners; requires a trade account, business license, or design credential to enter or book.
+- HYBRID_ACCOMPANIED: homeowners allowed ONLY if physically accompanied by their registered interior designer, architect, or contractor.
+- HYBRID_DEALER_NETWORK: homeowners may visit/browse/select, but all purchases/pricing/transactions must be facilitated through a licensed trade partner or authorized dealer network.
+- HYBRID_APPOINTMENT_ONLY: open to homeowners but strictly requires a pre-booked appointment (no walk-ins).
+Scan the 'About Us', 'Visit Us', 'FAQ', and 'Trade Program' sections specifically. Look for trigger phrases such as: 'accompanied by a design professional', 'purchases must be facilitated through', 'dealer network', 'open to the public to browse', 'professional environment'. If the text does not contain enough signal to decide, return UNKNOWN. Return the selected enum value, a concise reasoning string quoting the exact policy/phrase that drove the decision, and requires_trade_rep = true when a homeowner needs a contractor/designer to either visit OR buy.`;
+
+/** A scraped page's URL + markdown, retained for access-level classification. */
+interface ScrapedPageText {
+  pageUrl: string;
+  markdown: string;
+}
+
+// ---------------------------------------------------------------------------
 // Workflow
 // ---------------------------------------------------------------------------
 
@@ -112,13 +179,16 @@ export class ShowroomScrapeWorkflow extends WorkflowEntrypoint<
       // Each page is its own retryable step. We accumulate the extractions so
       // aggregate can hydrate Instagram / hero / brands afterward.
       const extractions: PageExtraction[] = [];
+      const pageTexts: ScrapedPageText[] = [];
 
       for (let i = 0; i < pageUrls.length && i < MAX_PAGES; i++) {
         const pageUrl = pageUrls[i];
-        const extraction = await step.do(`scrape-${i}`, async () =>
-          scrapePage(env, showroomId, ragUuid, pageUrl),
+        const { markdown, ...extraction } = await step.do(
+          `scrape-${i}`,
+          async () => scrapePage(env, showroomId, ragUuid, pageUrl),
         );
         extractions.push(extraction);
+        pageTexts.push({ pageUrl, markdown });
       }
 
       // ── 4. favicon ──────────────────────────────────────────────────────
@@ -129,6 +199,14 @@ export class ShowroomScrapeWorkflow extends WorkflowEntrypoint<
       // ── 5. aggregate ────────────────────────────────────────────────────
       await step.do("aggregate", async () =>
         aggregate(env, showroomId, extractions),
+      );
+
+      // ── 5b. classify-access-level ───────────────────────────────────────
+      // Classify the showroom's homeowner ACCESS LEVEL from the aggregated
+      // scraped text and persist accessLevel / accessLevelReasoning /
+      // isTradeRepRequired. Never throws — falls back to UNKNOWN on failure.
+      await step.do("classify-access-level", async () =>
+        classifyAccessLevel(env, showroomId, pageTexts),
       );
 
       // ── 6. mark-complete ────────────────────────────────────────────────
@@ -241,7 +319,7 @@ async function scrapePage(
   showroomId: number,
   ragUuid: string,
   pageUrl: string,
-): Promise<PageExtraction> {
+): Promise<PageExtraction & { markdown: string }> {
   const db = drizzle(env.DB);
   const scraped = await scrapeUrl(env, pageUrl);
   const markdown = scraped.markdown ?? scraped.text ?? "";
@@ -291,7 +369,7 @@ async function scrapePage(
     >,
   });
 
-  return extraction;
+  return { ...extraction, markdown };
 }
 
 /**
@@ -629,6 +707,151 @@ async function upsertBrandMapping(
       .values({ showroomId, brandId })
       .onConflictDoNothing();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Step 5b — classify homeowner access level
+// ---------------------------------------------------------------------------
+
+/**
+ * Classify the showroom's homeowner ACCESS LEVEL from the aggregated scraped
+ * page text and persist `accessLevel`, `accessLevelReasoning`, and
+ * `isTradeRepRequired` on `showroom_stores`.
+ *
+ * One Workers-AI structured call (llama-3.1-8b-instruct, through the AI gateway)
+ * over a combined-text budget of ~{@link ACCESS_LEVEL_CHAR_BUDGET} chars,
+ * prioritizing About / Visit / FAQ / Trade pages. Never throws — on any failure
+ * it persists `accessLevel = "UNKNOWN"` with the flag false.
+ */
+async function classifyAccessLevel(
+  env: Env,
+  showroomId: number,
+  pageTexts: ScrapedPageText[],
+): Promise<void> {
+  const db = drizzle(env.DB);
+
+  const combinedText = buildAccessLevelText(pageTexts);
+  const prompt = buildAccessLevelPrompt(combinedText);
+
+  // Store the prompt used for observability/audit (no dedicated DB column).
+  console.info(
+    `showroom-scrape: access-level prompt for showroom ${showroomId}`,
+    { prompt },
+  );
+
+  let accessLevel: AccessLevel = "UNKNOWN";
+  let reasoning: string | null = null;
+  let requiresTradeRep = false;
+
+  try {
+    // No usable text at all — persist UNKNOWN but still store the prompt.
+    if (combinedText.trim().length > 0) {
+      const raw = (await env.AI.run(
+        EXTRACT_MODEL as Parameters<typeof env.AI.run>[0],
+        {
+          messages: [
+            { role: "system", content: ACCESS_LEVEL_SYSTEM_INSTRUCTION },
+            { role: "user", content: prompt },
+          ],
+          response_format: {
+            type: "json_schema",
+            json_schema: ACCESS_LEVEL_SCHEMA,
+          },
+          gateway: { id: env.AI_GATEWAY_ID },
+        } as Parameters<typeof env.AI.run>[1],
+      )) as { response?: unknown } & Partial<AccessLevelResultShape>;
+
+      const wrapped = raw?.response;
+      const source =
+        wrapped && typeof wrapped === "object"
+          ? wrapped
+          : (raw as Partial<AccessLevelResultShape>);
+
+      const parsed = AccessLevelResult.safeParse(source);
+      if (parsed.success) {
+        accessLevel = parsed.data.access_level;
+        reasoning = parsed.data.reasoning.trim() || null;
+        requiresTradeRep = parsed.data.requires_trade_rep;
+        // Fallback: STRICT_TRADE_ONLY / HYBRID_ACCOMPANIED always imply a rep.
+        if (TRADE_REP_IMPLIED.has(accessLevel)) {
+          requiresTradeRep = true;
+        }
+      } else {
+        console.error(
+          `showroom-scrape: access-level parse failed for showroom ${showroomId}`,
+          parsed.error,
+        );
+      }
+    }
+  } catch (err) {
+    // Never throw out of the step — fall back to UNKNOWN / flag false.
+    console.error(
+      `showroom-scrape: access-level classification failed for showroom ${showroomId}`,
+      err,
+    );
+    accessLevel = "UNKNOWN";
+    reasoning = null;
+    requiresTradeRep = false;
+  }
+
+  try {
+    await db
+      .update(showroomStores)
+      .set({
+        accessLevel,
+        accessLevelReasoning: reasoning,
+        isTradeRepRequired: requiresTradeRep,
+        updatedAt: new Date(),
+      })
+      .where(eq(showroomStores.id, showroomId));
+  } catch (err) {
+    console.error(
+      `showroom-scrape: failed to persist access level for showroom ${showroomId}`,
+      err,
+    );
+  }
+}
+
+/**
+ * Assemble the combined classification text from scraped page markdown,
+ * prioritizing pages whose URL or markdown mentions About / Visit / FAQ / Trade,
+ * capped at {@link ACCESS_LEVEL_CHAR_BUDGET} chars.
+ */
+function buildAccessLevelText(pageTexts: ScrapedPageText[]): string {
+  const prioritized: ScrapedPageText[] = [];
+  const rest: ScrapedPageText[] = [];
+
+  for (const page of pageTexts) {
+    if (!page.markdown || page.markdown.trim().length === 0) continue;
+    if (
+      ACCESS_PRIORITY_RE.test(page.pageUrl) ||
+      ACCESS_PRIORITY_RE.test(page.markdown)
+    ) {
+      prioritized.push(page);
+    } else {
+      rest.push(page);
+    }
+  }
+
+  const ordered = [...prioritized, ...rest];
+  let combined = "";
+  for (const page of ordered) {
+    if (combined.length >= ACCESS_LEVEL_CHAR_BUDGET) break;
+    const block = `# ${page.pageUrl}\n\n${page.markdown.trim()}\n\n`;
+    const remaining = ACCESS_LEVEL_CHAR_BUDGET - combined.length;
+    combined +=
+      block.length > remaining ? `${block.slice(0, remaining)}\n[truncated]` : block;
+  }
+
+  return combined.trim();
+}
+
+/** Build the user prompt wrapping the combined scraped text. */
+function buildAccessLevelPrompt(combinedText: string): string {
+  return `Classify the homeowner ACCESS LEVEL of the showroom described by the scraped website text below. Follow the system instruction exactly and respond ONLY with valid JSON conforming to the supplied schema.
+
+SCRAPED SHOWROOM TEXT:
+${combinedText}`;
 }
 
 // ---------------------------------------------------------------------------

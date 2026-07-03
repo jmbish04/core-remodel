@@ -262,8 +262,32 @@ const createStoreSchema = z.object({
   isLargeSelection: z.boolean().optional(),
   /** Showroom carries exclusive, hand-selected, or made-to-order collections. */
   isBespoke: z.boolean().optional(),
-  /** Showroom explicitly requires or strongly prefers trade/designer access. */
+  /** Showroom explicitly requires or strongly prefers trade/designer access. @deprecated Use isTradeRepRequired instead. */
   isDesignerOnly: z.boolean().optional(),
+  /**
+   * Google Places star rating (0–5) sourced from the Places API `rating` field.
+   * Written by the scrape workflow; also accepted on intake so the form can
+   * pre-populate a freshly looked-up place without waiting for a scrape cycle.
+   */
+  googleRating: z.number().min(0).max(5).optional().nullable(),
+  /**
+   * Total number of user ratings from Google Places `userRatingCount`.
+   * Displayed alongside `googleRating` for credibility context.
+   */
+  userRatingCount: z.number().int().min(0).optional().nullable(),
+  /**
+   * Google's AI-generated review synopsis (plain text extracted from the
+   * Places API `reviewSummary.text.text` field). Stored as a raw string so
+   * the UI can render it without re-parsing the Places API shape.
+   */
+  reviewSummary: z.string().optional().nullable(),
+  /**
+   * When true, the showroom requires a trade representative introduction or
+   * appointment before a homeowner can visit or access pricing.
+   * Replaces the deprecated `isDesignerOnly` flag; both columns co-exist
+   * during the transition to avoid breaking older callers.
+   */
+  isTradeRepRequired: z.boolean().optional(),
   scale: z.string().optional().nullable(),
   inventoryFocus: z.string().optional().nullable(),
   targetDemographic: z.string().optional().nullable(),
