@@ -4,17 +4,18 @@
  * Renders a Monolith-dark, mobile-responsive editor over the canonical
  * `HoursJson` model (see ./hours-types). Two layers:
  *
- *   1. Standard mode — a row of seven day-toggle chips (Mon→Sun) plus, for each
- *      OPEN day, a compact open-time / close-time `<Select>` pair drawn from the
- *      curated `OPEN_TIME_OPTIONS` / `CLOSE_TIME_OPTIONS` lists. Toggling a day
- *      on seeds it from the last open day's window (or 9–5); toggling off nulls
- *      it. This covers the overwhelmingly common "9–5 weekdays" case in a couple
- *      of clicks.
+ *   1. Summary layer — a row of seven day-toggle chips (Mon→Sun) plus a single
+ *      "smart" summary line (from `summarizeHours`). Toggling a day on seeds it
+ *      with `DEFAULT_DAY_HOURS`; toggling off nulls it. This covers the common
+ *      "same hours Mon–Fri" case at a glance without any per-day time rows. When
+ *      weekday times DON'T all match, the summary renders in orange to flag that
+ *      precise times need setting.
  *
  *   2. Custom hours — an escape-hatch table (one row per day) with manual
- *      HH:MM-ish text inputs + AM/PM toggles for stores with non-standard hours
- *      the curated Selects can't express. Values round-trip through
- *      `from12h`/`to12h`.
+ *      HH:MM-ish text inputs + AM/PM toggles. HIDDEN behind a toggle by default,
+ *      but AUTO-OPENED whenever weekday times vary (`weekdaysUniform === false`)
+ *      so the user is taken straight to the per-day controls. Values round-trip
+ *      through `from12h`/`to12h`.
  *
  * Every mutation produces a fresh `HoursJson` and calls `onChange`. The
  * component is controlled: it seeds local state from `value ?? DEFAULT_HOURS`
@@ -26,23 +27,14 @@ import { ChevronDown, Clock } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 import {
-  CLOSE_TIME_OPTIONS,
   DAY_KEYS,
   DAY_LABELS,
   DEFAULT_DAY_HOURS,
   DEFAULT_HOURS,
-  OPEN_TIME_OPTIONS,
-  formatHoursSummary,
   from12h,
+  summarizeHours,
   to12h,
   type DayHours,
   type DayKey,
@@ -70,63 +62,6 @@ function normalize(h: HoursJson | null | undefined): HoursJson {
     out[k] = d ? { open: d.open, close: d.close } : null;
   }
   return out;
-}
-
-/** The window a newly-opened day should inherit: the last open day, else 9–5. */
-function seedForNewOpenDay(h: HoursJson): DayHours {
-  for (let i = DAY_KEYS.length - 1; i >= 0; i--) {
-    const d = h[DAY_KEYS[i]];
-    if (d) return { open: d.open, close: d.close };
-  }
-  return { ...DEFAULT_DAY_HOURS };
-}
-
-// ─── standard-mode per-day time Selects ───────────────────────────────────────
-
-function OpenCloseSelects({
-  day,
-  hours,
-  onChange,
-}: {
-  day: DayKey;
-  hours: DayHours;
-  onChange: (next: DayHours) => void;
-}) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <Select
-        value={hours.open}
-        onValueChange={(v) => v && onChange({ ...hours, open: v })}
-      >
-        <SelectTrigger className="h-7 w-[92px] text-xs" aria-label={`${DAY_LABELS[day].full} open time`}>
-          <SelectValue items={OPEN_TIME_OPTIONS} />
-        </SelectTrigger>
-        <SelectContent>
-          {OPEN_TIME_OPTIONS.map((o) => (
-            <SelectItem key={o.value} value={o.value}>
-              {o.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <span className="text-xs text-muted-foreground">to</span>
-      <Select
-        value={hours.close}
-        onValueChange={(v) => v && onChange({ ...hours, close: v })}
-      >
-        <SelectTrigger className="h-7 w-[92px] text-xs" aria-label={`${DAY_LABELS[day].full} close time`}>
-          <SelectValue items={CLOSE_TIME_OPTIONS} />
-        </SelectTrigger>
-        <SelectContent>
-          {CLOSE_TIME_OPTIONS.map((o) => (
-            <SelectItem key={o.value} value={o.value}>
-              {o.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
 }
 
 // ─── AM/PM two-button toggle (radio-group is not installed) ────────────────────
@@ -261,7 +196,9 @@ export interface HoursEditorProps {
 
 export function HoursEditor({ value, onChange }: HoursEditorProps) {
   const [hours, setHours] = useState<HoursJson>(() => normalize(value));
-  const [showCustom, setShowCustom] = useState(false);
+  // `null` = user hasn't touched the disclosure; auto-open logic decides. Once
+  // the user clicks the toggle we store an explicit boolean and honor it.
+  const [customOverride, setCustomOverride] = useState<boolean | null>(null);
 
   // Re-seed local state whenever a *different* value object arrives from the
   // parent (identity check — the editor's own edits set the same object it just
@@ -278,7 +215,7 @@ export function HoursEditor({ value, onChange }: HoursEditorProps) {
 
   const toggleDay = (day: DayKey, open: boolean) => {
     const next = cloneHours(hours);
-    next[day] = open ? seedForNewOpenDay(hours) : null;
+    next[day] = open ? { ...DEFAULT_DAY_HOURS } : null;
     commit(next);
   };
 
@@ -288,7 +225,12 @@ export function HoursEditor({ value, onChange }: HoursEditorProps) {
     commit(next);
   };
 
-  const summary = useMemo(() => formatHoursSummary(hours), [hours]);
+  const summary = useMemo(() => summarizeHours(hours), [hours]);
+
+  // Custom pane auto-opens when weekday times vary; the user can still override
+  // (open it manually, or close it) once they interact with the disclosure.
+  const showCustom =
+    customOverride !== null ? customOverride : !summary.weekdaysUniform;
 
   return (
     <div className="space-y-3">
@@ -315,41 +257,24 @@ export function HoursEditor({ value, onChange }: HoursEditorProps) {
         })}
       </div>
 
-      {/* Live summary */}
-      <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+      {/* Smart summary — orange when weekday times vary (needs attention). */}
+      <div
+        className={`flex items-center gap-1.5 text-[11px] ${
+          summary.weekdaysUniform ? "text-muted-foreground" : "text-amber-500"
+        }`}
+      >
         <Clock className="size-3 shrink-0" />
-        <span className="line-clamp-1">{summary}</span>
+        <span className="line-clamp-1">{summary.label}</span>
       </div>
 
-      {/* Standard per-open-day time Selects */}
-      <div className="space-y-1.5">
-        {DAY_KEYS.filter((d) => hours[d] !== null).map((day) => (
-          <div key={day} className="flex flex-wrap items-center gap-2">
-            <span className="w-9 shrink-0 text-xs font-medium text-foreground">
-              {DAY_LABELS[day].full.slice(0, 3)}
-            </span>
-            <OpenCloseSelects
-              day={day}
-              hours={hours[day] as DayHours}
-              onChange={(dh) => setDayHours(day, dh)}
-            />
-          </div>
-        ))}
-        {DAY_KEYS.every((d) => hours[d] === null) && (
-          <p className="text-xs text-muted-foreground/70">
-            Closed every day — toggle a day above to set hours.
-          </p>
-        )}
-      </div>
-
-      {/* Custom-hours escape hatch */}
+      {/* Custom-hours escape hatch (auto-opens when weekday times vary) */}
       <div>
         <Button
           type="button"
           size="sm"
           variant="ghost"
           aria-expanded={showCustom}
-          onClick={() => setShowCustom((s) => !s)}
+          onClick={() => setCustomOverride(!showCustom)}
           className="h-7 gap-1 text-[11px] text-muted-foreground hover:text-foreground"
         >
           <ChevronDown

@@ -147,6 +147,25 @@ const OpeningHoursSchema = z
   })
   .passthrough();
 
+/**
+ * Schema for the Google Places (New) `reviewSummary` field.
+ *
+ * The API returns an AI-generated synopsis of the place sourced from
+ * user reviews. Shape: `{ text: { text: string, languageCode: string }, ... }`.
+ * `.passthrough()` preserves any future additions to the wrapper object.
+ */
+const ReviewSummarySchema = z
+  .object({
+    text: z
+      .object({
+        text: z.string().optional().nullable(),
+        languageCode: z.string().optional().nullable(),
+      })
+      .optional()
+      .nullable(),
+  })
+  .passthrough();
+
 const PlaceDetailsResponseSchema = z
   .object({
     id: z.string().optional().nullable().openapi({ description: "Google Place ID." }),
@@ -157,6 +176,16 @@ const PlaceDetailsResponseSchema = z
     internationalPhoneNumber: z.string().optional().nullable(),
     websiteUri: z.string().optional().nullable(),
     regularOpeningHours: OpeningHoursSchema.optional().nullable(),
+    /** Secondary opening-hours periods (e.g. kitchen hours, drive-through hours). */
+    regularSecondaryOpeningHours: z
+      .array(OpeningHoursSchema)
+      .optional()
+      .nullable()
+      .openapi({
+        description:
+          "Secondary opening hours, e.g. drive-through or kitchen hours. " +
+          "Each element follows the same shape as regularOpeningHours.",
+      }),
     currentOpeningHours: OpeningHoursSchema.optional().nullable(),
     priceLevel: z.string().optional().nullable(),
     priceRange: z.record(z.string(), z.unknown()).optional().nullable(),
@@ -165,6 +194,16 @@ const PlaceDetailsResponseSchema = z
     reviews: z.array(z.record(z.string(), z.unknown())).optional().nullable(),
     editorialSummary: LocalizedTextSchema.optional().nullable(),
     generativeSummary: z.record(z.string(), z.unknown()).optional().nullable(),
+    /**
+     * AI-generated summary of the place derived from user reviews.
+     * Populated when Google has sufficient review data. Passthrough preserves
+     * future envelope keys Google may add around the text object.
+     */
+    reviewSummary: ReviewSummarySchema.optional().nullable().openapi({
+      description:
+        "Google-generated AI synopsis of the place based on user reviews. " +
+        "Present only when Google has sufficient review data for the location.",
+    }),
     types: z.array(z.string()).optional().nullable(),
     primaryType: z.string().optional().nullable(),
     photos: z.array(z.record(z.string(), z.unknown())).optional().nullable(),

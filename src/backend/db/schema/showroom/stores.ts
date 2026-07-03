@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
 
 import { storeBayareaCities } from "./bay_area_cities";
 
@@ -245,6 +245,89 @@ export const showroomStores = sqliteTable("showroom_stores", {
   })
     .notNull()
     .default("idle"),
+
+  // ── Trade / access control ────────────────────────────────────────────
+
+  /**
+   * Trade-rep required flag — the homeowner must be accompanied by or act
+   * through a licensed contractor, designer, or trade-account holder to visit
+   * or purchase at this showroom.
+   *
+   * SUPERSEDES `isDesignerOnly` (which is retained in the schema as a
+   * deprecated column but should no longer be written to for new data).
+   * `isDesignerOnly` captured the same concept but with narrower semantics
+   * (designer-specifically vs. any trade rep).  New code should read and
+   * write `isTradeRepRequired` exclusively.
+   */
+  isTradeRepRequired: integer("is_trade_rep_required", { mode: "boolean" })
+    .notNull()
+    .default(false),
+
+  // ── Google Places data ────────────────────────────────────────────────
+
+  /**
+   * Google Places aggregate star rating for this location (1.0–5.0).
+   * Distinct from the homeowner's personal visit `rating` (integer 1–5).
+   * Sourced from the Places API `rating` field; refreshed by the scrape agent.
+   */
+  googleRating: real("google_rating"),
+
+  /**
+   * Google Places total review count for this location.
+   * Sourced from the Places API `userRatingCount` field; refreshed by the
+   * scrape agent alongside `googleRating`.
+   */
+  userRatingCount: integer("user_rating_count"),
+
+  /**
+   * AI-generated summary of this location derived from Google user reviews.
+   * Maps to the Places API `reviewSummary` field (markdown/plain text).
+   * Shown read-only on the intake form and showroom viewport — not editable
+   * by the homeowner; refreshed on each scrape run.
+   */
+  reviewSummary: text("review_summary"),
+
+  // ── Agent-classified access level ─────────────────────────────────────
+
+  /**
+   * Homeowner access classification set by the scrape/research agent after
+   * evaluating the showroom's website, hours, and reviews.
+   *
+   * Values:
+   * - `PUBLIC_UNRESTRICTED`      — walk-in welcome; no trade account needed.
+   * - `STRICT_TRADE_ONLY`        — trade account strictly required; homeowners
+   *                                cannot visit or purchase without one.
+   * - `HYBRID_ACCOMPANIED`       — homeowners may visit but MUST be accompanied
+   *                                by a trade rep for the full session.
+   * - `HYBRID_DEALER_NETWORK`    — homeowners can browse but purchase only
+   *                                through an authorised dealer / trade account.
+   * - `HYBRID_APPOINTMENT_ONLY`  — access open to homeowners by appointment;
+   *                                no rep required but no walk-ins.
+   * - `UNKNOWN`                  — agent could not determine access level from
+   *                                available data; manual review needed.
+   *
+   * Nullable — null means the agent has not yet evaluated this store.
+   * Used to drive the access-level badge in the showroom directory UI and to
+   * gate or annotate the "Plan Visit" action.
+   */
+  accessLevel: text("access_level", {
+    enum: [
+      "PUBLIC_UNRESTRICTED",
+      "STRICT_TRADE_ONLY",
+      "HYBRID_ACCOMPANIED",
+      "HYBRID_DEALER_NETWORK",
+      "HYBRID_APPOINTMENT_ONLY",
+      "UNKNOWN",
+    ],
+  }),
+
+  /**
+   * Agent's concise reasoning or supporting quote for the `accessLevel`
+   * classification.  Plain text / one or two sentences extracted from the
+   * showroom's website copy or reviews.  Shown as a tooltip or footnote on
+   * the access-level badge.  Nullable — omitted when `accessLevel` is null.
+   */
+  accessLevelReasoning: text("access_level_reasoning"),
 
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
