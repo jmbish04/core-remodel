@@ -1623,7 +1623,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
     }
   };
 
-  const steps = ["Location", "Hours", "Details"];
+  const steps = ["Search", "Location", "Hours", "Details"];
 
   return (
     <>
@@ -1683,7 +1683,9 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                 </div>
                 <div>
                   <Label>Description</Label>
-                  <div className="mt-1">
+                  {/* Roomier editor: force the contenteditable surface taller so
+                      there's comfortable space to write the overview. */}
+                  <div className="mt-1 w-full [&_[contenteditable]]:!min-h-[220px]">
                     <OverviewNoteEditor
                       key={descSeedKey}
                       initialMarkdown={form.description}
@@ -1691,6 +1693,23 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                     />
                   </div>
                 </div>
+                {/* Can't find it on Google? Skip the Place selection entirely and
+                    proceed to fill everything in by hand. The typed name persists
+                    (the search input is bound to form.name). Nothing here requires
+                    a Place to have been selected. */}
+                <button
+                  type="button"
+                  onClick={() => setStep(1)}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-card px-3 py-2.5 text-xs font-medium text-muted-foreground ring-1 ring-border/40 transition-colors hover:bg-muted/40 hover:text-foreground"
+                >
+                  <Plus className="size-3.5" />
+                  Can't find it? Enter the showroom manually
+                </button>
+              </>
+            )}
+
+            {step === 1 && (
+              <>
                 <div>
                   <Label htmlFor="address">Address</Label>
                   <Input id="address" value={form.locationAddress} onChange={(e) => update({ locationAddress: e.target.value })} placeholder="123 Design St" />
@@ -1730,7 +1749,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
               </>
             )}
 
-            {step === 1 && (
+            {step === 2 && (
               <div>
                 <Label>Hours</Label>
                 <p className="mb-2 mt-0.5 text-[11px] text-muted-foreground">
@@ -1741,7 +1760,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
               </div>
             )}
 
-            {step === 2 && (
+            {step === 3 && (
               <>
                 <div>
                   <Label>Rating</Label>
