@@ -2,6 +2,7 @@ import { and, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { googleMapsUsage } from "@backend/db/schema";
+import { createGeminiAiGatewayClient } from "@backend/services/render/providers/gemini-stage-provider";
 import { getGoogleMapsApiKey } from "@/backend/utils/secrets";
 
 /**
@@ -342,6 +343,149 @@ export class GoogleMapsService {
       const errData = data as { error?: { message?: string } };
       const errMsg = errData.error?.message ?? `HTTP ${res.status}`;
       throw new Error(`PLACES_DETAILS_ERROR: ${errMsg}`);
+    }
+
+    // ── Gemini review summary + structured inference (via AI Gateway) ────────
+    // Replace Google's `reviewSummary` (which duplicates `generativeSummary`)
+    // with a Gemini structured response routed through the Cloudflare AI Gateway
+    // (google-ai-studio path). Yields four fields:
+    //   summary              — 2-3 sentence homeowner-facing précis  (→ reviewSummary)
+    //   inferred_price_point — "$"|"$$"|"$$$"|"$$$$"|null            (→ aiInference)
+    //   price_reasoning      — quoted phrase(s) from reviews         (→ aiInference)
+    //   is_large_selection   — warehouse/outlet/huge-inventory flag  (→ aiInference)
+    //
+    // On any Gemini failure: block skipped entirely; Google's original reviewSummary
+    // is left intact and no `aiInference` key is written.
+    const reviews = data.reviews as
+      | Array<{
+          rating?: number;
+          text?: { text?: string };
+          originalText?: { text?: string };
+          relativePublishTimeDescription?: string;
+        }>
+      | undefined;
+
+    if (Array.isArray(reviews) && reviews.length > 0) {
+      try {
+        const rating = data.rating as number | undefined;
+        const userRatingCount = data.userRatingCount as number | undefined;
+        const placeId = data.id as string | undefined;
+        const displayName = (data.displayName as { text?: string } | undefined)?.text;
+        const formattedAddress = data.formattedAddress as string | undefined;
+        const googleMapsUri =
+          (data.googleMapsUri as string | undefined) ??
+          (placeId ? `https://www.google.com/maps/place/?q=place_id:${placeId}` : undefined);
+
+        const sample = reviews.slice(0, 5);
+        const n = sample.length;
+
+        const reviewLines = sample
+          .map((r, i) => {
+            const stars = r.rating != null ? `${r.rating}/5` : "no rating";
+            const body = r.text?.text ?? r.originalText?.text ?? "(no text)";
+            const when = r.relativePublishTimeDescription ?? "";
+            return `Review ${i + 1} (${stars}${when ? `, ${when}` : ""}): ${body}`;
+          })
+          .join("\n");
+
+        const placeContext = [
+          displayName ? `Business: ${displayName}` : null,
+          formattedAddress ? `Address: ${formattedAddress}` : null,
+          googleMapsUri ? `Google Maps URL: ${googleMapsUri}` : null,
+          placeId ? `Place ID: ${placeId}` : null,
+          rating != null ? `Overall rating: ${rating}/5 (${userRatingCount ?? "unknown"} total reviews)` : null,
+        ]
+          .filter(Boolean)
+          .join("\n");
+
+        const prompt =
+          `You are writing for a HOMEOWNER (not a designer or trade pro) who is deciding whether to visit and buy from this Bay Area remodel showroom. ` +
+          `Give a FAIR, balanced summary — strengths and any caveats (trade-only vibes, appointment requirements, pricing).\n\n` +
+          `PLACE CONTEXT:\n${placeContext}\n\n` +
+          `REVIEW SAMPLE (${n} of ${userRatingCount ?? "unknown"} total reviews, overall ${rating ?? "unknown"}/5 stars):\n${reviewLines}\n\n` +
+          `Instructions:\n` +
+          `1. Write 2-3 concise, factual sentences on overall sentiment and what stands out. ` +
+          `Note that this is based on a sample of ${n} of ${userRatingCount ?? "unknown"} reviews and whether the sample seems consistent with the ${rating ?? "unknown"}-star average. No marketing fluff.\n` +
+          `2. Infer a price tier ONLY from explicit pricing language in the reviews: ` +
+          `budget/cheap/affordable → "$"; moderate/reasonable/mid-range → "$$"; mid-to-high/premium/upper-mid → "$$$"; luxury/very expensive/high-end-only → "$$$$". ` +
+          `If reviews mix tiers (e.g. "affordable tile" AND "mid-to-high-end slabs"), pick the CENTRAL tier ("$$" or "$$$") and explain in price_reasoning. ` +
+          `Return null for inferred_price_point when there is no pricing signal. Quote the relevant phrase(s) in price_reasoning.\n` +
+          `3. Set is_large_selection = true when reviews mention a large/extensive selection, outlet, warehouse, huge inventory, "shifting inventory", or lots of options; else false.\n\n` +
+          `Respond ONLY with a JSON object — no prose outside the JSON.`;
+
+        // Gemini responseSchema for structured JSON output.
+        const REVIEW_INSIGHT_SCHEMA = {
+          type: "OBJECT",
+          properties: {
+            summary: { type: "STRING" },
+            inferred_price_point: {
+              type: "STRING",
+              nullable: true,
+              enum: ["$", "$$", "$$$", "$$$$"],
+            },
+            price_reasoning: { type: "STRING" },
+            is_large_selection: { type: "BOOLEAN" },
+          },
+          required: ["summary", "inferred_price_point", "price_reasoning", "is_large_selection"],
+        };
+
+        const ai = await createGeminiAiGatewayClient(this.env);
+        const geminiResponse = await ai.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: REVIEW_INSIGHT_SCHEMA,
+          },
+        } as Parameters<typeof ai.models.generateContent>[0]);
+
+        // Extract text from the standard Gemini candidate parts shape.
+        const rawJson = (
+          (geminiResponse as any)?.candidates?.[0]?.content?.parts?.[0]?.text ??
+          (geminiResponse as any)?.text ??
+          ""
+        ).trim();
+
+        if (rawJson) {
+          type ReviewInsight = {
+            summary?: string;
+            inferred_price_point?: "$" | "$$" | "$$$" | "$$$$" | null;
+            price_reasoning?: string;
+            is_large_selection?: boolean;
+          };
+
+          let parsed: ReviewInsight | null = null;
+
+          try {
+            parsed = JSON.parse(rawJson) as ReviewInsight;
+          } catch {
+            // Gemini output is not valid JSON — use raw text as the summary
+            // and skip structured inference fields.
+            console.warn("[placeDetails] Gemini returned non-JSON; using raw as summary.");
+          }
+
+          const aiSummary = parsed?.summary ?? rawJson;
+
+          data.reviewSummary = {
+            text: {
+              text: `[gemini summarized] ${aiSummary}`,
+              languageCode: "en",
+            },
+          };
+
+          if (parsed) {
+            data.aiInference = {
+              inferredPricePoint: parsed.inferred_price_point ?? null,
+              priceReasoning: parsed.price_reasoning ?? null,
+              isLargeSelection: !!parsed.is_large_selection,
+            };
+          }
+        }
+      } catch (aiErr) {
+        // Gemini failure is non-fatal — leave Google's original reviewSummary intact
+        // and write no aiInference key. The details response always returns.
+        console.error("[placeDetails] Gemini summary failed:", aiErr);
+      }
     }
 
     return data;

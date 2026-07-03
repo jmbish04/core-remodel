@@ -76,7 +76,10 @@ import {
   mapPlaceToHoursJson,
   mapPlaceToIntake,
   showroomIntakeSchema,
+  type FieldDiag,
   type GooglePlaceDetails,
+  type GooglePlacePhoto,
+  type IntakeDiagnostics,
   type ShowroomIntakeInput,
   type ShowroomIntakeValues,
 } from "./places-mapper";
@@ -362,6 +365,28 @@ function RatingStars({ value }: { value: number }) {
   );
 }
 
+/**
+ * Inline red "why this field didn't autofill" note. Renders ONLY when a
+ * diagnostic exists and its autofill failed (`!diag.ok`): a destructive-toned
+ * warning line plus a muted line echoing the exact Google source path + the raw
+ * value inspected. When the field autofilled cleanly (or has no diagnostic —
+ * e.g. a manual, non-Google entry) it renders nothing.
+ */
+function DiagNote({ diag }: { diag?: FieldDiag }) {
+  if (!diag || diag.ok) return null;
+  return (
+    <div className="space-y-0.5">
+      <p className="flex items-start gap-1 text-[11px] text-destructive">
+        <AlertTriangle className="mt-px size-3 shrink-0" />
+        <span>Not autofilled — {diag.reason}</span>
+      </p>
+      <p className="text-[11px] text-muted-foreground/70">
+        Places {diag.source}: {String(diag.raw ?? "—")}
+      </p>
+    </div>
+  );
+}
+
 // ─── Main app ─────────────────────────────────────────────────────────────────
 
 export function ShowroomIntakeApp() {
@@ -383,6 +408,14 @@ export function ShowroomIntakeApp() {
   // Bumped after a successful save so PlaceSearch resets its session token.
   const [sessionEpoch, setSessionEpoch] = useState(0);
   const sessionTokenRef = useRef<string>(crypto.randomUUID());
+  // Per-field autofill diagnostics + raw Google photos from the last mapped place.
+  const [diagnostics, setDiagnostics] = useState<IntakeDiagnostics>({});
+  const [placePhotos, setPlacePhotos] = useState<GooglePlacePhoto[]>([]);
+  // True when the applied pricePoint came from AI review-inference (not Google's
+  // structured priceLevel) — drives the amber "Inferred from reviews" note.
+  const [priceInferred, setPriceInferred] = useState(false);
+  // The AI's price reasoning string, shown in the amber note when `priceInferred`.
+  const [priceReasoning, setPriceReasoning] = useState<string | null>(null);
 
   const form = useForm<ShowroomIntakeInput, unknown, ShowroomIntakeValues>({
     resolver: zodResolver(showroomIntakeSchema),
@@ -473,12 +506,36 @@ export function ShowroomIntakeApp() {
           categories,
         );
 
+        // ── Price fallback ──
+        // Prefer Google's structured priceLevel (already in mapped.pricePoint);
+        // otherwise fall back to the backend's AI review-inference. Track whether
+        // the value came from AI so the Details tab can flag it in amber.
+        const ai = place.aiInference ?? null;
+        const inferredPrice = ai?.inferredPricePoint ?? undefined;
+        const resolvedPricePoint = mapped.pricePoint ?? inferredPrice;
+        const didInferPrice = !mapped.pricePoint && !!inferredPrice;
+        setPriceInferred(didInferPrice);
+        setPriceReasoning(didInferPrice ? (ai?.priceReasoning ?? null) : null);
+
+        // ── Large selection ── OR of the AI flag and any Google-derived flag.
+        const resolvedLargeSelection =
+          !!ai?.isLargeSelection || !!mapped.isLargeSelection;
+
+        // ── Review summary ── the "[gemini summarized] …" copy (editable below).
+        const resolvedReviewSummary = mapped.reviewSummary ?? "";
+
+        // Forward diagnostics + raw photos for the red labels and submit body.
+        setDiagnostics(mapped._diagnostics ?? {});
+        setPlacePhotos(mapped._photos ?? []);
+
         reset({
           ...EMPTY_VALUES,
           ...mapped,
+          pricePoint: resolvedPricePoint,
+          isLargeSelection: resolvedLargeSelection,
           googleRating: mapped.googleRating,
           userRatingCount: mapped.userRatingCount,
-          reviewSummary: mapped.reviewSummary ?? "",
+          reviewSummary: resolvedReviewSummary,
           hoursJson: h ?? DEFAULT_HOURS,
           categoryIds: resolvedIds,
         });
@@ -567,6 +624,9 @@ export function ShowroomIntakeApp() {
     body.isBespoke = !!values.isBespoke;
     body.isTradeRepRequired = !!values.isTradeRepRequired;
     body.categoryIds = values.categoryIds;
+    // Raw Google photo references (first 5) so the server can fetch + persist the
+    // media. Sent as-is; empty array when the place had no photos / manual entry.
+    body.photos = placePhotos;
 
     try {
       const res = await fetch("/api/showroom-stores", {
@@ -585,6 +645,10 @@ export function ShowroomIntakeApp() {
       setContext({});
       setSearchQuery("");
       setActiveTab("search");
+      setDiagnostics({});
+      setPlacePhotos([]);
+      setPriceInferred(false);
+      setPriceReasoning(null);
       sessionTokenRef.current = crypto.randomUUID();
       setSessionEpoch((n) => n + 1);
     } catch (err) {
@@ -685,6 +749,7 @@ export function ShowroomIntakeApp() {
                     {errors.name.message}
                   </p>
                 )}
+                <DiagNote diag={diagnostics.name} />
               </FormRow>
 
               <div className="w-full space-y-1.5 [&_[contenteditable]]:min-h-[220px]">
@@ -699,6 +764,7 @@ export function ShowroomIntakeApp() {
                 <p className="text-[11px] text-muted-foreground">
                   Seeded from Google&rsquo;s summary — edit as needed.
                 </p>
+                <DiagNote diag={diagnostics.description} />
               </div>
             </Card>
 
@@ -774,6 +840,7 @@ export function ShowroomIntakeApp() {
                     {...register("locationAddress")}
                     placeholder="123 Design St, San Francisco, CA"
                   />
+                  <DiagNote diag={diagnostics.locationAddress} />
                 </FormRow>
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -796,6 +863,7 @@ export function ShowroomIntakeApp() {
                   </FormRow>
                   <FormRow label="ZIP code" htmlFor="zipCode">
                     <Input id="zipCode" {...register("zipCode")} placeholder="94103" />
+                    <DiagNote diag={diagnostics.zipCode} />
                   </FormRow>
                 </div>
 
@@ -805,6 +873,7 @@ export function ShowroomIntakeApp() {
                     {...register("googleMapsLink")}
                     placeholder="https://www.google.com/maps/place/…"
                   />
+                  <DiagNote diag={diagnostics.googleMapsLink} />
                 </FormRow>
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -814,6 +883,7 @@ export function ShowroomIntakeApp() {
                       {...register("phoneNumber")}
                       placeholder="(415) 555-0100"
                     />
+                    <DiagNote diag={diagnostics.phoneNumber} />
                   </FormRow>
                   <FormRow label="Website" htmlFor="websiteUrl">
                     <Input
@@ -821,6 +891,7 @@ export function ShowroomIntakeApp() {
                       {...register("websiteUrl")}
                       placeholder="https://…"
                     />
+                    <DiagNote diag={diagnostics.websiteUrl} />
                   </FormRow>
                 </div>
               </Card>
@@ -853,6 +924,7 @@ export function ShowroomIntakeApp() {
                   value={(watch("hoursJson") as HoursJson | undefined) ?? null}
                   onChange={(h) => setValue("hoursJson", h, { shouldDirty: true })}
                 />
+                <DiagNote diag={diagnostics.hoursJson} />
               </Card>
             </TabsContent>
 
@@ -878,23 +950,26 @@ export function ShowroomIntakeApp() {
                     No Google rating available.
                   </p>
                 )}
+                <DiagNote diag={diagnostics.googleRating} />
               </Card>
 
-              {/* Review summary (read-only) */}
+              {/* Review summary (editable — seeded from Gemini, hand-correctable) */}
               <Card className="space-y-3 p-4 sm:p-5">
                 <span className="text-sm font-medium">Review summary</span>
-                {reviewSummary && reviewSummary.trim() ? (
+                <div className="w-full space-y-1.5 [&_[contenteditable]]:min-h-[160px]">
                   <OverviewNoteEditor
                     key={`review-${sessionEpoch}`}
-                    editable={false}
-                    initialMarkdown={reviewSummary}
-                    onChange={() => {}}
+                    initialMarkdown={reviewSummary ?? ""}
+                    onChange={({ markdown }) =>
+                      setValue("reviewSummary", markdown, { shouldDirty: true })
+                    }
                   />
-                ) : (
-                  <p className="text-sm text-muted-foreground/70">
-                    No review summary available.
+                  <p className="text-[11px] text-muted-foreground">
+                    Seeded from Google&rsquo;s AI review summary — edit or rewrite
+                    as needed.
                   </p>
-                )}
+                </div>
+                <DiagNote diag={diagnostics.reviewSummary} />
               </Card>
 
               {/* Price level (editable, autofilled) */}
@@ -921,6 +996,17 @@ export function ShowroomIntakeApp() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {priceInferred ? (
+                    <p className="flex items-start gap-1 text-[11px] text-amber-400">
+                      <Star className="mt-px size-3 shrink-0" />
+                      <span>
+                        Inferred from reviews (AI)
+                        {priceReasoning ? `: ${priceReasoning}` : ""}
+                      </span>
+                    </p>
+                  ) : (
+                    <DiagNote diag={diagnostics.pricePoint} />
+                  )}
                 </FormRow>
               </Card>
 
@@ -972,6 +1058,10 @@ export function ShowroomIntakeApp() {
                 setContext({});
                 setSearchQuery("");
                 setActiveTab("search");
+                setDiagnostics({});
+                setPlacePhotos([]);
+                setPriceInferred(false);
+                setPriceReasoning(null);
                 sessionTokenRef.current = crypto.randomUUID();
                 setSessionEpoch((n) => n + 1);
               }}

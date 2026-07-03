@@ -75,7 +75,10 @@ import {
 import {
   mapPlaceToHoursJson,
   mapPlaceToIntake,
+  type FieldDiag,
   type GooglePlaceDetails,
+  type GooglePlacePhoto,
+  type IntakeDiagnostics,
 } from "./intake/places-mapper";
 import { HoursEditor } from "./intake/HoursEditor";
 import { FlagsEditor } from "./intake/FlagsEditor";
@@ -1456,6 +1459,26 @@ function ShowroomNameSearch({
   );
 }
 
+/**
+ * Small inline "why this field didn't autofill" note. Renders only when a
+ * diagnostic exists AND its autofill failed (`ok === false`): a red warning line
+ * with the human reason, plus a muted line echoing the exact Google source path
+ * and the raw value that was inspected.
+ */
+function DiagNote({ diag }: { diag?: FieldDiag }) {
+  if (!diag || diag.ok) return null;
+  return (
+    <div className="mt-1 space-y-0.5">
+      <p className="text-[11px] font-medium text-rose-400">
+        ⚠ Not autofilled — {diag.reason}
+      </p>
+      <p className="text-[10px] text-muted-foreground/70">
+        Places {diag.source}: {String(diag.raw ?? "—")}
+      </p>
+    </div>
+  );
+}
+
 function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: () => void }) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(0);
@@ -1482,9 +1505,21 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
   };
   const [form, setForm] = useState({ ...emptyForm });
   const [loadingPlace, setLoadingPlace] = useState(false);
+  // Per-field autofill diagnostics from the mapper — powers the red DiagNote
+  // labels next to each field explaining why Google didn't fill it.
+  const [diagnostics, setDiagnostics] = useState<IntakeDiagnostics>({});
+  // Raw Google photo references (first 5) forwarded verbatim to the create body.
+  const [placePhotos, setPlacePhotos] = useState<GooglePlacePhoto[]>([]);
+  // True when the price level shown was INFERRED from reviews by AI (Gemini)
+  // because Google returned no structured priceLevel — drives the amber note.
+  const [priceInferred, setPriceInferred] = useState(false);
+  const [priceReasoning, setPriceReasoning] = useState<string | null>(null);
   // Bumped whenever an autofill lands so the (seed-once) rich-text description
   // editor remounts and re-seeds from the freshly mapped description.
   const [descSeedKey, setDescSeedKey] = useState(0);
+  // Bumped on autofill so the (seed-once) review-summary editor re-seeds from
+  // the freshly mapped `[gemini summarized] …` copy.
+  const [reviewSeedKey, setReviewSeedKey] = useState(0);
   // One session token per search session: shared with the child typeahead by ref
   // so every autocomplete keystroke + the terminal details call bill as ONE
   // Google session. Regenerated after a successful selection.
@@ -1537,10 +1572,23 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
         const mapped = mapPlaceToIntake(place);
         const cityId = resolveBayAreaCityId(mapped.locationAddress);
 
+        // Per-field diagnostics + raw photos forwarded from the mapper.
+        setDiagnostics(mapped._diagnostics ?? {});
+        setPlacePhotos(mapped._photos ?? []);
+
+        // Price: prefer Google's structured priceLevel; else fall back to the
+        // AI-inferred price point (present only when reviews existed).
+        const ai = place.aiInference ?? null;
+        const inferredPrice =
+          !mapped.pricePoint && ai?.inferredPricePoint ? ai.inferredPricePoint : null;
+        const resolvedPrice = mapped.pricePoint ?? inferredPrice ?? "";
+        setPriceInferred(Boolean(inferredPrice));
+        setPriceReasoning(inferredPrice ? ai?.priceReasoning ?? null : null);
+
         update({
           name: mapped.name ?? form.name,
           description: mapped.description ?? "",
-          pricePoint: mapped.pricePoint ?? "",
+          pricePoint: resolvedPrice,
           websiteUrl: mapped.websiteUrl ?? "",
           locationAddress: mapped.locationAddress ?? "",
           zipCode: mapped.zipCode ?? "",
@@ -1550,11 +1598,14 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
           userRatingCount: mapped.userRatingCount,
           reviewSummary: mapped.reviewSummary ?? "",
           hoursJson: mapPlaceToHoursJson(place.regularOpeningHours) ?? DEFAULT_HOURS,
+          // AI signal: large selection seeds the corresponding flag.
+          ...(ai?.isLargeSelection ? { isLargeSelection: true } : {}),
           ...(cityId ? { bayAreaCityId: cityId } : {}),
         });
 
-        // Re-seed the (seed-once) rich-text description editor.
+        // Re-seed the (seed-once) rich-text description + review-summary editors.
         setDescSeedKey((k) => k + 1);
+        setReviewSeedKey((k) => k + 1);
 
         // Successful details call closes the billing session → new token next search.
         sessionTokenRef.current = crypto.randomUUID();
@@ -1588,7 +1639,11 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
       // Google-sourced review signals (read-only in the UI).
       if (typeof form.googleRating === "number") body.googleRating = form.googleRating;
       if (typeof form.userRatingCount === "number") body.userRatingCount = form.userRatingCount;
-      if (form.reviewSummary) body.reviewSummary = form.reviewSummary;
+      // Review summary is now hand-editable (PlateJS) — always send the current
+      // form value so manual corrections/fallbacks persist.
+      body.reviewSummary = form.reviewSummary;
+      // Raw Google photo references (first 5) — server fetches + persists media.
+      body.photos = placePhotos;
       // Server derives isOpenWeekends / weekdayHours / weekendHours from hoursJson.
       body.hoursJson = form.hoursJson;
       body.isAppointmentOnly = form.isAppointmentOnly;
@@ -1613,7 +1668,12 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
       setOpen(false);
       setStep(0);
       setForm({ ...emptyForm });
+      setDiagnostics({});
+      setPlacePhotos([]);
+      setPriceInferred(false);
+      setPriceReasoning(null);
       setDescSeedKey((k) => k + 1);
+      setReviewSeedKey((k) => k + 1);
       sessionTokenRef.current = crypto.randomUUID();
       onCreated();
     } catch (e) {
@@ -1680,6 +1740,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                       Google…
                     </div>
                   )}
+                  <DiagNote diag={diagnostics.name} />
                 </div>
                 <div>
                   <Label>Description</Label>
@@ -1692,6 +1753,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                       onChange={({ markdown }) => update({ description: markdown })}
                     />
                   </div>
+                  <DiagNote diag={diagnostics.description} />
                 </div>
                 {/* Can't find it on Google? Skip the Place selection entirely and
                     proceed to fill everything in by hand. The typed name persists
@@ -1713,6 +1775,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                 <div>
                   <Label htmlFor="address">Address</Label>
                   <Input id="address" value={form.locationAddress} onChange={(e) => update({ locationAddress: e.target.value })} placeholder="123 Design St" />
+                  <DiagNote diag={diagnostics.locationAddress} />
                 </div>
                 <div>
                   <Label htmlFor="city">Bay Area City</Label>
@@ -1733,6 +1796,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                 <div>
                   <Label htmlFor="zip">Zip Code</Label>
                   <Input id="zip" value={form.zipCode} onChange={(e) => update({ zipCode: e.target.value })} placeholder="94103" />
+                  <DiagNote diag={diagnostics.zipCode} />
                 </div>
                 <div>
                   <Label htmlFor="maps">Google Maps Link</Label>
@@ -1741,10 +1805,12 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                 <div>
                   <Label htmlFor="phone">Phone Number</Label>
                   <Input id="phone" value={form.phoneNumber} onChange={(e) => update({ phoneNumber: e.target.value })} placeholder="(415) 555-0100" />
+                  <DiagNote diag={diagnostics.phoneNumber} />
                 </div>
                 <div>
                   <Label htmlFor="website">Website URL</Label>
                   <Input id="website" value={form.websiteUrl} onChange={(e) => update({ websiteUrl: e.target.value })} placeholder="https://..." />
+                  <DiagNote diag={diagnostics.websiteUrl} />
                 </div>
               </>
             )}
@@ -1757,6 +1823,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                   derived automatically.
                 </p>
                 <HoursEditor value={form.hoursJson} onChange={(h) => update({ hoursJson: h })} />
+                <DiagNote diag={diagnostics.hoursJson} />
               </div>
             )}
 
@@ -1781,18 +1848,20 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                       </span>
                     )}
                   </div>
+                  <DiagNote diag={diagnostics.googleRating} />
                 </div>
                 <div>
                   <Label>Review summary</Label>
-                  <div className="mt-1.5 rounded-lg bg-card px-3 py-2 ring-1 ring-border/40">
-                    {form.reviewSummary ? (
-                      <p className="whitespace-pre-line text-sm leading-relaxed text-muted-foreground">
-                        {form.reviewSummary}
-                      </p>
-                    ) : (
-                      <p className="text-xs text-muted-foreground/60">No review summary yet</p>
-                    )}
-                  </div>
+                  <p className="mb-1 mt-0.5 text-[11px] text-muted-foreground">
+                    Autofilled from Google/AI when available — edit or hand-write it
+                    as a fallback.
+                  </p>
+                  <OverviewNoteEditor
+                    key={reviewSeedKey}
+                    initialMarkdown={form.reviewSummary}
+                    onChange={({ markdown }) => update({ reviewSummary: markdown })}
+                  />
+                  <DiagNote diag={diagnostics.reviewSummary} />
                 </div>
                 <div>
                   <Label>Price level</Label>
@@ -1803,13 +1872,24 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                         size="sm"
                         type="button"
                         variant={form.pricePoint === pp ? "default" : "outline"}
-                        onClick={() => update({ pricePoint: form.pricePoint === pp ? "" : pp })}
+                        onClick={() => {
+                          // Manually overriding clears the AI-inferred marker.
+                          setPriceInferred(false);
+                          update({ pricePoint: form.pricePoint === pp ? "" : pp });
+                        }}
                         className="font-mono"
                       >
                         {pp}
                       </Button>
                     ))}
                   </div>
+                  {priceInferred ? (
+                    <p className="mt-1 text-[11px] font-medium text-amber-400">
+                      Inferred from reviews (AI): {priceReasoning ?? "—"}
+                    </p>
+                  ) : (
+                    <DiagNote diag={diagnostics.pricePoint} />
+                  )}
                 </div>
                 <div>
                   <Label>Attributes</Label>

@@ -130,7 +130,63 @@ export interface GooglePlaceDetails {
   types?: string[] | null;
   primaryType?: string | null;
   businessStatus?: string | null;
+  /**
+   * Google Places (New) photo references. `name` is the photo resource id
+   * ("places/{place}/photos/{photo}") used to fetch the media bytes. Forwarded
+   * (first 5) to the create body as `_photos`; never a persisted intake field.
+   */
+  photos?: Array<{
+    name: string;
+    widthPx?: number | null;
+    heightPx?: number | null;
+    authorAttributions?: Array<{
+      displayName?: string | null;
+      uri?: string | null;
+      photoUri?: string | null;
+    }> | null;
+    flagContentUri?: string | null;
+    googleMapsUri?: string | null;
+  }> | null;
+  /** Raw Google reviews (rating + text) — kept for potential downstream use. */
+  reviews?: Array<{
+    rating?: number | null;
+    text?: { text?: string | null } | null;
+  }> | null;
+  /**
+   * AI-derived insight attached by the backend Places-details proxy (Gemini via
+   * AI Gateway). Present only when reviews were available and the AI call
+   * succeeded. `inferredPricePoint` is a FALLBACK used when Google returns no
+   * structured `priceLevel`; `isLargeSelection` seeds the Large-selection flag.
+   */
+  aiInference?: {
+    inferredPricePoint?: "$" | "$$" | "$$$" | "$$$$" | null;
+    priceReasoning?: string | null;
+    isLargeSelection?: boolean;
+  } | null;
 }
+
+/** A single Places photo reference, as forwarded on `_photos`. */
+export type GooglePlacePhoto = NonNullable<GooglePlaceDetails["photos"]>[number];
+
+/**
+ * Per-field autofill diagnostic. Powers the red "why this field didn't
+ * autofill" labels next to each form input.
+ *
+ * - `source` — the exact Google field path this value was read from
+ *   (e.g. `"priceLevel"`, `"displayName.text"`, `"regularOpeningHours.periods"`).
+ * - `raw`    — the exact raw Google value that was inspected (or `null` absent).
+ * - `ok`     — whether a usable value was produced for the form.
+ * - `reason` — a short human explanation, present ONLY when `ok === false`.
+ */
+export interface FieldDiag {
+  source: string;
+  raw: unknown;
+  ok: boolean;
+  reason?: string;
+}
+
+/** Map of intake field key → its autofill diagnostic. */
+export type IntakeDiagnostics = Record<string, FieldDiag>;
 
 /**
  * The result of `mapPlaceToIntake`: the subset of intake form values Google can
@@ -146,6 +202,13 @@ export type MappedIntake = Partial<ShowroomIntakeValues> & {
   _rating?: number;
   /** Google review count backing the rating. */
   _userRatingCount?: number;
+  /**
+   * First 5 raw Google photo references, forwarded to the create body so the
+   * server can fetch + persist the media. NOT a persisted intake field.
+   */
+  _photos: GooglePlacePhoto[];
+  /** Per-field autofill diagnostics for the red "why it didn't autofill" labels. */
+  _diagnostics: IntakeDiagnostics;
 };
 
 // ─── Price-level mapping ──────────────────────────────────────────────────────
@@ -229,6 +292,10 @@ export function mapPlaceToIntake(place: GooglePlaceDetails): MappedIntake {
       place.types ?? [],
       place.primaryType ?? undefined,
     ),
+    // Populated near the end of this function; seeded here so the object
+    // satisfies the (now-required) MappedIntake keys during construction.
+    _photos: [],
+    _diagnostics: {},
   };
 
   const name = place.displayName?.text?.trim();
@@ -270,7 +337,220 @@ export function mapPlaceToIntake(place: GooglePlaceDetails): MappedIntake {
   const reviewSummary = extractReviewSummary(place);
   if (reviewSummary) mapped.reviewSummary = reviewSummary;
 
+  // Raw photo references (first 5) for the create body — NOT a persisted field.
+  mapped._photos = (place.photos ?? []).slice(0, 5);
+
+  // Per-field autofill diagnostics for the red "why it didn't autofill" labels.
+  mapped._diagnostics = buildDiagnostics(place, {
+    zip,
+    description,
+    phone,
+    reviewSummary,
+  });
+
   return mapped;
+}
+
+/**
+ * Build the per-field autofill diagnostics map. Each entry records the exact
+ * Google field path (`source`), the raw value inspected (`raw`), whether a
+ * usable value was produced (`ok`), and a short `reason` when it was not.
+ *
+ * Fully defensive — every Google field is optional, so a missing value yields
+ * an `ok: false` entry with a `raw` of `null` (or the raw unmapped value) plus a
+ * human-readable reason. Does NOT include a `bayAreaCity` entry (the form
+ * resolves city itself).
+ *
+ * The already-computed derived values (`zip`, `description`, `phone`,
+ * `reviewSummary`) are threaded in so this stays in lock-step with the mapping
+ * above rather than re-deriving them.
+ */
+function buildDiagnostics(
+  place: GooglePlaceDetails,
+  derived: {
+    zip: string | undefined;
+    description: string | undefined;
+    phone: string | undefined;
+    reviewSummary: string | undefined;
+  },
+): IntakeDiagnostics {
+  const diag: IntakeDiagnostics = {};
+
+  // name ← displayName.text
+  {
+    const raw = place.displayName?.text ?? null;
+    const value = place.displayName?.text?.trim();
+    diag.name = value
+      ? { source: "displayName.text", raw, ok: true }
+      : {
+          source: "displayName.text",
+          raw,
+          ok: false,
+          reason: "Places returned no displayName.text",
+        };
+  }
+
+  // description ← generativeSummary / editorialSummary
+  {
+    const raw = place.generativeSummary ?? place.editorialSummary ?? null;
+    diag.description = derived.description
+      ? { source: "generativeSummary/editorialSummary", raw, ok: true }
+      : {
+          source: "generativeSummary/editorialSummary",
+          raw,
+          ok: false,
+          reason: "Places returned no generative or editorial summary",
+        };
+  }
+
+  // pricePoint ← priceLevel (only ok when it's a KEY in PRICE_LEVEL_MAP)
+  {
+    const raw = place.priceLevel ?? null;
+    if (place.priceLevel && PRICE_LEVEL_MAP[place.priceLevel]) {
+      diag.pricePoint = { source: "priceLevel", raw, ok: true };
+    } else if (!place.priceLevel) {
+      diag.pricePoint = {
+        source: "priceLevel",
+        raw,
+        ok: false,
+        reason: "Places returned no priceLevel",
+      };
+    } else {
+      diag.pricePoint = {
+        source: "priceLevel",
+        raw,
+        ok: false,
+        reason: `Places priceLevel = ${place.priceLevel} (no $ tier)`,
+      };
+    }
+  }
+
+  // locationAddress ← formattedAddress
+  {
+    const raw = place.formattedAddress ?? null;
+    diag.locationAddress = place.formattedAddress
+      ? { source: "formattedAddress", raw, ok: true }
+      : {
+          source: "formattedAddress",
+          raw,
+          ok: false,
+          reason: "Places returned no formattedAddress",
+        };
+  }
+
+  // zipCode ← parsed from formattedAddress
+  {
+    const raw = place.formattedAddress ?? null;
+    diag.zipCode = derived.zip
+      ? { source: "formattedAddress", raw, ok: true }
+      : {
+          source: "formattedAddress",
+          raw,
+          ok: false,
+          reason: place.formattedAddress
+            ? "No ZIP found in the formatted address"
+            : "Places returned no formattedAddress",
+        };
+  }
+
+  // phoneNumber ← internationalPhoneNumber ?? nationalPhoneNumber
+  {
+    const raw =
+      place.internationalPhoneNumber ?? place.nationalPhoneNumber ?? null;
+    diag.phoneNumber = derived.phone
+      ? { source: "internationalPhoneNumber ?? nationalPhoneNumber", raw, ok: true }
+      : {
+          source: "internationalPhoneNumber ?? nationalPhoneNumber",
+          raw,
+          ok: false,
+          reason: "Places returned no phone number",
+        };
+  }
+
+  // websiteUrl ← websiteUri
+  {
+    const raw = place.websiteUri ?? null;
+    diag.websiteUrl = place.websiteUri
+      ? { source: "websiteUri", raw, ok: true }
+      : {
+          source: "websiteUri",
+          raw,
+          ok: false,
+          reason: "Places returned no websiteUri",
+        };
+  }
+
+  // googleMapsLink ← derived from id
+  {
+    const raw = place.id ?? null;
+    diag.googleMapsLink = place.id
+      ? { source: "id", raw, ok: true }
+      : {
+          source: "id",
+          raw,
+          ok: false,
+          reason: "Places returned no place id",
+        };
+  }
+
+  // hoursJson ← regularOpeningHours
+  {
+    const raw = place.regularOpeningHours ?? null;
+    const hours = mapPlaceToHoursJson(place.regularOpeningHours);
+    diag.hoursJson = hours
+      ? { source: "regularOpeningHours.periods", raw, ok: true }
+      : {
+          source: "regularOpeningHours.periods",
+          raw,
+          ok: false,
+          reason: place.regularOpeningHours
+            ? "Places regularOpeningHours had no usable periods"
+            : "Places had no regularOpeningHours",
+        };
+  }
+
+  // googleRating ← rating
+  {
+    const raw = place.rating ?? null;
+    diag.googleRating =
+      typeof place.rating === "number"
+        ? { source: "rating", raw, ok: true }
+        : {
+            source: "rating",
+            raw,
+            ok: false,
+            reason: "Places returned no rating",
+          };
+  }
+
+  // userRatingCount ← userRatingCount
+  {
+    const raw = place.userRatingCount ?? null;
+    diag.userRatingCount =
+      typeof place.userRatingCount === "number"
+        ? { source: "userRatingCount", raw, ok: true }
+        : {
+            source: "userRatingCount",
+            raw,
+            ok: false,
+            reason: "Places returned no userRatingCount",
+          };
+  }
+
+  // reviewSummary ← reviewSummary.text.text (falls back to generative/editorial)
+  {
+    const raw = place.reviewSummary?.text?.text ?? null;
+    diag.reviewSummary = derived.reviewSummary
+      ? { source: "reviewSummary.text.text", raw, ok: true }
+      : {
+          source: "reviewSummary.text.text",
+          raw,
+          ok: false,
+          reason: "Places returned no review summary",
+        };
+  }
+
+  return diag;
 }
 
 /**

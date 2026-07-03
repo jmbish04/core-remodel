@@ -191,7 +191,25 @@ const PlaceDetailsResponseSchema = z
     priceRange: z.record(z.string(), z.unknown()).optional().nullable(),
     rating: z.number().optional().nullable(),
     userRatingCount: z.number().int().optional().nullable(),
-    reviews: z.array(z.record(z.string(), z.unknown())).optional().nullable(),
+    reviews: z
+      .array(
+        z
+          .object({
+            rating: z.number().optional().nullable(),
+            text: z
+              .object({
+                text: z.string().optional().nullable(),
+              })
+              .passthrough()
+              .optional()
+              .nullable(),
+            relativePublishTimeDescription: z.string().optional().nullable(),
+          })
+          .passthrough(),
+      )
+      .optional()
+      .nullable()
+      .openapi({ description: "Up to 5 most-relevant user reviews from Google Places." }),
     editorialSummary: LocalizedTextSchema.optional().nullable(),
     generativeSummary: z.record(z.string(), z.unknown()).optional().nullable(),
     /**
@@ -206,8 +224,83 @@ const PlaceDetailsResponseSchema = z
     }),
     types: z.array(z.string()).optional().nullable(),
     primaryType: z.string().optional().nullable(),
-    photos: z.array(z.record(z.string(), z.unknown())).optional().nullable(),
+    photos: z
+      .array(
+        z
+          .object({
+            name: z.string(),
+            widthPx: z.number().int().optional().nullable(),
+            heightPx: z.number().int().optional().nullable(),
+            authorAttributions: z
+              .array(
+                z
+                  .object({
+                    displayName: z.string().optional().nullable(),
+                    uri: z.string().optional().nullable(),
+                    photoUri: z.string().optional().nullable(),
+                  })
+                  .passthrough(),
+              )
+              .optional()
+              .nullable(),
+            flagContentUri: z.string().optional().nullable(),
+            googleMapsUri: z.string().optional().nullable(),
+          })
+          .passthrough(),
+      )
+      .optional()
+      .nullable()
+      .openapi({
+        description:
+          "Photo references for this place. Use the `name` field (e.g. " +
+          "'places/ChIJ.../photos/A...' ) to construct a photo-media URL. " +
+          "Pass the full photo objects to the showroom-store create endpoint " +
+          "so the frontend can render thumbnails without re-fetching.",
+      }),
     businessStatus: z.string().optional().nullable(),
+    /**
+     * Workers-AI structured inference derived from the review sample.
+     * Present only when the AI call succeeded and reviews were available.
+     * `inferredPricePoint` fills in as a fallback when Google omits `priceLevel`.
+     */
+    aiInference: z
+      .object({
+        inferredPricePoint: z
+          .enum(["$", "$$", "$$$", "$$$$"])
+          .nullable()
+          .optional()
+          .openapi({
+            description:
+              'Price tier inferred from explicit pricing language in review text. ' +
+              'Null when reviews contain no pricing signal. ' +
+              'Use as a fallback when Google\'s `priceLevel` field is absent.',
+          }),
+        priceReasoning: z
+          .string()
+          .nullable()
+          .optional()
+          .openapi({
+            description:
+              "Quoted phrase(s) from the reviews that drove the inferred_price_point, " +
+              "or null when no inference was made.",
+          }),
+        isLargeSelection: z
+          .boolean()
+          .optional()
+          .openapi({
+            description:
+              "True when reviews mention a large/extensive selection, outlet, warehouse, " +
+              'huge inventory, "shifting inventory", or lots of options.',
+          }),
+      })
+      .passthrough()
+      .optional()
+      .nullable()
+      .openapi({
+        description:
+          "Structured inference from Workers-AI based on the review sample. " +
+          "Absent when reviews were unavailable or the AI call failed.",
+      }),
   })
   .passthrough()
   .openapi({ description: "Rich Google Places (New) Details payload." });

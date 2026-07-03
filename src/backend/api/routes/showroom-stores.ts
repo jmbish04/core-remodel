@@ -8,7 +8,7 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, desc, and, like, inArray, sql } from "drizzle-orm";
+import { eq, desc, asc, and, like, inArray, sql } from "drizzle-orm";
 import { getAgentByName } from "agents";
 
 import {
@@ -36,6 +36,7 @@ import {
   showroomPocs,
   showroomProductMappings,
   browserRunPages,
+  showroomPhotosMapping,
 } from "@backend/db/schema/showroom/index";
 import {
   brands,
@@ -43,7 +44,7 @@ import {
 } from "@backend/db/schema/brands/index";
 import { businessCardService } from "@backend/services/business-card";
 import { ImageProcessorService } from "@backend/services/image-processor";
-import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
+import { resolveCloudflareImagesCredentials, getGoogleMapsApiKey } from "@backend/utils/secrets";
 import { faviconService } from "@backend/services/favicon";
 import {
   generateProductDraftPrompt,
@@ -313,6 +314,40 @@ const createStoreSchema = z.object({
    * stripped before the DB insert.
    */
   categoryIds: z.array(z.number().int()).optional().default([]),
+  /**
+   * Up to 5 Google Places photo objects from the intake form.
+   * Each photo's media bytes are fetched, uploaded to Cloudflare Images,
+   * and stored as `showroom_photos_mapping` rows in a background waitUntil.
+   * The first photo (index 0) also sets `heroImageCfImagesUrl` on the store.
+   * This field is NOT a column on `showroom_stores` and is stripped before
+   * the DB insert.
+   */
+  photos: z
+    .array(
+      z
+        .object({
+          name: z.string(),
+          widthPx: z.number().int().optional().nullable(),
+          heightPx: z.number().int().optional().nullable(),
+          authorAttributions: z
+            .array(
+              z
+                .object({
+                  displayName: z.string().optional().nullable(),
+                  uri: z.string().optional().nullable(),
+                  photoUri: z.string().optional().nullable(),
+                })
+                .passthrough(),
+            )
+            .optional()
+            .nullable(),
+          flagContentUri: z.string().optional().nullable(),
+          googleMapsUri: z.string().optional().nullable(),
+        })
+        .passthrough(),
+    )
+    .max(5)
+    .optional(),
 });
 
 const createProductSchema = z.object({
@@ -1318,8 +1353,9 @@ showroomStoresRouter.post("/", async (c) => {
   const body = await c.req.json();
   const data = createStoreSchema.parse(body);
 
-  // Strip the virtual field before inserting into showroom_stores.
-  const { categoryIds, ...storeValues } = data;
+  // Strip virtual fields before inserting into showroom_stores.
+  // `categoryIds` and `photos` are not columns on `showroom_stores`.
+  const { categoryIds, photos, ...storeValues } = data;
 
   // When hoursJson is provided, derive the back-compat display fields
   // server-side so filters and legacy display remain correct.
@@ -1400,6 +1436,82 @@ showroomStoresRouter.post("/", async (c) => {
             `showroom scrape workflow trigger failed for ${inserted.id}:`,
             error,
           );
+        }
+      })(),
+    );
+  }
+
+  // Fire background photo pipeline: fetch each Places photo media URL, upload
+  // to Cloudflare Images, store a showroom_photos_mapping row, and set the hero
+  // image from photo[0]. Error-guarded — never throws out of waitUntil.
+  if (photos && photos.length > 0) {
+    const storeId = inserted.id;
+    c.executionCtx.waitUntil(
+      (async () => {
+        try {
+          const { accountId, apiTokens } = await resolveCloudflareImagesCredentials(c.env);
+          if (!accountId || apiTokens.length === 0) {
+            console.error(`[showroom-stores] photos pipeline: CF Images credentials missing for store ${storeId}`);
+            return;
+          }
+          const [primaryToken, ...fallbackApiTokens] = apiTokens;
+          const processor = new ImageProcessorService(c.env, accountId, primaryToken, { fallbackApiTokens });
+
+          const mapsKey = await getGoogleMapsApiKey(c.env).catch(() => null);
+          if (!mapsKey) {
+            console.error(`[showroom-stores] photos pipeline: Google Maps API key missing for store ${storeId}`);
+            return;
+          }
+
+          const db = drizzle(c.env.DB);
+          const capped = photos.slice(0, 5);
+
+          for (let i = 0; i < capped.length; i++) {
+            const photo = capped[i];
+            try {
+              // Fetch the Places photo media bytes. The endpoint 302-redirects to
+              // the actual image; fetch follows the redirect automatically.
+              const mediaUrl = `https://places.googleapis.com/v1/${photo.name}/media?maxWidthPx=1600&key=${mapsKey}`;
+              const res = await fetch(mediaUrl, { signal: AbortSignal.timeout(8000) });
+              if (!res.ok) {
+                console.warn(`[showroom-stores] photos pipeline: non-ok response ${res.status} for photo ${i} of store ${storeId}`);
+                continue;
+              }
+              const blob = await res.blob();
+
+              // Upload to Cloudflare Images.
+              const customId = `showroom-photo-${storeId}-${i}`;
+              const filename = `showroom-${storeId}-${i}.jpg`;
+              const uploadResp = await processor.uploadToCloudflareImages(blob, customId, filename);
+              const url = processor.getDeliveryUrl(uploadResp, customId);
+
+              // Store the mapping row.
+              await db.insert(showroomPhotosMapping).values({
+                showroomId: storeId,
+                cfImagesPhotoUrl: url,
+                photoName: photo.name,
+                photoWidthPx: photo.widthPx ?? null,
+                photoHeightPx: photo.heightPx ?? null,
+                authorAttributes: photo.authorAttributions ?? null,
+                flagContentUri: photo.flagContentUri ?? null,
+                googleMapsUri: photo.googleMapsUri ?? null,
+                sortOrder: i,
+              } as typeof showroomPhotosMapping.$inferInsert);
+
+              // Set the hero image from the first photo.
+              if (i === 0) {
+                await db
+                  .update(showroomStores)
+                  .set({ heroImageCfImagesUrl: url, updatedAt: new Date() } as Partial<typeof showroomStores.$inferInsert>)
+                  .where(eq(showroomStores.id, storeId));
+              }
+            } catch (photoErr) {
+              console.error(`[showroom-stores] photos pipeline: error on photo ${i} for store ${storeId}:`, photoErr);
+              // Continue to the next photo — one failure must not abort the pipeline.
+            }
+          }
+        } catch (pipelineErr) {
+          console.error(`[showroom-stores] photos pipeline: outer error for store ${inserted.id}:`, pipelineErr);
         }
       })(),
     );
@@ -3042,6 +3154,59 @@ showroomStoresRouter.post("/:id/mapped-products", async (c) => {
     console.error("[showroom-stores] POST /:id/mapped-products error:", err);
     return c.json({ success: false, error: "Failed to add product mapping" }, 500);
   }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── PLACES PHOTOS GALLERY (showroom_photos_mapping) ─────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Google Places photos that were fetched at intake time, uploaded to Cloudflare
+// Images, and stored as showroom_photos_mapping rows. Sorted by sortOrder asc
+// (preserves the Places API ordering, where 0 is the hero/default photo).
+
+/**
+ * GET /:id/photos-gallery — Google Places photos for a showroom.
+ *
+ * Response 200:
+ *   {
+ *     "photos": [
+ *       {
+ *         "id": 1,
+ *         "cfImagesPhotoUrl": "https://imagedelivery.net/...",
+ *         "photoName": "places/abc123/photos/xyz",
+ *         "photoWidthPx": 1600,
+ *         "photoHeightPx": 900,
+ *         "authorAttributes": [{ "displayName": "Jane D.", "uri": "...", "photoUri": "..." }],
+ *         "flagContentUri": "https://...",
+ *         "googleMapsUri": "https://..."
+ *       },
+ *       ...
+ *     ]
+ *   }
+ */
+showroomStoresRouter.get("/:id/photos-gallery", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isFinite(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  const rows = await db
+    .select({
+      id: showroomPhotosMapping.id,
+      cfImagesPhotoUrl: showroomPhotosMapping.cfImagesPhotoUrl,
+      photoName: showroomPhotosMapping.photoName,
+      photoWidthPx: showroomPhotosMapping.photoWidthPx,
+      photoHeightPx: showroomPhotosMapping.photoHeightPx,
+      authorAttributes: showroomPhotosMapping.authorAttributes,
+      flagContentUri: showroomPhotosMapping.flagContentUri,
+      googleMapsUri: showroomPhotosMapping.googleMapsUri,
+    })
+    .from(showroomPhotosMapping)
+    .where(eq(showroomPhotosMapping.showroomId, storeId))
+    .orderBy(asc(showroomPhotosMapping.sortOrder));
+
+  return c.json({ photos: rows });
 });
 
 /**
