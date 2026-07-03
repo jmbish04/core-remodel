@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   CalendarPlus,
+  CheckCircle2,
   Globe,
   ImagePlus,
   Instagram,
@@ -23,9 +24,10 @@ import {
   NotebookPen,
   Package,
   Phone,
+  RefreshCcw,
+  ScanSearch,
   Star,
   StickyNote,
-  Store as StoreIcon,
   Tag,
   Trash2,
   Upload,
@@ -36,6 +38,7 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
+import { ScrapeResultsModal } from "./ScrapeResultsModal";
 import { RecordVisitModal } from "./visit/RecordVisitModal";
 import { AssociateBrandsModal } from "./associate/AssociateBrandsModal";
 import { AssociateProductsModal } from "./associate/AssociateProductsModal";
@@ -53,6 +56,11 @@ const VALID_SECTIONS: SectionKey[] = ["brands-products", "notes", "photos"];
 function isSectionKey(v: string | undefined | null): v is SectionKey {
   return v != null && (VALID_SECTIONS as string[]).includes(v);
 }
+
+type ScrapeStatus = "idle" | "pending" | "running" | "complete" | "failed";
+
+const TERMINAL_SCRAPE_STATUSES: ScrapeStatus[] = ["complete", "failed", "idle"];
+const SCRAPE_POLL_MS = 10_000;
 
 interface StoreBrand {
   id: number;
@@ -75,6 +83,9 @@ interface StoreDetail {
   websiteUrl: string | null;
   instagramUrl: string | null;
   iconCfImagesUrl: string | null;
+  heroImageCfImagesUrl: string | null;
+  scrapeStatus: ScrapeStatus;
+  ragUuid: string | null;
   rating: number | null;
   ratingContextHtml: string | null;
   ratingContextMarkdown: string | null;
@@ -129,36 +140,70 @@ function instagramHref(url: string | null): string | null {
   return url.startsWith("http") ? url : `https://${url}`;
 }
 
-// ─── Small favicon with graceful fallback ───────────────────────────────────────
+// ─── Hero favicon + banner ──────────────────────────────────────────────────────
 
-function FaviconImg({
-  src,
-  alt,
-  className,
-}: {
-  src: string | null | undefined;
-  alt: string;
-  className?: string;
-}) {
+/** Circular favicon that floats over the hero banner, with an initials/icon fallback. */
+function HeroFavicon({ src, name }: { src: string | null | undefined; name: string }) {
   const [failed, setFailed] = useState(false);
+  const initials = name.trim().slice(0, 2).toUpperCase() || "?";
+  const base =
+    "absolute left-5 bottom-0 z-10 flex size-16 translate-y-1/2 items-center justify-center overflow-hidden rounded-full bg-card ring-2 ring-background sm:left-6";
+
   if (!src || failed) {
     return (
-      <span
-        className={`flex items-center justify-center bg-card text-muted-foreground ring-1 ring-border/40 ${className ?? ""}`}
-        aria-hidden
-      >
-        <StoreIcon className="h-1/2 w-1/2" />
+      <span className={`${base} text-sm font-semibold text-muted-foreground ring-1`} aria-hidden>
+        {initials}
       </span>
     );
   }
   return (
     <img
       src={src}
-      alt={alt}
+      alt={`${name} icon`}
       onError={() => setFailed(true)}
-      className={`bg-card object-contain ring-1 ring-border/40 ${className ?? ""}`}
       loading="lazy"
+      className={`${base} object-contain`}
     />
+  );
+}
+
+/**
+ * Hero banner: renders `src` as a cover background image behind a dark gradient
+ * overlay (so overlaid text stays legible), with the favicon floating as a
+ * circle on the middle-left overlapping the bottom edge. On image load error we
+ * fall back to a short plain band; when there's no image at all the band still
+ * hosts the favicon so the header composition stays consistent.
+ */
+function HeroBanner({
+  src,
+  iconSrc,
+  name,
+}: {
+  src: string | null | undefined;
+  iconSrc: string | null | undefined;
+  name: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  const showImage = Boolean(src) && !failed;
+
+  return (
+    <div className={`relative ${showImage ? "h-40 sm:h-48" : "h-16 sm:h-20"}`}>
+      {showImage ? (
+        <>
+          <img
+            src={src as string}
+            alt={`${name} hero`}
+            onError={() => setFailed(true)}
+            className="absolute inset-0 size-full object-cover"
+          />
+          {/* Dark gradient overlay keeps the header text legible over any image. */}
+          <div className="absolute inset-0 bg-gradient-to-t from-background via-background/70 to-background/30" />
+        </>
+      ) : (
+        <div className="absolute inset-0 bg-gradient-to-b from-muted/40 to-card" />
+      )}
+      <HeroFavicon src={iconSrc} name={name} />
+    </div>
   );
 }
 
@@ -173,6 +218,77 @@ function VisitStars({ rating }: { rating: number }) {
         />
       ))}
     </span>
+  );
+}
+
+/**
+ * Scrape-status badge: reflects the background website-scan Workflow.
+ *  - pending/running → amber, spinner, not clickable
+ *  - complete        → emerald, clickable → opens the results modal
+ *  - failed          → rose, clickable → re-triggers the scan
+ *  - idle            → subtle "Run website scan" (only when a websiteUrl exists)
+ */
+function ScrapeBadge({
+  status,
+  hasWebsite,
+  busy,
+  onOpenResults,
+  onTrigger,
+}: {
+  status: ScrapeStatus;
+  hasWebsite: boolean;
+  busy: boolean;
+  onOpenResults: () => void;
+  onTrigger: () => void;
+}) {
+  if (status === "pending" || status === "running") {
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/15 px-2.5 py-1 text-[11px] font-medium text-amber-300 ring-1 ring-amber-500/30">
+        <Loader2 className="size-3 animate-spin" />
+        Scraping website…
+      </span>
+    );
+  }
+
+  if (status === "complete") {
+    return (
+      <button
+        type="button"
+        onClick={onOpenResults}
+        className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-1 text-[11px] font-medium text-emerald-300 ring-1 ring-emerald-500/30 transition-colors hover:bg-emerald-500/25"
+      >
+        <CheckCircle2 className="size-3" />
+        Scraping complete
+      </button>
+    );
+  }
+
+  if (status === "failed") {
+    return (
+      <button
+        type="button"
+        onClick={onTrigger}
+        disabled={busy}
+        className="inline-flex items-center gap-1.5 rounded-full bg-rose-500/15 px-2.5 py-1 text-[11px] font-medium text-rose-300 ring-1 ring-rose-500/30 transition-colors hover:bg-rose-500/25 disabled:opacity-50"
+      >
+        {busy ? <Loader2 className="size-3 animate-spin" /> : <RefreshCcw className="size-3" />}
+        Scrape failed — retry
+      </button>
+    );
+  }
+
+  // idle
+  if (!hasWebsite) return null;
+  return (
+    <button
+      type="button"
+      onClick={onTrigger}
+      disabled={busy}
+      className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2.5 py-1 text-[11px] font-medium text-muted-foreground ring-1 ring-border/40 transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+    >
+      {busy ? <Loader2 className="size-3 animate-spin" /> : <ScanSearch className="size-3" />}
+      Run website scan
+    </button>
   );
 }
 
@@ -206,6 +322,13 @@ export function StoreViewportApp({
   const [productsOpen, setProductsOpen] = useState(false);
   const [noteModalOpen, setNoteModalOpen] = useState(false);
   const [editingNote, setEditingNote] = useState<ShowroomNote | null>(null);
+  const [scrapeResultsOpen, setScrapeResultsOpen] = useState(false);
+
+  // Scrape lifecycle. `scrapeStatus` mirrors the store row but is polled
+  // independently via GET /:id/scrape while pending/running.
+  const [scrapeStatus, setScrapeStatus] = useState<ScrapeStatus | null>(null);
+  const [triggeringScrape, setTriggeringScrape] = useState(false);
+  const scrapePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Mutation flags.
   const [removingBrandId, setRemovingBrandId] = useState<number | null>(null);
@@ -267,6 +390,85 @@ export function StoreViewportApp({
     void loadNotes();
     void loadPhotos();
   }, [loadStore, loadMappedProducts, loadNotes, loadPhotos]);
+
+  // ── Scrape status: mount fetch + poll while in-flight ─────────────────────
+  //
+  // On mount (and whenever `id` changes) we read GET /:id/scrape once; if the
+  // status is pending/running we poll every ~10s until it reaches a terminal
+  // state. The interval is torn down on unmount, on terminal status, and before
+  // starting a fresh one so we never leak timers.
+
+  const clearScrapePoll = useCallback(() => {
+    if (scrapePollRef.current !== null) {
+      clearInterval(scrapePollRef.current);
+      scrapePollRef.current = null;
+    }
+  }, []);
+
+  const fetchScrapeStatus = useCallback(async (): Promise<ScrapeStatus | null> => {
+    try {
+      const data = await api<{ scrapeStatus: ScrapeStatus }>(
+        `/api/showroom-stores/${id}/scrape`,
+      );
+      setScrapeStatus(data.scrapeStatus);
+      if (TERMINAL_SCRAPE_STATUSES.includes(data.scrapeStatus)) {
+        clearScrapePoll();
+      }
+      return data.scrapeStatus;
+    } catch (e) {
+      console.error("[store/scrape-status]", e);
+      // A transient poll failure shouldn't nuke the badge; stop polling to
+      // avoid hammering a failing endpoint.
+      clearScrapePoll();
+      return null;
+    }
+  }, [id, clearScrapePoll]);
+
+  const startScrapePoll = useCallback(() => {
+    clearScrapePoll();
+    scrapePollRef.current = setInterval(() => {
+      void fetchScrapeStatus();
+    }, SCRAPE_POLL_MS);
+  }, [clearScrapePoll, fetchScrapeStatus]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const status = await fetchScrapeStatus();
+      if (cancelled) return;
+      if (status === "pending" || status === "running") startScrapePoll();
+    })();
+    return () => {
+      cancelled = true;
+      clearScrapePoll();
+    };
+  }, [fetchScrapeStatus, startScrapePoll, clearScrapePoll]);
+
+  const triggerScrape = useCallback(async () => {
+    if (triggeringScrape) return;
+    setTriggeringScrape(true);
+    try {
+      const res = await fetch(`/api/showroom-stores/${id}/scrape`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error ?? `Scan failed (${res.status})`);
+      }
+      const payload = (await res.json().catch(() => ({}))) as {
+        scrapeStatus?: ScrapeStatus;
+      };
+      setScrapeStatus(payload.scrapeStatus ?? "pending");
+      toast.success("Website scan started");
+      startScrapePoll();
+    } catch (e) {
+      console.error("[store/scrape-trigger]", e);
+      toast.error(e instanceof Error ? e.message : "Failed to start website scan");
+    } finally {
+      setTriggeringScrape(false);
+    }
+  }, [id, triggeringScrape, startScrapePoll]);
 
   // ── Section ↔ URL sync ──────────────────────────────────────────────────────
   //
@@ -446,6 +648,8 @@ export function StoreViewportApp({
 
   const igHref = instagramHref(store.instagramUrl);
   const categoryNames = store.categories.map((c) => c.categoryName).filter(Boolean);
+  // Prefer the polled status; fall back to the store row's value on first paint.
+  const effectiveScrapeStatus: ScrapeStatus = scrapeStatus ?? store.scrapeStatus ?? "idle";
 
   return (
     <main className="container mx-auto max-w-5xl px-4 py-10">
@@ -457,14 +661,19 @@ export function StoreViewportApp({
       </a>
 
       {/* ── Enriched hero header ──────────────────────────────────────────────── */}
-      <section className="mt-4 rounded-xl bg-card p-5 ring-1 ring-border/40 sm:p-6">
-        <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
-          <FaviconImg
-            src={store.iconCfImagesUrl}
-            alt={`${store.name} icon`}
-            className="h-16 w-16 shrink-0 rounded-lg object-contain"
-          />
+      <section className="mt-4 overflow-hidden rounded-xl bg-card ring-1 ring-border/40">
+        {/* Hero banner: heroImageCfImagesUrl as a cover background with a dark
+            gradient so overlaid text stays legible; the favicon floats as a
+            circle on the middle-left, overlapping the banner's bottom edge.
+            When there's no hero image the banner collapses and we fall back to
+            the plain padded header below. */}
+        <HeroBanner
+          src={store.heroImageCfImagesUrl}
+          iconSrc={store.iconCfImagesUrl}
+          name={store.name}
+        />
 
+        <div className="p-5 pt-8 sm:p-6 sm:pt-9">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl font-semibold tracking-tight">{store.name}</h1>
@@ -476,6 +685,13 @@ export function StoreViewportApp({
                   {store.pricePoint}
                 </Badge>
               ) : null}
+              <ScrapeBadge
+                status={effectiveScrapeStatus}
+                hasWebsite={Boolean(store.websiteUrl)}
+                busy={triggeringScrape}
+                onOpenResults={() => setScrapeResultsOpen(true)}
+                onTrigger={() => void triggerScrape()}
+              />
             </div>
 
             {(store.cityName || store.hubName) ? (
@@ -543,7 +759,6 @@ export function StoreViewportApp({
               ) : null}
             </div>
           </div>
-        </div>
 
         {/* Visit rating + context note. */}
         {store.rating !== null || store.ratingContextHtml ? (
@@ -602,6 +817,7 @@ export function StoreViewportApp({
           >
             <Package className="size-3.5" /> Associate products
           </Button>
+        </div>
         </div>
       </section>
 
@@ -687,6 +903,11 @@ export function StoreViewportApp({
         onSaved={() => {
           void loadNotes();
         }}
+      />
+      <ScrapeResultsModal
+        showroomId={id}
+        open={scrapeResultsOpen}
+        onOpenChange={setScrapeResultsOpen}
       />
     </main>
   );
