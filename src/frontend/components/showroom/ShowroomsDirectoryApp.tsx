@@ -14,7 +14,7 @@
  * / click-to-email contact links.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AppWindow,
   Archive,
@@ -73,6 +73,11 @@ import {
   MarkerContent,
   MarkerPopup,
 } from "@/components/ui/map";
+import {
+  formatOpeningHours,
+  mapPlaceToIntake,
+  type GooglePlaceDetails,
+} from "./intake/places-mapper";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Store {
@@ -1291,6 +1296,163 @@ function DirectoryView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
 
 // ─── Add Showroom Modal ───────────────────────────────────────────────────────
 
+/**
+ * Google Places (New) autocomplete typeahead for the showroom NAME field.
+ *
+ * Mirrors `PlaceSearch` from ShowroomIntakeApp: a controlled `<Input>` that
+ * still drives `form.name` (so the user can just type a name manually) plus a
+ * debounced (~300ms) suggestions dropdown fed by
+ * `GET /api/places/autocomplete?q=&sessionToken=`. Selecting a suggestion hands
+ * the `placeId` back to the parent, which fetches Place Details and autofills.
+ *
+ * Session token: one `crypto.randomUUID()` per search session is held in
+ * `sessionTokenRef` and sent with every keystroke's autocomplete call AND the
+ * terminal details call — grouping them into ONE Google billing session. The
+ * parent regenerates it (via `sessionTokenRef`, shared by ref) after a
+ * successful selection.
+ */
+function ShowroomNameSearch({
+  value,
+  onChange,
+  onSelect,
+  sessionTokenRef,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSelect: (placeId: string) => void;
+  sessionTokenRef: React.MutableRefObject<string>;
+  disabled: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [suggestions, setSuggestions] = useState<{ placeId: string; text: string }[]>([]);
+  const [loading, setLoading] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+
+  // Close the dropdown when clicking outside the search container.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  // On unmount, clear any pending debounce timer and abort any in-flight fetch.
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  const runSearch = useCallback(
+    async (text: string) => {
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      setLoading(true);
+      try {
+        const url = `/api/places/autocomplete?q=${encodeURIComponent(text)}&sessionToken=${sessionTokenRef.current}`;
+        const res = await fetch(url, { credentials: "include", signal: controller.signal });
+        if (res.status === 429) {
+          toast.error("Google Maps monthly quota reached. Try again later.");
+          setSuggestions([]);
+          return;
+        }
+        if (!res.ok) {
+          const payload = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(payload.error ?? `Autocomplete failed (${res.status})`);
+        }
+        const data = (await res.json()) as {
+          suggestions?: { placeId: string; text: string }[];
+        };
+        setSuggestions(data.suggestions ?? []);
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error("[directory/autocomplete]", err);
+        toast.error(err instanceof Error ? err.message : "Autocomplete failed");
+        setSuggestions([]);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [sessionTokenRef],
+  );
+
+  const handleChange = (next: string) => {
+    onChange(next);
+    setOpen(true);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    const trimmed = next.trim();
+    if (trimmed.length < 2) {
+      setSuggestions([]);
+      setLoading(false);
+      return;
+    }
+    debounceRef.current = setTimeout(() => runSearch(trimmed), 300);
+  };
+
+  return (
+    <div ref={containerRef} className="relative w-full">
+      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        id="name"
+        value={value}
+        disabled={disabled}
+        onChange={(e) => handleChange(e.target.value)}
+        onFocus={() => value.trim().length >= 2 && setOpen(true)}
+        placeholder="e.g. Ferguson Bath, Kitchen & Lighting"
+        className="pl-9"
+        aria-label="Search Google Places by showroom name"
+      />
+      {loading && (
+        <Loader2 className="absolute right-3 top-1/2 size-4 -translate-y-1/2 animate-spin text-muted-foreground" />
+      )}
+
+      {open && !disabled && (
+        <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-72 overflow-y-auto rounded-lg bg-popover p-1 shadow-md ring-1 ring-border/40">
+          {loading && suggestions.length === 0 ? (
+            <div className="flex items-center gap-2 px-3 py-4 text-sm text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" /> Searching…
+            </div>
+          ) : suggestions.length === 0 ? (
+            <div className="px-3 py-4 text-sm text-muted-foreground">
+              {value.trim().length < 2
+                ? "Type at least 2 characters to search Google, or enter a name manually."
+                : "No matches — you can still type a name manually."}
+            </div>
+          ) : (
+            <ul className="divide-y divide-border/40">
+              {suggestions.map((s) => (
+                <li key={s.placeId}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpen(false);
+                      setSuggestions([]);
+                      onSelect(s.placeId);
+                    }}
+                    className="flex w-full items-start gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors hover:bg-muted/60"
+                  >
+                    <MapPin className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                    <span className="line-clamp-2">{s.text}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: () => void }) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState(0);
@@ -1300,6 +1462,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
     description: "",
     pricePoint: "",
     websiteUrl: "",
+    instagramUrl: "",
     phoneNumber: "",
     emailAddress: "",
     bayAreaCityId: "",
@@ -1319,8 +1482,88 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
     mainPocEmailAddress: "",
   };
   const [form, setForm] = useState({ ...emptyForm });
+  const [loadingPlace, setLoadingPlace] = useState(false);
+  // One session token per search session: shared with the child typeahead by ref
+  // so every autocomplete keystroke + the terminal details call bill as ONE
+  // Google session. Regenerated after a successful selection.
+  const sessionTokenRef = useRef<string>(crypto.randomUUID());
 
   const update = (patch: Partial<typeof form>) => setForm((f) => ({ ...f, ...patch }));
+
+  /**
+   * Resolve a Bay Area city ID from a mapped address/city string by matching
+   * (case-insensitive, contains) against the `cities` prop's `bayAreaCityName`.
+   * Prefers the longest matching city name so "South San Francisco" wins over
+   * "San Francisco" when both are substrings of the address.
+   */
+  const resolveBayAreaCityId = useCallback(
+    (address: string | undefined): string => {
+      if (!address) return "";
+      const hay = address.toLowerCase();
+      let best: { id: number; len: number } | null = null;
+      for (const c of cities) {
+        const name = c.bayAreaCityName?.trim().toLowerCase();
+        if (!name) continue;
+        if (hay.includes(name) && (!best || name.length > best.len)) {
+          best = { id: c.id, len: name.length };
+        }
+      }
+      return best ? String(best.id) : "";
+    },
+    [cities],
+  );
+
+  // Fetch Place Details for the selected suggestion, map it, and autofill the
+  // form. POC fields are intentionally left untouched. Instagram is never filled
+  // by Google — it stays whatever the user typed.
+  const handleSelectPlace = useCallback(
+    async (placeId: string) => {
+      setLoadingPlace(true);
+      try {
+        const url = `/api/places/details/${encodeURIComponent(placeId)}?sessionToken=${sessionTokenRef.current}`;
+        const res = await fetch(url, { credentials: "include" });
+        if (res.status === 429) {
+          toast.error("Google Maps monthly quota reached. Try again later.");
+          return;
+        }
+        if (!res.ok) {
+          const payload = (await res.json().catch(() => ({}))) as { error?: string };
+          throw new Error(payload.error ?? `Details failed (${res.status})`);
+        }
+        const place = (await res.json()) as GooglePlaceDetails;
+
+        const mapped = mapPlaceToIntake(place);
+        const hours = formatOpeningHours(place.regularOpeningHours);
+        const cityId = resolveBayAreaCityId(mapped.locationAddress);
+
+        update({
+          name: mapped.name ?? form.name,
+          description: mapped.description ?? "",
+          pricePoint: mapped.pricePoint ?? "",
+          websiteUrl: mapped.websiteUrl ?? "",
+          locationAddress: mapped.locationAddress ?? "",
+          zipCode: mapped.zipCode ?? "",
+          googleMapsLink: mapped.googleMapsLink ?? "",
+          phoneNumber: mapped.phoneNumber ?? "",
+          emailAddress: mapped.emailAddress ?? "",
+          weekdayHours: hours.weekdayHours,
+          weekendHours: hours.weekendHours,
+          isOpenWeekends: hours.isOpenWeekends,
+          ...(cityId ? { bayAreaCityId: cityId } : {}),
+        });
+
+        // Successful details call closes the billing session → new token next search.
+        sessionTokenRef.current = crypto.randomUUID();
+        toast.success("Details pulled from Google — review and edit as needed.");
+      } catch (e) {
+        console.error("[directory/details]", e);
+        toast.error(e instanceof Error ? e.message : "Failed to load place details");
+      } finally {
+        setLoadingPlace(false);
+      }
+    },
+    [form.name, resolveBayAreaCityId],
+  );
 
   const handleSubmit = async () => {
     if (!form.name.trim()) {
@@ -1333,6 +1576,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
       if (form.description) body.description = form.description;
       if (form.pricePoint) body.pricePoint = form.pricePoint;
       if (form.websiteUrl) body.websiteUrl = form.websiteUrl;
+      if (form.instagramUrl) body.instagramUrl = form.instagramUrl;
       if (form.phoneNumber) body.phoneNumber = form.phoneNumber;
       if (form.emailAddress) body.emailAddress = form.emailAddress;
       if (form.bayAreaCityId) body.bayAreaCityId = Number(form.bayAreaCityId);
@@ -1367,6 +1611,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
       setOpen(false);
       setStep(0);
       setForm({ ...emptyForm });
+      sessionTokenRef.current = crypto.randomUUID();
       onCreated();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to create showroom");
@@ -1415,7 +1660,23 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
               <>
                 <div>
                   <Label htmlFor="name">Name *</Label>
-                  <Input id="name" value={form.name} onChange={(e) => update({ name: e.target.value })} placeholder="e.g. Ferguson Bath, Kitchen & Lighting" />
+                  <ShowroomNameSearch
+                    value={form.name}
+                    onChange={(v) => update({ name: v })}
+                    onSelect={handleSelectPlace}
+                    sessionTokenRef={sessionTokenRef}
+                    disabled={loadingPlace}
+                  />
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Start typing to search Google — pick a result to auto-fill the
+                    rest, or just type a name manually.
+                  </p>
+                  {loadingPlace && (
+                    <div className="mt-1.5 flex items-center gap-2 text-[11px] text-muted-foreground">
+                      <Loader2 className="size-3.5 animate-spin" /> Fetching details from
+                      Google…
+                    </div>
+                  )}
                 </div>
                 <div>
                   <Label htmlFor="desc">Description</Label>
@@ -1441,6 +1702,22 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                 <div>
                   <Label htmlFor="website">Website</Label>
                   <Input id="website" value={form.websiteUrl} onChange={(e) => update({ websiteUrl: e.target.value })} placeholder="https://..." />
+                </div>
+                <div>
+                  <Label htmlFor="instagram">Instagram</Label>
+                  <div className="relative">
+                    <Instagram className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      id="instagram"
+                      value={form.instagramUrl}
+                      onChange={(e) => update({ instagramUrl: e.target.value })}
+                      placeholder="https://instagram.com/..."
+                      className="pl-9"
+                    />
+                  </div>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Not filled by Google — paste the profile URL.
+                  </p>
                 </div>
               </>
             )}
