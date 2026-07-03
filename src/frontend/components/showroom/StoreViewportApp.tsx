@@ -46,6 +46,8 @@ import { ShowroomNoteModal, type ShowroomNote } from "./notes/ShowroomNoteModal"
 import { ShowroomPhotoPolaroid, type ShowroomPhoto } from "./photos/ShowroomPhotoPolaroid";
 import { ShowroomBento, type ShowroomBentoSection } from "./bento/ShowroomBento";
 import { BrandLogo } from "./brands/BrandLogo";
+import { PhotoStack } from "./PhotoStack";
+import { ShowroomGalleryModal, type GalleryPhoto } from "./ShowroomGalleryModal";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -178,10 +180,13 @@ function HeroBanner({
   src,
   iconSrc,
   name,
+  overlay,
 }: {
   src: string | null | undefined;
   iconSrc: string | null | undefined;
   name: string;
+  /** Optional floating overlay (e.g. the PhotoStack) pinned bottom-right. */
+  overlay?: React.ReactNode;
 }) {
   const [failed, setFailed] = useState(false);
   const showImage = Boolean(src) && !failed;
@@ -203,6 +208,11 @@ function HeroBanner({
         <div className="absolute inset-0 bg-gradient-to-b from-muted/40 to-card" />
       )}
       <HeroFavicon src={iconSrc} name={name} />
+      {overlay ? (
+        <div className="absolute bottom-3 right-3 z-10 sm:bottom-4 sm:right-4">
+          {overlay}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -316,6 +326,11 @@ export function StoreViewportApp({
   const [notes, setNotes] = useState<NoteRow[]>([]);
   const [photos, setPhotos] = useState<ShowroomPhoto[]>([]);
 
+  // Google Places gallery photos (hero source + theater lightbox). Distinct
+  // from the homeowner's uploaded `photos` above.
+  const [galleryPhotos, setGalleryPhotos] = useState<GalleryPhoto[]>([]);
+  const [galleryOpen, setGalleryOpen] = useState(false);
+
   // Modal state.
   const [visitOpen, setVisitOpen] = useState(false);
   const [brandsOpen, setBrandsOpen] = useState(false);
@@ -383,13 +398,27 @@ export function StoreViewportApp({
     }
   }, [id]);
 
+  const loadGalleryPhotos = useCallback(async () => {
+    try {
+      const data = await api<{ photos: GalleryPhoto[] }>(
+        `/api/showroom-stores/${id}/photos-gallery`,
+      );
+      setGalleryPhotos(data.photos ?? []);
+    } catch (e) {
+      // Non-fatal: the hero simply falls back to heroImageCfImagesUrl and the
+      // stack is hidden. Surface for observability without blocking the page.
+      console.error("[store/photos-gallery]", e);
+    }
+  }, [id]);
+
   useEffect(() => {
     setLoading(true);
     void loadStore();
     void loadMappedProducts();
     void loadNotes();
     void loadPhotos();
-  }, [loadStore, loadMappedProducts, loadNotes, loadPhotos]);
+    void loadGalleryPhotos();
+  }, [loadStore, loadMappedProducts, loadNotes, loadPhotos, loadGalleryPhotos]);
 
   // ── Scrape status: mount fetch + poll while in-flight ─────────────────────
   //
@@ -668,9 +697,18 @@ export function StoreViewportApp({
             When there's no hero image the banner collapses and we fall back to
             the plain padded header below. */}
         <HeroBanner
-          src={store.heroImageCfImagesUrl}
+          src={galleryPhotos[0]?.cfImagesPhotoUrl ?? store.heroImageCfImagesUrl}
           iconSrc={store.iconCfImagesUrl}
           name={store.name}
+          overlay={
+            galleryPhotos.length > 0 ? (
+              <PhotoStack
+                images={galleryPhotos.slice(0, 3).map((p) => p.cfImagesPhotoUrl)}
+                count={`${galleryPhotos.length} photo${galleryPhotos.length === 1 ? "" : "s"}`}
+                onClick={() => setGalleryOpen(true)}
+              />
+            ) : null
+          }
         />
 
         <div className="p-5 pt-8 sm:p-6 sm:pt-9">
@@ -908,6 +946,11 @@ export function StoreViewportApp({
         showroomId={id}
         open={scrapeResultsOpen}
         onOpenChange={setScrapeResultsOpen}
+      />
+      <ShowroomGalleryModal
+        photos={galleryPhotos}
+        open={galleryOpen}
+        onOpenChange={setGalleryOpen}
       />
     </main>
   );
