@@ -151,42 +151,57 @@ export function ScopedInspirationReview({
     }
   }, [showControls, internalScope, internalFloorId, levelFloors]);
 
-  const loadGroups = useCallback(async () => {
-    // Level scope without a chosen floor cannot be queried yet — render empty.
-    if (scope === "level" && (floorId === null || !Number.isFinite(floorId))) {
-      setGroups([]);
+  const loadGroups = useCallback(
+    async (signal?: AbortSignal) => {
+      // Level scope without a chosen floor cannot be queried yet — render empty.
+      if (scope === "level" && (floorId === null || !Number.isFinite(floorId))) {
+        setGroups([]);
+        setError(null);
+        return;
+      }
+      setLoading(true);
       setError(null);
-      return;
-    }
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams({ scope, groupBy: "category" });
-      if (scope === "level" && floorId !== null) {
-        params.set("floorId", String(floorId));
+      try {
+        const params = new URLSearchParams({ scope, groupBy: "category" });
+        if (scope === "level" && floorId !== null) {
+          params.set("floorId", String(floorId));
+        }
+        const response = await fetch(
+          `/api/images/inspiration/scoped?${params.toString()}`,
+          { signal },
+        );
+        const payload = (await response.json()) as ScopedInspirationGroupedResponse;
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || "Failed to load scoped inspiration");
+        }
+        setGroups(payload.groups ?? []);
+      } catch (caught) {
+        // A superseded request was aborted — drop it silently, no state churn.
+        if (signal?.aborted || (caught as Error)?.name === "AbortError") {
+          return;
+        }
+        const message =
+          caught instanceof Error
+            ? caught.message
+            : "Failed to load scoped inspiration";
+        setError(message);
+        toast.error(message);
+      } finally {
+        // Only the live (non-aborted) request owns the loading flag.
+        if (!signal?.aborted) {
+          setLoading(false);
+        }
       }
-      const response = await fetch(
-        `/api/images/inspiration/scoped?${params.toString()}`,
-      );
-      const payload = (await response.json()) as ScopedInspirationGroupedResponse;
-      if (!response.ok || !payload.success) {
-        throw new Error(payload.error || "Failed to load scoped inspiration");
-      }
-      setGroups(payload.groups ?? []);
-    } catch (caught) {
-      const message =
-        caught instanceof Error
-          ? caught.message
-          : "Failed to load scoped inspiration";
-      setError(message);
-      toast.error(message);
-    } finally {
-      setLoading(false);
-    }
-  }, [scope, floorId]);
+    },
+    [scope, floorId],
+  );
 
   useEffect(() => {
-    void loadGroups();
+    const controller = new AbortController();
+    void loadGroups(controller.signal);
+    return () => {
+      controller.abort();
+    };
   }, [loadGroups, refreshToken]);
 
   const totalImages = useMemo(
