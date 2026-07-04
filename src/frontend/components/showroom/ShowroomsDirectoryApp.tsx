@@ -84,6 +84,11 @@ import { HoursEditor } from "./intake/HoursEditor";
 import { FlagsEditor } from "./intake/FlagsEditor";
 import { OverviewNoteEditor } from "./OverviewNoteEditor";
 import { DEFAULT_HOURS, type HoursJson } from "./intake/hours-types";
+import {
+  isOpenNow as isOpenNowStructured,
+  type HourRow,
+} from "./hours-status";
+import { ShowroomMergedCard } from "./ShowroomMergedCard";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Store {
@@ -113,6 +118,17 @@ interface Store {
   scale: string | null;
   instagramUrl: string | null;
   iconCfImagesUrl: string | null;
+  /** Scraped hero image (Cloudflare Images delivery URL); null → fall back to logo/initials. */
+  heroImageCfImagesUrl: string | null;
+  /** Normalized open-hours rows (one per open day). Empty → hours unknown/closed. */
+  hours: HourRow[];
+  /** Google Places aggregate rating + review count (distinct from onlineRating). */
+  googleRating: number | null;
+  userRatingCount: number | null;
+  /** Intake flags. */
+  isLargeSelection: boolean;
+  isBespoke: boolean;
+  isTradeRepRequired: boolean;
 }
 
 interface Category {
@@ -636,52 +652,11 @@ function ContactRow({ store, className }: { store: Store; className?: string }) 
 
 function ShowroomCard({ store, pst }: { store: Store; pst: PstNow }) {
   return (
-    <article className="group relative flex flex-col gap-4 rounded-xl bg-card p-4 ring-1 ring-border/40 transition-colors hover:bg-muted/40 sm:flex-row sm:items-stretch">
-      {/* Left: identity + focus */}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-start gap-3">
-          <LogoBadge store={store} />
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              {/* Stretched link makes the whole card clickable; inner links opt out via z-10. */}
-              <a
-                href={`/admin/showroom/store/${store.id}`}
-                className="line-clamp-1 text-sm font-medium after:absolute after:inset-0 after:content-['']"
-              >
-                {store.name}
-              </a>
-              {store.isFlagshipLocation && <FlagshipBadge />}
-            </div>
-            {store.cityName && (
-              <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                <MapPin className="size-3" />
-                {store.cityName}
-              </div>
-            )}
-            {store.categories.length > 0 && (
-              <div className="mt-1.5">
-                <CategoryTags categories={store.categories} max={5} />
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="mt-3">
-          <RatingRow store={store} />
-        </div>
-
-        {store.inventoryFocus && (
-          <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{store.inventoryFocus}</p>
-        )}
-
-        <ContactRow store={store} className="mt-3" />
-      </div>
-
-      {/* Right: hours (fixed-ish width on desktop, full-width stacked on mobile) */}
-      <div className="shrink-0 border-t border-border/40 pt-3 sm:w-64 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
-        <HoursFooter store={store} pst={pst} />
-      </div>
-    </article>
+    <ShowroomMergedCard
+      store={store}
+      pst={pst}
+      href={`/admin/showroom/store/${store.id}`}
+    />
   );
 }
 
@@ -748,6 +723,7 @@ interface Filters {
   appointmentOnly: boolean;
   flagship: boolean;
   openNow: boolean;
+  visited: "all" | "visited" | "unvisited";
 }
 
 const EMPTY_FILTERS: Filters = {
@@ -759,6 +735,7 @@ const EMPTY_FILTERS: Filters = {
   appointmentOnly: false,
   flagship: false,
   openNow: false,
+  visited: "all",
 };
 
 function FilterBar({
@@ -822,6 +799,32 @@ function FilterBar({
           <Clock className="size-3" />
           Open Now ({pst.label} PST)
         </Button>
+
+        <div className="mx-1 h-5 w-px bg-border/40" />
+
+        {/* Visited segmented toggle */}
+        <div className="inline-flex overflow-hidden rounded-md ring-1 ring-border/40">
+          {(
+            [
+              { id: "all", label: "All" },
+              { id: "visited", label: "Visited" },
+              { id: "unvisited", label: "Unvisited" },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => onChange({ ...filters, visited: opt.id })}
+              className={`px-2.5 py-1 text-[11px] font-medium transition ${
+                filters.visited === opt.id
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
 
         <div className="mx-1 h-5 w-px bg-border/40" />
 
@@ -1147,91 +1150,15 @@ function ListView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
 
 // ─── Directory View (condensed field sheet, grouped by hub city) ────────────────
 
-/** A short "open now / closes …" cue for the condensed directory card. */
-function hoursCue(store: Store, pst: PstNow): { text: string; className: string } {
-  if (store.isAppointmentOnly)
-    return { text: "By appt", className: "bg-violet-500/15 text-violet-300" };
-  if (isOpenNow(store, pst)) {
-    const isWeekday = pst.day >= 1 && pst.day <= 5;
-    const range = parseHoursRange(isWeekday ? store.weekdayHours : store.weekendHours);
-    if (range && pst.minutes >= range.close - 60)
-      return { text: `Closing ${fmt12(range.close)}`, className: "bg-amber-500/15 text-amber-300" };
-    return {
-      text: range ? `Open · ${fmt12(range.close)}` : "Open now",
-      className: "bg-emerald-500/15 text-emerald-300",
-    };
-  }
-  return { text: "Closed now", className: "bg-rose-500/15 text-rose-300" };
-}
-
-/** Dense contact card — favors phone-first density over imagery. */
+/** Dense contact card — the compact variant of the canonical merged card. */
 function DirectoryCard({ store, pst }: { store: Store; pst: PstNow }) {
-  const cue = hoursCue(store, pst);
-  const stop = (e: React.MouseEvent) => e.stopPropagation();
   return (
-    <article className="group relative flex items-center gap-3 rounded-lg bg-card px-3 py-2.5 ring-1 ring-border/40 transition-colors hover:bg-muted/40">
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <a
-            href={`/admin/showroom/store/${store.id}`}
-            className="line-clamp-1 text-sm font-medium after:absolute after:inset-0 after:content-['']"
-          >
-            {store.name}
-          </a>
-          {store.isFlagshipLocation && <FlagshipBadge />}
-          <span
-            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-medium ${cue.className}`}
-          >
-            <Clock className="size-2.5" />
-            {cue.text}
-          </span>
-        </div>
-
-        {/* Phone-first contact row */}
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
-          {store.phoneNumber && (
-            <a
-              href={telHref(store.phoneNumber)}
-              onClick={stop}
-              className="relative z-10 inline-flex items-center gap-1.5 font-medium text-sky-400 hover:text-sky-300"
-            >
-              <Phone className="size-3.5" />
-              {formatPhone(store.phoneNumber)}
-            </a>
-          )}
-          {store.websiteUrl && (
-            <a
-              href={store.websiteUrl}
-              target="_blank"
-              rel="noreferrer"
-              onClick={stop}
-              aria-label="Website"
-              className="relative z-10 inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-            >
-              <Globe className="size-3.5" />
-            </a>
-          )}
-          {store.instagramUrl && (
-            <a
-              href={store.instagramUrl}
-              target="_blank"
-              rel="noreferrer"
-              onClick={stop}
-              aria-label="Instagram"
-              className="relative z-10 inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-            >
-              <Instagram className="size-3.5" />
-            </a>
-          )}
-          {store.cityName && (
-            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/70">
-              <MapPin className="size-3" />
-              {store.cityName}
-            </span>
-          )}
-        </div>
-      </div>
-    </article>
+    <ShowroomMergedCard
+      store={store}
+      pst={pst}
+      href={`/admin/showroom/store/${store.id}`}
+      compact
+    />
   );
 }
 
@@ -2370,6 +2297,13 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
           isAppointmentOnly: s.isAppointmentOnly ?? false,
           isFlagshipLocation: s.isFlagshipLocation ?? false,
           isOpenWeekends: s.isOpenWeekends ?? false,
+          hours: s.hours ?? [],
+          heroImageCfImagesUrl: s.heroImageCfImagesUrl ?? null,
+          googleRating: s.googleRating ?? null,
+          userRatingCount: s.userRatingCount ?? null,
+          isLargeSelection: s.isLargeSelection ?? false,
+          isBespoke: s.isBespoke ?? false,
+          isTradeRepRequired: s.isTradeRepRequired ?? false,
         })),
       );
     } catch (e) {
@@ -2413,7 +2347,9 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
         return false;
       if (filters.appointmentOnly && !s.isAppointmentOnly) return false;
       if (filters.flagship && !s.isFlagshipLocation) return false;
-      if (filters.openNow && !isOpenNow(s, pst)) return false;
+      if (filters.openNow && !isOpenNowStructured(s.hours, pst)) return false;
+      if (filters.visited === "visited" && s.userRating == null) return false;
+      if (filters.visited === "unvisited" && s.userRating != null) return false;
       if (
         filters.categories.length > 0 &&
         !filters.categories.some((c) => s.categories.includes(c))
