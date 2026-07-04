@@ -89,6 +89,7 @@ import {
   type HourRow,
 } from "./hours-status";
 import { ShowroomMergedCard } from "./ShowroomMergedCard";
+import { ManageShowroomsModal } from "./ManageShowroomsModal";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Store {
@@ -655,7 +656,7 @@ function ShowroomCard({ store, pst }: { store: Store; pst: PstNow }) {
     <ShowroomMergedCard
       store={store}
       pst={pst}
-      href={`/admin/showroom/store/${store.id}`}
+      href={`/admin/shopping/store/${store.id}`}
     />
   );
 }
@@ -1156,7 +1157,7 @@ function DirectoryCard({ store, pst }: { store: Store; pst: PstNow }) {
     <ShowroomMergedCard
       store={store}
       pst={pst}
-      href={`/admin/showroom/store/${store.id}`}
+      href={`/admin/shopping/store/${store.id}`}
       compact
     />
   );
@@ -1887,7 +1888,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                       twice.
                     </p>
                     <a
-                      href={`/admin/showroom/store/${dupWarning.showroomId}`}
+                      href={`/admin/shopping/store/${dupWarning.showroomId}`}
                       className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-sky-400 hover:text-sky-300"
                     >
                       <StoreIcon className="size-3" />
@@ -2183,7 +2184,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                 ⚠ Already added: {dupWarning.name}
               </p>
               <a
-                href={`/admin/showroom/store/${dupWarning.showroomId}`}
+                href={`/admin/shopping/store/${dupWarning.showroomId}`}
                 className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-sky-400 hover:text-sky-300"
               >
                 <StoreIcon className="size-3" />
@@ -2254,12 +2255,12 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
   const [viewMode, setViewMode] = useState<ViewMode>(initialTab);
   const [pst, setPst] = useState<PstNow>(() => computePst());
 
-  // Tab ↔ URL sync. Clicking a tab pushes /admin/showroom/showrooms/<tab>;
+  // Tab ↔ URL sync. Clicking a tab pushes /admin/shopping/showrooms/<tab>;
   // browser back/forward (popstate) restores the tab from the path.
   const selectTab = useCallback((tab: ViewMode) => {
     setViewMode(tab);
     if (typeof window !== "undefined") {
-      const next = `/admin/showroom/showrooms/${tab}`;
+      const next = `/admin/shopping/showrooms/${tab}`;
       if (window.location.pathname !== next) {
         window.history.pushState(null, "", next);
       }
@@ -2371,6 +2372,7 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
         </div>
         <div className="flex items-center gap-2">
           <ViewToggle value={viewMode} onChange={selectTab} />
+          <ManageShowroomsModal onDone={fetchStores} />
           <AddShowroomModal cities={cities} onCreated={fetchStores} />
         </div>
       </div>

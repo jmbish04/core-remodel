@@ -10,7 +10,7 @@ const tab: Tab = VALID.includes(raw as Tab) ? (raw as Tab) : "map";
 
 // Normalize unknown segments to the map default so the URL always matches state.
 if (!VALID.includes(raw as Tab)) {
-  return Astro.redirect("/admin/showroom/showrooms/map");
+  return Astro.redirect("/admin/shopping/showrooms/map");
 }
 
 const TAB_LABEL: Record<Tab, string> = {

@@ -8,6 +8,10 @@ import { VisitorActivityTracker } from "@/components/VisitorActivityTracker";
 import { Toaster } from "sonner";
 
 const { title, description, ogImage } = Astro.props;
+
+// Normalize the request path so the sidebar can SSR the correct active item +
+// expanded section (no trailing slash; "/" stays "/").
+const currentPath = (Astro.url.pathname.replace(/\/+$/, "") || "/");
 ---
 
 <!doctype html>
@@ -34,7 +38,7 @@ const { title, description, ogImage } = Astro.props;
     )}
   >
     <div class="bg-background relative z-10 min-h-svh">
-      <AppSidebar client:only="react" />
+      <AppSidebar client:load currentPath={currentPath} />
       <div class="flex min-h-svh w-full min-w-0 md:pl-64">
         <div class="flex min-h-svh min-w-0 flex-1 flex-col">
           <div class="min-w-0 flex-1">

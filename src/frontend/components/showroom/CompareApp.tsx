@@ -191,7 +191,7 @@ export function CompareApp() {
                 {data.products.map((p) => (
                   <th key={p.id} className="min-w-[180px] p-3 text-left align-top">
                     <div className="flex items-start justify-between gap-2">
-                      <a href={`/admin/showroom/product/${p.id}`} className="font-medium hover:underline">{p.itemName}</a>
+                      <a href={`/admin/shopping/product/${p.id}`} className="font-medium hover:underline">{p.itemName}</a>
                       <button onClick={() => remove(p.id)} className="text-muted-foreground hover:text-destructive" aria-label="Remove"><X className="h-3.5 w-3.5" /></button>
                     </div>
                     <div className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">

@@ -293,7 +293,7 @@ export function ShowroomBrandProducts({
     return (
       <main className="container mx-auto max-w-5xl px-4 py-10">
         <a
-          href={`/admin/showroom/store/${showroomId}`}
+          href={`/admin/shopping/store/${showroomId}`}
           className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-3 w-3" /> Showroom
@@ -316,7 +316,7 @@ export function ShowroomBrandProducts({
     <main className="container mx-auto max-w-6xl px-4 py-10">
       {/* Back link */}
       <a
-        href={`/admin/showroom/store/${showroomId}`}
+        href={`/admin/shopping/store/${showroomId}`}
         className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-3 w-3" /> {showroomName}

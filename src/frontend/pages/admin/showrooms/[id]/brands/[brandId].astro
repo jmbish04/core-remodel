@@ -6,7 +6,7 @@ const { id, brandId } = Astro.params;
 const showroomId = id ? Number.parseInt(id, 10) : NaN;
 const brand = brandId ? Number.parseInt(brandId, 10) : NaN;
 if (!Number.isFinite(showroomId) || !Number.isFinite(brand)) {
-  return Astro.redirect("/admin/showroom/showrooms");
+  return Astro.redirect("/admin/shopping/showrooms");
 }
 ---
 

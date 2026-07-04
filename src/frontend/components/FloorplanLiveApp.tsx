@@ -9,7 +9,7 @@
  *   - inbound `WALL_TOUCH` → an amber flash on that segment ("Claude is pointing here").
  *
  * Manual entry (a backup, or for a second person entering while you measure) lives on
- * the existing `/measurements` page, linked from the header.
+ * the existing `/admin/measurements` page, linked from the header.
  *
  * The traced SVGs use black strokes (for print); we recolor them for the dark theme and
  * make each `*_wall_segment_*` line tappable. The SVG is fetched + injected, and the
@@ -187,7 +187,7 @@ export function FloorplanLiveApp() {
         </div>
         <div className="flex items-center gap-2">
           <StatusPill status={socket.status} />
-          <a href="/measurements" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+          <a href="/admin/measurements" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
             <Ruler className="mr-2 size-4" />
             Manual entry
           </a>

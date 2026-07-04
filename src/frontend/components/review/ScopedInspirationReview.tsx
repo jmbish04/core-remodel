@@ -78,7 +78,7 @@ function isLevelFloor(floor: ScopedInspirationFloor): boolean {
  * alphabetically, the null/"uncategorized" bucket last); we render one labeled
  * section per group with a responsive thumbnail grid.
  *
- * Mounted on `/review` today, but intentionally self-sufficient (it can fetch
+ * Mounted on `/admin/review` today, but intentionally self-sufficient (it can fetch
  * its own floor list) so it can be reused on a room page, a dashboard widget,
  * etc. without wiring.
  */

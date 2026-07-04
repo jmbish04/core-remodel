@@ -1071,7 +1071,7 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
 
   const navigateToAiEdit = useCallback((image: ViewImageRecord) => {
     const params = new URLSearchParams({ sourceImageId: image.id });
-    window.location.assign(`/photo-edits?${params.toString()}`);
+    window.location.assign(`/admin/photo-edits?${params.toString()}`);
   }, []);
 
   const markImageAsDuplicate = useCallback(
@@ -1936,7 +1936,7 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
                             className="h-7 w-full text-[11px] font-medium border-amber-500/20 text-amber-300 bg-amber-500/5 hover:bg-amber-500/10"
                             onClick={() => {
                               const params = new URLSearchParams({ sourceImageId: selectedImage.id });
-                              window.location.assign(`/photo-edits?${params.toString()}`);
+                              window.location.assign(`/admin/photo-edits?${params.toString()}`);
                             }}
                           >
                             <Sparkles className="mr-1.5 size-3.5" />

@@ -7,7 +7,7 @@
  *      Instagram links, 1–5 visit stars + rating-context note) plus an action
  *      bar (record visit, add note, upload photo, associate brands/products).
  *   2. URL-routed bento — three sections (Brands & Products, Notes, Photos).
- *      Selecting a tile pushes `/admin/showroom/store/:id/:section` and a
+ *      Selecting a tile pushes `/admin/shopping/store/:id/:section` and a
  *      popstate listener syncs the active section back on browser navigation.
  */
 
@@ -502,7 +502,7 @@ export function StoreViewportApp({
   // ── Section ↔ URL sync ──────────────────────────────────────────────────────
   //
   // Selecting a tile updates the active section AND pushes the canonical path
-  // `/admin/showroom/store/:id/:section`; browser back/forward restores the
+  // `/admin/shopping/store/:id/:section`; browser back/forward restores the
   // section from the last path segment via `popstate`.
 
   const selectSection = useCallback(
@@ -510,7 +510,7 @@ export function StoreViewportApp({
       if (!isSectionKey(key)) return;
       setSection(key);
       if (typeof window !== "undefined") {
-        const next = `/admin/showroom/store/${id}/${key}`;
+        const next = `/admin/shopping/store/${id}/${key}`;
         if (window.location.pathname !== next) {
           window.history.pushState(null, "", next);
         }
@@ -683,7 +683,7 @@ export function StoreViewportApp({
   return (
     <main className="container mx-auto max-w-5xl px-4 py-10">
       <a
-        href="/admin/showroom/showrooms"
+        href="/admin/shopping/showrooms"
         className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-3 w-3" /> Showrooms
@@ -1063,7 +1063,7 @@ function BrandsProductsSection({
                 className="flex items-center justify-between gap-3 py-2.5"
               >
                 <a
-                  href={`/admin/showroom/product/${m.product.id}`}
+                  href={`/admin/shopping/product/${m.product.id}`}
                   className="flex min-w-0 items-center gap-2 text-sm hover:underline"
                 >
                   <Package className="size-4 shrink-0 text-muted-foreground" />

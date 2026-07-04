@@ -113,7 +113,7 @@ export function ProductsCatalogApp() {
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {products.map((p) => (
-            <a key={p.id} href={`/admin/showroom/product/${p.id}`} className="block">
+            <a key={p.id} href={`/admin/shopping/product/${p.id}`} className="block">
               <Card className="h-full transition-colors hover:bg-muted/40">
                 <CardContent className="space-y-2 p-4">
                   <div className="flex items-start justify-between gap-2">

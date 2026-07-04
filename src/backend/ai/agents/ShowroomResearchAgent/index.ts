@@ -27,8 +27,14 @@ import {
   deepSweepStore as runDeepSweepStore,
   draftSweepPlan,
   runApprovedSweep,
+  fillBlanksFromPlacesAI,
+  runBackfillPhotoPipeline,
+  triggerBackfillScrape,
+  hasExistingFindings,
   type DiscoverSweepPlanInput,
+  type BackfillEnrichPayload,
 } from "./methods";
+import { faviconService } from "@backend/services/favicon";
 import type {
   DeepSweepCategoryInput,
   DeepSweepProductInput,
@@ -304,6 +310,105 @@ export class ShowroomResearchAgent extends AIChatAgent<
       triggerSource: "product-created",
     });
     return { success: result.success, findingsCount: result.findingsWritten };
+  }
+
+  // -------------------------------------------------------------------------
+  // Bulk backfill (Manage flow): durable per-showroom enrichment queue
+  // -------------------------------------------------------------------------
+
+  /**
+   * Enqueue one durable backfill task per showroom onto the Agent's built-in
+   * FIFO queue. Each task is processed by {@link backfillEnrichShowroom} with
+   * automatic retry. Processing serializes through this single agent instance,
+   * which naturally throttles the downstream Gemini / Workers-AI / scrape load
+   * (the wave-of-N throttle the batch image pipeline needs).
+   *
+   * @param items  One entry per showroom to enrich (id + confirmed place + photos).
+   * @returns The queued task IDs.
+   */
+  @callable()
+  async enqueueBackfill(
+    items: BackfillEnrichPayload[],
+  ): Promise<{ queued: number; taskIds: string[] }> {
+    const taskIds: string[] = [];
+    for (const item of items ?? []) {
+      if (!item || typeof item.showroomId !== "number") continue;
+      const id = await this.queue("backfillEnrichShowroom", item);
+      taskIds.push(id);
+    }
+    return { queued: taskIds.length, taskIds };
+  }
+
+  /**
+   * Queue callback: run the "remaining intake steps" for a single showroom,
+   * fill-blanks only. Mirrors the background work `POST /api/showroom-stores`
+   * fires on create, plus the Gemini review analysis that bulk-imported rows
+   * never received. Order:
+   *   1. Gemini review insight → AI columns + brands (if placeId + still blank).
+   *   2. Deep-sweep research → findings + images (only when none exist yet).
+   *   3. Favicon hydration (if website + no icon).
+   *   4. Website scrape workflow (if website + not yet scraped).
+   *   5. Places photo pipeline → CF Images + hero (if photos + none stored).
+   *
+   * Each step is independently guarded so a single failure never aborts the
+   * others; a thrown error propagates to the queue for retry with backoff.
+   *
+   * NOT `@callable` — invoked only by the Agent queue via its method name.
+   */
+  async backfillEnrichShowroom(payload: BackfillEnrichPayload): Promise<void> {
+    const { showroomId } = payload;
+    this.reportProgress(`Backfilling showroom ${showroomId}`);
+
+    const db = drizzle(this.env.DB);
+    const [store] = await db
+      .select()
+      .from(showroomStores)
+      .where(eq(showroomStores.id, showroomId))
+      .limit(1);
+    if (!store) {
+      this.markComplete();
+      return;
+    }
+
+    const placeId = payload.placeId ?? store.placeId ?? null;
+
+    // 1. Gemini review insight (fill-blanks) + brand mapping.
+    if (placeId) {
+      try {
+        await fillBlanksFromPlacesAI(this.env, showroomId, placeId);
+      } catch (err) {
+        console.error(`[backfill] Gemini insight failed for store ${showroomId}:`, err);
+      }
+    }
+
+    // 2. Deep-sweep research — only when the store has no findings yet.
+    try {
+      if (!(await hasExistingFindings(this.env, showroomId))) {
+        await this.researchStore(showroomId);
+      }
+    } catch (err) {
+      console.error(`[backfill] research failed for store ${showroomId}:`, err);
+    }
+
+    // 3 + 4. Favicon + website scrape (fill-blanks guarded inside helpers).
+    const websiteUrl = store.websiteUrl ?? "";
+    if (websiteUrl) {
+      if (!store.iconCfImagesUrl) {
+        try {
+          await faviconService.hydrateShowroomIcon(this.env, showroomId, websiteUrl);
+        } catch (err) {
+          console.error(`[backfill] favicon failed for store ${showroomId}:`, err);
+        }
+      }
+      await triggerBackfillScrape(this.env, showroomId, websiteUrl);
+    }
+
+    // 5. Places photo pipeline → CF Images + hero.
+    if (payload.photos?.length) {
+      await runBackfillPhotoPipeline(this.env, showroomId, payload.photos);
+    }
+
+    this.markComplete();
   }
 
   /**

@@ -16,21 +16,137 @@ type SidebarItem = {
   badgeCount?: number;
 };
 
-const WORKSPACE_ITEMS: SidebarItem[] = [
-  { href: "/supporting-docs", label: "Project Records" },
-];
+/**
+ * A collapsible sidebar section. `admin` sections only render for authenticated
+ * users; every `admin` section's URLs live under `/admin/*` (the invariant that
+ * pairs the sidebar grouping with the route foldering). Non-admin sections hold
+ * user-facing root pages.
+ */
+type NavGroupDef = {
+  id: string;
+  label: string;
+  admin: boolean;
+  items: SidebarItem[];
+};
 
-const GALLERY_ITEMS: SidebarItem[] = [
-  { href: "/floor-plan", label: "Floor Plan" },
-  { href: "/kitchen-layout", label: "Kitchen Layout" },
-  { href: "/listing-photos", label: "Listing Photos" },
-  { href: "/inspiration-photos", label: "Inspiration Photos" },
+/**
+ * The information architecture for the sidebar. Ordered top-to-bottom. Each entry
+ * renders as a collapsible section; only the section containing the active route
+ * is expanded by default (see `SidebarLinks`), keeping the list short on mobile.
+ * The full shopping toolset lives on the `/admin/shopping` hub landing — the
+ * sidebar surfaces only the high-traffic few.
+ */
+const NAV_GROUPS: NavGroupDef[] = [
+  {
+    id: "plan",
+    label: "Plan",
+    admin: true,
+    items: [
+      { href: "/admin/measure", label: "Live Floor Plan" },
+      { href: "/admin/measurements", label: "Measurements" },
+      { href: "/admin/planning/moodboards", label: "Mood Boards" },
+      { href: "/admin/planning/decision-room", label: "Decision Room" },
+    ],
+  },
+  {
+    id: "budget",
+    label: "Budget",
+    admin: true,
+    items: [
+      { href: "/admin/budget-tracker", label: "Budget Tracker" },
+      { href: "/admin/budget-dashboard", label: "Budget Triage Matrix" },
+      { href: "/admin/truth-table", label: "Labor & Materials Costs" },
+    ],
+  },
+  {
+    id: "contractors",
+    label: "Contractors",
+    admin: true,
+    items: [
+      { href: "/admin/companies", label: "Companies" },
+      { href: "/admin/estimates", label: "Estimates" },
+      { href: "/admin/contracts", label: "Contracts" },
+      { href: "/admin/bid-portfolios", label: "Bid Portfolios" },
+      { href: "/admin/contractor-schedule", label: "Schedule" },
+      { href: "/admin/permits", label: "Permits" },
+      { href: "/admin/dialer", label: "Prospect Dialer" },
+    ],
+  },
+  {
+    id: "shopping",
+    label: "Shopping & Sourcing",
+    admin: true,
+    items: [
+      { href: "/admin/shopping", label: "Sourcing & Shopping tools" },
+      { href: "/admin/shopping/showrooms", label: "Showrooms" },
+      { href: "/admin/shopping/schedule", label: "Materials Schedule" },
+      { href: "/admin/shopping/products", label: "Products" },
+      { href: "/admin/shopping/journal", label: "Shopping Journal" },
+      { href: "/admin/shopping/research", label: "Deep Research" },
+    ],
+  },
+  {
+    id: "photos",
+    label: "Photos & Renders",
+    admin: true,
+    items: [
+      { href: "/admin/uploads", label: "Uploads" },
+      { href: "/admin/review", label: "Review" },
+      { href: "/admin/photo-edits", label: "Photo Edits" },
+      { href: "/admin/blank-canvas", label: "Blank Canvas" },
+      { href: "/admin/builder", label: "Renovation Studio" },
+      { href: "/admin/gallery", label: "Render Gallery" },
+    ],
+  },
+  {
+    id: "documents",
+    label: "Documents & Research",
+    admin: true,
+    items: [
+      { href: "/admin/supporting-docs", label: "Supporting Docs" },
+      { href: "/admin/research", label: "Research Library" },
+    ],
+  },
+  {
+    id: "system",
+    label: "System",
+    admin: true,
+    items: [
+      { href: "/admin", label: "Analytics" },
+      { href: "/admin/integrations/usage", label: "Integrations Usage" },
+      { href: "/admin/config", label: "Config" },
+    ],
+  },
+  {
+    id: "home-tour",
+    label: "Home Tour",
+    admin: false,
+    items: [
+      { href: "/floor-plan", label: "Floor Plan" },
+      { href: "/kitchen-layout", label: "Kitchen Layout" },
+      { href: "/listing-photos", label: "Listing Photos" },
+      { href: "/inspiration-photos", label: "Inspiration Photos" },
+    ],
+  },
+  {
+    id: "records",
+    label: "Records",
+    admin: false,
+    items: [
+      { href: "/supporting-docs", label: "Project Records" },
+    ],
+  },
 ];
 
 function isPathActive(currentPath: string, href: string): boolean {
   if (href === "/") return currentPath === "/";
   if (href === "/admin") return currentPath === "/admin";
   return currentPath === href || currentPath.startsWith(`${href}/`);
+}
+
+/** True when any item in the group matches the active route. */
+function isGroupActive(currentPath: string, group: NavGroupDef): boolean {
+  return group.items.some((item) => isPathActive(currentPath, item.href));
 }
 
 interface NavLinkProps {
@@ -91,6 +207,16 @@ function SidebarLinks({
       ]),
     ),
   );
+
+  // Collapsible nav sections: only the section containing the active route is
+  // open initially (computed from the SSR-provided currentPath, so the correct
+  // section is already expanded in the first paint). Users can toggle; state
+  // resets per page load, which is the desired "active section open" behavior.
+  const [openNavGroups, setOpenNavGroups] = useState<Record<string, boolean>>(() =>
+    Object.fromEntries(NAV_GROUPS.map((group) => [group.id, isGroupActive(currentPath, group)])),
+  );
+  const toggleNavGroup = (id: string) =>
+    setOpenNavGroups((current) => ({ ...current, [id]: !current[id] }));
 
   useEffect(() => {
     if (!docsActive) return;
@@ -215,37 +341,64 @@ function SidebarLinks({
     </div>
   );
 
-  const renderSection = (label: string, items: SidebarItem[]) => (
-    <div className="space-y-1">
-      <p className="px-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-        {label}
-      </p>
-      {items.map((item) => (
-        <NavLink
-          key={item.href}
-          href={item.href}
-          label={item.label}
-          badgeCount={item.badgeCount}
-          active={isPathActive(currentPath, item.href)}
-          onNavigate={onNavigate}
-        />
-      ))}
-    </div>
-  );
+  const renderGroup = (group: NavGroupDef) => {
+    const groupActive = isGroupActive(currentPath, group);
+    const open = openNavGroups[group.id] ?? groupActive;
 
-  const workspaceItems = [
-    { href: "/supporting-docs", label: "Project Records" },
-  ];
-  if (sharedBoardsCount >= 1) {
-    workspaceItems.push({ href: "/moodboards", label: "Mood Boards" });
-  }
+    // Per-group runtime item tweaks: the Uploads badge, and the conditional
+    // shared Mood Boards link under Records.
+    let items = group.items;
+    if (group.id === "photos") {
+      items = items.map((item) =>
+        item.href === "/admin/uploads" ? { ...item, badgeCount: uploadsPendingCount } : item,
+      );
+    } else if (group.id === "records" && sharedBoardsCount >= 1) {
+      items = [...items, { href: "/moodboards", label: "Mood Boards" }];
+    }
+    const collapsedBadge = items.reduce((sum, item) => sum + (item.badgeCount ?? 0), 0);
+
+    return (
+      <div key={group.id} className="space-y-1">
+        <button
+          type="button"
+          onClick={() => toggleNavGroup(group.id)}
+          aria-expanded={open}
+          className={cn(
+            "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[10px] font-semibold uppercase tracking-[0.24em] transition hover:bg-muted/40 hover:text-foreground",
+            groupActive ? "text-foreground" : "text-muted-foreground",
+          )}
+        >
+          <span className="inline-flex items-center gap-2">
+            {group.label}
+            {!open && collapsedBadge > 0 ? (
+              <Badge variant="destructive" className="h-4 min-w-4 justify-center px-1 text-[9px]">
+                {collapsedBadge > 99 ? "99+" : collapsedBadge}
+              </Badge>
+            ) : null}
+          </span>
+          <ChevronDown className={cn("size-3.5 transition-transform", open ? "rotate-180" : "")} />
+        </button>
+        {open ? (
+          <div className="space-y-1">
+            {items.map((item) => (
+              <NavLink
+                key={item.href}
+                href={item.href}
+                label={item.label}
+                badgeCount={item.badgeCount}
+                active={isPathActive(currentPath, item.href)}
+                onNavigate={onNavigate}
+              />
+            ))}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
 
   return (
-    <nav className="space-y-4" aria-label="Main navigation">
+    <nav className="space-y-3" aria-label="Main navigation">
       <div className="space-y-1">
-        <p className="px-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-          Home
-        </p>
         <NavLink
           href="/"
           label="Mission Control"
@@ -254,63 +407,20 @@ function SidebarLinks({
         />
       </div>
 
-      {renderSection("Workspace", workspaceItems)}
-      {renderSection("Gallery", GALLERY_ITEMS)}
-
       {accessAuthenticated ? (
-        <>
-          {renderSection("Admin - Planning", [
-            { href: "/measure", label: "Live Floor Plan" },
-            { href: "/measurements", label: "Measurements" },
-            { href: "/admin/planning/decision-room", label: "Decision Room" },
-            { href: "/admin/planning/moodboards", label: "Mood Boards" },
-          ])}
-          {renderSection("Admin - Budget", [
-            { href: "/budget-tracker", label: "Budget Tracker" },
-            { href: "/budget-dashboard", label: "Budget Triage Matrix" },
-            { href: "/admin/forecasting", label: "Budget Forecasting" },
-            { href: "/admin/truth-table", label: "Labor & Materials Costs" },
-          ])}
-          {renderSection("Admin - Contractors", [
-            { href: "/admin/permits", label: "House Permits" },
-            { href: "/admin/permits/contacts", label: "Contractor Permits" },
-            { href: "/admin/contracts", label: "Contracts" },
-            { href: "/admin/estimates", label: "Estimates" },
-            { href: "/bid-portfolios", label: "Bid Portfolios" },
-            { href: "/admin/contractor-schedule", label: "Contractor Schedule" },
-            { href: "/admin/dialer", label: "Prospect Dialer" },
-          ])}
-          {renderSection("Admin - Photos & Docs", [
-            { href: "/uploads", label: "Uploads", badgeCount: uploadsPendingCount },
-            { href: "/review", label: "Review" },
-            { href: "/photo-edits", label: "Photo Edits" },
-            { href: "/admin/blank-canvas", label: "Blank Canvas" },
-            { href: "/builder", label: "Renovation Studio" },
-            { href: "/gallery", label: "Render Gallery" },
-            { href: "/admin/supporting-docs", label: "Supporting Docs" },
-          ])}
-          {renderSection("Admin - Tools", [
-            { href: "/admin", label: "Analytics" },
-            { href: "/admin/research", label: "Research Center" },
-          ])}
-          {renderSection("Admin - Shopping", [
-            { href: "/admin/showroom", label: "Showroom Dashboard" },
-            { href: "/admin/showroom/schedule", label: "Materials Schedule" },
-            { href: "/admin/showroom/showrooms", label: "Showrooms" },
-            { href: "/admin/brands", label: "Brands" },
-            { href: "/admin/products", label: "Global Products" },
-            { href: "/admin/showroom/products", label: "Products" },
-            { href: "/admin/showroom/research", label: "Deep Research" },
-            { href: "/admin/showroom/compare", label: "Compare" },
-            { href: "/admin/showroom/scan", label: "Field Scan" },
-            { href: "/admin/shopping-journal", label: "Shopping Journal" },
-            { href: "/rooms/closets", label: "Closet Research" },
-            { href: "/admin/showroom/progress", label: "Build Progress" },
-          ])}
-        </>
+        NAV_GROUPS.filter((group) => group.admin).map((group) => renderGroup(group))
       ) : (
-        renderSection("Admin", [{ href: "/admin", label: "Admin" }])
+        <div className="space-y-1">
+          <NavLink
+            href="/admin"
+            label="Admin"
+            active={currentPath === "/admin"}
+            onNavigate={onNavigate}
+          />
+        </div>
       )}
+
+      {NAV_GROUPS.filter((group) => !group.admin).map((group) => renderGroup(group))}
 
       {renderDocsTree()}
     </nav>
@@ -383,16 +493,21 @@ function SidebarContent({
   );
 }
 
-export function AppSidebar() {
+export function AppSidebar({ currentPath: currentPathProp }: { currentPath?: string } = {}) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [uploadsPendingCount, setUploadsPendingCount] = useState(0);
   const [currentHash, setCurrentHash] = useState("");
   const [accessAuthenticated, setAccessAuthenticated] = useState(false);
   const [sharedBoardsCount, setSharedBoardsCount] = useState(0);
+  // The active path is supplied by the server (Astro passes `Astro.url.pathname`)
+  // so the correct nav item and expanded section are already in the SSR HTML —
+  // no client round-trip, no post-hydration highlight flip. Falls back to
+  // `window.location` only if the prop is omitted (e.g. a stray client-only mount).
   const currentPath = useMemo(() => {
-    const path = typeof window === "undefined" ? "/" : window.location.pathname;
-    return path.replace(/\/+$/, "") || "/";
-  }, []);
+    const raw =
+      currentPathProp ?? (typeof window === "undefined" ? "/" : window.location.pathname);
+    return raw.replace(/\/+$/, "") || "/";
+  }, [currentPathProp]);
 
   useEffect(() => {
     const syncHash = () => {

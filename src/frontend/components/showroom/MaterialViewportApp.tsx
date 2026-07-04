@@ -80,7 +80,7 @@ export function MaterialViewportApp({ id }: { id: number }) {
 
   return (
     <main className="container mx-auto max-w-3xl px-4 py-10">
-      <a href="/admin/showroom/schedule" className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-widest text-muted-foreground hover:text-foreground">
+      <a href="/admin/shopping/schedule" className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-widest text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-3 w-3" /> Materials Schedule
       </a>
 
@@ -123,7 +123,7 @@ export function MaterialViewportApp({ id }: { id: number }) {
             <ul className="space-y-2">
               {matches.map((m) => (
                 <li key={m.product.id}>
-                  <a href={`/admin/showroom/product/${m.product.id}`} className="flex items-center justify-between rounded-md bg-muted/40 p-3 transition-colors hover:bg-muted/70">
+                  <a href={`/admin/shopping/product/${m.product.id}`} className="flex items-center justify-between rounded-md bg-muted/40 p-3 transition-colors hover:bg-muted/70">
                     <span className="flex items-center gap-1.5 text-sm font-medium">
                       <Package className="h-4 w-4 text-muted-foreground" /> {m.product.itemName}
                     </span>
@@ -140,7 +140,7 @@ export function MaterialViewportApp({ id }: { id: number }) {
         <Card className="mt-4">
           <CardHeader className="pb-3"><CardTitle className="text-base">Purchased as</CardTitle></CardHeader>
           <CardContent>
-            <a href={`/admin/showroom/product/${purchased.id}`} className="text-sm font-medium text-sky-400 hover:underline">
+            <a href={`/admin/shopping/product/${purchased.id}`} className="text-sm font-medium text-sky-400 hover:underline">
               {purchased.itemName}
             </a>
           </CardContent>

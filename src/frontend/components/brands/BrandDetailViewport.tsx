@@ -5,7 +5,7 @@
  * mount and answers "which showrooms carry this brand" up top, then surfaces:
  *   - a hero (favicon + name, website/Instagram out-links, online + user
  *     rating stars, an Edit dialog → PUT /api/brands/:id),
- *   - a prominent showrooms panel (each linking to /admin/showroom/store/:id),
+ *   - a prominent showrooms panel (each linking to /admin/shopping/store/:id),
  *   - a personal-notes Textarea with a "Save Notes" button → PUT { personalNotes },
  *   - a products grid (image w/ onError fallback, name, productType badge).
  *
@@ -573,7 +573,7 @@ export function BrandDetailViewport({ brandId }: { brandId: number }) {
               {showrooms.map((sr) => (
                 <a
                   key={sr.id}
-                  href={`/admin/showroom/store/${sr.id}`}
+                  href={`/admin/shopping/store/${sr.id}`}
                   className="group flex items-start gap-3 rounded-lg bg-card p-3 ring-1 ring-border/40 transition-colors hover:bg-muted/30"
                 >
                   <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">

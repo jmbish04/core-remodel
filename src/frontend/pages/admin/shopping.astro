@@ -1,0 +1,46 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+
+// Hub-and-spoke landing: this page is the home for ALL sourcing & shopping tools.
+// The sidebar surfaces only the high-traffic few; every tool is reachable here.
+const links = [
+  { href: "/admin/shopping/showrooms", title: "Showrooms", desc: "Bay Area hub directory: map, list, and field directory." },
+  { href: "/admin/shopping/schedule", title: "Materials Schedule", desc: "The master list of materials to source." },
+  { href: "/admin/shopping/products", title: "Products", desc: "Cross-store product catalog." },
+  { href: "/admin/products", title: "All Products (Global)", desc: "Every product across all brands & showrooms." },
+  { href: "/admin/shopping/journal", title: "Shopping Journal", desc: "Log showroom trips, pricing, and contractor interviews." },
+  { href: "/admin/shopping/research", title: "Deep Research", desc: "Plan-gated sourcing research." },
+  { href: "/admin/shopping/compare", title: "Compare", desc: "Side-by-side product decisions." },
+  { href: "/admin/shopping/gaps", title: "Coverage Gaps", desc: "Product areas with no showroom coverage yet." },
+  { href: "/admin/shopping/scan", title: "Field Scan", desc: "Capture products at showrooms." },
+  { href: "/admin/shopping/intake", title: "Add Showroom", desc: "Google-powered intake: search, auto-fill, review, save." },
+  { href: "/admin/brands", title: "Brands", desc: "Brand directory with auto-scraped icons + type badges." },
+  { href: "/admin/brands/types", title: "Brand Types", desc: "Manage brand type definitions (plumbing, lighting, ...)." },
+  { href: "/admin/shopping/closets", title: "Closet Research", desc: "Closet systems & storage sourcing." },
+  { href: "/admin/shopping/progress", title: "Build Progress", desc: "Phased build-out tracker." },
+];
+---
+
+<BaseLayout
+  title="Sourcing and Shopping tools — The Monolith"
+  description="Launchpad for the sourcing & shopping suite: showrooms, materials, products, journal, research, compare, and field scan."
+>
+  <main class="container mx-auto max-w-4xl px-4 py-10">
+    <h1 class="text-2xl font-semibold tracking-tight">Sourcing and Shopping tools</h1>
+    <p class="mt-1 text-sm text-muted-foreground">Materials-driven sourcing across Bay Area showrooms.</p>
+
+    <div class="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+      {
+        links.map((l) => (
+          <a
+            href={l.href}
+            class="rounded-lg bg-card p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] transition-colors hover:bg-muted/40"
+          >
+            <div class="font-medium">{l.title}</div>
+            <div class="mt-0.5 text-sm text-muted-foreground">{l.desc}</div>
+          </a>
+        ))
+      }
+    </div>
+  </main>
+</BaseLayout>

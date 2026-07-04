@@ -35,7 +35,7 @@ export function PhaseScaffold({
   source,
   purpose,
   steps,
-  backHref = "/admin/showroom",
+  backHref = "/admin/shopping",
   backLabel = "Showroom Dashboard",
 }: PhaseScaffoldProps) {
   return (
