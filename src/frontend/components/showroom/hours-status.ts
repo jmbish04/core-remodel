@@ -86,7 +86,11 @@ export function isOpenWeekends(hours: HourRow[]): boolean {
   );
 }
 
-/** True when the store is open at the given PST moment. */
+/**
+ * True when the store is open at the given PST moment. Daytime-business hours:
+ * `close` is assumed later than `open` on the same day (no midnight wrapping —
+ * see the showroom_hours schema note), so a simple in-window check is correct.
+ */
 export function isOpenNow(hours: HourRow[], now: PstNow): boolean {
   const row = rowForDay(hours, now.day);
   if (!row) return false;

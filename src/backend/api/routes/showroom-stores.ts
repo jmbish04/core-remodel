@@ -1949,6 +1949,20 @@ showroomStoresRouter.put("/:id", async (c) => {
 
   if (!updated) return c.json({ error: "Store not found" }, 404);
 
+  // Keep the normalized showroom_hours rows in lock-step with an edited
+  // hoursJson (the cards + filters read the rows, not hoursJson). Replace-all:
+  // drop this store's rows and re-insert one per open day. Only runs when the
+  // caller actually sent hoursJson, so other PUTs leave hours untouched.
+  if (data.hoursJson != null) {
+    await db.delete(showroomHours).where(eq(showroomHours.showroomId, storeId));
+    const hourRows = hoursJsonToRows(storeId, data.hoursJson);
+    if (hourRows.length > 0) {
+      await db.insert(showroomHours).values(
+        hourRows as [(typeof hourRows)[number], ...(typeof hourRows)[number][]],
+      );
+    }
+  }
+
   // Trigger favicon refresh when websiteUrl changed or icon is missing.
   const incomingUrl = data.websiteUrl ?? null;
   const shouldRefreshIcon =

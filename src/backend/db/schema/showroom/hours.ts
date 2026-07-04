@@ -18,8 +18,10 @@ import { showroomStores } from "./stores";
  *
  * Times are stored as 24-HOUR integers (`openHour` 0–23, `openMinute` 0–59,
  * etc.) so all status/filter math is trivial; the frontend formats to 12-hour
- * "8:00 AM" on display. A store open past midnight can have `closeHour` <
- * `openHour` (consumers treat that as wrapping to the next day if needed).
+ * "8:00 AM" on display. These are daytime-business hours: `close` is assumed
+ * to be LATER than `open` on the same day — overnight windows that wrap past
+ * midnight are not modeled (no showroom in scope operates past midnight), and
+ * the status helpers intentionally do not handle wrapping.
  */
 export const showroomHours = sqliteTable(
   "showroom_hours",
