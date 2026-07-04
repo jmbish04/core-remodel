@@ -1535,6 +1535,11 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
   };
   const [form, setForm] = useState({ ...emptyForm });
   const [loadingPlace, setLoadingPlace] = useState(false);
+  // Two-phase intake: after a Place is picked we prefill the Google fields
+  // (phase 1) and then run Gemini (phase 2). While "running", the modal cannot
+  // be closed or submitted — the user must let the AI analysis finish (or fail).
+  // "idle" = no place selected yet / manual entry (no gating).
+  const [geminiPhase, setGeminiPhase] = useState<"idle" | "running" | "done" | "failed">("idle");
   // Set when the selected Google Place is already in the directory (from the
   // pre-check on select, or defensively from a 409 on submit). Drives the
   // prominent "already added" banner AND blocks the Create button.
@@ -1609,8 +1614,15 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
   const handleSelectPlace = useCallback(
     async (placeId: string) => {
       setLoadingPlace(true);
+      setGeminiPhase("idle");
+
+      // ── PHASE 1 — Google Places fields only (fast) → prefill immediately ──
+      // We request `skipAi=1` so the Places fields land right away; the Gemini
+      // pass happens in phase 2 below for visible progress.
+      let place: GooglePlaceDetails | null = null;
+      let mapped: ReturnType<typeof mapPlaceToIntake> | null = null;
       try {
-        const url = `/api/places/details/${encodeURIComponent(placeId)}?sessionToken=${sessionTokenRef.current}`;
+        const url = `/api/places/details/${encodeURIComponent(placeId)}?sessionToken=${sessionTokenRef.current}&skipAi=1`;
         const res = await fetch(url, { credentials: "include" });
         if (res.status === 429) {
           toast.error("Google Maps monthly quota reached. Try again later.");
@@ -1620,82 +1632,22 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
           const payload = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(payload.error ?? `Details failed (${res.status})`);
         }
-        const place = (await res.json()) as GooglePlaceDetails;
-
-        const mapped = mapPlaceToIntake(place);
+        place = (await res.json()) as GooglePlaceDetails;
+        mapped = mapPlaceToIntake(place);
         const cityId = resolveBayAreaCityId(mapped.locationAddress);
 
         // Per-field diagnostics + raw photos forwarded from the mapper.
         setDiagnostics(mapped._diagnostics ?? {});
         setPlacePhotos(mapped._photos ?? []);
 
-        // AI insight from the backend Places proxy. Store the full object for
-        // the create body; the backend persists it + auto-creates the brands.
-        const ai = place.aiInference ?? null;
-        setReviewAiInsight(ai);
-        setReviewAuthenticity(ai?.reviewAuthenticity ?? null);
-        setDetectedBrands(ai?.brands ?? null);
-
-        // Price: PREFER Gemini's informed read. Gemini now ALWAYS returns
-        // `inferredPricePoint` — a real tier ($, $$, $$$, $$$$) when it found a
-        // signal, or the "PRICE_LEVEL_UNSPECIFIED" enum when it found none.
-        //  1. Gemini returned a REAL tier → use it, mark inferred + reasoning.
-        //  2. Gemini returned UNSPECIFIED → fall back to Google's mapped
-        //     priceLevel if present (noted), else leave blank + no-signal note.
-        //  3. No aiInference at all → Google's mapped priceLevel as before.
-        const REAL_TIERS = new Set(["$", "$$", "$$$", "$$$$"]);
-        const aiTier = ai?.inferredPricePoint ?? null;
-        let resolvedPrice = "";
-        let priceIsInferred = false;
-        let priceReason: string | null = null;
-        let noSignalNote: string | null = null;
-        if (aiTier && REAL_TIERS.has(aiTier)) {
-          // Gemini has a confident tier — it wins over Google.
-          resolvedPrice = aiTier;
-          priceIsInferred = true;
-          priceReason = ai?.priceReasoning ?? null;
-        } else if (aiTier === "PRICE_LEVEL_UNSPECIFIED") {
-          // Gemini found no signal — fall back to Google's structured level.
-          if (mapped.pricePoint) {
-            resolvedPrice = mapped.pricePoint;
-            noSignalNote = "Google priceLevel; Gemini found no clear signal.";
-          } else {
-            noSignalNote =
-              "AI reviewed the reviews and found no pricing signal (PRICE_LEVEL_UNSPECIFIED).";
-          }
-        } else {
-          // No aiInference at all — Google's mapped priceLevel as before.
-          resolvedPrice = mapped.pricePoint ?? "";
-        }
-        setPriceInferred(priceIsInferred);
-        setPriceReasoning(priceReason);
-        setPriceNoSignal(noSignalNote);
-
-        // AI attributes → boolean flags, plus per-flag rationales for display.
-        const attrs = ai?.attributes ?? null;
-        const flagPatch: Partial<typeof form> = attrs
-          ? {
-              isAppointmentOnly: !!attrs.appointmentOnly?.value,
-              isFlagshipLocation: !!attrs.flagshipLocation?.value,
-              isLargeSelection: !!attrs.largeSelection?.value,
-              isBespoke: !!attrs.bespokeCurated?.value,
-              isTradeRepRequired: !!attrs.tradeRepRequired?.value,
-            }
-          : {};
-        if (attrs) {
-          const rationales: Record<string, string> = {};
-          const addRationale = (key: string, set?: { value?: boolean; rationale?: string }) => {
-            if (set?.value && set.rationale) rationales[key] = set.rationale;
-          };
-          addRationale("isAppointmentOnly", attrs.appointmentOnly);
-          addRationale("isFlagshipLocation", attrs.flagshipLocation);
-          addRationale("isLargeSelection", attrs.largeSelection);
-          addRationale("isBespoke", attrs.bespokeCurated);
-          addRationale("isTradeRepRequired", attrs.tradeRepRequired);
-          setAttrRationales(rationales);
-        } else {
-          setAttrRationales({});
-        }
+        // Reset AI-derived UI to a clean "pending" state — phase 2 fills it in.
+        setReviewAiInsight(null);
+        setReviewAuthenticity(null);
+        setDetectedBrands(null);
+        setAttrRationales({});
+        setPriceInferred(false);
+        setPriceReasoning(null);
+        setPriceNoSignal(null);
 
         // The Google Place ID drives duplicate prevention (pre-check below + a
         // 409 guard on submit). May be absent on rare Details responses.
@@ -1705,7 +1657,8 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
           name: mapped.name ?? form.name,
           placeId: selectedPlaceId,
           description: mapped.description ?? "",
-          pricePoint: resolvedPrice,
+          // Google's structured price for now; Gemini may refine it in phase 2.
+          pricePoint: mapped.pricePoint ?? "",
           websiteUrl: mapped.websiteUrl ?? "",
           locationAddress: mapped.locationAddress ?? "",
           zipCode: mapped.zipCode ?? "",
@@ -1715,8 +1668,12 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
           userRatingCount: mapped.userRatingCount,
           reviewSummary: mapped.reviewSummary ?? "",
           hoursJson: mapPlaceToHoursJson(place.regularOpeningHours) ?? DEFAULT_HOURS,
-          // AI attribute detections seed the corresponding flags.
-          ...flagPatch,
+          // Attribute flags are AI-derived — clear until phase 2 sets them.
+          isAppointmentOnly: false,
+          isFlagshipLocation: false,
+          isLargeSelection: false,
+          isBespoke: false,
+          isTradeRepRequired: false,
           ...(cityId ? { bayAreaCityId: cityId } : {}),
         });
 
@@ -1726,7 +1683,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
 
         // Successful details call closes the billing session → new token next search.
         sessionTokenRef.current = crypto.randomUUID();
-        toast.success("Details pulled from Google — review and edit as needed.");
+        toast.success("Details pulled from Google — analyzing reviews with AI…");
 
         // Duplicate pre-check: block re-intaking a Place that's already in the
         // directory. Clears any stale warning first, then flags a dup if found.
@@ -1755,8 +1712,100 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
       } catch (e) {
         console.error("[directory/details]", e);
         toast.error(e instanceof Error ? e.message : "Failed to load place details");
+        return;
       } finally {
         setLoadingPlace(false);
+      }
+
+      // ── PHASE 2 — Gemini review analysis (slower) → fills the AI fields ───
+      // Runs on the payload we already fetched, so NO extra Places billing.
+      // While "running", the modal blocks close + submit (see geminiPhase).
+      if (!place) return;
+      setGeminiPhase("running");
+      try {
+        const aiRes = await fetch("/api/places/details/ai-insight", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(place),
+        });
+        if (!aiRes.ok) throw new Error(`AI insight failed (${aiRes.status})`);
+        const { aiInference: ai, reviewSummary: aiReviewSummary } = (await aiRes.json()) as {
+          aiInference: GooglePlaceDetails["aiInference"] | null;
+          reviewSummary: string | null;
+        };
+
+        // Full AI object → create body (backend persists + auto-creates brands).
+        setReviewAiInsight(ai);
+        setReviewAuthenticity(ai?.reviewAuthenticity ?? null);
+        setDetectedBrands(ai?.brands ?? null);
+
+        // Price: PREFER Gemini's informed read (same policy as before).
+        //  1. Gemini REAL tier → use it, mark inferred + reasoning.
+        //  2. Gemini UNSPECIFIED → fall back to Google's mapped priceLevel
+        //     (noted), else blank + no-signal note.
+        const REAL_TIERS = new Set(["$", "$$", "$$$", "$$$$"]);
+        const aiTier = ai?.inferredPricePoint ?? null;
+        let resolvedPrice = mapped?.pricePoint ?? "";
+        let priceIsInferred = false;
+        let priceReason: string | null = null;
+        let noSignalNote: string | null = null;
+        if (aiTier && REAL_TIERS.has(aiTier)) {
+          resolvedPrice = aiTier;
+          priceIsInferred = true;
+          priceReason = ai?.priceReasoning ?? null;
+        } else if (aiTier === "PRICE_LEVEL_UNSPECIFIED") {
+          if (mapped?.pricePoint) {
+            resolvedPrice = mapped.pricePoint;
+            noSignalNote = "Google priceLevel; Gemini found no clear signal.";
+          } else {
+            resolvedPrice = "";
+            noSignalNote =
+              "AI reviewed the reviews and found no pricing signal (PRICE_LEVEL_UNSPECIFIED).";
+          }
+        }
+        setPriceInferred(priceIsInferred);
+        setPriceReasoning(priceReason);
+        setPriceNoSignal(noSignalNote);
+
+        // AI attributes → boolean flags, plus per-flag rationales for display.
+        const attrs = ai?.attributes ?? null;
+        const flagPatch: Partial<typeof form> = attrs
+          ? {
+              isAppointmentOnly: !!attrs.appointmentOnly?.value,
+              isFlagshipLocation: !!attrs.flagshipLocation?.value,
+              isLargeSelection: !!attrs.largeSelection?.value,
+              isBespoke: !!attrs.bespokeCurated?.value,
+              isTradeRepRequired: !!attrs.tradeRepRequired?.value,
+            }
+          : {};
+        if (attrs) {
+          const rationales: Record<string, string> = {};
+          const addRationale = (key: string, set?: { value?: boolean; rationale?: string }) => {
+            if (set?.value && set.rationale) rationales[key] = set.rationale;
+          };
+          addRationale("isAppointmentOnly", attrs.appointmentOnly);
+          addRationale("isFlagshipLocation", attrs.flagshipLocation);
+          addRationale("isLargeSelection", attrs.largeSelection);
+          addRationale("isBespoke", attrs.bespokeCurated);
+          addRationale("isTradeRepRequired", attrs.tradeRepRequired);
+          setAttrRationales(rationales);
+        }
+
+        update({
+          pricePoint: resolvedPrice,
+          // Gemini's homeowner-framed summary replaces Google's (often empty) one.
+          ...(aiReviewSummary ? { reviewSummary: aiReviewSummary } : {}),
+          ...flagPatch,
+        });
+        if (aiReviewSummary) setReviewSeedKey((k) => k + 1);
+
+        setGeminiPhase("done");
+        toast.success("AI review analysis complete.");
+      } catch (e) {
+        console.error("[directory/ai-insight]", e);
+        setGeminiPhase("failed");
+        toast.error("AI review analysis failed — you can still save the showroom.");
       }
     },
     [form.name, resolveBayAreaCityId],
@@ -1839,6 +1888,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
       setReviewAuthenticity(null);
       setDetectedBrands(null);
       setReviewAiInsight(null);
+      setGeminiPhase("idle");
       setDescSeedKey((k) => k + 1);
       setReviewSeedKey((k) => k + 1);
       sessionTokenRef.current = crypto.randomUUID();
@@ -1858,8 +1908,20 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
         <Plus className="size-3.5" />
         Add Showroom
       </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          // Controlled dialog: while Gemini is running, ignore every close
+          // request (Escape, outside-click, and the X button all route here)
+          // so it stays open until the AI analysis replies.
+          if (!next && geminiPhase === "running") {
+            toast.info("Hang on — finishing the AI review analysis…");
+            return;
+          }
+          setOpen(next);
+        }}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg [&_label]:mb-1.5">
           <DialogHeader>
             <DialogTitle>Add New Showroom</DialogTitle>
             <DialogDescription>
@@ -2203,6 +2265,16 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
             </div>
           )}
 
+          {/* AI-analysis progress — while running, the modal can't be closed or
+              submitted; the user waits for Gemini to reply (or fail). */}
+          {geminiPhase === "running" && (
+            <div className="mt-4 flex items-center gap-2 rounded-lg bg-sky-500/10 p-3 text-xs text-sky-300 ring-1 ring-sky-500/30">
+              <Loader2 className="size-3.5 animate-spin" />
+              Analyzing reviews with AI — please wait. You can't close or save until
+              this finishes.
+            </div>
+          )}
+
           {/* Navigation */}
           <div className="mt-4 flex justify-between">
             <Button size="sm" variant="ghost" onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0}>
@@ -2217,10 +2289,17 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                 <Button
                   size="sm"
                   onClick={handleSubmit}
-                  disabled={submitting || !form.name.trim() || dupWarning !== null}
+                  disabled={
+                    submitting ||
+                    !form.name.trim() ||
+                    dupWarning !== null ||
+                    geminiPhase === "running"
+                  }
                 >
-                  {submitting && <Loader2 className="mr-1.5 size-3 animate-spin" />}
-                  Create Showroom
+                  {(submitting || geminiPhase === "running") && (
+                    <Loader2 className="mr-1.5 size-3 animate-spin" />
+                  )}
+                  {geminiPhase === "running" ? "Analyzing…" : "Create Showroom"}
                 </Button>
               )}
             </div>
