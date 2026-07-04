@@ -1,3 +1,4 @@
+import { GoogleGenAI } from "@google/genai";
 import { and, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -389,6 +390,7 @@ export class GoogleMapsService {
         const rating = data.rating as number | undefined;
         const userRatingCount = data.userRatingCount as number | undefined;
         const formattedAddress = data.formattedAddress as string | undefined;
+        const googlePriceLevel = data.priceLevel as string | undefined;
         const googleMapsUri =
           (data.googleMapsUri as string | undefined) ??
           (resolvedPlaceId
@@ -421,6 +423,9 @@ export class GoogleMapsService {
           rating != null
             ? `Overall rating: ${rating}/5 (${userRatingCount ?? "unknown"} total reviews)`
             : null,
+          `Google's structured priceLevel for this place is: ${googlePriceLevel ?? "none"}; ` +
+            `treat it as ONE input signal but form your OWN informed judgment for inferredPricePoint ` +
+            `— do not simply pass it through.`,
         ]
           .filter(Boolean)
           .join("\n");
@@ -452,8 +457,8 @@ Output ONLY a single JSON object with this exact shape (no prose before or after
 }
 
 Rules for each field:
-- inferredPricePoint: map explicit pricing language → budget/cheap/affordable="$", moderate/reasonable/mid-range="$$", mid-to-high/premium/upper-mid="$$$", luxury/very-expensive/high-end-only="$$$$". Mixed signals → central tier. Use "PRICE_LEVEL_UNSPECIFIED" when you consciously find NO pricing signal in the reviews (this is a clean, deliberate exit — NOT an error or a guess). Use null ONLY when the field genuinely cannot be produced.
-- priceReasoning: required when inferredPricePoint is one of the $ tiers; null otherwise.
+- inferredPricePoint: ALWAYS return a value for this field — never omit it. Form your OWN informed judgment; Google's structured priceLevel (given above) is only ONE input signal, not something to simply pass through. Map explicit pricing language → budget/cheap/affordable="$", moderate/reasonable/mid-range="$$", mid-to-high/premium/upper-mid="$$$", luxury/very-expensive/high-end-only="$$$$". Mixed signals → central tier. Use "PRICE_LEVEL_UNSPECIFIED" when you consciously find NO pricing signal anywhere (reviews, search results, or general knowledge) — this is a clean, deliberate exit, NOT an error or a guess. Use null ONLY when the field genuinely cannot be produced.
+- priceReasoning: ALWAYS return a value for this field explaining your OWN reasoning (which may reference Google's priceLevel as one data point among others); required when inferredPricePoint is one of the $ tiers, and still expected (e.g. explaining why you chose PRICE_LEVEL_UNSPECIFIED) otherwise.
 - attributes.tradeRepRequired: true when reviews indicate homeowners are turned away or must bring a trade pro to visit or buy. "Trade-only" pricing games (hidden prices, contractor discounts) are a RED FLAG for homeowners. But if reviews say non-trade visitors were welcomed despite trade-only signage, set value=false and capture that nuance in the rationale.
 - attributes.bespokeCurated: true when reviews genuinely rave about unique/mold-breaking selection even without marketing language; false when reviews call the selection overpriced, stale, or generic.
 - reviewAuthenticity: USE your Google Search grounding to cross-check whether the Google reviews look genuine vs bought/bot. Look for corroborating discussion on Reddit (r/ subreddit threads like "best tile SF", "best plumber Bay Area") and other sources. Put any URLs you consulted in the sources array.
@@ -621,13 +626,16 @@ Rules for each field:
         };
 
         // ── Helper: extract raw JSON text from a Gemini response ──────────────
+        // Handles three response shapes: the Interactions API (`output_text` /
+        // `text`), and the classic generateContent candidate-parts shape.
         function extractRawJson(geminiResp: unknown): string {
           const raw = (
+            (geminiResp as any)?.output_text ??
             (geminiResp as any)?.candidates?.[0]?.content?.parts?.[0]?.text ??
             (geminiResp as any)?.text ??
             ""
-          ).trim();
-          return raw;
+          );
+          return typeof raw === "string" ? raw.trim() : String(raw ?? "").trim();
         }
 
         // ── Helper: parse JSON defensively (strips ```json fences) ───────────
@@ -646,75 +654,176 @@ Rules for each field:
           }
         }
 
-        const ai = await createGeminiAiGatewayClient(this.env);
+        // ── Helper: log every Gemini call for cost-audit protection ──────────
+        // Never lets a logging failure break the response; never logs the full
+        // prompt/output text (lengths + usage/token metadata + model only).
+        const logGeminiCall = async (
+          model: string,
+          engine: "interactions" | "gateway",
+          promptChars: number,
+          outputText: string,
+          usage: unknown,
+        ): Promise<void> => {
+          try {
+            await this.logUsage(
+              "gemini:review-insight",
+              { model, engine, promptChars },
+              { outputChars: (outputText || "").length, usage: usage ?? null },
+              { endpoint: "gemini-interactions" },
+            );
+          } catch (logErr) {
+            console.error("[placeDetails] Failed to log Gemini usage (non-fatal):", logErr);
+          }
+        };
+
+        const INTERACTIONS_MODEL = "gemini-3.5-flash";
+        const GATEWAY_MODEL = "gemini-2.5-flash";
+
         let parsed: RichReviewInsight | null = null;
         let usedGrounding = false;
+        let engineUsed: "interactions" | "gateway" = "gateway";
+        let modelUsed: string = GATEWAY_MODEL;
 
-        // ── PRIMARY: grounded call (Google Search + free-form JSON in prompt) ─
+        // The Interactions API takes a single input string — fold system framing
+        // + JSON-schema description + place context into one prompt.
+        const interactionsInput = `${systemPrompt}\n\n${userPrompt}`;
+
+        // ── PRIMARY: direct Gemini Interactions API (Google Search grounded) ──
+        // AI Gateway does not yet support the Interactions API, so this call
+        // bypasses the gateway helper entirely and hits Gemini directly.
         try {
-          const groundedResponse = await (ai.models.generateContent as Function)({
-            model: "gemini-2.5-flash",
-            contents: [
-              { role: "user", parts: [{ text: userPrompt }] },
-            ],
-            config: {
-              systemInstruction: systemPrompt,
-              tools: [{ googleSearch: {} }],
-              // NOTE: responseSchema and responseMimeType intentionally omitted —
-              // Gemini cannot combine structured JSON mode with grounding tools.
-            },
+          const apiKey = await this.env.GEMINI_API_KEY.get();
+          if (!apiKey) throw new Error("GEMINI_API_KEY is not configured");
+
+          const directClient = new GoogleGenAI({ apiKey });
+
+          if (!(directClient as any).interactions) {
+            throw new Error("client.interactions is undefined on this @google/genai version");
+          }
+
+          const interaction = await (directClient as any).interactions.create({
+            model: INTERACTIONS_MODEL,
+            input: interactionsInput,
+            tools: [{ type: "google_search" }],
           });
 
-          const rawJson = extractRawJson(groundedResponse);
+          const rawJson = extractRawJson(interaction);
+
+          await logGeminiCall(
+            INTERACTIONS_MODEL,
+            "interactions",
+            interactionsInput.length,
+            rawJson,
+            (interaction as any)?.usage ?? (interaction as any)?.usageMetadata ?? null,
+          );
+
           if (rawJson) {
             parsed = parseInsightJson(rawJson);
             if (parsed) {
               usedGrounding = true;
-              console.info("[placeDetails] Gemini grounded path succeeded.");
+              engineUsed = "interactions";
+              modelUsed = INTERACTIONS_MODEL;
+              console.info("[placeDetails] Gemini Interactions API (grounded) path succeeded.");
             } else {
               console.warn(
-                "[placeDetails] Gemini grounded response was not parseable JSON; falling back.",
+                "[placeDetails] Gemini Interactions API response was not parseable JSON; falling back.",
               );
             }
           }
-        } catch (groundedErr) {
+        } catch (interactionsErr) {
           console.warn(
-            "[placeDetails] Gemini grounded call failed; falling back to ungrounded JSON mode.",
-            groundedErr,
+            "[placeDetails] Gemini Interactions API unavailable/failed; falling back to AI-Gateway generateContent.",
+            interactionsErr,
           );
         }
 
-        // ── FALLBACK: no-tools + strict JSON mode ─────────────────────────────
+        // ── FALLBACK 1: AI-Gateway generateContent, grounded ──────────────────
         if (!parsed) {
-          const fallbackUserPrompt =
-            userPrompt +
-            `\n\nIMPORTANT: Google Search is NOT available for this call, so you cannot look up reviews. ` +
-            `Base summary/attributes/brands on the review sample above (if any) and your own general knowledge ` +
-            `of this business if you have any; otherwise state plainly in the summary that no review data was ` +
-            `available for this call. Set reviewAuthenticity.assessment = "UNVERIFIED" and ` +
-            `reviewAuthenticity.sources = [] regardless of your confidence.`;
+          const ai = await createGeminiAiGatewayClient(this.env);
 
-          const fallbackResponse = await (ai.models.generateContent as Function)({
-            model: "gemini-2.5-flash",
-            contents: [
-              { role: "user", parts: [{ text: fallbackUserPrompt }] },
-            ],
-            config: {
-              systemInstruction: systemPrompt,
-              responseMimeType: "application/json",
-              responseSchema: FALLBACK_RESPONSE_SCHEMA,
-            },
-          });
+          try {
+            const groundedResponse = await (ai.models.generateContent as Function)({
+              model: GATEWAY_MODEL,
+              contents: [{ role: "user", parts: [{ text: userPrompt }] }],
+              config: {
+                systemInstruction: systemPrompt,
+                tools: [{ googleSearch: {} }],
+                // NOTE: responseSchema and responseMimeType intentionally omitted —
+                // Gemini cannot combine structured JSON mode with grounding tools.
+              },
+            });
 
-          const rawJson = extractRawJson(fallbackResponse);
-          if (rawJson) {
-            parsed = parseInsightJson(rawJson) ?? (JSON.parse(rawJson) as RichReviewInsight);
-            // Enforce UNVERIFIED when grounding wasn't used.
-            if (parsed?.reviewAuthenticity) {
-              parsed.reviewAuthenticity.assessment = "UNVERIFIED";
-              parsed.reviewAuthenticity.sources = [];
+            const rawJson = extractRawJson(groundedResponse);
+
+            await logGeminiCall(
+              GATEWAY_MODEL,
+              "gateway",
+              userPrompt.length,
+              rawJson,
+              (groundedResponse as any)?.usageMetadata ?? null,
+            );
+
+            if (rawJson) {
+              parsed = parseInsightJson(rawJson);
+              if (parsed) {
+                usedGrounding = true;
+                engineUsed = "gateway";
+                modelUsed = GATEWAY_MODEL;
+                console.info("[placeDetails] Gemini AI-Gateway grounded path succeeded.");
+              } else {
+                console.warn(
+                  "[placeDetails] Gemini AI-Gateway grounded response was not parseable JSON; falling back.",
+                );
+              }
             }
-            console.info("[placeDetails] Gemini fallback (no-grounding) path succeeded.");
+          } catch (groundedErr) {
+            console.warn(
+              "[placeDetails] Gemini AI-Gateway grounded call failed; falling back to ungrounded JSON mode.",
+              groundedErr,
+            );
+          }
+
+          // ── FALLBACK 2: AI-Gateway generateContent, no-tools + strict JSON ──
+          if (!parsed) {
+            const fallbackUserPrompt =
+              userPrompt +
+              `\n\nIMPORTANT: Google Search is NOT available for this call, so you cannot look up reviews. ` +
+              `Base summary/attributes/brands on the review sample above (if any) and your own general knowledge ` +
+              `of this business if you have any; otherwise state plainly in the summary that no review data was ` +
+              `available for this call. Set reviewAuthenticity.assessment = "UNVERIFIED" and ` +
+              `reviewAuthenticity.sources = [] regardless of your confidence.`;
+
+            const fallbackResponse = await (ai.models.generateContent as Function)({
+              model: GATEWAY_MODEL,
+              contents: [{ role: "user", parts: [{ text: fallbackUserPrompt }] }],
+              config: {
+                systemInstruction: systemPrompt,
+                responseMimeType: "application/json",
+                responseSchema: FALLBACK_RESPONSE_SCHEMA,
+              },
+            });
+
+            const rawJson = extractRawJson(fallbackResponse);
+
+            await logGeminiCall(
+              GATEWAY_MODEL,
+              "gateway",
+              fallbackUserPrompt.length,
+              rawJson,
+              (fallbackResponse as any)?.usageMetadata ?? null,
+            );
+
+            if (rawJson) {
+              parsed = parseInsightJson(rawJson) ?? (JSON.parse(rawJson) as RichReviewInsight);
+              // Enforce UNVERIFIED when grounding wasn't used.
+              if (parsed?.reviewAuthenticity) {
+                parsed.reviewAuthenticity.assessment = "UNVERIFIED";
+                parsed.reviewAuthenticity.sources = [];
+              }
+              engineUsed = "gateway";
+              modelUsed = GATEWAY_MODEL;
+              console.info("[placeDetails] Gemini AI-Gateway fallback (no-grounding) path succeeded.");
+            }
           }
         }
 
@@ -740,7 +849,7 @@ Rules for each field:
               sources: [],
             },
             brands: parsed.brands ?? [],
-            _meta: { groundingUsed: usedGrounding, model: "gemini-2.5-flash" },
+            _meta: { engine: engineUsed, model: modelUsed, groundingUsed: usedGrounding },
           };
         }
       } catch (aiErr) {
