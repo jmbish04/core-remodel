@@ -349,6 +349,16 @@ export class GoogleMapsService {
     // Replaces Google's `reviewSummary` with a richer homeowner-framed Gemini
     // analysis using Google-Search grounding.
     //
+    // IMPORTANT: Google's Places `reviews` field requires a pricier SKU that
+    // isn't enabled in production, so `data.reviews` is frequently absent or
+    // empty. This block MUST NOT be gated on reviews being present — it runs
+    // for every place that has an identity (id or displayName), and instructs
+    // Gemini to use Google Search grounding to find and read reviews/discussion
+    // itself (Google Maps reviews, Yelp, Reddit, design forums) using the
+    // business name + address + Maps URL + Place ID. Any Google-supplied
+    // review sample (when present) is included as additional signal, not a
+    // requirement.
+    //
     // Strategy:
     //   1. PRIMARY PATH — enable grounding via config.tools=[{googleSearch:{}}].
     //      Do NOT set responseSchema/responseMimeType (Gemini can't combine them
@@ -370,34 +380,44 @@ export class GoogleMapsService {
         }>
       | undefined;
 
-    if (Array.isArray(reviews) && reviews.length > 0) {
+    const resolvedPlaceId = data.id as string | undefined;
+    const displayName = (data.displayName as { text?: string } | undefined)?.text;
+    const hasIdentity = Boolean(resolvedPlaceId || displayName);
+
+    if (hasIdentity) {
       try {
         const rating = data.rating as number | undefined;
         const userRatingCount = data.userRatingCount as number | undefined;
-        const placeId = data.id as string | undefined;
-        const displayName = (data.displayName as { text?: string } | undefined)?.text;
         const formattedAddress = data.formattedAddress as string | undefined;
         const googleMapsUri =
           (data.googleMapsUri as string | undefined) ??
-          (placeId ? `https://www.google.com/maps/place/?q=place_id:${placeId}` : undefined);
+          (resolvedPlaceId
+            ? `https://www.google.com/maps/place/?q=place_id:${resolvedPlaceId}`
+            : undefined);
 
-        const sample = reviews.slice(0, 5);
+        // Google's review array may be empty/unavailable (pricier SKU not
+        // enabled) — build the sample from whatever IS present, but do not
+        // require it. Gemini is instructed to search for reviews itself.
+        const sample = Array.isArray(reviews) ? reviews.slice(0, 5) : [];
         const n = sample.length;
 
-        const reviewLines = sample
-          .map((r, i) => {
-            const stars = r.rating != null ? `${r.rating}/5` : "no rating";
-            const body = r.text?.text ?? r.originalText?.text ?? "(no text)";
-            const when = r.relativePublishTimeDescription ?? "";
-            return `Review ${i + 1} (${stars}${when ? `, ${when}` : ""}): ${body}`;
-          })
-          .join("\n");
+        const reviewLines =
+          n > 0
+            ? sample
+                .map((r, i) => {
+                  const stars = r.rating != null ? `${r.rating}/5` : "no rating";
+                  const body = r.text?.text ?? r.originalText?.text ?? "(no text)";
+                  const when = r.relativePublishTimeDescription ?? "";
+                  return `Review ${i + 1} (${stars}${when ? `, ${when}` : ""}): ${body}`;
+                })
+                .join("\n")
+            : "(none provided by Google for this call — use Google Search to find reviews yourself.)";
 
         const placeContext = [
           displayName ? `Business: ${displayName}` : null,
           formattedAddress ? `Address: ${formattedAddress}` : null,
           googleMapsUri ? `Google Maps URL: ${googleMapsUri}` : null,
-          placeId ? `Place ID: ${placeId}` : null,
+          resolvedPlaceId ? `Place ID: ${resolvedPlaceId}` : null,
           rating != null
             ? `Overall rating: ${rating}/5 (${userRatingCount ?? "unknown"} total reviews)`
             : null,
@@ -446,15 +466,28 @@ Rules for each field:
           `Be FAIR and BALANCED — acknowledge genuine strengths but surface any caveats ` +
           `(trade-only hostility, appointment requirements, pricing opacity, fake reviews). ` +
           `Homeowner-hostile showrooms that require a trade rep or hide pricing are RED FLAGS — flag them clearly. ` +
-          `Showrooms that welcome non-trade visitors despite trade-only signage are a GOOD sign — note that.`;
+          `Showrooms that welcome non-trade visitors despite trade-only signage are a GOOD sign — note that. ` +
+          `Google's review array may be EMPTY or UNAVAILABLE for this call (it requires a pricier API tier that isn't ` +
+          `always enabled) — when that happens, USE GOOGLE SEARCH to find and read reviews and discussion about THIS ` +
+          `specific business yourself: Google Maps reviews, Yelp, Reddit threads (e.g. r/ subreddits like "best tile SF" ` +
+          `or "best plumber Bay Area"), and design forums — using the business name, address, Google Maps URL, and ` +
+          `Place ID provided below to identify the correct business. Base your analysis on what you find. Never refuse ` +
+          `or leave a field blank merely because Google's review sample was empty.`;
 
         // ── User prompt ───────────────────────────────────────────────────────
         const userPrompt =
-          `PLACE CONTEXT:\n${placeContext}\n\n` +
-          `REVIEW SAMPLE (${n} of ${userRatingCount ?? "unknown"} total reviews, overall ${rating ?? "unknown"}/5 stars):\n` +
+          `PLACE CONTEXT (use these identifiers to find the correct business via Google Search):\n${placeContext}\n\n` +
+          `GOOGLE-SUPPLIED REVIEW SAMPLE (${n} of ${userRatingCount ?? "unknown"} total reviews on record` +
+          `${rating != null ? `, overall ${rating}/5 stars` : ""}):\n` +
           `${reviewLines}\n\n` +
-          `Note: this is a sample of ${n} of ${userRatingCount ?? "unknown"} reviews. ` +
-          `Consider whether the sample seems representative of the ${rating ?? "unknown"}-star average.\n\n` +
+          (n > 0
+            ? `Note: this is a sample of ${n} of ${userRatingCount ?? "unknown"} reviews. ` +
+              `Consider whether the sample seems representative of the ${rating ?? "unknown"}-star average. ` +
+              `Use Google Search to find ADDITIONAL reviews/discussion beyond this sample as well.\n\n`
+            : `Note: Google did not supply any review text for this call. This is EXPECTED — it does NOT mean the ` +
+              `business has no reviews. USE GOOGLE SEARCH NOW to find and read real reviews and discussion about ` +
+              `this specific business (Google Maps, Yelp, Reddit, design forums) and base your entire analysis on ` +
+              `what you find there.\n\n`) +
           `${JSON_SCHEMA_DESCRIPTION}`;
 
         // ── Gemini responseSchema for fallback (no-grounding) path ────────────
@@ -655,8 +688,11 @@ Rules for each field:
         if (!parsed) {
           const fallbackUserPrompt =
             userPrompt +
-            `\n\nIMPORTANT: Google Search is NOT available for this call. ` +
-            `Set reviewAuthenticity.assessment = "UNVERIFIED" and reviewAuthenticity.sources = [].`;
+            `\n\nIMPORTANT: Google Search is NOT available for this call, so you cannot look up reviews. ` +
+            `Base summary/attributes/brands on the review sample above (if any) and your own general knowledge ` +
+            `of this business if you have any; otherwise state plainly in the summary that no review data was ` +
+            `available for this call. Set reviewAuthenticity.assessment = "UNVERIFIED" and ` +
+            `reviewAuthenticity.sources = [] regardless of your confidence.`;
 
           const fallbackResponse = await (ai.models.generateContent as Function)({
             model: "gemini-2.5-flash",
