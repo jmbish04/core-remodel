@@ -461,6 +461,16 @@ placesRouter.openapi(
               "Optional session token that was passed to `placesAutocomplete` to close the billing session.",
             example: "550e8400-e29b-41d4-a716-446655440000",
           }),
+        skipAi: z
+          .enum(["0", "1", "true", "false"])
+          .optional()
+          .openapi({
+            description:
+              "When '1'/'true', skip the Gemini review analysis and return only the raw Google fields " +
+              "(fast). The intake UI uses this to prefill immediately, then calls POST /details/ai-insight " +
+              "for the Gemini pass — a two-phase progress UX with no extra Places Details billing.",
+            example: "1",
+          }),
       }),
     },
     responses: {
@@ -482,11 +492,13 @@ placesRouter.openapi(
   }),
   async (c) => {
     const { placeId } = c.req.valid("param");
-    const { sessionToken } = c.req.valid("query");
+    const { sessionToken, skipAi } = c.req.valid("query");
     const service = new GoogleMapsService(c.env);
 
     try {
-      const data = await service.placeDetails(placeId, sessionToken);
+      const data = await service.placeDetails(placeId, sessionToken, {
+        skipAi: skipAi === "1" || skipAi === "true",
+      });
       return c.json(data, 200);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -495,6 +507,76 @@ placesRouter.openapi(
       }
       console.error("[places/details] upstream error:", message);
       return c.json({ error: `Upstream Places API error: ${message}` }, 502);
+    }
+  },
+);
+
+// ─── POST /details/ai-insight ────────────────────────────────────────────────
+// Second phase of the two-phase intake: the client posts back the Places
+// payload it already fetched (via GET /details/{id}?skipAi=1) and we run ONLY
+// the Gemini review analysis on it. Reusing the already-fetched payload means
+// no additional Places Details billing — just the (logged) Gemini call.
+placesRouter.openapi(
+  createRoute({
+    method: "post",
+    path: "/details/ai-insight",
+    operationId: "placesDetailsAiInsight",
+    tags: ["Places"],
+    summary: "Run Gemini review analysis for an already-fetched place",
+    description:
+      "Runs the Gemini structured review analysis on a Places Details payload the client already " +
+      "holds (from GET /details/{placeId}?skipAi=1). No Places API call is made here, so there is " +
+      "no additional Places billing — only the (logged) Gemini request. Powers the intake modal's " +
+      "prefill-then-analyze progress UX.",
+    request: {
+      body: {
+        content: {
+          "application/json": {
+            // The raw Places Details payload from phase 1 (passthrough — we only
+            // read id/displayName/formattedAddress/reviews/priceLevel/etc.).
+            schema: z.object({}).passthrough().openapi({
+              description: "The Places Details payload returned by GET /details/{placeId}?skipAi=1.",
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "Gemini inference (and the Gemini-authored review summary, if any).",
+        content: {
+          "application/json": {
+            schema: z
+              .object({
+                aiInference: z.any().nullable(),
+                reviewSummary: z.string().nullable(),
+              })
+              .openapi({ description: "Gemini structured inference + summary text." }),
+          },
+        },
+      },
+      502: {
+        description: "Gemini analysis failed.",
+        content: { "application/json": { schema: ErrorSchema } },
+      },
+    },
+  }),
+  async (c) => {
+    const data = c.req.valid("json") as Record<string, unknown>;
+    const service = new GoogleMapsService(c.env);
+    try {
+      // Mutates `data` in place, adding aiInference + replacing reviewSummary.
+      await service.computeReviewInsight(data);
+      const reviewSummary =
+        (data.reviewSummary as { text?: { text?: string } } | undefined)?.text?.text ?? null;
+      return c.json(
+        { aiInference: data.aiInference ?? null, reviewSummary },
+        200,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[places/details/ai-insight] error:", message);
+      return c.json({ error: `Gemini analysis error: ${message}` }, 502);
     }
   },
 );

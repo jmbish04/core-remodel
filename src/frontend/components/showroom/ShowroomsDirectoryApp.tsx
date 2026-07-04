@@ -84,6 +84,11 @@ import { HoursEditor } from "./intake/HoursEditor";
 import { FlagsEditor } from "./intake/FlagsEditor";
 import { OverviewNoteEditor } from "./OverviewNoteEditor";
 import { DEFAULT_HOURS, type HoursJson } from "./intake/hours-types";
+import {
+  isOpenNow as isOpenNowStructured,
+  type HourRow,
+} from "./hours-status";
+import { ShowroomMergedCard } from "./ShowroomMergedCard";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Store {
@@ -113,6 +118,17 @@ interface Store {
   scale: string | null;
   instagramUrl: string | null;
   iconCfImagesUrl: string | null;
+  /** Scraped hero image (Cloudflare Images delivery URL); null → fall back to logo/initials. */
+  heroImageCfImagesUrl: string | null;
+  /** Normalized open-hours rows (one per open day). Empty → hours unknown/closed. */
+  hours: HourRow[];
+  /** Google Places aggregate rating + review count (distinct from onlineRating). */
+  googleRating: number | null;
+  userRatingCount: number | null;
+  /** Intake flags. */
+  isLargeSelection: boolean;
+  isBespoke: boolean;
+  isTradeRepRequired: boolean;
 }
 
 interface Category {
@@ -636,52 +652,11 @@ function ContactRow({ store, className }: { store: Store; className?: string }) 
 
 function ShowroomCard({ store, pst }: { store: Store; pst: PstNow }) {
   return (
-    <article className="group relative flex flex-col gap-4 rounded-xl bg-card p-4 ring-1 ring-border/40 transition-colors hover:bg-muted/40 sm:flex-row sm:items-stretch">
-      {/* Left: identity + focus */}
-      <div className="min-w-0 flex-1">
-        <div className="flex items-start gap-3">
-          <LogoBadge store={store} />
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              {/* Stretched link makes the whole card clickable; inner links opt out via z-10. */}
-              <a
-                href={`/admin/showroom/store/${store.id}`}
-                className="line-clamp-1 text-sm font-medium after:absolute after:inset-0 after:content-['']"
-              >
-                {store.name}
-              </a>
-              {store.isFlagshipLocation && <FlagshipBadge />}
-            </div>
-            {store.cityName && (
-              <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                <MapPin className="size-3" />
-                {store.cityName}
-              </div>
-            )}
-            {store.categories.length > 0 && (
-              <div className="mt-1.5">
-                <CategoryTags categories={store.categories} max={5} />
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="mt-3">
-          <RatingRow store={store} />
-        </div>
-
-        {store.inventoryFocus && (
-          <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{store.inventoryFocus}</p>
-        )}
-
-        <ContactRow store={store} className="mt-3" />
-      </div>
-
-      {/* Right: hours (fixed-ish width on desktop, full-width stacked on mobile) */}
-      <div className="shrink-0 border-t border-border/40 pt-3 sm:w-64 sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0">
-        <HoursFooter store={store} pst={pst} />
-      </div>
-    </article>
+    <ShowroomMergedCard
+      store={store}
+      pst={pst}
+      href={`/admin/showroom/store/${store.id}`}
+    />
   );
 }
 
@@ -748,6 +723,7 @@ interface Filters {
   appointmentOnly: boolean;
   flagship: boolean;
   openNow: boolean;
+  visited: "all" | "visited" | "unvisited";
 }
 
 const EMPTY_FILTERS: Filters = {
@@ -759,6 +735,7 @@ const EMPTY_FILTERS: Filters = {
   appointmentOnly: false,
   flagship: false,
   openNow: false,
+  visited: "all",
 };
 
 function FilterBar({
@@ -822,6 +799,32 @@ function FilterBar({
           <Clock className="size-3" />
           Open Now ({pst.label} PST)
         </Button>
+
+        <div className="mx-1 h-5 w-px bg-border/40" />
+
+        {/* Visited segmented toggle */}
+        <div className="inline-flex overflow-hidden rounded-md ring-1 ring-border/40">
+          {(
+            [
+              { id: "all", label: "All" },
+              { id: "visited", label: "Visited" },
+              { id: "unvisited", label: "Unvisited" },
+            ] as const
+          ).map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => onChange({ ...filters, visited: opt.id })}
+              className={`px-2.5 py-1 text-[11px] font-medium transition ${
+                filters.visited === opt.id
+                  ? "bg-primary/10 text-primary"
+                  : "text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+              }`}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
 
         <div className="mx-1 h-5 w-px bg-border/40" />
 
@@ -1147,91 +1150,15 @@ function ListView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
 
 // ─── Directory View (condensed field sheet, grouped by hub city) ────────────────
 
-/** A short "open now / closes …" cue for the condensed directory card. */
-function hoursCue(store: Store, pst: PstNow): { text: string; className: string } {
-  if (store.isAppointmentOnly)
-    return { text: "By appt", className: "bg-violet-500/15 text-violet-300" };
-  if (isOpenNow(store, pst)) {
-    const isWeekday = pst.day >= 1 && pst.day <= 5;
-    const range = parseHoursRange(isWeekday ? store.weekdayHours : store.weekendHours);
-    if (range && pst.minutes >= range.close - 60)
-      return { text: `Closing ${fmt12(range.close)}`, className: "bg-amber-500/15 text-amber-300" };
-    return {
-      text: range ? `Open · ${fmt12(range.close)}` : "Open now",
-      className: "bg-emerald-500/15 text-emerald-300",
-    };
-  }
-  return { text: "Closed now", className: "bg-rose-500/15 text-rose-300" };
-}
-
-/** Dense contact card — favors phone-first density over imagery. */
+/** Dense contact card — the compact variant of the canonical merged card. */
 function DirectoryCard({ store, pst }: { store: Store; pst: PstNow }) {
-  const cue = hoursCue(store, pst);
-  const stop = (e: React.MouseEvent) => e.stopPropagation();
   return (
-    <article className="group relative flex items-center gap-3 rounded-lg bg-card px-3 py-2.5 ring-1 ring-border/40 transition-colors hover:bg-muted/40">
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <a
-            href={`/admin/showroom/store/${store.id}`}
-            className="line-clamp-1 text-sm font-medium after:absolute after:inset-0 after:content-['']"
-          >
-            {store.name}
-          </a>
-          {store.isFlagshipLocation && <FlagshipBadge />}
-          <span
-            className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-medium ${cue.className}`}
-          >
-            <Clock className="size-2.5" />
-            {cue.text}
-          </span>
-        </div>
-
-        {/* Phone-first contact row */}
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
-          {store.phoneNumber && (
-            <a
-              href={telHref(store.phoneNumber)}
-              onClick={stop}
-              className="relative z-10 inline-flex items-center gap-1.5 font-medium text-sky-400 hover:text-sky-300"
-            >
-              <Phone className="size-3.5" />
-              {formatPhone(store.phoneNumber)}
-            </a>
-          )}
-          {store.websiteUrl && (
-            <a
-              href={store.websiteUrl}
-              target="_blank"
-              rel="noreferrer"
-              onClick={stop}
-              aria-label="Website"
-              className="relative z-10 inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-            >
-              <Globe className="size-3.5" />
-            </a>
-          )}
-          {store.instagramUrl && (
-            <a
-              href={store.instagramUrl}
-              target="_blank"
-              rel="noreferrer"
-              onClick={stop}
-              aria-label="Instagram"
-              className="relative z-10 inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-            >
-              <Instagram className="size-3.5" />
-            </a>
-          )}
-          {store.cityName && (
-            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/70">
-              <MapPin className="size-3" />
-              {store.cityName}
-            </span>
-          )}
-        </div>
-      </div>
-    </article>
+    <ShowroomMergedCard
+      store={store}
+      pst={pst}
+      href={`/admin/showroom/store/${store.id}`}
+      compact
+    />
   );
 }
 
@@ -1535,6 +1462,11 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
   };
   const [form, setForm] = useState({ ...emptyForm });
   const [loadingPlace, setLoadingPlace] = useState(false);
+  // Two-phase intake: after a Place is picked we prefill the Google fields
+  // (phase 1) and then run Gemini (phase 2). While "running", the modal cannot
+  // be closed or submitted — the user must let the AI analysis finish (or fail).
+  // "idle" = no place selected yet / manual entry (no gating).
+  const [geminiPhase, setGeminiPhase] = useState<"idle" | "running" | "done" | "failed">("idle");
   // Set when the selected Google Place is already in the directory (from the
   // pre-check on select, or defensively from a 409 on submit). Drives the
   // prominent "already added" banner AND blocks the Create button.
@@ -1609,8 +1541,15 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
   const handleSelectPlace = useCallback(
     async (placeId: string) => {
       setLoadingPlace(true);
+      setGeminiPhase("idle");
+
+      // ── PHASE 1 — Google Places fields only (fast) → prefill immediately ──
+      // We request `skipAi=1` so the Places fields land right away; the Gemini
+      // pass happens in phase 2 below for visible progress.
+      let place: GooglePlaceDetails | null = null;
+      let mapped: ReturnType<typeof mapPlaceToIntake> | null = null;
       try {
-        const url = `/api/places/details/${encodeURIComponent(placeId)}?sessionToken=${sessionTokenRef.current}`;
+        const url = `/api/places/details/${encodeURIComponent(placeId)}?sessionToken=${sessionTokenRef.current}&skipAi=1`;
         const res = await fetch(url, { credentials: "include" });
         if (res.status === 429) {
           toast.error("Google Maps monthly quota reached. Try again later.");
@@ -1620,82 +1559,22 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
           const payload = (await res.json().catch(() => ({}))) as { error?: string };
           throw new Error(payload.error ?? `Details failed (${res.status})`);
         }
-        const place = (await res.json()) as GooglePlaceDetails;
-
-        const mapped = mapPlaceToIntake(place);
+        place = (await res.json()) as GooglePlaceDetails;
+        mapped = mapPlaceToIntake(place);
         const cityId = resolveBayAreaCityId(mapped.locationAddress);
 
         // Per-field diagnostics + raw photos forwarded from the mapper.
         setDiagnostics(mapped._diagnostics ?? {});
         setPlacePhotos(mapped._photos ?? []);
 
-        // AI insight from the backend Places proxy. Store the full object for
-        // the create body; the backend persists it + auto-creates the brands.
-        const ai = place.aiInference ?? null;
-        setReviewAiInsight(ai);
-        setReviewAuthenticity(ai?.reviewAuthenticity ?? null);
-        setDetectedBrands(ai?.brands ?? null);
-
-        // Price: PREFER Gemini's informed read. Gemini now ALWAYS returns
-        // `inferredPricePoint` — a real tier ($, $$, $$$, $$$$) when it found a
-        // signal, or the "PRICE_LEVEL_UNSPECIFIED" enum when it found none.
-        //  1. Gemini returned a REAL tier → use it, mark inferred + reasoning.
-        //  2. Gemini returned UNSPECIFIED → fall back to Google's mapped
-        //     priceLevel if present (noted), else leave blank + no-signal note.
-        //  3. No aiInference at all → Google's mapped priceLevel as before.
-        const REAL_TIERS = new Set(["$", "$$", "$$$", "$$$$"]);
-        const aiTier = ai?.inferredPricePoint ?? null;
-        let resolvedPrice = "";
-        let priceIsInferred = false;
-        let priceReason: string | null = null;
-        let noSignalNote: string | null = null;
-        if (aiTier && REAL_TIERS.has(aiTier)) {
-          // Gemini has a confident tier — it wins over Google.
-          resolvedPrice = aiTier;
-          priceIsInferred = true;
-          priceReason = ai?.priceReasoning ?? null;
-        } else if (aiTier === "PRICE_LEVEL_UNSPECIFIED") {
-          // Gemini found no signal — fall back to Google's structured level.
-          if (mapped.pricePoint) {
-            resolvedPrice = mapped.pricePoint;
-            noSignalNote = "Google priceLevel; Gemini found no clear signal.";
-          } else {
-            noSignalNote =
-              "AI reviewed the reviews and found no pricing signal (PRICE_LEVEL_UNSPECIFIED).";
-          }
-        } else {
-          // No aiInference at all — Google's mapped priceLevel as before.
-          resolvedPrice = mapped.pricePoint ?? "";
-        }
-        setPriceInferred(priceIsInferred);
-        setPriceReasoning(priceReason);
-        setPriceNoSignal(noSignalNote);
-
-        // AI attributes → boolean flags, plus per-flag rationales for display.
-        const attrs = ai?.attributes ?? null;
-        const flagPatch: Partial<typeof form> = attrs
-          ? {
-              isAppointmentOnly: !!attrs.appointmentOnly?.value,
-              isFlagshipLocation: !!attrs.flagshipLocation?.value,
-              isLargeSelection: !!attrs.largeSelection?.value,
-              isBespoke: !!attrs.bespokeCurated?.value,
-              isTradeRepRequired: !!attrs.tradeRepRequired?.value,
-            }
-          : {};
-        if (attrs) {
-          const rationales: Record<string, string> = {};
-          const addRationale = (key: string, set?: { value?: boolean; rationale?: string }) => {
-            if (set?.value && set.rationale) rationales[key] = set.rationale;
-          };
-          addRationale("isAppointmentOnly", attrs.appointmentOnly);
-          addRationale("isFlagshipLocation", attrs.flagshipLocation);
-          addRationale("isLargeSelection", attrs.largeSelection);
-          addRationale("isBespoke", attrs.bespokeCurated);
-          addRationale("isTradeRepRequired", attrs.tradeRepRequired);
-          setAttrRationales(rationales);
-        } else {
-          setAttrRationales({});
-        }
+        // Reset AI-derived UI to a clean "pending" state — phase 2 fills it in.
+        setReviewAiInsight(null);
+        setReviewAuthenticity(null);
+        setDetectedBrands(null);
+        setAttrRationales({});
+        setPriceInferred(false);
+        setPriceReasoning(null);
+        setPriceNoSignal(null);
 
         // The Google Place ID drives duplicate prevention (pre-check below + a
         // 409 guard on submit). May be absent on rare Details responses.
@@ -1705,7 +1584,8 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
           name: mapped.name ?? form.name,
           placeId: selectedPlaceId,
           description: mapped.description ?? "",
-          pricePoint: resolvedPrice,
+          // Google's structured price for now; Gemini may refine it in phase 2.
+          pricePoint: mapped.pricePoint ?? "",
           websiteUrl: mapped.websiteUrl ?? "",
           locationAddress: mapped.locationAddress ?? "",
           zipCode: mapped.zipCode ?? "",
@@ -1715,8 +1595,12 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
           userRatingCount: mapped.userRatingCount,
           reviewSummary: mapped.reviewSummary ?? "",
           hoursJson: mapPlaceToHoursJson(place.regularOpeningHours) ?? DEFAULT_HOURS,
-          // AI attribute detections seed the corresponding flags.
-          ...flagPatch,
+          // Attribute flags are AI-derived — clear until phase 2 sets them.
+          isAppointmentOnly: false,
+          isFlagshipLocation: false,
+          isLargeSelection: false,
+          isBespoke: false,
+          isTradeRepRequired: false,
           ...(cityId ? { bayAreaCityId: cityId } : {}),
         });
 
@@ -1726,7 +1610,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
 
         // Successful details call closes the billing session → new token next search.
         sessionTokenRef.current = crypto.randomUUID();
-        toast.success("Details pulled from Google — review and edit as needed.");
+        toast.success("Details pulled from Google — analyzing reviews with AI…");
 
         // Duplicate pre-check: block re-intaking a Place that's already in the
         // directory. Clears any stale warning first, then flags a dup if found.
@@ -1755,8 +1639,100 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
       } catch (e) {
         console.error("[directory/details]", e);
         toast.error(e instanceof Error ? e.message : "Failed to load place details");
+        return;
       } finally {
         setLoadingPlace(false);
+      }
+
+      // ── PHASE 2 — Gemini review analysis (slower) → fills the AI fields ───
+      // Runs on the payload we already fetched, so NO extra Places billing.
+      // While "running", the modal blocks close + submit (see geminiPhase).
+      if (!place) return;
+      setGeminiPhase("running");
+      try {
+        const aiRes = await fetch("/api/places/details/ai-insight", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(place),
+        });
+        if (!aiRes.ok) throw new Error(`AI insight failed (${aiRes.status})`);
+        const { aiInference: ai, reviewSummary: aiReviewSummary } = (await aiRes.json()) as {
+          aiInference: GooglePlaceDetails["aiInference"] | null;
+          reviewSummary: string | null;
+        };
+
+        // Full AI object → create body (backend persists + auto-creates brands).
+        setReviewAiInsight(ai);
+        setReviewAuthenticity(ai?.reviewAuthenticity ?? null);
+        setDetectedBrands(ai?.brands ?? null);
+
+        // Price: PREFER Gemini's informed read (same policy as before).
+        //  1. Gemini REAL tier → use it, mark inferred + reasoning.
+        //  2. Gemini UNSPECIFIED → fall back to Google's mapped priceLevel
+        //     (noted), else blank + no-signal note.
+        const REAL_TIERS = new Set(["$", "$$", "$$$", "$$$$"]);
+        const aiTier = ai?.inferredPricePoint ?? null;
+        let resolvedPrice = mapped?.pricePoint ?? "";
+        let priceIsInferred = false;
+        let priceReason: string | null = null;
+        let noSignalNote: string | null = null;
+        if (aiTier && REAL_TIERS.has(aiTier)) {
+          resolvedPrice = aiTier;
+          priceIsInferred = true;
+          priceReason = ai?.priceReasoning ?? null;
+        } else if (aiTier === "PRICE_LEVEL_UNSPECIFIED") {
+          if (mapped?.pricePoint) {
+            resolvedPrice = mapped.pricePoint;
+            noSignalNote = "Google priceLevel; Gemini found no clear signal.";
+          } else {
+            resolvedPrice = "";
+            noSignalNote =
+              "AI reviewed the reviews and found no pricing signal (PRICE_LEVEL_UNSPECIFIED).";
+          }
+        }
+        setPriceInferred(priceIsInferred);
+        setPriceReasoning(priceReason);
+        setPriceNoSignal(noSignalNote);
+
+        // AI attributes → boolean flags, plus per-flag rationales for display.
+        const attrs = ai?.attributes ?? null;
+        const flagPatch: Partial<typeof form> = attrs
+          ? {
+              isAppointmentOnly: !!attrs.appointmentOnly?.value,
+              isFlagshipLocation: !!attrs.flagshipLocation?.value,
+              isLargeSelection: !!attrs.largeSelection?.value,
+              isBespoke: !!attrs.bespokeCurated?.value,
+              isTradeRepRequired: !!attrs.tradeRepRequired?.value,
+            }
+          : {};
+        if (attrs) {
+          const rationales: Record<string, string> = {};
+          const addRationale = (key: string, set?: { value?: boolean; rationale?: string }) => {
+            if (set?.value && set.rationale) rationales[key] = set.rationale;
+          };
+          addRationale("isAppointmentOnly", attrs.appointmentOnly);
+          addRationale("isFlagshipLocation", attrs.flagshipLocation);
+          addRationale("isLargeSelection", attrs.largeSelection);
+          addRationale("isBespoke", attrs.bespokeCurated);
+          addRationale("isTradeRepRequired", attrs.tradeRepRequired);
+          setAttrRationales(rationales);
+        }
+
+        update({
+          pricePoint: resolvedPrice,
+          // Gemini's homeowner-framed summary replaces Google's (often empty) one.
+          ...(aiReviewSummary ? { reviewSummary: aiReviewSummary } : {}),
+          ...flagPatch,
+        });
+        if (aiReviewSummary) setReviewSeedKey((k) => k + 1);
+
+        setGeminiPhase("done");
+        toast.success("AI review analysis complete.");
+      } catch (e) {
+        console.error("[directory/ai-insight]", e);
+        setGeminiPhase("failed");
+        toast.error("AI review analysis failed — you can still save the showroom.");
       }
     },
     [form.name, resolveBayAreaCityId],
@@ -1839,6 +1815,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
       setReviewAuthenticity(null);
       setDetectedBrands(null);
       setReviewAiInsight(null);
+      setGeminiPhase("idle");
       setDescSeedKey((k) => k + 1);
       setReviewSeedKey((k) => k + 1);
       sessionTokenRef.current = crypto.randomUUID();
@@ -1858,8 +1835,20 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
         <Plus className="size-3.5" />
         Add Showroom
       </Button>
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          // Controlled dialog: while Gemini is running, ignore every close
+          // request (Escape, outside-click, and the X button all route here)
+          // so it stays open until the AI analysis replies.
+          if (!next && geminiPhase === "running") {
+            toast.info("Hang on — finishing the AI review analysis…");
+            return;
+          }
+          setOpen(next);
+        }}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg [&_label]:mb-1.5">
           <DialogHeader>
             <DialogTitle>Add New Showroom</DialogTitle>
             <DialogDescription>
@@ -2203,6 +2192,16 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
             </div>
           )}
 
+          {/* AI-analysis progress — while running, the modal can't be closed or
+              submitted; the user waits for Gemini to reply (or fail). */}
+          {geminiPhase === "running" && (
+            <div className="mt-4 flex items-center gap-2 rounded-lg bg-sky-500/10 p-3 text-xs text-sky-300 ring-1 ring-sky-500/30">
+              <Loader2 className="size-3.5 animate-spin" />
+              Analyzing reviews with AI — please wait. You can't close or save until
+              this finishes.
+            </div>
+          )}
+
           {/* Navigation */}
           <div className="mt-4 flex justify-between">
             <Button size="sm" variant="ghost" onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0}>
@@ -2217,10 +2216,17 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                 <Button
                   size="sm"
                   onClick={handleSubmit}
-                  disabled={submitting || !form.name.trim() || dupWarning !== null}
+                  disabled={
+                    submitting ||
+                    !form.name.trim() ||
+                    dupWarning !== null ||
+                    geminiPhase === "running"
+                  }
                 >
-                  {submitting && <Loader2 className="mr-1.5 size-3 animate-spin" />}
-                  Create Showroom
+                  {(submitting || geminiPhase === "running") && (
+                    <Loader2 className="mr-1.5 size-3 animate-spin" />
+                  )}
+                  {geminiPhase === "running" ? "Analyzing…" : "Create Showroom"}
                 </Button>
               )}
             </div>
@@ -2291,6 +2297,13 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
           isAppointmentOnly: s.isAppointmentOnly ?? false,
           isFlagshipLocation: s.isFlagshipLocation ?? false,
           isOpenWeekends: s.isOpenWeekends ?? false,
+          hours: s.hours ?? [],
+          heroImageCfImagesUrl: s.heroImageCfImagesUrl ?? null,
+          googleRating: s.googleRating ?? null,
+          userRatingCount: s.userRatingCount ?? null,
+          isLargeSelection: s.isLargeSelection ?? false,
+          isBespoke: s.isBespoke ?? false,
+          isTradeRepRequired: s.isTradeRepRequired ?? false,
         })),
       );
     } catch (e) {
@@ -2334,7 +2347,9 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
         return false;
       if (filters.appointmentOnly && !s.isAppointmentOnly) return false;
       if (filters.flagship && !s.isFlagshipLocation) return false;
-      if (filters.openNow && !isOpenNow(s, pst)) return false;
+      if (filters.openNow && !isOpenNowStructured(s.hours, pst)) return false;
+      if (filters.visited === "visited" && s.userRating == null) return false;
+      if (filters.visited === "unvisited" && s.userRating != null) return false;
       if (
         filters.categories.length > 0 &&
         !filters.categories.some((c) => s.categories.includes(c))

@@ -37,6 +37,7 @@ import {
   showroomProductMappings,
   browserRunPages,
   showroomPhotosMapping,
+  showroomHours,
 } from "@backend/db/schema/showroom/index";
 import {
   brands,
@@ -234,6 +235,54 @@ function deriveHoursSummary(
   const isOpenWeekends = Boolean(hoursJson.sat || hoursJson.sun);
 
   return { weekdayHours, weekendHours, isOpenWeekends };
+}
+
+/** hoursJson day-key ("mon"…"sun") → showroom_hours.day enum. */
+const DAY_KEY_TO_ENUM = {
+  mon: "MONDAY",
+  tue: "TUESDAY",
+  wed: "WEDNESDAY",
+  thu: "THURSDAY",
+  fri: "FRIDAY",
+  sat: "SATURDAY",
+  sun: "SUNDAY",
+} as const;
+
+/** Parse a 24-hour "HH:MM" string into integer hour/minute (clamped, safe). */
+function parseHhmm(hhmm: string): { hour: number; minute: number } {
+  const m = /^(\d{1,2}):(\d{2})$/.exec((hhmm ?? "").trim());
+  if (!m) return { hour: 0, minute: 0 };
+  const hour = Math.min(Math.max(parseInt(m[1], 10) || 0, 0), 23);
+  const minute = Math.min(Math.max(parseInt(m[2], 10) || 0, 0), 59);
+  return { hour, minute };
+}
+
+/**
+ * Convert a structured `hoursJson` (7-key `{open,close}|null`) into normalized
+ * `showroom_hours` insert rows — ONE ROW PER OPEN DAY (closed days are omitted).
+ * This is how intake writes populate the relational hours table that the API
+ * serves and the frontend uses for status/filtering.
+ */
+function hoursJsonToRows(
+  showroomId: number,
+  hoursJson: NonNullable<NonNullable<z.infer<typeof hoursJsonSchema>>>,
+): Array<typeof showroomHours.$inferInsert> {
+  const rows: Array<typeof showroomHours.$inferInsert> = [];
+  for (const [key, day] of Object.entries(DAY_KEY_TO_ENUM)) {
+    const slot = hoursJson[key as keyof typeof hoursJson];
+    if (!slot) continue; // null / absent → closed that day
+    const open = parseHhmm(slot.open);
+    const close = parseHhmm(slot.close);
+    rows.push({
+      showroomId,
+      day,
+      openHour: open.hour,
+      openMinute: open.minute,
+      closeHour: close.hour,
+      closeMinute: close.minute,
+    });
+  }
+  return rows;
 }
 
 const createStoreSchema = z.object({
@@ -1104,7 +1153,7 @@ showroomStoresRouter.get("/", async (c) => {
   // Two independent rating sources are surfaced separately:
   //   - userRatingMap   → the homeowner's own visit rating (store_rating, active)
   //   - onlineRatingMap → aggregated external platform ratings (showroom_store_ratings)
-  const [categoryMap, userRatingMap, onlineRatingMap] = await Promise.all([
+  const [categoryMap, userRatingMap, onlineRatingMap, hoursMap] = await Promise.all([
     includes.has("categories") && storeIds.length > 0
       ? db
           .select({
@@ -1161,6 +1210,42 @@ showroomStoresRouter.get("/", async (c) => {
             return map;
           })
       : Promise.resolve(new Map<number, { sum: number; count: number }>()),
+    // Normalized per-day hours for every store in the list (cards always need
+    // them for open/closed status + weekend cues). One query, grouped by store.
+    storeIds.length > 0
+      ? db
+          .select({
+            showroomId: showroomHours.showroomId,
+            day: showroomHours.day,
+            openHour: showroomHours.openHour,
+            openMinute: showroomHours.openMinute,
+            closeHour: showroomHours.closeHour,
+            closeMinute: showroomHours.closeMinute,
+          })
+          .from(showroomHours)
+          .where(inArray(showroomHours.showroomId, storeIds))
+          .then((hRows) => {
+            const map = new Map<number, Array<Omit<(typeof hRows)[number], "showroomId">>>();
+            for (const h of hRows) {
+              const { showroomId, ...row } = h;
+              const list = map.get(showroomId) ?? [];
+              list.push(row);
+              map.set(showroomId, list);
+            }
+            return map;
+          })
+      : Promise.resolve(
+          new Map<
+            number,
+            Array<{
+              day: string;
+              openHour: number;
+              openMinute: number;
+              closeHour: number;
+              closeMinute: number;
+            }>
+          >(),
+        ),
   ]);
 
   return c.json({
@@ -1170,6 +1255,8 @@ showroomStoresRouter.get("/", async (c) => {
         cityName: r.cityName,
         hubRoute: r.hubRoute,
         hubName: r.hubName,
+        // Normalized per-day hours (only open days; absent day = closed).
+        hours: hoursMap.get(r.store.id) ?? [],
       };
 
       if (includes.has("categories")) {
@@ -1331,11 +1418,24 @@ showroomStoresRouter.get("/:id", async (c) => {
     a.name.localeCompare(b.name)
   );
 
+  // Normalized per-day hours (only open days; absent day = closed).
+  const hours = await db
+    .select({
+      day: showroomHours.day,
+      openHour: showroomHours.openHour,
+      openMinute: showroomHours.openMinute,
+      closeHour: showroomHours.closeHour,
+      closeMinute: showroomHours.closeMinute,
+    })
+    .from(showroomHours)
+    .where(eq(showroomHours.showroomId, storeId));
+
   return c.json({
     ...store.store,
     cityName: store.cityName,
     hubRoute: store.hubRoute,
     hubName: store.hubName,
+    hours,
     products,
     categories: categories.map((r) => ({
       ...r.mapping,
@@ -1474,6 +1574,18 @@ showroomStoresRouter.post("/", async (c) => {
       );
       // chunk is always non-empty here; cast to the non-empty tuple db.batch expects.
       await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
+    }
+  }
+
+  // Normalized per-day hours: one row per OPEN day in showroom_hours (the table
+  // the API serves + the frontend uses for status/filtering). Derived from the
+  // same structured hoursJson the intake editors already send.
+  if (storeValues.hoursJson != null) {
+    const hourRows = hoursJsonToRows(inserted.id, storeValues.hoursJson);
+    if (hourRows.length > 0) {
+      await db.insert(showroomHours).values(
+        hourRows as [(typeof hourRows)[number], ...(typeof hourRows)[number][]],
+      );
     }
   }
 
@@ -1836,6 +1948,20 @@ showroomStoresRouter.put("/:id", async (c) => {
     .returning();
 
   if (!updated) return c.json({ error: "Store not found" }, 404);
+
+  // Keep the normalized showroom_hours rows in lock-step with an edited
+  // hoursJson (the cards + filters read the rows, not hoursJson). Replace-all:
+  // drop this store's rows and re-insert one per open day. Only runs when the
+  // caller actually sent hoursJson, so other PUTs leave hours untouched.
+  if (data.hoursJson != null) {
+    await db.delete(showroomHours).where(eq(showroomHours.showroomId, storeId));
+    const hourRows = hoursJsonToRows(storeId, data.hoursJson);
+    if (hourRows.length > 0) {
+      await db.insert(showroomHours).values(
+        hourRows as [(typeof hourRows)[number], ...(typeof hourRows)[number][]],
+      );
+    }
+  }
 
   // Trigger favicon refresh when websiteUrl changed or icon is missing.
   const incomingUrl = data.websiteUrl ?? null;

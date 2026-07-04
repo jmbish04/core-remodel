@@ -284,6 +284,7 @@ export class GoogleMapsService {
   async placeDetails(
     placeId: string,
     sessionToken?: string,
+    opts?: { skipAi?: boolean },
   ): Promise<Record<string, unknown>> {
     if (!(await this.isUnderMonthlyQuota())) {
       throw new Error("MAPS_QUOTA_EXCEEDED");
@@ -346,6 +347,27 @@ export class GoogleMapsService {
       throw new Error(`PLACES_DETAILS_ERROR: ${errMsg}`);
     }
 
+    // Two-phase intake UX: when `skipAi` is set the caller wants the raw Google
+    // fields immediately and will run the (slow) Gemini analysis in a second
+    // request via `computeReviewInsight` — so the modal can prefill first, then
+    // show AI progress. When not skipping, run it inline as before.
+    if (!opts?.skipAi) {
+      await this.computeReviewInsight(data);
+    }
+
+    return data;
+  }
+
+  /**
+   * Gemini review analysis + structured inference. Mutates `data` in place,
+   * setting `data.aiInference` and replacing `data.reviewSummary` with the
+   * Gemini summary when the place has an identity. Extracted from
+   * `placeDetails` so the intake UI can prefill Google fields first (via
+   * `placeDetails(..., { skipAi: true })`) and call this second for a two-phase
+   * progress UX. The caller passes the already-fetched place payload, so this
+   * triggers NO additional Places Details billing.
+   */
+  async computeReviewInsight(data: Record<string, unknown>): Promise<void> {
     // ── Gemini review analysis + structured inference (via AI Gateway) ──────
     // Replaces Google's `reviewSummary` with a richer homeowner-framed Gemini
     // analysis using Google-Search grounding.
@@ -858,8 +880,6 @@ Rules for each field:
         console.error("[placeDetails] Gemini summary failed:", aiErr);
       }
     }
-
-    return data;
   }
 
   // ─── Commute (existing — untouched) ──────────────────────────────────────
