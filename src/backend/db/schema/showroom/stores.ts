@@ -1,5 +1,11 @@
 import { sql } from "drizzle-orm";
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import {
+  sqliteTable,
+  text,
+  integer,
+  real,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 import { storeBayareaCities } from "./bay_area_cities";
 
@@ -273,6 +279,16 @@ export const showroomStores = sqliteTable("showroom_stores", {
   googleRating: real("google_rating"),
 
   /**
+   * Google Places place ID for this showroom location.
+   * Nullable — manual (non-Places) entries have no place ID.
+   * Uniquely indexed (see `placeIdUniq` below) to prevent
+   * intaking the same Google place twice; SQLite treats multiple `NULL`
+   * values as distinct, so any number of manual-entry rows with a null
+   * `place_id` are permitted — only non-null duplicates are blocked.
+   */
+  placeId: text("place_id"),
+
+  /**
    * Google Places total review count for this location.
    * Sourced from the Places API `userRatingCount` field; refreshed by the
    * scrape agent alongside `googleRating`.
@@ -398,7 +414,14 @@ export const showroomStores = sqliteTable("showroom_stores", {
   updatedAt: integer("updated_at", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),
-});
+}, (t) => ({
+  /**
+   * Prevents intaking the same Google place twice. SQLite treats multiple
+   * `NULL`s as distinct, so manual-entry rows (no `placeId`) are unaffected —
+   * only non-null `placeId` duplicates are rejected.
+   */
+  placeIdUniq: uniqueIndex("showroom_stores_place_id_uniq").on(t.placeId),
+}));
 
 export type ShowroomStore = typeof showroomStores.$inferSelect;
 export type ShowroomStoreInsert = typeof showroomStores.$inferInsert;

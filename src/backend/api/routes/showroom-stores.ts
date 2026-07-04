@@ -248,6 +248,12 @@ const createStoreSchema = z.object({
   zipCode: z.string().optional().nullable(),
   googleMapsLink: z.string().optional().nullable(),
   /**
+   * Google Places API `place_id` for this showroom. Used to prevent
+   * duplicate showroom creation from the same Places selection — see
+   * `showroom_stores_place_id_uniq` and the POST / dedup check below.
+   */
+  placeId: z.string().optional().nullable(),
+  /**
    * Structured opening hours — source of truth when provided.
    *
    * When present on create or update, the server derives and overwrites
@@ -1379,15 +1385,75 @@ showroomStoresRouter.post("/", async (c) => {
     storeValues.isOpenWeekends = derived.isOpenWeekends;
   }
 
-  const [inserted] = await db
-    .insert(showroomStores)
-    .values({
-      ...storeValues,
-      // Cast the lenient passthrough object to the column's typed shape.
-      // The column is text-json; any JSON-serialisable object is safe at runtime.
-      reviewAiInsight: (reviewAiInsight ?? null) as typeof showroomStores.$inferInsert["reviewAiInsight"],
-    })
-    .returning();
+  // ── Duplicate prevention by Google Places place_id ──────────────────────
+  // Pre-check before inserting: if a showroom already exists for this
+  // place_id, short-circuit with 409 rather than let the unique constraint
+  // fail (or worse, silently create a duplicate on a schema that lacked the
+  // index). The insert below is ALSO try/catch-guarded to close the race
+  // between this check and the insert.
+  if (typeof data.placeId === "string" && data.placeId.length > 0) {
+    const [existingByPlaceId] = await db
+      .select({ id: showroomStores.id, name: showroomStores.name })
+      .from(showroomStores)
+      .where(eq(showroomStores.placeId, data.placeId))
+      .limit(1);
+
+    if (existingByPlaceId) {
+      return c.json(
+        {
+          success: false,
+          error: "This showroom has already been added.",
+          existingId: existingByPlaceId.id,
+          existingName: existingByPlaceId.name,
+        },
+        409,
+      );
+    }
+  }
+
+  let inserted: typeof showroomStores.$inferSelect;
+  try {
+    [inserted] = await db
+      .insert(showroomStores)
+      .values({
+        ...storeValues,
+        // Cast the lenient passthrough object to the column's typed shape.
+        // The column is text-json; any JSON-serialisable object is safe at runtime.
+        reviewAiInsight: (reviewAiInsight ?? null) as typeof showroomStores.$inferInsert["reviewAiInsight"],
+      })
+      .returning();
+  } catch (err: any) {
+    // Guards the race between the pre-check above and this insert (e.g. two
+    // concurrent submits for the same Places selection). Only the place_id
+    // unique constraint is expected to trip here.
+    const message = err?.message ?? String(err);
+    if (message.includes("UNIQUE") || message.toLowerCase().includes("constraint")) {
+      let existingId: number | null = null;
+      let existingName: string | null = null;
+      if (typeof data.placeId === "string" && data.placeId.length > 0) {
+        const [existingByPlaceId] = await db
+          .select({ id: showroomStores.id, name: showroomStores.name })
+          .from(showroomStores)
+          .where(eq(showroomStores.placeId, data.placeId))
+          .limit(1);
+        if (existingByPlaceId) {
+          existingId = existingByPlaceId.id;
+          existingName = existingByPlaceId.name;
+        }
+      }
+      return c.json(
+        {
+          success: false,
+          error: "This showroom has already been added.",
+          existingId,
+          existingName,
+        },
+        409,
+      );
+    }
+    console.error("[showroom-stores] POST / insert error:", err);
+    return c.json({ success: false, error: "Failed to create store" }, 500);
+  }
 
   // Attach inferred category mappings when provided.
   //
@@ -1948,6 +2014,41 @@ showroomStoresRouter.get("/meta/categories", async (c) => {
     .where(eq(showroomStoreCategory.isActive, true));
 
   return c.json({ categories });
+});
+
+const placeExistsQuerySchema = z.object({
+  placeId: z.string().min(1),
+});
+
+/**
+ * GET /meta/place-exists — Pre-check whether a showroom already exists for a
+ * given Google Places `place_id`.
+ *
+ * Lets the frontend warn the homeowner at Places-autocomplete selection time,
+ * before they fill out the intake form and hit the POST / dedup guard.
+ *
+ * Query: ?placeId=<Google Places place_id>
+ */
+showroomStoresRouter.get("/meta/place-exists", async (c) => {
+  const parsed = placeExistsQuerySchema.safeParse({
+    placeId: c.req.query("placeId"),
+  });
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+
+  const db = drizzle(c.env.DB);
+  const [existing] = await db
+    .select({ id: showroomStores.id, name: showroomStores.name })
+    .from(showroomStores)
+    .where(eq(showroomStores.placeId, parsed.data.placeId))
+    .limit(1);
+
+  return c.json({
+    exists: Boolean(existing),
+    showroomId: existing?.id ?? null,
+    name: existing?.name ?? null,
+  });
 });
 
 // ─── CITIES ───────────────────────────────────────────────────────────────────

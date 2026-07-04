@@ -158,17 +158,16 @@ photoReviewsRouter.post("/:id", async (c) => {
     if (body.visibleCaption !== undefined)
       updates.visibleCaption = body.visibleCaption;
 
-    await db
+    const [updated] = await db
       .update(imageReviews)
       .set(updates)
       .where(eq(imageReviews.id, id))
-      .run();
+      .returning();
 
-    const updated = await db
-      .select()
-      .from(imageReviews)
-      .where(eq(imageReviews.id, id))
-      .get();
+    if (!updated) {
+      return c.json({ error: "Not found" }, 404);
+    }
+
     return c.json({ success: true, image: updated });
   } catch (error) {
     console.error("Update error:", error);

@@ -405,8 +405,16 @@ const PlaceDetailsResponseSchema = z
         // Internal metadata — not for display; useful for debugging.
         _meta: z
           .object({
-            groundingUsed: z.boolean().optional(),
+            engine: z
+              .enum(["interactions", "gateway"])
+              .optional()
+              .openapi({
+                description:
+                  '"interactions" when the direct Gemini Interactions API (Google Search grounded) ' +
+                  'produced this result; "gateway" when it fell back to the AI-Gateway generateContent path.',
+              }),
             model: z.string().optional(),
+            groundingUsed: z.boolean().optional(),
           })
           .passthrough()
           .optional()

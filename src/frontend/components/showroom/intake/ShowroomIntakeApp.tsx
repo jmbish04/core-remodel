@@ -63,7 +63,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -506,6 +506,15 @@ export function ShowroomIntakeApp() {
   // Full AI inference object, forwarded verbatim in the submit body so the backend
   // can persist it + auto-create brands. Cleared on discard/save.
   const [reviewAiInsight, setReviewAiInsight] = useState<AiInference | null>(null);
+  // The selected Google Place ID (from the details `place.id`). Forwarded to the
+  // create endpoint as `placeId` for server-side dedupe. Cleared on discard/save.
+  const [placeId, setPlaceId] = useState<string | null>(null);
+  // Set when the selected place is already in the directory (pre-check hit, or a
+  // defensive 409 from the POST). Drives a prominent warning card + blocks submit.
+  const [dupWarning, setDupWarning] = useState<{
+    showroomId: number;
+    name: string;
+  } | null>(null);
 
   const form = useForm<ShowroomIntakeInput, unknown, ShowroomIntakeValues>({
     resolver: zodResolver(showroomIntakeSchema),
@@ -589,6 +598,12 @@ export function ShowroomIntakeApp() {
         }
         const place = (await res.json()) as GooglePlaceDetails;
 
+        // Track the selected Google Place ID for dedupe (pre-check + submit body).
+        // A fresh selection clears any prior duplicate warning until re-checked.
+        const selectedPlaceId = place.id ?? null;
+        setPlaceId(selectedPlaceId);
+        setDupWarning(null);
+
         const mapped = mapPlaceToIntake(place);
         const h = mapPlaceToHoursJson(place.regularOpeningHours);
         const resolvedIds = resolveCategoryIds(
@@ -633,29 +648,40 @@ export function ShowroomIntakeApp() {
           rationales.isTradeRepRequired = attrs.tradeRepRequired.rationale;
         setAttrRationales(rationales);
 
-        // ── Price fallback ──
-        // Prefer Google's structured priceLevel (already in mapped.pricePoint).
-        // Otherwise fall back to the AI's inferred tier — but ONLY when it is a
-        // real `$` tier. `PRICE_LEVEL_UNSPECIFIED` (or null) means the AI found no
-        // usable price signal: do NOT apply it (the enum must never reach the
-        // Select) — instead surface a muted "no signal" note.
+        // ── Price: PREFER Gemini over Google ──
+        // Gemini now ALWAYS returns `aiInference.inferredPricePoint` (its own read
+        // of the reviews; `"PRICE_LEVEL_UNSPECIFIED"` when it finds no clear signal)
+        // plus `priceReasoning`. Precedence:
+        //   1. Gemini real tier (`$`…`$$$$`)      → use it (amber "Inferred (AI)" note).
+        //   2. Gemini PRICE_LEVEL_UNSPECIFIED     → fall back to Google's mapped
+        //      pricePoint if present (muted note); else blank + no-signal note.
+        //   3. No aiInference block at all        → Google's mapped pricePoint as before.
         const rawInferred = ai?.inferredPricePoint ?? null;
         const isRealTier =
           rawInferred === "$" ||
           rawInferred === "$$" ||
           rawInferred === "$$$" ||
           rawInferred === "$$$$";
-        const didInferPrice = !mapped.pricePoint && isRealTier;
-        const resolvedPricePoint = mapped.pricePoint
-          ? mapped.pricePoint
-          : isRealTier
-            ? (rawInferred as ShowroomIntakeInput["pricePoint"])
-            : undefined;
+        const geminiUnspecified = rawInferred === "PRICE_LEVEL_UNSPECIFIED";
+
+        let resolvedPricePoint: ShowroomIntakeInput["pricePoint"];
+        let didInferPrice = false; // Gemini's real tier was applied
+        let noSignal = false; // muted "no clear signal" note
+        if (isRealTier) {
+          // 1. Gemini has a clear read → prefer it over Google.
+          resolvedPricePoint = rawInferred as ShowroomIntakeInput["pricePoint"];
+          didInferPrice = true;
+        } else if (geminiUnspecified) {
+          // 2. Gemini found no signal → fall back to Google's mapped price if any.
+          resolvedPricePoint = mapped.pricePoint ?? undefined;
+          noSignal = true;
+        } else {
+          // 3. No aiInference block → Google's mapped price as before.
+          resolvedPricePoint = mapped.pricePoint ?? undefined;
+        }
         setPriceInferred(didInferPrice);
         setPriceReasoning(didInferPrice ? (ai?.priceReasoning ?? null) : null);
-        setPriceNoSignal(
-          !mapped.pricePoint && rawInferred === "PRICE_LEVEL_UNSPECIFIED",
-        );
+        setPriceNoSignal(noSignal);
 
         // ── AI insight surfaces ── authenticity, brands, and the full object for
         // the submit body (backend persists it + auto-creates brands).
@@ -697,6 +723,39 @@ export function ShowroomIntakeApp() {
 
         // Successful details call closes the billing session → new token next search.
         sessionTokenRef.current = crypto.randomUUID();
+
+        // ── Duplicate pre-check ── block re-intaking a place already in the
+        // directory. Non-fatal: a failed check just skips the warning (the POST
+        // still guards with a 409). Only runs when Google returned a place id.
+        if (selectedPlaceId) {
+          try {
+            const dupRes = await fetch(
+              `/api/showroom-stores/meta/place-exists?placeId=${encodeURIComponent(
+                selectedPlaceId,
+              )}`,
+              { credentials: "include" },
+            );
+            if (dupRes.ok) {
+              const dup = (await dupRes.json()) as {
+                exists?: boolean;
+                showroomId?: number;
+                name?: string;
+              };
+              if (dup.exists && typeof dup.showroomId === "number") {
+                setDupWarning({
+                  showroomId: dup.showroomId,
+                  name: dup.name ?? "this business",
+                });
+                toast.warning(
+                  `${dup.name ?? "This business"} is already in the directory.`,
+                );
+              }
+            }
+          } catch (dupErr) {
+            // Pre-check is best-effort — swallow so it never blocks autofill.
+            console.error("[intake/place-exists]", dupErr);
+          }
+        }
       } catch (err) {
         console.error("[intake/details]", err);
         toast.error(err instanceof Error ? err.message : "Failed to load place details");
@@ -713,6 +772,9 @@ export function ShowroomIntakeApp() {
   const handleEnterManually = useCallback(() => {
     const typed = searchQuery.trim();
     if (typed) setValue("name", typed, { shouldDirty: true });
+    // Manual entry abandons any Google place → drop its id + any dup warning.
+    setPlaceId(null);
+    setDupWarning(null);
     setActiveTab("location");
   }, [searchQuery, setValue]);
 
@@ -732,6 +794,13 @@ export function ShowroomIntakeApp() {
 
   // ── Submit → POST /api/showroom-stores ──
   const onSubmit = handleSubmit(async (values) => {
+    // Hard-block submit while a duplicate warning is active — the selected place
+    // is already in the directory. (The button is also disabled; this guards the
+    // Enter-key path.)
+    if (dupWarning) {
+      toast.error(`${dupWarning.name} is already in the directory.`);
+      return;
+    }
     // Strip empty strings so we send `undefined` (server treats absent as null)
     // rather than persisting "". Booleans + categoryIds always pass through.
     // NOTE: email / POC / instagram / inventoryFocus / scale / targetDemographic /
@@ -777,6 +846,8 @@ export function ShowroomIntakeApp() {
     // attribute rationales, and review-authenticity, and auto-creates any detected
     // brands. Sent verbatim; null on manual entry / places without an AI block.
     body.reviewAiInsight = reviewAiInsight;
+    // Selected Google Place ID → lets the server dedupe on the canonical id.
+    if (placeId) body.placeId = placeId;
 
     try {
       const res = await fetch("/api/showroom-stores", {
@@ -785,6 +856,28 @@ export function ShowroomIntakeApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
+      // Defensive dedupe: the server returns 409 when this place is already in the
+      // directory (race with the pre-check, or a manual placeId collision). Parse
+      // the existing store id/name → toast + raise the dup warning card (not a
+      // generic error), so the user gets the same "View existing" affordance.
+      if (res.status === 409) {
+        const payload = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          existingId?: number;
+          existingName?: string;
+        };
+        if (typeof payload.existingId === "number") {
+          setDupWarning({
+            showroomId: payload.existingId,
+            name: payload.existingName ?? "this business",
+          });
+        }
+        toast.error(
+          payload.error ??
+            `${payload.existingName ?? "This business"} is already in the directory.`,
+        );
+        return;
+      }
       if (!res.ok) {
         const payload = (await res.json().catch(() => ({}))) as { error?: string };
         throw new Error(payload.error ?? `Create failed (${res.status})`);
@@ -804,6 +897,8 @@ export function ShowroomIntakeApp() {
       setReviewAuthenticity(null);
       setDetectedBrands([]);
       setReviewAiInsight(null);
+      setPlaceId(null);
+      setDupWarning(null);
       sessionTokenRef.current = crypto.randomUUID();
       setSessionEpoch((n) => n + 1);
     } catch (err) {
@@ -876,7 +971,15 @@ export function ShowroomIntakeApp() {
                 onSelect={handleSelectPlace}
                 disabled={loadingPlace}
                 query={searchQuery}
-                onQueryChange={setSearchQuery}
+                onQueryChange={(value) => {
+                  setSearchQuery(value);
+                  // Clearing/retyping the search abandons the current place → drop
+                  // its id + any dup warning until a new place is selected.
+                  if (value.trim().length === 0) {
+                    setPlaceId(null);
+                    setDupWarning(null);
+                  }
+                }}
               />
               {loadingPlace ? (
                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -895,6 +998,40 @@ export function ShowroomIntakeApp() {
                 </Button>
               )}
             </Card>
+
+            {/* Duplicate warning — this place is already in the directory. */}
+            {dupWarning && (
+              <Card className="flex flex-col gap-3 p-4 ring-1 ring-amber-500/40 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                <div className="flex items-start gap-2.5">
+                  <span
+                    className="mt-0.5 text-base leading-none text-amber-400"
+                    aria-hidden="true"
+                  >
+                    ⚠
+                  </span>
+                  <div className="space-y-0.5">
+                    <p className="text-sm font-semibold text-amber-300">
+                      Already added: {dupWarning.name}
+                    </p>
+                    <p className="text-[12px] text-muted-foreground">
+                      This business is already in the showroom directory. Saving is
+                      blocked to avoid a duplicate.
+                    </p>
+                  </div>
+                </div>
+                <a
+                  href={`/admin/showroom/store/${dupWarning.showroomId}`}
+                  className={buttonVariants({
+                    variant: "secondary",
+                    size: "sm",
+                    className: "shrink-0 gap-1.5",
+                  })}
+                >
+                  <ExternalLink className="size-3.5" />
+                  View existing
+                </a>
+              </Card>
+            )}
 
             <Card className="space-y-4 p-4 sm:p-5">
               <FormRow label="Name" htmlFor="name">
@@ -1163,8 +1300,9 @@ export function ShowroomIntakeApp() {
                     <p className="flex items-start gap-1 text-[11px] text-muted-foreground/70">
                       <Sparkles className="mt-px size-3 shrink-0" />
                       <span>
-                        AI found no reliable price signal in the reviews — set the
-                        price level manually if you know it.
+                        {pricePoint
+                          ? "Google priceLevel; Gemini found no clear signal in the reviews."
+                          : "AI found no reliable price signal in the reviews — set the price level manually if you know it."}
                       </span>
                     </p>
                   ) : (
@@ -1293,6 +1431,17 @@ export function ShowroomIntakeApp() {
 
           <Separator className="bg-border/40" />
 
+          {dupWarning && (
+            <div className="flex items-start gap-2 rounded-lg bg-amber-500/5 px-4 py-3 ring-1 ring-amber-500/40">
+              <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-400" />
+              <p className="text-[13px] text-amber-300">
+                <span className="font-medium">{dupWarning.name}</span> is already in
+                the directory — clear the search or pick a different business to
+                continue.
+              </p>
+            </div>
+          )}
+
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button
               type="button"
@@ -1312,6 +1461,8 @@ export function ShowroomIntakeApp() {
                 setReviewAuthenticity(null);
                 setDetectedBrands([]);
                 setReviewAiInsight(null);
+                setPlaceId(null);
+                setDupWarning(null);
                 sessionTokenRef.current = crypto.randomUUID();
                 setSessionEpoch((n) => n + 1);
               }}
@@ -1319,7 +1470,11 @@ export function ShowroomIntakeApp() {
             >
               Discard
             </Button>
-            <Button type="submit" disabled={isSubmitting} className="gap-1.5">
+            <Button
+              type="submit"
+              disabled={isSubmitting || !!dupWarning}
+              className="gap-1.5"
+            >
               {isSubmitting ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (

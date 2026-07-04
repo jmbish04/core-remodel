@@ -1514,6 +1514,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
   const [submitting, setSubmitting] = useState(false);
   const emptyForm = {
     name: "",
+    placeId: null as string | null,
     description: "",
     pricePoint: "",
     websiteUrl: "",
@@ -1534,6 +1535,10 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
   };
   const [form, setForm] = useState({ ...emptyForm });
   const [loadingPlace, setLoadingPlace] = useState(false);
+  // Set when the selected Google Place is already in the directory (from the
+  // pre-check on select, or defensively from a 409 on submit). Drives the
+  // prominent "already added" banner AND blocks the Create button.
+  const [dupWarning, setDupWarning] = useState<{ showroomId: number; name: string } | null>(null);
   // Per-field autofill diagnostics from the mapper — powers the red DiagNote
   // labels next to each field explaining why Google didn't fill it.
   const [diagnostics, setDiagnostics] = useState<IntakeDiagnostics>({});
@@ -1631,23 +1636,40 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
         setReviewAuthenticity(ai?.reviewAuthenticity ?? null);
         setDetectedBrands(ai?.brands ?? null);
 
-        // Price: prefer Google's structured priceLevel. Else, only apply the
-        // AI-inferred tier when it is a REAL tier ($, $$, $$$, $$$$). If the AI
-        // reviewed the reviews and found no pricing signal at all, it returns
-        // the "PRICE_LEVEL_UNSPECIFIED" enum — never surface that literal in the
-        // Select; instead show a "no signal" note.
+        // Price: PREFER Gemini's informed read. Gemini now ALWAYS returns
+        // `inferredPricePoint` — a real tier ($, $$, $$$, $$$$) when it found a
+        // signal, or the "PRICE_LEVEL_UNSPECIFIED" enum when it found none.
+        //  1. Gemini returned a REAL tier → use it, mark inferred + reasoning.
+        //  2. Gemini returned UNSPECIFIED → fall back to Google's mapped
+        //     priceLevel if present (noted), else leave blank + no-signal note.
+        //  3. No aiInference at all → Google's mapped priceLevel as before.
         const REAL_TIERS = new Set(["$", "$$", "$$$", "$$$$"]);
         const aiTier = ai?.inferredPricePoint ?? null;
-        const inferredPrice =
-          !mapped.pricePoint && aiTier && REAL_TIERS.has(aiTier) ? aiTier : null;
-        const resolvedPrice = mapped.pricePoint ?? inferredPrice ?? "";
-        setPriceInferred(Boolean(inferredPrice));
-        setPriceReasoning(inferredPrice ? ai?.priceReasoning ?? null : null);
-        setPriceNoSignal(
-          !mapped.pricePoint && aiTier === "PRICE_LEVEL_UNSPECIFIED"
-            ? "AI reviewed the reviews and found no pricing signal (PRICE_LEVEL_UNSPECIFIED)."
-            : null,
-        );
+        let resolvedPrice = "";
+        let priceIsInferred = false;
+        let priceReason: string | null = null;
+        let noSignalNote: string | null = null;
+        if (aiTier && REAL_TIERS.has(aiTier)) {
+          // Gemini has a confident tier — it wins over Google.
+          resolvedPrice = aiTier;
+          priceIsInferred = true;
+          priceReason = ai?.priceReasoning ?? null;
+        } else if (aiTier === "PRICE_LEVEL_UNSPECIFIED") {
+          // Gemini found no signal — fall back to Google's structured level.
+          if (mapped.pricePoint) {
+            resolvedPrice = mapped.pricePoint;
+            noSignalNote = "Google priceLevel; Gemini found no clear signal.";
+          } else {
+            noSignalNote =
+              "AI reviewed the reviews and found no pricing signal (PRICE_LEVEL_UNSPECIFIED).";
+          }
+        } else {
+          // No aiInference at all — Google's mapped priceLevel as before.
+          resolvedPrice = mapped.pricePoint ?? "";
+        }
+        setPriceInferred(priceIsInferred);
+        setPriceReasoning(priceReason);
+        setPriceNoSignal(noSignalNote);
 
         // AI attributes → boolean flags, plus per-flag rationales for display.
         const attrs = ai?.attributes ?? null;
@@ -1675,8 +1697,13 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
           setAttrRationales({});
         }
 
+        // The Google Place ID drives duplicate prevention (pre-check below + a
+        // 409 guard on submit). May be absent on rare Details responses.
+        const selectedPlaceId = place.id ?? null;
+
         update({
           name: mapped.name ?? form.name,
+          placeId: selectedPlaceId,
           description: mapped.description ?? "",
           pricePoint: resolvedPrice,
           websiteUrl: mapped.websiteUrl ?? "",
@@ -1700,6 +1727,31 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
         // Successful details call closes the billing session → new token next search.
         sessionTokenRef.current = crypto.randomUUID();
         toast.success("Details pulled from Google — review and edit as needed.");
+
+        // Duplicate pre-check: block re-intaking a Place that's already in the
+        // directory. Clears any stale warning first, then flags a dup if found.
+        setDupWarning(null);
+        if (selectedPlaceId) {
+          try {
+            const exRes = await fetch(
+              `/api/showroom-stores/meta/place-exists?placeId=${encodeURIComponent(selectedPlaceId)}`,
+              { credentials: "include" },
+            );
+            if (exRes.ok) {
+              const ex = (await exRes.json()) as {
+                exists: boolean;
+                showroomId: number | null;
+                name: string | null;
+              };
+              if (ex.exists && ex.showroomId != null) {
+                setDupWarning({ showroomId: ex.showroomId, name: ex.name ?? mapped.name ?? "this showroom" });
+              }
+            }
+          } catch (exErr) {
+            // Non-fatal: the 409 guard on submit is the backstop.
+            console.error("[directory/place-exists]", exErr);
+          }
+        }
       } catch (e) {
         console.error("[directory/details]", e);
         toast.error(e instanceof Error ? e.message : "Failed to load place details");
@@ -1718,6 +1770,8 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
     setSubmitting(true);
     try {
       const body: Record<string, unknown> = { name: form.name.trim() };
+      // Google Places place_id — enables backend duplicate prevention.
+      if (form.placeId) body.placeId = form.placeId;
       if (form.description) body.description = form.description;
       if (form.pricePoint) body.pricePoint = form.pricePoint;
       if (form.websiteUrl) body.websiteUrl = form.websiteUrl;
@@ -1753,6 +1807,21 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
 
       if (!res.ok) {
         const err = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+        // Defensive dup handling: a 409 means this Place is already in the
+        // directory (pre-check may have been skipped). Surface the banner +
+        // toast rather than a generic error, and don't reset the form.
+        if (res.status === 409) {
+          const existingId = err.existingId as number | null | undefined;
+          const existingName = (err.existingName as string | null | undefined) ?? form.name.trim();
+          if (typeof existingId === "number") {
+            setDupWarning({ showroomId: existingId, name: existingName });
+            setStep(0);
+          }
+          toast.error(
+            (err.error as string) ?? "This showroom has already been added.",
+          );
+          return;
+        }
         throw new Error((err.error as string) ?? `Failed (${res.status})`);
       }
 
@@ -1760,6 +1829,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
       setOpen(false);
       setStep(0);
       setForm({ ...emptyForm });
+      setDupWarning(null);
       setDiagnostics({});
       setPlacePhotos([]);
       setPriceInferred(false);
@@ -1818,11 +1888,35 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
           <div className="mt-2 space-y-3">
             {step === 0 && (
               <>
+                {dupWarning && (
+                  <div className="rounded-lg bg-amber-500/10 p-3 ring-1 ring-amber-500/30">
+                    <p className="text-sm font-medium text-amber-300">
+                      ⚠ Already added: {dupWarning.name}
+                    </p>
+                    <p className="mt-1 text-[11px] text-amber-200/70">
+                      This Google Place is already in the directory. You can't add it
+                      twice.
+                    </p>
+                    <a
+                      href={`/admin/showroom/store/${dupWarning.showroomId}`}
+                      className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-sky-400 hover:text-sky-300"
+                    >
+                      <StoreIcon className="size-3" />
+                      View existing
+                    </a>
+                  </div>
+                )}
                 <div>
                   <Label htmlFor="name">Name *</Label>
                   <ShowroomNameSearch
                     value={form.name}
-                    onChange={(v) => update({ name: v })}
+                    onChange={(v) => {
+                      // Typing/clearing the name breaks the tie to the selected
+                      // Place → drop the placeId and any dup warning so the
+                      // banner + submit-block don't linger on manual edits.
+                      update({ name: v, placeId: null });
+                      if (dupWarning) setDupWarning(null);
+                    }}
                     onSelect={handleSelectPlace}
                     sessionTokenRef={sessionTokenRef}
                     disabled={loadingPlace}
@@ -2092,6 +2186,23 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
             )}
           </div>
 
+          {/* Dup banner near the submit control — mirrors the Search-tab warning
+              so the reason for the disabled Create button is always visible. */}
+          {dupWarning && step === steps.length - 1 && (
+            <div className="mt-4 rounded-lg bg-amber-500/10 p-3 ring-1 ring-amber-500/30">
+              <p className="text-sm font-medium text-amber-300">
+                ⚠ Already added: {dupWarning.name}
+              </p>
+              <a
+                href={`/admin/showroom/store/${dupWarning.showroomId}`}
+                className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-sky-400 hover:text-sky-300"
+              >
+                <StoreIcon className="size-3" />
+                View existing
+              </a>
+            </div>
+          )}
+
           {/* Navigation */}
           <div className="mt-4 flex justify-between">
             <Button size="sm" variant="ghost" onClick={() => setStep(Math.max(0, step - 1))} disabled={step === 0}>
@@ -2103,7 +2214,11 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
                   Next
                 </Button>
               ) : (
-                <Button size="sm" onClick={handleSubmit} disabled={submitting || !form.name.trim()}>
+                <Button
+                  size="sm"
+                  onClick={handleSubmit}
+                  disabled={submitting || !form.name.trim() || dupWarning !== null}
+                >
                   {submitting && <Loader2 className="mr-1.5 size-3 animate-spin" />}
                   Create Showroom
                 </Button>
