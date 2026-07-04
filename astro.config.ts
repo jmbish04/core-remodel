@@ -27,25 +27,11 @@ export default defineConfig({
     prefetchAll: true,
     defaultStrategy: "hover",
   },
-  // Preserve old URLs after the showroom→shopping rebrand and the admin-route
-  // normalization (pages moved under /admin/*). `output: "server"` runs these on
-  // the Worker, so bookmarks / QR codes / prod links keep resolving.
-  redirects: {
-    "/admin/showroom": "/admin/shopping",
-    "/admin/showroom/[...rest]": "/admin/shopping/[...rest]",
-    "/admin/shopping-journal": "/admin/shopping/journal",
-    "/rooms/closets": "/admin/shopping/closets",
-    "/uploads": "/admin/uploads",
-    "/review": "/admin/review",
-    "/photo-edits": "/admin/photo-edits",
-    "/builder": "/admin/builder",
-    "/gallery": "/admin/gallery",
-    "/budget-tracker": "/admin/budget-tracker",
-    "/budget-dashboard": "/admin/budget-dashboard",
-    "/bid-portfolios": "/admin/bid-portfolios",
-    "/measure": "/admin/measure",
-    "/measurements": "/admin/measurements",
-  },
+  // NOTE: legacy-URL redirects for the showroom→shopping rebrand and the
+  // admin-route normalization are handled in `src/_worker.ts` (prefix-based, 301),
+  // NOT via Astro's `redirects` config — the Cloudflare adapter mis-generates a
+  // self-referential `_redirects` splat rule for dynamic destinations, which
+  // wrangler rejects at deploy time ("infinite loop detected").
   vite: {
     plugins: [tailwindcss()],
   },
