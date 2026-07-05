@@ -69,7 +69,7 @@ const PHASES: Phase[] = [
       { label: "Showrooms directory + Bay-Area hub map + GapPanel", done: true },
       { label: "discover-from-materials via showroom GapPanel", done: true },
       { label: "Products catalog grid + /catalog/products endpoint", done: true },
-      { label: "Retire ShowroomDashboard (thin launcher at /admin/showroom)", done: true },
+      { label: "Retire ShowroomDashboard (thin launcher at /admin/shopping)", done: true },
     ],
   },
   {

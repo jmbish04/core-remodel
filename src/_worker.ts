@@ -32,12 +32,51 @@ export { DeepResearchAgent } from "./backend/ai/agents/DeepResearchAgent/index";
 export { RemodelOrchestrator } from "./backend/ai/agents/RemodelOrchestrator";
 export { AdminChatAgent } from "./backend/ai/agents/AdminChatAgent";
 
+/**
+ * Legacy → new page-path redirects (301), applied prefix-first so sub-paths and
+ * query strings carry over. Covers the showroom→shopping rebrand and the
+ * admin-route normalization (root pages moved under /admin/*).
+ *
+ * Handled here rather than via Astro's `redirects` config because the Cloudflare
+ * adapter emits a malformed self-referential `_redirects` splat rule for dynamic
+ * destinations (wrangler rejects it: "infinite loop detected").
+ *
+ * Prefix matching uses `=== from || startsWith(from + "/")`, so `/admin/showroom`
+ * never swallows the distinct legacy `/admin/showrooms/...` route, and `/measure`
+ * never swallows `/measurements`.
+ */
+const LEGACY_REDIRECTS: ReadonlyArray<readonly [string, string]> = [
+  ["/admin/showroom", "/admin/shopping"],
+  ["/admin/shopping-journal", "/admin/shopping/journal"],
+  ["/rooms/closets", "/admin/shopping/closets"],
+  ["/uploads", "/admin/uploads"],
+  ["/review", "/admin/review"],
+  ["/photo-edits", "/admin/photo-edits"],
+  ["/builder", "/admin/builder"],
+  ["/gallery", "/admin/gallery"],
+  ["/budget-tracker", "/admin/budget-tracker"],
+  ["/budget-dashboard", "/admin/budget-dashboard"],
+  ["/bid-portfolios", "/admin/bid-portfolios"],
+  ["/measure", "/admin/measure"],
+  ["/measurements", "/admin/measurements"],
+];
+
 const handler: ExportedHandler<Env> = {
   async fetch(request, env, ctx) {
     const agentResponse = await routeAgentRequest(request, env);
     if (agentResponse) return agentResponse;
 
     const url = new URL(request.url);
+
+    // Legacy-path 301s (rebrand + admin-route normalization). Runs before auth so
+    // old bookmarks land on the new URL (and then hit the /admin auth gate there).
+    for (const [from, to] of LEGACY_REDIRECTS) {
+      if (url.pathname === from || url.pathname.startsWith(`${from}/`)) {
+        const rest = url.pathname.slice(from.length);
+        return Response.redirect(`${url.origin}${to}${rest}${url.search}`, 301);
+      }
+    }
+
     const protectedPaths = [
       "/admin",
       "/uploads",

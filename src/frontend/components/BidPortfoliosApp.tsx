@@ -352,7 +352,7 @@ export function BidPortfoliosApp() {
   // ── Portfolio CRUD ────────────────────────────────────────────────
 
   const openNewPortfolio = () => {
-    window.location.href = "/bid-portfolios/new";
+    window.location.href = "/admin/bid-portfolios/new";
   };
 
   const openEditPortfolio = (portfolio: Portfolio) => {

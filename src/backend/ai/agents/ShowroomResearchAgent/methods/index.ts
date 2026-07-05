@@ -14,3 +14,11 @@ export {
   runApprovedSweep,
   type DiscoverSweepPlanInput,
 } from "./sweep-plan";
+export {
+  fillBlanksFromPlacesAI,
+  runBackfillPhotoPipeline,
+  triggerBackfillScrape,
+  hasExistingFindings,
+  type BackfillEnrichPayload,
+  type BackfillPhotoRef,
+} from "./backfill";

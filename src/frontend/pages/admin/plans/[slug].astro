@@ -1,0 +1,15 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { PlanBoardApp } from "@/components/plans/PlanBoardApp";
+
+const { slug } = Astro.params;
+---
+
+<BaseLayout
+  title="Roadmap Plans — The Monolith"
+  description="Live task board and progress monitor for a single roadmap plan."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <PlanBoardApp client:only="react" slug={slug} />
+  </main>
+</BaseLayout>

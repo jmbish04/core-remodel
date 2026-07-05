@@ -884,6 +884,98 @@ Rules for each field:
 
   // ─── Commute (existing — untouched) ──────────────────────────────────────
 
+  // ─── Places API (New) — Text Search (single best match) ───────────────────
+
+  /**
+   * Resolve a free-text query (e.g. `"Studio Belmont Plumbing, San Francisco"`)
+   * to the single best-matching Google Place via the Places (New) Text Search
+   * endpoint.
+   *
+   * Used by the bulk-backfill "resolve" step to attach a `place_id` to showrooms
+   * that were entered manually (no Places link). Returns a compact card-shaped
+   * record for the confirmation UI, or `null` when Google finds no match.
+   *
+   * This is a lighter cousin of {@link placeDetails}: it returns only the fields
+   * needed to render a confirmation card and to fill blank store columns, and it
+   * never runs the Gemini review analysis. Callers that need the full rich
+   * payload (reviews, photos, opening hours) should follow up with
+   * {@link placeDetails} using the returned `placeId`.
+   *
+   * @param query  Free-text place query. Combining name + address yields the
+   *               most reliable single match.
+   * @returns The top match, or `null` when Google returns no candidates.
+   * @throws Error('MAPS_QUOTA_EXCEEDED') when the monthly free-tier limit is reached.
+   * @throws Error('PLACES_TEXT_SEARCH_ERROR: <message>') on upstream failure.
+   */
+  async placesTextSearch(query: string): Promise<{
+    placeId: string;
+    displayName: string | null;
+    formattedAddress: string | null;
+    rating: number | null;
+    userRatingCount: number | null;
+    nationalPhoneNumber: string | null;
+    websiteUri: string | null;
+  } | null> {
+    if (!(await this.isUnderMonthlyQuota())) {
+      throw new Error("MAPS_QUOTA_EXCEEDED");
+    }
+
+    const gmapKey = await getGoogleMapsApiKey(this.env);
+    const requestBody = { textQuery: query, maxResultCount: 1 };
+
+    const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": gmapKey,
+        "X-Goog-FieldMask":
+          "places.id,places.displayName,places.formattedAddress,places.rating," +
+          "places.userRatingCount,places.nationalPhoneNumber,places.websiteUri",
+      },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(5000),
+    });
+
+    const data = (await res.json()) as {
+      places?: Array<{
+        id?: string;
+        displayName?: { text?: string };
+        formattedAddress?: string;
+        rating?: number;
+        userRatingCount?: number;
+        nationalPhoneNumber?: string;
+        websiteUri?: string;
+      }>;
+      error?: { message?: string };
+    };
+
+    await this.logUsage(
+      "places:searchText",
+      requestBody,
+      { resultCount: data.places?.length ?? 0, statusCode: res.status },
+      { endpoint: "textSearch:backfill", statusCode: res.status },
+    );
+
+    if (!res.ok) {
+      const errMsg = data.error?.message ?? `HTTP ${res.status}`;
+      throw new Error(`PLACES_TEXT_SEARCH_ERROR: ${errMsg}`);
+    }
+
+    const top = data.places?.[0];
+    if (!top?.id) return null;
+
+    return {
+      placeId: top.id,
+      displayName: top.displayName?.text ?? null,
+      formattedAddress: top.formattedAddress ?? null,
+      rating: typeof top.rating === "number" ? top.rating : null,
+      userRatingCount:
+        typeof top.userRatingCount === "number" ? top.userRatingCount : null,
+      nationalPhoneNumber: top.nationalPhoneNumber ?? null,
+      websiteUri: top.websiteUri ?? null,
+    };
+  }
+
   async computeCommute(
     homeAddress: string,
     searchQuery: string,

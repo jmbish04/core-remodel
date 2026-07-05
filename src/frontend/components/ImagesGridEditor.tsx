@@ -464,7 +464,7 @@ export function ImagesGridEditor(props: ImagesGridEditorProps) {
 
   const openAiEditor = useCallback((image: ViewImageRecord) => {
     const params = new URLSearchParams({ sourceImageId: image.id });
-    window.location.assign(`/photo-edits?${params.toString()}`);
+    window.location.assign(`/admin/photo-edits?${params.toString()}`);
   }, []);
 
   const imageById = useMemo(() => {

@@ -117,7 +117,7 @@ const homeownersPages: DocsPageDefinition[] = [
         ],
         actions: [
           {
-            href: "/budget-tracker",
+            href: "/admin/budget-tracker",
             label: "Open Budget Tracker",
             description: "Split the remodel budget into room and item-level targets.",
           },
@@ -162,7 +162,7 @@ const homeownersPages: DocsPageDefinition[] = [
     ],
     actions: [
       {
-        href: "/budget-tracker",
+        href: "/admin/budget-tracker",
         label: "Open Budget Tracker",
         description: "Work inside the mirrored D1 and Google Sheets budget workspace.",
       },
@@ -235,7 +235,7 @@ const homeownersPages: DocsPageDefinition[] = [
     ],
     actions: [
       {
-        href: "/uploads",
+        href: "/admin/uploads",
         label: "Open Uploads",
         description: "Add new listing or inspiration photos into the system.",
       },
@@ -245,7 +245,7 @@ const homeownersPages: DocsPageDefinition[] = [
         description: "Review room metadata and existing-condition photography.",
       },
       {
-        href: "/review",
+        href: "/admin/review",
         label: "Open Photo Reviews",
         description: "Sort, review, and tag inspirational images with AI support.",
       },
@@ -398,12 +398,12 @@ const homeownersPages: DocsPageDefinition[] = [
     ],
     actions: [
       {
-        href: "/photo-edits",
+        href: "/admin/photo-edits",
         label: "Open Photo Editor",
         description: "Review current edit sessions or spin up a new visual transformation.",
       },
       {
-        href: "/review",
+        href: "/admin/review",
         label: "Review Inspiration",
         description: "Audit inspirational images before stitching details into listing angles.",
       },
@@ -501,12 +501,12 @@ const homeownersPages: DocsPageDefinition[] = [
     ],
     actions: [
       {
-        href: "/builder",
+        href: "/admin/builder",
         label: "Open Render Studio",
         description: "Configure a design and run the staged base, rough-in, and finish pipeline on a room.",
       },
       {
-        href: "/gallery",
+        href: "/admin/gallery",
         label: "Open Render Gallery",
         description: "Browse finished renders with inspiration chips and per-angle results.",
       },
@@ -1001,7 +1001,7 @@ const sharedPages: DocsPageDefinition[] = [
         description: "Review evidence, file versions, and room-linked artifacts.",
       },
       {
-        href: "/review",
+        href: "/admin/review",
         label: "Open Photo Reviews",
         description: "Review inspirational images and target design direction.",
       },
@@ -1079,7 +1079,7 @@ const sharedPages: DocsPageDefinition[] = [
         description: "See the current shared entry point for the project.",
       },
       {
-        href: "/budget-tracker",
+        href: "/admin/budget-tracker",
         label: "Open Budget Tracker",
         description: "Review how budget decisions evolve with the collaboration loop.",
       },
@@ -1167,12 +1167,12 @@ const platformPages: DocsPageDefinition[] = [
     ],
     actions: [
       {
-        href: "/admin/showroom/sourcing",
+        href: "/admin/shopping/sourcing",
         label: "Open Sourcing Research",
         description: "Stage a prompt, launch a sweep, and review findings and media.",
       },
       {
-        href: "/admin/showroom",
+        href: "/admin/shopping",
         label: "Showroom Dashboard",
         description: "Browse the showrooms and products that sweeps write against.",
       },
@@ -1261,7 +1261,7 @@ const platformPages: DocsPageDefinition[] = [
     ],
     actions: [
       {
-        href: "/admin/showroom/sourcing",
+        href: "/admin/shopping/sourcing",
         label: "Open Sourcing Research",
         description: "Run a sweep and watch the artifacts land.",
       },
@@ -1355,7 +1355,7 @@ const platformPages: DocsPageDefinition[] = [
     ],
     actions: [
       {
-        href: "/admin/showroom/sourcing",
+        href: "/admin/shopping/sourcing",
         label: "Open Sourcing Research",
         description: "Where the review gates will live.",
       },

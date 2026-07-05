@@ -5,7 +5,7 @@ import { MaterialViewportApp } from "@/components/showroom/MaterialViewportApp";
 const { id } = Astro.params;
 const materialId = id ? Number.parseInt(id, 10) : NaN;
 if (!Number.isFinite(materialId)) {
-  return Astro.redirect("/admin/showroom/schedule");
+  return Astro.redirect("/admin/shopping/schedule");
 }
 ---
 

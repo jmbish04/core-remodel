@@ -20,6 +20,18 @@ export default defineConfig({
     },
   }),
   integrations: [react()],
+  // Prefetch page HTML on link hover/focus so MPA navigation feels instant and
+  // the click "hang" (waiting on SSR) is eliminated. `output: "server"` on the
+  // Cloudflare adapter serves the prefetched SSR HTML.
+  prefetch: {
+    prefetchAll: true,
+    defaultStrategy: "hover",
+  },
+  // NOTE: legacy-URL redirects for the showroom→shopping rebrand and the
+  // admin-route normalization are handled in `src/_worker.ts` (prefix-based, 301),
+  // NOT via Astro's `redirects` config — the Cloudflare adapter mis-generates a
+  // self-referential `_redirects` splat rule for dynamic destinations, which
+  // wrangler rejects at deploy time ("infinite loop detected").
   vite: {
     plugins: [tailwindcss()],
   },

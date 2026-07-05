@@ -88,7 +88,7 @@ export function ProductViewportApp({ id }: { id: number }) {
 
   return (
     <main className="container mx-auto max-w-3xl px-4 py-10">
-      <a href="/admin/showroom/products" className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-widest text-muted-foreground hover:text-foreground">
+      <a href="/admin/shopping/products" className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-widest text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-3 w-3" /> Products
       </a>
 
@@ -99,7 +99,7 @@ export function ProductViewportApp({ id }: { id: number }) {
       <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
         {product.sku ? <span className="font-mono text-xs">SKU {product.sku}</span> : null}
         {product.leadTime ? <span>Lead time: {product.leadTime}</span> : null}
-        <a href={`/admin/showroom/store/${product.storeId}`} className="text-sky-400 hover:underline">View store</a>
+        <a href={`/admin/shopping/store/${product.storeId}`} className="text-sky-400 hover:underline">View store</a>
       </div>
       {product.description ? <p className="mt-2 text-sm text-muted-foreground">{product.description}</p> : null}
 

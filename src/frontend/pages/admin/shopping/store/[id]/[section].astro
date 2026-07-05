@@ -8,7 +8,7 @@ type SectionKey = (typeof VALID_SECTIONS)[number];
 const { id, section } = Astro.params;
 const storeId = id ? Number.parseInt(id, 10) : NaN;
 if (!Number.isFinite(storeId)) {
-  return Astro.redirect("/admin/showroom/showrooms");
+  return Astro.redirect("/admin/shopping/showrooms");
 }
 
 const initialSection: SectionKey = VALID_SECTIONS.includes(section as SectionKey)

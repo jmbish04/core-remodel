@@ -1,0 +1,125 @@
+---
+/**
+ * `/sitemap` — human-readable site map.
+ *
+ * Renders the dynamically-derived route inventory (from `@/lib/sitemap`,
+ * generated from the actual page foldering under `src/frontend/pages/**`,
+ * mirroring how `/openapi.json` is generated from registered routes) grouped
+ * by top-level path segment.
+ *
+ * Static routes are clickable links; dynamic route patterns (`[param]`,
+ * `[...rest]`) are shown as non-clickable patterns with a muted "dynamic"
+ * badge because they are URL templates, not concrete destinations.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { getSiteRoutes, groupRoutesByTopSegment } from "@/lib/sitemap";
+import { Network, FileJson, FileCode, ExternalLink } from "lucide-react";
+
+const routes = getSiteRoutes();
+const groups = groupRoutesByTopSegment(routes);
+
+// Sort group keys with the root bucket first, then alphabetically.
+const groupKeys = Object.keys(groups).sort((a, b) => {
+  if (a === "(root)") return -1;
+  if (b === "(root)") return 1;
+  return a.localeCompare(b);
+});
+
+const staticCount = routes.filter((r) => !r.dynamic).length;
+const dynamicCount = routes.length - staticCount;
+
+/** Human-friendly section label from a group key. */
+function groupLabel(key: string): string {
+  return key === "(root)" ? "Top level" : key;
+}
+---
+
+<BaseLayout
+  title="Sitemap — 126 Colby Remodel Mission Control"
+  description="Every available page URL, generated dynamically from the page foldering."
+>
+  <main class="container mx-auto max-w-5xl px-4 py-8 pb-12 space-y-10">
+    <!-- Header -->
+    <header class="space-y-4 max-w-3xl">
+      <h1
+        class="text-4xl font-extrabold tracking-tight text-foreground sm:text-5xl flex items-center gap-3"
+      >
+        <Network className="size-8 text-primary" />
+        Sitemap
+      </h1>
+      <p class="text-lg text-muted-foreground font-light leading-relaxed">
+        Generated dynamically from the page foldering under
+        <code class="rounded bg-card px-1.5 py-0.5 text-sm text-foreground"
+          >src/frontend/pages</code
+        > — the same way <code
+          class="rounded bg-card px-1.5 py-0.5 text-sm text-foreground"
+          >/openapi.json</code
+        > is generated from the registered routes. It never drifts from the
+        pages that actually exist.
+      </p>
+
+      <div class="flex flex-wrap items-center gap-3 text-sm">
+        <span
+          class="inline-flex items-center rounded-full bg-card px-3 py-1 text-muted-foreground ring-1 ring-border/40"
+        >
+          {routes.length} routes · {staticCount} static · {dynamicCount} dynamic
+        </span>
+        <a
+          href="/sitemap.json"
+          class="inline-flex items-center gap-1.5 rounded-full bg-card px-3 py-1 text-foreground/80 ring-1 ring-border/40 transition-colors hover:text-foreground"
+        >
+          <FileJson className="size-3.5" />
+          sitemap.json
+        </a>
+        <a
+          href="/sitemap.xml"
+          class="inline-flex items-center gap-1.5 rounded-full bg-card px-3 py-1 text-foreground/80 ring-1 ring-border/40 transition-colors hover:text-foreground"
+        >
+          <FileCode className="size-3.5" />
+          sitemap.xml
+        </a>
+      </div>
+    </header>
+
+    <!-- Grouped route list -->
+    <div class="space-y-8">
+      {
+        groupKeys.map((key) => (
+          <section class="space-y-3">
+            <h2 class="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {groupLabel(key)}
+            </h2>
+            <div class="overflow-hidden rounded-xl bg-card ring-1 ring-border/40">
+              <ul class="divide-y divide-border/40">
+                {groups[key].map((route) =>
+                  route.dynamic ? (
+                    <li class="flex items-center justify-between gap-3 px-4 py-3">
+                      <span class="font-mono text-sm text-muted-foreground">
+                        {route.path}
+                      </span>
+                      <span class="inline-flex items-center rounded-full bg-muted/40 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        dynamic
+                      </span>
+                    </li>
+                  ) : (
+                    <li>
+                      <a
+                        href={route.path}
+                        class="flex items-center justify-between gap-3 px-4 py-3 transition-colors hover:bg-muted/30 group"
+                      >
+                        <span class="font-mono text-sm text-foreground/90 group-hover:text-foreground">
+                          {route.path}
+                        </span>
+                        <ExternalLink className="size-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                      </a>
+                    </li>
+                  ),
+                )}
+              </ul>
+            </div>
+          </section>
+        ))
+      }
+    </div>
+  </main>
+</BaseLayout>

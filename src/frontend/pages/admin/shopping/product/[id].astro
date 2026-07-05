@@ -5,7 +5,7 @@ import { ProductViewportApp } from "@/components/showroom/ProductViewportApp";
 const { id } = Astro.params;
 const productId = id ? Number.parseInt(id, 10) : NaN;
 if (!Number.isFinite(productId)) {
-  return Astro.redirect("/admin/showroom/products");
+  return Astro.redirect("/admin/shopping/products");
 }
 ---
 

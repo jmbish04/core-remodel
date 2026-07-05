@@ -69,8 +69,10 @@ import { materialsRouter } from "./routes/materials";
 import { showroomGapsRouter } from "./routes/showroom-gaps";
 import { showroomCatalogRouter } from "./routes/showroom-catalog";
 import { showroomScanRouter } from "./routes/showroom-scan";
+import { showroomBackfillRouter } from "./routes/showroom-backfill";
 import { placesRouter } from "./routes/places";
 import { adminIntegrationsRouter } from "./routes/admin-integrations";
+import { adminPlansRouter } from "./routes/admin-plans";
 import { requireAccessAuth } from "@backend/utils/access";
 
 export type Variables = {
@@ -184,11 +186,13 @@ app.route("/api/showroom-stores", showroomSeedRouter);
 app.route("/api/showroom-stores", showroomGapsRouter);
 app.route("/api/showroom-stores", showroomCatalogRouter);
 app.route("/api/showroom-stores", showroomScanRouter);
+app.route("/api/showroom-stores", showroomBackfillRouter);
 app.route("/api/materials", materialsRouter);
 app.route("/api/places", placesRouter);
 // adminIntegrationsRouter mounts under /api/admin/integrations — already covered
 // by the /api/admin/* requireAccessAuth middleware above.
 app.route("/api/admin/integrations", adminIntegrationsRouter);
+app.route("/api/admin/plans", adminPlansRouter);
 app.route("/", openapiRouter);
 
 export { app };

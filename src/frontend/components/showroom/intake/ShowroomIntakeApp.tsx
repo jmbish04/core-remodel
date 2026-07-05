@@ -1020,7 +1020,7 @@ export function ShowroomIntakeApp() {
                   </div>
                 </div>
                 <a
-                  href={`/admin/showroom/store/${dupWarning.showroomId}`}
+                  href={`/admin/shopping/store/${dupWarning.showroomId}`}
                   className={buttonVariants({
                     variant: "secondary",
                     size: "sm",

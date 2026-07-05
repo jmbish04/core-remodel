@@ -12,6 +12,7 @@ export function Navigation() {
     { href: "/openapi.json", label: "OpenAPI Spec" },
     { href: "/scalar", label: "Scalar" },
     { href: "/swagger", label: "Swagger" },
+    { href: "/sitemap", label: "Sitemap" },
   ];
 
   return (
