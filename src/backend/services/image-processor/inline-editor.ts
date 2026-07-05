@@ -7,8 +7,17 @@ export async function processImageEdit(
 ): Promise<string | null> {
   const ai = await createGeminiAiGatewayClient(env);
 
+  let finalPrompt = prompt;
+  if (base64Images.length > 1) {
+    // Inpainting / Semantic masking template
+    finalPrompt = `Using the provided image and mask, change only the area covered by the mask to be: ${prompt}. Keep everything else in the image exactly the same, preserving the original style, lighting, and composition.`;
+  } else {
+    // Adding/removing elements template
+    finalPrompt = `Using the provided image, please modify it based on this request: ${prompt}. Ensure the change integrates naturally with the scene's lighting, shadows, and composition.`;
+  }
+
   const input = [
-    { type: "text", text: prompt },
+    { type: "text", text: finalPrompt },
     ...base64Images.map((img) => ({
       type: "image",
       mime_type: img.mimeType,
@@ -17,12 +26,8 @@ export async function processImageEdit(
   ];
 
   const interaction = await (ai as any).interactions.create({
-    model: "gemini-3-pro-image-preview",
+    model: "gemini-3.1-flash-image",
     input: input as any,
-    response_format: {
-      type: "image",
-      image_size: "4K",
-    },
   });
 
   for (const step of interaction.steps as Array<any>) {

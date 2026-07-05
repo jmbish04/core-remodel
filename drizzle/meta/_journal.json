@@ -386,6 +386,34 @@
       "when": 1782241394617,
       "tag": "0054_clear_daimon_hellstrom",
       "breakpoints": true
+    },
+    {
+      "idx": 55,
+      "version": "6",
+      "when": 1782564630497,
+      "tag": "0055_normal_stone_men",
+      "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "6",
+      "when": 1782566436974,
+      "tag": "0056_smooth_spiral",
+      "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1782567847554,
+      "tag": "0057_clever_blonde_phantom",
+      "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "6",
+      "when": 1782623070738,
+      "tag": "0058_thin_franklin_storm",
+      "breakpoints": true
     }
   ]
 }

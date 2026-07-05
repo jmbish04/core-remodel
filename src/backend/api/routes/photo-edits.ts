@@ -3,9 +3,16 @@
  *
  * Tracks iterative edit sessions + revisions, and persists generated uploads
  * to Cloudflare Images and D1.
+ *
+ * Uses Gemini 3 Pro via Cloudflare AI Gateway for all image generation.
  */
 
-import { imageEditRevisions, imageEditSessions, images } from "@backend/db";
+import {
+  imageEditRevisions,
+  imageEditSessions,
+  images,
+  listingPhotos,
+} from "@backend/db";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { zValidator } from "@hono/zod-validator";
 import { desc, eq } from "drizzle-orm";
@@ -66,20 +73,20 @@ function resolveImageUrl(image: typeof images.$inferSelect): string {
   return `https://imagedelivery.net/${deliveryId}/public`;
 }
 
-function parseNumber(
-  input: string | null | undefined,
-  fallback: number,
-  min: number,
-  max: number,
-): number {
-  if (input === null || input === undefined || input === "") {
-    return fallback;
-  }
-  const value = Number(input);
-  if (!Number.isFinite(value)) {
-    return fallback;
-  }
-  return Math.min(max, Math.max(min, value));
+/**
+ * Resolve the listingPhoto record for a given image ID (if it has one).
+ * Returns the listing photo with blankCanvasCfImageId, roomName, etc.
+ */
+async function resolveListingPhotoForImage(
+  db: ReturnType<typeof drizzle>,
+  imageId: string,
+): Promise<typeof listingPhotos.$inferSelect | null> {
+  const row = await db
+    .select()
+    .from(listingPhotos)
+    .where(eq(listingPhotos.imageId, imageId))
+    .get();
+  return row ?? null;
 }
 
 async function toImageBytes(payload: unknown): Promise<Uint8Array> {
@@ -446,6 +453,11 @@ photoEditsRouter.get("/sessions/:sessionId", async (c) => {
       ? await db.select().from(images).where(eq(images.id, session.sourceImageId)).get()
       : null;
 
+    // Resolve listing photo metadata (blank canvas ID, room name) for the source image
+    const sourceListingPhoto = sourceImage
+      ? await resolveListingPhotoForImage(db, sourceImage.id)
+      : null;
+
     const outputImageMap = new Map<string, typeof images.$inferSelect>();
     const sourceImageMap = new Map<string, typeof images.$inferSelect>();
     for (const revision of revisionsSorted) {
@@ -461,13 +473,13 @@ photoEditsRouter.get("/sessions/:sessionId", async (c) => {
       }
 
       if (revision.sourceImageId) {
-        const sourceImage = await db
+        const revisionSourceImg = await db
           .select()
           .from(images)
           .where(eq(images.id, revision.sourceImageId))
           .get();
-        if (sourceImage) {
-          sourceImageMap.set(revision.sourceImageId, sourceImage);
+        if (revisionSourceImg) {
+          sourceImageMap.set(revision.sourceImageId, revisionSourceImg);
         }
       }
     }
@@ -475,7 +487,21 @@ photoEditsRouter.get("/sessions/:sessionId", async (c) => {
     return c.json({
       success: true,
       session,
-      sourceImage,
+      sourceImage: sourceImage
+        ? {
+            ...sourceImage,
+            listingPhoto: sourceListingPhoto
+              ? {
+                  id: sourceListingPhoto.id,
+                  roomId: sourceListingPhoto.roomId,
+                  roomName: sourceListingPhoto.roomName,
+                  description: sourceListingPhoto.description,
+                  blankCanvasCfImageId: sourceListingPhoto.blankCanvasCfImageId ?? null,
+                  skipBlankCanvas: sourceListingPhoto.skipBlankCanvas ?? false,
+                }
+              : null,
+          }
+        : null,
       revisions: revisionsSorted.map((revision) => ({
         ...revision,
         sourceImage: revision.sourceImageId
@@ -688,30 +714,304 @@ photoEditsRouter.get("/decision-room", async (c) => {
   }
 });
 
-photoEditsRouter.post("/sessions/:sessionId/revisions", async (c) => {
-  try {
-    const db = drizzle(c.env.DB);
-    const sessionId = c.req.param("sessionId");
+/**
+ * Core revision creation logic — shared by single and batch endpoints.
+ */
+async function createSingleRevision(
+  env: Env,
+  sessionId: string,
+  params: {
+    prompt: string;
+    sourceImageId: string;
+    roomType?: string | null;
+    maskBase64?: string | null;
+    blankCanvasImageId?: string | null;
+    category?: string | null;
+    inspoImageIds?: string[];
+  },
+): Promise<{
+  success: boolean;
+  error?: string;
+  revision?: any;
+  outputImage?: any;
+  deliveryUrl?: string;
+}> {
+  const db = drizzle(env.DB);
 
-    const session = await db
+  const session = await db
+    .select()
+    .from(imageEditSessions)
+    .where(eq(imageEditSessions.id, sessionId))
+    .get();
+
+  if (!session) {
+    return { success: false, error: "Edit session not found" };
+  }
+
+  // Resolve the actual image to feed Gemini — prefer blank canvas when provided
+  const actualSourceId = params.blankCanvasImageId || params.sourceImageId;
+
+  const sourceImage = await db
+    .select()
+    .from(images)
+    .where(eq(images.id, actualSourceId))
+    .get();
+
+  // Fallback: if blank canvas ID doesn't resolve as an `images` row, treat it
+  // as a raw CF Images delivery token and use the original source image row
+  // for metadata, but the blank canvas URL for the pixel data.
+  let sourceImageRow = sourceImage;
+  let blankCanvasUrl: string | null = null;
+
+  if (!sourceImage && params.blankCanvasImageId) {
+    sourceImageRow = await db
       .select()
-      .from(imageEditSessions)
-      .where(eq(imageEditSessions.id, sessionId))
-      .get();
+      .from(images)
+      .where(eq(images.id, params.sourceImageId))
+      .get() ?? undefined;
 
-    if (!session) {
-      return c.json({ error: "Edit session not found" }, 404);
+    if (!sourceImageRow) {
+      return { success: false, error: "Source image not found" };
     }
 
+    // blankCanvasImageId is a CF delivery token, not a UUID image row
+    const token = params.blankCanvasImageId;
+    blankCanvasUrl = token.startsWith("http")
+      ? token
+      : `https://imagedelivery.net/${token}/public`;
+  } else if (!sourceImage) {
+    return { success: false, error: "Source image not found" };
+  }
+
+  const credentials = await resolveCloudflareImagesCredentials(env);
+  if (!credentials.accountId || credentials.apiTokens.length === 0) {
+    return { success: false, error: "Cloudflare credentials not configured" };
+  }
+
+  // Determine the pixel-source URL
+  const sourceUrl = blankCanvasUrl || resolveImageUrl(sourceImageRow!);
+  if (!sourceUrl) {
+    return { success: false, error: "Source image URL is unavailable" };
+  }
+
+  const sourceResponse = await fetch(sourceUrl, { cache: "no-store" });
+  if (!sourceResponse.ok) {
+    return {
+      success: false,
+      error: `Failed to fetch source image (${sourceResponse.status})`,
+    };
+  }
+
+  const sourceBytes = new Uint8Array(await sourceResponse.arrayBuffer());
+  const sourceMime = sourceResponse.headers.get("content-type") || "image/jpeg";
+  let sourceB64 = "";
+  const b64Chunk = 0x8000;
+  for (let i = 0; i < sourceBytes.length; i += b64Chunk) {
+    sourceB64 += String.fromCharCode(...sourceBytes.subarray(i, i + b64Chunk));
+  }
+  const base64Images = [{ data: btoa(sourceB64), mimeType: sourceMime }];
+
+  // Append mask if provided
+  if (params.maskBase64) {
+    const match = params.maskBase64.match(/^data:image\/[a-z]+;base64,(.+)$/i);
+    const rawMask = match ? match[1] : params.maskBase64;
+    base64Images.push({ data: rawMask, mimeType: "image/png" });
+  }
+
+  // Append inspiration images if provided (for stitch category)
+  if (params.inspoImageIds && params.inspoImageIds.length > 0) {
+    for (const inspoId of params.inspoImageIds.slice(0, 6)) {
+      const inspoImage = await db
+        .select()
+        .from(images)
+        .where(eq(images.id, inspoId))
+        .get();
+      if (!inspoImage) continue;
+      const inspoUrl = resolveImageUrl(inspoImage);
+      if (!inspoUrl) continue;
+      try {
+        const inspoResponse = await fetch(inspoUrl, { cache: "no-store" });
+        if (!inspoResponse.ok) continue;
+        const inspoBytes = new Uint8Array(await inspoResponse.arrayBuffer());
+        const inspoMime = inspoResponse.headers.get("content-type") || "image/jpeg";
+        let inspoB64 = "";
+        for (let j = 0; j < inspoBytes.length; j += b64Chunk) {
+          inspoB64 += String.fromCharCode(...inspoBytes.subarray(j, j + b64Chunk));
+        }
+        base64Images.push({ data: btoa(inspoB64), mimeType: inspoMime });
+      } catch {
+        // Skip failed inspo fetches
+      }
+    }
+  }
+
+  const editedBase64 = await processImageEdit(env, params.prompt, base64Images);
+  if (!editedBase64) {
+    return { success: false, error: "Gemini returned no image for this edit." };
+  }
+
+  const generatedBlob = await (
+    await fetch(`data:image/png;base64,${editedBase64}`)
+  ).blob();
+
+  const uploadFile = new File(
+    [generatedBlob],
+    `render-${sessionId}-${Date.now()}.png`,
+    { type: "image/png" },
+  );
+
+  const processor = new ImageProcessorService(
+    env,
+    credentials.accountId,
+    credentials.apiTokens[0],
+    { fallbackApiTokens: credentials.apiTokens.slice(1) },
+  );
+  const outputImageId = crypto.randomUUID();
+  const uploadResponse = await processor.uploadToCloudflareImages(
+    uploadFile,
+    outputImageId,
+    uploadFile.name,
+  );
+
+  if (!uploadResponse.success) {
+    return { success: false, error: "Failed to upload generated image" };
+  }
+
+  const deliveryUrl = processor.getDeliveryUrl(uploadResponse, outputImageId);
+  const deliveryToken =
+    extractDeliveryTokenFromUrl(deliveryUrl) ||
+    `${credentials.accountId}/${uploadResponse.result.id}`;
+
+  const revisionRows = await db
+    .select()
+    .from(imageEditRevisions)
+    .where(eq(imageEditRevisions.sessionId, sessionId))
+    .all();
+  const revisionNumber =
+    revisionRows.reduce(
+      (maxValue, row) => Math.max(maxValue, row.revisionNumber ?? 0),
+      0,
+    ) + 1;
+
+  const roomType =
+    params.roomType?.trim().toLowerCase() ||
+    sourceImageRow!.roomType ||
+    "unassigned";
+
+  const model = "gemini-3.1-flash-image";
+
+  await db
+    .insert(images)
+    .values({
+      id: outputImageId,
+      displayName: `${session.name} · Revision ${revisionNumber}`,
+      cfImageIdOriginal: deliveryToken,
+      cfImageIdOptimized: null,
+      photoCategory: "ai_render",
+      roomId: sourceImageRow!.roomId,
+      roomType,
+      isInstagram: false,
+      isListingPhoto: false,
+      metadata: JSON.stringify({
+        sourceImageId: params.sourceImageId,
+        blankCanvasImageId: params.blankCanvasImageId ?? null,
+        sessionId,
+        revisionNumber,
+        prompt: params.prompt,
+        model,
+        deliveryUrl,
+        deliveryToken,
+        category: params.category ?? null,
+      }),
+    })
+    .run();
+
+  // Generate and store Vectorize embeddings for the new revision
+  const embeddingText = `${roomType} ai_render ${params.prompt}`;
+  try {
+    await processor.generateAndStoreEmbeddings(
+      outputImageId,
+      embeddingText,
+      deliveryUrl,
+    );
+  } catch (vectorError) {
+    console.warn(
+      `[Vectorize] Failed to store embeddings for revision image ${outputImageId}; continuing.`,
+      vectorError,
+    );
+  }
+
+  const revisionId = crypto.randomUUID();
+  await db
+    .insert(imageEditRevisions)
+    .values({
+      id: revisionId,
+      sessionId,
+      parentId:
+        revisionRows.length > 0
+          ? revisionRows.sort(
+              (a, b) => (b.revisionNumber || 0) - (a.revisionNumber || 0),
+            )[0]?.id || null
+          : null,
+      sourceImageId: params.sourceImageId,
+      outputImageId,
+      prompt: params.prompt,
+      model,
+      revisionNumber,
+      startingImageUrl: sourceUrl,
+      outputImageUrl: deliveryUrl,
+      metadata: JSON.stringify({
+        deliveryUrl,
+        deliveryToken,
+        category: params.category ?? null,
+        usedBlankCanvas: !!params.blankCanvasImageId,
+      }),
+    })
+    .run();
+
+  await db
+    .update(imageEditSessions)
+    .set({
+      sourceImageId: params.sourceImageId,
+      datetimeLastModified: new Date(),
+    })
+    .where(eq(imageEditSessions.id, sessionId))
+    .run();
+
+  const revision = await db
+    .select()
+    .from(imageEditRevisions)
+    .where(eq(imageEditRevisions.id, revisionId))
+    .get();
+
+  const outputImage = await db
+    .select()
+    .from(images)
+    .where(eq(images.id, outputImageId))
+    .get();
+
+  return {
+    success: true,
+    revision,
+    outputImage,
+    deliveryUrl,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Single revision endpoint (backward-compatible)
+// ---------------------------------------------------------------------------
+photoEditsRouter.post("/sessions/:sessionId/revisions", async (c) => {
+  try {
+    const sessionId = c.req.param("sessionId");
     const contentType = c.req.header("content-type") || "";
+
     let prompt = "";
-    let sourceImageId: string | null = session.sourceImageId || null;
-    let model = "@cf/runwayml/stable-diffusion-v1-5-img2img";
-    let strength = 0.55;
-    let numSteps = 20;
-    let guidance = 7.5;
+    let sourceImageId: string | null = null;
     let roomTypeInput: string | null = null;
-    let uploadedOutputFile: File | null = null;
+    let maskBase64: string | null = null;
+    let blankCanvasImageId: string | null = null;
+    let category: string | null = null;
 
     if (contentType.includes("multipart/form-data")) {
       const formData = await c.req.formData();
@@ -720,242 +1020,162 @@ photoEditsRouter.post("/sessions/:sessionId/revisions", async (c) => {
       if (typeof sourceInput === "string" && sourceInput.trim().length > 0) {
         sourceImageId = sourceInput.trim();
       }
-      const modelInput = formData.get("model");
-      if (typeof modelInput === "string" && modelInput.trim().length > 0) {
-        model = modelInput.trim();
-      }
       const roomInput = formData.get("roomType");
       if (typeof roomInput === "string" && roomInput.trim().length > 0) {
         roomTypeInput = roomInput.trim().toLowerCase();
       }
-
-      strength = parseNumber(String(formData.get("strength") || ""), 0.55, 0.1, 1.0);
-      numSteps = Math.round(parseNumber(String(formData.get("numSteps") || ""), 20, 1, 20));
-      guidance = parseNumber(String(formData.get("guidance") || ""), 7.5, 1, 20);
-
-      const uploaded = formData.get("file");
-      if (uploaded instanceof File) {
-        uploadedOutputFile = uploaded;
+      const maskInput = formData.get("maskBase64");
+      if (typeof maskInput === "string" && maskInput.trim().length > 0) {
+        maskBase64 = maskInput.trim();
+      }
+      const bcInput = formData.get("blankCanvasImageId");
+      if (typeof bcInput === "string" && bcInput.trim().length > 0) {
+        blankCanvasImageId = bcInput.trim();
+      }
+      const catInput = formData.get("category");
+      if (typeof catInput === "string" && catInput.trim().length > 0) {
+        category = catInput.trim();
       }
     } else {
       const body = (await c.req.json()) as {
         prompt?: string;
         sourceImageId?: string;
-        model?: string;
-        strength?: number;
-        numSteps?: number;
-        guidance?: number;
         roomType?: string;
+        maskBase64?: string;
+        blankCanvasImageId?: string;
+        category?: string;
+        inspoImageIds?: string[];
       };
       prompt = body.prompt?.trim() || "";
-      if (body.sourceImageId) {
-        sourceImageId = body.sourceImageId;
-      }
-      if (body.model) {
-        model = body.model;
-      }
-      if (typeof body.strength === "number") {
-        strength = Math.min(1, Math.max(0.1, body.strength));
-      }
-      if (typeof body.numSteps === "number") {
-        numSteps = Math.round(Math.min(20, Math.max(1, body.numSteps)));
-      }
-      if (typeof body.guidance === "number") {
-        guidance = Math.min(20, Math.max(1, body.guidance));
-      }
-      if (typeof body.roomType === "string" && body.roomType.trim().length > 0) {
-        roomTypeInput = body.roomType.trim().toLowerCase();
-      }
+      if (body.sourceImageId) sourceImageId = body.sourceImageId;
+      if (body.roomType) roomTypeInput = body.roomType.trim().toLowerCase();
+      if (body.maskBase64) maskBase64 = body.maskBase64;
+      if (body.blankCanvasImageId) blankCanvasImageId = body.blankCanvasImageId;
+      if (body.category) category = body.category;
+    }
+
+    // Resolve sourceImageId from session if not explicitly provided
+    if (!sourceImageId) {
+      const db = drizzle(c.env.DB);
+      const session = await db
+        .select()
+        .from(imageEditSessions)
+        .where(eq(imageEditSessions.id, sessionId))
+        .get();
+      sourceImageId = session?.sourceImageId || null;
     }
 
     if (!prompt) {
       return c.json({ error: "Prompt is required" }, 400);
     }
-
     if (!sourceImageId) {
       return c.json({ error: "Source image is required" }, 400);
     }
 
-    const sourceImage = await db.select().from(images).where(eq(images.id, sourceImageId)).get();
-
-    if (!sourceImage) {
-      return c.json({ error: "Source image not found" }, 404);
-    }
-
-    const credentials = await resolveCloudflareImagesCredentials(c.env);
-    if (!credentials.accountId || credentials.apiTokens.length === 0) {
-      return c.json({ error: "Cloudflare credentials not configured" }, 500);
-    }
-
-    let uploadFile: File;
-
-    if (uploadedOutputFile) {
-      uploadFile = uploadedOutputFile;
-    } else {
-      const sourceUrl = resolveImageUrl(sourceImage);
-      if (!sourceUrl) {
-        return c.json({ error: "Source image URL is unavailable" }, 400);
-      }
-
-      const sourceResponse = await fetch(sourceUrl, { cache: "no-store" });
-      if (!sourceResponse.ok) {
-        return c.json({ error: `Failed to fetch source image (${sourceResponse.status})` }, 500);
-      }
-
-      const sourceBytes = new Uint8Array(await sourceResponse.arrayBuffer());
-      // Retired Workers AI Stable Diffusion 1.5 in favor of Gemini 3 Pro Image via
-      // Cloudflare AI Gateway (faithful, controlled). The legacy SD params
-      // (model/strength/numSteps/guidance) are no longer used by this path.
-      const sourceMime = sourceResponse.headers.get("content-type") || "image/jpeg";
-      let sourceB64 = "";
-      const b64Chunk = 0x8000;
-      for (let i = 0; i < sourceBytes.length; i += b64Chunk) {
-        sourceB64 += String.fromCharCode(...sourceBytes.subarray(i, i + b64Chunk));
-      }
-      const editedBase64 = await processImageEdit(c.env, prompt, [
-        { data: btoa(sourceB64), mimeType: sourceMime },
-      ]);
-      if (!editedBase64) {
-        return c.json({ error: "Gemini returned no image for this edit." }, 500);
-      }
-      const generatedBlob = await (
-        await fetch(`data:image/png;base64,${editedBase64}`)
-      ).blob();
-
-      uploadFile = new File([generatedBlob], `render-${sessionId}-${Date.now()}.png`, {
-        type: "image/png",
-      });
-    }
-
-    const processor = new ImageProcessorService(
-      c.env,
-      credentials.accountId,
-      credentials.apiTokens[0],
-      {
-        fallbackApiTokens: credentials.apiTokens.slice(1),
-      },
-    );
-    const outputImageId = crypto.randomUUID();
-    const uploadResponse = await processor.uploadToCloudflareImages(
-      uploadFile,
-      outputImageId,
-      uploadFile.name,
-    );
-
-    if (!uploadResponse.success) {
-      return c.json({ error: "Failed to upload generated image" }, 500);
-    }
-
-    const deliveryUrl = processor.getDeliveryUrl(uploadResponse, outputImageId);
-    const deliveryToken =
-      extractDeliveryTokenFromUrl(deliveryUrl) ||
-      `${credentials.accountId}/${uploadResponse.result.id}`;
-
-    const revisionRows = await db
-      .select()
-      .from(imageEditRevisions)
-      .where(eq(imageEditRevisions.sessionId, sessionId))
-      .all();
-    const revisionNumber =
-      revisionRows.reduce((maxValue, row) => Math.max(maxValue, row.revisionNumber ?? 0), 0) + 1;
-
-    const roomType = roomTypeInput || sourceImage.roomType || "unassigned";
-
-    await db
-      .insert(images)
-      .values({
-        id: outputImageId,
-        displayName: `${session.name} · Revision ${revisionNumber}`,
-        cfImageIdOriginal: deliveryToken,
-        cfImageIdOptimized: null,
-        photoCategory: "ai_render",
-        roomId: sourceImage.roomId,
-        roomType,
-        isInstagram: false,
-        isListingPhoto: false,
-        metadata: JSON.stringify({
-          sourceImageId,
-          sessionId,
-          revisionNumber,
-          prompt,
-          model,
-          deliveryUrl,
-          deliveryToken,
-          strength,
-          numSteps,
-          guidance,
-        }),
-      })
-      .run();
-
-    // Generate and store Vectorize embeddings for the new revision
-    const embeddingText = `${roomType} ai_render ${prompt}`;
-    try {
-      await processor.generateAndStoreEmbeddings(outputImageId, embeddingText, deliveryUrl);
-    } catch (vectorError) {
-      console.warn(
-        `[Vectorize] Failed to store multi-modal pooled embeddings for revision image ${outputImageId}; continuing without vector index.`,
-        vectorError,
-      );
-    }
-
-    const revisionId = crypto.randomUUID();
-    await db
-      .insert(imageEditRevisions)
-      .values({
-        id: revisionId,
-        sessionId,
-        parentId:
-          revisionRows.length > 0
-            ? revisionRows.sort((a, b) => (b.revisionNumber || 0) - (a.revisionNumber || 0))[0]
-                ?.id || null
-            : null,
-        sourceImageId,
-        outputImageId,
-        prompt,
-        model,
-        revisionNumber,
-        startingImageUrl: resolveImageUrl(sourceImage),
-        outputImageUrl: deliveryUrl,
-        metadata: JSON.stringify({
-          deliveryUrl,
-          deliveryToken,
-          usedUploadedFile: uploadedOutputFile !== null,
-          strength,
-          numSteps,
-          guidance,
-        }),
-      })
-      .run();
-
-    await db
-      .update(imageEditSessions)
-      .set({
-        sourceImageId,
-        datetimeLastModified: new Date(),
-      })
-      .where(eq(imageEditSessions.id, sessionId))
-      .run();
-
-    const revision = await db
-      .select()
-      .from(imageEditRevisions)
-      .where(eq(imageEditRevisions.id, revisionId))
-      .get();
-
-    const outputImage = await db.select().from(images).where(eq(images.id, outputImageId)).get();
-
-    return c.json({
-      success: true,
-      revision,
-      outputImage,
-      deliveryUrl,
+    const result = await createSingleRevision(c.env, sessionId, {
+      prompt,
+      sourceImageId,
+      roomType: roomTypeInput,
+      maskBase64,
+      blankCanvasImageId,
+      category,
     });
+
+    if (!result.success) {
+      return c.json({ error: result.error }, 500);
+    }
+
+    return c.json(result);
   } catch (error) {
     console.error("Create revision error:", error);
     return c.json(
       {
         error: "Failed to create revision",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Batch revision endpoint — processes multiple categories sequentially
+// ---------------------------------------------------------------------------
+photoEditsRouter.post("/sessions/:sessionId/revisions/batch", async (c) => {
+  try {
+    const sessionId = c.req.param("sessionId");
+    const body = (await c.req.json()) as {
+      revisions: Array<{
+        prompt: string;
+        sourceImageId: string;
+        roomType?: string;
+        maskBase64?: string;
+        blankCanvasImageId?: string;
+        category?: string;
+        inspoImageIds?: string[];
+      }>;
+    };
+
+    if (!Array.isArray(body.revisions) || body.revisions.length === 0) {
+      return c.json({ error: "At least one revision spec is required" }, 400);
+    }
+
+    if (body.revisions.length > 10) {
+      return c.json({ error: "Maximum 10 revisions per batch" }, 400);
+    }
+
+    const results: Array<{
+      category: string | null;
+      success: boolean;
+      error?: string;
+      revision?: any;
+      outputImage?: any;
+      deliveryUrl?: string;
+    }> = [];
+
+    for (const spec of body.revisions) {
+      if (!spec.prompt?.trim()) {
+        results.push({
+          category: spec.category ?? null,
+          success: false,
+          error: "Prompt is required",
+        });
+        continue;
+      }
+      if (!spec.sourceImageId) {
+        results.push({
+          category: spec.category ?? null,
+          success: false,
+          error: "Source image is required",
+        });
+        continue;
+      }
+
+      const result = await createSingleRevision(c.env, sessionId, {
+        prompt: spec.prompt.trim(),
+        sourceImageId: spec.sourceImageId,
+        roomType: spec.roomType,
+        maskBase64: spec.maskBase64,
+        blankCanvasImageId: spec.blankCanvasImageId,
+        category: spec.category,
+        inspoImageIds: spec.inspoImageIds,
+      });
+
+      results.push({
+        category: spec.category ?? null,
+        ...result,
+      });
+    }
+
+    return c.json({
+      success: results.every((r) => r.success),
+      results,
+    });
+  } catch (error) {
+    console.error("Batch revision error:", error);
+    return c.json(
+      {
+        error: "Failed to process batch revisions",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       500,

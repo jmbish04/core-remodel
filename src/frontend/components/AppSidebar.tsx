@@ -260,6 +260,7 @@ function SidebarLinks({
       {accessAuthenticated ? (
         <>
           {renderSection("Admin - Planning", [
+            { href: "/admin/tasks", label: "Tasks" },
             { href: "/measure", label: "Live Floor Plan" },
             { href: "/measurements", label: "Measurements" },
             { href: "/admin/planning/decision-room", label: "Decision Room" },
@@ -284,7 +285,7 @@ function SidebarLinks({
             { href: "/uploads", label: "Uploads", badgeCount: uploadsPendingCount },
             { href: "/review", label: "Review" },
             { href: "/photo-edits", label: "Photo Edits" },
-            { href: "/admin/blank-canvas", label: "Blank Canvas" },
+            { href: "/admin/blank-canvas/lower-level", label: "Blank Canvas" },
             { href: "/builder", label: "Renovation Studio" },
             { href: "/gallery", label: "Render Gallery" },
             { href: "/admin/supporting-docs", label: "Supporting Docs" },

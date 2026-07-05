@@ -1,0 +1,67 @@
+{
+  "meta": { "model": "example", "count": 2, "notes": "Reference layouts for the STRICT schema. Every required field is present. Replace with the model's full set." },
+  "layouts": [
+    {
+      "id": "L01",
+      "name": "Classic East Galley + Bay Dining",
+      "concept": "Cooking wall stays east where the plumbing is; dining glows at the bay; living anchors the west.",
+      "kitchen_zone": "east-wall", "dining_zone": "bay", "living_zone": "west",
+      "rationale": "Keeps the wet wall east (no plumbing move), an 11ft island parallel to it, dining in the bright bay, and the whole west wall for a lounge.",
+      "pros": ["No plumbing move", "Bay is the dining focal point", "Generous west living zone"],
+      "cons": ["Kitchen and dining share the front sightline"],
+      "seats": 6,
+      "kitchen": {
+        "cabinets": [
+          { "x0": 267, "y0": 66, "x1": 293, "y1": 200, "height": 36, "wall": "E", "backsplash": true, "material": "dekton" }
+        ],
+        "island":     { "x0": 184, "y0": 40,  "x1": 224, "y1": 172, "material": "calacatta" },
+        "pantry":     { "x0": 267, "y0": 42,  "x1": 293, "y1": 66 },
+        "fridge":     { "x0": 267, "y0": 7,   "x1": 293, "y1": 42 },
+        "cooktop":    { "x0": 270, "y0": 120, "x1": 292, "y1": 150 },
+        "oven":       { "x0": 267, "y0": 96,  "x1": 290, "y1": 118 },
+        "hood":       { "x0": 277, "y0": 120, "x1": 292, "y1": 150 },
+        "sink":       { "x0": 196, "y0": 64,  "x1": 212, "y1": 90 },
+        "dishwasher": { "x0": 196, "y0": 120, "x1": 214, "y1": 150 }
+      },
+      "dining": { "table": { "cx": 88, "cy": 78, "w": 40, "l": 84, "seats": 6 } },
+      "living": {
+        "seating":      { "kind": "sectional", "x0": 16, "y0": 150, "x1": 130, "y1": 250, "facing": "W", "corner": "SE" },
+        "rug":          { "x0": 16, "y0": 150, "x1": 145, "y1": 252 },
+        "coffee_table": { "x0": 60, "y0": 185, "x1": 100, "y1": 215 },
+        "tv":           { "wall": "W", "cy": 200 }
+      },
+      "lighting": { "island_pendants": { "cx": 204, "cy": 106, "count": 2, "axis": "NS", "spacing": 40 } }
+    },
+    {
+      "id": "L02",
+      "name": "West Kitchen, Dining at the Stairs",
+      "concept": "Flip the kitchen west, give the bay to a sunny lounge, dine by the open stair.",
+      "kitchen_zone": "west-wall", "dining_zone": "stairs", "living_zone": "bay",
+      "rationale": "Mirrors the cooking wall west (note plumbing rerun), centers a lounge in the bright bay, seats dinner by the open stair.",
+      "pros": ["Bay becomes a daylight lounge", "Long uninterrupted west cooking wall"],
+      "cons": ["Sink/range on west wall = plumbing + gas rerun cost"],
+      "seats": 6,
+      "kitchen": {
+        "cabinets": [
+          { "x0": 7, "y0": 66, "x1": 33, "y1": 200, "height": 36, "wall": "W", "backsplash": true, "material": "dekton" }
+        ],
+        "island":     { "x0": 76, "y0": 40,  "x1": 116, "y1": 172, "material": "calacatta" },
+        "pantry":     { "x0": 7, "y0": 42,  "x1": 33, "y1": 66 },
+        "fridge":     { "x0": 7, "y0": 7,   "x1": 33, "y1": 42 },
+        "cooktop":    { "x0": 8, "y0": 120, "x1": 30, "y1": 150 },
+        "oven":       { "x0": 7, "y0": 96,  "x1": 30, "y1": 118 },
+        "hood":       { "x0": 8, "y0": 120, "x1": 23, "y1": 150 },
+        "sink":       { "x0": 88, "y0": 64,  "x1": 104, "y1": 90 },
+        "dishwasher": { "x0": 88, "y0": 120, "x1": 106, "y1": 150 }
+      },
+      "dining": { "table": { "cx": 210, "cy": 215, "w": 44, "l": 90, "seats": 6 } },
+      "living": {
+        "seating":      { "kind": "sofa", "x0": 150, "y0": 28, "x1": 280, "y1": 88, "facing": "N" },
+        "rug":          { "x0": 150, "y0": 24, "x1": 285, "y1": 130 },
+        "coffee_table": { "x0": 195, "y0": 96, "x1": 235, "y1": 120 },
+        "tv":           { "wall": "N", "cx": 215 }
+      },
+      "lighting": { "island_pendants": { "cx": 96, "cy": 106, "count": 2, "axis": "NS", "spacing": 40 } }
+    }
+  ]
+}

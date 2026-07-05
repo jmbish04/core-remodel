@@ -2,15 +2,15 @@
  * @fileoverview Listing Photos API routes
  */
 
-import { aiEdits, images, listingPhotos, rooms } from "@backend/db";
+import { aiEdits, images, listingPhotos, rooms, listingPhotoBlankCanvases } from "@backend/db";
 import { ensureHomeCatalogSeed } from "@backend/services/home-catalog";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
-import { and, eq, inArray, isNull } from "drizzle-orm";
+import { and, eq, inArray, isNull, desc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
 import { ImageProcessorService } from "../../services/image-processor";
-import { generateBlankCanvas } from "../../services/render/blank-canvas-generator";
+import { generateBlankCanvas, buildBlankCanvasPrompt } from "../../services/render/blank-canvas-generator";
 
 const listingPhotosRouter = new Hono<{ Bindings: Env }>();
 
@@ -529,18 +529,28 @@ listingPhotosRouter.post("/:id/blank-canvas", async (c) => {
       },
     );
 
+    console.log(`[POST /:id/blank-canvas] Preparing file upload. Name: ${file.name}, Size: ${file.size} bytes, Type: ${file.type}`);
     const arrayBuffer = await file.arrayBuffer();
     const imageBlob = new Blob([arrayBuffer], { type: file.type || "image/jpeg" });
     const imageId = crypto.randomUUID();
+    console.log(`[POST /:id/blank-canvas] Created Blob. Size: ${imageBlob.size} bytes. Random UUID imageId: ${imageId}`);
 
-    const uploadResponse = await processor.uploadToCloudflareImages(
-      imageBlob,
-      imageId,
-      file.name || "blank-canvas.jpg",
-    );
+    let uploadResponse;
+    try {
+      uploadResponse = await processor.uploadToCloudflareImages(
+        imageBlob,
+        imageId,
+        file.name || "blank-canvas.jpg",
+      );
+      console.log(`[POST /:id/blank-canvas] Cloudflare Images API upload success status:`, uploadResponse.success);
+    } catch (uploadErr: any) {
+      console.error(`[POST /:id/blank-canvas] uploadToCloudflareImages threw an exception:`, uploadErr.stack || uploadErr.message || uploadErr);
+      return c.json({ error: `Upload exception: ${uploadErr.message || uploadErr}` }, 500);
+    }
 
     if (!uploadResponse.success) {
-      return c.json({ error: "Failed to upload image to Cloudflare" }, 500);
+      console.error(`[POST /:id/blank-canvas] Cloudflare Images upload returned success=false:`, JSON.stringify(uploadResponse));
+      return c.json({ error: "Failed to upload image to Cloudflare", details: JSON.stringify(uploadResponse) }, 500);
     }
 
     const deliveryUrl = processor.getDeliveryUrl(uploadResponse, uploadResponse.result.id);
@@ -548,18 +558,25 @@ listingPhotosRouter.post("/:id/blank-canvas", async (c) => {
       ImageProcessorService.extractDeliveryTokenFromUrl(deliveryUrl) ||
       `${credentials.accountId}/${uploadResponse.result.id}`;
 
-    await db
-      .update(listingPhotos)
-      .set({ blankCanvasCfImageId: deliveryToken })
-      .where(eq(listingPhotos.id, photoId))
-      .run();
+    await db.batch([
+      db.update(listingPhotos)
+        .set({ blankCanvasCfImageId: deliveryToken })
+        .where(eq(listingPhotos.id, photoId)),
+      db.insert(listingPhotoBlankCanvases)
+        .values({
+          listingPhotoId: photoId,
+          cfImageId: deliveryToken,
+          prompt: "Manual Upload",
+        }),
+    ]);
 
     return c.json({
       success: true,
       blankCanvasCfImageId: deliveryToken,
       deliveryUrl: `https://imagedelivery.net/${deliveryToken}/public`,
     });
-  } catch (error) {
+  } catch (error: any) {
+    console.error(`[POST /:id/blank-canvas] Critical failure in route handler:`, error.stack || error.message || error);
     return c.json(
       {
         error: "Failed to upload blank canvas",
@@ -658,11 +675,16 @@ listingPhotosRouter.get("/download-script", async (c) => {
         .where(inArray(listingPhotos.id, ids))
         .all();
     } else {
-      // Default: all listing photos without a blank canvas
+      // Default: all listing photos without a blank canvas, excluding skipped ones
       photos = await db
         .select()
         .from(listingPhotos)
-        .where(isNull(listingPhotos.blankCanvasCfImageId))
+        .where(
+          and(
+            isNull(listingPhotos.blankCanvasCfImageId),
+            eq(listingPhotos.skipBlankCanvas, false),
+          ),
+        )
         .all();
     }
 
@@ -670,123 +692,47 @@ listingPhotosRouter.get("/download-script", async (c) => {
       return c.json({ error: "No listing photos found for the given criteria" }, 404);
     }
 
-    // Build a list of download entries for the Python script
-    const entries = photos.map((p) => ({
-      id: p.id,
-      cfImageId: p.cfImageId,
-      roomName: p.roomName || "Unassigned",
-      filename: `${(p.roomName || "room").replace(/[^a-zA-Z0-9_-]/g, "_")}_${p.id}`,
-    }));
+    // Build a list of download entries for the Bash script
+    const entries = photos.map((p) => {
+      const sanitizedRoomName = (p.roomName || "room").replace(/[^a-zA-Z0-9_-]/g, "_");
+      return {
+        cfImageId: p.cfImageId,
+        filename: `${sanitizedRoomName}_${p.id}`,
+      };
+    });
 
-    const script = `#!/usr/bin/env python3
-"""
-Blank Canvas — Bulk Download Script
-Generated: ${new Date().toISOString()}
+    const script = `#!/bin/bash
+# Blank Canvas — Bulk Download Script (Bash)
+# Generated: ${new Date().toISOString()}
 
-Downloads ${entries.length} listing photo(s) from Cloudflare Images.
-After downloading, edit each image to remove all furniture/fixtures/decor,
-then re-upload the blank canvas versions through the admin UI.
+# Define the target directory
+DOWNLOAD_DIR="$HOME/Downloads/core-remodel-image-edits-offline"
 
-Usage:
-  1. Set your Cloudflare API token below (or as env var)
-  2. Run: python3 download_listing_photos.py
-  3. Photos will be saved to ./listing_photos/
-"""
+# Ensure the Downloads directory exists
+mkdir -p "$DOWNLOAD_DIR"
 
-import os
-import sys
-
-try:
-    import requests
-except ImportError:
-    print("Installing requests...")
-    os.system(f"{sys.executable} -m pip install requests")
-    import requests
-
-# ──────────────────────────────────────────────────────────────────
-# CONFIGURATION — Set your Cloudflare API token here or via env var
-# ──────────────────────────────────────────────────────────────────
-CF_API_TOKEN = os.environ.get("CF_API_TOKEN", "YOUR_CLOUDFLARE_API_TOKEN_HERE")
-
-# ──────────────────────────────────────────────────────────────────
-# Photo manifest (auto-generated from your listing photos database)
-# ──────────────────────────────────────────────────────────────────
-PHOTOS = [
-${entries
-  .map(
-    (e) =>
-      `    {"id": ${e.id}, "cf_image_id": "${e.cfImageId}", "room": "${e.roomName}", "filename": "${e.filename}"},`,
-  )
-  .join("\n")}
-]
-
-# ──────────────────────────────────────────────────────────────────
-# Download logic
-# ──────────────────────────────────────────────────────────────────
-OUTPUT_DIR = "listing_photos"
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-def download_photo(photo):
-    """Download a single photo from Cloudflare Images delivery URL."""
-    cf_image_id = photo["cf_image_id"]
-    filename = photo["filename"]
+# Loop through the list of IDs and Filenames
+while read -r cf_id filename; do
+    # Skip empty lines
+    [[ -z "$cf_id" ]] && continue
     
-    # Try delivery URL first (public, no auth needed)
-    delivery_url = f"https://imagedelivery.net/{cf_image_id}/public"
+    url="https://imagedelivery.net/$cf_id/public"
+    output_path="$DOWNLOAD_DIR/$filename.jpg"
     
-    try:
-        resp = requests.get(delivery_url, timeout=30)
-        if resp.status_code == 200:
-            ext = "jpg"
-            content_type = resp.headers.get("content-type", "")
-            if "png" in content_type:
-                ext = "png"
-            elif "webp" in content_type:
-                ext = "webp"
-            
-            filepath = os.path.join(OUTPUT_DIR, f"{filename}.{ext}")
-            with open(filepath, "wb") as f:
-                f.write(resp.content)
-            print(f"  ✓ {filename}.{ext} ({len(resp.content) / 1024:.0f} KB)")
-            return True
-        else:
-            print(f"  ✗ {filename} — HTTP {resp.status_code}")
-            return False
-    except Exception as e:
-        print(f"  ✗ {filename} — {e}")
-        return False
+    echo "Downloading: $filename.jpg"
+    
+    # -sS hides the progress bar but shows errors, -o specifies output file
+    curl -sS "$url" -o "$output_path"
+done << 'EOF'
+${entries.map((e) => `${e.cfImageId} ${e.filename}`).join("\n")}
+EOF
 
-if __name__ == "__main__":
-    if CF_API_TOKEN == "YOUR_CLOUDFLARE_API_TOKEN_HERE":
-        print("⚠️  Note: Using public delivery URLs (no API token set).")
-        print("   If downloads fail, set CF_API_TOKEN in this script or as env var.")
-        print()
-    
-    print(f"Downloading {len(PHOTOS)} listing photos to ./{OUTPUT_DIR}/")
-    print("=" * 60)
-    
-    success = 0
-    failed = 0
-    for photo in PHOTOS:
-        if download_photo(photo):
-            success += 1
-        else:
-            failed += 1
-    
-    print()
-    print(f"Done! {success} downloaded, {failed} failed.")
-    print(f"Photos saved to: {os.path.abspath(OUTPUT_DIR)}/")
-    print()
-    print("NEXT STEPS:")
-    print("1. Open each photo in your AI editor (e.g., Photoshop Generative Fill, DALL-E)")
-    print("2. Remove all furniture, fixtures, decor — leave the room completely empty")
-    print("3. Save the edited versions with the SAME filenames")
-    print("4. Re-upload through the Blank Canvas admin UI")
+echo "Success! All images have been downloaded to $DOWNLOAD_DIR"
 `;
 
     return c.text(script, 200, {
-      "Content-Type": "text/x-python",
-      "Content-Disposition": `attachment; filename="download_listing_photos.py"`,
+      "Content-Type": "text/x-shellscript",
+      "Content-Disposition": `attachment; filename="download_listing_photos.sh"`,
     });
   } catch (error) {
     return c.json(
@@ -809,7 +755,10 @@ listingPhotosRouter.post("/generate-blank-canvases", async (c) => {
   try {
     const db = drizzle(c.env.DB);
     const body = await c.req.json();
-    const { listingPhotoIds } = body as { listingPhotoIds?: number[] };
+    const { listingPhotoIds, leaveOutline = false } = body as {
+      listingPhotoIds?: number[];
+      leaveOutline?: boolean;
+    };
 
     if (!Array.isArray(listingPhotoIds) || listingPhotoIds.length === 0) {
       return c.json({ error: "listingPhotoIds array is required" }, 400);
@@ -823,11 +772,16 @@ listingPhotosRouter.post("/generate-blank-canvases", async (c) => {
       );
     }
 
-    // Validate all IDs exist
+    // Validate all IDs exist and are not excluded
     const photos = await db
       .select()
       .from(listingPhotos)
-      .where(inArray(listingPhotos.id, listingPhotoIds))
+      .where(
+        and(
+          inArray(listingPhotos.id, listingPhotoIds),
+          eq(listingPhotos.skipBlankCanvas, false),
+        ),
+      )
       .all();
 
     if (photos.length === 0) {
@@ -880,7 +834,7 @@ listingPhotosRouter.post("/generate-blank-canvases", async (c) => {
               : `https://imagedelivery.net/${cfImageId}/public`;
 
             // Generate blank canvas via Gemini
-            const result = await generateBlankCanvas(sourceUrl, c.env);
+            const result = await generateBlankCanvas(sourceUrl, c.env, { leaveOutline });
 
             // Upload the result to Cloudflare Images
             const imageBlob = new Blob([result.imageBytes], { type: result.mimeType });
@@ -903,11 +857,17 @@ listingPhotosRouter.post("/generate-blank-canvases", async (c) => {
               `${credentials.accountId}/${uploadResponse.result.id}`;
 
             // Update the listing photo with the blank canvas
-            await db
-              .update(listingPhotos)
-              .set({ blankCanvasCfImageId: deliveryToken })
-              .where(eq(listingPhotos.id, item.listingPhotoId))
-              .run();
+            await db.batch([
+              db.update(listingPhotos)
+                .set({ blankCanvasCfImageId: deliveryToken })
+                .where(eq(listingPhotos.id, item.listingPhotoId)),
+              db.insert(listingPhotoBlankCanvases)
+                .values({
+                  listingPhotoId: item.listingPhotoId,
+                  cfImageId: deliveryToken,
+                  prompt: "AI Generate (Batch)",
+                })
+            ]);
 
             item.status = "done";
             item.blankCanvasCfImageId = deliveryToken;
@@ -973,6 +933,371 @@ listingPhotosRouter.get("/generation-status/:jobId", async (c) => {
     isComplete: pending === 0 && processing === 0,
     items: job.items,
   });
+});
+
+/**
+ * POST /api/listing-photos/bulk-skip-blank-canvas
+ * Bulk update the skipBlankCanvas flag for listing photos.
+ */
+listingPhotosRouter.post("/bulk-skip-blank-canvas", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const body = await c.req.json<{ ids: number[]; skip: boolean }>();
+    const { ids, skip } = body;
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return c.json({ error: "ids array is required" }, 400);
+    }
+
+    await db
+      .update(listingPhotos)
+      .set({ skipBlankCanvas: skip })
+      .where(inArray(listingPhotos.id, ids))
+      .run();
+
+    return c.json({
+      success: true,
+      updatedCount: ids.length,
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to bulk update skip status",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * GET /api/listing-photos/default-prompt
+ * Get the default system prompt used for blank canvas generation.
+ */
+listingPhotosRouter.get("/default-prompt", async (c) => {
+  const leaveOutline = c.req.query("leaveOutline") === "true";
+  const hasWindows = c.req.query("hasWindows") !== "false"; // default to true
+  const hasSkylights = c.req.query("hasSkylights") === "true"; // default to false
+  const hasMask = c.req.query("hasMask") === "true";
+
+  let prompt = buildBlankCanvasPrompt({ leaveOutline, hasWindows, hasSkylights });
+  if (hasMask) {
+    prompt = `Using the provided image, change only the room contents (removing all furniture, appliances, fixtures, decor, rugs, plants, curtains, window treatments, and personal items) and the specific elements highlighted in the black-and-white annotation mask (which highlights cabinetry, ceiling lights, or items to be removed) to empty/vacant space. Keep everything else in the image exactly the same, preserving the original style, lighting, and composition.
+
+Detail instructions:
+${prompt}`;
+  }
+  return c.json({ success: true, prompt });
+});
+
+/**
+ * POST /api/listing-photos/refine-blank-canvas
+ * Synchronous refinement of a blank canvas image with prompt and/or mask.
+ */
+listingPhotosRouter.post("/refine-blank-canvas", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const body = await c.req.json();
+    const {
+      listingPhotoId,
+      baseImageUrl,
+      maskBase64,
+      prompt,
+      leaveOutline = false
+    } = body as {
+      listingPhotoId: number;
+      baseImageUrl: string;
+      maskBase64?: string;
+      prompt?: string;
+      leaveOutline?: boolean;
+    };
+
+    if (!listingPhotoId || !baseImageUrl) {
+      return c.json({ error: "listingPhotoId and baseImageUrl are required" }, 400);
+    }
+
+    const credentials = await resolveCloudflareImagesCredentials(c.env);
+    if (!credentials.accountId || credentials.apiTokens.length === 0) {
+      return c.json({ error: "Cloudflare credentials not configured" }, 500);
+    }
+
+    const processor = new ImageProcessorService(
+      c.env,
+      credentials.accountId,
+      credentials.apiTokens[0],
+      { fallbackApiTokens: credentials.apiTokens.slice(1) },
+    );
+
+    // If maskBase64 is passed, strip any data:image/png;base64, prefix
+    let rawMask: string | undefined = undefined;
+    if (maskBase64) {
+      const match = maskBase64.match(/^data:image\/[a-z]+;base64,(.+)$/i);
+      rawMask = match ? match[1] : maskBase64;
+    }
+
+    // Call generateBlankCanvas with the specified options
+    const result = await generateBlankCanvas(baseImageUrl, c.env, {
+      maskBase64: rawMask,
+      promptOverride: prompt,
+      leaveOutline,
+    });
+
+    // Upload to Cloudflare Images
+    const imageBlob = new Blob([result.imageBytes], { type: result.mimeType });
+    const imageId = crypto.randomUUID();
+    const uploadResponse = await processor.uploadToCloudflareImages(
+      imageBlob,
+      imageId,
+      `refined-canvas-${listingPhotoId}-${Date.now()}.${result.mimeType.includes("png") ? "png" : "jpg"}`,
+    );
+
+    if (!uploadResponse.success) {
+      return c.json({ error: "Failed to upload refined image to Cloudflare" }, 500);
+    }
+
+    const deliveryUrl = processor.getDeliveryUrl(uploadResponse, uploadResponse.result.id);
+    const deliveryToken =
+      ImageProcessorService.extractDeliveryTokenFromUrl(deliveryUrl) ||
+      `${credentials.accountId}/${uploadResponse.result.id}`;
+
+    return c.json({
+      success: true,
+      blankCanvasCfImageId: deliveryToken,
+      deliveryUrl: `https://imagedelivery.net/${deliveryToken}/public`,
+      thoughts: result.thoughts,
+    });
+  } catch (error) {
+    console.error("Refine blank canvas error:", error);
+    const thoughts = (error as any).thoughts || undefined;
+    return c.json(
+      {
+        error: "Failed to refine blank canvas",
+        details: error instanceof Error ? error.message : "Unknown error",
+        thoughts,
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * POST /api/listing-photos/:id/accept-blank-canvas
+ * Accepts an already uploaded blank canvas by pairing its Cloudflare delivery token.
+ */
+listingPhotosRouter.post("/:id/accept-blank-canvas", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const photoId = parseInt(c.req.param("id"));
+    const { blankCanvasCfImageId, prompt } = await c.req.json<{
+      blankCanvasCfImageId: string;
+      prompt?: string;
+    }>();
+
+    if (!blankCanvasCfImageId) {
+      return c.json({ error: "blankCanvasCfImageId is required" }, 400);
+    }
+
+    const listingPhoto = await db
+      .select()
+      .from(listingPhotos)
+      .where(eq(listingPhotos.id, photoId))
+      .get();
+
+    if (!listingPhoto) {
+      return c.json({ error: "Listing photo not found" }, 404);
+    }
+
+    await db.batch([
+      db.update(listingPhotos)
+        .set({ blankCanvasCfImageId })
+        .where(eq(listingPhotos.id, photoId)),
+      db.insert(listingPhotoBlankCanvases)
+        .values({
+          listingPhotoId: photoId,
+          cfImageId: blankCanvasCfImageId,
+          prompt: prompt || "Accepted Refinement",
+        })
+    ]);
+
+    return c.json({
+      success: true,
+      blankCanvasCfImageId,
+      deliveryUrl: `https://imagedelivery.net/${blankCanvasCfImageId}/public`,
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to accept blank canvas",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * GET /api/listing-photos/:id/blank-canvases
+ * Retrieve all blank canvases associated with a listing photo.
+ */
+listingPhotosRouter.get("/:id/blank-canvases", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const photoId = parseInt(c.req.param("id"));
+
+    const photo = await db
+      .select()
+      .from(listingPhotos)
+      .where(eq(listingPhotos.id, photoId))
+      .get();
+
+    if (!photo) {
+      return c.json({ error: "Listing photo not found" }, 404);
+    }
+
+    const canvases = await db
+      .select()
+      .from(listingPhotoBlankCanvases)
+      .where(eq(listingPhotoBlankCanvases.listingPhotoId, photoId))
+      .orderBy(desc(listingPhotoBlankCanvases.datetimeCreated))
+      .all();
+
+    // Enforce that the listing photo's current blankCanvasCfImageId is included in the list
+    const hasPrimary = photo.blankCanvasCfImageId;
+    const primaryInList = canvases.find((canv: any) => canv.cfImageId === hasPrimary);
+
+    const list = [...canvases];
+    if (hasPrimary && !primaryInList) {
+      list.unshift({
+        id: -1, // Dummy ID representing primary
+        listingPhotoId: photoId,
+        cfImageId: hasPrimary,
+        prompt: "Legacy / Primary Blank Canvas",
+        datetimeCreated: photo.datetimeCreated || new Date(),
+      });
+    }
+
+    return c.json({
+      success: true,
+      canvases: list,
+      primaryCfImageId: hasPrimary,
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to load blank canvases",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * DELETE /api/listing-photos/:id/blank-canvases/:canvasId
+ * Delete a specific blank canvas.
+ */
+listingPhotosRouter.delete("/:id/blank-canvases/:canvasId", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const photoId = parseInt(c.req.param("id"));
+    const canvasIdStr = c.req.param("canvasId");
+    const canvasId = parseInt(canvasIdStr);
+
+    const photo = await db
+      .select()
+      .from(listingPhotos)
+      .where(eq(listingPhotos.id, photoId))
+      .get();
+
+    if (!photo) {
+      return c.json({ error: "Listing photo not found" }, 404);
+    }
+
+    let deletedCfImageId: string | null = null;
+
+    if (Number.isNaN(canvasId) || canvasId === -1) {
+      // Deleting the legacy/primary reference itself
+      deletedCfImageId = photo.blankCanvasCfImageId;
+      await db
+        .update(listingPhotos)
+        .set({ blankCanvasCfImageId: null })
+        .where(eq(listingPhotos.id, photoId))
+        .run();
+    } else {
+      const record = await db
+        .select()
+        .from(listingPhotoBlankCanvases)
+        .where(eq(listingPhotoBlankCanvases.id, canvasId))
+        .get();
+
+      if (record) {
+        deletedCfImageId = record.cfImageId;
+        await db
+          .delete(listingPhotoBlankCanvases)
+          .where(eq(listingPhotoBlankCanvases.id, canvasId))
+          .run();
+      }
+    }
+
+    // If we deleted the active primary canvas, update the listingPhoto's primary pointer to the next newest canvas
+    if (deletedCfImageId && photo.blankCanvasCfImageId === deletedCfImageId) {
+      const nextNewest = await db
+        .select()
+        .from(listingPhotoBlankCanvases)
+        .where(eq(listingPhotoBlankCanvases.listingPhotoId, photoId))
+        .orderBy(desc(listingPhotoBlankCanvases.datetimeCreated))
+        .limit(1)
+        .get();
+
+      await db
+        .update(listingPhotos)
+        .set({ blankCanvasCfImageId: nextNewest ? nextNewest.cfImageId : null })
+        .where(eq(listingPhotos.id, photoId))
+        .run();
+    }
+
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to delete blank canvas",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
+ * POST /api/listing-photos/:id/set-primary-blank-canvas
+ * Make a specific blank canvas primary.
+ */
+listingPhotosRouter.post("/:id/set-primary-blank-canvas", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const photoId = parseInt(c.req.param("id"));
+    const { cfImageId } = await c.req.json<{ cfImageId: string }>();
+
+    if (!cfImageId) {
+      return c.json({ error: "cfImageId is required" }, 400);
+    }
+
+    await db
+      .update(listingPhotos)
+      .set({ blankCanvasCfImageId: cfImageId })
+      .where(eq(listingPhotos.id, photoId))
+      .run();
+
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to update primary blank canvas",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
 });
 
 export { listingPhotosRouter };

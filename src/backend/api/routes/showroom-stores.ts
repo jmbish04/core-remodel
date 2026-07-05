@@ -742,8 +742,13 @@ showroomStoresRouter.post("/research/sweep-sessions/:sid/request-changes", async
 // ─── STORES CRUD ──────────────────────────────────────────────────────────────
 
 /**
- * GET / — List all stores with optional filters.
- * Query params: ?city=San+Francisco&pricePoint=$$$&search=studio
+ * GET / — List all stores with optional filters and enrichment.
+ * Query params: ?city=San+Francisco&pricePoint=$$$&search=studio&hub=A
+ *               &include=categories,ratings
+ *
+ * When `include` contains:
+ *   - "categories" → each store gets `categories: string[]`
+ *   - "ratings"    → each store gets `avgRating: number | null`, `ratingCount: number`
  */
 showroomStoresRouter.get("/", async (c) => {
   const db = drizzle(c.env.DB);
@@ -751,6 +756,8 @@ showroomStoresRouter.get("/", async (c) => {
   const priceFilter = c.req.query("pricePoint");
   const search = c.req.query("search");
   const hubFilter = c.req.query("hub");
+  const includeParam = c.req.query("include") ?? "";
+  const includes = new Set(includeParam.split(",").map((s) => s.trim()).filter(Boolean));
 
   let query = db
     .select({
@@ -788,14 +795,72 @@ showroomStoresRouter.get("/", async (c) => {
   }
 
   const rows = await query;
+  const storeIds = rows.map((r) => r.store.id);
+
+  // Parallel enrichment queries (only when requested and stores exist).
+  const [categoryMap, ratingMap] = await Promise.all([
+    includes.has("categories") && storeIds.length > 0
+      ? db
+          .select({
+            storeId: showroomStoreCategoryMapping.storeId,
+            categoryName: showroomStoreCategory.name,
+          })
+          .from(showroomStoreCategoryMapping)
+          .innerJoin(
+            showroomStoreCategory,
+            eq(showroomStoreCategoryMapping.categoryId, showroomStoreCategory.id)
+          )
+          .then((catRows) => {
+            const map = new Map<number, string[]>();
+            for (const r of catRows) {
+              const list = map.get(r.storeId) ?? [];
+              list.push(r.categoryName);
+              map.set(r.storeId, list);
+            }
+            return map;
+          })
+      : Promise.resolve(new Map<number, string[]>()),
+    includes.has("ratings") && storeIds.length > 0
+      ? db
+          .select({
+            storeId: storeRating.storeId,
+            rating: storeRating.rating,
+          })
+          .from(storeRating)
+          .where(eq(storeRating.isActive, true))
+          .then((rRows) => {
+            const map = new Map<number, { sum: number; count: number }>();
+            for (const r of rRows) {
+              const cur = map.get(r.storeId) ?? { sum: 0, count: 0 };
+              cur.sum += r.rating;
+              cur.count += 1;
+              map.set(r.storeId, cur);
+            }
+            return map;
+          })
+      : Promise.resolve(new Map<number, { sum: number; count: number }>()),
+  ]);
 
   return c.json({
-    stores: rows.map((r) => ({
-      ...r.store,
-      cityName: r.cityName,
-      hubRoute: r.hubRoute,
-      hubName: r.hubName,
-    })),
+    stores: rows.map((r) => {
+      const base = {
+        ...r.store,
+        cityName: r.cityName,
+        hubRoute: r.hubRoute,
+        hubName: r.hubName,
+      };
+
+      if (includes.has("categories")) {
+        (base as any).categories = categoryMap.get(r.store.id) ?? [];
+      }
+      if (includes.has("ratings")) {
+        const rData = ratingMap.get(r.store.id);
+        (base as any).avgRating = rData ? Math.round((rData.sum / rData.count) * 10) / 10 : null;
+        (base as any).ratingCount = rData?.count ?? 0;
+      }
+
+      return base;
+    }),
   });
 });
 

@@ -144,5 +144,19 @@ export async function getCloudflareAiGatewayToken(env: Env): Promise<string> {
       ? env.CLOUDFLARE_AI_GATEWAY_TOKEN
       : await (env.CLOUDFLARE_AI_GATEWAY_TOKEN as any).get();
   }
-  throw new Error("Missing env.REPLICATE_API_TOKEN in Worker Secret Bindings");
+  throw new Error("Missing env.CLOUDFLARE_AI_GATEWAY_TOKEN in Worker Secret Bindings");
 }
+
+/**
+ * Helper to fetch NotebookLM cookies.
+ * Maps to NOTEBOOKLM_COOKIES if present in env.
+ */
+// export async function getNotebookLMCookies(env: Env): Promise<string> {
+//   const cookies = (env as any).NOTEBOOKLM_COOKIES;
+//   if (cookies) {
+//     return typeof cookies === "string"
+//       ? cookies
+//       : await cookies.get();
+//   }
+//   throw new Error("Missing env.NOTEBOOKLM_COOKIES in Worker Secret Bindings");
+// }
