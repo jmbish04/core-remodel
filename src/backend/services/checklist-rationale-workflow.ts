@@ -286,7 +286,7 @@ async function inferMappingsForCandidate(
 
   try {
     const raw = (await env.AI.run(
-      "@cf/meta/llama-3.1-8b-instruct" as Parameters<typeof env.AI.run>[0],
+      "@cf/moonshotai/kimi-k2.6" as Parameters<typeof env.AI.run>[0],
       {
         messages: [
           { role: "system", content: systemPrompt },
