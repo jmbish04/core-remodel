@@ -9,6 +9,7 @@ export * from "./ai/messages";
 
 export * from "./health/health_checks";
 export * from "./notifications/notifications";
+export * from "./plans/index";
 export * from "./documents/documents";
 export * from "./documents/supporting_documents";
 export * from "./estimates/estimates";

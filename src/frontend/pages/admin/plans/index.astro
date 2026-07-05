@@ -1,0 +1,13 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { PlansOverviewApp } from "@/components/plans/PlansOverviewApp";
+---
+
+<BaseLayout
+  title="Roadmap Plans — The Monolith"
+  description="Live roadmap progress monitor across every build plan for the 126 Colby remodel platform."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <PlansOverviewApp client:only="react" />
+  </main>
+</BaseLayout>

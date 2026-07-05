@@ -1,0 +1,84 @@
+{
+  "$note": "Doc mirror of src/backend/db/seeds/seed-plan-tasks.ts (the runtime source of truth). Live status lives in D1 / /admin/plans; update the seed when adding tasks and re-run POST /api/admin/plans/{slug}/seed.",
+  "plans": [
+    { "slug": "0013_link_cleanup", "title": "Site/URL cleanup + two-viewport IA", "status": "active" },
+    { "slug": "0009_clickup_taskmanagement", "title": "ClickUp Integration + AI Orchestrator", "status": "planning" },
+    { "slug": "0010_gallery_search", "title": "Gallery Search + Saved Searches + Canvas Editor", "status": "planning" },
+    { "slug": "0011_photo_editing", "title": "Photo Edit Sessions — UX Overhaul", "status": "planning" },
+    { "slug": "0012_contractor_activity_map", "title": "Contractor Activity Map", "status": "planning" },
+    { "slug": "0014_ai_photo_workshop", "title": "Design Workshop (Nano-Banana Spatial Design)", "status": "planning" }
+  ],
+  "tasks": {
+    "0013_link_cleanup": [
+      { "key": "P0-01", "phase": 0, "ws": "tracker", "type": "new", "title": "D1 plans + plan_tasks schema" },
+      { "key": "P0-02", "phase": 0, "ws": "tracker", "type": "new", "title": "/api/admin/plans/* endpoints" },
+      { "key": "P0-03", "phase": 0, "ws": "tracker", "type": "new", "title": "/admin/plans overview + board UI" },
+      { "key": "P0-04", "phase": 0, "ws": "tracker", "type": "new", "title": "Seed + sidebar link" },
+      { "key": "P0-05", "phase": 0, "ws": "tracker", "type": "new", "title": "Author docs/0013 package" },
+      { "key": "W0-01", "phase": 0, "ws": "recovery", "type": "recover", "title": "Recover blank-canvas suite", "dependsOn": ["W0-06"] },
+      { "key": "W0-02", "phase": 0, "ws": "recovery", "type": "recover", "title": "Rescue ClickUp integration" },
+      { "key": "W0-03", "phase": 0, "ws": "recovery", "type": "recover", "title": "Rescue Admin Chat + Orchestrator" },
+      { "key": "W0-04", "phase": 0, "ws": "recovery", "type": "recover", "title": "Rescue saved image searches" },
+      { "key": "W0-05", "phase": 0, "ws": "recovery", "type": "investigate", "title": "Reconcile migrations 0055-0058" },
+      { "key": "W0-06", "phase": 0, "ws": "recovery", "type": "recover", "title": "3-way merge overlapping files" },
+      { "key": "P1-01", "phase": 1, "ws": "navigation", "type": "new", "title": "Two sidebars (Public/Admin)" },
+      { "key": "P1-02", "phase": 1, "ws": "navigation", "type": "new", "title": "Enter Admin Portal button" },
+      { "key": "P1-03", "phase": 1, "ws": "navigation", "type": "move", "title": "Admin namespace reorg" },
+      { "key": "P1-04", "phase": 1, "ws": "navigation", "type": "move", "title": "Public route moves" },
+      { "key": "P1-05", "phase": 1, "ws": "navigation", "type": "update", "title": "Redirects for all moves", "dependsOn": ["P1-03", "P1-04"] },
+      { "key": "P1-06", "phase": 1, "ws": "navigation", "type": "update", "title": "Fix stale contractor guide" },
+      { "key": "P1-07", "phase": 1, "ws": "navigation", "type": "delete", "title": "Hard-delete dead routes (keep tally + data)" },
+      { "key": "P1-08", "phase": 1, "ws": "navigation", "type": "move", "title": "Questionnaire move+keep" },
+      { "key": "P2-01", "phase": 2, "ws": "documents", "type": "new", "title": "Documents schema (visibility + views)" },
+      { "key": "P2-02", "phase": 2, "ws": "documents", "type": "new", "title": "Reusable upload pipeline", "dependsOn": ["P2-01"] },
+      { "key": "P2-03", "phase": 2, "ws": "documents", "type": "new", "title": "Public /docs", "dependsOn": ["P2-01"] },
+      { "key": "P2-04", "phase": 2, "ws": "documents", "type": "new", "title": "/admin/docs", "dependsOn": ["P2-02"] },
+      { "key": "P2-05", "phase": 2, "ws": "documents", "type": "new", "title": "Mount uploader on entities", "dependsOn": ["P2-02"] },
+      { "key": "P3-01", "phase": 3, "ws": "crm", "type": "new", "title": "Company detail (info tabs) + new" },
+      { "key": "P3-02", "phase": 3, "ws": "crm", "type": "new", "title": "Contacts" },
+      { "key": "P3-03", "phase": 3, "ws": "crm", "type": "new", "title": "Notes (PlateJS)" },
+      { "key": "P3-04", "phase": 3, "ws": "crm", "type": "new", "title": "Todos (PlateJS)" },
+      { "key": "P3-05", "phase": 3, "ws": "crm", "type": "new", "title": "Company documents", "dependsOn": ["P2-05"] },
+      { "key": "P3-06", "phase": 3, "ws": "crm", "type": "new", "title": "Company permits" },
+      { "key": "P3-07", "phase": 3, "ws": "crm", "type": "new", "title": "Gmail Comms hub (specs/GMAIL_COMMS.md)" },
+      { "key": "P4-01", "phase": 4, "ws": "design", "type": "new", "title": "Moodboards suite" },
+      { "key": "P4-02", "phase": 4, "ws": "design", "type": "new", "title": "Design Workshop (plan 0014)" },
+      { "key": "P4-03", "phase": 4, "ws": "design", "type": "new", "title": "Decision Room" },
+      { "key": "P4-04", "phase": 4, "ws": "design", "type": "new", "title": "Blank-canvas rebuild", "dependsOn": ["W0-01"] },
+      { "key": "P4-05", "phase": 4, "ws": "design", "type": "move", "title": "Builder -> angles" },
+      { "key": "P4-06", "phase": 4, "ws": "design", "type": "new", "title": "Public design-master-plan", "dependsOn": ["P4-03"] },
+      { "key": "P4-07", "phase": 4, "ws": "design", "type": "move", "title": "Kitchen layout -> designs/layouts" },
+      { "key": "P5-01", "phase": 5, "ws": "sourcing", "type": "update", "title": "Consolidate + reintegrate shopping" },
+      { "key": "P5-02", "phase": 5, "ws": "sourcing", "type": "new", "title": "Showroom sub-pages" },
+      { "key": "P5-03", "phase": 5, "ws": "sourcing", "type": "new", "title": "Brand e-commerce pages" },
+      { "key": "P5-04", "phase": 5, "ws": "sourcing", "type": "new", "title": "Product e-commerce pages" },
+      { "key": "P5-05", "phase": 5, "ws": "sourcing", "type": "new", "title": "Showroom hero hours + cards" },
+      { "key": "P5-06", "phase": 5, "ws": "sourcing", "type": "new", "title": "Showroom enrichment pipeline (specs/SHOWROOM_ENRICHMENT.md)" },
+      { "key": "P5-07", "phase": 5, "ws": "sourcing", "type": "new", "title": "RAG journal viewer" },
+      { "key": "P5-08", "phase": 5, "ws": "sourcing", "type": "update", "title": "Fix broken showroom routes" },
+      { "key": "P6-01", "phase": 6, "ws": "bids-budget", "type": "move", "title": "Bids portal (+ phone PIN)" },
+      { "key": "P6-02", "phase": 6, "ws": "bids-budget", "type": "delete", "title": "Delete estimates list" },
+      { "key": "P6-03", "phase": 6, "ws": "bids-budget", "type": "move", "title": "Budget namespace" },
+      { "key": "P6-04", "phase": 6, "ws": "bids-budget", "type": "keep", "title": "Budget reconciliation" },
+      { "key": "P7-01", "phase": 7, "ws": "floorplan", "type": "new", "title": "Floor/room routing" },
+      { "key": "P7-02", "phase": 7, "ws": "floorplan", "type": "new", "title": "Closets view" }
+    ],
+    "0009_clickup_taskmanagement": [
+      { "key": "CU-01", "phase": 1, "ws": "clickup", "type": "recover", "title": "ClickUp-backed PMO mirrored in D1" },
+      { "key": "CU-02", "phase": 1, "ws": "clickup", "type": "recover", "title": "AI Orchestrator Agent" }
+    ],
+    "0010_gallery_search": [
+      { "key": "GS-01", "phase": 1, "ws": "gallery", "type": "recover", "title": "Gallery search + saved searches" },
+      { "key": "GS-02", "phase": 1, "ws": "gallery", "type": "recover", "title": "Gemini canvas-editor refinements" }
+    ],
+    "0011_photo_editing": [
+      { "key": "PE-01", "phase": 1, "ws": "photos", "type": "recover", "title": "Photo edit sessions UX overhaul" }
+    ],
+    "0012_contractor_activity_map": [
+      { "key": "CM-01", "phase": 1, "ws": "map", "type": "new", "title": "Contractor activity map" }
+    ],
+    "0014_ai_photo_workshop": [
+      { "key": "WS-01", "phase": 1, "ws": "design", "type": "new", "title": "Design workshop (nano-banana)" }
+    ]
+  }
+}
