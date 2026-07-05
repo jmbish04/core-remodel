@@ -236,7 +236,9 @@ export async function runBackfillPhotoPipeline(
       .from(showroomStores)
       .where(eq(showroomStores.id, showroomId))
       .limit(1);
-    if (existing) return;
+    // Bail if the store row is gone (avoids a FK violation / orphaned photo rows)
+    // or if photos already exist (fill-blanks).
+    if (!store || existing) return;
 
     const { accountId, apiTokens } = await resolveCloudflareImagesCredentials(env);
     if (!accountId || apiTokens.length === 0) {

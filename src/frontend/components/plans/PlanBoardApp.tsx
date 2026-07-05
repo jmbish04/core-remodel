@@ -86,7 +86,7 @@ export function PlanBoardApp({ slug }: { slug: string }) {
       setDetail(payload);
       setNotFound(false);
     } catch (error) {
-      const status = (error as { status?: number }).status;
+      const status = (error as { status?: number } | null | undefined)?.status;
       if (status === 404) {
         setNotFound(true);
       } else if (!loadedOnce.current) {

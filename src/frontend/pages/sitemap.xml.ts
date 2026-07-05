@@ -5,10 +5,11 @@
  * foldering under `src/frontend/pages/**` (see `@/lib/sitemap`) so it never
  * drifts from the real set of pages.
  *
- * Only STATIC (non-dynamic) routes are emitted: a crawler sitemap must list
- * concrete, fetchable URLs, and dynamic patterns like `/rooms/[slug]` are not
- * real URLs. Dynamic routes are still present in `/sitemap.json` (flagged) and
- * on the human `/sitemap` page.
+ * Only STATIC, PUBLIC routes are emitted: a crawler sitemap must list concrete,
+ * fetchable URLs, so dynamic patterns like `/rooms/[slug]` are excluded — and
+ * `/admin/*` (auth-gated) is excluded so this public document never advertises
+ * the admin surface to search engines. The full route set (incl. admin +
+ * dynamic) is still available on the auth-gated `/sitemap.json` and `/sitemap`.
  *
  * Absolute URLs are built from the REQUEST origin (`new URL(request.url).origin`)
  * rather than the `site` value in `astro.config`, so the sitemap is correct
@@ -37,7 +38,10 @@ export const GET: APIRoute = ({ request }) => {
   const lastmod = new Date().toISOString();
 
   const urls = getSiteRoutes()
+    // Static, public routes only — no dynamic patterns, and never the auth-gated
+    // /admin surface (leaking admin paths to crawlers is a security risk).
     .filter((route) => !route.dynamic)
+    .filter((route) => route.path !== "/admin" && !route.path.startsWith("/admin/"))
     .map((route) => {
       // Root path stays as-is; other paths are appended to the origin verbatim.
       const loc = escapeXml(`${origin}${route.path}`);

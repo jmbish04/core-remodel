@@ -1,3 +1,4 @@
+import * as React from "react"
 import { Checkbox as CheckboxPrimitive } from "@base-ui/react/checkbox"
 import { CheckIcon, MinusIcon } from "lucide-react"
 
@@ -10,12 +11,13 @@ import { cn } from "@/lib/utils"
  * state). Uses `ring-1 ring-border/60` for the resting edge rather than a hard
  * 1px border, per the Monolith no-borders rule.
  */
-function Checkbox({
-  className,
-  ...props
-}: CheckboxPrimitive.Root.Props) {
+const Checkbox = React.forwardRef<
+  HTMLButtonElement,
+  CheckboxPrimitive.Root.Props
+>(({ className, ...props }, ref) => {
   return (
     <CheckboxPrimitive.Root
+      ref={ref}
       data-slot="checkbox"
       className={cn(
         "group peer size-4 shrink-0 rounded-[4px] bg-input/40 ring-1 ring-border/60 outline-none transition-colors",
@@ -39,6 +41,7 @@ function Checkbox({
       </CheckboxPrimitive.Indicator>
     </CheckboxPrimitive.Root>
   )
-}
+})
+Checkbox.displayName = "Checkbox"
 
 export { Checkbox }

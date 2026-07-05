@@ -98,8 +98,10 @@ adminPlansRouter.get("/:slug", async (c) => {
   const byPhase = new Map<number, PlanTask[]>();
   const byWorkstream = new Map<string, PlanTask[]>();
   for (const task of tasks) {
-    (byPhase.get(task.phase) ?? byPhase.set(task.phase, []).get(task.phase)!).push(task);
-    (byWorkstream.get(task.workstream) ?? byWorkstream.set(task.workstream, []).get(task.workstream)!).push(task);
+    if (!byPhase.has(task.phase)) byPhase.set(task.phase, []);
+    byPhase.get(task.phase)!.push(task);
+    if (!byWorkstream.has(task.workstream)) byWorkstream.set(task.workstream, []);
+    byWorkstream.get(task.workstream)!.push(task);
   }
 
   return c.json({

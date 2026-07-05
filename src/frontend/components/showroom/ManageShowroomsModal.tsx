@@ -57,6 +57,22 @@ import {
 } from "./intake/places-mapper";
 import type { HoursJson } from "./intake/hours-types";
 
+/**
+ * UUID with a fallback for non-secure contexts. `crypto.randomUUID()` only
+ * exists over HTTPS/localhost, so it throws when the app is opened over plain
+ * HTTP (e.g. on a phone via the LAN IP during testing). This never throws.
+ */
+function generateUUID(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 // ─── Wire types (mirror the backend endpoints verbatim) ───────────────────────
 
 /** One entry of `GET /api/showroom-stores/meta/incomplete`. */
@@ -436,7 +452,7 @@ export function ManageShowroomsModal({ onDone }: { onDone: () => void }) {
 
   // One Places session token per edit search; regenerated after each successful
   // details fetch (mirrors AddShowroomModal.sessionTokenRef).
-  const sessionTokenRef = useRef<string>(crypto.randomUUID());
+  const sessionTokenRef = useRef<string>(generateUUID());
 
   // Any in-flight request blocks dialog close.
   const busy = loadingList || resolving || submitting;
@@ -522,7 +538,7 @@ export function ManageShowroomsModal({ onDone }: { onDone: () => void }) {
         const url = `/api/places/details/${encodeURIComponent(placeId)}?sessionToken=${sessionTokenRef.current}&skipAi=1`;
         const place = await api<GooglePlaceDetails>(url);
         // Regenerate the session token — this details call closed the session.
-        sessionTokenRef.current = crypto.randomUUID();
+        sessionTokenRef.current = generateUUID();
         const card: PlaceCard = {
           placeId: place.id ?? placeId,
           displayName: place.displayName?.text ?? null,
@@ -576,34 +592,36 @@ export function ManageShowroomsModal({ onDone }: { onDone: () => void }) {
     setProgress({ done: 0, total: readyRows.length });
 
     try {
-      const items: Array<{ showroomId: number; placeId: string; fields: BackfillFields }> = [];
+      // Fetch Place Details for all rows in PARALLEL (sequential would take 25s+
+      // for a full batch of 50). Each call gets its own session token; progress
+      // increments as each resolves.
+      let done = 0;
+      const items = await Promise.all(
+        readyRows.map(async (row) => {
+          const placeId = row.chosenPlaceId as string;
+          const url = `/api/places/details/${encodeURIComponent(placeId)}?sessionToken=${generateUUID()}&skipAi=1`;
+          const place = await api<GooglePlaceDetails>(url);
 
-      for (let i = 0; i < readyRows.length; i++) {
-        const row = readyRows[i];
-        const placeId = row.chosenPlaceId as string;
-        const url = `/api/places/details/${encodeURIComponent(placeId)}?sessionToken=${sessionTokenRef.current}&skipAi=1`;
-        const place = await api<GooglePlaceDetails>(url);
-        sessionTokenRef.current = crypto.randomUUID();
+          const mapped = mapPlaceToIntake(place);
+          // Only forward what the mapper actually produced (all optional).
+          const fields: BackfillFields = {};
+          if (mapped.locationAddress) fields.locationAddress = mapped.locationAddress;
+          if (mapped.phoneNumber) fields.phoneNumber = mapped.phoneNumber;
+          if (mapped.websiteUrl) fields.websiteUrl = mapped.websiteUrl;
+          if (typeof mapped.googleRating === "number") fields.googleRating = mapped.googleRating;
+          if (typeof mapped.userRatingCount === "number") {
+            fields.userRatingCount = mapped.userRatingCount;
+          }
+          if (mapped.reviewSummary) fields.reviewSummary = mapped.reviewSummary;
+          if (mapped.pricePoint) fields.pricePoint = mapped.pricePoint;
+          if (mapped.hoursJson) fields.hoursJson = mapped.hoursJson;
+          // Raw Places photo refs (pass-through so the backend queue can upload).
+          if (place.photos && place.photos.length > 0) fields.photos = place.photos;
 
-        const mapped = mapPlaceToIntake(place);
-        // Only forward what the mapper actually produced (all optional).
-        const fields: BackfillFields = {};
-        if (mapped.locationAddress) fields.locationAddress = mapped.locationAddress;
-        if (mapped.phoneNumber) fields.phoneNumber = mapped.phoneNumber;
-        if (mapped.websiteUrl) fields.websiteUrl = mapped.websiteUrl;
-        if (typeof mapped.googleRating === "number") fields.googleRating = mapped.googleRating;
-        if (typeof mapped.userRatingCount === "number") {
-          fields.userRatingCount = mapped.userRatingCount;
-        }
-        if (mapped.reviewSummary) fields.reviewSummary = mapped.reviewSummary;
-        if (mapped.pricePoint) fields.pricePoint = mapped.pricePoint;
-        if (mapped.hoursJson) fields.hoursJson = mapped.hoursJson;
-        // Raw Places photo refs (pass-through so the backend queue can upload).
-        if (place.photos && place.photos.length > 0) fields.photos = place.photos;
-
-        items.push({ showroomId: row.showroomId, placeId, fields });
-        setProgress({ done: i + 1, total: readyRows.length });
-      }
+          setProgress({ done: ++done, total: readyRows.length });
+          return { showroomId: row.showroomId, placeId, fields };
+        }),
+      );
 
       const result = await apiPost<SubmitResponse>(
         "/api/showroom-stores/backfill/submit",
