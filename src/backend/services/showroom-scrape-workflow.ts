@@ -52,7 +52,7 @@ export interface ShowroomScrapeParams {
 const EMBED_MODEL = "@cf/baai/bge-large-en-v1.5" as const;
 
 /** Workers-AI instruct model used for per-page structured extraction. */
-const EXTRACT_MODEL = "@cf/meta/llama-3.1-8b-instruct" as const;
+const EXTRACT_MODEL = "@cf/moonshotai/kimi-k2.6" as const;
 
 /** Hard cap on the number of pages crawled per run. */
 const MAX_PAGES = 10;
