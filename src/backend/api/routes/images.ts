@@ -1430,7 +1430,7 @@ imagesRouter.post("/upload-urls", async (c) => {
             sourceFilenameNormalized: uploadFingerprint.sourceFilenameNormalized,
             sourceFileSize: uploadFingerprint.sourceFileSize,
             sourceFileMd5: uploadFingerprint.sourceFileMd5,
-            inspirationScope: photoCategory === "inspirational" ? "room" : "room",
+            inspirationScope: "room",
             scopeFloorId: null,
           })
           .run();
