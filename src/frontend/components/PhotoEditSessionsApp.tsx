@@ -1,12 +1,21 @@
 import {
+  ArrowLeft,
+  ArrowRight,
   Building2,
   Check,
-  Crop,
   Eraser,
   Loader2,
+  Paintbrush,
   Plus,
   RefreshCw,
+  Sofa,
   Sparkles,
+  Brush,
+  Trash2,
+  Upload,
+  Wand2,
+  Layers,
+  Image as ImageIcon,
 } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -30,7 +39,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   FileUpload,
-  FileUploadClear,
   FileUploadDropzone,
   FileUploadItem,
   FileUploadItemDelete,
@@ -39,10 +47,13 @@ import {
   FileUploadList,
   FileUploadTrigger,
 } from "@/components/ui/file-upload";
-import { Cropper, CropperArea, CropperImage, type CropperAreaData } from "@/components/ui/cropper";
-
+import { InlineMaskEditor } from "@/components/ui/InlineMaskEditor";
 
 import { cn } from "@/lib/utils";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
 
 interface ImageRecord {
   id: string;
@@ -56,7 +67,11 @@ interface ImageRecord {
   photoCategory?: "inspirational" | "listing" | "ai_render";
   listingPhoto?: {
     id: number;
+    roomId?: number | null;
+    roomName?: string | null;
+    description?: string | null;
     blankCanvasCfImageId?: string | null;
+    skipBlankCanvas?: boolean;
     [key: string]: unknown;
   } | null;
 }
@@ -100,15 +115,59 @@ interface EditRevision {
   outputImage?: ImageRecord | null;
 }
 
-interface CropState {
-  crop: { x: number; y: number };
-  zoom: number;
-  rotation: number;
-  areaPixels: CropperAreaData | null;
+type EditCategory = "layout" | "paint" | "staging" | "stitch";
+
+interface CategoryPromptConfig {
+  key: EditCategory;
+  title: string;
+  description: string;
+  icon: React.ReactNode;
+  defaultPrompt: string;
+  supportsMask: boolean;
 }
 
+const EDIT_CATEGORIES: CategoryPromptConfig[] = [
+  {
+    key: "layout",
+    title: "Wall Layout Change",
+    description:
+      "Open walls, move zones, remove fixed elements, and establish a base canvas.",
+    icon: <Layers className="size-5" />,
+    defaultPrompt:
+      "Remove all furniture and personal items from this room. Open the wall between the kitchen and living area. Keep the structural elements, windows, and flooring intact.",
+    supportsMask: true,
+  },
+  {
+    key: "paint",
+    title: "Paint Color Visuals",
+    description: "Test color systems, sheen, and finish detail prompts.",
+    icon: <Paintbrush className="size-5" />,
+    defaultPrompt:
+      "Repaint all walls in this room to a warm greige (similar to Benjamin Moore Revere Pewter HC-172). Keep the trim and ceiling white. Preserve all furniture, lighting, and decor exactly as they are.",
+    supportsMask: true,
+  },
+  {
+    key: "staging",
+    title: "Staging / Furniture",
+    description: "Show furniture, lighting, and styling concepts.",
+    icon: <Sofa className="size-5" />,
+    defaultPrompt:
+      "Stage this empty room with modern transitional furniture: a sectional sofa, accent chairs, coffee table, area rug, and ambient lighting. Keep the wall color, flooring, and windows exactly as they are.",
+    supportsMask: true,
+  },
+  {
+    key: "stitch",
+    title: "Inspirational Stitching",
+    description:
+      "Extract details from inspiration photos and apply to listing angles.",
+    icon: <Wand2 className="size-5" />,
+    defaultPrompt:
+      "Using the provided inspiration image(s), extract the key design elements (furniture style, color palette, material finishes) and apply them to this room photo. Maintain the room's architecture, windows, and flooring.",
+    supportsMask: false,
+  },
+];
+
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
-const MAX_FILES = 1;
 
 const fileKey = (file: File) =>
   `${file.name}-${file.size}-${file.type}-${file.lastModified}`;
@@ -156,70 +215,76 @@ function getImageDisplayName(
   return fallback;
 }
 
-function createImageFromFile(file: File): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    const objectUrl = URL.createObjectURL(file);
-
-    image.addEventListener("load", () => {
-      URL.revokeObjectURL(objectUrl);
-      resolve(image);
-    });
-
-    image.addEventListener("error", (error) => {
-      URL.revokeObjectURL(objectUrl);
-      reject(error);
-    });
-
-    image.src = objectUrl;
-  });
-}
-
-async function getCroppedFile(file: File, areaPixels: CropperAreaData): Promise<File> {
-  const image = await createImageFromFile(file);
-  const canvas = document.createElement("canvas");
-  const context = canvas.getContext("2d");
-
-  if (!context) {
-    throw new Error("2D context is not available for cropping");
-  }
-
-  const width = Math.max(1, Math.round(areaPixels.width));
-  const height = Math.max(1, Math.round(areaPixels.height));
-  const x = Math.max(0, Math.round(areaPixels.x));
-  const y = Math.max(0, Math.round(areaPixels.y));
-
-  canvas.width = width;
-  canvas.height = height;
-  context.drawImage(image, x, y, width, height, 0, 0, width, height);
-
-  const outputType = file.type === "image/png" ? "image/png" : "image/jpeg";
-  const blob = await new Promise<Blob>((resolve, reject) => {
-    canvas.toBlob(
-      (result) => {
-        if (!result) {
-          reject(new Error("Failed to render cropped image"));
-          return;
-        }
-        resolve(result);
-      },
-      outputType,
-      0.95,
-    );
-  });
-
-  return new File([blob], file.name, {
-    type: outputType,
-    lastModified: Date.now(),
-  });
-}
-
 function formatDate(value: string | number | Date | null | undefined): string {
   if (!value) return "Unknown";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Unknown";
   return date.toLocaleString();
 }
+
+function resolveRoomName(
+  image: ImageRecord,
+  catalogFloors: CatalogFloor[],
+): { roomName: string; floorName: string } {
+  // 1. Listing photo roomName is the most specific
+  if (image.listingPhoto?.roomName) {
+    // Try to find the floor
+    for (const floor of catalogFloors) {
+      const matched = floor.rooms.find(
+        (room) =>
+          room.roomName === image.listingPhoto?.roomName ||
+          room.displayName === image.listingPhoto?.roomName,
+      );
+      if (matched) {
+        return {
+          roomName: matched.displayName || matched.roomName,
+          floorName: floor.name,
+        };
+      }
+    }
+    return { roomName: image.listingPhoto.roomName, floorName: "Unassigned" };
+  }
+
+  // 2. Catalog room lookup via roomId
+  if (image.roomId) {
+    for (const floor of catalogFloors) {
+      const matched = floor.rooms.find((room) => room.id === image.roomId);
+      if (matched) {
+        return {
+          roomName: matched.displayName || matched.roomName,
+          floorName: floor.name,
+        };
+      }
+    }
+  }
+
+  // 3. roomLabels array
+  if (Array.isArray(image.roomLabels) && image.roomLabels.length > 0) {
+    for (const floor of catalogFloors) {
+      const matched = floor.rooms.find((room) =>
+        image.roomLabels?.includes(room.roomName),
+      );
+      if (matched) {
+        return {
+          roomName: matched.displayName || matched.roomName,
+          floorName: floor.name,
+        };
+      }
+    }
+    return { roomName: image.roomLabels[0], floorName: "Unassigned" };
+  }
+
+  // 4. roomType fallback
+  if (image.roomType) {
+    return { roomName: image.roomType, floorName: "Unassigned" };
+  }
+
+  return { roomName: "Unassigned", floorName: "Unassigned" };
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
 
 export function PhotoEditSessionsApp() {
   const [sessions, setSessions] = useState<EditSession[]>([]);
@@ -231,58 +296,69 @@ export function PhotoEditSessionsApp() {
   const [loading, setLoading] = useState(true);
   const [loadingSession, setLoadingSession] = useState(false);
   const [creatingSession, setCreatingSession] = useState(false);
-  const [creatingRevision, setCreatingRevision] = useState(false);
 
-  const [newSessionName, setNewSessionName] = useState("");
-  const [newSessionSourceImageId, setNewSessionSourceImageId] = useState("");
-  const [newSessionRoomType, setNewSessionRoomType] = useState("");
-  const [newSessionPromptTemplate, setNewSessionPromptTemplate] = useState("");
-
+  // Revision form (inline after session selection)
   const [prompt, setPrompt] = useState("");
   const [roomType, setRoomType] = useState("");
-  const [revisionSourceImageId, setRevisionSourceImageId] = useState("");
-  const [revisionFiles, setRevisionFiles] = useState<File[]>([]);
+  const [maskBase64, setMaskBase64] = useState<string | null>(null);
+  const [maskEditorOpen, setMaskEditorOpen] = useState(false);
+  const [creatingRevision, setCreatingRevision] = useState(false);
+  const [useBlankCanvas, setUseBlankCanvas] = useState(true);
 
+  // Room catalog
   const [catalogFloors, setCatalogFloors] = useState<CatalogFloor[]>([]);
-  const [catalogRooms, setCatalogRooms] = useState<CatalogRoom[]>([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
 
+  // Wizard state
   const [sessionWizardOpen, setSessionWizardOpen] = useState(false);
   const [sessionWizardStep, setSessionWizardStep] = useState(1);
-  const [sessionWizardEditType, setSessionWizardEditType] = useState<
-    "layout" | "paint" | "staging" | "inspiration"
-  >("layout");
   const [wizardSelectedSourceImageIds, setWizardSelectedSourceImageIds] = useState<string[]>([]);
   const [wizardPreviewImageId, setWizardPreviewImageId] = useState<string | null>(null);
+  const [wizardUseBlankCanvas, setWizardUseBlankCanvas] = useState(true);
+  const [wizardRoomType, setWizardRoomType] = useState("");
+  const [wizardSessionName, setWizardSessionName] = useState("");
+
+  // Multi-select categories
+  const [wizardSelectedCategories, setWizardSelectedCategories] = useState<Set<EditCategory>>(
+    new Set(),
+  );
+
+  // Per-category prompts and config
+  const [categoryPrompts, setCategoryPrompts] = useState<Record<EditCategory, string>>({
+    layout: EDIT_CATEGORIES[0].defaultPrompt,
+    paint: EDIT_CATEGORIES[1].defaultPrompt,
+    staging: EDIT_CATEGORIES[2].defaultPrompt,
+    stitch: EDIT_CATEGORIES[3].defaultPrompt,
+  });
+  const [categoryMasks, setCategoryMasks] = useState<Record<EditCategory, string | null>>({
+    layout: null,
+    paint: null,
+    staging: null,
+    stitch: null,
+  });
+  const [activeCategoryIndex, setActiveCategoryIndex] = useState(0);
+
+  // Stitch-specific: inspo picker
+  const [stitchInspoMode, setStitchInspoMode] = useState<"existing" | "upload">("existing");
+  const [stitchSelectedInspoIds, setStitchSelectedInspoIds] = useState<string[]>([]);
+  const [stitchUploadedFiles, setStitchUploadedFiles] = useState<File[]>([]);
+  const [showAllInspo, setShowAllInspo] = useState(false);
+
+  // Processing state
+  const [batchProcessing, setBatchProcessing] = useState(false);
+  const [batchResults, setBatchResults] = useState<
+    Array<{ category: string; success: boolean; error?: string }>
+  >([]);
+
   const requestedSourceImageIdRef = useRef<string | null>(
     typeof window !== "undefined"
       ? new URLSearchParams(window.location.search).get("sourceImageId")
       : null,
   );
 
-  const [cropModalOpen, setCropModalOpen] = useState(false);
-  const [cropTargetFile, setCropTargetFile] = useState<File | null>(null);
-  const [cropState, setCropState] = useState<CropState>({
-    crop: { x: 0, y: 0 },
-    zoom: 1,
-    rotation: 0,
-    areaPixels: null,
-  });
-
-  const cropTargetPreview = useMemo(
-    () => (cropTargetFile ? URL.createObjectURL(cropTargetFile) : null),
-    [cropTargetFile],
-  );
-
-  useEffect(() => {
-    return () => {
-      if (cropTargetPreview) {
-        URL.revokeObjectURL(cropTargetPreview);
-      }
-    };
-  }, [cropTargetPreview]);
-
-
+  // ---------------------------------------------------------------------------
+  // Data loading
+  // ---------------------------------------------------------------------------
 
   const loadSourceImages = useCallback(async () => {
     const response = await fetch("/api/images");
@@ -333,7 +409,6 @@ export function PhotoEditSessionsApp() {
       }));
 
       setCatalogFloors(normalizedFloors);
-      setCatalogRooms(normalizedFloors.flatMap((floor) => floor.rooms));
     } finally {
       setCatalogLoading(false);
     }
@@ -376,15 +451,25 @@ export function PhotoEditSessionsApp() {
       }
 
       setSelectedSession(payload.session);
-      setSessionSourceImage(payload.sourceImage ?? null);
+      const src = payload.sourceImage ?? null;
+      setSessionSourceImage(src);
       setRevisions(Array.isArray(payload.revisions) ? payload.revisions : []);
-      setNewSessionSourceImageId(payload.session.sourceImageId || "");
+
+      // Auto-fill room type from source image
+      if (src) {
+        const { roomName } = resolveRoomName(src, catalogFloors);
+        if (roomName && roomName !== "Unassigned") {
+          setRoomType(roomName.toLowerCase());
+        }
+        // Auto-set blank canvas toggle
+        setUseBlankCanvas(!!src.listingPhoto?.blankCanvasCfImageId);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to load session");
     } finally {
       setLoadingSession(false);
     }
-  }, [selectedSessionId]);
+  }, [selectedSessionId, catalogFloors]);
 
   useEffect(() => {
     const init = async () => {
@@ -427,6 +512,7 @@ export function PhotoEditSessionsApp() {
     };
   }, [loadCatalog, loadSelectedSession, loadSessions, loadSourceImages, selectedSessionId]);
 
+  // Auto-open wizard if sourceImageId in URL
   useEffect(() => {
     const requestedSourceImageId = requestedSourceImageIdRef.current;
     if (!requestedSourceImageId) {
@@ -438,35 +524,30 @@ export function PhotoEditSessionsApp() {
     }
 
     setSessionWizardOpen(true);
-    setSessionWizardStep(3);
+    setSessionWizardStep(2);
     setWizardSelectedSourceImageIds([matched.id]);
     setWizardPreviewImageId(matched.id);
-    setNewSessionSourceImageId(matched.id);
-    setNewSessionName(`${getImageDisplayName(matched, "Photo")} Edit Session`);
+    setWizardSessionName(`${getImageDisplayName(matched, "Photo")} Edit Session`);
+
+    // Auto-fill room
+    const { roomName } = resolveRoomName(matched, catalogFloors);
+    if (roomName && roomName !== "Unassigned") {
+      setWizardRoomType(roomName.toLowerCase());
+    }
+    // Auto-set blank canvas
+    setWizardUseBlankCanvas(!!matched.listingPhoto?.blankCanvasCfImageId);
+
     requestedSourceImageIdRef.current = null;
-  }, [sourceImages]);
+  }, [sourceImages, catalogFloors]);
 
-  const sessionSourceOptions = useMemo(() => {
-    const options = new Map<string, { id: string; label: string }>();
+  // ---------------------------------------------------------------------------
+  // Computed values
+  // ---------------------------------------------------------------------------
 
-    if (sessionSourceImage) {
-      options.set(sessionSourceImage.id, {
-        id: sessionSourceImage.id,
-        label: `Session source · ${getImageDisplayName(sessionSourceImage)}`,
-      });
-    }
-
-    for (const revision of revisions) {
-      if (revision.outputImage) {
-        options.set(revision.outputImage.id, {
-          id: revision.outputImage.id,
-          label: `Revision ${revision.revisionNumber} · ${getImageDisplayName(revision.outputImage)}`,
-        });
-      }
-    }
-
-    return Array.from(options.values());
-  }, [revisions, sessionSourceImage]);
+  const catalogRooms = useMemo(
+    () => catalogFloors.flatMap((floor) => floor.rooms),
+    [catalogFloors],
+  );
 
   const listingPhotosByFloorAndRoom = useMemo(() => {
     const listingImages = sourceImages.filter(
@@ -508,28 +589,42 @@ export function PhotoEditSessionsApp() {
     return { groups, unmatched };
   }, [catalogFloors, sourceImages]);
 
-  const resetSessionWizard = useCallback(() => {
-    setSessionWizardStep(1);
-    setSessionWizardEditType("layout");
-    setWizardSelectedSourceImageIds([]);
-    setWizardPreviewImageId(null);
-    setNewSessionRoomType("");
-    setNewSessionPromptTemplate("");
-    setNewSessionName("");
-  }, []);
+  const inspirationImages = useMemo(() => {
+    return sourceImages.filter((image) => image.photoCategory === "inspirational");
+  }, [sourceImages]);
 
-  const openSessionWizard = useCallback(() => {
-    resetSessionWizard();
-    setSessionWizardOpen(true);
-  }, [resetSessionWizard]);
+  // Filter inspo by room for the stitch picker
+  const filteredInspoImages = useMemo(() => {
+    if (showAllInspo) return inspirationImages;
+    if (wizardSelectedSourceImageIds.length === 0) return inspirationImages;
 
-  useEffect(() => {
-    if (wizardSelectedSourceImageIds.length === 0) {
-      setNewSessionSourceImageId("");
-      return;
-    }
-    setNewSessionSourceImageId(wizardSelectedSourceImageIds[0] || "");
-  }, [wizardSelectedSourceImageIds]);
+    const firstSource = sourceImages.find(
+      (img) => img.id === wizardSelectedSourceImageIds[0],
+    );
+    if (!firstSource) return inspirationImages;
+
+    const { roomName } = resolveRoomName(firstSource, catalogFloors);
+    if (!roomName || roomName === "Unassigned") return inspirationImages;
+
+    const filtered = inspirationImages.filter((img) => {
+      if (img.roomType?.toLowerCase() === roomName.toLowerCase()) return true;
+      if (
+        Array.isArray(img.roomLabels) &&
+        img.roomLabels.some((label) => label.toLowerCase() === roomName.toLowerCase())
+      )
+        return true;
+      return false;
+    });
+
+    // If filtering yields nothing, show all
+    return filtered.length > 0 ? filtered : inspirationImages;
+  }, [
+    inspirationImages,
+    showAllInspo,
+    wizardSelectedSourceImageIds,
+    sourceImages,
+    catalogFloors,
+  ]);
 
   const wizardPreviewImage = useMemo(
     () =>
@@ -539,158 +634,217 @@ export function PhotoEditSessionsApp() {
     [sourceImages, wizardPreviewImageId],
   );
 
+  // Ordered list of selected categories for the walkthrough
+  const orderedSelectedCategories = useMemo(() => {
+    return EDIT_CATEGORIES.filter((cat) => wizardSelectedCategories.has(cat.key));
+  }, [wizardSelectedCategories]);
 
+  const activeCategory = orderedSelectedCategories[activeCategoryIndex] ?? null;
 
-  useEffect(() => {
-    if (!selectedSessionId) {
-      setRevisionSourceImageId("");
-      return;
-    }
+  // ---------------------------------------------------------------------------
+  // Wizard actions
+  // ---------------------------------------------------------------------------
 
-    if (revisions.length > 0) {
-      const latestOutput = revisions[revisions.length - 1]?.outputImage?.id;
-      if (latestOutput) {
-        setRevisionSourceImageId(latestOutput);
-        return;
-      }
-    }
-
-    if (sessionSourceImage?.id) {
-      setRevisionSourceImageId(sessionSourceImage.id);
-      return;
-    }
-
-    if (selectedSession?.sourceImageId) {
-      setRevisionSourceImageId(selectedSession.sourceImageId);
-      return;
-    }
-
-    setRevisionSourceImageId("");
-  }, [revisions, selectedSession?.sourceImageId, selectedSessionId, sessionSourceImage?.id]);
-
-  const onFileValidate = useCallback((file: File) => {
-    if (!file.type.startsWith("image/")) {
-      return "Only image files are supported";
-    }
-    if (file.size > MAX_FILE_SIZE) {
-      return "File must be 10MB or less";
-    }
-    return null;
+  const resetSessionWizard = useCallback(() => {
+    setSessionWizardStep(1);
+    setWizardSelectedSourceImageIds([]);
+    setWizardPreviewImageId(null);
+    setWizardRoomType("");
+    setWizardSessionName("");
+    setWizardUseBlankCanvas(true);
+    setWizardSelectedCategories(new Set());
+    setCategoryPrompts({
+      layout: EDIT_CATEGORIES[0].defaultPrompt,
+      paint: EDIT_CATEGORIES[1].defaultPrompt,
+      staging: EDIT_CATEGORIES[2].defaultPrompt,
+      stitch: EDIT_CATEGORIES[3].defaultPrompt,
+    });
+    setCategoryMasks({ layout: null, paint: null, staging: null, stitch: null });
+    setActiveCategoryIndex(0);
+    setStitchInspoMode("existing");
+    setStitchSelectedInspoIds([]);
+    setStitchUploadedFiles([]);
+    setShowAllInspo(false);
+    setBatchProcessing(false);
+    setBatchResults([]);
   }, []);
 
-  const createSession = useCallback(async (sourceOverrideIds?: string[]) => {
-    const candidateSourceIds =
-      Array.isArray(sourceOverrideIds) && sourceOverrideIds.length > 0
-        ? sourceOverrideIds
-        : newSessionSourceImageId
-          ? [newSessionSourceImageId]
-          : [];
+  const openSessionWizard = useCallback(() => {
+    resetSessionWizard();
+    setSessionWizardOpen(true);
+  }, [resetSessionWizard]);
 
-    const sourceIdsToCreate = candidateSourceIds.length > 0 ? candidateSourceIds : [null];
+  // When source photos are selected, auto-fill room and session name
+  useEffect(() => {
+    if (wizardSelectedSourceImageIds.length === 0) return;
+    const firstImage = sourceImages.find(
+      (img) => img.id === wizardSelectedSourceImageIds[0],
+    );
+    if (!firstImage) return;
 
-    setCreatingSession(true);
+    // Auto-fill room type
+    const { roomName } = resolveRoomName(firstImage, catalogFloors);
+    if (roomName && roomName !== "Unassigned") {
+      setWizardRoomType(roomName.toLowerCase());
+    }
+
+    // Auto-fill session name
+    if (!wizardSessionName.trim()) {
+      const displayName = getImageDisplayName(firstImage, "Photo");
+      setWizardSessionName(`${displayName} Edit Session`);
+    }
+
+    // Auto-set blank canvas toggle
+    setWizardUseBlankCanvas(!!firstImage.listingPhoto?.blankCanvasCfImageId);
+  }, [wizardSelectedSourceImageIds, sourceImages, catalogFloors]);
+
+  // Resolve the source image URL to show in the wizard (original vs blank canvas)
+  const resolveWizardSourceUrl = useCallback(
+    (image: ImageRecord): string => {
+      if (
+        wizardUseBlankCanvas &&
+        image.listingPhoto?.blankCanvasCfImageId
+      ) {
+        const token = image.listingPhoto.blankCanvasCfImageId;
+        return token.startsWith("http")
+          ? token
+          : `https://imagedelivery.net/${token}/public`;
+      }
+      return resolveImageUrl(image);
+    },
+    [wizardUseBlankCanvas],
+  );
+
+  // Submit wizard: create session + auto-process all selected categories
+  const submitSessionWizard = useCallback(async () => {
+    if (wizardSelectedSourceImageIds.length === 0) {
+      toast.error("Select at least one source listing photo");
+      setSessionWizardStep(1);
+      return;
+    }
+
+    if (wizardSelectedCategories.size === 0) {
+      toast.error("Select at least one edit category");
+      setSessionWizardStep(2);
+      return;
+    }
+
+    const sessionName =
+      wizardSessionName.trim() ||
+      `Edit Session ${new Date().toISOString().slice(0, 16).replace("T", " ")}`;
+
+    setBatchProcessing(true);
+    setBatchResults([]);
+
     try {
-      const createdSessionIds: string[] = [];
-      const baseName = newSessionName.trim();
+      // 1. Create session
+      const sourceImageId = wizardSelectedSourceImageIds[0];
+      const createRes = await fetch("/api/photo-edits/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: sessionName,
+          sourceImageId,
+        }),
+      });
+      const createPayload = (await createRes.json()) as {
+        session?: EditSession;
+        error?: string;
+      };
 
-      for (let index = 0; index < sourceIdsToCreate.length; index++) {
-        const sourceId = sourceIdsToCreate[index];
-        const sourceImage = sourceImages.find((image) => image.id === sourceId) || null;
-        const suffix =
-          sourceIdsToCreate.length > 1
-            ? ` · Angle ${index + 1}`
-            : "";
-        const resolvedName =
-          baseName ||
-          `${sourceImage?.displayName?.trim() || sourceImage?.roomType || "Photo Edit"}${suffix}`;
+      if (!createRes.ok || !createPayload.session) {
+        throw new Error(createPayload.error ?? "Failed to create session");
+      }
 
-        const response = await fetch("/api/photo-edits/sessions", {
+      const createdSessionId = createPayload.session.id;
+
+      // 2. Build revision specs for each selected category
+      const firstImage = sourceImages.find((img) => img.id === sourceImageId);
+      const blankCanvasId =
+        wizardUseBlankCanvas && firstImage?.listingPhoto?.blankCanvasCfImageId
+          ? firstImage.listingPhoto.blankCanvasCfImageId
+          : undefined;
+
+      const revisionSpecs = orderedSelectedCategories.map((cat) => ({
+        prompt: categoryPrompts[cat.key] || cat.defaultPrompt,
+        sourceImageId,
+        roomType: wizardRoomType || undefined,
+        maskBase64: categoryMasks[cat.key] || undefined,
+        blankCanvasImageId: blankCanvasId,
+        category: cat.key,
+        inspoImageIds:
+          cat.key === "stitch" ? stitchSelectedInspoIds : undefined,
+      }));
+
+      // 3. Fire batch endpoint
+      const batchRes = await fetch(
+        `/api/photo-edits/sessions/${createdSessionId}/revisions/batch`,
+        {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: resolvedName || undefined,
-            sourceImageId: sourceId || undefined,
-          }),
-        });
-        const payload = (await response.json()) as { session?: EditSession; error?: string };
-
-        if (!response.ok || !payload.session) {
-          throw new Error(payload.error ?? "Failed to create session");
-        }
-
-        createdSessionIds.push(payload.session.id);
-      }
-
-      if (newSessionRoomType.trim().length > 0) {
-        setRoomType(newSessionRoomType.trim().toLowerCase());
-      }
-      if (newSessionPromptTemplate.trim().length > 0) {
-        setPrompt(newSessionPromptTemplate.trim());
-      }
-
-      resetSessionWizard();
-      setSessionWizardOpen(false);
-      await loadSessions();
-
-      const targetSessionId = createdSessionIds[0];
-      if (targetSessionId) {
-        setSelectedSessionId(targetSessionId);
-      }
-
-      toast.success(
-        createdSessionIds.length > 1
-          ? `Created ${createdSessionIds.length} sessions`
-          : "Session created",
+          body: JSON.stringify({ revisions: revisionSpecs }),
+        },
       );
+
+      const batchPayload = (await batchRes.json()) as {
+        success: boolean;
+        results: Array<{
+          category: string | null;
+          success: boolean;
+          error?: string;
+        }>;
+      };
+
+      const results = (batchPayload.results || []).map((r) => ({
+        category: r.category || "unknown",
+        success: r.success,
+        error: r.error,
+      }));
+
+      setBatchResults(results);
+
+      const successCount = results.filter((r) => r.success).length;
+      const failCount = results.filter((r) => !r.success).length;
+
+      if (successCount > 0) {
+        toast.success(
+          `Generated ${successCount} revision${successCount > 1 ? "s" : ""}${failCount > 0 ? ` (${failCount} failed)` : ""}`,
+        );
+      } else {
+        toast.error("All revisions failed to generate");
+      }
+
+      await loadSessions();
+      setSelectedSessionId(createdSessionId);
+
+      // Close wizard after a brief delay to show results
+      setTimeout(() => {
+        resetSessionWizard();
+        setSessionWizardOpen(false);
+      }, 2000);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to create session");
+      toast.error(
+        error instanceof Error ? error.message : "Failed to create session",
+      );
     } finally {
-      setCreatingSession(false);
+      setBatchProcessing(false);
     }
   }, [
-    loadSessions,
-    newSessionName,
-    newSessionPromptTemplate,
-    newSessionRoomType,
-    newSessionSourceImageId,
-    resetSessionWizard,
+    wizardSelectedSourceImageIds,
+    wizardSelectedCategories,
+    wizardSessionName,
     sourceImages,
+    wizardUseBlankCanvas,
+    orderedSelectedCategories,
+    categoryPrompts,
+    wizardRoomType,
+    categoryMasks,
+    stitchSelectedInspoIds,
+    loadSessions,
+    resetSessionWizard,
   ]);
 
-  const openCropModal = useCallback((file: File) => {
-    setCropTargetFile(file);
-    setCropState({
-      crop: { x: 0, y: 0 },
-      zoom: 1,
-      rotation: 0,
-      areaPixels: null,
-    });
-    setCropModalOpen(true);
-  }, []);
-
-  const closeCropModal = useCallback(() => {
-    setCropModalOpen(false);
-    setCropTargetFile(null);
-  }, []);
-
-  const applyCrop = useCallback(async () => {
-    if (!cropTargetFile || !cropState.areaPixels) {
-      toast.error("Select a crop area first");
-      return;
-    }
-
-    try {
-      const cropped = await getCroppedFile(cropTargetFile, cropState.areaPixels);
-      setRevisionFiles((prev) =>
-        prev.map((entry) => (entry === cropTargetFile ? cropped : entry)),
-      );
-      toast.success("Crop applied");
-      closeCropModal();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to crop image");
-    }
-  }, [closeCropModal, cropState.areaPixels, cropTargetFile]);
-
+  // Create a single inline revision (from the session detail panel)
   const createRevision = useCallback(async () => {
     if (!selectedSessionId) {
       toast.error("Select or create a session first");
@@ -703,26 +857,34 @@ export function PhotoEditSessionsApp() {
 
     setCreatingRevision(true);
     try {
-      const formData = new FormData();
-      formData.append("prompt", prompt.trim());
-      if (roomType.trim()) {
-        formData.append("roomType", roomType.trim().toLowerCase());
-      }
-      if (revisionSourceImageId) {
-        formData.append("sourceImageId", revisionSourceImageId);
-      } else if (selectedSession?.sourceImageId) {
-        formData.append("sourceImageId", selectedSession.sourceImageId);
-      } else if (newSessionSourceImageId) {
-        formData.append("sourceImageId", newSessionSourceImageId);
-      }
-      if (revisionFiles[0]) {
-        formData.append("file", revisionFiles[0]);
+      const sourceImageId =
+        selectedSession?.sourceImageId || sessionSourceImage?.id;
+      if (!sourceImageId) {
+        toast.error("No source image for this session");
+        return;
       }
 
-      const response = await fetch(`/api/photo-edits/sessions/${selectedSessionId}/revisions`, {
-        method: "POST",
-        body: formData,
-      });
+      const blankCanvasId =
+        useBlankCanvas && sessionSourceImage?.listingPhoto?.blankCanvasCfImageId
+          ? sessionSourceImage.listingPhoto.blankCanvasCfImageId
+          : undefined;
+
+      const body: Record<string, unknown> = {
+        prompt: prompt.trim(),
+        sourceImageId,
+        roomType: roomType.trim().toLowerCase() || undefined,
+        maskBase64: maskBase64 || undefined,
+        blankCanvasImageId: blankCanvasId,
+      };
+
+      const response = await fetch(
+        `/api/photo-edits/sessions/${selectedSessionId}/revisions`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        },
+      );
       const payload = (await response.json()) as { error?: string };
 
       if (!response.ok) {
@@ -730,8 +892,7 @@ export function PhotoEditSessionsApp() {
       }
 
       setPrompt("");
-      setRoomType("");
-      setRevisionFiles([]);
+      setMaskBase64(null);
       await loadSessions();
       await loadSelectedSession();
       window.dispatchEvent(
@@ -739,39 +900,57 @@ export function PhotoEditSessionsApp() {
           detail: { target: "images", isListingPhoto: false, source: "photo-edits" },
         }),
       );
-      toast.success("Revision created");
+      toast.success("Revision generated");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to create revision");
+      toast.error(
+        error instanceof Error ? error.message : "Failed to create revision",
+      );
     } finally {
       setCreatingRevision(false);
     }
   }, [
     loadSelectedSession,
     loadSessions,
-    newSessionSourceImageId,
     prompt,
-    revisionSourceImageId,
-    revisionFiles,
     roomType,
     selectedSession,
     selectedSessionId,
+    sessionSourceImage,
+    maskBase64,
+    useBlankCanvas,
   ]);
 
-  const submitSessionWizard = useCallback(async () => {
-    if (!newSessionName.trim()) {
-      toast.error("Session name is required");
-      setSessionWizardStep(3);
-      return;
+  const onStitchFileValidate = useCallback((file: File) => {
+    if (!file.type.startsWith("image/")) {
+      return "Only image files are supported";
     }
-
-    if (wizardSelectedSourceImageIds.length === 0) {
-      toast.error("Select at least one source listing photo");
-      setSessionWizardStep(1);
-      return;
+    if (file.size > MAX_FILE_SIZE) {
+      return "File must be 10MB or less";
     }
+    return null;
+  }, []);
 
-    await createSession(wizardSelectedSourceImageIds);
-  }, [createSession, newSessionName, wizardSelectedSourceImageIds]);
+  // ---------------------------------------------------------------------------
+  // Render: source image URL for session detail (respects blank canvas toggle)
+  // ---------------------------------------------------------------------------
+
+  const sessionSourceUrl = useMemo(() => {
+    if (!sessionSourceImage) return "";
+    if (
+      useBlankCanvas &&
+      sessionSourceImage.listingPhoto?.blankCanvasCfImageId
+    ) {
+      const token = sessionSourceImage.listingPhoto.blankCanvasCfImageId;
+      return token.startsWith("http")
+        ? token
+        : `https://imagedelivery.net/${token}/public`;
+    }
+    return resolveImageUrl(sessionSourceImage);
+  }, [sessionSourceImage, useBlankCanvas]);
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
 
   if (loading) {
     return (
@@ -785,6 +964,7 @@ export function PhotoEditSessionsApp() {
   return (
     <>
       <div className="grid gap-6 lg:grid-cols-[22rem_1fr]">
+        {/* Session list sidebar */}
         <Card className="h-fit ring-1 ring-border/40">
           <CardHeader>
             <CardTitle>Edit Sessions</CardTitle>
@@ -823,6 +1003,7 @@ export function PhotoEditSessionsApp() {
           </CardContent>
         </Card>
 
+        {/* Session detail panel */}
         <div className="space-y-6">
           <Card className="ring-1 ring-border/40">
             <CardHeader className="flex flex-row items-center justify-between gap-3">
@@ -831,7 +1012,7 @@ export function PhotoEditSessionsApp() {
                   {selectedSession?.name || "Select a Session"}
                 </CardTitle>
                 <CardDescription>
-                  Track prompts, generated revisions, and image history per session.
+                  Prompt and generate revisions — Gemini processes automatically.
                 </CardDescription>
               </div>
               <Button
@@ -848,21 +1029,115 @@ export function PhotoEditSessionsApp() {
 
             <CardContent className="space-y-4">
               {sessionSourceImage ? (
-                <div className="grid gap-4 md:grid-cols-[12rem_1fr]">
-                  <img
-                    src={resolveImageUrl(sessionSourceImage)}
-                    alt="Session source"
-                    className="aspect-[4/3] w-full rounded-lg object-cover ring-1 ring-border/40"
-                  />
-                  <div className="space-y-1 text-sm text-muted-foreground">
-                    <p>
-                      <span className="font-medium text-foreground">Source:</span>{" "}
-                      {getImageDisplayName(sessionSourceImage)}
-                    </p>
-                    <p><span className="font-medium text-foreground">Room:</span> {sessionSourceImage.roomType || "unassigned"}</p>
-                    <p><span className="font-medium text-foreground">Created:</span> {formatDate(selectedSession?.datetimeCreated)}</p>
-                    <p><span className="font-medium text-foreground">Updated:</span> {formatDate(selectedSession?.datetimeLastModified)}</p>
+                <div className="space-y-4">
+                  <div className="grid gap-4 md:grid-cols-[12rem_1fr]">
+                    <img
+                      src={sessionSourceUrl}
+                      alt="Session source"
+                      className="aspect-[4/3] w-full rounded-lg object-cover ring-1 ring-border/40"
+                    />
+                    <div className="space-y-1 text-sm text-muted-foreground flex flex-col justify-between">
+                      <div>
+                        <p>
+                          <span className="font-medium text-foreground">Source:</span>{" "}
+                          {getImageDisplayName(sessionSourceImage)}
+                        </p>
+                        <p><span className="font-medium text-foreground">Room:</span> {roomType || sessionSourceImage.roomType || "unassigned"}</p>
+                        <p><span className="font-medium text-foreground">Created:</span> {formatDate(selectedSession?.datetimeCreated)}</p>
+                      </div>
+
+                      {/* Blank canvas toggle */}
+                      {sessionSourceImage.listingPhoto?.blankCanvasCfImageId && (
+                        <div className="pt-2">
+                          <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={useBlankCanvas}
+                              onChange={(e) => setUseBlankCanvas(e.target.checked)}
+                              className="rounded border-border/40 bg-background text-primary focus:ring-primary/45"
+                            />
+                            <span className="text-xs font-semibold">
+                              Use blank canvas as source
+                            </span>
+                            <Eraser className="size-3 text-sky-400" />
+                          </label>
+                          <p className="text-[10px] text-muted-foreground mt-0.5 ml-5">
+                            Sends the furniture-removed version to Gemini for cleaner results
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Mask controls */}
+                      <div className="pt-2 flex flex-wrap gap-2">
+                        {maskBase64 ? (
+                          <>
+                            <div className="flex items-center gap-1 text-xs font-semibold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full ring-1 ring-emerald-500/20">
+                              <Check className="size-3" /> Mask Active
+                            </div>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              type="button"
+                              onClick={() => setMaskEditorOpen(true)}
+                              className="h-7 text-xs gap-1"
+                            >
+                              <Brush className="size-3" />
+                              Edit Mask
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              type="button"
+                              onClick={() => setMaskBase64(null)}
+                              className="h-7 text-xs text-red-500 hover:text-red-600 gap-1 hover:bg-transparent"
+                            >
+                              <Trash2 className="size-3" />
+                              Clear Mask
+                            </Button>
+                          </>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            type="button"
+                            onClick={() => setMaskEditorOpen(true)}
+                            className="h-7 text-xs gap-1"
+                          >
+                            <Brush className="size-3" />
+                            Draw Edit Mask
+                          </Button>
+                        )}
+                      </div>
+                    </div>
                   </div>
+
+                  {maskEditorOpen && (
+                    <div className="space-y-2 rounded-lg border border-border/40 p-4 bg-muted/10">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-semibold">Draw Inpainting Mask</span>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          type="button"
+                          onClick={() => setMaskEditorOpen(false)}
+                          className="h-7 text-xs gap-1"
+                        >
+                          <ArrowLeft className="size-3" /> Back
+                        </Button>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Use the pen tool (red) to paint over the areas you want Gemini to change. Click "Save" inside the editor to compute the mask.
+                      </p>
+                      <InlineMaskEditor
+                        imageUrl={sessionSourceUrl}
+                        onChange={(mask) => {
+                          setMaskBase64(mask);
+                          setMaskEditorOpen(false);
+                        }}
+                        height={400}
+                      />
+                    </div>
+                  )}
                 </div>
               ) : (
                 <p className="text-sm text-muted-foreground">
@@ -870,6 +1145,7 @@ export function PhotoEditSessionsApp() {
                 </p>
               )}
 
+              {/* Prompt + Room Override + Generate */}
               <div className="space-y-2">
                 <label
                   htmlFor="revision-prompt-input"
@@ -882,7 +1158,7 @@ export function PhotoEditSessionsApp() {
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
                   rows={4}
-                  placeholder="Extract the panel-ready fridge style from the inspiration and apply it to this kitchen photo."
+                  placeholder="Describe the changes you want Gemini to make to this photo..."
                   className="w-full resize-none rounded-md border border-border/50 bg-background px-3 py-2 text-sm outline-none ring-ring/40 transition focus:ring-2"
                 />
               </div>
@@ -892,97 +1168,25 @@ export function PhotoEditSessionsApp() {
                   htmlFor="room-override-input"
                   className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
                 >
-                  Room Override (Optional)
-                </label>
-                <input
-                  id="room-override-input"
-                  type="text"
-                  value={roomType}
-                  onChange={(event) => setRoomType(event.target.value)}
-                  placeholder="kitchen"
-                  className="w-full rounded-md border border-border/50 bg-background px-3 py-2 text-sm outline-none ring-ring/40 transition focus:ring-2"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label
-                  htmlFor="revision-source-image-select"
-                  className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
-                >
-                  Source Image For Next Revision
+                  Room
                 </label>
                 <select
-                  id="revision-source-image-select"
-                  value={revisionSourceImageId}
-                  onChange={(event) => setRevisionSourceImageId(event.target.value)}
+                  id="room-override-input"
+                  value={roomType}
+                  onChange={(event) => setRoomType(event.target.value)}
                   className="w-full rounded-md border border-border/50 bg-background px-3 py-2 text-sm outline-none ring-ring/40 transition focus:ring-2"
                 >
-                  <option value="">Choose source image</option>
-                  {sessionSourceOptions.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.label}
-                    </option>
+                  <option value="">Auto-detect from photo</option>
+                  {catalogFloors.map((floor) => (
+                    <optgroup key={floor.id} label={floor.name}>
+                      {floor.rooms.map((room) => (
+                        <option key={room.id} value={room.roomName.toLowerCase()}>
+                          {room.displayName}
+                        </option>
+                      ))}
+                    </optgroup>
                   ))}
                 </select>
-              </div>
-
-              <div className="space-y-3">
-                <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Optional Output Upload
-                </p>
-                <FileUpload
-                  value={revisionFiles}
-                  onValueChange={setRevisionFiles}
-                  onFileValidate={onFileValidate}
-                  maxFiles={MAX_FILES}
-                  maxSize={MAX_FILE_SIZE}
-                  accept="image/*"
-                  multiple={false}
-                  label="Revision output upload"
-                  disabled={creatingRevision}
-                >
-                  <FileUploadDropzone className="gap-2 rounded-xl border-border/40 bg-muted/20 p-6 text-center">
-                    <p className="text-sm font-medium">Drop rendered image output</p>
-                    <p className="text-xs text-muted-foreground">
-                      If empty, Workers AI will generate from the source image + prompt.
-                    </p>
-                    <FileUploadTrigger asChild>
-                      <Button size="sm" variant="secondary">
-                        Browse File
-                      </Button>
-                    </FileUploadTrigger>
-                  </FileUploadDropzone>
-
-                  <div className="flex justify-between">
-                    <FileUploadClear asChild>
-                      <Button size="sm" variant="ghost">
-                        Clear
-                      </Button>
-                    </FileUploadClear>
-                  </div>
-
-                  <FileUploadList>
-                    {revisionFiles.map((file) => (
-                      <FileUploadItem key={fileKey(file)} value={file} className="gap-3 rounded-lg border-border/40 bg-card/60 px-3 py-2">
-                        <FileUploadItemPreview className="size-12 rounded-md ring-1 ring-border/40" />
-                        <FileUploadItemMetadata size="sm" />
-                        <Button
-                          variant="ghost"
-                          size="icon-sm"
-                          onClick={() => openCropModal(file)}
-                          title="Crop image"
-                        >
-                          <Crop className="size-4" />
-                        </Button>
-                        <FileUploadItemDelete asChild>
-                          <Button variant="ghost" size="icon-sm" title="Remove file">
-                            <Plus className="size-4 rotate-45" />
-                          </Button>
-                        </FileUploadItemDelete>
-                      </FileUploadItem>
-                    ))}
-                  </FileUploadList>
-                </FileUpload>
               </div>
 
               <Button
@@ -993,23 +1197,24 @@ export function PhotoEditSessionsApp() {
                 {creatingRevision ? (
                   <>
                     <Loader2 className="size-4 animate-spin" />
-                    Generating Revision
+                    Generating...
                   </>
                 ) : (
                   <>
-                    {revisionFiles.length > 0 ? <Check className="size-4" /> : <Sparkles className="size-4" />}
-                    {revisionFiles.length > 0 ? "Upload Revision" : "Generate with Workers AI"}
+                    <Sparkles className="size-4" />
+                    Generate Revision
                   </>
                 )}
               </Button>
             </CardContent>
           </Card>
 
+          {/* Revision History */}
           <Card className="ring-1 ring-border/40">
             <CardHeader>
               <CardTitle>Revision History</CardTitle>
               <CardDescription>
-                Each revision is saved to Cloudflare Images and linked to this session in D1.
+                Each revision is generated by Gemini and saved to Cloudflare Images.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -1052,16 +1257,6 @@ export function PhotoEditSessionsApp() {
                           <p className="text-sm font-medium">Revision {revision.revisionNumber}</p>
                           <p className="line-clamp-3 text-xs text-muted-foreground">{revision.prompt}</p>
                           <p className="text-[11px] text-muted-foreground">{formatDate(revision.datetimeCreated)}</p>
-                          {outputImage && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="w-full"
-                              onClick={() => setRevisionSourceImageId(outputImage.id)}
-                            >
-                              Use As Source For Next Revision
-                            </Button>
-                          )}
                         </div>
                       </article>
                     );
@@ -1073,20 +1268,23 @@ export function PhotoEditSessionsApp() {
         </div>
       </div>
 
+      {/* ================================================================= */}
+      {/* SESSION CREATION WIZARD                                           */}
+      {/* ================================================================= */}
       <Dialog open={sessionWizardOpen} onOpenChange={setSessionWizardOpen}>
         <DialogContent className="max-h-[85vh] sm:max-w-5xl overflow-auto">
           <DialogHeader>
             <DialogTitle>Create New Edit Session</DialogTitle>
           </DialogHeader>
 
-          <Stepper steps={3} value={sessionWizardStep} onValueChange={setSessionWizardStep}>
+          <Stepper steps={4} value={sessionWizardStep} onValueChange={setSessionWizardStep}>
             <StepperList className="flex-nowrap overflow-x-auto pb-1">
               <StepperItem step={1}>
                 <StepperTrigger>
                   <StepperIndicator />
                   <div className="text-left">
-                    <StepperTitle>Choose Source Photos</StepperTitle>
-                    <StepperDescription>Floor, room, and listing angles</StepperDescription>
+                    <StepperTitle>Choose Photos</StepperTitle>
+                    <StepperDescription>Source listing photos</StepperDescription>
                   </div>
                 </StepperTrigger>
               </StepperItem>
@@ -1094,8 +1292,8 @@ export function PhotoEditSessionsApp() {
                 <StepperTrigger>
                   <StepperIndicator />
                   <div className="text-left">
-                    <StepperTitle>Edit Strategy</StepperTitle>
-                    <StepperDescription>Pick mode and prompt defaults</StepperDescription>
+                    <StepperTitle>Edit Categories</StepperTitle>
+                    <StepperDescription>Select what to change</StepperDescription>
                   </div>
                 </StepperTrigger>
               </StepperItem>
@@ -1103,13 +1301,23 @@ export function PhotoEditSessionsApp() {
                 <StepperTrigger>
                   <StepperIndicator />
                   <div className="text-left">
-                    <StepperTitle>Confirm Session</StepperTitle>
-                    <StepperDescription>Create and start revising</StepperDescription>
+                    <StepperTitle>Configure Prompts</StepperTitle>
+                    <StepperDescription>Customize per category</StepperDescription>
+                  </div>
+                </StepperTrigger>
+              </StepperItem>
+              <StepperItem step={4}>
+                <StepperTrigger>
+                  <StepperIndicator />
+                  <div className="text-left">
+                    <StepperTitle>Confirm & Generate</StepperTitle>
+                    <StepperDescription>Review and auto-process</StepperDescription>
                   </div>
                 </StepperTrigger>
               </StepperItem>
             </StepperList>
 
+            {/* STEP 1: Choose Source Photos */}
             <StepperContent step={1} className="space-y-5">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium">
@@ -1259,17 +1467,6 @@ export function PhotoEditSessionsApp() {
                               <Check className="size-3" />
                             </div>
                           )}
-                          <div
-                            className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent px-1.5 pb-1 pt-4 opacity-0 transition group-hover:opacity-100"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setWizardPreviewImageId(image.id);
-                            }}
-                          >
-                            <p className="truncate text-[11px] font-medium text-white">
-                              {name}
-                            </p>
-                          </div>
                         </button>
                       );
                     })}
@@ -1278,83 +1475,454 @@ export function PhotoEditSessionsApp() {
               )}
             </StepperContent>
 
-            <StepperContent step={2} className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-2">
-                {[
-                  {
-                    key: "layout" as const,
-                    title: "Wall Layout Change",
-                    description: "Open walls, move zones, remove fixed elements, and establish a base canvas.",
-                  },
-                  {
-                    key: "paint" as const,
-                    title: "Paint Color Visuals",
-                    description: "Test color systems, sheen, and finish detail prompts.",
-                  },
-                  {
-                    key: "staging" as const,
-                    title: "Staging / Furniture",
-                    description: "Show furniture, lighting, and styling concepts.",
-                  },
-                  {
-                    key: "inspiration" as const,
-                    title: "Inspirational Stitching",
-                    description: "Extract details from inspiration and apply to listing angles.",
-                  },
-                ].map((option) => (
-                  <button
-                    key={option.key}
-                    type="button"
-                    onClick={() => setSessionWizardEditType(option.key)}
-                    className={cn(
-                      "rounded-xl border p-3 text-left ring-1 ring-border/40 transition",
-                      sessionWizardEditType === option.key
-                        ? "border-primary bg-primary/10"
-                        : "hover:bg-muted/20",
+            {/* STEP 2: Select Edit Categories (Multi-Select) */}
+            <StepperContent step={2} className="space-y-5">
+              {/* Blank canvas toggle */}
+              {(() => {
+                const firstImage = sourceImages.find(
+                  (img) => img.id === wizardSelectedSourceImageIds[0],
+                );
+                const hasBlankCanvas = !!firstImage?.listingPhoto?.blankCanvasCfImageId;
+
+                return (
+                  <div className="space-y-4">
+                    {hasBlankCanvas && (
+                      <div className="flex items-start gap-2.5 rounded-lg border border-sky-500/20 bg-sky-500/5 p-3">
+                        <input
+                          type="checkbox"
+                          id="wizard-blank-canvas-toggle"
+                          checked={wizardUseBlankCanvas}
+                          onChange={(e) => setWizardUseBlankCanvas(e.target.checked)}
+                          className="mt-1 rounded border-border/40 bg-background text-primary focus:ring-primary/45"
+                        />
+                        <div className="grid gap-1">
+                          <label
+                            htmlFor="wizard-blank-canvas-toggle"
+                            className="text-xs font-semibold text-foreground cursor-pointer flex items-center gap-1.5"
+                          >
+                            <Eraser className="size-3.5 text-sky-400" />
+                            Use blank canvas as base image (recommended)
+                          </label>
+                          <p className="text-[10px] text-muted-foreground leading-relaxed">
+                            Sends the furniture-removed version to Gemini. Produces cleaner results for staging, paint, and layout changes.
+                          </p>
+                        </div>
+                      </div>
                     )}
-                  >
-                    <p className="text-sm font-semibold">{option.title}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">{option.description}</p>
-                  </button>
-                ))}
-              </div>
 
-              <div className="space-y-2">
-                <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Room Override
-                </label>
-                <input
-                  type="text"
-                  value={newSessionRoomType}
-                  onChange={(event) => setNewSessionRoomType(event.target.value)}
-                  placeholder="kitchen"
-                  className="w-full rounded-md border border-border/50 bg-background px-3 py-2 text-sm outline-none ring-ring/40 transition focus:ring-2"
-                />
-              </div>
+                    {/* Room override — pre-filled */}
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Room
+                      </label>
+                      <select
+                        value={wizardRoomType}
+                        onChange={(event) => setWizardRoomType(event.target.value)}
+                        className="w-full rounded-md border border-border/50 bg-background px-3 py-2 text-sm outline-none ring-ring/40 transition focus:ring-2"
+                      >
+                        <option value="">Auto-detect</option>
+                        {catalogFloors.map((floor) => (
+                          <optgroup key={floor.id} label={floor.name}>
+                            {floor.rooms.map((room) => (
+                              <option key={room.id} value={room.roomName.toLowerCase()}>
+                                {room.displayName}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ))}
+                      </select>
+                    </div>
 
-              <div className="space-y-2">
-                <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Prompt Template
-                </label>
-                <textarea
-                  value={newSessionPromptTemplate}
-                  onChange={(event) => setNewSessionPromptTemplate(event.target.value)}
-                  rows={5}
-                  className="w-full resize-none rounded-md border border-border/50 bg-background px-3 py-2 text-sm outline-none ring-ring/40 transition focus:ring-2"
-                  placeholder="Describe the baseline transformation, constraints, and material intent. This carries into the main prompt box after session creation."
-                />
-              </div>
+                    {/* Category checkboxes */}
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Select edit types
+                        <span className="ml-2 normal-case font-normal">
+                          (select all that apply)
+                        </span>
+                      </p>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        {EDIT_CATEGORIES.map((option) => {
+                          const isSelected = wizardSelectedCategories.has(option.key);
+                          return (
+                            <button
+                              key={option.key}
+                              type="button"
+                              onClick={() => {
+                                setWizardSelectedCategories((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(option.key)) {
+                                    next.delete(option.key);
+                                  } else {
+                                    next.add(option.key);
+                                  }
+                                  return next;
+                                });
+                              }}
+                              className={cn(
+                                "rounded-xl border p-3 text-left ring-1 ring-border/40 transition flex items-start gap-3",
+                                isSelected
+                                  ? "border-primary bg-primary/10"
+                                  : "hover:bg-muted/20",
+                              )}
+                            >
+                              <div
+                                className={cn(
+                                  "flex size-5 items-center justify-center rounded border transition-colors mt-0.5",
+                                  isSelected
+                                    ? "border-primary bg-primary text-primary-foreground"
+                                    : "border-border/60",
+                                )}
+                              >
+                                {isSelected && <Check className="size-3" />}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-muted-foreground">{option.icon}</span>
+                                  <p className="text-sm font-semibold">{option.title}</p>
+                                </div>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                  {option.description}
+                                </p>
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </StepperContent>
 
+            {/* STEP 3: Per-Category Prompt Walkthrough */}
             <StepperContent step={3} className="space-y-4">
+              {orderedSelectedCategories.length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Go back and select at least one edit category.
+                </p>
+              ) : (
+                <>
+                  {/* Sub-step tabs */}
+                  <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                    {orderedSelectedCategories.map((cat, index) => (
+                      <button
+                        key={cat.key}
+                        type="button"
+                        onClick={() => setActiveCategoryIndex(index)}
+                        className={cn(
+                          "flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition whitespace-nowrap",
+                          activeCategoryIndex === index
+                            ? "bg-primary text-primary-foreground"
+                            : "bg-muted/30 text-muted-foreground hover:bg-muted/50",
+                        )}
+                      >
+                        {cat.icon}
+                        {cat.title}
+                        {categoryPrompts[cat.key] !== cat.defaultPrompt && (
+                          <span className="size-1.5 rounded-full bg-emerald-400" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+
+                  {activeCategory && (
+                    <div className="space-y-4 rounded-lg border border-border/30 bg-muted/5 p-4">
+                      <div className="flex items-center gap-2">
+                        <span className="text-muted-foreground">{activeCategory.icon}</span>
+                        <h4 className="text-sm font-semibold">{activeCategory.title}</h4>
+                      </div>
+
+                      {/* Source preview */}
+                      {wizardSelectedSourceImageIds[0] && (() => {
+                        const previewImg = sourceImages.find(
+                          (img) => img.id === wizardSelectedSourceImageIds[0],
+                        );
+                        return previewImg ? (
+                          <div className="flex gap-3">
+                            <img
+                              src={resolveWizardSourceUrl(previewImg)}
+                              alt="Source"
+                              className="aspect-[4/3] w-40 rounded-lg object-cover ring-1 ring-border/30"
+                            />
+                            <div className="flex-1 space-y-1 text-xs text-muted-foreground">
+                              <p>
+                                <span className="font-medium text-foreground">Source:</span>{" "}
+                                {getImageDisplayName(previewImg)}
+                              </p>
+                              {wizardUseBlankCanvas && previewImg.listingPhoto?.blankCanvasCfImageId && (
+                                <p className="flex items-center gap-1 text-sky-400">
+                                  <Eraser className="size-3" /> Using blank canvas
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        ) : null;
+                      })()}
+
+                      {/* Prompt textarea */}
+                      <div className="space-y-2">
+                        <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Prompt for {activeCategory.title}
+                        </label>
+                        <textarea
+                          value={categoryPrompts[activeCategory.key]}
+                          onChange={(e) =>
+                            setCategoryPrompts((prev) => ({
+                              ...prev,
+                              [activeCategory.key]: e.target.value,
+                            }))
+                          }
+                          rows={5}
+                          className="w-full resize-none rounded-md border border-border/50 bg-background px-3 py-2 text-sm outline-none ring-ring/40 transition focus:ring-2"
+                        />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() =>
+                            setCategoryPrompts((prev) => ({
+                              ...prev,
+                              [activeCategory.key]: activeCategory.defaultPrompt,
+                            }))
+                          }
+                        >
+                          Reset to default prompt
+                        </Button>
+                      </div>
+
+                      {/* Category-specific UI */}
+                      {activeCategory.supportsMask && (
+                        <div className="space-y-2">
+                          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                            Edit Mask (optional)
+                          </p>
+                          {categoryMasks[activeCategory.key] ? (
+                            <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-1 text-xs font-semibold text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded-full ring-1 ring-emerald-500/20">
+                                <Check className="size-3" /> Mask Active
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs text-red-500"
+                                onClick={() =>
+                                  setCategoryMasks((prev) => ({
+                                    ...prev,
+                                    [activeCategory.key]: null,
+                                  }))
+                                }
+                              >
+                                <Trash2 className="size-3 mr-1" /> Clear
+                              </Button>
+                            </div>
+                          ) : (
+                            <>
+                              {wizardSelectedSourceImageIds[0] && (() => {
+                                const maskImg = sourceImages.find(
+                                  (img) => img.id === wizardSelectedSourceImageIds[0],
+                                );
+                                return maskImg ? (
+                                  <InlineMaskEditor
+                                    imageUrl={resolveWizardSourceUrl(maskImg)}
+                                    onChange={(mask) =>
+                                      setCategoryMasks((prev) => ({
+                                        ...prev,
+                                        [activeCategory.key]: mask,
+                                      }))
+                                    }
+                                    height={360}
+                                  />
+                                ) : null;
+                              })()}
+                            </>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Stitch-specific: inspo picker */}
+                      {activeCategory.key === "stitch" && (
+                        <div className="space-y-3">
+                          <div className="flex items-center gap-3">
+                            <button
+                              type="button"
+                              onClick={() => setStitchInspoMode("existing")}
+                              className={cn(
+                                "text-xs font-semibold px-3 py-1.5 rounded-full transition",
+                                stitchInspoMode === "existing"
+                                  ? "bg-primary text-primary-foreground"
+                                  : "bg-muted/30 text-muted-foreground",
+                              )}
+                            >
+                              <ImageIcon className="size-3 mr-1 inline" />
+                              Choose from library
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setStitchInspoMode("upload")}
+                              className={cn(
+                                "text-xs font-semibold px-3 py-1.5 rounded-full transition",
+                                stitchInspoMode === "upload"
+                                  ? "bg-primary text-primary-foreground"
+                                  : "bg-muted/30 text-muted-foreground",
+                              )}
+                            >
+                              <Upload className="size-3 mr-1 inline" />
+                              Upload new inspo
+                            </button>
+                          </div>
+
+                          {stitchInspoMode === "existing" && (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <p className="text-xs text-muted-foreground">
+                                  {stitchSelectedInspoIds.length} selected
+                                </p>
+                                <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={showAllInspo}
+                                    onChange={(e) => setShowAllInspo(e.target.checked)}
+                                    className="rounded border-border/40 bg-background text-primary focus:ring-primary/45"
+                                  />
+                                  Show all rooms
+                                </label>
+                              </div>
+                              {filteredInspoImages.length === 0 ? (
+                                <p className="text-xs text-muted-foreground py-4 text-center">
+                                  No inspiration photos found. Upload some first.
+                                </p>
+                              ) : (
+                                <div className="grid grid-cols-4 gap-2 max-h-64 overflow-y-auto sm:grid-cols-5 lg:grid-cols-6">
+                                  {filteredInspoImages.map((img) => {
+                                    const sel = stitchSelectedInspoIds.includes(img.id);
+                                    return (
+                                      <button
+                                        key={img.id}
+                                        type="button"
+                                        onClick={() => {
+                                          setStitchSelectedInspoIds((prev) =>
+                                            prev.includes(img.id)
+                                              ? prev.filter((id) => id !== img.id)
+                                              : [...prev, img.id],
+                                          );
+                                        }}
+                                        className={cn(
+                                          "relative overflow-hidden rounded-lg ring-1 ring-border/40 transition",
+                                          sel && "ring-2 ring-primary",
+                                        )}
+                                      >
+                                        <img
+                                          src={resolveImageUrl(img)}
+                                          alt={getImageDisplayName(img)}
+                                          className="aspect-square w-full object-cover"
+                                        />
+                                        {sel && (
+                                          <div className="absolute right-0.5 top-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                                            <Check className="size-2.5" />
+                                          </div>
+                                        )}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          {stitchInspoMode === "upload" && (
+                            <FileUpload
+                              value={stitchUploadedFiles}
+                              onValueChange={setStitchUploadedFiles}
+                              onFileValidate={onStitchFileValidate}
+                              maxFiles={6}
+                              maxSize={MAX_FILE_SIZE}
+                              accept="image/*"
+                              multiple
+                              label="Upload inspiration photos"
+                            >
+                              <FileUploadDropzone className="gap-2 rounded-xl border-border/40 bg-muted/20 p-6 text-center">
+                                <p className="text-sm font-medium">
+                                  Drop inspiration photos here
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  Up to 6 images, 10MB each
+                                </p>
+                                <FileUploadTrigger asChild>
+                                  <Button size="sm" variant="secondary">
+                                    Browse Files
+                                  </Button>
+                                </FileUploadTrigger>
+                              </FileUploadDropzone>
+
+                              <FileUploadList>
+                                {stitchUploadedFiles.map((file) => (
+                                  <FileUploadItem
+                                    key={fileKey(file)}
+                                    value={file}
+                                    className="gap-3 rounded-lg border-border/40 bg-card/60 px-3 py-2"
+                                  >
+                                    <FileUploadItemPreview className="size-12 rounded-md ring-1 ring-border/40" />
+                                    <FileUploadItemMetadata size="sm" />
+                                    <FileUploadItemDelete asChild>
+                                      <Button variant="ghost" size="icon-sm" title="Remove file">
+                                        <Plus className="size-4 rotate-45" />
+                                      </Button>
+                                    </FileUploadItemDelete>
+                                  </FileUploadItem>
+                                ))}
+                              </FileUploadList>
+                            </FileUpload>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Navigate between categories */}
+                      <div className="flex justify-between pt-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={activeCategoryIndex === 0}
+                          onClick={() =>
+                            setActiveCategoryIndex((i) => Math.max(0, i - 1))
+                          }
+                        >
+                          <ArrowLeft className="size-3 mr-1" />
+                          Previous
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={
+                            activeCategoryIndex >=
+                            orderedSelectedCategories.length - 1
+                          }
+                          onClick={() =>
+                            setActiveCategoryIndex((i) =>
+                              Math.min(orderedSelectedCategories.length - 1, i + 1),
+                            )
+                          }
+                        >
+                          Next
+                          <ArrowRight className="size-3 ml-1" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </StepperContent>
+
+            {/* STEP 4: Confirm & Generate */}
+            <StepperContent step={4} className="space-y-4">
               <div className="space-y-2">
                 <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   Session Name
                 </label>
                 <input
                   type="text"
-                  value={newSessionName}
-                  onChange={(event) => setNewSessionName(event.target.value)}
+                  value={wizardSessionName}
+                  onChange={(event) => setWizardSessionName(event.target.value)}
                   placeholder="Kitchen base layout v1"
                   className="w-full rounded-md border border-border/50 bg-background px-3 py-2 text-sm outline-none ring-ring/40 transition focus:ring-2"
                 />
@@ -1363,42 +1931,107 @@ export function PhotoEditSessionsApp() {
               <div className="rounded-lg bg-muted/20 p-3 text-sm ring-1 ring-border/30">
                 <p className="font-medium">Summary</p>
                 <ul className="mt-2 space-y-1 text-muted-foreground">
-                  <li>• Edit type: {sessionWizardEditType}</li>
-                  <li>• Selected listing photos: {wizardSelectedSourceImageIds.length}</li>
-                  <li>• Room override: {newSessionRoomType || "auto"}</li>
+                  <li>• Source photos: {wizardSelectedSourceImageIds.length}</li>
+                  <li>
+                    • Edit types:{" "}
+                    {orderedSelectedCategories.map((c) => c.title).join(", ") ||
+                      "none selected"}
+                  </li>
+                  <li>• Room: {wizardRoomType || "auto-detect"}</li>
+                  <li>
+                    • Base image:{" "}
+                    {wizardUseBlankCanvas ? "blank canvas" : "original photo"}
+                  </li>
+                  {stitchSelectedInspoIds.length > 0 && (
+                    <li>
+                      • Inspiration photos: {stitchSelectedInspoIds.length}
+                    </li>
+                  )}
                 </ul>
               </div>
+
+              {/* Batch processing results */}
+              {batchResults.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Processing Results
+                  </p>
+                  {batchResults.map((result, index) => (
+                    <div
+                      key={index}
+                      className={cn(
+                        "flex items-center gap-2 rounded-lg px-3 py-2 text-sm ring-1",
+                        result.success
+                          ? "bg-emerald-500/5 ring-emerald-500/20 text-emerald-400"
+                          : "bg-red-500/5 ring-red-500/20 text-red-400",
+                      )}
+                    >
+                      {result.success ? (
+                        <Check className="size-4" />
+                      ) : (
+                        <Trash2 className="size-4" />
+                      )}
+                      <span className="font-medium capitalize">
+                        {result.category}
+                      </span>
+                      {result.error && (
+                        <span className="text-xs text-muted-foreground ml-auto">
+                          {result.error}
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </StepperContent>
 
+            {/* Stepper Navigation */}
             <div className="flex justify-between gap-2 border-t border-border/40 pt-4">
-              <StepperPrev onClick={() => setSessionWizardStep((current) => Math.max(1, current - 1))}>
+              <StepperPrev
+                onClick={() =>
+                  setSessionWizardStep((current) => Math.max(1, current - 1))
+                }
+              >
                 Back
               </StepperPrev>
 
               <div className="flex gap-2">
-                <Button variant="outline" onClick={() => setSessionWizardOpen(false)}>
+                <Button
+                  variant="outline"
+                  onClick={() => setSessionWizardOpen(false)}
+                >
                   Cancel
                 </Button>
-                {sessionWizardStep < 3 ? (
+                {sessionWizardStep < 4 ? (
                   <StepperNext
                     onClick={() =>
-                      setSessionWizardStep((current) => Math.min(3, current + 1))
+                      setSessionWizardStep((current) =>
+                        Math.min(4, current + 1),
+                      )
                     }
-                    disabled={sessionWizardStep === 1 && wizardSelectedSourceImageIds.length === 0}
+                    disabled={
+                      (sessionWizardStep === 1 &&
+                        wizardSelectedSourceImageIds.length === 0) ||
+                      (sessionWizardStep === 2 &&
+                        wizardSelectedCategories.size === 0)
+                    }
                   >
                     Next
                   </StepperNext>
                 ) : (
-                  <Button onClick={submitSessionWizard} disabled={creatingSession}>
-                    {creatingSession ? (
+                  <Button
+                    onClick={submitSessionWizard}
+                    disabled={batchProcessing || batchResults.length > 0}
+                  >
+                    {batchProcessing ? (
                       <>
                         <Loader2 className="mr-2 size-4 animate-spin" />
-                        Creating
+                        Processing...
                       </>
                     ) : (
                       <>
-                        <Building2 className="mr-2 size-4" />
-                        Create Session
+                        <Sparkles className="mr-2 size-4" />
+                        Create & Generate
                       </>
                     )}
                   </Button>
@@ -1422,87 +2055,6 @@ export function PhotoEditSessionsApp() {
           metadata={wizardPreviewImage.metadata || null}
         />
       )}
-
-      <Dialog open={cropModalOpen} onOpenChange={(open) => (open ? setCropModalOpen(true) : closeCropModal())}>
-        <DialogContent className="sm:max-w-4xl">
-          <DialogHeader>
-            <DialogTitle>Crop Output Image</DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="relative h-[22rem] overflow-hidden rounded-xl bg-muted/30 ring-1 ring-border/40">
-              {cropTargetPreview && (
-                <Cropper
-                  crop={cropState.crop}
-                  zoom={cropState.zoom}
-                  rotation={cropState.rotation}
-                  aspectRatio={4 / 3}
-                  withGrid
-                  onCropChange={(crop) => setCropState((prev) => ({ ...prev, crop }))}
-                  onZoomChange={(zoom) => setCropState((prev) => ({ ...prev, zoom }))}
-                  onRotationChange={(rotation) =>
-                    setCropState((prev) => ({ ...prev, rotation }))
-                  }
-                  onCropAreaChange={(_, areaPixels) =>
-                    setCropState((prev) => ({ ...prev, areaPixels }))
-                  }
-                >
-                  <CropperImage src={cropTargetPreview} alt="Crop target" />
-                  <CropperArea />
-                </Cropper>
-              )}
-            </div>
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="space-y-2 text-sm">
-                <span className="text-muted-foreground">Zoom ({cropState.zoom.toFixed(2)}x)</span>
-                <input
-                  type="range"
-                  min={1}
-                  max={4}
-                  step={0.05}
-                  value={cropState.zoom}
-                  onChange={(event) =>
-                    setCropState((prev) => ({
-                      ...prev,
-                      zoom: Number(event.target.value),
-                    }))
-                  }
-                  className="w-full"
-                />
-              </label>
-
-              <label className="space-y-2 text-sm">
-                <span className="text-muted-foreground">Rotation ({Math.round(cropState.rotation)}°)</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={360}
-                  step={1}
-                  value={cropState.rotation}
-                  onChange={(event) =>
-                    setCropState((prev) => ({
-                      ...prev,
-                      rotation: Number(event.target.value),
-                    }))
-                  }
-                  className="w-full"
-                />
-              </label>
-            </div>
-
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={closeCropModal}>
-                Cancel
-              </Button>
-              <Button onClick={applyCrop}>
-                <Crop className="mr-2 size-4" />
-                Apply Crop
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }

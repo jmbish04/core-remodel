@@ -57,6 +57,16 @@ export const images = sqliteTable(
     isDuplicate: integer("is_duplicate", { mode: "boolean" }).notNull().default(false),
     duplicateMarkedBy: text("duplicate_marked_by"),
     duplicateMarkedAt: integer("duplicate_marked_at", { mode: "timestamp" }),
+    /**
+     * Soft-delete flag for images. Mirrors the isDuplicate pattern.
+     *
+     * Set true to hide an image from listing/gallery queries without hard-deleting
+     * the row (preserves edit history + AI provenance). Consumed by the photo-edit
+     * and blank-canvas admin surfaces to exclude removed photos from candidate lists.
+     */
+    isDeleted: integer("is_deleted", { mode: "boolean" }).notNull().default(false),
+    deletedMarkedBy: text("deleted_marked_by"),
+    deletedMarkedAt: integer("deleted_marked_at", { mode: "timestamp" }),
     reviewed: integer("reviewed", { mode: "boolean" }).notNull().default(false), // photo-review/coding pass complete
     reviewedAt: integer("reviewed_at", { mode: "timestamp" }),
 
@@ -103,6 +113,7 @@ export const images = sqliteTable(
       table.sourceFileSize,
     ),
     isDuplicateIdx: index("images_is_duplicate_idx").on(table.isDuplicate),
+    isDeletedIdx: index("images_is_deleted_idx").on(table.isDeleted),
     /** Index for querying all level-scoped inspiration for a given floor quickly. */
     scopeFloorIdx: index("images_scope_floor_id_idx").on(table.scopeFloorId),
     /** Index for filtering all home/level-scoped inspiration images quickly. */

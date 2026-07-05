@@ -17,6 +17,21 @@ export const listingPhotos = sqliteTable("listing_photos", {
   }),
   roomName: text("room_name").notNull(),
   description: text("description"),
+  skipBlankCanvas: integer("skip_blank_canvas", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  datetimeCreated: integer("datetime_created", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+});
+
+export const listingPhotoBlankCanvases = sqliteTable("listing_photo_blank_canvases", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  listingPhotoId: integer("listing_photo_id")
+    .notNull()
+    .references(() => listingPhotos.id, { onDelete: "cascade" }),
+  cfImageId: text("cf_image_id").notNull(),
+  prompt: text("prompt"),
   datetimeCreated: integer("datetime_created", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),

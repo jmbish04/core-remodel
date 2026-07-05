@@ -91,6 +91,7 @@ app.use("*", cors());
 app.use("*", logger());
 app.use("/api/admin/*", requireAccessAuth);
 app.use("/api/images/upload", requireAccessAuth);
+app.use("/api/images/upload-urls", requireAccessAuth);
 app.use("/api/images/inspiration/scoped", requireAccessAuth);
 app.use("/api/images/:id/inspiration-category", requireAccessAuth);
 app.use("/api/images/:id/suggest-category", requireAccessAuth);
