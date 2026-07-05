@@ -1,4 +1,4 @@
-import { Check, Crop, FileText, Loader2, Upload, X } from "lucide-react";
+import { Check, ChevronDown, ChevronUp, Crop, FileText, Link2, Loader2, Upload, X } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { UploadsMappingPanel } from "@/components/UploadsMappingPanel";
 import { Badge } from "@/components/ui/badge";
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Cropper, CropperArea, CropperImage, type CropperAreaData } from "@/components/ui/cropper";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import {
   FileUpload,
   FileUploadClear,
@@ -121,6 +122,78 @@ export function UniversalUploadApp() {
     total: 0,
   });
   const [mappingRefreshToken, setMappingRefreshToken] = useState(0);
+
+  // ─── Bulk URL import state ──────────────────────────────────────────────
+  const [urlText, setUrlText] = useState("");
+  const [urlImporting, setUrlImporting] = useState(false);
+  const [urlPanelOpen, setUrlPanelOpen] = useState(false);
+  const [urlImportStatus, setUrlImportStatus] = useState("");
+
+  const parsedUrls = useMemo(() => {
+    return urlText
+      .split(/[\n,;]+/)
+      .map((s) => s.trim())
+      .filter((s) => {
+        try {
+          const u = new URL(s);
+          return u.protocol === "https:" || u.protocol === "http:";
+        } catch {
+          return false;
+        }
+      });
+  }, [urlText]);
+
+  const importUrls = useCallback(async () => {
+    if (parsedUrls.length === 0) {
+      setUrlImportStatus("No valid URLs found. Paste image URLs separated by newlines or commas.");
+      return;
+    }
+    setUrlImporting(true);
+    setUrlImportStatus(`Importing ${parsedUrls.length} URL${parsedUrls.length === 1 ? "" : "s"}… The worker is fetching each image.`);
+    try {
+      const res = await fetch("/api/images/upload-urls", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ urls: parsedUrls, photoCategory: target }),
+      });
+      let payload: any;
+      try {
+        payload = await res.json();
+      } catch {
+        throw new Error(`Server returned non-JSON (${res.status})`);
+      }
+      if (!res.ok || !payload.success) {
+        throw new Error(payload.error ?? "URL import failed");
+      }
+      const results = payload.results ?? [];
+      const ok = results.filter((r: any) => r.success).length;
+      const fail = results.length - ok;
+      setUrlImportStatus(
+        fail === 0
+          ? `✓ ${ok} image${ok === 1 ? "" : "s"} imported and queued for processing.`
+          : `Imported ${ok}/${results.length}. ${fail} failed.`,
+      );
+      if (ok > 0) {
+        setUrlText("");
+        setMappingRefreshToken((t) => t + 1);
+        window.dispatchEvent(
+          new CustomEvent("global-upload-complete", {
+            detail: { target: "images", successful: ok, failed: fail, total: results.length },
+          }),
+        );
+        window.dispatchEvent(
+          new CustomEvent("image-mapping-summary-updated", {
+            detail: { source: "url-import" },
+          }),
+        );
+      }
+    } catch (e) {
+      setUrlImportStatus(e instanceof Error ? e.message : "URL import failed");
+    } finally {
+      setUrlImporting(false);
+    }
+  }, [parsedUrls, target]);
 
   const [cropModalOpen, setCropModalOpen] = useState(false);
   const [cropTargetFile, setCropTargetFile] = useState<File | null>(null);
@@ -692,6 +765,80 @@ export function UniversalUploadApp() {
 
           {status && <p className="text-sm text-muted-foreground">{status}</p>}
         </CardContent>
+      </Card>
+
+      {/* ─── Bulk URL Import Card ──────────────────────────────────────────── */}
+      <Card className="ring-1 ring-border/40">
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 px-6 py-4 text-left"
+          onClick={() => setUrlPanelOpen(!urlPanelOpen)}
+        >
+          <Link2 className="size-4 text-muted-foreground" />
+          <span className="flex-1 text-sm font-semibold">Import from URLs</span>
+          {parsedUrls.length > 0 && (
+            <Badge variant="secondary" className="mr-1">
+              {parsedUrls.length} URL{parsedUrls.length === 1 ? "" : "s"}
+            </Badge>
+          )}
+          {urlPanelOpen ? (
+            <ChevronUp className="size-4 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="size-4 text-muted-foreground" />
+          )}
+        </button>
+        {urlPanelOpen && (
+          <CardContent className="space-y-3 pt-0">
+            <p className="text-xs text-muted-foreground">
+              Paste image URLs below — one per line, or comma/semicolon separated.
+              Right-click any image on the web → "Copy image address" → paste here.
+              The worker will fetch, upload to Cloudflare Images, and queue AI processing.
+            </p>
+            <Textarea
+              placeholder={"https://example.com/photo1.jpg\nhttps://example.com/photo2.png\nhttps://cdn.site.com/inspiration/tile-closeup.webp"}
+              value={urlText}
+              onChange={(e) => {
+                setUrlText(e.target.value);
+                setUrlImportStatus("");
+              }}
+              rows={6}
+              className="resize-y font-mono text-xs"
+              disabled={urlImporting}
+            />
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground">
+                {parsedUrls.length === 0
+                  ? "No valid URLs detected"
+                  : `${parsedUrls.length} valid URL${parsedUrls.length === 1 ? "" : "s"} ready`}
+              </p>
+              <Button
+                size="sm"
+                onClick={importUrls}
+                disabled={urlImporting || parsedUrls.length === 0}
+              >
+                {urlImporting ? (
+                  <>
+                    <Loader2 className="mr-2 size-4 animate-spin" />
+                    Importing…
+                  </>
+                ) : (
+                  <>
+                    <Link2 className="mr-2 size-4" />
+                    Import {parsedUrls.length > 0 ? parsedUrls.length : ""} URL{parsedUrls.length === 1 ? "" : "s"}
+                  </>
+                )}
+              </Button>
+            </div>
+            {urlImportStatus && (
+              <p className={cn(
+                "text-xs",
+                urlImportStatus.startsWith("✓") ? "text-emerald-400" : "text-muted-foreground",
+              )}>
+                {urlImportStatus}
+              </p>
+            )}
+          </CardContent>
+        )}
       </Card>
 
       <UploadsMappingPanel

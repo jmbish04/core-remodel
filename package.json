@@ -13,7 +13,7 @@
   },
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "build": "NODE_OPTIONS=--max-old-space-size=8192 astro build",
     "preview": "wrangler dev",
     "start": "astro dev",
     "fmt": "oxfmt",
@@ -92,6 +92,7 @@
     "radix-ui": "^1.4.3",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "react-filerobot-image-editor": "5.0.0-beta.159",
     "react-hook-form": "^7.80.0",
     "react-konva": "^19.2.4",
     "react-markdown": "^10.1.0",

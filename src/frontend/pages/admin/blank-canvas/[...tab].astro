@@ -1,6 +1,11 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import { BlankCanvasAdminApp } from "@/components/BlankCanvasAdminApp";
+
+const { tab } = Astro.params;
+
+// Convert dash URL param to database underscores (e.g. lower-level -> lower_level)
+const initialTab = tab ? tab.replace(/-/g, "_") : undefined;
 ---
 
 <BaseLayout
@@ -16,6 +21,6 @@ import { BlankCanvasAdminApp } from "@/components/BlankCanvasAdminApp";
       </p>
     </div>
 
-    <BlankCanvasAdminApp client:only="react" />
+    <BlankCanvasAdminApp client:only="react" initialTab={initialTab} />
   </main>
 </BaseLayout>
