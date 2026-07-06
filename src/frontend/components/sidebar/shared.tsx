@@ -36,6 +36,9 @@ export type NavGroupDef = {
 export function isPathActive(currentPath: string, href: string): boolean {
   if (href === "/") return currentPath === "/";
   if (href === "/admin") return currentPath === "/admin";
+  // The Shopping hub has its own sub-pages listed in the sidebar; exact-match so
+  // a sub-page (e.g. /admin/shopping/showrooms) doesn't also light up the hub.
+  if (href === "/admin/shopping") return currentPath === "/admin/shopping";
   return currentPath === href || currentPath.startsWith(`${href}/`);
 }
 
@@ -87,6 +90,24 @@ export function useOpenNavGroups(groups: NavGroupDef[], currentPath: string) {
   const [openNavGroups, setOpenNavGroups] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(groups.map((group) => [group.id, isGroupActive(currentPath, group)])),
   );
+  // Re-sync when the resolved groups or path change (e.g. an async fetch adds a
+  // conditional item like the shared Mood Boards link): expand any group that now
+  // contains the active route, without collapsing the user's manual toggles.
+  useEffect(() => {
+    setOpenNavGroups((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const group of groups) {
+        if (isGroupActive(currentPath, group) && !next[group.id]) {
+          next[group.id] = true;
+          changed = true;
+        }
+      }
+      // Return the SAME reference when nothing changed so an unstable `groups`
+      // array can't trigger a re-render loop.
+      return changed ? next : current;
+    });
+  }, [groups, currentPath]);
   const toggleNavGroup = (id: string) =>
     setOpenNavGroups((current) => ({ ...current, [id]: !current[id] }));
   return { openNavGroups, toggleNavGroup };

@@ -1,5 +1,5 @@
 import { Home, Menu, ShieldCheck } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { buttonVariants } from "@/components/ui/button";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -27,7 +27,19 @@ function PublicSidebarLinks({
   sharedBoardsCount: number;
   onNavigate?: () => void;
 }) {
-  const { openNavGroups, toggleNavGroup } = useOpenNavGroups(PUBLIC_NAV_GROUPS, currentPath);
+  // Resolve the dynamic groups (Records surfaces the shared Mood Boards link
+  // only when boards exist) BEFORE the open-state hook, so the hook — and its
+  // re-sync effect — can auto-expand Records when the user is on /moodboards.
+  const resolvedGroups = useMemo<NavGroupDef[]>(
+    () =>
+      PUBLIC_NAV_GROUPS.map((group) =>
+        group.id === "records" && sharedBoardsCount >= 1
+          ? { ...group, items: [...group.items, { href: "/moodboards", label: "Mood Boards" }] }
+          : group,
+      ),
+    [sharedBoardsCount],
+  );
+  const { openNavGroups, toggleNavGroup } = useOpenNavGroups(resolvedGroups, currentPath);
 
   return (
     <nav className="space-y-3" aria-label="Main navigation">
@@ -40,23 +52,16 @@ function PublicSidebarLinks({
         />
       </div>
 
-      {PUBLIC_NAV_GROUPS.map((group) => {
-        // Records surfaces the shared Mood Boards link only when boards exist.
-        const resolved: NavGroupDef =
-          group.id === "records" && sharedBoardsCount >= 1
-            ? { ...group, items: [...group.items, { href: "/moodboards", label: "Mood Boards" }] }
-            : group;
-        return (
-          <RenderGroup
-            key={resolved.id}
-            group={resolved}
-            currentPath={currentPath}
-            open={openNavGroups[resolved.id] ?? false}
-            onToggle={toggleNavGroup}
-            onNavigate={onNavigate}
-          />
-        );
-      })}
+      {resolvedGroups.map((group) => (
+        <RenderGroup
+          key={group.id}
+          group={group}
+          currentPath={currentPath}
+          open={openNavGroups[group.id] ?? false}
+          onToggle={toggleNavGroup}
+          onNavigate={onNavigate}
+        />
+      ))}
 
       <DocsTree currentPath={currentPath} currentHash={currentHash} onNavigate={onNavigate} />
     </nav>
