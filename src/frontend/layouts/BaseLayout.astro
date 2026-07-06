@@ -2,7 +2,8 @@
 import { cn } from "@/lib/utils";
 
 import HeadSEO from "@/components/HeadSEO.astro";
-import { AppSidebar } from "@/components/AppSidebar";
+import { AdminSidebar } from "@/components/sidebar/AdminSidebar";
+import { PublicSidebar } from "@/components/sidebar/PublicSidebar";
 import { Footer } from "@/components/Footer";
 import { VisitorActivityTracker } from "@/components/VisitorActivityTracker";
 import { Toaster } from "sonner";
@@ -12,6 +13,12 @@ const { title, description, ogImage } = Astro.props;
 // Normalize the request path so the sidebar can SSR the correct active item +
 // expanded section (no trailing slash; "/" stays "/").
 const currentPath = (Astro.url.pathname.replace(/\/+$/, "") || "/");
+
+// Two-viewport split: /admin and everything under it renders the AdminSidebar
+// (admin groups + Exit + Log out); every other page renders the PublicSidebar
+// (public/contractor groups + Enter Admin Portal). Selected server-side from
+// the normalized path so the correct sidebar is in the SSR HTML.
+const isAdmin = currentPath === "/admin" || currentPath.startsWith("/admin/");
 ---
 
 <!doctype html>
@@ -38,7 +45,11 @@ const currentPath = (Astro.url.pathname.replace(/\/+$/, "") || "/");
     )}
   >
     <div class="bg-background relative z-10 min-h-svh">
-      <AppSidebar client:load currentPath={currentPath} />
+      {isAdmin ? (
+        <AdminSidebar client:load currentPath={currentPath} />
+      ) : (
+        <PublicSidebar client:load currentPath={currentPath} />
+      )}
       <div class="flex min-h-svh w-full min-w-0 md:pl-64">
         <div class="flex min-h-svh min-w-0 flex-1 flex-col">
           <div class="min-w-0 flex-1">
