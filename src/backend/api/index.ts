@@ -67,6 +67,7 @@ import { materialsRouter } from "./routes/materials";
 import { showroomGapsRouter } from "./routes/showroom-gaps";
 import { showroomCatalogRouter } from "./routes/showroom-catalog";
 import { showroomScanRouter } from "./routes/showroom-scan";
+import { clickupRouter } from "./routes/clickup";
 import { requireAccessAuth } from "@backend/utils/access";
 
 export type Variables = {
@@ -85,6 +86,7 @@ app.use("*", cors());
 app.use("*", logger());
 app.use("/api/admin/*", requireAccessAuth);
 app.use("/api/images/upload", requireAccessAuth);
+app.use("/api/images/upload-urls", requireAccessAuth);
 app.use("/api/images/inspiration/scoped", requireAccessAuth);
 app.use("/api/images/:id/inspiration-category", requireAccessAuth);
 app.use("/api/images/:id/suggest-category", requireAccessAuth);
@@ -102,6 +104,8 @@ app.use("/api/showroom-stores", requireAccessAuth);
 app.use("/api/showroom-stores/*", requireAccessAuth);
 app.use("/api/materials", requireAccessAuth);
 app.use("/api/materials/*", requireAccessAuth);
+app.use("/api/clickup", requireAccessAuth);
+app.use("/api/clickup/*", requireAccessAuth);
 app.use("/api/bid-portfolios/*", async (c, next) => {
   // Public routes do not require auth
   const path = new URL(c.req.url).pathname;
@@ -173,6 +177,7 @@ app.route("/api/showroom-stores", showroomGapsRouter);
 app.route("/api/showroom-stores", showroomCatalogRouter);
 app.route("/api/showroom-stores", showroomScanRouter);
 app.route("/api/materials", materialsRouter);
+app.route("/api/clickup", clickupRouter);
 app.route("/", openapiRouter);
 
 export { app };

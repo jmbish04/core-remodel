@@ -68,16 +68,16 @@ REPLICATE_MODELS = {
     "finish": "black-forest-labs/flux-kontext-max",
 }
 
-# OpenAI image edit — GPT image models (default gpt-image-1.5) + legacy dall-e-2.
+# OpenAI image edit — GPT image models (default gpt-image-2) + legacy dall-e-2.
 # Set any stage to "openai" in STAGE_MODELS to A/B test; switch a value to "dall-e-2"
 # for the legacy model (single square PNG, prompt <= 1000 chars).
 OPENAI_MODELS = {
-    "base": "gpt-image-1.5",
-    "rough_in": "gpt-image-1.5",
-    "finish": "gpt-image-1.5",
-    "interaction": "gpt-image-1.5",
-    "synthesis": "gpt-image-1.5",
-    "moodboard": "gpt-image-1.5",
+    "base": "gpt-image-2",
+    "rough_in": "gpt-image-2",
+    "finish": "gpt-image-2",
+    "interaction": "gpt-image-2",
+    "synthesis": "gpt-image-2",
+    "moodboard": "gpt-image-2",
 }
 
 # Mood board prompt — VERBATIM (per-room context is appended at call time).

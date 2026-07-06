@@ -28,16 +28,8 @@ export { ResearchAgent } from "./backend/ai/agents/ResearchAgent";
 export { PermitIntelligenceAgent } from "./backend/ai/agents/PermitIntelligenceAgent/index";
 export { ShowroomResearchAgent } from "./backend/ai/agents/ShowroomResearchAgent/index";
 export { DeepResearchAgent } from "./backend/ai/agents/DeepResearchAgent/index";
-
-export class FloorplanSessionDO {
-  constructor(state: any, env: any) {}
-  async fetch(request: Request) { return new Response("Not implemented in this branch", { status: 501 }); }
-}
-
-export class DeepResearchAgent {
-  constructor(state: any, env: any) {}
-  async fetch(request: Request) { return new Response("Not implemented in this branch", { status: 501 }); }
-}
+export { RemodelOrchestrator } from "./backend/ai/agents/RemodelOrchestrator";
+export { AdminChatAgent } from "./backend/ai/agents/AdminChatAgent";
 
 const handler: ExportedHandler<Env> = {
   async fetch(request, env, ctx) {

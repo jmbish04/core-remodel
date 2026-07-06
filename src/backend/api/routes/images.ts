@@ -2,7 +2,7 @@
  * @fileoverview Images API routes for remodel mood board
  */
 
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, or, like, desc } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
@@ -18,9 +18,12 @@ import {
   inspirationalImageRooms,
   listingPhotos,
   rooms,
+  savedImageSearches,
+  photoViewerNotes,
 } from "@backend/db";
 import {
   buildImageUploadFingerprint,
+  buildImageUploadFingerprintFromBytes,
   buildUploadFingerprintKey,
   findDuplicateImageByFingerprint,
 } from "@/services/image-processor/deduplication";
@@ -1203,6 +1206,340 @@ imagesRouter.post("/upload", async (c) => {
 });
 
 /**
+ * POST /api/images/upload-urls
+ * Bulk import images from external URLs.
+ *
+ * Body (JSON):
+ *   urls          — string[]     (required, 1-50 URLs)
+ *   photoCategory — "inspirational" | "listing" (default "inspirational")
+ *
+ * For each URL, the worker:
+ *   1. Fetches the image (with timeout + size guard)
+ *   2. Derives a filename from the URL
+ *   3. Builds a fingerprint + checks for duplicates
+ *   4. Uploads the blob to Cloudflare Images
+ *   5. Inserts the images row + staging row
+ *   6. Queues the batch workflow for AI processing
+ *
+ * Response shape matches POST /upload for frontend compatibility.
+ */
+imagesRouter.post("/upload-urls", async (c) => {
+  try {
+    const body = await c.req.json<{
+      urls?: string[];
+      photoCategory?: string;
+    }>();
+
+    const rawUrls = body.urls;
+    if (!Array.isArray(rawUrls) || rawUrls.length === 0) {
+      return c.json({ error: "urls[] is required and must be non-empty" }, 400);
+    }
+
+    // Sanitize + deduplicate URLs.
+    const MAX_URLS = 50;
+    const MAX_FETCH_SIZE = 15 * 1024 * 1024; // 15 MB per image
+    const FETCH_TIMEOUT_MS = 20_000;
+
+    const uniqueUrls: string[] = [];
+    const seen = new Set<string>();
+    for (const raw of rawUrls.slice(0, MAX_URLS)) {
+      const url = typeof raw === "string" ? raw.trim() : "";
+      if (!url || seen.has(url)) continue;
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== "https:" && parsed.protocol !== "http:") continue;
+        seen.add(url);
+        uniqueUrls.push(url);
+      } catch {
+        // Silently skip invalid URLs — they'll appear as errors in results.
+      }
+    }
+
+    if (uniqueUrls.length === 0) {
+      return c.json({ error: "No valid URLs provided" }, 400);
+    }
+
+    const credentials = await resolveCloudflareImagesCredentials(c.env);
+    if (!credentials.accountId || credentials.apiTokens.length === 0) {
+      return c.json({ error: "Cloudflare credentials not configured" }, 500);
+    }
+
+    const processor = new ImageProcessorService(
+      c.env,
+      credentials.accountId,
+      credentials.apiTokens[0],
+      { fallbackApiTokens: credentials.apiTokens.slice(1) },
+    );
+
+    const photoCategory = normalizePhotoCategory(
+      body.photoCategory ?? null,
+      body.photoCategory === "listing",
+    );
+    const isListingPhoto = photoCategory === "listing";
+    const mappingCategory = toMappingCategory(photoCategory, isListingPhoto);
+    const db = drizzle(c.env.DB);
+    await ensureHomeCatalogSeed(c.env);
+
+    const batchItems: ImageProcessingWorkflowParams[] = [];
+    const results: UploadResult[] = [];
+    const requestFingerprintKeys = new Set<string>();
+
+    for (const url of uniqueUrls) {
+      const imageId = crypto.randomUUID();
+      // Derive a readable filename from the URL.
+      let filename = "url-image.jpg";
+      try {
+        const pathname = new URL(url).pathname;
+        const lastSegment = pathname.split("/").pop();
+        if (lastSegment && /\.\w{2,5}$/.test(lastSegment)) {
+          filename = decodeURIComponent(lastSegment).slice(0, 200);
+        }
+      } catch {
+        // Keep default filename.
+      }
+
+      try {
+        // Fetch the remote image with timeout + size limit.
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+        let fetchResponse: Response;
+        try {
+          fetchResponse = await fetch(url, {
+            signal: controller.signal,
+            headers: {
+              "User-Agent": "Monolith-ImageImporter/1.0",
+              Accept: "image/*",
+            },
+            redirect: "follow",
+          });
+        } finally {
+          clearTimeout(timeout);
+        }
+
+        if (!fetchResponse.ok) {
+          results.push({
+            success: false,
+            imageId,
+            error: `Fetch failed (${fetchResponse.status}) for ${url}`,
+          });
+          continue;
+        }
+
+        // Validate content type.
+        const contentType = fetchResponse.headers.get("content-type") ?? "";
+        if (!contentType.startsWith("image/")) {
+          results.push({
+            success: false,
+            imageId,
+            error: `URL did not return an image (content-type: ${contentType})`,
+          });
+          continue;
+        }
+
+        const bytes = await fetchResponse.arrayBuffer();
+        if (bytes.byteLength > MAX_FETCH_SIZE) {
+          results.push({
+            success: false,
+            imageId,
+            error: `Image too large (${(bytes.byteLength / (1024 * 1024)).toFixed(1)} MB, max ${MAX_FETCH_SIZE / (1024 * 1024)} MB)`,
+          });
+          continue;
+        }
+        if (bytes.byteLength === 0) {
+          results.push({
+            success: false,
+            imageId,
+            error: "Empty response body — no image data",
+          });
+          continue;
+        }
+
+        // Fingerprint + dedup.
+        const uploadFingerprint = buildImageUploadFingerprintFromBytes({
+          filename,
+          sourceFileSize: bytes.byteLength,
+          bytes,
+        });
+        const requestFingerprintKey = buildUploadFingerprintKey(uploadFingerprint);
+
+        if (requestFingerprintKeys.has(requestFingerprintKey)) {
+          results.push({
+            success: false,
+            imageId,
+            duplicate: true,
+            error: "Duplicate image detected in this batch",
+          });
+          continue;
+        }
+        requestFingerprintKeys.add(requestFingerprintKey);
+
+        const duplicateImage = await findDuplicateImageByFingerprint(db, uploadFingerprint);
+        if (duplicateImage) {
+          results.push({
+            success: false,
+            imageId,
+            duplicate: true,
+            duplicateImageId: duplicateImage.id,
+            error: "Duplicate image already exists",
+            image: duplicateImage,
+          });
+          continue;
+        }
+
+        // Upload blob to Cloudflare Images.
+        const blob = new Blob([bytes], { type: contentType || "image/jpeg" });
+        const uploadResponse = await processor.uploadToCloudflareImages(
+          blob,
+          undefined,
+          filename,
+        );
+        const deliveryUrl = processor.getDeliveryUrl(
+          uploadResponse,
+          uploadResponse.result.id,
+        );
+        const deliveryToken =
+          ImageProcessorService.extractDeliveryTokenFromUrl(deliveryUrl);
+
+        if (!deliveryToken) {
+          throw new Error("Failed to derive Cloudflare Images delivery token");
+        }
+
+        const workflowInstanceId = buildWorkflowInstanceId(imageId);
+        const displayName =
+          ImageProcessorService.deriveDisplayNameFromFilename(filename);
+        const initialMetadata = JSON.stringify({
+          deliveryUrl,
+          deliveryToken,
+          processingStatus: "queued",
+          uploadFingerprint,
+          sourceUrl: url,
+        });
+
+        await db
+          .insert(images)
+          .values({
+            id: imageId,
+            displayName,
+            cfImageIdOriginal: deliveryToken,
+            cfImageIdOptimized: null,
+            photoCategory,
+            roomId: null,
+            roomType: null,
+            metadata: initialMetadata,
+            isListingPhoto,
+            sourceFilename: uploadFingerprint.sourceFilename,
+            sourceFilenameNormalized: uploadFingerprint.sourceFilenameNormalized,
+            sourceFileSize: uploadFingerprint.sourceFileSize,
+            sourceFileMd5: uploadFingerprint.sourceFileMd5,
+            inspirationScope: photoCategory === "inspirational" ? "room" : "room",
+            scopeFloorId: null,
+          })
+          .run();
+
+        await db
+          .insert(imageUploadStaging)
+          .values({
+            imageId,
+            photoCategory: mappingCategory,
+            mappingStatus: "pending",
+            processingStatus: "queued",
+            workflowInstanceId,
+            processingError: null,
+          })
+          .onConflictDoUpdate({
+            target: imageUploadStaging.imageId,
+            set: {
+              photoCategory: mappingCategory,
+              mappingStatus: "pending",
+              processingStatus: "queued",
+              workflowInstanceId,
+              processingError: null,
+            },
+          })
+          .run();
+
+        batchItems.push({
+          imageId,
+          photoCategory,
+          isListingPhoto,
+          filename,
+          roomId: null,
+          roomIds: [],
+          roomHint: null,
+        });
+
+        results.push({
+          success: true,
+          imageId,
+          workflowInstanceId,
+          processingStatus: "queued",
+          image: null,
+        });
+      } catch (urlError) {
+        results.push({
+          success: false,
+          imageId,
+          error:
+            urlError instanceof Error
+              ? urlError.message
+              : `Failed to fetch and process ${url}`,
+        });
+      }
+    }
+
+    // Queue batch workflow for all successful fetches.
+    if (batchItems.length > 0) {
+      try {
+        await c.env.IMAGE_BATCH_WORKFLOW.create({
+          id: `image-batch-${crypto.randomUUID()}`,
+          params: { items: batchItems },
+        });
+      } catch (batchError) {
+        const message =
+          batchError instanceof Error
+            ? batchError.message
+            : "Failed to queue batch workflow";
+        console.error("Batch workflow create failed:", message);
+        const failedIds = new Set(batchItems.map((item) => item.imageId));
+        await db
+          .update(imageUploadStaging)
+          .set({ processingStatus: "failed", processingError: message })
+          .where(inArray(imageUploadStaging.imageId, Array.from(failedIds)))
+          .run();
+        for (let i = 0; i < results.length; i += 1) {
+          const r = results[i];
+          if (r.success && failedIds.has(r.imageId)) {
+            results[i] = { success: false, imageId: r.imageId, error: message };
+          }
+        }
+      }
+    }
+
+    const successCount = results.filter((r) => r.success).length;
+    const failureCount = results.length - successCount;
+
+    return c.json(
+      {
+        success: true,
+        message: `Fetched and queued ${successCount} images from URLs with ${failureCount} failures`,
+        photoCategory,
+        results,
+      },
+      202,
+    );
+  } catch (error) {
+    console.error("URL import error:", error);
+    return c.json(
+      {
+        error: "Failed to import images from URLs",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+/**
  * GET /api/images/mapping/summary
  * Returns pending mapping counts for uploads staging.
  */
@@ -2122,6 +2459,7 @@ imagesRouter.get("/", async (c) => {
         roomName: record.roomName,
         description: record.description,
         blankCanvasCfImageId: record.blankCanvasCfImageId ?? null,
+        skipBlankCanvas: record.skipBlankCanvas ?? false,
         aiEdits: aiEditsByListingPhotoId.get(record.id) || [],
       });
     }

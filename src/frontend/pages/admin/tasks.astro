@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ClickUpTasksPage } from "@/components/clickup/ClickUpTasksPage";
+---
+
+<BaseLayout
+  title="Project Tasks — The Monolith"
+  description="ClickUp-powered task management with AI-flagged critical path analysis and Kanban/Gantt views."
+>
+  <ClickUpTasksPage client:only="react" />
+</BaseLayout>

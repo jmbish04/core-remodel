@@ -21,6 +21,7 @@
 
 import { AIChatAgent } from "@cloudflare/ai-chat";
 import { callable } from "agents";
+import { GoogleGenAI } from "@google/genai";
 import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
 import { drizzle } from "drizzle-orm/d1";

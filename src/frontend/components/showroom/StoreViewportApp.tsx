@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { BrandShowcase } from "@/components/showroom/BrandShowcase";
 
 interface StoreDetail {
   id: number;
@@ -24,6 +25,16 @@ interface StoreDetail {
   notes: { id: number; note: string }[];
   research: { id: number; finding: string; findingUrl: string | null; sentiment: string | null }[];
   externalRatings: { id: number; source: string | null; rating: number | null; comment: string | null }[];
+  brands: {
+    id: number;
+    name: string;
+    slug: string;
+    logoCfDeliveryUrl: string | null;
+    websiteUrl: string | null;
+    pricePoint: string | null;
+    avgRating: number | null;
+    productCount: number;
+  }[];
 }
 
 async function api<T>(url: string): Promise<T> {
@@ -127,6 +138,13 @@ export function StoreViewportApp({ id }: { id: number }) {
             </ul>
           </CardContent>
         </Card>
+      ) : null}
+
+      {store.brands.length > 0 ? (
+        <BrandShowcase
+          storeName={store.name}
+          brands={store.brands}
+        />
       ) : null}
     </main>
   );

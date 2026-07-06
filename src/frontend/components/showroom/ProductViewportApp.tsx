@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 interface Product {
   id: number;
   storeId: number;
+  brandId: number | null;
+  brandName?: string | null;
   itemName: string;
   description: string | null;
   sku: string | null;
@@ -100,6 +102,11 @@ export function ProductViewportApp({ id }: { id: number }) {
         {product.sku ? <span className="font-mono text-xs">SKU {product.sku}</span> : null}
         {product.leadTime ? <span>Lead time: {product.leadTime}</span> : null}
         <a href={`/admin/showroom/store/${product.storeId}`} className="text-sky-400 hover:underline">View store</a>
+        {product.brandId ? (
+          <a href={`/admin/brands/${product.brandId}`} className="text-sky-400 hover:underline">
+            {product.brandName ?? "View brand"}
+          </a>
+        ) : null}
       </div>
       {product.description ? <p className="mt-2 text-sm text-muted-foreground">{product.description}</p> : null}
 

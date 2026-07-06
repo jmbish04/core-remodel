@@ -66,6 +66,7 @@ export * from "./images/render_canvases";
 export * from "./images/canvas_inspiration_references";
 export * from "./images/mood_board_generations";
 export * from "./images/photo_viewer_notes";
+export * from "./images/saved_image_searches";
 
 export * from "./home/questionnaire";
 
@@ -89,3 +90,5 @@ export * from "./dialer/state";
 export * from "./materials/index";
 
 export * from "./showroom/index";
+
+export * from "./scrum/index";

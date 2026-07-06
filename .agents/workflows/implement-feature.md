@@ -83,3 +83,19 @@ This extension covers `docs/0007_sourcing_deep_research/`.
 2. Run `pnpm run db:generate`.
 3. Run `pnpm run cf-typegen`.
 4. Run focused lint and build checks.
+
+## Extension: Apply GPT-Image Strict Alignment and Masking to OpenAI Provider
+
+### Objective
+Update the `providers/openai.py` module to strictly enforce GPT-Image structural requirements, including modulo-16 coordinate bounds, proper parameter deprecation handling, and inverted RGBA alpha-mask injection. 
+
+### Context
+The first modularization pass successfully isolated the `openai_edit` function, but it left the payload generation largely untouched. The OpenAI `gpt-image-2` family drops support for `input_fidelity`, requires images to be sized in multiples of 16, requires explicitly declaring `b64_json` as a response format, and demands alpha transparency for masking (as opposed to FLUX/Gemini binary masks). 
+
+### Steps
+1. Navigate to `/Volumes/Projects/workers/core-remodel/scripts/ai_photo_pipeline/providers/openai.py`.
+2. Apply `import io` and `from PIL import Image, ImageOps`.
+3. Restrict `_FIDELITY_MODELS` to only `"gpt-image-1"` and `"gpt-image-1.5"`.
+4. Implement the `w - (w % 16)` modulo resizing logic on the base image buffer. 
+5. Wire up the `mask` evaluation block, ensuring `ImageOps.invert` correctly applies alpha=0 (transparency) to the target edit zone before packing it into `kwargs["mask"]`.
+6. Add `"response_format": "b64_json"` explicitly to the `kwargs` payload for the `else:` execution block.

@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
 import { showroomStores } from "./stores";
+import { showroomBrands } from "./brands";
 import { materialScheduleItems } from "../materials/schedule_item";
 
 /**
@@ -12,6 +13,14 @@ export const showroomStoreProducts = sqliteTable("showroom_store_products", {
   storeId: integer("store_id")
     .notNull()
     .references(() => showroomStores.id, { onDelete: "cascade" }),
+
+  /**
+   * The brand this product belongs to (nullable — allows accurate per-brand
+   * product counts via a real FK rather than fuzzy text matching).
+   */
+  brandId: integer("brand_id").references(() => showroomBrands.id, {
+    onDelete: "set null",
+  }),
 
   /**
    * The material schedule item this product is sourced for (nullable — a

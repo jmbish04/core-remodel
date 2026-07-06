@@ -1,6 +1,8 @@
 export * from "./bay_area_cities";
 export * from "./stores";
 export * from "./store_products";
+export * from "./brands";
+export * from "./store_brand_mapping";
 export * from "./categories";
 export * from "./product_docs";
 export * from "./research";
@@ -15,3 +17,4 @@ export * from "./product_specs";
 export * from "./showroom_images";
 export * from "./sweep_sessions";
 export * from "./gaps";
+

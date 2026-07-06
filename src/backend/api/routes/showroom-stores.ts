@@ -8,7 +8,7 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, desc, and, like } from "drizzle-orm";
+import { eq, desc, and, like, inArray } from "drizzle-orm";
 import { getAgentByName } from "agents";
 
 import {
@@ -33,6 +33,8 @@ import {
   productSpecs,
   showroomImages,
   sourcingSweepSessions,
+  showroomBrands,
+  storeBrandMapping,
 } from "@backend/db/schema/showroom/index";
 import {
   generateProductDraftPrompt,
@@ -742,8 +744,13 @@ showroomStoresRouter.post("/research/sweep-sessions/:sid/request-changes", async
 // ─── STORES CRUD ──────────────────────────────────────────────────────────────
 
 /**
- * GET / — List all stores with optional filters.
- * Query params: ?city=San+Francisco&pricePoint=$$$&search=studio
+ * GET / — List all stores with optional filters and enrichment.
+ * Query params: ?city=San+Francisco&pricePoint=$$$&search=studio&hub=A
+ *               &include=categories,ratings
+ *
+ * When `include` contains:
+ *   - "categories" → each store gets `categories: string[]`
+ *   - "ratings"    → each store gets `avgRating: number | null`, `ratingCount: number`
  */
 showroomStoresRouter.get("/", async (c) => {
   const db = drizzle(c.env.DB);
@@ -751,6 +758,8 @@ showroomStoresRouter.get("/", async (c) => {
   const priceFilter = c.req.query("pricePoint");
   const search = c.req.query("search");
   const hubFilter = c.req.query("hub");
+  const includeParam = c.req.query("include") ?? "";
+  const includes = new Set(includeParam.split(",").map((s) => s.trim()).filter(Boolean));
 
   let query = db
     .select({
@@ -788,14 +797,72 @@ showroomStoresRouter.get("/", async (c) => {
   }
 
   const rows = await query;
+  const storeIds = rows.map((r) => r.store.id);
+
+  // Parallel enrichment queries (only when requested and stores exist).
+  const [categoryMap, ratingMap] = await Promise.all([
+    includes.has("categories") && storeIds.length > 0
+      ? db
+          .select({
+            storeId: showroomStoreCategoryMapping.storeId,
+            categoryName: showroomStoreCategory.name,
+          })
+          .from(showroomStoreCategoryMapping)
+          .innerJoin(
+            showroomStoreCategory,
+            eq(showroomStoreCategoryMapping.categoryId, showroomStoreCategory.id)
+          )
+          .then((catRows) => {
+            const map = new Map<number, string[]>();
+            for (const r of catRows) {
+              const list = map.get(r.storeId) ?? [];
+              list.push(r.categoryName);
+              map.set(r.storeId, list);
+            }
+            return map;
+          })
+      : Promise.resolve(new Map<number, string[]>()),
+    includes.has("ratings") && storeIds.length > 0
+      ? db
+          .select({
+            storeId: storeRating.storeId,
+            rating: storeRating.rating,
+          })
+          .from(storeRating)
+          .where(eq(storeRating.isActive, true))
+          .then((rRows) => {
+            const map = new Map<number, { sum: number; count: number }>();
+            for (const r of rRows) {
+              const cur = map.get(r.storeId) ?? { sum: 0, count: 0 };
+              cur.sum += r.rating;
+              cur.count += 1;
+              map.set(r.storeId, cur);
+            }
+            return map;
+          })
+      : Promise.resolve(new Map<number, { sum: number; count: number }>()),
+  ]);
 
   return c.json({
-    stores: rows.map((r) => ({
-      ...r.store,
-      cityName: r.cityName,
-      hubRoute: r.hubRoute,
-      hubName: r.hubName,
-    })),
+    stores: rows.map((r) => {
+      const base = {
+        ...r.store,
+        cityName: r.cityName,
+        hubRoute: r.hubRoute,
+        hubName: r.hubName,
+      };
+
+      if (includes.has("categories")) {
+        (base as any).categories = categoryMap.get(r.store.id) ?? [];
+      }
+      if (includes.has("ratings")) {
+        const rData = ratingMap.get(r.store.id);
+        (base as any).avgRating = rData ? Math.round((rData.sum / rData.count) * 10) / 10 : null;
+        (base as any).ratingCount = rData?.count ?? 0;
+      }
+
+      return base;
+    }),
   });
 });
 
@@ -824,7 +891,7 @@ showroomStoresRouter.get("/:id", async (c) => {
   if (!store) return c.json({ error: "Store not found" }, 404);
 
   // Parallel data loads
-  const [products, categories, notes, ratings, externalRatings, research, tags] =
+  const [products, categories, notes, ratings, externalRatings, research, tags, brandMappings] =
     await Promise.all([
       db
         .select()
@@ -879,7 +946,40 @@ showroomStoresRouter.get("/:id", async (c) => {
           eq(storeTagMapping.showroomTagId, showroomTagDef.id)
         )
         .where(eq(storeTagMapping.storeId, storeId)),
+      db
+        .select({
+          mapping: storeBrandMapping,
+          brand: showroomBrands,
+        })
+        .from(storeBrandMapping)
+        .innerJoin(
+          showroomBrands,
+          eq(storeBrandMapping.brandId, showroomBrands.id)
+        )
+        .where(eq(storeBrandMapping.storeId, storeId)),
     ]);
+
+  // Count products per brand GLOBALLY (not per-store) — brands overlap
+  // across showrooms and products may be discovered at different locations.
+  const brandIds = brandMappings.map((r) => r.brand.id);
+  const brandProductCounts = new Map<number, number>();
+  if (brandIds.length > 0) {
+    const allBrandProducts = await db
+      .select({
+        brandId: showroomStoreProducts.brandId,
+      })
+      .from(showroomStoreProducts)
+      .where(inArray(showroomStoreProducts.brandId, brandIds));
+
+    for (const p of allBrandProducts) {
+      if (p.brandId) {
+        brandProductCounts.set(
+          p.brandId,
+          (brandProductCounts.get(p.brandId) ?? 0) + 1,
+        );
+      }
+    }
+  }
 
   return c.json({
     ...store.store,
@@ -900,6 +1000,16 @@ showroomStoresRouter.get("/:id", async (c) => {
       ...r.mapping,
       tagName: r.tag.name,
       tagColor: r.tag.color,
+    })),
+    brands: brandMappings.map((r) => ({
+      id: r.brand.id,
+      name: r.brand.name,
+      slug: r.brand.slug,
+      logoCfDeliveryUrl: r.brand.logoCfDeliveryUrl,
+      websiteUrl: r.brand.websiteUrl,
+      pricePoint: r.brand.pricePoint,
+      avgRating: r.brand.avgRating,
+      productCount: brandProductCounts.get(r.brand.id) ?? 0,
     })),
   });
 });
@@ -1354,4 +1464,194 @@ showroomStoresRouter.get("/meta/product-areas", async (c) => {
     .where(eq(storeProductAreaDef.isActive, true));
 
   return c.json({ productAreas: areas });
+});
+
+// ─── BRANDS ──────────────────────────────────────────────────────────────────
+
+/**
+ * GET /brands — List all brands in the system.
+ */
+showroomStoresRouter.get("/brands", async (c) => {
+  const db = drizzle(c.env.DB);
+  const brands = await db
+    .select()
+    .from(showroomBrands)
+    .where(eq(showroomBrands.isActive, true))
+    .orderBy(showroomBrands.name);
+
+  return c.json({ brands });
+});
+
+/**
+ * GET /brands/:brandId — Single brand detail + all products + stores carrying it.
+ */
+showroomStoresRouter.get("/brands/:brandId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const brandId = Number(c.req.param("brandId"));
+
+  const [brand] = await db
+    .select()
+    .from(showroomBrands)
+    .where(eq(showroomBrands.id, brandId))
+    .limit(1);
+
+  if (!brand) return c.json({ error: "Brand not found" }, 404);
+
+  const [products, stores] = await Promise.all([
+    db
+      .select({
+        product: showroomStoreProducts,
+        storeName: showroomStores.name,
+      })
+      .from(showroomStoreProducts)
+      .leftJoin(showroomStores, eq(showroomStoreProducts.storeId, showroomStores.id))
+      .where(eq(showroomStoreProducts.brandId, brandId))
+      .orderBy(desc(showroomStoreProducts.createdAt)),
+    db
+      .select({
+        mapping: storeBrandMapping,
+        storeName: showroomStores.name,
+        storeId: showroomStores.id,
+      })
+      .from(storeBrandMapping)
+      .innerJoin(showroomStores, eq(storeBrandMapping.storeId, showroomStores.id))
+      .where(eq(storeBrandMapping.brandId, brandId)),
+  ]);
+
+  return c.json({
+    brand,
+    products: products.map((r) => ({ ...r.product, storeName: r.storeName })),
+    stores: stores.map((r) => ({
+      id: r.storeId,
+      name: r.storeName,
+    })),
+  });
+});
+
+/**
+ * POST /brands — Create a new brand (used by the agent during scraping).
+ */
+showroomStoresRouter.post("/brands", async (c) => {
+  const db = drizzle(c.env.DB);
+  const body = await c.req.json();
+
+  const schema = z.object({
+    name: z.string().min(1),
+    slug: z.string().min(1),
+    logoCfImageId: z.string().optional().nullable(),
+    logoCfDeliveryUrl: z.string().optional().nullable(),
+    websiteUrl: z.string().optional().nullable(),
+    description: z.string().optional().nullable(),
+    pricePoint: z.enum(["$", "$$", "$$$", "$$$$"]).optional().nullable(),
+    avgRating: z.number().optional().nullable(),
+    ratingCount: z.number().int().optional(),
+    countryOfOrigin: z.string().optional().nullable(),
+  });
+
+  const data = schema.parse(body);
+  const [inserted] = await db.insert(showroomBrands).values(data).returning();
+  return c.json(inserted, 201);
+});
+
+/**
+ * GET /:id/brands — List brands mapped to a store (with global product counts).
+ */
+showroomStoresRouter.get("/:id/brands", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+
+  const mappings = await db
+    .select({
+      mapping: storeBrandMapping,
+      brand: showroomBrands,
+    })
+    .from(storeBrandMapping)
+    .innerJoin(
+      showroomBrands,
+      eq(storeBrandMapping.brandId, showroomBrands.id),
+    )
+    .where(eq(storeBrandMapping.storeId, storeId));
+
+  // Global product counts for these brands
+  const brandIds = mappings.map((r) => r.brand.id);
+  const counts = new Map<number, number>();
+  if (brandIds.length > 0) {
+    const allBrandProducts = await db
+      .select({ brandId: showroomStoreProducts.brandId })
+      .from(showroomStoreProducts)
+      .where(inArray(showroomStoreProducts.brandId, brandIds));
+
+    for (const p of allBrandProducts) {
+      if (p.brandId) counts.set(p.brandId, (counts.get(p.brandId) ?? 0) + 1);
+    }
+  }
+
+  return c.json({
+    brands: mappings.map((r) => ({
+      id: r.brand.id,
+      name: r.brand.name,
+      slug: r.brand.slug,
+      logoCfDeliveryUrl: r.brand.logoCfDeliveryUrl,
+      websiteUrl: r.brand.websiteUrl,
+      pricePoint: r.brand.pricePoint,
+      avgRating: r.brand.avgRating,
+      productCount: counts.get(r.brand.id) ?? 0,
+    })),
+  });
+});
+
+/**
+ * GET /:id/brands/:brandId — Brand detail + ALL products for the brand
+ * (globally, not filtered by store — brands overlap across showrooms).
+ */
+showroomStoresRouter.get("/:id/brands/:brandId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const brandId = Number(c.req.param("brandId"));
+
+  const [brand] = await db
+    .select()
+    .from(showroomBrands)
+    .where(eq(showroomBrands.id, brandId))
+    .limit(1);
+
+  if (!brand) return c.json({ error: "Brand not found" }, 404);
+
+  // All products for this brand across all stores
+  const products = await db
+    .select({
+      product: showroomStoreProducts,
+      storeName: showroomStores.name,
+    })
+    .from(showroomStoreProducts)
+    .leftJoin(showroomStores, eq(showroomStoreProducts.storeId, showroomStores.id))
+    .where(eq(showroomStoreProducts.brandId, brandId))
+    .orderBy(desc(showroomStoreProducts.createdAt));
+
+  return c.json({
+    brand,
+    products: products.map((r) => ({ ...r.product, storeName: r.storeName })),
+  });
+});
+
+/**
+ * POST /:id/brands — Map a brand to a store (used by the agent).
+ */
+showroomStoresRouter.post("/:id/brands", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const body = await c.req.json();
+
+  const schema = z.object({
+    brandId: z.number().int(),
+  });
+
+  const { brandId } = schema.parse(body);
+
+  const [inserted] = await db
+    .insert(storeBrandMapping)
+    .values({ storeId, brandId })
+    .onConflictDoNothing()
+    .returning();
+
+  return c.json(inserted ?? { storeId, brandId, exists: true }, 201);
 });
