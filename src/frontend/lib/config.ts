@@ -29,7 +29,7 @@ export const siteConfig: SiteConfig = {
     github: "https://github.com/jmbish04/core-remodel",
   },
   navItems: [
-    { href: "/admin/budget-tracker", label: "Budget Tracker" },
+    { href: "/admin/budget/tracker", label: "Budget Tracker" },
     { href: "/questionnaire", label: "Questionnaire" },
     { href: "/admin/estimates", label: "Estimates" },
     { href: "/admin/contracts", label: "Contracts" },

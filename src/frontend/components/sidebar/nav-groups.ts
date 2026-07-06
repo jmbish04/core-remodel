@@ -15,7 +15,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     label: "Plan",
     admin: true,
     items: [
-      { href: "/admin/measure", label: "Live Floor Plan" },
+      { href: "/admin/planning/measure", label: "Live Floor Plan" },
       { href: "/admin/measurements", label: "Measurements" },
       { href: "/admin/planning/moodboards", label: "Mood Boards" },
       { href: "/admin/planning/decision-room", label: "Decision Room" },
@@ -26,9 +26,9 @@ export const NAV_GROUPS: NavGroupDef[] = [
     label: "Budget",
     admin: true,
     items: [
-      { href: "/admin/budget-tracker", label: "Budget Tracker" },
-      { href: "/admin/budget-dashboard", label: "Budget Triage Matrix" },
-      { href: "/admin/truth-table", label: "Labor & Materials Costs" },
+      { href: "/admin/budget/tracker", label: "Budget Tracker" },
+      { href: "/admin/budget/dashboard", label: "Budget Triage Matrix" },
+      { href: "/admin/budget/truth-table", label: "Labor & Materials Costs" },
     ],
   },
   {
@@ -40,7 +40,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
       { href: "/admin/estimates", label: "Estimates" },
       { href: "/admin/contracts", label: "Contracts" },
       { href: "/admin/bid-portfolios", label: "Bid Portfolios" },
-      { href: "/admin/contractor-schedule", label: "Schedule" },
+      { href: "/admin/pmo/schedule/contractor", label: "Schedule" },
       { href: "/admin/permits", label: "Permits" },
       { href: "/admin/dialer", label: "Prospect Dialer" },
     ],
@@ -77,7 +77,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     admin: true,
     items: [
       { href: "/admin/supporting-docs", label: "Supporting Docs" },
-      { href: "/admin/research", label: "Research Library" },
+      { href: "/admin/planning/research", label: "Research Library" },
     ],
   },
   {

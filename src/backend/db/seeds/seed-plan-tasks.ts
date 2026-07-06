@@ -87,7 +87,7 @@ const TASKS_0013: SeedTask[] = [
   t(P, "P4-03", "design", 4, "new", "Decision Room", "/admin/designs/decision-room: per-room final moodboard + material→product/description todos.", "/admin/designs/decision-room"),
   t(P, "P4-04", "design", 4, "new", "Blank-canvas rebuild", "Extend recovered W0-01 suite: upload/generate/exclusions/floor/room.", "/admin/prepare/blank-canvas", ["W0-01"]),
   t(P, "P4-05", "design", 4, "move", "Builder → angles", "builder → /admin/prepare/blank-canvas/angles (camera-on-floorplan positioning).", "/admin/prepare/blank-canvas/angles"),
-  t(P, "P4-06", "design", 4, "new", "Public design-master-plan", "/planning/design-master-plan — public read-only render of decision-room + contractor comments.", "/planning/design-master-plan", ["P4-03"]),
+  t(P, "P4-06", "design", 4, "new", "Public design-master-plan", "/admin/pmo/operations/design-master-plan — public read-only render of decision-room + contractor comments.", "/admin/pmo/operations/design-master-plan", ["P4-03"]),
   t(P, "P4-07", "design", 4, "move", "Kitchen layout", "kitchen-layout → /admin/designs/layouts/[id] (admin).", "/admin/designs/layouts/[id]"),
 
   // Phase 5 — Brands / Products / Showroom sourcing

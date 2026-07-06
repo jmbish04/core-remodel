@@ -732,7 +732,7 @@ export function ShoppingJournalApp() {
 
                       {selectedEntry.researchSession.status === "complete" ? (
                         <a
-                          href="/admin/research"
+                          href={`/admin/planning/research/${selectedEntry.researchSession.id}`}
                           className="flex items-center justify-center gap-1.5 w-full bg-zinc-850 hover:bg-zinc-800 border border-zinc-700/60 rounded px-2.5 py-1.5 font-medium text-center text-[11px] transition"
                         >
                           View Deep Research Report

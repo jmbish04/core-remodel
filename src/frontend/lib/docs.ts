@@ -117,7 +117,7 @@ const homeownersPages: DocsPageDefinition[] = [
         ],
         actions: [
           {
-            href: "/admin/budget-tracker",
+            href: "/admin/budget/tracker",
             label: "Open Budget Tracker",
             description: "Split the remodel budget into room and item-level targets.",
           },
@@ -162,7 +162,7 @@ const homeownersPages: DocsPageDefinition[] = [
     ],
     actions: [
       {
-        href: "/admin/budget-tracker",
+        href: "/admin/budget/tracker",
         label: "Open Budget Tracker",
         description: "Work inside the mirrored D1 and Google Sheets budget workspace.",
       },
@@ -1079,7 +1079,7 @@ const sharedPages: DocsPageDefinition[] = [
         description: "See the current shared entry point for the project.",
       },
       {
-        href: "/admin/budget-tracker",
+        href: "/admin/budget/tracker",
         label: "Open Budget Tracker",
         description: "Review how budget decisions evolve with the collaboration loop.",
       },
