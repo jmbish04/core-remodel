@@ -54,11 +54,21 @@ const LEGACY_REDIRECTS: ReadonlyArray<readonly [string, string]> = [
   ["/photo-edits", "/admin/photo-edits"],
   ["/builder", "/admin/builder"],
   ["/gallery", "/admin/gallery"],
-  ["/budget-tracker", "/admin/budget-tracker"],
-  ["/budget-dashboard", "/admin/budget-dashboard"],
   ["/bid-portfolios", "/admin/bid-portfolios"],
-  ["/measure", "/admin/measure"],
   ["/measurements", "/admin/measurements"],
+  // Admin namespace reorg (budget / pmo / planning). Old flat + root paths land
+  // directly on the new namespaced URLs (single hop — no redirect chains).
+  ["/budget-tracker", "/admin/budget/tracker"],
+  ["/budget-dashboard", "/admin/budget/dashboard"],
+  ["/budget-reconciliation", "/admin/budget/reconciliation"],
+  ["/planning", "/admin/pmo/operations"],
+  ["/measure", "/admin/planning/measure"],
+  ["/admin/budget-tracker", "/admin/budget/tracker"],
+  ["/admin/budget-dashboard", "/admin/budget/dashboard"],
+  ["/admin/truth-table", "/admin/budget/truth-table"],
+  ["/admin/contractor-schedule", "/admin/pmo/schedule/contractor"],
+  ["/admin/measure", "/admin/planning/measure"],
+  ["/admin/research", "/admin/planning/research"],
 ];
 
 const handler: ExportedHandler<Env> = {

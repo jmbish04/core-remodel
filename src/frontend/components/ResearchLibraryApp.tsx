@@ -336,7 +336,7 @@ export function ResearchLibraryApp() {
             ].includes(session.status);
 
             const open = () => {
-              window.location.href = `/admin/research/${session.id}`;
+              window.location.href = `/admin/planning/research/${session.id}`;
             };
 
             return (

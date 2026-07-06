@@ -170,7 +170,7 @@ export function ResearchDetailApp({ sessionId }: { sessionId?: string }) {
               variant="ghost"
               size="sm"
               onClick={() => {
-                window.location.href = "/admin/research";
+                window.location.href = "/admin/planning/research";
               }}
               className="text-zinc-500"
             >
