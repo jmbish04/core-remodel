@@ -95,34 +95,28 @@ portalRouter.get("/home", async (c) => {
             "Review existing conditions room-by-room before discussing scope, sequence, and trade constraints.",
         },
         {
-          label: "Review Inspiration",
-          href: "/review",
+          label: "Check the Floor Plan",
+          href: "/floor-plan",
           description:
-            "Compare target design intent and notes attached to each inspirational reference image.",
+            "Confirm room layout, dimensions, and adjacencies before scheduling work in a given area.",
         },
         {
-          label: "Validate Proposed Renders",
-          href: "/decision-room",
+          label: "Review Design Intent",
+          href: "/inspiration-photos",
           description:
-            "Use side-by-side comparisons to evaluate feasibility against as-is conditions.",
+            "See the target look and finish notes attached to each inspirational reference image.",
         },
         {
-          label: "Track Estimates",
-          href: "/estimates",
+          label: "Read Supporting Docs",
+          href: "/supporting-docs",
           description:
-            "Capture contractor/vendor estimates with draft intake, AI extraction, and revision history.",
+            "Access permits, spec sheets, and shared documentation relevant to the current phase.",
         },
         {
-          label: "Budget Decision Tracker",
-          href: "/budget-tracker",
+          label: "Log Daily Progress",
+          href: "/daily-log",
           description:
-            "Model must-do scope, future items, and scenario options while keeping Sheets and app tabs mirrored.",
-        },
-        {
-          label: "Manage Contracts",
-          href: "/contracts",
-          description:
-            "Ingest contract artifacts, analyze risk findings, and monitor payment/timeline obligations.",
+            "Post site updates, blockers, and photos so the homeowner can follow along day to day.",
         },
       ],
       recentUpdates,
