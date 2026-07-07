@@ -76,6 +76,11 @@
       "binding": "SHOWROOM_SCRAPE_WORKFLOW",
       "class_name": "ShowroomScrapeWorkflow",
     },
+    {
+      "name": "blank-canvas-batch",
+      "binding": "BLANK_CANVAS_WORKFLOW",
+      "class_name": "BlankCanvasBatchWorkflow",
+    },
   ],
   "triggers": {
     "crons": ["0 14 * * *", "* * * * *"],

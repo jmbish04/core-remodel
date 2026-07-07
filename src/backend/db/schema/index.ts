@@ -72,6 +72,7 @@ export * from "./images/render_canvases";
 export * from "./images/canvas_inspiration_references";
 export * from "./images/mood_board_generations";
 export * from "./images/photo_viewer_notes";
+export * from "./images/blank_canvas_jobs";
 
 export * from "./home/questionnaire";
 
