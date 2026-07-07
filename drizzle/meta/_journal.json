@@ -519,6 +519,13 @@
       "when": 1783407698442,
       "tag": "0073_blushing_violations",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "6",
+      "when": 1783417570476,
+      "tag": "0074_quick_sebastian_shaw",
+      "breakpoints": true
     }
   ]
 }

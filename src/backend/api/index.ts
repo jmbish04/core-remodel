@@ -76,6 +76,7 @@ import { adminIntegrationsRouter } from "./routes/admin-integrations";
 import { adminPlansRouter } from "./routes/admin-plans";
 import { clickupRouter } from "./routes/clickup";
 import { companyCrmRouter } from "./routes/company-crm";
+import { notesSharedRouter } from "./routes/notes-shared";
 import { gmailRouter } from "./routes/gmail";
 import { requireAccessAuth } from "@backend/utils/access";
 
@@ -125,6 +126,9 @@ app.use("/api/places/*", requireAccessAuth);
 // Company CRM (notes + todos, 0013 roadmap P3-03/P3-04) — admin-only, no public read.
 app.use("/api/companies", requireAccessAuth);
 app.use("/api/companies/*", requireAccessAuth);
+// Shared note-editor utilities (AI title generation) — admin-only.
+app.use("/api/notes", requireAccessAuth);
+app.use("/api/notes/*", requireAccessAuth);
 // Gmail comms hub (0013 roadmap P3-07) — admin-only, sends mail as justin@126colby.com.
 app.use("/api/gmail", requireAccessAuth);
 app.use("/api/gmail/*", requireAccessAuth);
@@ -217,6 +221,7 @@ app.route("/api/admin/integrations", adminIntegrationsRouter);
 app.route("/api/admin/plans", adminPlansRouter);
 app.route("/api/clickup", clickupRouter);
 app.route("/api/companies", companyCrmRouter);
+app.route("/api/notes", notesSharedRouter);
 app.route("/api/gmail", gmailRouter);
 app.route("/", openapiRouter);
 

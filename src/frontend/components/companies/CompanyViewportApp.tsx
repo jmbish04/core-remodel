@@ -46,6 +46,16 @@ interface Portfolio {
   datetimeCreated: string;
 }
 
+const COMPANY_TABS = ["overview", "rolodex", "bids", "documents", "notes", "todos"];
+
+/** Read the initial tab from `?tab=`; falls back to overview. Lets deep links
+ *  (e.g. returning from the full-page note editor) land on the right tab. */
+function initialCompanyTab(): string {
+  if (typeof window === "undefined") return "overview";
+  const tab = new URLSearchParams(window.location.search).get("tab");
+  return tab && COMPANY_TABS.includes(tab) ? tab : "overview";
+}
+
 export function CompanyViewportApp({ companyId }: { companyId: number }) {
   const [company, setCompany] = useState<Company | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
@@ -128,7 +138,7 @@ export function CompanyViewportApp({ companyId }: { companyId: number }) {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 space-y-6">
-          <Tabs defaultValue="overview">
+          <Tabs defaultValue={initialCompanyTab()}>
             <TabsList>
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="rolodex">Rolodex ({contacts.length})</TabsTrigger>

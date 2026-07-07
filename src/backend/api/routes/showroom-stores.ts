@@ -1442,7 +1442,7 @@ showroomStoresRouter.get("/:id", async (c) => {
       categoryName: r.category.name,
       categoryDescription: r.category.description,
     })),
-    notes,
+    notes: notes.map(serializeStoreNote),
     userRating: ratings[0] ?? null,
     externalRatings,
     research,
@@ -2059,21 +2059,10 @@ showroomStoresRouter.put("/:id/products/:pid", async (c) => {
 
 // ─── NOTES ────────────────────────────────────────────────────────────────────
 
-/**
- * POST /:id/notes — Add a note to a store.
- */
-showroomStoresRouter.post("/:id/notes", async (c) => {
-  const db = drizzle(c.env.DB);
-  const storeId = Number(c.req.param("id"));
-  const { note } = await c.req.json<{ note: string }>();
-
-  const [inserted] = await db
-    .insert(storeNotes)
-    .values({ storeId, note })
-    .returning();
-
-  return c.json({ note: inserted }, 201);
-});
+// NOTE: the legacy plain-`{note}` POST /:id/notes handler that used to live here
+// shadowed the rich handler below (Hono dispatches to the FIRST registration),
+// silently dropping title/content/tags on create. The rich handler accepts the
+// legacy `note` field too, so the duplicate was removed (2026-07-07).
 
 /**
  * POST /products/:pid/notes — Add a note to a product.
@@ -3007,24 +2996,93 @@ showroomStoresRouter.post("/:id/pocs", async (c) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ─── NOTES (rich titled notes, migration 0057) ───────────────────────────────
+// ─── NOTES (rich titled notes, migration 0057; tags, migration 0074) ─────────
 // ═══════════════════════════════════════════════════════════════════════════════
 //
 // The `store_notes` table was extended in migration 0057 with `title`,
 // `contentHtml`, `contentMarkdown`, and `isActive` (soft-delete). The old
 // `note` plain-text column is still present for backward compatibility.
+// Migration 0074 added `tagsJson` (nullable JSON string[]) — wire field name
+// is `tags: string[]` ([] when null on read); accepted on create/update.
 //
 // NOTE: `POST /:id/notes` above in the original NOTES block only accepted a
 // plain `note` string. The routes here supersede that with the full rich-text
 // schema. The old route is left in place for backward compatibility; these new
 // routes live in a separate clearly-sectioned block.
 
+/** Max number of tags retained per note (extras beyond this are dropped). */
+const NOTE_TAGS_MAX = 20;
+
+/**
+ * Parse a note's `tagsJson` column into a `tags: string[]` wire value.
+ * Returns `[]` when the column is null or fails to parse as an array.
+ */
+function parseNoteTags(tagsJson: string | null | undefined): string[] {
+  if (!tagsJson) return [];
+  try {
+    const parsed = JSON.parse(tagsJson);
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Trim, drop empties, dedupe (case-sensitive), and cap at NOTE_TAGS_MAX. */
+function normalizeNoteTags(tags: string[] | undefined): string[] {
+  if (!tags) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of tags) {
+    const t = raw.trim();
+    if (!t || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+    if (out.length >= NOTE_TAGS_MAX) break;
+  }
+  return out;
+}
+
+/** Shape a raw `store_notes` row for the wire: adds `tags: string[]`. */
+function serializeStoreNote(row: typeof storeNotes.$inferSelect) {
+  const { tagsJson, ...rest } = row;
+  return { ...rest, tags: parseNoteTags(tagsJson) };
+}
+
+const noteTagsBodySchema = z.object({
+  tags: z.array(z.string().min(1)).max(NOTE_TAGS_MAX).optional(),
+});
+
+/**
+ * GET /notes/tags — Distinct tags across ALL active store notes.
+ *
+ * Registered before `/:id/notes` and `/notes/:noteId` so the literal `tags`
+ * segment is never captured as a `:noteId` param.
+ *
+ * Response 200:
+ *   { "success": true, "tags": string[] }  // sorted, deduped
+ */
+showroomStoresRouter.get("/notes/tags", async (c) => {
+  const db = drizzle(c.env.DB);
+
+  const rows = await db
+    .select({ tagsJson: storeNotes.tagsJson })
+    .from(storeNotes)
+    .where(and(eq(storeNotes.isActive, true), sql`${storeNotes.tagsJson} is not null`));
+
+  const tagSet = new Set<string>();
+  for (const row of rows) {
+    for (const tag of parseNoteTags(row.tagsJson)) tagSet.add(tag);
+  }
+
+  return c.json({ success: true, tags: [...tagSet].sort() });
+});
+
 /**
  * GET /:id/notes — List active notes for a showroom, newest first.
  *
  * Response 200:
  *   { "notes": [ { id, storeId, title, note, contentHtml, contentMarkdown,
- *                  isActive, timestamp }, ... ] }
+ *                  isActive, timestamp, tags }, ... ] }
  */
 showroomStoresRouter.get("/:id/notes", async (c) => {
   const db = drizzle(c.env.DB);
@@ -3044,7 +3102,7 @@ showroomStoresRouter.get("/:id/notes", async (c) => {
     )
     .orderBy(desc(storeNotes.timestamp));
 
-  return c.json({ notes });
+  return c.json({ notes: notes.map(serializeStoreNote) });
 });
 
 /**
@@ -3055,11 +3113,12 @@ showroomStoresRouter.get("/:id/notes", async (c) => {
  *     "title": "Post-visit impressions",
  *     "contentHtml": "<p>Waterworks display was incredible.</p>",
  *     "contentMarkdown": "Waterworks display was incredible.",
- *     "note": "plain text fallback (optional)"
+ *     "note": "plain text fallback (optional)",
+ *     "tags": ["favorite", "follow-up"]
  *   }
  *
  * Response 201:
- *   { "note": { id, storeId, title, note, contentHtml, contentMarkdown, isActive, timestamp } }
+ *   { "note": { id, storeId, title, note, contentHtml, contentMarkdown, isActive, timestamp, tags } }
  */
 showroomStoresRouter.post("/:id/notes", async (c) => {
   const db = drizzle(c.env.DB);
@@ -3080,12 +3139,14 @@ showroomStoresRouter.post("/:id/notes", async (c) => {
     contentHtml: z.string().optional().nullable(),
     contentMarkdown: z.string().optional().nullable(),
     note: z.string().optional().nullable(),
-  });
+  }).merge(noteTagsBodySchema);
 
   const parsed = createNoteSchema.safeParse(body);
   if (!parsed.success) {
     return c.json({ success: false, error: parsed.error.message }, 400);
   }
+
+  const normalizedTags = normalizeNoteTags(parsed.data.tags);
 
   const [inserted] = await db
     .insert(storeNotes)
@@ -3096,10 +3157,11 @@ showroomStoresRouter.post("/:id/notes", async (c) => {
       contentMarkdown: parsed.data.contentMarkdown ?? null,
       note: parsed.data.note ?? null,
       isActive: true,
+      tagsJson: normalizedTags.length > 0 ? JSON.stringify(normalizedTags) : null,
     } as typeof storeNotes.$inferInsert)
     .returning();
 
-  return c.json({ note: inserted }, 201);
+  return c.json({ note: serializeStoreNote(inserted) }, 201);
 });
 
 /**
@@ -3109,11 +3171,12 @@ showroomStoresRouter.post("/:id/notes", async (c) => {
  *   {
  *     "title": "Updated title",
  *     "contentHtml": "<p>New content.</p>",
- *     "contentMarkdown": "New content."
+ *     "contentMarkdown": "New content.",
+ *     "tags": ["favorite"]
  *   }
  *
  * Response 200:
- *   { "note": { ...updatedRow } }
+ *   { "note": { ...updatedRow, tags } }
  */
 showroomStoresRouter.put("/notes/:noteId", async (c) => {
   const db = drizzle(c.env.DB);
@@ -3134,7 +3197,7 @@ showroomStoresRouter.put("/notes/:noteId", async (c) => {
     contentHtml: z.string().optional().nullable(),
     contentMarkdown: z.string().optional().nullable(),
     note: z.string().optional().nullable(),
-  });
+  }).merge(noteTagsBodySchema);
 
   const parsed = updateNoteSchema.safeParse(body);
   if (!parsed.success) {
@@ -3146,6 +3209,10 @@ showroomStoresRouter.put("/notes/:noteId", async (c) => {
   if (parsed.data.contentHtml !== undefined) patch.contentHtml = parsed.data.contentHtml;
   if (parsed.data.contentMarkdown !== undefined) patch.contentMarkdown = parsed.data.contentMarkdown;
   if (parsed.data.note !== undefined) patch.note = parsed.data.note;
+  if (parsed.data.tags !== undefined) {
+    const normalizedTags = normalizeNoteTags(parsed.data.tags);
+    patch.tagsJson = normalizedTags.length > 0 ? JSON.stringify(normalizedTags) : null;
+  }
 
   // Guard against an empty patch: Drizzle `.set({})` emits an empty UPDATE,
   // which is a SQL syntax error in SQLite/D1. With nothing to change, return
@@ -3159,7 +3226,7 @@ showroomStoresRouter.put("/notes/:noteId", async (c) => {
     if (!existing) {
       return c.json({ success: false, error: "Note not found" }, 404);
     }
-    return c.json({ note: existing });
+    return c.json({ note: serializeStoreNote(existing) });
   }
 
   const [updated] = await db
@@ -3172,7 +3239,7 @@ showroomStoresRouter.put("/notes/:noteId", async (c) => {
     return c.json({ success: false, error: "Note not found" }, 404);
   }
 
-  return c.json({ note: updated });
+  return c.json({ note: serializeStoreNote(updated) });
 });
 
 /**
