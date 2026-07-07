@@ -24,12 +24,15 @@
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, and, or, isNull, inArray, like, desc, sql } from "drizzle-orm";
+import { eq, and, or, isNull, inArray, like, desc, ne, sql } from "drizzle-orm";
 
 import { brands } from "@backend/db/schema/brands/brands";
 import { brandTypesDef } from "@backend/db/schema/brands/brand_types_def";
 import { brandTypeMappings } from "@backend/db/schema/brands/brand_type_mappings";
 import { showroomBrandMappings } from "@backend/db/schema/brands/showroom_brand_mappings";
+import { brandIntel } from "@backend/db/schema/brands/brand_intel";
+import { brandImages } from "@backend/db/schema/brands/brand_images";
+import { brandProductLines } from "@backend/db/schema/brands/brand_product_lines";
 import { showroomStoreProducts } from "@backend/db/schema/showroom/store_products";
 import { showroomProductMappings } from "@backend/db/schema/showroom/product_mappings";
 import { showroomStores } from "@backend/db/schema/showroom/stores";
@@ -429,6 +432,9 @@ brandsRouter.openapi(
  *   - `products`: brand's products with newest image URL (or null).
  *     Uses two queries + JS-side merge — avoids N+1 and handles SQLite group-by limits.
  *   - `productCount`: total count of products.
+ *   - `intel`: brand_intel row from the BrandResearchWorkflow (or null).
+ *   - `productLines`: brand_product_lines ordered by sortOrder (flagship first).
+ *   - `images`: brand_images where reviewStatus != 'rejected', newest first, max 24.
  *
  * Uses a plain `.get()` handler (not `openapi()`) to avoid the Drizzle Date ↔
  * JSON string type mismatch that the strict `RouteConfigToTypedResponse` check
@@ -447,9 +453,16 @@ brandsRouter.get("/:id", async (c) => {
       return c.json({ success: false, error: "Brand not found" }, 404);
     }
 
-    // ── Fire all three independent queries concurrently ──────────────────────
-    const [typeMappingRows, showroomBrandRows, showroomProductRows, productRows] =
-      await Promise.all([
+    // ── Fire all independent queries concurrently ────────────────────────────
+    const [
+      typeMappingRows,
+      showroomBrandRows,
+      showroomProductRows,
+      productRows,
+      intelRows,
+      productLineRows,
+      imageRows,
+    ] = await Promise.all([
         // (1) Type mappings
         db
           .select({
@@ -498,6 +511,33 @@ brandsRouter.get("/:id", async (c) => {
           })
           .from(showroomStoreProducts)
           .where(eq(showroomStoreProducts.brandId, brandId)),
+
+        // (4) Deep-research intel (1:1 row, may not exist yet)
+        db
+          .select()
+          .from(brandIntel)
+          .where(eq(brandIntel.brandId, brandId))
+          .limit(1),
+
+        // (5) Product lines ordered by sortOrder (flagship first)
+        db
+          .select()
+          .from(brandProductLines)
+          .where(eq(brandProductLines.brandId, brandId))
+          .orderBy(brandProductLines.sortOrder),
+
+        // (6) Images — everything not rejected, newest first, max 24
+        db
+          .select()
+          .from(brandImages)
+          .where(
+            and(
+              eq(brandImages.brandId, brandId),
+              ne(brandImages.reviewStatus, "rejected"),
+            ),
+          )
+          .orderBy(desc(brandImages.id))
+          .limit(24),
       ]);
 
     // ── De-dupe showrooms by id (UNION of brand-mapping + product-mapping) ───
@@ -551,6 +591,12 @@ brandsRouter.get("/:id", async (c) => {
       showrooms,
       products,
       productCount: products.length,
+      /** Deep-research intel row (or null before the first workflow run). */
+      intel: intelRows[0] ?? null,
+      /** Top product lines from the research workflow, flagship first. */
+      productLines: productLineRows,
+      /** Scraped brand images (pending + approved), newest first, max 24. */
+      images: imageRows,
     });
 });
 
@@ -624,6 +670,19 @@ brandsRouter.openapi(
           faviconService.hydrateBrandIcon(c.env, inserted.id, inserted.websiteUrl),
         );
       }
+
+      // Kick the deep-research workflow in the background — its mark-running
+      // step upserts the brand_intel row, so no pre-insert is needed here.
+      c.executionCtx.waitUntil(
+        c.env.BRAND_RESEARCH_WORKFLOW.create({
+          params: { brandId: inserted.id },
+        }).catch((err) =>
+          console.error(
+            `[brands] POST / research workflow create failed for brand ${inserted.id}:`,
+            err,
+          ),
+        ),
+      );
 
       return c.json({ brand: inserted }, 201);
     } catch (err: unknown) {
@@ -843,9 +902,91 @@ brandsRouter.post("/backfill-enrichment", async (c) => {
             err,
           );
         }
+
+        // Also kick the deep-research workflow — skipped when a run is
+        // already in flight. All workflow writes are fill-blanks, so
+        // repeat runs against complete brands are safe (and cheap to skip).
+        try {
+          const db2 = drizzle(c.env.DB);
+          const [intel] = await db2
+            .select({ researchStatus: brandIntel.researchStatus })
+            .from(brandIntel)
+            .where(eq(brandIntel.brandId, brand.id))
+            .limit(1);
+          if (intel?.researchStatus !== "running") {
+            await c.env.BRAND_RESEARCH_WORKFLOW.create({
+              params: { brandId: brand.id },
+            });
+          }
+        } catch (err) {
+          console.error(
+            `[brands] POST /backfill-enrichment workflow create failed for brand ${brand.id}:`,
+            err,
+          );
+        }
       }
     })(),
   );
 
   return c.json({ success: true, queued: candidates.length }, 202);
+});
+
+// ─── BRAND DEEP-RESEARCH TRIGGER ──────────────────────────────────────────────
+
+/**
+ * POST /:id/research — manually (re)trigger the BrandResearchWorkflow.
+ *
+ * Guards:
+ *   - 400 on a non-numeric id, 404 when the brand doesn't exist.
+ *   - 409 when `brand_intel.research_status` is already "running".
+ *
+ * The workflow's writes are fill-blanks only, so re-running against a
+ * completed brand simply fills whatever is still missing. Marks the intel
+ * row "pending" before creating the workflow instance.
+ *
+ * Response: `{ queued: true }` (202).
+ */
+brandsRouter.post("/:id/research", async (c) => {
+  const db = drizzle(c.env.DB);
+  const brandId = Number(c.req.param("id"));
+  if (!Number.isFinite(brandId) || brandId <= 0) {
+    return c.json({ success: false, error: "Invalid brand id" }, 400);
+  }
+
+  const [brand] = await db
+    .select({ id: brands.id })
+    .from(brands)
+    .where(eq(brands.id, brandId))
+    .limit(1);
+  if (!brand) {
+    return c.json({ success: false, error: "Brand not found" }, 404);
+  }
+
+  const [intel] = await db
+    .select({ researchStatus: brandIntel.researchStatus })
+    .from(brandIntel)
+    .where(eq(brandIntel.brandId, brandId))
+    .limit(1);
+  if (intel?.researchStatus === "running") {
+    return c.json(
+      { success: false, error: "Research is already running for this brand" },
+      409,
+    );
+  }
+
+  try {
+    await db
+      .insert(brandIntel)
+      .values({ brandId, researchStatus: "pending" })
+      .onConflictDoUpdate({
+        target: brandIntel.brandId,
+        set: { researchStatus: "pending", updatedAt: new Date() },
+      });
+
+    await c.env.BRAND_RESEARCH_WORKFLOW.create({ params: { brandId } });
+    return c.json({ queued: true }, 202);
+  } catch (err) {
+    console.error(`[brands] POST /:id/research failed for brand ${brandId}:`, err);
+    return c.json({ success: false, error: "Failed to queue brand research" }, 500);
+  }
 });

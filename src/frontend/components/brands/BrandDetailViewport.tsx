@@ -13,21 +13,26 @@
  * toasts, no mock data, loading/empty/error states, mobile responsive.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   Building2,
+  ExternalLink,
   Globe,
   ImageOff,
-  Instagram,
+  Layers,
   Loader2,
   MapPin,
   PackageSearch,
   Pencil,
+  Play,
   RotateCcw,
   Save,
+  ShoppingBag,
+  Sparkles,
   Star,
   Store,
+  TriangleAlert,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -36,6 +41,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Dialog,
   DialogContent,
@@ -45,6 +51,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { EntityDocumentsPanel } from "@/components/documents";
+import { SocialLinks } from "@/components/showroom/hero";
+import { MarkdownProse } from "@/components/research/MarkdownProse";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -54,10 +62,54 @@ interface BrandDetail {
   description: string | null;
   websiteUrl: string | null;
   instagramUrl: string | null;
+  facebookUrl: string | null;
+  pinterestUrl: string | null;
   iconCfImagesUrl: string | null;
   personalNotes: string | null;
   onlineRating: number | null;
   userRating: number | null;
+}
+
+type ResearchStatus = "idle" | "pending" | "running" | "complete" | "failed";
+
+interface BigboxRetailer {
+  name: string;
+  url?: string | null;
+  notes?: string | null;
+}
+
+interface BigboxAvailability {
+  retailers: BigboxRetailer[];
+  onlineOnly?: boolean | null;
+  rationale: string | null;
+}
+
+/** AI-derived brand intel; null for brands that predate the research workflow. */
+interface BrandIntel {
+  reviewSummary: string | null;
+  isBigboxAvailable: boolean | null;
+  bigboxAvailability: BigboxAvailability | null;
+  salesIntel: string | null;
+  researchReport: string | null;
+  researchSources: string | null;
+  researchStatus: ResearchStatus;
+}
+
+interface ProductLine {
+  id: number;
+  name: string;
+  description: string | null;
+  productType: string | null;
+  sourceUrl: string | null;
+  sortOrder: number | null;
+}
+
+interface BrandImage {
+  id: number;
+  deliveryUrl: string;
+  altText: string | null;
+  imageKind: string | null;
+  reviewStatus: string | null;
 }
 
 interface BrandTypeRow {
@@ -84,6 +136,13 @@ interface BrandDetailResponse {
   showrooms: ShowroomRow[];
   products: ProductRow[];
   productCount: number;
+  intel: BrandIntel | null;
+  productLines: ProductLine[];
+  images: BrandImage[];
+}
+
+function isResearchInFlight(status: ResearchStatus | null | undefined): boolean {
+  return status === "pending" || status === "running";
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -197,6 +256,251 @@ function ProductImage({ product }: { product: ProductRow }) {
     <div className="flex aspect-square w-full items-center justify-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border/40">
       <ImageOff className="size-6" aria-label="No image" />
     </div>
+  );
+}
+
+// ─── Research status chip ──────────────────────────────────────────────────────
+
+function ResearchStatusChip({ status }: { status: ResearchStatus }) {
+  const map: Record<ResearchStatus, { label: string; cls: string; spin?: boolean }> = {
+    idle: { label: "Not researched", cls: "bg-muted/40 text-muted-foreground ring-border/40" },
+    pending: { label: "Queued", cls: "bg-amber-500/10 text-amber-300 ring-amber-500/30", spin: true },
+    running: { label: "Researching…", cls: "bg-amber-500/10 text-amber-300 ring-amber-500/30", spin: true },
+    complete: { label: "Researched", cls: "bg-emerald-500/10 text-emerald-300 ring-emerald-500/30" },
+    failed: { label: "Research failed", cls: "bg-rose-500/10 text-rose-300 ring-rose-500/30" },
+  };
+  const { label, cls, spin } = map[status];
+  return (
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ${cls}`}>
+      {spin && <Loader2 className="size-3 animate-spin" />}
+      {label}
+    </span>
+  );
+}
+
+// ─── Section wrapper (card) ─────────────────────────────────────────────────────
+
+function SectionCard({
+  icon,
+  title,
+  action,
+  children,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="mt-6 rounded-2xl bg-card p-6 ring-1 ring-border/40">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 text-sm font-semibold tracking-tight">
+          {icon}
+          {title}
+        </h2>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+// ─── Photo w/ fallback (research imagery strip) ─────────────────────────────────
+
+function BrandPhoto({ image, brandName }: { image: BrandImage; brandName: string }) {
+  const [broken, setBroken] = useState(false);
+  if (broken) {
+    return (
+      <div className="flex size-28 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border/40">
+        <ImageOff className="size-5" aria-label="Image unavailable" />
+      </div>
+    );
+  }
+  return (
+    <img
+      src={image.deliveryUrl}
+      alt={image.altText ?? brandName}
+      loading="lazy"
+      onError={() => setBroken(true)}
+      className="size-28 shrink-0 rounded-lg bg-muted object-cover ring-1 ring-border/40"
+    />
+  );
+}
+
+// ─── Brand research enrichment (all null-intel-safe) ────────────────────────────
+
+/**
+ * Renders every enrichment section produced by `POST /api/brands/:id/research`.
+ * When `intel` is null (pre-workflow brands) it shows an inviting "Not
+ * researched yet — Run research" empty state rather than blank holes.
+ */
+function BrandEnrichment({
+  intel,
+  productLines,
+  images,
+  running,
+  onRunResearch,
+}: {
+  intel: BrandIntel | null;
+  productLines: ProductLine[];
+  images: BrandImage[];
+  running: boolean;
+  onRunResearch: () => void;
+}) {
+  const status = intel?.researchStatus ?? "idle";
+  const inFlight = running || isResearchInFlight(status);
+  const visibleImages = images.filter((img) => img.reviewStatus !== "rejected");
+
+  const runButton = (
+    <div className="flex items-center gap-2">
+      <ResearchStatusChip status={status} />
+      <Button
+        size="sm"
+        variant="outline"
+        className="gap-1.5"
+        onClick={onRunResearch}
+        disabled={inFlight}
+      >
+        {inFlight ? <Loader2 className="size-3.5 animate-spin" /> : <Play className="size-3.5" />}
+        {intel ? "Re-run" : "Run research"}
+      </Button>
+    </div>
+  );
+
+  // Pre-workflow: single inviting empty state carrying the run affordance.
+  if (!intel) {
+    return (
+      <SectionCard icon={<Sparkles className="size-4 text-primary" />} title="Brand intelligence" action={runButton}>
+        <div className="flex min-h-[120px] flex-col items-center justify-center gap-2 rounded-xl bg-muted/20 p-6 text-center ring-1 ring-border/40">
+          <Sparkles className="size-6 text-muted-foreground/60" />
+          <p className="text-sm text-muted-foreground">
+            Not researched yet. Run research to surface a review summary, big-box
+            availability, sales intel, and top product lines.
+          </p>
+        </div>
+      </SectionCard>
+    );
+  }
+
+  return (
+    <>
+      <SectionCard icon={<Sparkles className="size-4 text-primary" />} title="Brand intelligence" action={runButton}>
+        {intel.reviewSummary ? (
+          <Alert className="bg-muted/20 ring-1 ring-border/40">
+            <Sparkles className="size-4 text-primary" />
+            <AlertTitle>AI review summary</AlertTitle>
+            <AlertDescription>{intel.reviewSummary}</AlertDescription>
+          </Alert>
+        ) : (
+          <p className="text-sm text-muted-foreground">No review summary produced.</p>
+        )}
+
+        {/* Big-box warning — answers "why pay a showroom premium?" */}
+        {intel.isBigboxAvailable && (
+          <Alert className="mt-4 bg-amber-500/10 text-amber-200 ring-1 ring-amber-500/30">
+            <TriangleAlert className="size-4 text-amber-300" />
+            <AlertTitle className="text-amber-200">Available at big-box retail</AlertTitle>
+            <AlertDescription className="text-amber-200/80">
+              {intel.bigboxAvailability?.rationale ??
+                "This brand is carried by big-box retailers — a showroom premium may not be justified."}
+              {intel.bigboxAvailability?.onlineOnly && (
+                <span className="mt-1 block text-xs text-amber-200/70">Online only.</span>
+              )}
+              {intel.bigboxAvailability?.retailers && intel.bigboxAvailability.retailers.length > 0 && (
+                <div className="mt-2.5 flex flex-wrap gap-1.5">
+                  {intel.bigboxAvailability.retailers.map((r) =>
+                    r.url ? (
+                      <a
+                        key={r.name}
+                        href={r.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={r.notes ?? undefined}
+                        className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-1 text-[11px] font-medium text-amber-200 ring-1 ring-amber-500/30 hover:bg-amber-500/25"
+                      >
+                        <ShoppingBag className="size-3" />
+                        {r.name}
+                        <ExternalLink className="size-3" />
+                      </a>
+                    ) : (
+                      <span
+                        key={r.name}
+                        title={r.notes ?? undefined}
+                        className="inline-flex items-center gap-1 rounded-full bg-amber-500/15 px-2.5 py-1 text-[11px] font-medium text-amber-200 ring-1 ring-amber-500/30"
+                      >
+                        <ShoppingBag className="size-3" />
+                        {r.name}
+                      </span>
+                    ),
+                  )}
+                </div>
+              )}
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {/* Sales & specials */}
+        {intel.salesIntel && (
+          <div className="mt-4 rounded-xl bg-muted/20 p-4 ring-1 ring-border/40">
+            <p className="mb-1.5 text-[10px] font-mono uppercase tracking-widest text-muted-foreground">
+              Sales &amp; specials
+            </p>
+            <MarkdownProse>{intel.salesIntel}</MarkdownProse>
+          </div>
+        )}
+      </SectionCard>
+
+      {/* Top product lines */}
+      {productLines.length > 0 && (
+        <SectionCard icon={<Layers className="size-4 text-muted-foreground" />} title="Top product lines">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {productLines
+              .slice()
+              .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0))
+              .map((line) => (
+                <article
+                  key={line.id}
+                  className="flex flex-col gap-1.5 rounded-xl bg-muted/20 p-4 ring-1 ring-border/40"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <h3 className="text-sm font-semibold tracking-tight">{line.name}</h3>
+                    {line.sourceUrl && (
+                      <a
+                        href={line.sourceUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        aria-label={`${line.name} source`}
+                        className="shrink-0 text-sky-400 hover:text-sky-300"
+                      >
+                        <ExternalLink className="size-3.5" />
+                      </a>
+                    )}
+                  </div>
+                  {line.productType && (
+                    <Badge variant="secondary" className="w-fit rounded-full text-[10px]">
+                      {line.productType}
+                    </Badge>
+                  )}
+                  {line.description && (
+                    <p className="text-xs leading-relaxed text-muted-foreground">{line.description}</p>
+                  )}
+                </article>
+              ))}
+          </div>
+        </SectionCard>
+      )}
+
+      {/* Research imagery strip */}
+      {visibleImages.length > 0 && (
+        <SectionCard icon={<ImageOff className="size-4 text-muted-foreground" />} title="Photos">
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {visibleImages.map((img) => (
+              <BrandPhoto key={img.id} image={img} brandName="brand" />
+            ))}
+          </div>
+        </SectionCard>
+      )}
+    </>
   );
 }
 
@@ -387,6 +691,8 @@ export function BrandDetailViewport({ brandId }: { brandId: number }) {
 
   const [notes, setNotes] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
+  const [running, setRunning] = useState(false);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchBrand = useCallback(async () => {
     setError(null);
@@ -405,7 +711,42 @@ export function BrandDetailViewport({ brandId }: { brandId: number }) {
 
   useEffect(() => {
     void fetchBrand();
+    return () => {
+      if (pollRef.current) clearTimeout(pollRef.current);
+    };
   }, [fetchBrand]);
+
+  // Poll while brand research is in flight, then settle.
+  useEffect(() => {
+    const status = data?.intel?.researchStatus;
+    if (!isResearchInFlight(status)) {
+      setRunning(false);
+      return;
+    }
+    pollRef.current = setTimeout(() => {
+      void fetchBrand();
+    }, 4000);
+    return () => {
+      if (pollRef.current) clearTimeout(pollRef.current);
+    };
+  }, [data, fetchBrand]);
+
+  const runResearch = useCallback(async () => {
+    setRunning(true);
+    try {
+      await apiJson(`/api/brands/${brandId}/research`, { method: "POST" });
+      toast.success("Research queued");
+      await fetchBrand();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Failed to queue research";
+      if (/409|already|running/i.test(msg)) {
+        toast.message("Research is already running");
+      } else {
+        toast.error(msg);
+        setRunning(false);
+      }
+    }
+  }, [brandId, fetchBrand]);
 
   const saveNotes = async () => {
     if (!data) return;
@@ -462,7 +803,7 @@ export function BrandDetailViewport({ brandId }: { brandId: number }) {
     );
   }
 
-  const { brand, types, showrooms, products, productCount } = data;
+  const { brand, types, showrooms, products, productCount, intel, productLines, images } = data;
 
   return (
     <main className="container mx-auto max-w-5xl px-4 py-10">
@@ -517,21 +858,17 @@ export function BrandDetailViewport({ brandId }: { brandId: number }) {
                     Website
                   </a>
                 )}
-                {brand.instagramUrl && (
-                  <a
-                    href={brand.instagramUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
-                  >
-                    <Instagram className="size-4" />
-                    Instagram
-                  </a>
-                )}
                 <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
                   <PackageSearch className="size-4" />
                   {productCount} {productCount === 1 ? "product" : "products"}
                 </span>
+
+                {/* Social icon row (Instagram / Facebook / Pinterest) */}
+                <SocialLinks
+                  instagramUrl={brand.instagramUrl}
+                  facebookUrl={brand.facebookUrl}
+                  pinterestUrl={brand.pinterestUrl}
+                />
               </div>
 
               <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2">
@@ -597,6 +934,15 @@ export function BrandDetailViewport({ brandId }: { brandId: number }) {
           )}
         </div>
       </section>
+
+      {/* AI brand intelligence (research workflow) */}
+      <BrandEnrichment
+        intel={intel}
+        productLines={productLines}
+        images={images}
+        running={running}
+        onRunResearch={() => void runResearch()}
+      />
 
       {/* Personal notes */}
       <section className="mt-6 rounded-2xl bg-card p-6 ring-1 ring-border/40">

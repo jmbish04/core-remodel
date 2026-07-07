@@ -236,6 +236,18 @@ async function mapInsightBrands(
             .values({ name, websiteUrl: websiteUrl || null } as typeof brands.$inferInsert)
             .returning({ id: brands.id });
           brandId = created.id;
+
+          // Newly-discovered brand — kick the deep-research workflow. Its
+          // mark-running step upserts brand_intel, and every write it makes
+          // is fill-blanks, so duplicate triggers are harmless. Best-effort.
+          try {
+            await env.BRAND_RESEARCH_WORKFLOW.create({ params: { brandId } });
+          } catch (wfErr) {
+            console.error(
+              `[backfill] brand research workflow create failed for "${name}" (brand ${brandId}):`,
+              wfErr,
+            );
+          }
         }
         await db
           .insert(showroomBrandMappings)

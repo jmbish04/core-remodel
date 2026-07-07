@@ -547,6 +547,13 @@
       "when": 1783429440752,
       "tag": "0077_jittery_diamondback",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "6",
+      "when": 1783430890040,
+      "tag": "0078_faithful_swarm",
+      "breakpoints": true
     }
   ]
 }

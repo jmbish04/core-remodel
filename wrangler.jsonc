@@ -89,6 +89,16 @@
       "class_name": "ShowroomScrapeWorkflow",
     },
     {
+      "name": "brand-research-workflow",
+      "binding": "BRAND_RESEARCH_WORKFLOW",
+      "class_name": "BrandResearchWorkflow",
+    },
+    {
+      "name": "product-research-workflow",
+      "binding": "PRODUCT_RESEARCH_WORKFLOW",
+      "class_name": "ProductResearchWorkflow",
+    },
+    {
       "name": "blank-canvas-batch",
       "binding": "BLANK_CANVAS_WORKFLOW",
       "class_name": "BlankCanvasBatchWorkflow",

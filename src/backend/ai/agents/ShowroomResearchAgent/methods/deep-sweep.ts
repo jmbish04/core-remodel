@@ -21,6 +21,10 @@ import {
   runDeepResearchForCitationPlan,
   type DeepResearchMcpScope,
 } from "@backend/services/gemini/deep-research";
+import {
+  runDeepResearch,
+  type DeepResearchResult,
+} from "@backend/ai/deep-research";
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import {
@@ -1028,6 +1032,105 @@ export async function deepSweepProduct(
   return result;
 }
 
+/** Minimum grounding confidence for an engine claim to become a finding row. */
+const ENGINE_MIN_CLAIM_CONFIDENCE = 0.5;
+/** Per-source and overall caps so a chatty engine run can't flood D1. */
+const ENGINE_MAX_CLAIMS_PER_SOURCE = 5;
+const ENGINE_MAX_TOTAL_FINDINGS = 40;
+/** D1 `store_research.finding` stays readable — trim runaway segments. */
+const ENGINE_MAX_FINDING_CHARS = 600;
+
+/**
+ * Persist a deep-research engine run as showroom `store_research` findings +
+ * a Vectorize embed of the findings digest.
+ *
+ * Findings rows are derived from the engine's grounded source map: each
+ * source's `supportedClaims` (model-output text segments backed by that
+ * source with a grounding confidence score) become rows with `findingUrl`
+ * set to the attributable source URL. The full cited report is intentionally
+ * NOT persisted for showrooms — the engine is used here purely as a
+ * higher-quality findings generator.
+ */
+async function persistEngineStoreResearch(
+  env: Env,
+  storeId: number,
+  research: DeepResearchResult,
+  result: ShowroomSweepResult,
+): Promise<void> {
+  let totalWritten = 0;
+  for (const source of Object.values(research.sources)) {
+    if (totalWritten >= ENGINE_MAX_TOTAL_FINDINGS) break;
+
+    const seen = new Set<string>();
+    const findings: ExtractedFinding[] = [];
+    for (const claim of source.supportedClaims) {
+      if (findings.length >= ENGINE_MAX_CLAIMS_PER_SOURCE) break;
+      if (claim.confidence < ENGINE_MIN_CLAIM_CONFIDENCE) continue;
+      const text = claim.textSegment.trim().slice(0, ENGINE_MAX_FINDING_CHARS);
+      if (!text || seen.has(text)) continue;
+      seen.add(text);
+      findings.push({ finding: text, sentiment: "neutral" });
+    }
+    if (findings.length === 0) continue;
+
+    const written = await insertStoreFindings(env, storeId, findings, source.url);
+    result.findingsWritten += written;
+    totalWritten += written;
+  }
+
+  // Embed the engine's findings digest for showroom RAG retrieval.
+  const digest = research.findings || research.report;
+  if (digest.trim()) {
+    result.vectorsWritten += await embedSourceText(env, {
+      namespace: `showroom:store:${storeId}`,
+      targetType: "store",
+      targetId: storeId,
+      storeId,
+      sourceUrl: `deep-research://store/${storeId}`,
+      text: digest,
+    });
+  }
+}
+
+/**
+ * Run the ADK-port deep-research engine (`@backend/ai/deep-research`) as the
+ * PRIMARY findings generator for a showroom store: plan → grounded research →
+ * critique/refine → cited report, focused on homeowner-relevant reputation
+ * and review evidence (Google, Reddit, Yelp, Houzz).
+ *
+ * Fully additive to the legacy sweep below (citation plan → per-source
+ * extraction), which still runs afterwards for images, ratings, and per-page
+ * Vectorize embeds — so existing behavior never degrades even when this
+ * throws (callers wrap it in try/catch).
+ */
+async function runEngineStoreResearch(
+  env: Env,
+  store: typeof showroomStores.$inferSelect,
+  negativeConstraints: string[],
+  result: ShowroomSweepResult,
+): Promise<void> {
+  const topic = `Reputation and review research for the showroom/store "${store.name}"${store.locationAddress ? ` located at ${store.locationAddress}` : ""} (website: ${store.websiteUrl ?? "unknown"}), on behalf of a homeowner running a high-end San Francisco home remodel. Research homeowner-relevant reputation and review evidence across Google reviews, Reddit, Yelp, and Houzz: product quality, brands and product lines carried, customer experience, pricing posture, warranty and service policies, delivery and lead times, and whether this store is worth visiting or buying from.`;
+
+  const guidance = `Extraction goals for this showroom sweep (surface concrete, source-backed evidence for each):
+- Reputation and review sentiment across Google, Reddit, Yelp, and Houzz, with specific examples.
+- Product quality and the brands/product lines the store carries.
+- Customer experience: sales staff, post-sale service, delivery, and complaint handling.
+- Warranty and service policies.
+- Pricing posture, trade/discount programs, and typical lead times.
+- Location-specific visit planning: showroom experience, appointment requirements, what to see in person.
+
+Store context:
+- Description: ${store.description ?? "none"}
+- Inventory focus: ${store.inventoryFocus ?? "none"}
+- Target demographic: ${store.targetDemographic ?? "none"}
+
+Negative constraints (avoid recommending anything matching these):
+${bulletList(negativeConstraints)}`;
+
+  const research = await runDeepResearch(env, topic, { guidance });
+  await persistEngineStoreResearch(env, store.id, research, result);
+}
+
 export async function deepSweepStore(
   env: Env,
   input: DeepSweepStoreInput,
@@ -1041,6 +1144,29 @@ export async function deepSweepStore(
     .where(eq(showroomStores.id, input.storeId))
     .limit(1);
   if (!store) throw new Error(`Showroom store ${input.storeId} not found`);
+
+  // Engine-first research: the ADK-port pipeline is the primary findings
+  // generator; the legacy citation-plan sweep below still runs for images,
+  // ratings, specs, and per-page embeds (and acts as the findings fallback
+  // whenever the engine fails).
+  progress?.("Running deep-research engine for store reputation", 5);
+  try {
+    await runEngineStoreResearch(
+      env,
+      store,
+      input.negativeConstraints ?? [],
+      result,
+    );
+  } catch (error) {
+    console.error(
+      `Deep-research engine failed for store ${input.storeId}; falling back to legacy sweep:`,
+      error,
+    );
+    pushWarning(
+      result,
+      `Deep-research engine skipped for store ${input.storeId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 
   const prompt =
     input.prompt?.trim() ||

@@ -29,6 +29,12 @@ export const brands = sqliteTable("brands", {
   /** Public Instagram profile URL for the brand. */
   instagramUrl: text("instagram_url"),
 
+  /** Public Facebook page URL for the brand. */
+  facebookUrl: text("facebook_url"),
+
+  /** Public Pinterest profile URL for the brand. */
+  pinterestUrl: text("pinterest_url"),
+
   /**
    * Cloudflare Images delivery URL of the brand's scraped favicon / logo.
    * Auto-populated by the favicon worker when `websiteUrl` is set or changed.
