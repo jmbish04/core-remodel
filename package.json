@@ -24,6 +24,7 @@
     "migrate:local": "pnpm run db:generate && node scripts/d1-migrate.mjs --local",
     "migrate:remote": "node scripts/d1-migrate.mjs --remote",
     "deploy": "pnpm run build && cp .assetsignore dist/.assetsignore && pnpm run migrate:remote && npx wrangler@latest deploy",
+    "deploy:preview": "pnpm run build && cp .assetsignore dist/.assetsignore && npx wrangler@latest versions upload",
     "cf-typegen": "wrangler types --include-runtime false",
     "test:throttle": "node scripts/tests/test_throttled_pipeline.mjs",
     "py:batch-ai-photo-edits": "proofs/tight/jason_20260615/upper_level/kitchen/ai_renders/.venv/bin/python scripts/batch_image_edit.py"
