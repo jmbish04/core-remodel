@@ -1081,7 +1081,7 @@ function BrandsTilePreview({ brands }: { brands: BrandWithCount[] }) {
     <div className="space-y-2" aria-hidden>
       <div className="flex items-center">
         {/* The stack breathes apart on tile hover — a small "come on in" cue. */}
-        <div className="flex -space-x-2.5 transition-all duration-300 group-hover/tile:-space-x-1 motion-reduce:transition-none">
+        <div className="flex -space-x-2.5 group-hover/tile:-space-x-1 [&>*]:transition-[margin] [&>*]:duration-300 motion-reduce:[&>*]:transition-none">
           {shown.map((b) => (
             <BrandStackLogo key={b.id} image={b.iconCfImagesUrl} name={b.name} />
           ))}
