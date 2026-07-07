@@ -13,7 +13,7 @@
  */
 
 import { ArrowUpRight, ChevronDown, FileText, Loader2, Plus } from "lucide-react";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -139,6 +139,23 @@ export function EntityDocumentsPanel({
     void refetch();
   }, [refetch]);
 
+  // DocumentUploader fires onUploaded once per file in a multi-file batch —
+  // debounce so a batch triggers a single refetch instead of N.
+  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const debouncedRefetch = useCallback(() => {
+    if (refetchTimer.current) clearTimeout(refetchTimer.current);
+    refetchTimer.current = setTimeout(() => {
+      refetchTimer.current = null;
+      void refetch();
+    }, 400);
+  }, [refetch]);
+  useEffect(
+    () => () => {
+      if (refetchTimer.current) clearTimeout(refetchTimer.current);
+    },
+    [],
+  );
+
   return (
     <section className="rounded-2xl bg-card p-5 ring-1 ring-border/40 sm:p-6">
       <div className="flex items-center justify-between gap-2">
@@ -169,9 +186,7 @@ export function EntityDocumentsPanel({
         <div className="mt-4 rounded-xl bg-muted/20 p-4 ring-1 ring-border/40">
           <DocumentUploader
             association={{ entityType, entityId }}
-            onUploaded={() => {
-              void refetch();
-            }}
+            onUploaded={debouncedRefetch}
           />
         </div>
       ) : null}

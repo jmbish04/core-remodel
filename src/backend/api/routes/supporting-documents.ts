@@ -561,14 +561,20 @@ supportingDocumentsRouter.get("/by-entity", async (c) => {
       return c.json({ success: true, count: 0, documents: [] });
     }
 
+    // Same posture as /search: unauthenticated callers only see public docs.
+    const authenticated = await isRequestAuthenticated(c.req.raw, c.env);
+
     // Chunked — the association list is unbounded and D1 caps bound params.
     const rows = await selectDocumentsByIds(
       db,
       assocRows.map((row) => row.documentId),
     );
     const documents = rows
-      .filter((row) => row.isActive)
-      .sort((a, b) => b.datetimeUpdated.getTime() - a.datetimeUpdated.getTime())
+      .filter((row) => row.isActive && (authenticated || row.visibility === "public"))
+      .sort(
+        (a, b) =>
+          (b.datetimeUpdated?.getTime() ?? 0) - (a.datetimeUpdated?.getTime() ?? 0),
+      )
       .map((row) => ({
         id: row.id,
         title: row.title,
