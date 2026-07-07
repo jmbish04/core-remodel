@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { NoteEditorPage } from "@/components/notes/NoteEditorPage";
+---
+
+<BaseLayout
+  title="Note editor — The Monolith"
+  description="Dedicated full-page editor for creating and modifying notes with AI-assisted titling and tags."
+>
+  <NoteEditorPage client:only="react" />
+</BaseLayout>

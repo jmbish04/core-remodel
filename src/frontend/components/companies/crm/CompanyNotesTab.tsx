@@ -1,18 +1,17 @@
 /**
  * @fileoverview Company Notes tab (0013 roadmap P3-03).
  *
- * Lists a company's CRM notes as cards with a PlateJS rich-text editor for
- * create / edit-in-place, and soft-delete with confirmation. Content
- * round-trips as Slate-JSON via the shared slateToJson/jsonToSlate helpers.
+ * Lists a company's CRM notes as cards with tag chips. Create/edit now navigate
+ * the current tab to the dedicated full-page note editor (`/admin/notes/edit`,
+ * type=company) — modals are too cramped for long notes. Soft-delete stays
+ * inline here behind a confirmation dialog.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { FileText, Loader2, Pencil, Plus, StickyNote, Trash2 } from "lucide-react";
-import { Plate, PlateContent, usePlateEditor } from "platejs/react";
-import { BasicBlocksPlugin, BasicMarksPlugin } from "@platejs/basic-nodes/react";
-import type { Descendant } from "slate";
 import { toast } from "sonner";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -23,146 +22,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { noteEditorHref } from "@/components/notes";
 
 import {
   apiGet,
   apiSend,
   contentPreview,
   formatDateTime,
-  jsonToSlate,
-  slateToJson,
   type Note,
-  type NoteResponse,
   type NotesListResponse,
 } from "./shared";
 
-// ---------------------------------------------------------------------------
-// Editor dialog
-// ---------------------------------------------------------------------------
-
-interface NoteEditorDialogProps {
-  companyId: number;
-  /** null → create mode; a Note → edit mode. */
-  note: Note | null;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSaved: (note: Note, mode: "create" | "edit") => void;
-}
-
-function NoteEditorDialog({ companyId, note, open, onOpenChange, onSaved }: NoteEditorDialogProps) {
-  const mode: "create" | "edit" = note ? "edit" : "create";
-  const [title, setTitle] = useState("");
-  const [value, setValue] = useState<Descendant[]>(jsonToSlate(null));
-  const [saving, setSaving] = useState(false);
-
-  // Re-create the editor per note (and per open toggle) so switching records
-  // never shows the previous note's content. This is the critical deps trick.
-  const editorKey = note?.id ?? "create";
-  const editor = usePlateEditor(
-    {
-      plugins: [BasicBlocksPlugin, BasicMarksPlugin],
-      value: jsonToSlate(note?.content ?? null) as any,
-    },
-    [editorKey, open],
-  );
-
-  useEffect(() => {
-    if (!open) return;
-    setTitle(note?.title ?? "");
-    setValue(jsonToSlate(note?.content ?? null));
-  }, [open, note]);
-
-  const handleSave = useCallback(async () => {
-    const trimmed = title.trim();
-    if (!trimmed) {
-      toast.error("Note title is required");
-      return;
-    }
-    setSaving(true);
-    try {
-      const payload = { title: trimmed, content: slateToJson(value) };
-      let saved: Note;
-      if (mode === "create") {
-        const res = await apiSend<NoteResponse>(
-          `/api/companies/${companyId}/notes`,
-          "POST",
-          payload,
-        );
-        saved = res.note;
-      } else {
-        const res = await apiSend<NoteResponse>(
-          `/api/companies/${companyId}/notes/${note!.id}`,
-          "PATCH",
-          payload,
-        );
-        saved = res.note;
-      }
-      toast.success(mode === "create" ? "Note created" : "Note updated");
-      onSaved(saved, mode);
-      onOpenChange(false);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to save note");
-    } finally {
-      setSaving(false);
-    }
-  }, [title, value, mode, companyId, note, onSaved, onOpenChange]);
-
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(next) => {
-        // Base UI controlled guard — block dismissal mid-save (no Radix props).
-        if (saving) return;
-        onOpenChange(next);
-      }}
-    >
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>{mode === "create" ? "New note" : "Edit note"}</DialogTitle>
-          <DialogDescription>
-            Rich-text note attached to this company. Saved as structured content.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="note-title">Title</Label>
-            <Input
-              id="note-title"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g., Kickoff call summary"
-              autoFocus
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label>Content</Label>
-            <div className="rounded-lg bg-card p-2 ring-1 ring-border/40">
-              <Plate editor={editor} onValueChange={({ value: v }) => setValue(v as Descendant[])}>
-                <PlateContent
-                  className="min-h-[160px] max-h-[320px] overflow-y-auto rounded bg-background/40 px-3 py-2 text-sm text-foreground ring-1 ring-border/40 focus-visible:outline-none placeholder:text-muted-foreground"
-                  placeholder="Write context, decisions, follow-ups…"
-                />
-              </Plate>
-            </div>
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
-            Cancel
-          </Button>
-          <Button onClick={handleSave} disabled={saving}>
-            {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {mode === "create" ? "Create note" : "Save changes"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+// Return here (Notes tab) after saving/cancelling in the full-page editor.
+function companyNotesReturn(companyId: number): string {
+  return `/admin/companies/${companyId}?tab=notes`;
 }
 
 // ---------------------------------------------------------------------------
@@ -242,6 +115,19 @@ function NoteCard({
           ) : (
             <p className="mt-2 text-sm italic text-muted-foreground/70">No content</p>
           )}
+          {note.tags && note.tags.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {note.tags.map((tag) => (
+                <Badge
+                  key={tag}
+                  variant="secondary"
+                  className="px-1.5 py-0 text-[10px] font-normal"
+                >
+                  {tag}
+                </Badge>
+              ))}
+            </div>
+          ) : null}
           <p className="mt-2 text-xs text-muted-foreground/70">
             Updated {formatDateTime(stamp)}
           </p>
@@ -274,9 +160,6 @@ export function CompanyNotesTab({ companyId }: { companyId: number }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [editorOpen, setEditorOpen] = useState(false);
-  const [activeNote, setActiveNote] = useState<Note | null>(null);
-
   const [deleteTarget, setDeleteTarget] = useState<Note | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -300,23 +183,30 @@ export function CompanyNotesTab({ companyId }: { companyId: number }) {
     void load();
   }, [load]);
 
+  // Create/edit navigate the current tab to the dedicated full-page editor.
   const openCreate = useCallback(() => {
-    setActiveNote(null);
-    setEditorOpen(true);
-  }, []);
-
-  const openEdit = useCallback((note: Note) => {
-    setActiveNote(note);
-    setEditorOpen(true);
-  }, []);
-
-  const handleSaved = useCallback((saved: Note, mode: "create" | "edit") => {
-    setNotes((prev) =>
-      mode === "create"
-        ? [saved, ...prev]
-        : prev.map((n) => (n.id === saved.id ? saved : n)),
+    window.location.assign(
+      noteEditorHref({
+        type: "company",
+        entityId: companyId,
+        returnTo: companyNotesReturn(companyId),
+      }),
     );
-  }, []);
+  }, [companyId]);
+
+  const openEdit = useCallback(
+    (note: Note) => {
+      window.location.assign(
+        noteEditorHref({
+          type: "company",
+          entityId: companyId,
+          noteId: note.id,
+          returnTo: companyNotesReturn(companyId),
+        }),
+      );
+    },
+    [companyId],
+  );
 
   const openDelete = useCallback((note: Note) => {
     setDeleteTarget(note);
@@ -392,14 +282,6 @@ export function CompanyNotesTab({ companyId }: { companyId: number }) {
           ))}
         </div>
       )}
-
-      <NoteEditorDialog
-        companyId={companyId}
-        note={activeNote}
-        open={editorOpen}
-        onOpenChange={setEditorOpen}
-        onSaved={handleSaved}
-      />
 
       <DeleteNoteDialog
         note={deleteTarget}

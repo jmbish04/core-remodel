@@ -4,6 +4,7 @@
  * Mounts at `/api/companies` (see src/backend/api/index.ts), gated end-to-end
  * by `requireAccessAuth` — this is admin-only CRM data, no public read surface.
  *
+ *   GET    /api/companies/notes/tags                  Distinct tags across ALL non-deleted notes
  *   GET    /api/companies/:companyId/notes           List notes (isDeleted=false, newest first)
  *   GET    /api/companies/:companyId/notes/:id        One note
  *   POST   /api/companies/:companyId/notes            Create a note
@@ -22,7 +23,8 @@
  *   - `content` is a JSON string of PlateJS Slate nodes; validated as a string
  *     that JSON.parses to an array, but stored/returned as the raw string —
  *     the frontend owns Slate (de)serialization.
- *   - `tagsJson` (DB column, JSON string) <-> `tags` (wire field, string[]).
+ *   - `tagsJson` (DB column, JSON string) <-> `tags` (wire field, string[]) on
+ *     BOTH company notes and company todos.
  *   - `dueDate` (DB column, Date | null) <-> wire field epoch-ms number | null.
  *   - Single company-existence lookup per request; 404s if missing.
  */
@@ -89,14 +91,22 @@ const slateContentSchema = z.string().refine(
 
 // ─── Request body schemas ─────────────────────────────────────────────────────
 
+/** Max number of tags retained per note (extras beyond this are dropped). */
+const NOTE_TAGS_MAX = 20;
+
+/** Array of trimmed, non-empty, deduped strings — capped at NOTE_TAGS_MAX. */
+const noteTagsSchema = z.array(z.string().min(1)).max(NOTE_TAGS_MAX).optional();
+
 const createNoteSchema = z.object({
   title: z.string().min(1),
   content: slateContentSchema,
+  tags: noteTagsSchema,
 });
 
 const updateNoteSchema = z.object({
   title: z.string().min(1).optional(),
   content: slateContentSchema.optional(),
+  tags: noteTagsSchema,
 });
 
 const createTodoSchema = z.object({
@@ -125,6 +135,7 @@ const noteSchema = z.object({
   companyId: z.number(),
   title: z.string(),
   content: z.string(),
+  tags: z.array(z.string()),
   isDeleted: z.boolean(),
   createdAt: z.union([z.date(), z.number()]).nullable(),
   updatedAt: z.union([z.date(), z.number()]).nullable(),
@@ -152,30 +163,49 @@ function toEpochMs(value: Date | number | null | undefined): number | null {
   return value;
 }
 
+/** Parse a `tagsJson` DB column into a `tags: string[]` wire value ([] when null/invalid). */
+function parseTagsJson(tagsJson: string | null | undefined): string[] {
+  if (!tagsJson) return [];
+  try {
+    const parsed = JSON.parse(tagsJson);
+    return Array.isArray(parsed) ? parsed.filter((t): t is string => typeof t === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Trim, drop empties, dedupe, and cap at NOTE_TAGS_MAX — used on every write path. */
+function normalizeTags(tags: string[] | undefined): string[] {
+  if (!tags) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of tags) {
+    const t = raw.trim();
+    if (!t || seen.has(t)) continue;
+    seen.add(t);
+    out.push(t);
+    if (out.length >= NOTE_TAGS_MAX) break;
+  }
+  return out;
+}
+
 function serializeNote(row: CompanyNote) {
+  const { tagsJson, ...rest } = row;
   return {
-    ...row,
+    ...rest,
+    tags: parseTagsJson(tagsJson),
     createdAt: toEpochMs(row.createdAt),
     updatedAt: toEpochMs(row.updatedAt),
   };
 }
 
 function serializeTodo(row: CompanyTodo) {
-  let tags: string[] = [];
-  if (row.tagsJson) {
-    try {
-      const parsed = JSON.parse(row.tagsJson);
-      if (Array.isArray(parsed)) tags = parsed;
-    } catch {
-      tags = [];
-    }
-  }
-  const { tagsJson: _tagsJson, dueDate, createdAt, updatedAt, status, ...rest } = row;
+  const { tagsJson, dueDate, createdAt, updatedAt, status, ...rest } = row;
   return {
     ...rest,
     status: status as TodoStatus,
     dueDate: toEpochMs(dueDate),
-    tags,
+    tags: parseTagsJson(tagsJson),
     createdAt: toEpochMs(createdAt),
     updatedAt: toEpochMs(updatedAt),
   };
@@ -198,6 +228,57 @@ async function requireCompany(
 // ════════════════════════════════════════════════════════════════════════════
 // NOTES
 // ════════════════════════════════════════════════════════════════════════════
+
+// ─── GET /notes/tags — distinct tags across ALL non-deleted company notes ────
+//
+// Registered BEFORE the `/{companyId}/notes...` param routes. Final path is a
+// 2-segment literal (`/notes/tags`) that can never collide with the 2- or
+// 3-segment `{companyId}`-prefixed routes below (segment 2 there is always the
+// literal "notes"/"todos", never "tags" as segment 1) — safe either way, but
+// registration order is kept literal-first per convention.
+
+companyCrmRouter.openapi(
+  createRoute({
+    method: "get",
+    path: "/notes/tags",
+    operationId: "listCompanyNoteTags",
+    tags: ["Company CRM"],
+    summary: "List distinct tags across all non-deleted company notes",
+    responses: {
+      200: {
+        description: "Distinct company note tags (sorted)",
+        content: {
+          "application/json": {
+            schema: z.object({ success: z.literal(true), tags: z.array(z.string()) }),
+          },
+        },
+      },
+      500: {
+        description: "Server error",
+        content: { "application/json": { schema: errorSchema } },
+      },
+    },
+  }),
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    try {
+      const rows = await db
+        .select({ tagsJson: companyNotes.tagsJson })
+        .from(companyNotes)
+        .where(eq(companyNotes.isDeleted, false));
+
+      const tagSet = new Set<string>();
+      for (const row of rows) {
+        for (const tag of parseTagsJson(row.tagsJson)) tagSet.add(tag);
+      }
+
+      return c.json({ success: true as const, tags: [...tagSet].sort() }, 200);
+    } catch (err) {
+      console.error("[company-crm] GET /notes/tags error:", err);
+      return c.json({ error: "Failed to list note tags" }, 500);
+    }
+  },
+);
 
 // ─── GET /:companyId/notes — list ─────────────────────────────────────────────
 
@@ -371,6 +452,7 @@ companyCrmRouter.openapi(
         companyId: companyIdNum,
         title: body.title,
         content: body.content,
+        tagsJson: body.tags !== undefined ? JSON.stringify(normalizeTags(body.tags)) : null,
       };
 
       const [inserted] = await db.insert(companyNotes).values(values).returning();
@@ -450,6 +532,10 @@ companyCrmRouter.openapi(
       const update: Partial<CompanyNoteInsert> = { updatedAt: new Date() };
       if (body.title !== undefined) update.title = body.title;
       if (body.content !== undefined) update.content = body.content;
+      if (body.tags !== undefined) {
+        const normalized = normalizeTags(body.tags);
+        update.tagsJson = normalized.length > 0 ? JSON.stringify(normalized) : null;
+      }
 
       const [updated] = await db
         .update(companyNotes)

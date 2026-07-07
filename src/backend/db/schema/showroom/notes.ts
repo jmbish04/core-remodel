@@ -42,6 +42,9 @@ export const storeNotes = sqliteTable("store_notes", {
 
   /** Soft delete — set false when a note is superseded or deleted. */
   isActive: integer("is_active", { mode: "boolean" }).default(true),
+
+  /** JSON string[] of free-form tags — selected/created via the note editor's multi-select. */
+  tagsJson: text("tags_json"),
 });
 
 /**

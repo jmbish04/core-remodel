@@ -39,13 +39,23 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { EntityDocumentsPanel } from "@/components/documents";
+import { noteEditorHref } from "@/components/notes";
 
 import { ScrapeResultsModal } from "./ScrapeResultsModal";
 import { RecordVisitModal } from "./visit/RecordVisitModal";
 import { AssociateBrandsModal } from "./associate/AssociateBrandsModal";
 import { AssociateProductsModal } from "./associate/AssociateProductsModal";
-import { ShowroomNoteModal, type ShowroomNote } from "./notes/ShowroomNoteModal";
 import { ShowroomPhotoPolaroid, type ShowroomPhoto } from "./photos/ShowroomPhotoPolaroid";
 import { ShowroomBento, type ShowroomBentoSection } from "./bento/ShowroomBento";
 import { PhotoStack } from "./PhotoStack";
@@ -131,6 +141,7 @@ interface NoteRow {
   title: string | null;
   contentHtml: string | null;
   contentMarkdown: string | null;
+  tags?: string[];
   isActive?: boolean;
   timestamp?: string | null;
 }
@@ -355,9 +366,11 @@ export function StoreViewportApp({
   const [visitOpen, setVisitOpen] = useState(false);
   const [brandsOpen, setBrandsOpen] = useState(false);
   const [productsOpen, setProductsOpen] = useState(false);
-  const [noteModalOpen, setNoteModalOpen] = useState(false);
-  const [editingNote, setEditingNote] = useState<ShowroomNote | null>(null);
   const [scrapeResultsOpen, setScrapeResultsOpen] = useState(false);
+
+  // Note delete (inline; create/edit now navigate to the full-page editor).
+  const [deleteNoteTarget, setDeleteNoteTarget] = useState<NoteRow | null>(null);
+  const [deletingNote, setDeletingNote] = useState(false);
 
   // Scrape lifecycle. `scrapeStatus` mirrors the store row but is polled
   // independently via GET /:id/scrape while pending/running.
@@ -640,20 +653,59 @@ export function StoreViewportApp({
     [uploadPhoto],
   );
 
-  const openCreateNote = useCallback(() => {
-    setEditingNote(null);
-    setNoteModalOpen(true);
-  }, []);
+  // Notes now open a dedicated full-page editor (modals are too cramped for long
+  // notes). We navigate the current tab and return to the Notes section here.
+  const noteReturnPath = useCallback(
+    () => `/admin/shopping/store/${id}/notes`,
+    [id],
+  );
 
-  const openEditNote = useCallback((note: NoteRow) => {
-    setEditingNote({
-      id: note.id,
-      title: note.title,
-      contentHtml: note.contentHtml,
-      contentMarkdown: note.contentMarkdown,
-    });
-    setNoteModalOpen(true);
-  }, []);
+  const openCreateNote = useCallback(() => {
+    window.location.assign(
+      noteEditorHref({
+        type: "showroom",
+        entityId: id,
+        returnTo: noteReturnPath(),
+      }),
+    );
+  }, [id, noteReturnPath]);
+
+  const openEditNote = useCallback(
+    (note: NoteRow) => {
+      window.location.assign(
+        noteEditorHref({
+          type: "showroom",
+          entityId: id,
+          noteId: note.id,
+          returnTo: noteReturnPath(),
+        }),
+      );
+    },
+    [id, noteReturnPath],
+  );
+
+  const confirmDeleteNote = useCallback(async () => {
+    if (!deleteNoteTarget) return;
+    setDeletingNote(true);
+    try {
+      const res = await fetch(
+        `/api/showroom-stores/notes/${deleteNoteTarget.id}`,
+        { method: "DELETE", credentials: "include" },
+      );
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error ?? `Delete failed (${res.status})`);
+      }
+      toast.success("Note deleted");
+      setDeleteNoteTarget(null);
+      await loadNotes();
+    } catch (e) {
+      console.error("[store/note-delete]", e);
+      toast.error(e instanceof Error ? e.message : "Failed to delete note");
+    } finally {
+      setDeletingNote(false);
+    }
+  }, [deleteNoteTarget, loadNotes]);
 
   // ── Per-brand product counts ──────────────────────────────────────────────────
   //
@@ -938,6 +990,7 @@ export function StoreViewportApp({
             notes={notes}
             onAddNote={openCreateNote}
             onEditNote={openEditNote}
+            onDeleteNote={setDeleteNoteTarget}
           />
         ) : (
           <PhotosSection
@@ -989,15 +1042,38 @@ export function StoreViewportApp({
           void loadStore();
         }}
       />
-      <ShowroomNoteModal
-        showroomId={id}
-        note={editingNote}
-        open={noteModalOpen}
-        onOpenChange={setNoteModalOpen}
-        onSaved={() => {
-          void loadNotes();
+      <AlertDialog
+        open={deleteNoteTarget !== null}
+        onOpenChange={(next) => {
+          if (deletingNote) return;
+          if (!next) setDeleteNoteTarget(null);
         }}
-      />
+      >
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this note?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteNoteTarget?.title?.trim()
+                ? `"${deleteNoteTarget.title.trim()}" will be removed from this showroom.`
+                : "This note will be removed from this showroom."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-2 gap-2">
+            <AlertDialogCancel disabled={deletingNote}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void confirmDeleteNote();
+              }}
+              disabled={deletingNote}
+              className="bg-rose-500 text-white hover:bg-rose-600"
+            >
+              {deletingNote && <Loader2 className="mr-1.5 size-4 animate-spin" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <ScrapeResultsModal
         showroomId={id}
         open={scrapeResultsOpen}
@@ -1342,10 +1418,12 @@ function NotesSection({
   notes,
   onAddNote,
   onEditNote,
+  onDeleteNote,
 }: {
   notes: NoteRow[];
   onAddNote: () => void;
   onEditNote: (note: NoteRow) => void;
+  onDeleteNote: (note: NoteRow) => void;
 }) {
   return (
     <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
@@ -1363,11 +1441,11 @@ function NotesSection({
       ) : (
         <ul className="mt-4 space-y-3">
           {notes.map((note) => (
-            <li key={note.id}>
+            <li key={note.id} className="group relative">
               <button
                 type="button"
                 onClick={() => onEditNote(note)}
-                className="w-full rounded-lg bg-muted/40 p-4 text-left ring-1 ring-border/40 transition-colors hover:bg-muted/70"
+                className="w-full rounded-lg bg-muted/40 p-4 pr-10 text-left ring-1 ring-border/40 transition-colors hover:bg-muted/70"
               >
                 <div className="flex items-center justify-between gap-2">
                   <span className="truncate text-sm font-medium">
@@ -1388,6 +1466,33 @@ function NotesSection({
                 ) : (
                   <p className="mt-1.5 text-xs text-muted-foreground/70">No content.</p>
                 )}
+                {note.tags && note.tags.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {note.tags.map((tag) => (
+                      <Badge
+                        key={tag}
+                        variant="secondary"
+                        className="px-1.5 py-0 text-[10px] font-normal"
+                      >
+                        {tag}
+                      </Badge>
+                    ))}
+                  </div>
+                ) : null}
+              </button>
+
+              {/* Inline delete — outside the edit button's activation. */}
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onDeleteNote(note);
+                }}
+                aria-label={`Delete ${note.title?.trim() || "note"}`}
+                className="absolute right-3 top-3 rounded-md p-1 text-muted-foreground opacity-0 transition-all hover:bg-foreground/10 hover:text-rose-300 focus-visible:opacity-100 group-hover:opacity-100"
+              >
+                <Trash2 className="size-3.5" />
               </button>
             </li>
           ))}

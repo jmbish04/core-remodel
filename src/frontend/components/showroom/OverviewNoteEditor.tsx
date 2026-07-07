@@ -47,6 +47,11 @@ interface OverviewNoteEditorProps {
   initialMarkdown?: string | null;
   onChange: (value: OverviewNoteEditorValue) => void;
   editable?: boolean;
+  /**
+   * "modal" (default) keeps the compact fixed-height editor used in dialogs.
+   * "page" lets the editor grow to fill a full-page layout (min-h-[50vh]).
+   */
+  variant?: "modal" | "page";
 }
 
 // ─── Markdown → HTML (scoped to this toolbar's feature set) ───────────────────
@@ -187,6 +192,7 @@ export function OverviewNoteEditor({
   initialMarkdown,
   onChange,
   editable = true,
+  variant = "modal",
 }: OverviewNoteEditorProps) {
   const editor = usePlateEditor({
     plugins: [BasicBlocksPlugin, BasicMarksPlugin, ListPlugin, MarkdownPlugin],
@@ -302,12 +308,24 @@ export function OverviewNoteEditor({
     );
   }
 
+  const isPage = variant === "page";
+
   return (
-    <div className="overflow-hidden rounded-lg ring-1 ring-border/40">
+    <div
+      className={cn(
+        "overflow-hidden rounded-lg ring-1 ring-border/40",
+        isPage && "flex min-h-[50vh] flex-1 flex-col",
+      )}
+    >
       <Plate editor={editor} onValueChange={emit}>
         {toolbar}
         <PlateContent
-          className="min-h-[160px] max-h-[360px] overflow-y-auto bg-background/60 px-3 py-2.5 text-sm leading-relaxed focus-visible:outline-none [&_h2]:mb-1 [&_h2]:mt-2 [&_h2]:text-base [&_h2]:font-semibold [&_h3]:mb-1 [&_h3]:mt-2 [&_h3]:text-sm [&_h3]:font-semibold [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5"
+          className={cn(
+            "overflow-y-auto bg-background/60 px-3 py-2.5 text-sm leading-relaxed focus-visible:outline-none [&_h2]:mb-1 [&_h2]:mt-2 [&_h2]:text-base [&_h2]:font-semibold [&_h3]:mb-1 [&_h3]:mt-2 [&_h3]:text-sm [&_h3]:font-semibold [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5",
+            isPage
+              ? "min-h-[50vh] flex-1 px-4 py-3"
+              : "min-h-[160px] max-h-[360px]",
+          )}
           placeholder="Write your overview of this showroom — what they're known for, who to ask for, standout products…"
         />
       </Plate>
