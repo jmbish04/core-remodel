@@ -82,6 +82,14 @@ const LEGACY_REDIRECTS: ReadonlyArray<readonly [string, string]> = [
   ["/inspiration-photos", "/photos/inspiration"],
   ["/daily-log", "/log/daily"],
   ["/weekly-log", "/log/weekly"],
+  // Phase 2 Documents system: the old static "Renovation Guide Center" audience
+  // routes are deleted (SITEMAP.md "Deleted routes"); land them on the new /docs.
+  // Safe alongside the dynamic /docs/[id] viewer — document ids are UUIDs, never
+  // these audience slugs.
+  ["/docs/homeowners", "/docs"],
+  ["/docs/contractors", "/docs"],
+  ["/docs/platform", "/docs"],
+  ["/docs/shared", "/docs"],
 ];
 
 const handler: ExportedHandler<Env> = {

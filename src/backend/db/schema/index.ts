@@ -12,6 +12,8 @@ export * from "./notifications/notifications";
 export * from "./plans/index";
 export * from "./documents/documents";
 export * from "./documents/supporting_documents";
+export * from "./documents/document_entity_associations";
+export * from "./documents/document_saved_views";
 export * from "./estimates/estimates";
 export * from "./contracts/contracts";
 

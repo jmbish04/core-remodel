@@ -33,6 +33,18 @@ export const supportingDocuments = sqliteTable("supporting_documents", {
   }),
   aiRationale: text("ai_rationale"),
 
+  /** 'private' | 'public'. Private by default; public docs are readable on /docs. */
+  visibility: text("visibility").notNull().default("private"),
+
+  /** Parsed/OCR'd text (markdown) used for keyword search + embeddings. */
+  extractedText: text("extracted_text"),
+
+  /** 'pending' | 'processing' | 'complete' | 'failed' | 'skipped'. */
+  extractionStatus: text("extraction_status").notNull().default("pending"),
+
+  /** Optional classification: CONTRACT | CHANGE_ORDER | INVOICE | LIEN_WAIVER | PLAN | SPEC | PHOTO | OTHER. Phase 3 CRM will use it. */
+  docType: text("doc_type"),
+
   datetimeCreated: integer("datetime_created", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),

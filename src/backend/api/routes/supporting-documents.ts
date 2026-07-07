@@ -1,4 +1,5 @@
 import {
+  documentEntityAssociations,
   remodelScenarios,
   rooms,
   supportingDocumentRoomMappings,
@@ -9,11 +10,26 @@ import {
 } from "@backend/db";
 import { ensureHomeCatalogSeed } from "@backend/services/home-catalog";
 import { improveDescription, summarizeDocumentForRoom } from "@backend/services/ai-text";
-import { desc, eq, inArray } from "drizzle-orm";
+import { extractAndEmbedDocument } from "@backend/services/documents/extraction";
+import { isRequestAuthenticated, requireAccessAuth } from "@backend/utils/access";
+import { and, desc, eq, inArray, like, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
 const supportingDocumentsRouter = new Hono<{ Bindings: Env }>();
+
+const ENTITY_TYPES = ["company", "brand", "product", "showroom", "permit", "floor"] as const;
+type EntityType = (typeof ENTITY_TYPES)[number];
+
+function isValidEntityType(value: unknown): value is EntityType {
+  return typeof value === "string" && (ENTITY_TYPES as readonly string[]).includes(value);
+}
+
+function normalizeDocType(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim().toUpperCase();
+  return trimmed || null;
+}
 
 type SourceType = "pdf" | "image" | "video" | "screenshot" | "url" | "text" | "other";
 
@@ -451,6 +467,184 @@ supportingDocumentsRouter.get("/summary", async (c) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// P2-02 — GET /api/supporting-documents/public
+// ---------------------------------------------------------------------------
+/**
+ * Public, unauthenticated, lean listing: only visibility="public" AND
+ * isActive documents. This is what the public /docs page calls. Registered
+ * BEFORE GET /:id so "public" is never captured as a document id param.
+ *
+ * Does NOT change the existing GET / behavior (still returns everything to
+ * anyone, unauthenticated, per existing pages' expectations).
+ */
+supportingDocumentsRouter.get("/public", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const rows = await db
+      .select()
+      .from(supportingDocuments)
+      .where(and(eq(supportingDocuments.visibility, "public"), eq(supportingDocuments.isActive, true)))
+      .orderBy(desc(supportingDocuments.datetimeUpdated))
+      .all();
+
+    return c.json({
+      success: true,
+      count: rows.length,
+      documents: rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        sourceType: row.sourceType,
+        mimeType: row.mimeType,
+        docType: row.docType,
+        tags: parseStringArray(row.tagsJson),
+        r2Url: row.r2Url,
+        externalUrl: row.externalUrl,
+        description: row.description,
+        createdAt: row.datetimeCreated,
+      })),
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to list public supporting documents",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// P2-02 — GET /api/supporting-documents/search?q=
+// ---------------------------------------------------------------------------
+/**
+ * Hybrid search: Vectorize semantic search (bge-large embedding of `q` against
+ * VECTOR_INDEX, filtered to kind="document") merged with a D1 keyword LIKE
+ * search over title/description/extractedText, deduped by documentId.
+ *
+ * Visibility: unauthenticated (public) callers only see visibility="public"
+ * docs; callers holding a valid remodel_access cookie see everything.
+ * Registered BEFORE GET /:id so "search" is never captured as a document id.
+ */
+supportingDocumentsRouter.get("/search", async (c) => {
+  try {
+    const q = c.req.query("q")?.trim() || "";
+    if (!q) {
+      return c.json({ error: "q is required" }, 400);
+    }
+
+    const authenticated = await isRequestAuthenticated(c.req.raw, c.env);
+    const db = drizzle(c.env.DB);
+
+    // --- Vectorize semantic search ---
+    const vectorScoreByDocId = new Map<string, number>();
+    try {
+      const embedResult = (await c.env.AI.run("@cf/baai/bge-large-en-v1.5", {
+        text: [q],
+      })) as { data: number[][] };
+      const vector = embedResult.data?.[0];
+      if (vector) {
+        const matches = await c.env.VECTOR_INDEX.query(vector, {
+          topK: 10,
+          filter: { kind: "document" },
+          returnMetadata: "all",
+        });
+        for (const match of matches.matches) {
+          const docId =
+            typeof match.metadata?.documentId === "string" ? match.metadata.documentId : null;
+          if (!docId) continue;
+          const existing = vectorScoreByDocId.get(docId);
+          if (existing === undefined || match.score > existing) {
+            vectorScoreByDocId.set(docId, match.score);
+          }
+        }
+      }
+    } catch (vectorError) {
+      // Non-fatal — fall back to keyword-only results.
+      console.error("[supporting-documents/search] vectorize query failed:", vectorError);
+    }
+
+    // --- D1 keyword LIKE search ---
+    const likePattern = `%${q.replace(/[%_]/g, (m) => `\\${m}`)}%`;
+    const keywordRows = await db
+      .select()
+      .from(supportingDocuments)
+      .where(
+        and(
+          eq(supportingDocuments.isActive, true),
+          or(
+            like(supportingDocuments.title, likePattern),
+            like(supportingDocuments.description, likePattern),
+            like(supportingDocuments.extractedText, likePattern),
+          ),
+        ),
+      )
+      .all();
+
+    const candidateIds = new Set<string>([
+      ...vectorScoreByDocId.keys(),
+      ...keywordRows.map((row) => row.id),
+    ]);
+
+    if (candidateIds.size === 0) {
+      return c.json({ success: true, query: q, count: 0, results: [] });
+    }
+
+    const rows = await db
+      .select()
+      .from(supportingDocuments)
+      .where(inArray(supportingDocuments.id, Array.from(candidateIds)))
+      .all();
+
+    const rowById = new Map(rows.map((row) => [row.id, row]));
+
+    function buildSnippet(row: (typeof rows)[number]): string {
+      const haystacks = [row.extractedText, row.description, row.title];
+      const lowerQ = q.toLowerCase();
+      for (const haystack of haystacks) {
+        if (!haystack) continue;
+        const idx = haystack.toLowerCase().indexOf(lowerQ);
+        if (idx >= 0) {
+          const start = Math.max(0, idx - 80);
+          const end = Math.min(haystack.length, idx + q.length + 80);
+          return `${start > 0 ? "…" : ""}${haystack.slice(start, end).trim()}${end < haystack.length ? "…" : ""}`;
+        }
+      }
+      return row.description || row.title;
+    }
+
+    const results = Array.from(candidateIds)
+      .map((docId) => rowById.get(docId))
+      .filter((row): row is NonNullable<typeof row> => Boolean(row))
+      .filter((row) => authenticated || row.visibility === "public")
+      .map((row) => ({
+        id: row.id,
+        title: row.title,
+        sourceType: row.sourceType,
+        docType: row.docType,
+        visibility: row.visibility,
+        tags: parseStringArray(row.tagsJson),
+        r2Url: row.r2Url,
+        externalUrl: row.externalUrl,
+        snippet: buildSnippet(row),
+        vectorScore: vectorScoreByDocId.get(row.id) ?? null,
+        matchedKeyword: keywordRows.some((kr) => kr.id === row.id),
+      }))
+      .sort((a, b) => (b.vectorScore ?? 0) - (a.vectorScore ?? 0));
+
+    return c.json({ success: true, query: q, count: results.length, results });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to search supporting documents",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
 supportingDocumentsRouter.post("/", async (c) => {
   try {
     const db = drizzle(c.env.DB);
@@ -700,6 +894,11 @@ supportingDocumentsRouter.post("/upload", async (c) => {
       .where(eq(supportingDocuments.id, id))
       .get();
     const mappings = await loadDocumentMappings(db, [id]);
+
+    // Kick off text extraction + embedding in the background — never block the
+    // upload response on OCR/toMarkdown/Vectorize latency. extractAndEmbedDocument
+    // never throws, so this is safe fire-and-forget via waitUntil.
+    c.executionCtx.waitUntil(extractAndEmbedDocument(c.env, id));
 
     return c.json(
       {
@@ -999,6 +1198,269 @@ supportingDocumentsRouter.patch("/:id", async (c) => {
     return c.json(
       {
         error: "Failed to update supporting document",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// P2-02 — PATCH /api/supporting-documents/:id/settings
+// ---------------------------------------------------------------------------
+/**
+ * Updates only visibility/docType/tags — distinct from the revision-forking
+ * PATCH /:id above so it never triggers `createRevision` semantics. Guarded:
+ * this router is intentionally unauthenticated overall (see the file-level
+ * comment near improve-description), but write endpoints added in Phase 2
+ * (settings, associations, reextract) require the admin access cookie.
+ *
+ * Body (JSON): { visibility?: "private" | "public", docType?: string | null, tags?: string[] }
+ */
+supportingDocumentsRouter.patch("/:id/settings", requireAccessAuth, async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const documentId = c.req.param("id");
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+
+    const existing = await db
+      .select()
+      .from(supportingDocuments)
+      .where(eq(supportingDocuments.id, documentId))
+      .get();
+    if (!existing) {
+      return c.json({ error: "Supporting document not found" }, 404);
+    }
+
+    const updates: Record<string, unknown> = { datetimeUpdated: new Date() };
+
+    if (body.visibility !== undefined) {
+      if (body.visibility !== "private" && body.visibility !== "public") {
+        return c.json({ error: "visibility must be 'private' or 'public'" }, 400);
+      }
+      updates.visibility = body.visibility;
+    }
+    if (body.docType !== undefined) {
+      updates.docType = normalizeDocType(body.docType);
+    }
+    if (body.tags !== undefined) {
+      const tags = parseStringArray(body.tags);
+      updates.tagsJson = tags.length > 0 ? JSON.stringify(tags) : null;
+    }
+
+    await db
+      .update(supportingDocuments)
+      .set(updates)
+      .where(eq(supportingDocuments.id, documentId))
+      .run();
+
+    const updated = await db
+      .select()
+      .from(supportingDocuments)
+      .where(eq(supportingDocuments.id, documentId))
+      .get();
+
+    return c.json({
+      success: true,
+      document: updated ? { ...updated, tags: parseStringArray(updated.tagsJson) } : null,
+    });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to update supporting document settings",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// P2-02 — GET /api/supporting-documents/:id/associations
+// ---------------------------------------------------------------------------
+/**
+ * Lists the generic polymorphic associations for a document. Read-only —
+ * follows the router's open-read posture (writes below are guarded). Used by
+ * the admin AssociationsDialog to pre-seed its list on open.
+ */
+supportingDocumentsRouter.get("/:id/associations", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const documentId = c.req.param("id");
+
+    const existing = await db
+      .select()
+      .from(supportingDocuments)
+      .where(eq(supportingDocuments.id, documentId))
+      .get();
+    if (!existing) {
+      return c.json({ error: "Supporting document not found" }, 404);
+    }
+
+    const associations = await db
+      .select()
+      .from(documentEntityAssociations)
+      .where(eq(documentEntityAssociations.documentId, documentId))
+      .all();
+
+    return c.json({ success: true, associations });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to list document associations",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// P2-02 — POST /api/supporting-documents/:id/associations
+// ---------------------------------------------------------------------------
+/**
+ * Adds a generic polymorphic association row (documentEntityAssociations).
+ * Body (JSON): { entityType: "company"|"brand"|"product"|"showroom"|"permit"|"floor", entityId: string }
+ * Guarded — admin-only write endpoint.
+ */
+supportingDocumentsRouter.post("/:id/associations", requireAccessAuth, async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const documentId = c.req.param("id");
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+
+    const existing = await db
+      .select()
+      .from(supportingDocuments)
+      .where(eq(supportingDocuments.id, documentId))
+      .get();
+    if (!existing) {
+      return c.json({ error: "Supporting document not found" }, 404);
+    }
+
+    if (!isValidEntityType(body.entityType)) {
+      return c.json(
+        { error: `entityType must be one of: ${ENTITY_TYPES.join(", ")}` },
+        400,
+      );
+    }
+    const entityId = typeof body.entityId === "string" ? body.entityId.trim() : "";
+    if (!entityId) {
+      return c.json({ error: "entityId is required" }, 400);
+    }
+
+    await db
+      .insert(documentEntityAssociations)
+      .values({ documentId, entityType: body.entityType, entityId })
+      .onConflictDoNothing()
+      .run();
+
+    const associations = await db
+      .select()
+      .from(documentEntityAssociations)
+      .where(eq(documentEntityAssociations.documentId, documentId))
+      .all();
+
+    return c.json({ success: true, associations }, 201);
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to add document association",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// P2-02 — DELETE /api/supporting-documents/:id/associations
+// ---------------------------------------------------------------------------
+/**
+ * Removes a generic polymorphic association row.
+ * Body (JSON): { entityType, entityId }
+ * Guarded — admin-only write endpoint.
+ */
+supportingDocumentsRouter.delete("/:id/associations", requireAccessAuth, async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const documentId = c.req.param("id");
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+
+    if (!isValidEntityType(body.entityType)) {
+      return c.json(
+        { error: `entityType must be one of: ${ENTITY_TYPES.join(", ")}` },
+        400,
+      );
+    }
+    const entityId = typeof body.entityId === "string" ? body.entityId.trim() : "";
+    if (!entityId) {
+      return c.json({ error: "entityId is required" }, 400);
+    }
+
+    await db
+      .delete(documentEntityAssociations)
+      .where(
+        and(
+          eq(documentEntityAssociations.documentId, documentId),
+          eq(documentEntityAssociations.entityType, body.entityType),
+          eq(documentEntityAssociations.entityId, entityId),
+        ),
+      )
+      .run();
+
+    const associations = await db
+      .select()
+      .from(documentEntityAssociations)
+      .where(eq(documentEntityAssociations.documentId, documentId))
+      .all();
+
+    return c.json({ success: true, associations });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to remove document association",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
+// P2-02 — POST /api/supporting-documents/:id/reextract
+// ---------------------------------------------------------------------------
+/**
+ * Resets extractionStatus to "pending" and re-runs the extraction/embedding
+ * pipeline via waitUntil. Guarded — admin-only write endpoint.
+ */
+supportingDocumentsRouter.post("/:id/reextract", requireAccessAuth, async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const documentId = c.req.param("id");
+
+    const existing = await db
+      .select()
+      .from(supportingDocuments)
+      .where(eq(supportingDocuments.id, documentId))
+      .get();
+    if (!existing) {
+      return c.json({ error: "Supporting document not found" }, 404);
+    }
+
+    await db
+      .update(supportingDocuments)
+      .set({ extractionStatus: "pending", datetimeUpdated: new Date() })
+      .where(eq(supportingDocuments.id, documentId))
+      .run();
+
+    c.executionCtx.waitUntil(extractAndEmbedDocument(c.env, documentId));
+
+    return c.json({ success: true, documentId, extractionStatus: "pending" });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to trigger re-extraction",
         details: error instanceof Error ? error.message : "Unknown error",
       },
       500,

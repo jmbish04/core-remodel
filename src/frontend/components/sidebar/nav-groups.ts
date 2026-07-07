@@ -76,6 +76,8 @@ export const NAV_GROUPS: NavGroupDef[] = [
     label: "Documents & Research",
     admin: true,
     items: [
+      { href: "/admin/docs", label: "Documents" },
+      { href: "/admin/docs/views", label: "Doc Views" },
       { href: "/admin/supporting-docs", label: "Supporting Docs" },
       { href: "/admin/planning/research", label: "Research Library" },
     ],
@@ -107,6 +109,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     label: "Records",
     admin: false,
     items: [
+      { href: "/docs", label: "Documents" },
       { href: "/supporting-docs", label: "Project Records" },
     ],
   },

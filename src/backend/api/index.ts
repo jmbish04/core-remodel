@@ -52,6 +52,7 @@ import { roomsExtendedRouter } from "./routes/rooms-extended";
 import { syncRouter } from "./routes/sync";
 import { threadsRouter } from "./routes/threads";
 import { supportingDocumentsRouter } from "./routes/supporting-documents";
+import { documentViewsRouter } from "./routes/document-views";
 import { visionNodesRouter } from "./routes/vision-nodes";
 import { bidPortfoliosRouter } from "./routes/bid-portfolios";
 import { bidPortfolioPublicRouter } from "./routes/bid-portfolio-public";
@@ -174,6 +175,14 @@ app.route("/api/budget-snapshot", budgetSnapshotRouter);
 app.route("/api/sync", syncRouter);
 app.route("/api/artifacts", artifactsRouter);
 app.route("/api/supporting-documents", supportingDocumentsRouter);
+// Mounted at a distinct top-level path (not /api/documents/views) because
+// /api/documents is already taken by the unrelated PlateJS notes router
+// (documentsRouter, mounted above). Write routes (POST/PATCH/DELETE) are
+// individually guarded with requireAccessAuth via each route's `middleware`
+// option in document-views.ts; GET routes are intentionally open (mirroring
+// supporting-documents' public-read posture) with per-request visibility
+// filtering applied inside the handlers.
+app.route("/api/document-views", documentViewsRouter);
 app.route("/api/vision-nodes", visionNodesRouter);
 app.route("/api/bid-portfolios/public", bidPortfolioPublicRouter);
 app.route("/api/bid-portfolios", bidPortfoliosRouter);
