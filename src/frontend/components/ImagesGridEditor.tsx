@@ -457,7 +457,7 @@ export function ImagesGridEditor(props: ImagesGridEditorProps) {
   };
 
   const openMetadataEditor = useCallback((image: ViewImageRecord) => {
-    const pagePath = image.raw.isListingPhoto ? "/listing-photos" : "/inspiration-photos";
+    const pagePath = image.raw.isListingPhoto ? "/photos/listing" : "/photos/inspiration";
     const params = new URLSearchParams({ imageId: image.id });
     window.location.assign(`${pagePath}?${params.toString()}`);
   }, []);

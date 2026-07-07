@@ -49,7 +49,7 @@ function AdminSidebarLinks({
             ? {
                 ...group,
                 items: group.items.map((item) =>
-                  item.href === "/admin/uploads"
+                  item.href === "/admin/prepare/uploads"
                     ? { ...item, badgeCount: uploadsPendingCount }
                     : item,
                 ),

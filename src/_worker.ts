@@ -49,12 +49,12 @@ const LEGACY_REDIRECTS: ReadonlyArray<readonly [string, string]> = [
   ["/admin/showroom", "/admin/shopping"],
   ["/admin/shopping-journal", "/admin/shopping/journal"],
   ["/rooms/closets", "/admin/shopping/closets"],
-  ["/uploads", "/admin/uploads"],
-  ["/review", "/admin/review"],
+  ["/uploads", "/admin/prepare/uploads"],
+  ["/review", "/admin/prepare/review"],
   ["/photo-edits", "/admin/photo-edits"],
   ["/builder", "/admin/builder"],
   ["/gallery", "/admin/gallery"],
-  ["/bid-portfolios", "/admin/bid-portfolios"],
+  ["/bid-portfolios", "/admin/bids"],
   ["/measurements", "/admin/measurements"],
   // Admin namespace reorg (budget / pmo / planning). Old flat + root paths land
   // directly on the new namespaced URLs (single hop — no redirect chains).
@@ -69,6 +69,19 @@ const LEGACY_REDIRECTS: ReadonlyArray<readonly [string, string]> = [
   ["/admin/contractor-schedule", "/admin/pmo/schedule/contractor"],
   ["/admin/measure", "/admin/planning/measure"],
   ["/admin/research", "/admin/planning/research"],
+  // Admin namespace reorg slice 2 (designs / prepare / bids / config) + public
+  // /photos·/log moves. Old flat/root paths land directly on the new URLs.
+  ["/admin/uploads", "/admin/prepare/uploads"],
+  ["/admin/review", "/admin/prepare/review"],
+  ["/admin/blank-canvas", "/admin/prepare/blank-canvas"],
+  ["/admin/bid-portfolios", "/admin/bids"],
+  ["/admin/planning/decision-room", "/admin/designs/decision-room"],
+  ["/admin/planning/moodboards", "/admin/designs/moodboards"],
+  ["/admin/brands/types", "/admin/config/brands/types"],
+  ["/listing-photos", "/photos/listing"],
+  ["/inspiration-photos", "/photos/inspiration"],
+  ["/daily-log", "/log/daily"],
+  ["/weekly-log", "/log/weekly"],
 ];
 
 const handler: ExportedHandler<Env> = {
