@@ -128,7 +128,8 @@ export async function cropCfImageToBbox(
     .transform({ trim: { top, bottom, left, right } })
     .output({ format: "image/jpeg", quality: 90 });
 
-  const blob = await new Response(result.image()).blob();
+  // ImagesBinding output exposes .response() (a standard Response), not .image().
+  const blob = await result.response().blob();
   return { blob, width: cropWidth, height: cropHeight };
 }
 
