@@ -60,6 +60,7 @@ export * from "./images/listing_photos";
 export * from "./images/ai_edits";
 export * from "./images/image_reviews";
 export * from "./images/mood_boards";
+export * from "./images/saved_image_searches";
 export * from "./images/image_edit_sessions";
 export * from "./images/image_edit_revisions";
 export * from "./images/image_upload_staging";
