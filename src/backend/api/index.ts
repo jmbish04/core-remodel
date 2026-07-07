@@ -74,6 +74,7 @@ import { showroomBackfillRouter } from "./routes/showroom-backfill";
 import { placesRouter } from "./routes/places";
 import { adminIntegrationsRouter } from "./routes/admin-integrations";
 import { adminPlansRouter } from "./routes/admin-plans";
+import { clickupRouter } from "./routes/clickup";
 import { requireAccessAuth } from "@backend/utils/access";
 
 export type Variables = {
@@ -91,6 +92,9 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use("*", cors());
 app.use("*", logger());
 app.use("/api/admin/*", requireAccessAuth);
+// ClickUp task mirror (0009): admin-only — API token + task mutations behind auth.
+app.use("/api/clickup", requireAccessAuth);
+app.use("/api/clickup/*", requireAccessAuth);
 app.use("/api/images/upload", requireAccessAuth);
 app.use("/api/images/upload-urls", requireAccessAuth);
 app.use("/api/images/inspiration/scoped", requireAccessAuth);
@@ -203,6 +207,7 @@ app.route("/api/places", placesRouter);
 // by the /api/admin/* requireAccessAuth middleware above.
 app.route("/api/admin/integrations", adminIntegrationsRouter);
 app.route("/api/admin/plans", adminPlansRouter);
+app.route("/api/clickup", clickupRouter);
 app.route("/", openapiRouter);
 
 export { app };
