@@ -1,6 +1,6 @@
 /**
  * PhotoCollectionApp — page-level orchestrator for the property-card-based
- * photo viewer on `/listing-photos` and `/inspiration-photos`.
+ * photo viewer on `/photos/listing` and `/photos/inspiration`.
  *
  * Flow:
  *   1. Fetches all images for the category and the room catalog.

@@ -235,17 +235,17 @@ const homeownersPages: DocsPageDefinition[] = [
     ],
     actions: [
       {
-        href: "/admin/uploads",
+        href: "/admin/prepare/uploads",
         label: "Open Uploads",
         description: "Add new listing or inspiration photos into the system.",
       },
       {
-        href: "/listing-photos",
+        href: "/photos/listing",
         label: "Open Listing Photos",
         description: "Review room metadata and existing-condition photography.",
       },
       {
-        href: "/admin/review",
+        href: "/admin/prepare/review",
         label: "Open Photo Reviews",
         description: "Sort, review, and tag inspirational images with AI support.",
       },
@@ -403,7 +403,7 @@ const homeownersPages: DocsPageDefinition[] = [
         description: "Review current edit sessions or spin up a new visual transformation.",
       },
       {
-        href: "/admin/review",
+        href: "/admin/prepare/review",
         label: "Review Inspiration",
         description: "Audit inspirational images before stitching details into listing angles.",
       },
@@ -837,7 +837,7 @@ const contractorsPages: DocsPageDefinition[] = [
         description: "Start from the plan and jump into room-specific context.",
       },
       {
-        href: "/listing-photos",
+        href: "/photos/listing",
         label: "Open Listing Photos",
         description: "Review the underlying room-mapped image library.",
       },
@@ -1001,7 +1001,7 @@ const sharedPages: DocsPageDefinition[] = [
         description: "Review evidence, file versions, and room-linked artifacts.",
       },
       {
-        href: "/admin/review",
+        href: "/admin/prepare/review",
         label: "Open Photo Reviews",
         description: "Review inspirational images and target design direction.",
       },

@@ -117,7 +117,7 @@ export function CompanyViewportApp({ companyId }: { companyId: number }) {
           </div>
         </div>
         <div className="flex flex-col gap-2 w-full md:w-auto">
-          <Button variant="default" onClick={() => window.location.href = `/admin/bid-portfolios/new`}>
+          <Button variant="default" onClick={() => window.location.href = `/admin/bids/new`}>
             <Send className="w-4 h-4 mr-2" /> Send New Bid Request
           </Button>
         </div>

@@ -90,7 +90,7 @@ portalRouter.get("/home", async (c) => {
       navigationGuide: [
         {
           label: "Start with Listing Photos",
-          href: "/listing-photos",
+          href: "/photos/listing",
           description:
             "Review existing conditions room-by-room before discussing scope, sequence, and trade constraints.",
         },
@@ -102,7 +102,7 @@ portalRouter.get("/home", async (c) => {
         },
         {
           label: "Review Design Intent",
-          href: "/inspiration-photos",
+          href: "/photos/inspiration",
           description:
             "See the target look and finish notes attached to each inspirational reference image.",
         },
@@ -114,7 +114,7 @@ portalRouter.get("/home", async (c) => {
         },
         {
           label: "Log Daily Progress",
-          href: "/daily-log",
+          href: "/log/daily",
           description:
             "Post site updates, blockers, and photos so the homeowner can follow along day to day.",
         },

@@ -5,7 +5,7 @@ import { sql } from "drizzle-orm";
  * Photo viewer notes — contractor / professional feedback on individual images.
  *
  * These notes are left by read-only viewers (contractors, professionals, etc.)
- * on the Photo Collection Viewport pages (`/listing-photos`, `/inspiration-photos`).
+ * on the Photo Collection Viewport pages (`/photos/listing`, `/photos/inspiration`).
  * They allow anyone viewing the photos to leave questions, observations, or
  * feedback that the homeowner or admin can later review and respond to.
  *

@@ -5,7 +5,7 @@ export function Navigation() {
     { href: "/", label: "Home", icon: HomeIcon },
     { href: "/floor-plan", label: "Floor Plan", icon: ImageIcon },
     { href: "/moodboards", label: "Mood Boards", icon: LayoutGridIcon },
-    { href: "/listing-photos", label: "Listing Photos", icon: CameraIcon },
+    { href: "/photos/listing", label: "Listing Photos", icon: CameraIcon },
   ];
 
   const apiLinks = [

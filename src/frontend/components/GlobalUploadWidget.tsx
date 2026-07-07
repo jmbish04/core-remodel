@@ -145,8 +145,8 @@ export function GlobalUploadWidget() {
 
     const path = window.location.pathname;
     return {
-      isListingPage: path.startsWith("/listing-photos"),
-      isBlankCanvasPage: path.startsWith("/admin/blank-canvas"),
+      isListingPage: path.startsWith("/photos/listing"),
+      isBlankCanvasPage: path.startsWith("/admin/prepare/blank-canvas"),
     };
   }, []);
 

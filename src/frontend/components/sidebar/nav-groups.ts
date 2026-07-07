@@ -17,8 +17,8 @@ export const NAV_GROUPS: NavGroupDef[] = [
     items: [
       { href: "/admin/planning/measure", label: "Live Floor Plan" },
       { href: "/admin/measurements", label: "Measurements" },
-      { href: "/admin/planning/moodboards", label: "Mood Boards" },
-      { href: "/admin/planning/decision-room", label: "Decision Room" },
+      { href: "/admin/designs/moodboards", label: "Mood Boards" },
+      { href: "/admin/designs/decision-room", label: "Decision Room" },
     ],
   },
   {
@@ -39,7 +39,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
       { href: "/admin/companies", label: "Companies" },
       { href: "/admin/estimates", label: "Estimates" },
       { href: "/admin/contracts", label: "Contracts" },
-      { href: "/admin/bid-portfolios", label: "Bid Portfolios" },
+      { href: "/admin/bids", label: "Bid Portfolios" },
       { href: "/admin/pmo/schedule/contractor", label: "Schedule" },
       { href: "/admin/permits", label: "Permits" },
       { href: "/admin/dialer", label: "Prospect Dialer" },
@@ -63,10 +63,10 @@ export const NAV_GROUPS: NavGroupDef[] = [
     label: "Photos & Renders",
     admin: true,
     items: [
-      { href: "/admin/uploads", label: "Uploads" },
-      { href: "/admin/review", label: "Review" },
+      { href: "/admin/prepare/uploads", label: "Uploads" },
+      { href: "/admin/prepare/review", label: "Review" },
       { href: "/admin/photo-edits", label: "Photo Edits" },
-      { href: "/admin/blank-canvas", label: "Blank Canvas" },
+      { href: "/admin/prepare/blank-canvas", label: "Blank Canvas" },
       { href: "/admin/builder", label: "Renovation Studio" },
       { href: "/admin/gallery", label: "Render Gallery" },
     ],
@@ -98,8 +98,8 @@ export const NAV_GROUPS: NavGroupDef[] = [
     items: [
       { href: "/floor-plan", label: "Floor Plan" },
       { href: "/kitchen-layout", label: "Kitchen Layout" },
-      { href: "/listing-photos", label: "Listing Photos" },
-      { href: "/inspiration-photos", label: "Inspiration Photos" },
+      { href: "/photos/listing", label: "Listing Photos" },
+      { href: "/photos/inspiration", label: "Inspiration Photos" },
     ],
   },
   {

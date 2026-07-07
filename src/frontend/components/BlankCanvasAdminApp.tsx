@@ -741,17 +741,17 @@ Please investigate why this error occurred (such as invalid API response format,
       } else if (initialTab && availableTabs.includes(initialTab)) {
         setActiveTab(initialTab);
         const slug = initialTab.replace(/_/g, "-");
-        window.history.replaceState(null, "", `/admin/blank-canvas/${slug}`);
+        window.history.replaceState(null, "", `/admin/prepare/blank-canvas/${slug}`);
       } else {
         const defaultTab = availableTabs[0];
         setActiveTab(defaultTab);
         const slug = defaultTab.replace(/_/g, "-");
-        window.history.replaceState(null, "", `/admin/blank-canvas/${slug}`);
+        window.history.replaceState(null, "", `/admin/prepare/blank-canvas/${slug}`);
       }
     } else {
       // Keep activeTab, but ensure URL pathname is synchronized
       const slug = activeTab.replace(/_/g, "-");
-      const expectedPath = `/admin/blank-canvas/${slug}`;
+      const expectedPath = `/admin/prepare/blank-canvas/${slug}`;
       if (window.location.pathname !== expectedPath) {
         window.history.replaceState(null, "", expectedPath);
       }
@@ -835,7 +835,7 @@ Please investigate why this error occurred (such as invalid API response format,
     setActiveTab(val);
     setSelectedIds(new Set());
     const slug = val.replace(/_/g, "-");
-    window.history.replaceState(null, "", `/admin/blank-canvas/${slug}`);
+    window.history.replaceState(null, "", `/admin/prepare/blank-canvas/${slug}`);
   }, []);
 
   const handleGenerateForPhoto = useCallback((lpId: number) => {
