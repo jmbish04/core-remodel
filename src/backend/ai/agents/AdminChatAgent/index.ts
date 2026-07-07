@@ -8,7 +8,7 @@
  * Chat sessions are persisted via the DO's SQLite storage.
  */
 
-import { AIChatAgent } from "@cloudflare/ai-chat";
+import { AIChatAgent, type OnChatMessageOptions } from "@cloudflare/ai-chat";
 import { createWorkersAI } from "workers-ai-provider";
 import { streamText, convertToModelMessages } from "ai";
 
@@ -35,11 +35,14 @@ When asked about data in the system, suggest relevant admin pages or API endpoin
 Always be direct and practical.`;
 
 export class AdminChatAgent extends AIChatAgent<Env> {
-  async onChatMessage(onFinish: any, options?: { model?: string }) {
+  async onChatMessage(onFinish: any, options?: OnChatMessageOptions) {
     const aiProvider = createWorkersAI({ binding: this.env.AI });
 
-    // Resolve model from options or fall back to default.
-    const requestedModel = options?.model ?? DEFAULT_MODEL_KEY;
+    // Resolve model from the client's custom body ({ body: { model } } on
+    // useAgentChat — the 0.7.1 channel for client params) or fall back.
+    const bodyModel = options?.body?.model;
+    const requestedModel =
+      typeof bodyModel === "string" ? bodyModel : DEFAULT_MODEL_KEY;
     const modelId = MODELS[requestedModel] ?? MODELS[DEFAULT_MODEL_KEY];
     const model = aiProvider(modelId);
 

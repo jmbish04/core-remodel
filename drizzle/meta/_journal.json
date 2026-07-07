@@ -484,6 +484,13 @@
       "when": 1783397148293,
       "tag": "0068_safe_lizard",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "6",
+      "when": 1783402048244,
+      "tag": "0069_condemned_santa_claus",
+      "breakpoints": true
     }
   ]
 }

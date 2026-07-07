@@ -1,5 +1,6 @@
 import {
   Activity,
+  Bot,
   Clock3,
   Eye,
   Loader2,
@@ -11,10 +12,11 @@ import React, { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { AdminWorkflowsPanel } from "@/components/AdminWorkflowsPanel";
+import { AdminChatPanel } from "@/components/AdminChatPanel";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
-type AdminTab = "overview" | "workflows";
+type AdminTab = "overview" | "workflows" | "chat";
 
 interface AdminOverview {
   success: boolean;
@@ -109,6 +111,7 @@ export function AdminDashboardApp() {
     <div className="flex flex-wrap gap-2 border-b border-border/10 pb-3">
       {tabButton("overview", "Overview", Eye)}
       {tabButton("workflows", "Workflows", Settings2)}
+      {tabButton("chat", "AI Chat", Bot)}
     </div>
   );
 
@@ -129,6 +132,15 @@ export function AdminDashboardApp() {
       <div className="space-y-6">
         {tabs}
         <AdminWorkflowsPanel />
+      </div>
+    );
+  }
+
+  if (activeTab === "chat") {
+    return (
+      <div className="space-y-6">
+        {tabs}
+        <AdminChatPanel />
       </div>
     );
   }
