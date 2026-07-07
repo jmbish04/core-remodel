@@ -13,7 +13,7 @@
  * rationale comment there) instead of firing every item concurrently.
  */
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import {
   WorkflowEntrypoint,
@@ -84,7 +84,12 @@ async function processOneItem(
       await db
         .update(blankCanvasGenerationJobItems)
         .set({ status: "processing", updatedAt: new Date() })
-        .where(eq(blankCanvasGenerationJobItems.listingPhotoId, item.listingPhotoId))
+        .where(
+          and(
+            eq(blankCanvasGenerationJobItems.jobId, jobId),
+            eq(blankCanvasGenerationJobItems.listingPhotoId, item.listingPhotoId),
+          ),
+        )
         .run();
       return { listingPhotoId: item.listingPhotoId };
     });
@@ -166,7 +171,12 @@ async function processOneItem(
             error: null,
             updatedAt: new Date(),
           })
-          .where(eq(blankCanvasGenerationJobItems.listingPhotoId, item.listingPhotoId))
+          .where(
+          and(
+            eq(blankCanvasGenerationJobItems.jobId, jobId),
+            eq(blankCanvasGenerationJobItems.listingPhotoId, item.listingPhotoId),
+          ),
+        )
           .run();
       } else {
         await db
@@ -176,7 +186,12 @@ async function processOneItem(
             error: outcome.error,
             updatedAt: new Date(),
           })
-          .where(eq(blankCanvasGenerationJobItems.listingPhotoId, item.listingPhotoId))
+          .where(
+          and(
+            eq(blankCanvasGenerationJobItems.jobId, jobId),
+            eq(blankCanvasGenerationJobItems.listingPhotoId, item.listingPhotoId),
+          ),
+        )
           .run();
       }
       return { listingPhotoId: item.listingPhotoId };
@@ -201,7 +216,12 @@ async function processOneItem(
         await db
           .update(blankCanvasGenerationJobItems)
           .set({ status: "failed", error: message, updatedAt: new Date() })
-          .where(eq(blankCanvasGenerationJobItems.listingPhotoId, item.listingPhotoId))
+          .where(
+          and(
+            eq(blankCanvasGenerationJobItems.jobId, jobId),
+            eq(blankCanvasGenerationJobItems.listingPhotoId, item.listingPhotoId),
+          ),
+        )
           .run();
         return { listingPhotoId: item.listingPhotoId };
       });
