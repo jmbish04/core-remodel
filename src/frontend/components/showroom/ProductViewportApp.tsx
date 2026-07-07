@@ -4,6 +4,7 @@ import { toast } from "sonner";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { EntityDocumentsPanel } from "@/components/documents";
 
 interface Product {
   id: number;
@@ -151,6 +152,10 @@ export function ProductViewportApp({ id }: { id: number }) {
           )}
         </CardContent>
       </Card>
+
+      <div className="mt-4">
+        <EntityDocumentsPanel entityType="product" entityId={String(id)} />
+      </div>
     </main>
   );
 }

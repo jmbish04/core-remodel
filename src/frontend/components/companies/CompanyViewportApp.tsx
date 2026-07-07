@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
+import { EntityDocumentsPanel } from "@/components/documents";
 
 interface BusinessType {
   id: number;
@@ -130,6 +131,7 @@ export function CompanyViewportApp({ companyId }: { companyId: number }) {
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="rolodex">Rolodex ({contacts.length})</TabsTrigger>
               <TabsTrigger value="bids">Bid History</TabsTrigger>
+              <TabsTrigger value="documents">Documents</TabsTrigger>
             </TabsList>
             
             <TabsContent value="overview" className="space-y-6 mt-6">
@@ -257,6 +259,14 @@ export function CompanyViewportApp({ companyId }: { companyId: number }) {
                   </div>
                 </CardContent>
               </Card>
+            </TabsContent>
+
+            <TabsContent value="documents" className="space-y-6 mt-6">
+              <EntityDocumentsPanel
+                entityType="company"
+                entityId={String(companyId)}
+                heading={`Documents · ${company.name}`}
+              />
             </TabsContent>
           </Tabs>
         </div>
