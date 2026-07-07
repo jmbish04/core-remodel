@@ -10,7 +10,7 @@
  * Supports drag-to-resize for date changes and click to open detail modal.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "@/lib/utils";
 
@@ -98,17 +98,35 @@ export function ClickUpGantt({
   const ganttRef = useRef<any>(null);
   const [loaded, setLoaded] = useState(false);
 
+  // Latest callbacks via refs — the parent recreates these each render, so
+  // capturing them in the init effect (or its dep array) would either go stale
+  // or re-initialize the chart on every render.
+  const onTaskClickRef = useRef(onTaskClick);
+  onTaskClickRef.current = onTaskClick;
+  const onDateChangeRef = useRef(onDateChange);
+  onDateChangeRef.current = onDateChange;
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
+
   // Collect critical path task IDs from flags
-  const criticalPathIds = new Set(
-    flags
-      .filter((f) => f.flagType === "CRITICAL_PATH" && !f.resolved)
-      .map((f) => f.clickupTaskId),
+  const criticalPathIds = useMemo(
+    () =>
+      new Set(
+        flags
+          .filter((f) => f.flagType === "CRITICAL_PATH" && !f.resolved)
+          .map((f) => f.clickupTaskId),
+      ),
+    [flags],
   );
 
   // Filter tasks with valid dates for the Gantt view
-  const ganttTasks = tasks
-    .filter((t) => t.start_date || t.due_date)
-    .map((t) => taskToGanttBar(t, criticalPathIds));
+  const ganttTasks = useMemo(
+    () =>
+      tasks
+        .filter((t) => t.start_date || t.due_date)
+        .map((t) => taskToGanttBar(t, criticalPathIds)),
+    [tasks, criticalPathIds],
+  );
 
   useEffect(() => {
     if (!containerRef.current || ganttTasks.length === 0) return;
@@ -135,11 +153,11 @@ export function ClickUpGantt({
           padding: 14,
           popup_trigger: "click",
           on_click: (frappeTask: any) => {
-            const task = tasks.find((t) => t.id === frappeTask.id);
-            if (task) onTaskClick(task);
+            const task = tasksRef.current.find((t) => t.id === frappeTask.id);
+            if (task) onTaskClickRef.current(task);
           },
           on_date_change: async (frappeTask: any, start: Date, end: Date) => {
-            await onDateChange(
+            await onDateChangeRef.current(
               frappeTask.id,
               start.getTime(),
               end.getTime(),
@@ -155,7 +173,9 @@ export function ClickUpGantt({
     return () => {
       cancelled = true;
     };
-  }, [tasks.length, viewMode]);
+    // ganttTasks is memoized on [tasks, criticalPathIds] — flag/date/name
+    // changes re-render the chart even when the task count is unchanged.
+  }, [ganttTasks, viewMode]);
 
   if (ganttTasks.length === 0) {
     return (

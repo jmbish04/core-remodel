@@ -126,10 +126,17 @@ export function ClickUpTaskModal({
   const [revisions, setRevisions] = useState<RevisionEntry[]>([]);
   const [loadingRevisions, setLoadingRevisions] = useState(false);
 
-  // Plate editor
-  const descriptionEditor = usePlateEditor({
-    value: descriptionValue as any,
-  });
+  // Plate editor — re-created per task (deps) so switching tasks never shows
+  // the previous task's description; plugins enable basic block/mark editing.
+  const descriptionEditor = usePlateEditor(
+    {
+      plugins: [BasicBlocksPlugin, BasicMarksPlugin],
+      value: textToDescendants(
+        mode === "edit" ? task?.description || task?.text_content || "" : "",
+      ) as any,
+    },
+    [task?.id ?? "create", mode],
+  );
 
   // Populate form when task changes
   useEffect(() => {

@@ -249,11 +249,9 @@ export function ClickUpTasksPage() {
   }, [config.listId]);
 
   useEffect(() => {
-    // If we already have a stored list ID, fetch tasks immediately
-    if (config.listId) {
-      fetchData();
-      return;
-    }
+    // A stored list ID is handled by the config.listId effect below —
+    // bailing here avoids a duplicate fetch on mount.
+    if (config.listId) return;
 
     // Otherwise, fetch the default list ID from the backend env var
     fetch("/api/clickup/config")
@@ -332,7 +330,12 @@ export function ClickUpTasksPage() {
       setTasks((prev) =>
         prev.map((t) =>
           t.id === taskId
-            ? { ...t, status: { ...t.status!, status: newStatus } }
+            ? {
+                ...t,
+                status: t.status
+                  ? { ...t.status, status: newStatus }
+                  : { status: newStatus, color: "", type: "custom", orderindex: 0 },
+              }
             : t,
         ),
       );

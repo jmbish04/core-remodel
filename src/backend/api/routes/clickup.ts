@@ -189,10 +189,14 @@ clickupRouter.post("/tasks/:taskId/attachments", async (c) => {
   const taskId = c.req.param("taskId");
 
   const formData = await c.req.formData();
-  const file = formData.get("file") as File | null;
-  if (!file) return c.json({ error: "file field required" }, 400);
+  const file = formData.get("file");
+  // formData.get returns string for text fields — only a real File is usable.
+  if (!file || typeof file === "string") {
+    return c.json({ error: "file field required (multipart file)" }, 400);
+  }
 
-  const label = (formData.get("label") as string) || file.name;
+  const labelField = formData.get("label");
+  const label = (typeof labelField === "string" && labelField) || file.name;
 
   // 1. Upload to R2
   const r2Key = `clickup-attachments/${taskId}/${Date.now()}-${file.name}`;
@@ -335,9 +339,12 @@ clickupRouter.get("/config", async (c) => {
   const spaces = await client.getSpaces();
   const listsPerSpace: Record<string, unknown[]> = {};
 
-  for (const space of spaces) {
-    listsPerSpace[space.id] = await client.getFolderlessLists(space.id);
-  }
+  // Parallel — sequential per-space fetches compound ClickUp API latency.
+  await Promise.all(
+    spaces.map(async (space) => {
+      listsPerSpace[space.id] = await client.getFolderlessLists(space.id);
+    }),
+  );
 
   return c.json({
     defaultListId: c.env.CLICKUP_LIST_ID || "",
