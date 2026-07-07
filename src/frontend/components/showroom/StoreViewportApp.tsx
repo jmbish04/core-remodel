@@ -46,8 +46,6 @@ import { AssociateProductsModal } from "./associate/AssociateProductsModal";
 import { ShowroomNoteModal, type ShowroomNote } from "./notes/ShowroomNoteModal";
 import { ShowroomPhotoPolaroid, type ShowroomPhoto } from "./photos/ShowroomPhotoPolaroid";
 import { ShowroomBento, type ShowroomBentoSection } from "./bento/ShowroomBento";
-import { BrandLogo } from "./brands/BrandLogo";
-import { ShopByBrandSection, type ShopByBrandItem } from "./brands/ShopByBrandSection";
 import { PhotoStack } from "./PhotoStack";
 import { ShowroomGalleryModal, type GalleryPhoto } from "./ShowroomGalleryModal";
 
@@ -72,6 +70,17 @@ interface StoreBrand {
   iconCfImagesUrl: string | null;
   instagramUrl: string | null;
   source: "direct" | "product";
+  // Full brands-table row fields (spread into the payload). All optional/nullable
+  // because product-derived brands or older payloads may omit them.
+  description?: string | null;
+  websiteUrl?: string | null;
+  onlineRating?: number | null;
+  pricePoint?: string | null;
+}
+
+/** A brand enriched with its per-showroom product count for the list cards. */
+interface BrandWithCount extends StoreBrand {
+  productCount: number;
 }
 
 interface StoreCategory {
@@ -641,6 +650,28 @@ export function StoreViewportApp({
     setNoteModalOpen(true);
   }, []);
 
+  // ── Per-brand product counts ──────────────────────────────────────────────────
+  //
+  // Reuses the store payload already in state: `brands` (the DISTINCT union of
+  // direct + product-derived brands) plus `products` (the store's own product
+  // rows, each with a brandId) to compute a per-brand product count client-side.
+  // No extra network call — the GET /:id response carries both arrays. The result
+  // feeds both the bento tile's mini logo preview and the Brands list cards.
+
+  const brandsWithCounts: BrandWithCount[] = useMemo(() => {
+    if (!store) return [];
+    const countByBrand = new Map<number, number>();
+    for (const p of store.products ?? []) {
+      if (p.brandId != null) {
+        countByBrand.set(p.brandId, (countByBrand.get(p.brandId) ?? 0) + 1);
+      }
+    }
+    return (store.brands ?? []).map((b) => ({
+      ...b,
+      productCount: countByBrand.get(b.id) ?? 0,
+    }));
+  }, [store]);
+
   // ── Bento sections ──────────────────────────────────────────────────────────
 
   const bentoSections: ShowroomBentoSection[] = useMemo(
@@ -650,6 +681,10 @@ export function StoreViewportApp({
         title: "Brands & Products",
         description: `${store?.brands.length ?? 0} brands · ${mappedProducts.length} products`,
         icon: <Tag className="size-5" />,
+        preview:
+          brandsWithCounts.length > 0 ? (
+            <BrandMiniStack brands={brandsWithCounts} />
+          ) : undefined,
       },
       {
         key: "notes",
@@ -664,31 +699,14 @@ export function StoreViewportApp({
         icon: <ImagePlus className="size-5" />,
       },
     ],
-    [store?.brands.length, mappedProducts.length, notes.length, photos.length],
+    [
+      store?.brands.length,
+      mappedProducts.length,
+      notes.length,
+      photos.length,
+      brandsWithCounts,
+    ],
   );
-
-  // ── Shop-by-Brand grid data ───────────────────────────────────────────────────
-  //
-  // Reuses the store payload already in state: `brands` (the DISTINCT union of
-  // direct + product-derived brands) plus `products` (the store's own product
-  // rows, each with a brandId) to compute a per-brand product count client-side.
-  // No extra network call — the GET /:id response carries both arrays.
-
-  const shopByBrand: ShopByBrandItem[] = useMemo(() => {
-    if (!store) return [];
-    const countByBrand = new Map<number, number>();
-    for (const p of store.products ?? []) {
-      if (p.brandId != null) {
-        countByBrand.set(p.brandId, (countByBrand.get(p.brandId) ?? 0) + 1);
-      }
-    }
-    return (store.brands ?? []).map((b) => ({
-      id: b.id,
-      name: b.name,
-      iconCfImagesUrl: b.iconCfImagesUrl,
-      productCount: countByBrand.get(b.id) ?? 0,
-    }));
-  }, [store]);
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -904,8 +922,7 @@ export function StoreViewportApp({
       <div className="mt-6">
         {section === "brands-products" ? (
           <BrandsProductsSection
-            storeId={id}
-            brands={store.brands}
+            brands={brandsWithCounts}
             products={mappedProducts}
             removingBrandId={removingBrandId}
             removingProductId={removingProductId}
@@ -934,16 +951,6 @@ export function StoreViewportApp({
       <div className="mt-8">
         <EntityDocumentsPanel entityType="showroom" entityId={String(id)} />
       </div>
-
-      {/* ── Shop by Brand ─────────────────────────────────────────────────────── */}
-      {/* Bottom-of-page brand grid; each card links to the brand's viewport
-          (/admin/brands/:id) where its product grid lives. Renders nothing when
-          the showroom has no associated brands. */}
-      {shopByBrand.length > 0 ? (
-        <div className="mt-16 mb-4">
-          <ShopByBrandSection brands={shopByBrand} />
-        </div>
-      ) : null}
 
       {/* Shared hidden file input for photo upload (hero + photos section). */}
       <input
@@ -1003,10 +1010,191 @@ export function StoreViewportApp({
   );
 }
 
+// ─── Brand mini logo stack (bento tile preview) ─────────────────────────────────
+
+/** Small logo tile with a lettermark fallback, sized for the overlapping stack. */
+function BrandStackLogo({ image, name }: { image: string | null; name: string }) {
+  const [broken, setBroken] = useState(false);
+  const showImage = Boolean(image) && !broken;
+  const letter = name.trim().charAt(0).toUpperCase() || "?";
+
+  return (
+    <span
+      className="flex size-8 items-center justify-center overflow-hidden rounded-full bg-card ring-1 ring-border/40"
+      title={name}
+    >
+      {showImage ? (
+        <img
+          src={image ?? undefined}
+          alt=""
+          aria-hidden
+          loading="lazy"
+          onError={() => setBroken(true)}
+          className="size-full object-contain p-1"
+        />
+      ) : (
+        <span className="text-[11px] font-semibold text-muted-foreground" aria-hidden>
+          {letter}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * Compact stacked grid of up to ~6 overlapping brand logos with a "+N" overflow
+ * chip. Purely decorative preview for the Brands & Products bento tile — no
+ * interactive children (the tile itself is the button).
+ */
+function BrandMiniStack({ brands }: { brands: BrandWithCount[] }) {
+  const MAX = 6;
+  const shown = brands.slice(0, MAX);
+  const overflow = brands.length - shown.length;
+
+  return (
+    <div className="flex items-center" aria-hidden>
+      <div className="flex -space-x-2">
+        {shown.map((b) => (
+          <BrandStackLogo key={b.id} image={b.iconCfImagesUrl} name={b.name} />
+        ))}
+      </div>
+      {overflow > 0 ? (
+        <span className="ml-2 inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground ring-1 ring-border/40">
+          +{overflow}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+// ─── Brand list card ────────────────────────────────────────────────────────────
+
+/** Leading brand icon tile for a list card, with a lettermark fallback. */
+function BrandCardIcon({ image, name }: { image: string | null; name: string }) {
+  const [broken, setBroken] = useState(false);
+  const showImage = Boolean(image) && !broken;
+  const letter = name.trim().charAt(0).toUpperCase() || "?";
+
+  return (
+    <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted ring-1 ring-border/40">
+      {showImage ? (
+        <img
+          src={image ?? undefined}
+          alt={`${name} logo`}
+          loading="lazy"
+          onError={() => setBroken(true)}
+          className="size-full object-contain p-1.5"
+        />
+      ) : (
+        <span className="text-base font-semibold text-muted-foreground">{letter}</span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * Horizontal brand card: the whole card is a link to the brand viewport at
+ * `/admin/shopping/brands/:id` (in-tab). The remove affordance (direct brands
+ * only) is layered on top and calls preventDefault/stopPropagation so removing a
+ * brand never navigates; product-derived brands show a "via product" badge
+ * instead.
+ */
+function BrandListCard({
+  brand,
+  removing,
+  removeDisabled,
+  onRemove,
+}: {
+  brand: BrandWithCount;
+  removing: boolean;
+  removeDisabled: boolean;
+  onRemove: (brandId: number) => void;
+}) {
+  return (
+    <div className="group relative">
+      <a
+        href={`/admin/shopping/brands/${brand.id}`}
+        aria-label={`View ${brand.name}`}
+        className="flex items-start gap-3 rounded-xl bg-card p-4 ring-1 ring-border/40 transition-all hover:ring-primary/40"
+      >
+        <BrandCardIcon image={brand.iconCfImagesUrl} name={brand.name} />
+        <div className="min-w-0 flex-1">
+          {/* Leave room on the right for the overlaid remove button / badge. */}
+          <h3 className="truncate pr-8 text-sm font-semibold tracking-tight text-card-foreground">
+            {brand.name}
+          </h3>
+          {brand.description ? (
+            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+              {brand.description}
+            </p>
+          ) : (
+            <p className="mt-0.5 text-xs italic text-muted-foreground/60">
+              No description yet.
+            </p>
+          )}
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <Badge
+              variant="secondary"
+              className="px-1.5 py-0 text-[10px] font-normal"
+            >
+              {brand.productCount} product{brand.productCount === 1 ? "" : "s"}
+            </Badge>
+            {typeof brand.onlineRating === "number" && brand.onlineRating > 0 ? (
+              <Badge
+                variant="outline"
+                className="gap-1 px-1.5 py-0 text-[10px] font-normal text-amber-300"
+              >
+                <Star className="size-2.5 fill-amber-400 text-amber-400" />
+                {brand.onlineRating.toFixed(1)}
+              </Badge>
+            ) : null}
+            {brand.pricePoint ? (
+              <Badge
+                variant="outline"
+                className="px-1.5 py-0 font-mono text-[10px] font-normal text-emerald-400"
+              >
+                {brand.pricePoint}
+              </Badge>
+            ) : null}
+          </div>
+        </div>
+      </a>
+
+      {/* Overlaid affordance — outside the anchor's activation semantics via
+          preventDefault/stopPropagation so it never triggers navigation. */}
+      {brand.source === "direct" ? (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            onRemove(brand.id);
+          }}
+          disabled={removeDisabled}
+          aria-label={`Remove ${brand.name}`}
+          className="absolute right-3 top-3 rounded-full p-1 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground disabled:opacity-50"
+        >
+          {removing ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <X className="h-3.5 w-3.5" />
+          )}
+        </button>
+      ) : (
+        <Badge
+          variant="outline"
+          className="pointer-events-none absolute right-3 top-3 px-1 py-0 text-[8px] uppercase tracking-wider text-muted-foreground"
+        >
+          via product
+        </Badge>
+      )}
+    </div>
+  );
+}
+
 // ─── Section: Brands & Products ─────────────────────────────────────────────────
 
 function BrandsProductsSection({
-  storeId,
   brands,
   products,
   removingBrandId,
@@ -1016,8 +1204,7 @@ function BrandsProductsSection({
   onAssociateBrands,
   onAssociateProducts,
 }: {
-  storeId: number;
-  brands: StoreBrand[];
+  brands: BrandWithCount[];
   products: MappedProduct[];
   removingBrandId: number | null;
   removingProductId: number | null;
@@ -1041,45 +1228,15 @@ function BrandsProductsSection({
             No brands linked to this showroom yet.
           </p>
         ) : (
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {brands.map((brand) => (
-              <span
+              <BrandListCard
                 key={brand.id}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-muted/40 py-1.5 pl-1.5 pr-2 text-sm ring-1 ring-border/40 transition-colors hover:bg-muted/70"
-              >
-                {/* Icon + name links into the brand↔showroom split viewport; the
-                    remove-× / "via product" affordances stay OUTSIDE the anchor so
-                    removing a brand never navigates. */}
-                <a
-                  href={`/admin/showrooms/${storeId}/brands/${brand.id}`}
-                  className="inline-flex items-center rounded-lg hover:opacity-90"
-                  aria-label={`View ${brand.name} products at this showroom`}
-                >
-                  <BrandLogo image={brand.iconCfImagesUrl} alt={brand.name} />
-                </a>
-                {brand.source === "direct" ? (
-                  <button
-                    type="button"
-                    onClick={() => onRemoveBrand(brand.id)}
-                    disabled={removingBrandId !== null}
-                    aria-label={`Remove ${brand.name}`}
-                    className="ml-0.5 rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-foreground/10 hover:text-foreground disabled:opacity-50"
-                  >
-                    {removingBrandId === brand.id ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : (
-                      <X className="h-3 w-3" />
-                    )}
-                  </button>
-                ) : (
-                  <Badge
-                    variant="outline"
-                    className="ml-0.5 px-1 py-0 text-[8px] uppercase tracking-wider text-muted-foreground"
-                  >
-                    via product
-                  </Badge>
-                )}
-              </span>
+                brand={brand}
+                removing={removingBrandId === brand.id}
+                removeDisabled={removingBrandId !== null}
+                onRemove={onRemoveBrand}
+              />
             ))}
           </div>
         )}

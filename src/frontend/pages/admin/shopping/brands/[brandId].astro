@@ -5,7 +5,7 @@ import { BrandDetailViewport } from "@/components/brands/BrandDetailViewport";
 const { brandId } = Astro.params;
 const parsedId = brandId ? Number.parseInt(brandId, 10) : NaN;
 if (!Number.isFinite(parsedId) || parsedId <= 0) {
-  return Astro.redirect("/admin/brands");
+  return Astro.redirect("/admin/shopping/brands");
 }
 ---
 
