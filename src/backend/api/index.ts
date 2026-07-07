@@ -78,6 +78,7 @@ import { clickupRouter } from "./routes/clickup";
 import { companyCrmRouter } from "./routes/company-crm";
 import { notesSharedRouter } from "./routes/notes-shared";
 import { gmailRouter } from "./routes/gmail";
+import { workshopRouter } from "./routes/workshop";
 import { requireAccessAuth } from "@backend/utils/access";
 
 export type Variables = {
@@ -132,6 +133,9 @@ app.use("/api/notes/*", requireAccessAuth);
 // Gmail comms hub (0013 roadmap P3-07) — admin-only, sends mail as justin@126colby.com.
 app.use("/api/gmail", requireAccessAuth);
 app.use("/api/gmail/*", requireAccessAuth);
+// AI Photo Design Workshop (0014 Slice 1) — admin-only canvas/piles/clippings/recipes.
+app.use("/api/workshop", requireAccessAuth);
+app.use("/api/workshop/*", requireAccessAuth);
 app.use("/api/bid-portfolios/*", async (c, next) => {
   // Public routes do not require auth
   const path = new URL(c.req.url).pathname;
@@ -223,6 +227,7 @@ app.route("/api/clickup", clickupRouter);
 app.route("/api/companies", companyCrmRouter);
 app.route("/api/notes", notesSharedRouter);
 app.route("/api/gmail", gmailRouter);
+app.route("/api/workshop", workshopRouter);
 app.route("/", openapiRouter);
 
 export { app };

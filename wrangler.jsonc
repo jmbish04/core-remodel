@@ -31,6 +31,13 @@
     "binding": "AI",
     "remote": true,
   },
+  // Cloudflare Images transform binding (env.IMAGES) — used by the Workshop's
+  // clipping-extraction crop (docs/0014_ai_photo_workshop) via
+  // src/backend/services/render/cf-images.ts. NO sharp/libvips: `.input().transform().output()`.
+  "images": {
+    "binding": "IMAGES",
+    "remote": true,
+  },
   "vars": {
     "AI_GATEWAY_ID": "default-gateway",
     "CLICKUP_LIST_ID": "901714811766",
@@ -132,87 +139,104 @@
       "binding": "GITHUB_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "GH_TOKEN",
+      "remote": true
     },
     {
       "binding": "CLOUDFLARE_ACCOUNT_ID",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "CLOUDFLARE_ACCOUNT_ID",
+      "remote": true
     },
     {
       "binding": "CLOUDFLARE_IMAGES_STREAM_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "CLOUDFLARE_IMAGES_STREAM_TOKEN",
+      "remote": true
     },
     {
       "binding": "CF_IMAGES_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "CLOUDFLARE_IMAGES_STREAM_TOKEN",
+      "remote": true
     },
     {
       "binding": "CLOUDFLARE_WRANGLER_API_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "CLOUDFLARE_WRANGLER_API_TOKEN",
+      "remote": true
     },
     {
       "binding": "WORKER_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "WORKER_API_KEY",
+      "remote": true
     },
     {
       "binding": "AI_GATEWAY_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "CLOUDFLARE_AI_GATEWAY_TOKEN",
+      "remote": true
     },
     {
       "binding": "CF_BROWSER_RENDER_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "CLOUDFLARE_BROWSER_RENDER_TOKEN",
+      "remote": true
     },
     {
       "binding": "JULES_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "JULES_API_KEY",
+      "remote": true
     },
     {
       "binding": "GEMINI_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "GOOGLE_API_KEY",
+      "remote": true
     },
     {
       "binding": "ANTHROPIC_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "ANTHROPIC_API_KEY",
+      "remote": true
     },
     {
       "binding": "FAL_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "FAL_API_KEY",
+      "remote": true
     },
     {
       "binding": "REPLICATE_API_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "REPLICATE_API_TOKEN",
+      "remote": true
     },
     {
       "binding": "GOOGLE_MAPS_API",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "GOOGLE_MAPS_API",
+      "remote": true
     },
     {
       "binding": "GOOGLE_SEARCH_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "GOOGLE_SEARCH_API_KEY",
+      "remote": true
     },
     {
       // ClickUp task mirror (0009): consumed by RemodelOrchestrator + /api/clickup.
       "binding": "CLICKUP_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "CLICKUP_TOKEN",
+      "remote": true
     },
     {
       "binding": "CLICKUP_TEAM_ID",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "CLICKUP_TEAM_ID",
+      "remote": true
     },
     {
       // Gmail comms hub (P3-07): service-account DWD. The private key exceeds
@@ -220,16 +244,19 @@
       "binding": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1",
+      "remote": true
     },
     {
       "binding": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2",
+      "remote": true
     },
     {
       "binding": "GOOGLE_CREDS_SA_CLIENT_EMAIL",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "GOOGLE_CREDS_SA_CLIENT_EMAIL",
+      "remote": true
     },
   ],
   "durable_objects": {

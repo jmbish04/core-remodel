@@ -17,6 +17,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     items: [
       { href: "/admin/planning/measure", label: "Live Floor Plan" },
       { href: "/admin/measurements", label: "Measurements" },
+      { href: "/admin/designs/workshop", label: "Design Workshop" },
       { href: "/admin/designs/moodboards", label: "Mood Boards" },
       { href: "/admin/designs/decision-room", label: "Decision Room" },
     ],
