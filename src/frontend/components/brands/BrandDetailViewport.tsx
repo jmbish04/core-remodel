@@ -1,7 +1,7 @@
 /**
  * @fileoverview BrandDetailViewport — single-brand admin viewport.
  *
- * Client island mounted at /admin/brands/:id. Fetches `GET /api/brands/:id` on
+ * Client island mounted at /admin/shopping/brands/:id. Fetches `GET /api/brands/:id` on
  * mount and answers "which showrooms carry this brand" up top, then surfaces:
  *   - a hero (favicon + name, website/Instagram out-links, online + user
  *     rating stars, an Edit dialog → PUT /api/brands/:id),
@@ -445,7 +445,7 @@ export function BrandDetailViewport({ brandId }: { brandId: number }) {
     return (
       <main className="container mx-auto max-w-5xl px-4 py-10">
         <a
-          href="/admin/brands"
+          href="/admin/shopping/brands"
           className="mb-6 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="size-4" />
@@ -467,7 +467,7 @@ export function BrandDetailViewport({ brandId }: { brandId: number }) {
   return (
     <main className="container mx-auto max-w-5xl px-4 py-10">
       <a
-        href="/admin/brands"
+        href="/admin/shopping/brands"
         className="mb-6 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="size-4" />

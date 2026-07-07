@@ -8,7 +8,7 @@
  *   - name, website (Globe) + Instagram links,
  *   - metric badges: productCount (PackageSearch) + online/user rating stars,
  *   - type badges with inline add / remove chip management,
- *   - a "View Details" link to /admin/brands/:id,
+ *   - a "View Details" link to /admin/shopping/brands/:id,
  *   - edit (dialog → PUT) and delete (AlertDialog confirm → DELETE).
  *
  * Filters: search + category (brand type) Select + min-rating Select, plus
@@ -440,7 +440,7 @@ function BrandCard({
       <div className="mt-auto flex items-end justify-between gap-2 pt-2.5">
         <TypeChips brand={brand} allTypes={allTypes} onChanged={onTypesChanged} />
         <a
-          href={`/admin/brands/${brand.id}`}
+          href={`/admin/shopping/brands/${brand.id}`}
           className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary transition hover:bg-primary/20"
           aria-label={`View details for ${brand.name}`}
         >

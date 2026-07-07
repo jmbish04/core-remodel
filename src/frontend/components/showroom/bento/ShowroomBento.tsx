@@ -19,6 +19,13 @@ export interface ShowroomBentoSection {
   title: string;
   description?: string;
   icon?: React.ReactNode;
+  /**
+   * Optional compact preview rendered inside the tile beneath the title area
+   * (e.g. a stacked mini logo grid for the Brands tile). Purely decorative —
+   * the whole tile remains a single selectable button, so previews must not
+   * introduce nested interactive elements.
+   */
+  preview?: React.ReactNode;
 }
 
 interface ShowroomBentoProps {
@@ -89,6 +96,7 @@ export function ShowroomBento({ sections, activeKey, onSelect }: ShowroomBentoPr
                   {section.description}
                 </p>
               )}
+              {section.preview && <div className="mt-3">{section.preview}</div>}
             </div>
             {active && (
               <span className="pointer-events-none absolute right-3 top-3 size-2 rounded-full bg-primary" />
