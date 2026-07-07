@@ -28,6 +28,7 @@
     "@efferd": "https://efferd.com/r/{name}.json",
     "@systaliko-ui": "https://systaliko-ui.vercel.app/r/{name}.json",
     "@mapcn": "https://mapcn.dev/r/{name}.json",
-    "@bklit": "https://ui.bklit.com/r/{name}.json"
+    "@bklit": "https://ui.bklit.com/r/{name}.json",
+    "@coss": "https://coss.com/ui/r/{name}.json"
   }
 }
