@@ -378,6 +378,9 @@ export function StoreViewportApp({
     try {
       const data = await api<StoreDetail>(`/api/showroom-stores/${id}`);
       setStore(data);
+      // Tab title = the showroom's actual name (the Astro page can only know
+      // the numeric id at render time).
+      if (data?.name) document.title = data.name;
     } catch (e) {
       console.error("[store/load]", e);
       toast.error(e instanceof Error ? e.message : "Failed to load showroom");
