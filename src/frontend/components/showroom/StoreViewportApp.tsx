@@ -47,6 +47,7 @@ import { ShowroomNoteModal, type ShowroomNote } from "./notes/ShowroomNoteModal"
 import { ShowroomPhotoPolaroid, type ShowroomPhoto } from "./photos/ShowroomPhotoPolaroid";
 import { ShowroomBento, type ShowroomBentoSection } from "./bento/ShowroomBento";
 import { BrandLogo } from "./brands/BrandLogo";
+import { ShopByBrandSection, type ShopByBrandItem } from "./brands/ShopByBrandSection";
 import { PhotoStack } from "./PhotoStack";
 import { ShowroomGalleryModal, type GalleryPhoto } from "./ShowroomGalleryModal";
 
@@ -77,6 +78,12 @@ interface StoreCategory {
   categoryName: string;
 }
 
+/** Store-owned product row (payload carries the full row; we only need brandId). */
+interface StoreProduct {
+  id: number;
+  brandId: number | null;
+}
+
 interface StoreDetail {
   id: number;
   name: string;
@@ -99,6 +106,7 @@ interface StoreDetail {
   hubName: string | null;
   categories: StoreCategory[];
   brands: StoreBrand[];
+  products: StoreProduct[];
 }
 
 interface MappedProduct {
@@ -659,6 +667,29 @@ export function StoreViewportApp({
     [store?.brands.length, mappedProducts.length, notes.length, photos.length],
   );
 
+  // ── Shop-by-Brand grid data ───────────────────────────────────────────────────
+  //
+  // Reuses the store payload already in state: `brands` (the DISTINCT union of
+  // direct + product-derived brands) plus `products` (the store's own product
+  // rows, each with a brandId) to compute a per-brand product count client-side.
+  // No extra network call — the GET /:id response carries both arrays.
+
+  const shopByBrand: ShopByBrandItem[] = useMemo(() => {
+    if (!store) return [];
+    const countByBrand = new Map<number, number>();
+    for (const p of store.products ?? []) {
+      if (p.brandId != null) {
+        countByBrand.set(p.brandId, (countByBrand.get(p.brandId) ?? 0) + 1);
+      }
+    }
+    return (store.brands ?? []).map((b) => ({
+      id: b.id,
+      name: b.name,
+      iconCfImagesUrl: b.iconCfImagesUrl,
+      productCount: countByBrand.get(b.id) ?? 0,
+    }));
+  }, [store]);
+
   // ── Render ───────────────────────────────────────────────────────────────────
 
   if (loading) {
@@ -903,6 +934,16 @@ export function StoreViewportApp({
       <div className="mt-8">
         <EntityDocumentsPanel entityType="showroom" entityId={String(id)} />
       </div>
+
+      {/* ── Shop by Brand ─────────────────────────────────────────────────────── */}
+      {/* Bottom-of-page brand grid; each card links to the brand's viewport
+          (/admin/brands/:id) where its product grid lives. Renders nothing when
+          the showroom has no associated brands. */}
+      {shopByBrand.length > 0 ? (
+        <div className="mt-16 mb-4">
+          <ShopByBrandSection brands={shopByBrand} />
+        </div>
+      ) : null}
 
       {/* Shared hidden file input for photo upload (hero + photos section). */}
       <input

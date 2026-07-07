@@ -57,6 +57,14 @@ export const brands = sqliteTable("brands", {
    */
   userRating: real("user_rating"),
 
+  /**
+   * Relative price tier for the brand: '$' | '$$' | '$$$' | '$$$$'.
+   * Best-effort estimate produced by the brand-enrichment pipeline (Workers-AI)
+   * when a newly-discovered brand is first inserted. Nullable — not all brands
+   * have enough public signal to classify.
+   */
+  pricePoint: text("price_point"),
+
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),

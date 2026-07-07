@@ -37,6 +37,7 @@ import { chunkMarkdown } from "@backend/ai/agents/ResearchAgent/methods/chunk-ma
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { faviconService } from "@backend/services/favicon";
+import { enrichNewBrand } from "@backend/services/showroom/brand-enrichment";
 
 // ---------------------------------------------------------------------------
 // Params + constants
@@ -663,6 +664,12 @@ async function uploadHeroImage(
 /**
  * Insert a brand (case-insensitive match on `name`) if not present, then map it
  * to the showroom via `showroom_brand_mappings` (dup mapping ignored).
+ *
+ * When the brand is newly discovered (no prior row), it is enriched inline —
+ * website discovery, icon hydration, online rating, price point, and a short
+ * description — via `enrichNewBrand`. This runs inside a Workflow `step.do(...)`
+ * body (bounded: ≤2 AI calls + ≤1 search + one icon fetch), so it is simply
+ * awaited rather than fired-and-forgotten.
  */
 async function upsertBrandMapping(
   env: Env,
@@ -687,6 +694,15 @@ async function upsertBrandMapping(
       .values({ name, websiteUrl: null })
       .returning({ id: brands.id });
     brandId = inserted.id;
+
+    // Newly-discovered brand — enrich it (fill-blanks; never throws).
+    try {
+      await enrichNewBrand(env, brandId, name);
+    } catch (err) {
+      // Defensive — enrichNewBrand already never throws, but this keeps the
+      // brand mapping from failing if that contract is ever violated.
+      console.error(`showroom-scrape: brand enrichment failed for "${name}"`, err);
+    }
   }
 
   // Map brand → showroom, ignoring the unique-constraint duplicate.

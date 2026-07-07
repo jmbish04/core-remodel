@@ -24,7 +24,7 @@
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, and, inArray, like, desc, sql } from "drizzle-orm";
+import { eq, and, or, isNull, inArray, like, desc, sql } from "drizzle-orm";
 
 import { brands } from "@backend/db/schema/brands/brands";
 import { brandTypesDef } from "@backend/db/schema/brands/brand_types_def";
@@ -35,6 +35,7 @@ import { showroomProductMappings } from "@backend/db/schema/showroom/product_map
 import { showroomStores } from "@backend/db/schema/showroom/stores";
 import { productImages } from "@backend/db/schema/showroom/product_images";
 import { faviconService } from "@backend/services/favicon";
+import { enrichNewBrand } from "@backend/services/showroom/brand-enrichment";
 
 export const brandsRouter = new OpenAPIHono<{ Bindings: Env }>();
 
@@ -788,4 +789,63 @@ brandsRouter.delete("/:id/types/:typeId", async (c) => {
     );
 
   return c.json({ success: true });
+});
+
+// ─── BRAND ENRICHMENT BACKFILL ────────────────────────────────────────────────
+
+/** Cap on the number of brands processed per backfill run — avoids stampeding Workers-AI. */
+const ENRICHMENT_BACKFILL_LIMIT = 20;
+
+/**
+ * POST /backfill-enrichment — enrich existing brands missing website / icon /
+ * rating / price point.
+ *
+ * Finds up to `ENRICHMENT_BACKFILL_LIMIT` brands where any of
+ * `websiteUrl`, `iconCfImagesUrl`, `onlineRating`, or `pricePoint` is NULL,
+ * ordered by `updatedAt` ASCENDING — every enrichment attempt (successful or
+ * not) bumps `updatedAt`, so this ordering pushes already-attempted brands to
+ * the back of the queue instead of starving it with permanently-unenrichable
+ * rows on every run. Then runs `enrichNewBrand` for each — fill-blanks only,
+ * same doctrine as inline scrape-time enrichment. Runs sequentially inside a
+ * single `c.executionCtx.waitUntil(...)` async IIFE (never parallel, so we
+ * don't stampede Workers-AI), with a per-brand try/catch so one failure can't
+ * abort the rest of the queue. Returns immediately with a 202 + count queued.
+ */
+brandsRouter.post("/backfill-enrichment", async (c) => {
+  const db = drizzle(c.env.DB);
+
+  const candidates = await db
+    .select({ id: brands.id, name: brands.name })
+    .from(brands)
+    .where(
+      or(
+        isNull(brands.websiteUrl),
+        isNull(brands.iconCfImagesUrl),
+        isNull(brands.onlineRating),
+        isNull(brands.pricePoint),
+      ),
+    )
+    .orderBy(brands.updatedAt)
+    .limit(ENRICHMENT_BACKFILL_LIMIT);
+
+  if (candidates.length === 0) {
+    return c.json({ success: true, queued: 0 }, 202);
+  }
+
+  c.executionCtx.waitUntil(
+    (async () => {
+      for (const brand of candidates) {
+        try {
+          await enrichNewBrand(c.env, brand.id, brand.name);
+        } catch (err) {
+          console.error(
+            `[brands] POST /backfill-enrichment failed for brand ${brand.id}:`,
+            err,
+          );
+        }
+      }
+    })(),
+  );
+
+  return c.json({ success: true, queued: candidates.length }, 202);
 });
