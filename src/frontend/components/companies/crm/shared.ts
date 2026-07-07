@@ -90,10 +90,21 @@ function envelopeError(payload: ApiEnvelope, status: number): string {
   return `Request failed (${status})`;
 }
 
+async function parseEnvelope<T>(response: Response): Promise<T & ApiEnvelope> {
+  try {
+    return (await response.json()) as T & ApiEnvelope;
+  } catch {
+    // Non-JSON body (gateway HTML error page, empty response). Returning {}
+    // on an ok response would just crash later when the UI reads fields —
+    // surface it as a real error instead.
+    throw new Error(`Unexpected non-JSON response (HTTP ${response.status})`);
+  }
+}
+
 /** GET helper. Throws on non-2xx / `success:false`. */
 export async function apiGet<T>(url: string): Promise<T> {
   const response = await fetch(url, { credentials: "include" });
-  const payload = (await response.json().catch(() => ({}))) as T & ApiEnvelope;
+  const payload = await parseEnvelope<T>(response);
   if (!response.ok || payload.success === false) {
     const error = new Error(envelopeError(payload, response.status)) as Error & {
       status?: number;
@@ -116,7 +127,7 @@ export async function apiSend<T>(
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
-  const payload = (await response.json().catch(() => ({}))) as T & ApiEnvelope;
+  const payload = await parseEnvelope<T>(response);
   if (!response.ok || payload.success === false) {
     const error = new Error(envelopeError(payload, response.status)) as Error & {
       status?: number;
@@ -231,7 +242,12 @@ export function epochToDateInput(value: number | null | undefined): string {
   if (value === null || value === undefined) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return date.toISOString().slice(0, 10);
+  // Local date parts, NOT toISOString(): the stored epoch is local midnight,
+  // so the UTC date can be the previous day for timezones ahead of UTC.
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
 }
 
 /**

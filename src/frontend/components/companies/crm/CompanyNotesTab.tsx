@@ -23,14 +23,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Dialog as ConfirmDialog,
-  DialogContent as ConfirmDialogContent,
-  DialogDescription as ConfirmDialogDescription,
-  DialogFooter as ConfirmDialogFooter,
-  DialogHeader as ConfirmDialogHeader,
-  DialogTitle as ConfirmDialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -187,21 +179,21 @@ interface DeleteNoteDialogProps {
 
 function DeleteNoteDialog({ note, open, onOpenChange, onConfirm, deleting }: DeleteNoteDialogProps) {
   return (
-    <ConfirmDialog
+    <Dialog
       open={open}
       onOpenChange={(next) => {
         if (deleting) return;
         onOpenChange(next);
       }}
     >
-      <ConfirmDialogContent className="sm:max-w-sm">
-        <ConfirmDialogHeader>
-          <ConfirmDialogTitle>Delete note?</ConfirmDialogTitle>
-          <ConfirmDialogDescription>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Delete note?</DialogTitle>
+          <DialogDescription>
             {note ? `"${note.title}" will be removed. This can be undone by an admin.` : ""}
-          </ConfirmDialogDescription>
-        </ConfirmDialogHeader>
-        <ConfirmDialogFooter>
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={deleting}>
             Cancel
           </Button>
@@ -213,9 +205,9 @@ function DeleteNoteDialog({ note, open, onOpenChange, onConfirm, deleting }: Del
             {deleting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Delete
           </Button>
-        </ConfirmDialogFooter>
-      </ConfirmDialogContent>
-    </ConfirmDialog>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
