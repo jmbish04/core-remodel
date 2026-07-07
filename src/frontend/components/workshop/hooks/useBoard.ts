@@ -16,6 +16,7 @@ import * as api from "../api";
 import type {
   Board,
   BoardNode,
+  BoardPhoto,
   Clipping,
   Collection,
   NodeSourceType,
@@ -30,6 +31,10 @@ export interface UseBoardResult {
   nodes: BoardNode[];
   collections: Collection[];
   clippings: Clipping[];
+  /** Whole listing photos for this room (drawer "Listing" tab). */
+  listingPhotos: BoardPhoto[];
+  /** Whole inspiration photos for this room (drawer "Inspiration" tab). */
+  inspirationPhotos: BoardPhoto[];
   /** Source node ids with a recipe HTTP request currently in flight. */
   processingNodeIds: Set<string>;
   /** Child node ids added this session (drives the staggered reveal). */
@@ -51,6 +56,14 @@ export interface UseBoardResult {
   removeItemFromCollection: (collectionId: string, itemId: string) => Promise<void>;
   // Clippings
   registerClipping: (clipping: Clipping) => void;
+  /**
+   * Optimistically flip a clipping's global membership (or relabel it) with
+   * rollback on failure. Drives the Samples→Global / Global→room-only moves.
+   */
+  patchClipping: (
+    id: string,
+    patch: { isGlobal?: boolean; label?: string },
+  ) => Promise<void>;
   // Recipe execution (sync-201)
   /** Flag/unflag a source node as having a recipe in flight. */
   setNodeProcessing: (nodeId: string, processing: boolean) => void;
@@ -65,6 +78,8 @@ export function useBoard(roomId: string): UseBoardResult {
   const [nodes, setNodes] = useState<BoardNode[]>([]);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [clippings, setClippings] = useState<Clipping[]>([]);
+  const [listingPhotos, setListingPhotos] = useState<BoardPhoto[]>([]);
+  const [inspirationPhotos, setInspirationPhotos] = useState<BoardPhoto[]>([]);
   const [processingNodeIds, setProcessingNodeIds] = useState<Set<string>>(
     new Set(),
   );
@@ -85,6 +100,8 @@ export function useBoard(roomId: string): UseBoardResult {
       setNodes(data.nodes);
       setCollections(data.collections);
       setClippings(data.clippings);
+      setListingPhotos(data.listingPhotos ?? []);
+      setInspirationPhotos(data.inspirationPhotos ?? []);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to load the board";
@@ -267,6 +284,39 @@ export function useBoard(roomId: string): UseBoardResult {
     setClippings((prev) => [clipping, ...prev]);
   }, []);
 
+  const patchClipping = useCallback(
+    async (id: string, patch: { isGlobal?: boolean; label?: string }) => {
+      // Snapshot for rollback, then apply optimistically.
+      let previous: Clipping | undefined;
+      setClippings((prev) =>
+        prev.map((clip) => {
+          if (clip.id !== id) return clip;
+          previous = clip;
+          return { ...clip, ...patch };
+        }),
+      );
+      try {
+        const updated = await api.patchClipping(id, patch);
+        setClippings((prev) =>
+          prev.map((clip) => (clip.id === id ? updated : clip)),
+        );
+      } catch (err) {
+        // Roll back to the pre-flight value.
+        if (previous) {
+          const snapshot = previous;
+          setClippings((prev) =>
+            prev.map((clip) => (clip.id === id ? snapshot : clip)),
+          );
+        }
+        toast.error(
+          err instanceof Error ? err.message : "Couldn't move that sample",
+        );
+        throw err;
+      }
+    },
+    [],
+  );
+
   const setNodeProcessing = useCallback(
     (nodeId: string, processing: boolean) => {
       setProcessingNodeIds((prev) => {
@@ -307,6 +357,8 @@ export function useBoard(roomId: string): UseBoardResult {
       nodes,
       collections,
       clippings,
+      listingPhotos,
+      inspirationPhotos,
       processingNodeIds,
       justAddedNodeIds,
       reload,
@@ -320,6 +372,7 @@ export function useBoard(roomId: string): UseBoardResult {
       addItemToCollection,
       removeItemFromCollection,
       registerClipping,
+      patchClipping,
       setNodeProcessing,
       insertChildNode,
     }),
@@ -330,6 +383,8 @@ export function useBoard(roomId: string): UseBoardResult {
       nodes,
       collections,
       clippings,
+      listingPhotos,
+      inspirationPhotos,
       processingNodeIds,
       justAddedNodeIds,
       reload,
@@ -343,6 +398,7 @@ export function useBoard(roomId: string): UseBoardResult {
       addItemToCollection,
       removeItemFromCollection,
       registerClipping,
+      patchClipping,
       setNodeProcessing,
       insertChildNode,
     ],

@@ -46,7 +46,26 @@ export interface Clipping {
   label: string | null;
   bboxJson: string | null;
   renderCanvasId: string | null;
+  /**
+   * Global-drawer membership. `true` → the clipping is promoted for use in
+   * EVERY room's Workshop (e.g. a house-wide paint color) and appears in this
+   * board's Global tab even if it was extracted in another room. `false` → this
+   * room's own sample (the Samples tab).
+   */
+  isGlobal: boolean;
   createdAt: string;
+}
+
+/**
+ * A whole listing/inspiration photo attached to this room's board. These are
+ * NOT nodes on the canvas — per Slice-1 feedback only blank-canvas seeds live on
+ * the canvas. Listing/inspiration photos live in drawer tabs and are placed onto
+ * the canvas on demand (POST /boards/:id/nodes with their sourceType).
+ */
+export interface BoardPhoto {
+  sourceId: string;
+  cfImageUrl: string;
+  label: string | null;
 }
 
 /** An item inside a pile (photo_collection_items row). */
@@ -75,9 +94,19 @@ export interface Board {
 export interface BoardResponse {
   success: boolean;
   board: Board;
+  /**
+   * Blank-canvas seeds (+ recipe children / user-placed nodes) only. Listing and
+   * inspiration photos NO LONGER arrive as nodes — they come back as
+   * `listingPhotos` / `inspirationPhotos` and are placed on demand.
+   */
   nodes: BoardNode[];
   collections: Collection[];
+  /** All clippings visible to this board: this room's + every global clipping. */
   clippings: Clipping[];
+  /** Whole listing photos for this room (drawer "Listing" tab). */
+  listingPhotos: BoardPhoto[];
+  /** Whole inspiration photos for this room (drawer "Inspiration" tab). */
+  inspirationPhotos: BoardPhoto[];
 }
 
 /** Normalized bbox (0..1) — what /clippings/extract expects. */
@@ -161,4 +190,12 @@ export function clippingAltText(clipping: Pick<Clipping, "label">): string {
   return clipping.label
     ? `Material clipping: ${clipping.label}`
     : "Material clipping";
+}
+
+export function boardPhotoAltText(
+  photo: Pick<BoardPhoto, "label">,
+  kind: "listing_photo" | "inspiration",
+): string {
+  const base = SOURCE_LABEL[kind];
+  return photo.label ? `${base}: ${photo.label}` : base;
 }

@@ -30,7 +30,13 @@ import { RoomPicker } from "./RoomPicker";
 import { runRecipe } from "./api";
 import { isAsyncRecipeResult } from "./types";
 import { useBoard } from "./hooks/useBoard";
-import type { BoardNode, Clipping, CollectionItem, RecipeKind } from "./types";
+import type {
+  BoardNode,
+  BoardPhoto,
+  Clipping,
+  CollectionItem,
+  RecipeKind,
+} from "./types";
 
 function useRoomId(): string | null {
   if (typeof window === "undefined") return null;
@@ -58,9 +64,16 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
     node: BoardNode;
   } | null>(null);
 
-  // References for the recipe dialogs.
+  // References for the recipe dialogs. Inspiration is now sourced from the
+  // drawer's inspirationPhotos (whole photos no longer arrive as nodes) PLUS any
+  // inspiration node the user has explicitly placed on the canvas.
   const materialSwapRefs = useMemo<RecipeReference[]>(() => {
-    const fromInspiration = board.nodes
+    const fromInspirationPhotos = board.inspirationPhotos.map((photo) => ({
+      id: `photo:${photo.sourceId}`,
+      cfImageUrl: photo.cfImageUrl,
+      label: photo.label,
+    }));
+    const fromInspirationNodes = board.nodes
       .filter((node) => node.sourceType === "inspiration")
       .map((node) => ({
         id: `node:${node.id}`,
@@ -72,8 +85,12 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
       cfImageUrl: clip.clippingCfImageUrl,
       label: clip.label,
     }));
-    return [...fromInspiration, ...fromClippings];
-  }, [board.nodes, board.clippings]);
+    return [
+      ...fromInspirationPhotos,
+      ...fromInspirationNodes,
+      ...fromClippings,
+    ];
+  }, [board.inspirationPhotos, board.nodes, board.clippings]);
 
   const mixRefs = useMemo<RecipeReference[]>(
     () =>
@@ -109,6 +126,75 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
       });
     },
     [board],
+  );
+
+  // Place a whole listing/inspiration photo from the drawer onto the canvas.
+  // The server marks it "placed"; it keeps its own sourceType.
+  const placeListingOnCanvas = useCallback(
+    (photo: BoardPhoto) => {
+      void board.addNode({
+        kind: "image",
+        cfImageUrl: photo.cfImageUrl,
+        sourceType: "listing_photo",
+        sourceId: photo.sourceId,
+      });
+    },
+    [board],
+  );
+
+  const placeInspirationOnCanvas = useCallback(
+    (photo: BoardPhoto) => {
+      void board.addNode({
+        kind: "image",
+        cfImageUrl: photo.cfImageUrl,
+        sourceType: "inspiration",
+        sourceId: photo.sourceId,
+      });
+    },
+    [board],
+  );
+
+  // Move a clipping between this room's Samples and the house-wide Global drawer.
+  const setClippingGlobal = useCallback(
+    (clipping: Clipping, next: boolean) => {
+      void board.patchClipping(clipping.id, { isGlobal: next }).then(() => {
+        toast.success(
+          next
+            ? "Moved to Global — it’s in every room now."
+            : "Made room-only.",
+        );
+      });
+    },
+    [board],
+  );
+
+  // Open the extraction dialog against an inspiration photo from the drawer by
+  // wrapping it in the lightweight node shape the dialog reads.
+  const onExtractFromPhoto = useCallback(
+    (photo: BoardPhoto) => {
+      setExtractNode({
+        id: `photo:${photo.sourceId}`,
+        boardId: board.board?.id ?? "",
+        kind: "image",
+        cfImageUrl: photo.cfImageUrl,
+        sourceType: "inspiration",
+        sourceId: photo.sourceId,
+        renderCanvasId: null,
+        parentNodeId: null,
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+        rotation: 0,
+        zIndex: 0,
+        isVisible: true,
+        isLocked: false,
+        metadata: null,
+        createdAt: "",
+        updatedAt: "",
+      });
+    },
+    [board.board?.id],
   );
 
   // Sync-201 recipe executor. Flags the source node "processing" (ambient +
@@ -240,8 +326,14 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
         </div>
 
         <SampleDrawer
+          listingPhotos={board.listingPhotos}
+          inspirationPhotos={board.inspirationPhotos}
           clippings={board.clippings}
+          onPlaceListing={placeListingOnCanvas}
+          onPlaceInspiration={placeInspirationOnCanvas}
           onPlaceClipping={placeClippingOnCanvas}
+          onExtractFromInspiration={onExtractFromPhoto}
+          onSetClippingGlobal={setClippingGlobal}
         />
       </div>
 

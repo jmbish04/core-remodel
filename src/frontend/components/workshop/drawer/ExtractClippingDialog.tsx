@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { InspirationCanvas } from "@/components/render/InspirationCanvas";
 import type { ExtractPayload } from "@/components/render/types";
 
@@ -38,6 +39,7 @@ export function ExtractClippingDialog({
   onExtracted,
 }: ExtractClippingDialogProps) {
   const [label, setLabel] = useState("");
+  const [isGlobal, setIsGlobal] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
 
@@ -45,6 +47,7 @@ export function ExtractClippingDialog({
   // InspirationCanvas can be normalized to 0..1 for the API.
   useEffect(() => {
     setLabel("");
+    setIsGlobal(false);
     setNatural(null);
     if (!node) return;
     const img = new Image();
@@ -74,9 +77,14 @@ export function ExtractClippingDialog({
           height: box.height / dims.h,
         },
         label: label.trim() || undefined,
+        isGlobal: isGlobal || undefined,
       });
       onExtracted(clipping);
-      toast.success("Sample saved to the drawer.");
+      toast.success(
+        isGlobal
+          ? "Sample saved — available in every room."
+          : "Sample saved to the drawer.",
+      );
       onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Couldn't extract that.");
@@ -110,6 +118,27 @@ export function ExtractClippingDialog({
               onChange={(e) => setLabel(e.target.value)}
               placeholder="e.g. Calacatta Viola marble"
               className="ring-1 ring-border/40"
+            />
+          </div>
+
+          <div className="flex items-start justify-between gap-4 rounded-lg bg-muted/30 px-3 py-2.5">
+            <div className="min-w-0 space-y-0.5">
+              <Label
+                htmlFor="clipping-global"
+                className="cursor-pointer text-xs font-medium text-foreground"
+              >
+                Make available in all rooms
+              </Label>
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                e.g. a paint color you’ll reuse house-wide. It’ll show up in
+                every room’s Global drawer.
+              </p>
+            </div>
+            <Switch
+              id="clipping-global"
+              checked={isGlobal}
+              onCheckedChange={setIsGlobal}
+              aria-label="Make this sample available in all rooms"
             />
           </div>
 

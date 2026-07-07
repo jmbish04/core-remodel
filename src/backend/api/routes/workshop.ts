@@ -4,9 +4,14 @@
  * The Workshop is a room-scoped infinite-canvas "sample table"
  * (docs/0014_ai_photo_workshop/IMPLEMENTATION_PLAN_v2.md §"Front door"). Every
  * room gets exactly one `workstation_boards` row (Slice-1 policy); the board
- * holds free-floating `board_nodes` (photos, canvases, clippings, renders),
- * `photo_collections` side-rail piles, and the room's `sample_clippings`
- * "drawer".
+ * holds free-floating `board_nodes` seeded ONLY from blank-canvas artifacts
+ * (photos, canvases, clippings, renders — see the seeding-policy note on
+ * GET /rooms/:roomId/board), `photo_collections` side-rail piles, and the
+ * room's `sample_clippings` "drawer" (room-scoped + globally-promoted rows).
+ * Listing photos and inspiration photos are NOT board nodes — they surface as
+ * two additional non-persisted drawer arrays (`listingPhotos`,
+ * `inspirationPhotos`) on the board response, for the client to render as
+ * separate drawers.
  *
  * Endpoints:
  *   GET    /rooms/:roomId/board                    get-or-create + seed a room's board
@@ -19,13 +24,14 @@
  *   POST   /collections/:id/items                    add a photo to a pile
  *   DELETE /collections/:id/items/:itemId             remove a photo from a pile
  *   POST   /clippings/extract                         extract a reusable clipping
+ *   PATCH  /clippings/:id                             rename / promote-demote global drawer
  *   POST   /nodes/:id/recipe                          run extract|material-swap|mix on a node
  *
  * All routes are mounted behind `requireAccessAuth` (see api/index.ts). Every
  * multi-row write goes through `db.batch` (D1 has no interactive transactions).
  */
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
-import { and, eq } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
@@ -41,7 +47,11 @@ import {
 import { cropAndUploadCfImage, probeCfImageDimensions } from "../../services/render/cf-images";
 import { nearestAspectRatio, PRESERVATION_BLOCK, referenceScopingNote } from "../../services/render/prompt-kit";
 import { runStage } from "../../services/render/stage-runner";
-import { resolveRoomArtifactSeeds } from "../../services/workshop/room-context";
+import {
+  resolveInspirationDrawer,
+  resolveListingPhotoDrawer,
+  resolveRoomArtifactSeeds,
+} from "../../services/workshop/room-context";
 
 export const workshopRouter = new OpenAPIHono<{ Bindings: Env }>();
 
@@ -98,6 +108,7 @@ const ClippingSchema = z.object({
   label: z.string().nullable(),
   bboxJson: z.string().nullable(),
   renderCanvasId: z.string().nullable(),
+  isGlobal: z.boolean(),
   createdAt: z.number(),
   updatedAt: z.number(),
 });
@@ -107,6 +118,13 @@ const BboxSchema = z.object({
   y: z.number().min(0).max(1),
   width: z.number().min(0).max(1),
   height: z.number().min(0).max(1),
+});
+
+/** A drawer entry — a listing/inspiration photo NOT seeded as a board node. */
+const DrawerPhotoSchema = z.object({
+  sourceId: z.string(),
+  cfImageUrl: z.string(),
+  label: z.string().nullable(),
 });
 
 /** Row -> wire shape: epoch-ms timestamps, boolean coercion. */
@@ -143,6 +161,7 @@ function serializeClipping(row: typeof sampleClippings.$inferSelect) {
     label: row.label,
     bboxJson: row.bboxJson,
     renderCanvasId: row.renderCanvasId,
+    isGlobal: row.isGlobal,
     createdAt: row.createdAt.getTime(),
     updatedAt: row.updatedAt.getTime(),
   };
@@ -196,6 +215,8 @@ workshopRouter.openapi(
               nodes: z.array(BoardNodeSchema),
               collections: z.array(CollectionSchema),
               clippings: z.array(ClippingSchema),
+              listingPhotos: z.array(DrawerPhotoSchema),
+              inspirationPhotos: z.array(DrawerPhotoSchema),
             }),
           },
         },
@@ -234,6 +255,10 @@ workshopRouter.openapi(
       if (!board) return c.json({ error: "Failed to create board" }, 500);
 
       if (seeded) {
+        // Slice-1 seeding policy: ONLY blank-canvas artifacts get seeded as
+        // board_nodes — that's what actually gets decorated. Listing +
+        // inspiration photos are drawer-only (see listingPhotos/inspirationPhotos
+        // below) and are never written to board_nodes at seed time.
         const seeds = await resolveRoomArtifactSeeds(c.env, roomId);
         if (seeds.length > 0) {
           const COLS = 4;
@@ -255,15 +280,60 @@ workshopRouter.openapi(
         }
       }
 
-      const [nodes, collections, clippings] = await Promise.all([
+      let nodes = await db
+        .select()
+        .from(boardNodes)
+        .where(eq(boardNodes.boardId, board.id))
+        .orderBy(boardNodes.zIndex)
+        .all();
+
+      // ---- Slice-1 seeding-policy migration (lazy, one-time cleanup) ----
+      // Boards created before this policy landed have listing_photo/inspiration
+      // nodes seeded directly on the canvas. Delete any node matching the
+      // "original seed" signature — sourceType IN ('listing_photo','inspiration')
+      // AND parentNodeId IS NULL (no on-board lineage) AND renderCanvasId IS NULL
+      // (never touched the render pipeline) — and exclude them from the
+      // response. This intentionally leaves clipping/render nodes and anything
+      // with lineage untouched.
+      //
+      // Caveat: a node the user deliberately drags onto the canvas from a
+      // drawer LATER will also match this signature (fresh drop = no parent,
+      // no render lineage) and would get swept up by a later board load. To
+      // prevent that, POST /boards/:boardId/nodes stamps
+      // metadata = '{"placed":true}' whenever sourceType is listing_photo or
+      // inspiration, and this cleanup exempts any node whose metadata parses
+      // to { placed: true }.
+      const staleSeedNodes = nodes.filter((node) => {
+        if (node.sourceType !== "listing_photo" && node.sourceType !== "inspiration") return false;
+        if (node.parentNodeId !== null || node.renderCanvasId !== null) return false;
+        if (node.metadata) {
+          try {
+            const parsed = JSON.parse(node.metadata) as { placed?: boolean };
+            if (parsed?.placed === true) return false;
+          } catch {
+            // Unparseable metadata — treat as not-placed, fall through to cleanup.
+          }
+        }
+        return true;
+      });
+
+      if (staleSeedNodes.length > 0) {
+        const staleIds = new Set(staleSeedNodes.map((node) => node.id));
+        const deleteStatements = staleSeedNodes.map((node) => db.delete(boardNodes).where(eq(boardNodes.id, node.id)));
+        await db.batch(deleteStatements as [(typeof deleteStatements)[number], ...(typeof deleteStatements)[number][]]);
+        nodes = nodes.filter((node) => !staleIds.has(node.id));
+      }
+
+      const [collections, clippings, listingPhotos, inspirationPhotos] = await Promise.all([
+        db.select().from(photoCollections).where(eq(photoCollections.boardId, board.id)).all(),
+        // Clippings visibility: room-scoped OR promoted to the global drawer.
         db
           .select()
-          .from(boardNodes)
-          .where(eq(boardNodes.boardId, board.id))
-          .orderBy(boardNodes.zIndex)
+          .from(sampleClippings)
+          .where(or(eq(sampleClippings.roomId, roomId), eq(sampleClippings.isGlobal, true)))
           .all(),
-        db.select().from(photoCollections).where(eq(photoCollections.boardId, board.id)).all(),
-        db.select().from(sampleClippings).where(eq(sampleClippings.roomId, roomId)).all(),
+        resolveListingPhotoDrawer(c.env, roomId),
+        resolveInspirationDrawer(c.env, roomId),
       ]);
 
       const collectionsWithItems = await Promise.all(
@@ -296,6 +366,8 @@ workshopRouter.openapi(
           nodes: nodes.map(serializeNode),
           collections: collectionsWithItems,
           clippings: clippings.map(serializeClipping),
+          listingPhotos,
+          inspirationPhotos,
         },
         200,
       );
@@ -352,7 +424,18 @@ workshopRouter.openapi(
       const board = await db.select().from(workstationBoards).where(eq(workstationBoards.id, boardId)).get();
       if (!board) return c.json({ error: "Board not found" }, 404);
 
+      // Nodes placed on the canvas from a drawer (listing_photo / inspiration)
+      // must be exempted from the lazy Slice-1 seeding-policy cleanup in
+      // GET /rooms/:roomId/board — that cleanup sweeps any parentless,
+      // render-lineage-free node of these sourceTypes as a stale pre-policy
+      // seed, and a user-placed drawer drop would otherwise match the same
+      // signature. Stamping metadata = {placed:true} here is how the cleanup
+      // tells the two apart.
       const id = crypto.randomUUID();
+      const metadata =
+        body.sourceType === "listing_photo" || body.sourceType === "inspiration"
+          ? JSON.stringify({ placed: true })
+          : null;
       await db
         .insert(boardNodes)
         .values({
@@ -364,6 +447,7 @@ workshopRouter.openapi(
           sourceId: body.sourceId ?? null,
           renderCanvasId: body.renderCanvasId ?? null,
           parentNodeId: body.parentNodeId ?? null,
+          metadata,
           x: body.x ?? 0,
           y: body.y ?? 0,
           width: body.width ?? 320,
@@ -777,6 +861,10 @@ const ExtractClippingSchema = z.object({
   sourceCfImageUrl: z.url(),
   bbox: BboxSchema,
   label: z.string().min(1).optional(),
+  // Global drawer: promote this clipping for use in every room's Workshop
+  // (e.g. a paint color chosen house-wide). roomId is still recorded for
+  // provenance. Defaults to false — most extractions stay room-scoped.
+  isGlobal: z.boolean().optional(),
 });
 
 async function extractClipping(
@@ -797,6 +885,7 @@ async function extractClipping(
       label: input.label ?? null,
       bboxJson: JSON.stringify(input.bbox),
       renderCanvasId: null,
+      isGlobal: input.isGlobal ?? false,
     })
     .run();
 
@@ -835,10 +924,68 @@ workshopRouter.openapi(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PATCH /clippings/:id — promote/demote the global drawer, rename
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PatchClippingSchema = z.object({
+  isGlobal: z.boolean().optional(),
+  label: z.string().min(1).optional(),
+});
+
+workshopRouter.openapi(
+  createRoute({
+    method: "patch",
+    path: "/clippings/{id}",
+    request: {
+      params: z.object({ id: z.string() }),
+      body: { content: { "application/json": { schema: PatchClippingSchema } } },
+    },
+    responses: {
+      200: {
+        description: "Clipping updated",
+        content: { "application/json": { schema: z.object({ success: z.literal(true), clipping: ClippingSchema }) } },
+      },
+      404: { description: "Clipping not found", content: { "application/json": { schema: ErrorSchema } } },
+      500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
+    },
+    tags: ["workshop"],
+    summary: "Promote/demote a clipping to the global drawer, or rename it",
+    operationId: "patchClipping",
+  }),
+  async (c) => {
+    try {
+      const { id } = c.req.valid("param");
+      const body = c.req.valid("json");
+      const db = drizzle(c.env.DB);
+
+      const existing = await db.select().from(sampleClippings).where(eq(sampleClippings.id, id)).get();
+      if (!existing) return c.json({ error: "Clipping not found" }, 404);
+
+      await db
+        .update(sampleClippings)
+        .set({ ...body, updatedAt: new Date() })
+        .where(eq(sampleClippings.id, id))
+        .run();
+
+      const clipping = await db.select().from(sampleClippings).where(eq(sampleClippings.id, id)).get();
+      if (!clipping) return c.json({ error: "Clipping not found" }, 404);
+      return c.json({ success: true as const, clipping: serializeClipping(clipping) }, 200);
+    } catch (err) {
+      console.error("[workshop] PATCH /clippings/:id failed:", err);
+      return c.json({ error: "Failed to update clipping" }, 500);
+    }
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // POST /nodes/:id/recipe — extract | material-swap | mix
 // ─────────────────────────────────────────────────────────────────────────────
 
-const RecipeExtractParams = z.object({ bbox: BboxSchema, label: z.string().min(1).optional() });
+const RecipeExtractParams = z.object({
+  bbox: BboxSchema,
+  label: z.string().min(1).optional(),
+  isGlobal: z.boolean().optional(),
+});
 const RecipeMaterialSwapParams = z.object({
   referenceCfImageUrls: z.array(z.url()).min(1).max(10),
   prompt: z.string().min(1).optional(),
@@ -924,6 +1071,7 @@ workshopRouter.openapi(
           sourceCfImageUrl: node.cfImageUrl,
           bbox: body.params.bbox,
           label: body.params.label,
+          isGlobal: body.params.isGlobal,
         });
 
         const childId = crypto.randomUUID();

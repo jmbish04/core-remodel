@@ -42,6 +42,10 @@ export const sampleClippings = sqliteTable(
     renderCanvasId: text("render_canvas_id").references(() => renderCanvases.id, {
       onDelete: "set null",
     }),
+    // Global drawer membership: a clipping the user promoted for use in EVERY
+    // room's Workshop (e.g. a paint color chosen house-wide). roomId still
+    // records where it was extracted (provenance); isGlobal widens visibility.
+    isGlobal: integer("is_global", { mode: "boolean" }).notNull().default(false),
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),

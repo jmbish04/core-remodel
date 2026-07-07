@@ -196,11 +196,25 @@ export async function extractClipping(input: {
   sourceCfImageUrl: string;
   bbox: NormalizedBBox;
   label?: string;
+  /** When true, the new clipping is promoted to the global (all-rooms) drawer. */
+  isGlobal?: boolean;
 }): Promise<Clipping> {
   const { data } = await request<{ clipping: Clipping }>(`/clippings/extract`, {
     method: "POST",
     body: JSON.stringify(input),
   });
+  return data.clipping;
+}
+
+/** Update a clipping's global-drawer membership and/or its label. */
+export async function patchClipping(
+  id: string,
+  patch: { isGlobal?: boolean; label?: string },
+): Promise<Clipping> {
+  const { data } = await request<{ success: boolean; clipping: Clipping }>(
+    `/clippings/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(patch) },
+  );
   return data.clipping;
 }
 
