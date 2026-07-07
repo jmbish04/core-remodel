@@ -147,13 +147,11 @@ export function AdminChatPanel() {
   const [chatId, setChatId] = useState(() => `admin-chat-${Date.now()}`);
 
   const agent = useAgent({ agent: "AdminChatAgent", name: chatId });
-  // `options.model` is the legacy AIChatAgent protocol field AdminChatAgent's
-  // onChatMessage reads; @cloudflare/ai-chat 0.7.1 no longer types it, so it
-  // rides through an untyped spread (dropped harmlessly if the transport
-  // ignores it — the agent then falls back to its default model).
+  // Custom client params travel via `body` in @cloudflare/ai-chat 0.7.1;
+  // AdminChatAgent.onChatMessage reads options.body.model server-side.
   const chat = useAgentChat({
     agent,
-    ...({ options: { model } } as object),
+    body: { model },
   });
   const runtime = useAISDKRuntime(chat);
 
