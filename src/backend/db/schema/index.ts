@@ -102,3 +102,7 @@ export * from "./showroom/index";
 export * from "./brands/index";
 
 export * from "./scrum/index";
+
+// gmail
+export * from "./gmail/gmail_threads";
+export * from "./gmail/gmail_messages";
