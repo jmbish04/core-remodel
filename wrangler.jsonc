@@ -83,7 +83,16 @@
     },
   ],
   "triggers": {
-    "crons": ["0 14 * * *", "* * * * *"],
+    // "15 */4 * * *": Gmail comms hub ingestion (0013 P3-07) — every 4 hours.
+    // A dedicated coarse trigger rather than piggybacking the "* * * * *"
+    // master tick: the master tick only drives `dispatchDueWorkflows` (fires
+    // Workflow bindings off `system_cron_schedules` rows) plus a couple of
+    // per-minute self-heal monitors — it has no notion of arbitrary
+    // non-Workflow handlers, and Gmail ingestion doesn't need per-minute
+    // resolution (Gmail search + full-message fetch + embedding per company
+    // is far too heavy to run 1,440x/day). A dedicated cron keeps the ingest
+    // job isolated, easy to disable independently, and cheap.
+    "crons": ["0 14 * * *", "* * * * *", "15 */4 * * *"],
   },
   "kv_namespaces": [
     {
@@ -199,6 +208,23 @@
       "binding": "CLICKUP_TEAM_ID",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "CLICKUP_TEAM_ID",
+    },
+    {
+      // Gmail comms hub (P3-07): service-account DWD. The private key exceeds
+      // the secrets-store value limit, so it is SPLIT — concatenate PT_1 + PT_2.
+      "binding": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1",
+      "store_id": "8c42fa70938644e0a8a109744467375f",
+      "secret_name": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1",
+    },
+    {
+      "binding": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2",
+      "store_id": "8c42fa70938644e0a8a109744467375f",
+      "secret_name": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2",
+    },
+    {
+      "binding": "GOOGLE_CREDS_SA_CLIENT_EMAIL",
+      "store_id": "8c42fa70938644e0a8a109744467375f",
+      "secret_name": "GOOGLE_CREDS_SA_CLIENT_EMAIL",
     },
   ],
   "durable_objects": {

@@ -505,6 +505,13 @@
       "when": 1783404380265,
       "tag": "0071_narrow_dazzler",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "6",
+      "when": 1783405815360,
+      "tag": "0072_fuzzy_skullbuster",
+      "breakpoints": true
     }
   ]
 }
