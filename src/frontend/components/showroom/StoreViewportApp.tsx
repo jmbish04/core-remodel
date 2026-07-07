@@ -677,12 +677,12 @@ export function StoreViewportApp({
   const shopByBrand: ShopByBrandItem[] = useMemo(() => {
     if (!store) return [];
     const countByBrand = new Map<number, number>();
-    for (const p of store.products) {
+    for (const p of store.products ?? []) {
       if (p.brandId != null) {
         countByBrand.set(p.brandId, (countByBrand.get(p.brandId) ?? 0) + 1);
       }
     }
-    return store.brands.map((b) => ({
+    return (store.brands ?? []).map((b) => ({
       id: b.id,
       name: b.name,
       iconCfImagesUrl: b.iconCfImagesUrl,

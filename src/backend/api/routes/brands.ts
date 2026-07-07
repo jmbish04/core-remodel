@@ -802,11 +802,14 @@ const ENRICHMENT_BACKFILL_LIMIT = 20;
  *
  * Finds up to `ENRICHMENT_BACKFILL_LIMIT` brands where any of
  * `websiteUrl`, `iconCfImagesUrl`, `onlineRating`, or `pricePoint` is NULL,
- * then runs `enrichNewBrand` for each — fill-blanks only, same doctrine as
- * inline scrape-time enrichment. Runs via a single chained
- * `c.executionCtx.waitUntil(...)` promise (sequential, not parallel) so we
- * never stampede Workers-AI with concurrent calls. Returns immediately with
- * a 202 + the count queued.
+ * ordered by `updatedAt` ASCENDING — every enrichment attempt (successful or
+ * not) bumps `updatedAt`, so this ordering pushes already-attempted brands to
+ * the back of the queue instead of starving it with permanently-unenrichable
+ * rows on every run. Then runs `enrichNewBrand` for each — fill-blanks only,
+ * same doctrine as inline scrape-time enrichment. Runs sequentially inside a
+ * single `c.executionCtx.waitUntil(...)` async IIFE (never parallel, so we
+ * don't stampede Workers-AI), with a per-brand try/catch so one failure can't
+ * abort the rest of the queue. Returns immediately with a 202 + count queued.
  */
 brandsRouter.post("/backfill-enrichment", async (c) => {
   const db = drizzle(c.env.DB);
@@ -822,23 +825,26 @@ brandsRouter.post("/backfill-enrichment", async (c) => {
         isNull(brands.pricePoint),
       ),
     )
+    .orderBy(brands.updatedAt)
     .limit(ENRICHMENT_BACKFILL_LIMIT);
 
   if (candidates.length === 0) {
     return c.json({ success: true, queued: 0 }, 202);
   }
 
-  // Sequential promise chain — one brand enriched at a time, never parallel.
-  const chain = candidates.reduce(
-    (prev, brand) =>
-      prev.then(() => enrichNewBrand(c.env, brand.id, brand.name)).then(() => undefined),
-    Promise.resolve<void>(undefined),
-  );
-
   c.executionCtx.waitUntil(
-    chain.catch((err) => {
-      console.error("[brands] POST /backfill-enrichment chain failed:", err);
-    }),
+    (async () => {
+      for (const brand of candidates) {
+        try {
+          await enrichNewBrand(c.env, brand.id, brand.name);
+        } catch (err) {
+          console.error(
+            `[brands] POST /backfill-enrichment failed for brand ${brand.id}:`,
+            err,
+          );
+        }
+      }
+    })(),
   );
 
   return c.json({ success: true, queued: candidates.length }, 202);

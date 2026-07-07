@@ -50,6 +50,12 @@ const REJECTED_DOMAINS = [
   "etsy.",
   "google.",
   "yelp.",
+  "wikipedia.",
+  "linkedin.",
+  "twitter.",
+  "x.com",
+  "youtube.",
+  "tiktok.",
 ];
 
 /** Minimum confidence (0–1) required to accept a Workers-AI-guessed website — hallucination guard. */
@@ -150,16 +156,14 @@ export async function enrichNewBrand(
     }
 
     const snippet = contextSnippet?.trim()?.slice(0, CONTEXT_CHAR_BUDGET);
+    const updates: Partial<typeof brands.$inferInsert> = {};
 
     // ── 1. Website discovery (fill-blanks: only if websiteUrl is NULL) ──────
     let websiteUrl: string | null = current.websiteUrl;
     if (!websiteUrl) {
       websiteUrl = await discoverBrandWebsite(env, brandName);
       if (websiteUrl) {
-        await db
-          .update(brands)
-          .set({ websiteUrl, updatedAt: new Date() })
-          .where(eq(brands.id, brandId));
+        updates.websiteUrl = websiteUrl;
         result.websiteFound = true;
       }
     }
@@ -172,7 +176,6 @@ export async function enrichNewBrand(
 
     if (needsProfile) {
       const profile = await guessBrandProfile(env, brandName, snippet);
-      const updates: Partial<typeof brands.$inferInsert> = {};
 
       if (current.onlineRating === null && profile.onlineRating !== null) {
         updates.onlineRating = clampRating(profile.onlineRating);
@@ -186,12 +189,15 @@ export async function enrichNewBrand(
         updates.description = profile.description;
         result.descriptionFilled = true;
       }
-
-      if (Object.keys(updates).length > 0) {
-        updates.updatedAt = new Date();
-        await db.update(brands).set(updates).where(eq(brands.id, brandId));
-      }
     }
+
+    // Consolidate into a single write. `updatedAt` is ALWAYS bumped — even
+    // when nothing was enriched — to mark that an attempt was made. This
+    // pairs with the backfill endpoint's `ORDER BY updatedAt ASC` so a
+    // permanently-unenrichable brand is pushed to the back of the queue
+    // instead of being re-selected first (and stampeded) on every run.
+    updates.updatedAt = new Date();
+    await db.update(brands).set(updates).where(eq(brands.id, brandId));
 
     // ── 3. Icon (fill-blanks: only if iconCfImagesUrl is NULL and we have a URL) ──
     if (!current.iconCfImagesUrl && websiteUrl) {
@@ -262,13 +268,18 @@ async function discoverViaCustomSearch(
     const link = item.link;
     if (!link) continue;
     let host: string;
+    let origin: string;
     try {
-      host = new URL(link).hostname.toLowerCase();
+      const u = new URL(link);
+      host = u.hostname.toLowerCase();
+      origin = u.origin;
     } catch {
       continue;
     }
     if (REJECTED_DOMAINS.some((rejected) => host.includes(rejected))) continue;
-    return link;
+    // Normalize to the origin (homepage) — never store a deep link as the
+    // brand's canonical website (keeps favicon hydration + display clean).
+    return origin;
   }
 
   return null;
@@ -322,15 +333,17 @@ If you are not highly confident, set websiteUrl to null and confidence low. Do N
       return null;
     }
 
-    // Validate it actually parses as a URL and isn't a rejected marketplace domain.
+    // Validate it actually parses as a URL and isn't a rejected marketplace
+    // domain, and normalize to the origin (homepage) — same discipline as the
+    // Custom Search path — so we never store a deep link.
     try {
-      const host = new URL(websiteUrl).hostname.toLowerCase();
+      const u = new URL(websiteUrl);
+      const host = u.hostname.toLowerCase();
       if (REJECTED_DOMAINS.some((rejected) => host.includes(rejected))) return null;
+      return u.origin;
     } catch {
       return null;
     }
-
-    return websiteUrl;
   } catch (err) {
     console.error(`[brand-enrichment] Workers-AI website guess failed for "${brandName}":`, err);
     return null;
