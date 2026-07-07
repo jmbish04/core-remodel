@@ -82,6 +82,8 @@ export * from "./admin/research_sessions";
 export * from "./directory/business_types";
 export * from "./directory/companies";
 export * from "./directory/company_contacts";
+export * from "./directory/company_notes";
+export * from "./directory/company_todos";
 export * from "./bid-portfolios/contacts";
 export * from "./bid-portfolios/bid_portfolios";
 export * from "./bid-portfolios/bid_portfolio_room_configs";

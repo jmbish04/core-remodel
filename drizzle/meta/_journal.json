@@ -498,6 +498,13 @@
       "when": 1783403699508,
       "tag": "0070_majestic_daredevil",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "6",
+      "when": 1783404380265,
+      "tag": "0071_narrow_dazzler",
+      "breakpoints": true
     }
   ]
 }

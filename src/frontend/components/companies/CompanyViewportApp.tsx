@@ -8,6 +8,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { EntityDocumentsPanel } from "@/components/documents";
+import { CompanyNotesTab } from "@/components/companies/crm/CompanyNotesTab";
+import { CompanyTodosTab } from "@/components/companies/crm/CompanyTodosTab";
 
 interface BusinessType {
   id: number;
@@ -132,6 +134,8 @@ export function CompanyViewportApp({ companyId }: { companyId: number }) {
               <TabsTrigger value="rolodex">Rolodex ({contacts.length})</TabsTrigger>
               <TabsTrigger value="bids">Bid History</TabsTrigger>
               <TabsTrigger value="documents">Documents</TabsTrigger>
+              <TabsTrigger value="notes">Notes</TabsTrigger>
+              <TabsTrigger value="todos">Todos</TabsTrigger>
             </TabsList>
             
             <TabsContent value="overview" className="space-y-6 mt-6">
@@ -267,6 +271,14 @@ export function CompanyViewportApp({ companyId }: { companyId: number }) {
                 entityId={String(companyId)}
                 heading={`Documents · ${company.name}`}
               />
+            </TabsContent>
+
+            <TabsContent value="notes" className="space-y-6 mt-6">
+              <CompanyNotesTab companyId={companyId} />
+            </TabsContent>
+
+            <TabsContent value="todos" className="space-y-6 mt-6">
+              <CompanyTodosTab companyId={companyId} />
             </TabsContent>
           </Tabs>
         </div>

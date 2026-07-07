@@ -75,6 +75,7 @@ import { placesRouter } from "./routes/places";
 import { adminIntegrationsRouter } from "./routes/admin-integrations";
 import { adminPlansRouter } from "./routes/admin-plans";
 import { clickupRouter } from "./routes/clickup";
+import { companyCrmRouter } from "./routes/company-crm";
 import { requireAccessAuth } from "@backend/utils/access";
 
 export type Variables = {
@@ -120,6 +121,9 @@ app.use("/api/materials", requireAccessAuth);
 app.use("/api/materials/*", requireAccessAuth);
 app.use("/api/places", requireAccessAuth);
 app.use("/api/places/*", requireAccessAuth);
+// Company CRM (notes + todos, 0013 roadmap P3-03/P3-04) — admin-only, no public read.
+app.use("/api/companies", requireAccessAuth);
+app.use("/api/companies/*", requireAccessAuth);
 app.use("/api/bid-portfolios/*", async (c, next) => {
   // Public routes do not require auth
   const path = new URL(c.req.url).pathname;
@@ -208,6 +212,7 @@ app.route("/api/places", placesRouter);
 app.route("/api/admin/integrations", adminIntegrationsRouter);
 app.route("/api/admin/plans", adminPlansRouter);
 app.route("/api/clickup", clickupRouter);
+app.route("/api/companies", companyCrmRouter);
 app.route("/", openapiRouter);
 
 export { app };
