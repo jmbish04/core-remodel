@@ -11,8 +11,13 @@ import {
 import { ensureHomeCatalogSeed } from "@backend/services/home-catalog";
 import { improveDescription, summarizeDocumentForRoom } from "@backend/services/ai-text";
 import { extractAndEmbedDocument } from "@backend/services/documents/extraction";
+import {
+  escapeLikeTerm,
+  likeEscaped,
+  selectDocumentsByIds,
+} from "@backend/services/documents/db-helpers";
 import { isRequestAuthenticated, requireAccessAuth } from "@backend/utils/access";
-import { and, desc, eq, inArray, like, or } from "drizzle-orm";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
@@ -566,7 +571,7 @@ supportingDocumentsRouter.get("/search", async (c) => {
     }
 
     // --- D1 keyword LIKE search ---
-    const likePattern = `%${q.replace(/[%_]/g, (m) => `\\${m}`)}%`;
+    const likePattern = `%${escapeLikeTerm(q)}%`;
     const keywordRows = await db
       .select()
       .from(supportingDocuments)
@@ -574,9 +579,9 @@ supportingDocumentsRouter.get("/search", async (c) => {
         and(
           eq(supportingDocuments.isActive, true),
           or(
-            like(supportingDocuments.title, likePattern),
-            like(supportingDocuments.description, likePattern),
-            like(supportingDocuments.extractedText, likePattern),
+            likeEscaped(supportingDocuments.title, likePattern),
+            likeEscaped(supportingDocuments.description, likePattern),
+            likeEscaped(supportingDocuments.extractedText, likePattern),
           ),
         ),
       )
@@ -591,11 +596,8 @@ supportingDocumentsRouter.get("/search", async (c) => {
       return c.json({ success: true, query: q, count: 0, results: [] });
     }
 
-    const rows = await db
-      .select()
-      .from(supportingDocuments)
-      .where(inArray(supportingDocuments.id, Array.from(candidateIds)))
-      .all();
+    // Chunked — candidateIds is unbounded and D1 caps bound params at 100.
+    const rows = await selectDocumentsByIds(db, Array.from(candidateIds));
 
     const rowById = new Map(rows.map((row) => [row.id, row]));
 

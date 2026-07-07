@@ -22,10 +22,15 @@
  */
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
-import { and, eq, inArray, like, or } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { documentEntityAssociations, documentSavedViews, supportingDocuments } from "@backend/db";
+import {
+  escapeLikeTerm,
+  likeEscaped,
+  selectDocumentsByIds,
+} from "@backend/services/documents/db-helpers";
 import { isRequestAuthenticated, requireAccessAuth } from "@backend/utils/access";
 
 export const documentViewsRouter = new OpenAPIHono<{ Bindings: Env }>();
@@ -197,7 +202,8 @@ async function resolveViewDocuments(
   if (view.kind === "static") {
     const docIds = parseDocIds(view.docIdsJson);
     if (docIds.length === 0) return [];
-    return db.select().from(supportingDocuments).where(inArray(supportingDocuments.id, docIds)).all();
+    // Chunked — docIds is user-authored and D1 caps bound params at 100.
+    return selectDocumentsByIds(db, docIds);
   }
 
   // dynamic
@@ -214,12 +220,12 @@ async function resolveViewDocuments(
     conditions.push(eq(supportingDocuments.visibility, filters.visibility));
   }
   if (filters.search) {
-    const likePattern = `%${filters.search.replace(/[%_]/g, (m) => `\\${m}`)}%`;
+    const likePattern = `%${escapeLikeTerm(filters.search)}%`;
     conditions.push(
       or(
-        like(supportingDocuments.title, likePattern),
-        like(supportingDocuments.description, likePattern),
-        like(supportingDocuments.extractedText, likePattern),
+        likeEscaped(supportingDocuments.title, likePattern),
+        likeEscaped(supportingDocuments.description, likePattern),
+        likeEscaped(supportingDocuments.extractedText, likePattern),
       )!,
     );
   }
@@ -277,11 +283,8 @@ async function buildWarnings(
   } else {
     const docIds = parseDocIds(view.docIdsJson);
     if (docIds.length > 0) {
-      const rows = await db
-        .select()
-        .from(supportingDocuments)
-        .where(inArray(supportingDocuments.id, docIds))
-        .all();
+      // Chunked — docIds is user-authored and D1 caps bound params at 100.
+      const rows = await selectDocumentsByIds(db, docIds);
       const privateTitles = rows.filter((r) => r.visibility === "private").map((r) => r.title);
       if (privateTitles.length > 0) {
         warnings.push(

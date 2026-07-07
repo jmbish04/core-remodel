@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/select";
 
 import {
+  apiGet,
   apiSend,
   type DocumentAssociation,
   ENTITY_TYPES,
@@ -60,12 +61,9 @@ export function AssociationsDialog({
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
-    fetch(`/api/supporting-documents/${documentId}/associations`, {
-      credentials: "include",
-    })
-      .then((res) => (res.ok ? (res.json() as Promise<AssociationsResponse>) : null))
+    apiGet<AssociationsResponse>(`/api/supporting-documents/${documentId}/associations`)
       .then((payload) => {
-        if (!cancelled && payload?.success) setAssociations(payload.associations);
+        if (!cancelled) setAssociations(payload.associations);
       })
       .catch(() => {
         /* keep whatever we had — POST/DELETE responses still refresh the list */
