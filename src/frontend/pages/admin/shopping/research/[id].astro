@@ -1,0 +1,17 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ResearchJobViewportApp } from "@/components/research-console";
+
+const { id } = Astro.params;
+const jobId = id ? Number.parseInt(id, 10) : NaN;
+if (!Number.isFinite(jobId)) {
+  return Astro.redirect("/admin/shopping/research");
+}
+---
+
+<BaseLayout
+  title="Research job — The Monolith"
+  description="Live research job viewport: streaming plan, step-by-step artifacts, sourced report, and discovery-candidate intake."
+>
+  <ResearchJobViewportApp client:only="react" id={jobId} />
+</BaseLayout>

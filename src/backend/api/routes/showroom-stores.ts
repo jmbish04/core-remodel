@@ -29,6 +29,7 @@ import {
   storeTagMapping,
   storeProductResearch,
   storeProductRating,
+  storeProductIntel,
   productImages,
   productSpecs,
   showroomImages,
@@ -729,9 +730,11 @@ showroomStoresRouter.openapi(
 /**
  * GET /products/:pid/research/context — Sourcing artifacts for one product.
  *
- * Returns the product row plus its research findings (sentiment-coded),
- * scraped product images, extracted specs, and the homeowner's active rating.
- * Powers the product-scoped ledger, media gallery, and specs panels.
+ * Returns the product row (denormalized with brandName / storeName) plus its
+ * research findings (sentiment-coded), scraped product images, extracted
+ * specs, the deep-research intel row, and the homeowner's active rating.
+ * Powers the product-scoped ledger, media gallery, specs panels, and the
+ * ecommerce viewport ({ product, findings, specs, images, intel }).
  */
 showroomStoresRouter.get("/products/:pid/research/context", async (c) => {
   const db = drizzle(c.env.DB);
@@ -750,40 +753,63 @@ showroomStoresRouter.get("/products/:pid/research/context", async (c) => {
     return c.json({ success: false, error: "Product not found" }, 404);
   }
 
-  const [findings, images, specs, ratings] = await Promise.all([
-    db
-      .select()
-      .from(storeProductResearch)
-      .where(eq(storeProductResearch.storeProductId, productId))
-      .orderBy(desc(storeProductResearch.timestamp)),
-    db
-      .select()
-      .from(productImages)
-      .where(eq(productImages.storeProductId, productId))
-      .orderBy(desc(productImages.createdAt)),
-    db
-      .select()
-      .from(productSpecs)
-      .where(eq(productSpecs.storeProductId, productId))
-      .orderBy(desc(productSpecs.confidence)),
-    db
-      .select()
-      .from(storeProductRating)
-      .where(
-        and(
-          eq(storeProductRating.storeProductId, productId),
-          eq(storeProductRating.isActive, true),
+  const [findings, images, specs, ratings, intelRows, storeRows, brandRows] =
+    await Promise.all([
+      db
+        .select()
+        .from(storeProductResearch)
+        .where(eq(storeProductResearch.storeProductId, productId))
+        .orderBy(desc(storeProductResearch.timestamp)),
+      db
+        .select()
+        .from(productImages)
+        .where(eq(productImages.storeProductId, productId))
+        .orderBy(desc(productImages.createdAt)),
+      db
+        .select()
+        .from(productSpecs)
+        .where(eq(productSpecs.storeProductId, productId))
+        .orderBy(desc(productSpecs.confidence)),
+      db
+        .select()
+        .from(storeProductRating)
+        .where(
+          and(
+            eq(storeProductRating.storeProductId, productId),
+            eq(storeProductRating.isActive, true),
+          ),
         ),
-      ),
-  ]);
+      db
+        .select()
+        .from(storeProductIntel)
+        .where(eq(storeProductIntel.storeProductId, productId))
+        .limit(1),
+      db
+        .select({ id: showroomStores.id, name: showroomStores.name })
+        .from(showroomStores)
+        .where(eq(showroomStores.id, product.storeId))
+        .limit(1),
+      product.brandId != null
+        ? db
+            .select({ id: brands.id, name: brands.name })
+            .from(brands)
+            .where(eq(brands.id, product.brandId))
+            .limit(1)
+        : Promise.resolve([] as Array<{ id: number; name: string }>),
+    ]);
 
   return c.json({
     success: true,
-    product,
+    product: {
+      ...product,
+      brandName: brandRows[0]?.name ?? null,
+      storeName: storeRows[0]?.name ?? null,
+    },
     findings,
     images,
     specs,
     rating: ratings[0] ?? null,
+    intel: intelRows[0] ?? null,
   });
 });
 
@@ -2093,7 +2119,73 @@ showroomStoresRouter.post("/:id/products", async (c) => {
     })(),
   );
 
+  // Kick off the deep-research enrichment workflow (reviews, price intel,
+  // brand-site scrape, photos). Fire-and-forget — a trigger failure must not
+  // fail product creation.
+  c.executionCtx.waitUntil(
+    c.env.PRODUCT_RESEARCH_WORKFLOW.create({
+      params: { storeProductId: inserted.id },
+    }).catch((err) =>
+      console.error("[product-research] trigger failed:", err),
+    ),
+  );
+
   return c.json({ product: inserted }, 201);
+});
+
+/**
+ * POST /products/:pid/research — Manually (re)trigger the product
+ * deep-research workflow for one product.
+ *
+ * Returns 409 when a run is already in flight (intel row status "running"),
+ * otherwise marks the intel row "pending" and creates a new
+ * PRODUCT_RESEARCH_WORKFLOW instance. Response: `{ success: true, queued: true }`.
+ */
+showroomStoresRouter.post("/products/:pid/research", async (c) => {
+  const db = drizzle(c.env.DB);
+  const productId = Number(c.req.param("pid"));
+  if (!Number.isInteger(productId)) {
+    return c.json({ success: false, error: "Invalid product id" }, 400);
+  }
+
+  const [product] = await db
+    .select({ id: showroomStoreProducts.id })
+    .from(showroomStoreProducts)
+    .where(eq(showroomStoreProducts.id, productId))
+    .limit(1);
+
+  if (!product) {
+    return c.json({ success: false, error: "Product not found" }, 404);
+  }
+
+  const [intel] = await db
+    .select({ researchStatus: storeProductIntel.researchStatus })
+    .from(storeProductIntel)
+    .where(eq(storeProductIntel.storeProductId, productId))
+    .limit(1);
+
+  if (intel?.researchStatus === "running") {
+    return c.json(
+      { success: false, error: "Product research is already running" },
+      409,
+    );
+  }
+
+  // Reflect the queued state immediately so the UI shows progress before the
+  // workflow's own mark-running step lands.
+  await db
+    .insert(storeProductIntel)
+    .values({ storeProductId: productId, researchStatus: "pending" })
+    .onConflictDoUpdate({
+      target: storeProductIntel.storeProductId,
+      set: { researchStatus: "pending", updatedAt: new Date() },
+    });
+
+  await c.env.PRODUCT_RESEARCH_WORKFLOW.create({
+    params: { storeProductId: productId },
+  });
+
+  return c.json({ success: true, queued: true });
 });
 
 /**

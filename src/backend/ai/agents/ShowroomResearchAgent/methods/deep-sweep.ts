@@ -21,8 +21,21 @@ import {
   runDeepResearchForCitationPlan,
   type DeepResearchMcpScope,
 } from "@backend/services/gemini/deep-research";
+import {
+  runDeepResearch,
+  type DeepResearchResult,
+} from "@backend/ai/deep-research";
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
+import {
+  beginStep,
+  completeJob,
+  completeStep,
+  createResearchJob,
+  enginePhaseRecorder,
+  failJob,
+  failStep,
+} from "@backend/services/research-jobs";
 import {
   buildProductResearchPrompt,
   loadProductPromptContext,
@@ -1028,6 +1041,131 @@ export async function deepSweepProduct(
   return result;
 }
 
+/** Minimum grounding confidence for an engine claim to become a finding row. */
+const ENGINE_MIN_CLAIM_CONFIDENCE = 0.5;
+/** Per-source and overall caps so a chatty engine run can't flood D1. */
+const ENGINE_MAX_CLAIMS_PER_SOURCE = 5;
+const ENGINE_MAX_TOTAL_FINDINGS = 40;
+/** D1 `store_research.finding` stays readable — trim runaway segments. */
+const ENGINE_MAX_FINDING_CHARS = 600;
+
+/**
+ * Persist a deep-research engine run as showroom `store_research` findings +
+ * a Vectorize embed of the findings digest.
+ *
+ * Findings rows are derived from the engine's grounded source map: each
+ * source's `supportedClaims` (model-output text segments backed by that
+ * source with a grounding confidence score) become rows with `findingUrl`
+ * set to the attributable source URL. The full cited report is intentionally
+ * NOT persisted for showrooms — the engine is used here purely as a
+ * higher-quality findings generator.
+ */
+async function persistEngineStoreResearch(
+  env: Env,
+  storeId: number,
+  research: DeepResearchResult,
+  result: ShowroomSweepResult,
+): Promise<void> {
+  let totalWritten = 0;
+  for (const source of Object.values(research.sources)) {
+    if (totalWritten >= ENGINE_MAX_TOTAL_FINDINGS) break;
+
+    const seen = new Set<string>();
+    const findings: ExtractedFinding[] = [];
+    for (const claim of source.supportedClaims) {
+      if (findings.length >= ENGINE_MAX_CLAIMS_PER_SOURCE) break;
+      if (claim.confidence < ENGINE_MIN_CLAIM_CONFIDENCE) continue;
+      const text = claim.textSegment.trim().slice(0, ENGINE_MAX_FINDING_CHARS);
+      if (!text || seen.has(text)) continue;
+      seen.add(text);
+      findings.push({ finding: text, sentiment: "neutral" });
+    }
+    if (findings.length === 0) continue;
+
+    const written = await insertStoreFindings(env, storeId, findings, source.url);
+    result.findingsWritten += written;
+    totalWritten += written;
+  }
+
+  // Embed the engine's findings digest for showroom RAG retrieval.
+  const digest = research.findings || research.report;
+  if (digest.trim()) {
+    result.vectorsWritten += await embedSourceText(env, {
+      namespace: `showroom:store:${storeId}`,
+      targetType: "store",
+      targetId: storeId,
+      storeId,
+      sourceUrl: `deep-research://store/${storeId}`,
+      text: digest,
+    });
+  }
+}
+
+/**
+ * Run the ADK-port deep-research engine (`@backend/ai/deep-research`) as the
+ * PRIMARY findings generator for a showroom store: plan → grounded research →
+ * critique/refine → cited report, focused on homeowner-relevant reputation
+ * and review evidence (Google, Reddit, Yelp, Houzz).
+ *
+ * Fully additive to the legacy sweep below (citation plan → per-source
+ * extraction), which still runs afterwards for images, ratings, and per-page
+ * Vectorize embeds — so existing behavior never degrades even when this
+ * throws (callers wrap it in try/catch).
+ */
+async function runEngineStoreResearch(
+  env: Env,
+  store: typeof showroomStores.$inferSelect,
+  negativeConstraints: string[],
+  result: ShowroomSweepResult,
+  jobId: number | null,
+): Promise<{ sourceCount: number }> {
+  const topic = `Reputation and review research for the showroom/store "${store.name}"${store.locationAddress ? ` located at ${store.locationAddress}` : ""} (website: ${store.websiteUrl ?? "unknown"}), on behalf of a homeowner running a high-end San Francisco home remodel. Research homeowner-relevant reputation and review evidence across Google reviews, Reddit, Yelp, and Houzz: product quality, brands and product lines carried, customer experience, pricing posture, warranty and service policies, delivery and lead times, and whether this store is worth visiting or buying from.`;
+
+  const guidance = `Extraction goals for this showroom sweep (surface concrete, source-backed evidence for each):
+- Reputation and review sentiment across Google, Reddit, Yelp, and Houzz, with specific examples.
+- Product quality and the brands/product lines the store carries.
+- Customer experience: sales staff, post-sale service, delivery, and complaint handling.
+- Warranty and service policies.
+- Pricing posture, trade/discount programs, and typical lead times.
+- Location-specific visit planning: showroom experience, appointment requirements, what to see in person.
+
+Store context:
+- Description: ${store.description ?? "none"}
+- Inventory focus: ${store.inventoryFocus ?? "none"}
+- Target demographic: ${store.targetDemographic ?? "none"}
+
+Negative constraints (avoid recommending anything matching these):
+${bulletList(negativeConstraints)}`;
+
+  const research = await runDeepResearch(env, topic, {
+    guidance,
+    onPhase: enginePhaseRecorder(env, jobId),
+  });
+
+  // Record the persistence pass as its own research-console step (sorted
+  // after the engine phases, which use sortBase 100).
+  const findingsBefore = result.findingsWritten;
+  await beginStep(env, jobId, "persist-findings", "Persisting engine findings", 200);
+  try {
+    await persistEngineStoreResearch(env, store.id, research, result);
+  } catch (error) {
+    await failStep(
+      env,
+      jobId,
+      "persist-findings",
+      error instanceof Error ? error.message : String(error),
+    );
+    throw error;
+  }
+  const findingsWritten = result.findingsWritten - findingsBefore;
+  await completeStep(env, jobId, "persist-findings", {
+    detail: `${findingsWritten} finding(s) written`,
+    artifact: { findingsWritten },
+  });
+
+  return { sourceCount: Object.keys(research.sources).length };
+}
+
 export async function deepSweepStore(
   env: Env,
   input: DeepSweepStoreInput,
@@ -1041,6 +1179,46 @@ export async function deepSweepStore(
     .where(eq(showroomStores.id, input.storeId))
     .limit(1);
   if (!store) throw new Error(`Showroom store ${input.storeId} not found`);
+
+  // Research-console job for the sweep: 7 deep-research engine phases +
+  // persist-findings + legacy-sweep. createResearchJob never throws — a null
+  // jobId simply turns every recorder call below into a no-op.
+  const jobId = await createResearchJob(env, {
+    kind: "showroom",
+    title: `Showroom research — ${store.name}`,
+    topic: `Reputation and review research for the showroom/store "${store.name}" (Google, Reddit, Yelp, Houzz) on behalf of a high-end SF remodel.`,
+    entityType: "showroom",
+    entityId: input.storeId,
+    totalSteps: 9,
+  });
+
+  // Engine-first research: the ADK-port pipeline is the primary findings
+  // generator; the legacy citation-plan sweep below still runs for images,
+  // ratings, specs, and per-page embeds (and acts as the findings fallback
+  // whenever the engine fails). An engine failure is NOT a job failure —
+  // it is recorded via the engine's failed phase events and the sweep (and
+  // job) completes from the legacy path.
+  progress?.("Running deep-research engine for store reputation", 5);
+  let engineSourceCount = 0;
+  try {
+    const engine = await runEngineStoreResearch(
+      env,
+      store,
+      input.negativeConstraints ?? [],
+      result,
+      jobId,
+    );
+    engineSourceCount = engine.sourceCount;
+  } catch (error) {
+    console.error(
+      `Deep-research engine failed for store ${input.storeId}; falling back to legacy sweep:`,
+      error,
+    );
+    pushWarning(
+      result,
+      `Deep-research engine skipped for store ${input.storeId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 
   const prompt =
     input.prompt?.trim() ||
@@ -1059,50 +1237,85 @@ Negative constraints:
 ${bulletList(input.negativeConstraints ?? [])}`;
 
   progress?.("Discovering store citation URLs", 10);
-  const plan = await discoverCitationPlan(
+  const findingsBeforeLegacy = result.findingsWritten;
+  await beginStep(
     env,
-    prompt,
-    [...(input.seedCitationUrls ?? []), ...(store.websiteUrl ? [store.websiteUrl] : [])],
-    input.negativeConstraints ?? [],
-    clampMaxSources(input.maxSources),
-    {
-      researchMode: input.researchMode,
-      deepResearchWaitMs: input.deepResearchWaitMs,
-      enableMcpBridge: input.enableMcpBridge,
-      mcpServerUrl: input.mcpServerUrl,
-      mcpScope: {
-        type: "store",
-        id: input.storeId,
-        storeId: input.storeId,
-      },
-    },
+    jobId,
+    "legacy-sweep",
+    "Legacy citation sweep (images, ratings, embeds)",
+    201,
   );
-  result.citationsFound = plan.citationUrls.length;
+  try {
+    const plan = await discoverCitationPlan(
+      env,
+      prompt,
+      [...(input.seedCitationUrls ?? []), ...(store.websiteUrl ? [store.websiteUrl] : [])],
+      input.negativeConstraints ?? [],
+      clampMaxSources(input.maxSources),
+      {
+        researchMode: input.researchMode,
+        deepResearchWaitMs: input.deepResearchWaitMs,
+        enableMcpBridge: input.enableMcpBridge,
+        mcpServerUrl: input.mcpServerUrl,
+        mcpScope: {
+          type: "store",
+          id: input.storeId,
+          storeId: input.storeId,
+        },
+      },
+    );
+    result.citationsFound = plan.citationUrls.length;
 
-  const processor = await createImageProcessor(env);
-  const targetLabel = `Showroom store ${store.name}`;
+    const processor = await createImageProcessor(env);
+    const targetLabel = `Showroom store ${store.name}`;
 
-  let index = 0;
-  for (const sourceUrl of plan.citationUrls) {
-    index += 1;
-    progress?.(`Processing store source ${index}/${plan.citationUrls.length}`, 20 + index * 10);
-    try {
-      await processStoreSource(
-        env,
-        input.storeId,
-        sourceUrl,
-        targetLabel,
-        processor,
-        result,
-      );
-      result.sourcesProcessed += 1;
-    } catch (error) {
-      pushWarning(
-        result,
-        `Source skipped for store ${input.storeId} (${sourceUrl}): ${error instanceof Error ? error.message : String(error)}`,
-      );
+    let index = 0;
+    for (const sourceUrl of plan.citationUrls) {
+      index += 1;
+      progress?.(`Processing store source ${index}/${plan.citationUrls.length}`, 20 + index * 10);
+      try {
+        await processStoreSource(
+          env,
+          input.storeId,
+          sourceUrl,
+          targetLabel,
+          processor,
+          result,
+        );
+        result.sourcesProcessed += 1;
+      } catch (error) {
+        pushWarning(
+          result,
+          `Source skipped for store ${input.storeId} (${sourceUrl}): ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
+  } catch (error) {
+    // Only a whole-sweep failure fails the job — per-source errors above are
+    // warnings, and an engine failure earlier already fell back to this path.
+    await failStep(
+      env,
+      jobId,
+      "legacy-sweep",
+      error instanceof Error ? error.message : String(error),
+    );
+    await failJob(env, jobId, error);
+    throw error;
   }
+  await completeStep(env, jobId, "legacy-sweep", {
+    detail: `${result.sourcesProcessed} source(s) processed`,
+    artifact: { findingsCount: result.findingsWritten - findingsBeforeLegacy },
+  });
+
+  // Showrooms intentionally do not persist the full report — the job result
+  // carries the aggregate counts instead.
+  await completeJob(env, jobId, {
+    report: null,
+    result: {
+      findingsWritten: result.findingsWritten,
+      sourceCount: engineSourceCount + result.sourcesProcessed,
+    },
+  });
 
   progress?.("Store deep sweep complete", 100);
   return result;

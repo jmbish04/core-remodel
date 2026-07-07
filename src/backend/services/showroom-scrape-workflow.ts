@@ -36,6 +36,7 @@ import { scrapeUrl } from "@backend/ai/tools/browser-rendering";
 import { chunkMarkdown } from "@backend/ai/agents/ResearchAgent/methods/chunk-markdown";
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
+import { parseStructuredResponse } from "@backend/utils/ai-json";
 import { faviconService } from "@backend/services/favicon";
 import { enrichNewBrand } from "@backend/services/showroom/brand-enrichment";
 
@@ -541,11 +542,13 @@ async function extractPage(
       } as Parameters<typeof env.AI.run>[1],
     )) as { response?: unknown } & Partial<PageExtraction>;
 
-    const wrapped = raw?.response;
-    const source =
-      wrapped && typeof wrapped === "object"
-        ? (wrapped as Partial<PageExtraction>)
-        : (raw as Partial<PageExtraction>);
+    // `.response` is a parsed object for some models, a JSON string for others
+    // (kimi via the gateway) — handle both, else a string response silently
+    // yields an all-null extraction.
+    const source = parseStructuredResponse<PageExtraction>(
+      raw,
+      "showroom page extraction",
+    );
 
     return normalizeExtraction(source);
   } catch (err) {
@@ -777,11 +780,10 @@ async function classifyAccessLevel(
         } as Parameters<typeof env.AI.run>[1],
       )) as { response?: unknown } & Partial<AccessLevelResultShape>;
 
-      const wrapped = raw?.response;
-      const source =
-        wrapped && typeof wrapped === "object"
-          ? wrapped
-          : (raw as Partial<AccessLevelResultShape>);
+      const source = parseStructuredResponse<AccessLevelResultShape>(
+        raw,
+        "showroom access-level classification",
+      );
 
       const parsed = AccessLevelResult.safeParse(source);
       if (parsed.success) {
