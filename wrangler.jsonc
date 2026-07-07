@@ -83,7 +83,16 @@
     },
   ],
   "triggers": {
-    "crons": ["0 14 * * *", "* * * * *"],
+    // "15 */4 * * *": Gmail comms hub ingestion (0013 P3-07) — every 4 hours.
+    // A dedicated coarse trigger rather than piggybacking the "* * * * *"
+    // master tick: the master tick only drives `dispatchDueWorkflows` (fires
+    // Workflow bindings off `system_cron_schedules` rows) plus a couple of
+    // per-minute self-heal monitors — it has no notion of arbitrary
+    // non-Workflow handlers, and Gmail ingestion doesn't need per-minute
+    // resolution (Gmail search + full-message fetch + embedding per company
+    // is far too heavy to run 1,440x/day). A dedicated cron keeps the ingest
+    // job isolated, easy to disable independently, and cheap.
+    "crons": ["0 14 * * *", "* * * * *", "15 */4 * * *"],
   },
   "kv_namespaces": [
     {
