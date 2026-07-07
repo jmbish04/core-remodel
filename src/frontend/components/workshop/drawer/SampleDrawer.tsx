@@ -20,7 +20,7 @@
 // ---------------------------------------------------------------------------
 
 import type * as React from "react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import {
   ChevronUp,
@@ -52,6 +52,9 @@ import {
 type TabKey = "listing" | "inspiration" | "samples" | "global";
 
 interface SampleDrawerProps {
+  /** Controlled open state (so the canvas "Place image" tool can open it). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
   listingPhotos: BoardPhoto[];
   inspirationPhotos: BoardPhoto[];
   clippings: Clipping[];
@@ -77,6 +80,8 @@ const TABS: Array<{ key: TabKey; label: string; icon: typeof Home }> = [
 ];
 
 export function SampleDrawer({
+  open: openProp,
+  onOpenChange,
   listingPhotos,
   inspirationPhotos,
   clippings,
@@ -87,7 +92,16 @@ export function SampleDrawer({
   onSetClippingGlobal,
 }: SampleDrawerProps) {
   const reduced = useReducedMotion();
-  const [open, setOpen] = useState(false);
+  const [openInternal, setOpenInternal] = useState(false);
+  const open = openProp ?? openInternal;
+  const setOpen = useCallback(
+    (next: boolean | ((v: boolean) => boolean)) => {
+      const resolved = typeof next === "function" ? next(open) : next;
+      if (onOpenChange) onOpenChange(resolved);
+      else setOpenInternal(resolved);
+    },
+    [onOpenChange, open],
+  );
   const [tab, setTab] = useState<TabKey>("listing");
 
   const roomClippings = clippings.filter((c) => !c.isGlobal);

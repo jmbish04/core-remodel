@@ -63,10 +63,17 @@ const ErrorSchema = z.object({ error: z.string() });
 
 const SOURCE_TYPES = ["listing_photo", "blank_canvas", "inspiration", "clipping", "render"] as const;
 
+// Node kinds: "image" is the original Slice-1 kind; rectangle/ellipse/text/pen
+// are the devl.dev vector-shape template-parity kinds (frontend, appended
+// contract widening) — persisted as board_nodes with their visual props in
+// the metadata JSON bag (fill/opacity/text?/points?/name). note/group remain
+// reserved for future free-text annotation and node-grouping.
+const NODE_KINDS = ["image", "note", "group", "rectangle", "ellipse", "text", "pen"] as const;
+
 const BoardNodeSchema = z.object({
   id: z.string(),
   boardId: z.string(),
-  kind: z.enum(["image", "note", "group"]),
+  kind: z.enum(NODE_KINDS),
   cfImageUrl: z.string(),
   sourceType: z.enum(SOURCE_TYPES),
   sourceId: z.string().nullable(),
@@ -303,6 +310,12 @@ workshopRouter.openapi(
       // metadata = '{"placed":true}' whenever sourceType is listing_photo or
       // inspiration, and this cleanup exempts any node whose metadata parses
       // to { placed: true }.
+      //
+      // Vector shape nodes (rectangle/ellipse/text/pen — the devl.dev
+      // template-parity tools) send sourceType "blank_canvas" (see
+      // src/frontend/components/workshop/api.ts createShapeNode), so the
+      // sourceType check below already excludes them from this cleanup with
+      // no further change needed.
       const staleSeedNodes = nodes.filter((node) => {
         if (node.sourceType !== "listing_photo" && node.sourceType !== "inspiration") return false;
         if (node.parentNodeId !== null || node.renderCanvasId !== null) return false;
@@ -383,7 +396,12 @@ workshopRouter.openapi(
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CreateNodeSchema = z.object({
-  kind: z.literal("image"),
+  // "image" is the original Slice-1 node kind; rectangle/ellipse/text/pen are
+  // the devl.dev vector-shape template-parity kinds — their visual props
+  // (fill/opacity/text?/points?/name) travel in `metadata` as a JSON string.
+  kind: z.enum(NODE_KINDS),
+  // cfImageUrl stays NOT NULL / z.url() — shape nodes send the "about:shape"
+  // sentinel (a valid WHATWG URL) since they have no backing image.
   cfImageUrl: z.url(),
   sourceType: z.enum(SOURCE_TYPES),
   sourceId: z.string().optional(),
@@ -393,6 +411,9 @@ const CreateNodeSchema = z.object({
   height: z.number().optional(),
   parentNodeId: z.string().optional(),
   renderCanvasId: z.string().optional(),
+  // JSON string bag: shape visual props ({fill, opacity, text?, points?, name})
+  // for rectangle/ellipse/text/pen kinds. Optional/unused for "image".
+  metadata: z.string().optional(),
 });
 
 workshopRouter.openapi(
@@ -430,12 +451,26 @@ workshopRouter.openapi(
       // render-lineage-free node of these sourceTypes as a stale pre-policy
       // seed, and a user-placed drawer drop would otherwise match the same
       // signature. Stamping metadata = {placed:true} here is how the cleanup
-      // tells the two apart.
+      // tells the two apart. Shape nodes (rectangle/ellipse/text/pen) send
+      // their own metadata JSON bag (fill/opacity/text?/points?/name) — the
+      // stamp MERGES into that object rather than clobbering it; malformed
+      // client JSON falls back to just the stamp (or null when no stamp
+      // applies and metadata doesn't parse).
       const id = crypto.randomUUID();
-      const metadata =
-        body.sourceType === "listing_photo" || body.sourceType === "inspiration"
-          ? JSON.stringify({ placed: true })
-          : null;
+      const needsPlacedStamp = body.sourceType === "listing_photo" || body.sourceType === "inspiration";
+      let metadata: string | null = body.metadata ?? null;
+      if (needsPlacedStamp) {
+        let base: Record<string, unknown> = {};
+        if (body.metadata) {
+          try {
+            const parsed = JSON.parse(body.metadata) as unknown;
+            if (parsed && typeof parsed === "object") base = parsed as Record<string, unknown>;
+          } catch {
+            // Malformed client metadata — drop it, keep just the stamp.
+          }
+        }
+        metadata = JSON.stringify({ ...base, placed: true });
+      }
       await db
         .insert(boardNodes)
         .values({
@@ -478,6 +513,9 @@ const PatchNodeSchema = z.object({
   zIndex: z.number().optional(),
   isVisible: z.boolean().optional(),
   isLocked: z.boolean().optional(),
+  // JSON string bag — persists shape fill/opacity/text edits (and any other
+  // metadata rewrite) for rectangle/ellipse/text/pen nodes.
+  metadata: z.string().optional(),
 });
 
 workshopRouter.openapi(

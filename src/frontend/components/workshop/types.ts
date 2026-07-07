@@ -37,6 +37,80 @@ export interface BoardNode {
   updatedAt: string;
 }
 
+// ---------------------------------------------------------------------------
+// Vector shape nodes (the devl.dev canvas-tools baseline, appended to our image
+// nodes). Shapes are ALSO board_nodes: `kind` is free-form text and the shape's
+// visual props live in the metadata JSON bag. They render on the SAME Konva
+// stage as image nodes and participate in selection / z-index / layers / lineage
+// exactly like any node.
+//
+// PERSISTENCE NOTE: the committed POST /boards/:id/nodes Zod schema is
+// `kind: z.literal("image")` + `cfImageUrl: z.url()` with NO metadata field, and
+// the response BoardNodeSchema restricts `kind` to ["image","note","group"]. So
+// shape nodes cannot be persisted against the API as it stands WITHOUT a backend
+// change (which this task must not make). `persistShapeNode` therefore attempts
+// the real endpoint and degrades gracefully; shapes stay live client-side. See
+// the handoff note in the task report for the exact schema widening required.
+// ---------------------------------------------------------------------------
+
+export type ShapeKind = "rectangle" | "ellipse" | "text" | "pen";
+
+/** The visual payload stored in a shape node's `metadata` JSON bag. */
+export interface ShapeMetadata {
+  fill: string;
+  /** 0..100 (matches the template + inspector slider). */
+  opacity: number;
+  /** Text content for `kind === "text"`. */
+  text?: string;
+  /**
+   * Pen-stroke points for `kind === "pen"`, RELATIVE to the node origin (x,y),
+   * flattened as [x0, y0, x1, y1, …] in world units (Konva.Line `points`).
+   */
+  points?: number[];
+  /** Human layer name shown in the Layers panel. */
+  name: string;
+}
+
+/**
+ * A vector shape node. Geometry fields mirror BoardNode so the inspector,
+ * layers panel, fit-to-screen, and selection logic can treat both uniformly.
+ */
+export interface ShapeNode {
+  id: string;
+  boardId: string;
+  kind: ShapeKind;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotation: number;
+  zIndex: number;
+  isVisible: boolean;
+  isLocked: boolean;
+  metadata: ShapeMetadata;
+}
+
+/** Anything selectable on the canvas: an image node or a vector shape. */
+export type CanvasNode = BoardNode | ShapeNode;
+
+export function isShapeNode(node: CanvasNode): node is ShapeNode {
+  return (
+    node.kind === "rectangle" ||
+    node.kind === "ellipse" ||
+    node.kind === "text" ||
+    node.kind === "pen"
+  );
+}
+
+/** The 5 template swatches — content colors (fills), not chrome. */
+export const SHAPE_SWATCHES = [
+  "#3b82f6",
+  "#8b5cf6",
+  "#10b981",
+  "#f59e0b",
+  "#ef4444",
+] as const;
+
 /** A Gemini-extracted material clipping (the Sample Library "drawer"). */
 export interface Clipping {
   id: string;
@@ -198,4 +272,12 @@ export function boardPhotoAltText(
 ): string {
   const base = SOURCE_LABEL[kind];
   return photo.label ? `${base}: ${photo.label}` : base;
+}
+
+/** A short, human label for any canvas node — used by the Layers panel. */
+export function canvasNodeLabel(node: CanvasNode): string {
+  if (isShapeNode(node)) {
+    return node.metadata.name;
+  }
+  return nodeAltText(node);
 }

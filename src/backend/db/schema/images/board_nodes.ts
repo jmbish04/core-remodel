@@ -27,9 +27,15 @@ export const boardNodes = sqliteTable(
     boardId: text("board_id")
       .notNull()
       .references(() => workstationBoards.id, { onDelete: "cascade" }),
-    // Node type on the canvas. Slice 1 only supports images; 'note'/'group' are
-    // reserved for future free-text annotations and node-grouping.
-    kind: text("kind", { enum: ["image", "note", "group"] }).notNull(),
+    // Node type on the canvas. 'image' is the original Slice-1 kind;
+    // rectangle/ellipse/text/pen are devl.dev vector-shape template-parity
+    // kinds (visual props live in `metadata` JSON); 'note'/'group' remain
+    // reserved for future free-text annotations and node-grouping. This is a
+    // TypeScript-level constraint only — SQLite has no native enum
+    // enforcement on a text column, so widening it requires no migration.
+    kind: text("kind", {
+      enum: ["image", "note", "group", "rectangle", "ellipse", "text", "pen"],
+    }).notNull(),
     // Cloudflare Images delivery URL rendered for this node (denormalized for the
     // canvas renderer — avoids a join per node on every board load).
     cfImageUrl: text("cf_image_url").notNull(),

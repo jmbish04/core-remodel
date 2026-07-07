@@ -20,6 +20,9 @@ import type {
   Clipping,
   Collection,
   NodeSourceType,
+  ShapeKind,
+  ShapeMetadata,
+  ShapeNode,
 } from "../types";
 
 const POSITION_DEBOUNCE_MS = 500;
@@ -69,6 +72,35 @@ export interface UseBoardResult {
   setNodeProcessing: (nodeId: string, processing: boolean) => void;
   /** Insert a finished child node (from the 201 body) with a reveal flag. */
   insertChildNode: (node: BoardNode) => void;
+
+  // Vector shape nodes (the devl.dev tool baseline). Held client-side and
+  // best-effort persisted (the committed API rejects non-image kinds — see
+  // types.ts). All ops are optimistic and never throw at the UI.
+  /** Vector shapes on this board. */
+  shapes: ShapeNode[];
+  /** Create a shape; returns the new shape (with its client/server id). */
+  addShape: (input: {
+    kind: ShapeKind;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    metadata: ShapeMetadata;
+  }) => ShapeNode | null;
+  /** Optimistic shape move/resize; debounced persist (best-effort). */
+  moveShape: (
+    id: string,
+    patch: { x?: number; y?: number; width?: number; height?: number },
+  ) => void;
+  /** Patch a shape's geometry, metadata, visibility or lock (best-effort). */
+  patchShape: (
+    id: string,
+    patch: Partial<Pick<ShapeNode, "x" | "y" | "width" | "height" | "isVisible" | "isLocked">> & {
+      metadata?: Partial<ShapeMetadata>;
+    },
+  ) => void;
+  /** Remove a shape (best-effort delete). */
+  removeShape: (id: string) => void;
 }
 
 export function useBoard(roomId: string): UseBoardResult {
@@ -86,11 +118,20 @@ export function useBoard(roomId: string): UseBoardResult {
   const [justAddedNodeIds, setJustAddedNodeIds] = useState<Set<string>>(
     new Set(),
   );
+  const [shapes, setShapes] = useState<ShapeNode[]>([]);
+  const shapeCounter = useRef(1);
 
   // Per-node debounce timers for position/size saves.
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const latestPatchRef = useRef<Map<string, api.PatchNodeInput>>(new Map());
   const revealTimers = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  // Per-shape debounce timers + merged patches (best-effort persistence).
+  const shapeTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map(),
+  );
+  const shapePatchRef = useRef<
+    Map<string, api.PatchNodeInput & { metadata?: string }>
+  >(new Map());
 
   const reload = useCallback(async () => {
     try {
@@ -121,11 +162,14 @@ export function useBoard(roomId: string): UseBoardResult {
   useEffect(() => {
     const timers = timersRef.current;
     const reveals = revealTimers.current;
+    const shapeTimers = shapeTimersRef.current;
     return () => {
       for (const timer of timers.values()) clearTimeout(timer);
       timers.clear();
       for (const timer of reveals.values()) clearTimeout(timer);
       reveals.clear();
+      for (const timer of shapeTimers.values()) clearTimeout(timer);
+      shapeTimers.clear();
     };
   }, []);
 
@@ -349,6 +393,139 @@ export function useBoard(roomId: string): UseBoardResult {
     revealTimers.current.add(timer);
   }, []);
 
+  // --- Vector shapes -------------------------------------------------------
+
+  const flushShapePatch = useCallback((id: string) => {
+    const patch = shapePatchRef.current.get(id);
+    if (!patch) return;
+    shapePatchRef.current.delete(id);
+    // Best-effort; never toasts (the API doesn't yet accept shape nodes).
+    void api.patchShapeNode(id, patch);
+  }, []);
+
+  const queueShapePatch = useCallback(
+    (id: string, patch: api.PatchNodeInput & { metadata?: string }) => {
+      const merged = { ...(shapePatchRef.current.get(id) ?? {}), ...patch };
+      shapePatchRef.current.set(id, merged);
+      const existing = shapeTimersRef.current.get(id);
+      if (existing) clearTimeout(existing);
+      shapeTimersRef.current.set(
+        id,
+        setTimeout(() => {
+          shapeTimersRef.current.delete(id);
+          flushShapePatch(id);
+        }, POSITION_DEBOUNCE_MS),
+      );
+    },
+    [flushShapePatch],
+  );
+
+  const addShape = useCallback(
+    (input: {
+      kind: ShapeKind;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      metadata: ShapeMetadata;
+    }): ShapeNode | null => {
+      if (!board) return null;
+      const localId = `shape-${shapeCounter.current++}-${crypto.randomUUID()}`;
+      const maxZ = Math.max(
+        0,
+        ...nodes.map((n) => n.zIndex),
+        ...shapes.map((s) => s.zIndex),
+      );
+      const shape: ShapeNode = {
+        id: localId,
+        boardId: board.id,
+        kind: input.kind,
+        x: input.x,
+        y: input.y,
+        width: input.width,
+        height: input.height,
+        rotation: 0,
+        zIndex: maxZ + 1,
+        isVisible: true,
+        isLocked: false,
+        metadata: input.metadata,
+      };
+      setShapes((prev) => [...prev, shape]);
+      // Best-effort persist; if the server accepts it, adopt the server id.
+      void api
+        .createShapeNode(board.id, {
+          kind: input.kind,
+          x: input.x,
+          y: input.y,
+          width: input.width,
+          height: input.height,
+          metadata: JSON.stringify(input.metadata),
+        })
+        .then((serverId) => {
+          if (serverId && serverId !== localId) {
+            setShapes((prev) =>
+              prev.map((s) => (s.id === localId ? { ...s, id: serverId } : s)),
+            );
+          }
+        });
+      return shape;
+    },
+    [board, nodes, shapes],
+  );
+
+  const moveShape = useCallback(
+    (
+      id: string,
+      patch: { x?: number; y?: number; width?: number; height?: number },
+    ) => {
+      setShapes((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, ...patch } : s)),
+      );
+      queueShapePatch(id, patch);
+    },
+    [queueShapePatch],
+  );
+
+  const patchShape = useCallback(
+    (
+      id: string,
+      patch: Partial<
+        Pick<ShapeNode, "x" | "y" | "width" | "height" | "isVisible" | "isLocked">
+      > & { metadata?: Partial<ShapeMetadata> },
+    ) => {
+      let nextMetadataJson: string | undefined;
+      setShapes((prev) =>
+        prev.map((s) => {
+          if (s.id !== id) return s;
+          const { metadata: metaPatch, ...rest } = patch;
+          const nextMetadata = metaPatch
+            ? { ...s.metadata, ...metaPatch }
+            : s.metadata;
+          if (metaPatch) nextMetadataJson = JSON.stringify(nextMetadata);
+          return { ...s, ...rest, metadata: nextMetadata };
+        }),
+      );
+      const { metadata: _drop, ...geometry } = patch;
+      queueShapePatch(id, {
+        ...geometry,
+        ...(nextMetadataJson ? { metadata: nextMetadataJson } : {}),
+      });
+    },
+    [queueShapePatch],
+  );
+
+  const removeShape = useCallback((id: string) => {
+    setShapes((prev) => prev.filter((s) => s.id !== id));
+    const timer = shapeTimersRef.current.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      shapeTimersRef.current.delete(id);
+    }
+    shapePatchRef.current.delete(id);
+    // Best-effort remote delete (no-throw if the shape was never persisted).
+    api.deleteNode(id).catch(() => {});
+  }, []);
+
   return useMemo(
     () => ({
       loading,
@@ -375,6 +552,11 @@ export function useBoard(roomId: string): UseBoardResult {
       patchClipping,
       setNodeProcessing,
       insertChildNode,
+      shapes,
+      addShape,
+      moveShape,
+      patchShape,
+      removeShape,
     }),
     [
       loading,
@@ -401,6 +583,11 @@ export function useBoard(roomId: string): UseBoardResult {
       patchClipping,
       setNodeProcessing,
       insertChildNode,
+      shapes,
+      addShape,
+      moveShape,
+      patchShape,
+      removeShape,
     ],
   );
 }

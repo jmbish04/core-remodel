@@ -56,6 +56,8 @@ export function WorkshopApp() {
 function WorkshopBoard({ roomId }: { roomId: string }) {
   const board = useBoard(roomId);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Drawer open state is lifted so the canvas "Place image (I)" tool can open it.
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   // Dialog targets.
   const [extractNode, setExtractNode] = useState<BoardNode | null>(null);
@@ -322,10 +324,13 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
               setRecipeState({ recipe: "material-swap", node })
             }
             onMix={(node) => setRecipeState({ recipe: "mix", node })}
+            onPlaceImage={() => setDrawerOpen(true)}
           />
         </div>
 
         <SampleDrawer
+          open={drawerOpen}
+          onOpenChange={setDrawerOpen}
           listingPhotos={board.listingPhotos}
           inspirationPhotos={board.inspirationPhotos}
           clippings={board.clippings}

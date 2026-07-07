@@ -95,6 +95,81 @@ export async function createNode(
   return data.node;
 }
 
+// ---- Shape nodes (vector) -------------------------------------------------
+//
+// Shapes are board_nodes too (free-form `kind`, visual props in a metadata JSON
+// bag). We attempt to persist them through the SAME POST/PATCH node endpoints as
+// images. IMPORTANT: the committed API's CreateNodeSchema is
+// `kind: z.literal("image")` + `cfImageUrl: z.url()` with no metadata field, so
+// these calls are REJECTED by the server today (no backend change allowed here).
+// The functions below therefore best-effort the request and swallow the
+// rejection — shapes stay live in client state either way. `cfImageUrl` uses the
+// "about:shape" sentinel (a valid WHATWG URL, so it survives `z.url()` once the
+// server's `kind`/`metadata` widening lands).
+
+/** Sentinel URL for shape nodes (cfImageUrl is NOT NULL in the schema). */
+export const SHAPE_CF_URL_SENTINEL = "about:shape";
+
+export interface CreateShapeNodeInput {
+  kind: "rectangle" | "ellipse" | "text" | "pen";
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Serialized ShapeMetadata JSON. */
+  metadata: string;
+  parentNodeId?: string;
+}
+
+/**
+ * Best-effort shape persistence. Returns the server id on success, or `null`
+ * when the API rejects the shape (current state) — the caller keeps its
+ * client-generated id and the shape remains fully usable on the canvas.
+ */
+export async function createShapeNode(
+  boardId: string,
+  input: CreateShapeNodeInput,
+): Promise<string | null> {
+  try {
+    const { data } = await request<{ node: BoardNode }>(
+      `/boards/${encodeURIComponent(boardId)}/nodes`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          kind: input.kind,
+          cfImageUrl: SHAPE_CF_URL_SENTINEL,
+          sourceType: "blank_canvas",
+          x: input.x,
+          y: input.y,
+          width: input.width,
+          height: input.height,
+          metadata: input.metadata,
+          parentNodeId: input.parentNodeId,
+        }),
+      },
+    );
+    return data.node.id;
+  } catch {
+    // API contract doesn't yet accept shape nodes — degrade to client-only.
+    return null;
+  }
+}
+
+/** Best-effort shape transform persistence (no-throw). */
+export async function patchShapeNode(
+  id: string,
+  patch: PatchNodeInput & { metadata?: string },
+): Promise<void> {
+  try {
+    await request<unknown>(`/nodes/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    });
+  } catch {
+    /* shape persistence not yet accepted by the API — client state is source of truth */
+  }
+}
+
 export interface PatchNodeInput {
   x?: number;
   y?: number;
