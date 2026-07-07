@@ -13,7 +13,7 @@
 
 import { z } from "@hono/zod-openapi";
 
-import { showroomHours } from "@backend/db/schema/showroom/index";
+import { showroomHours, showroomStores } from "@backend/db/schema/showroom/index";
 
 /** Zod schema for a single day's window (24-hour "HH:MM"), or null when closed. */
 const dayWindowSchema = z
@@ -85,4 +85,108 @@ export function hoursJsonToRows(
     });
   }
   return rows;
+}
+
+/** The full 7-key hours shape stored on `showroom_stores.hours_json`. */
+export type HoursJsonColumn = NonNullable<
+  typeof showroomStores.$inferSelect["hoursJson"]
+>;
+
+/**
+ * Normalize a permissive `hoursJson` payload (absent key === closed) into the
+ * full 7-key shape the `showroom_stores.hours_json` column is typed as.
+ */
+export function normalizeHoursJson(hoursJson: NonNullable<HoursJson>): HoursJsonColumn {
+  return {
+    mon: hoursJson.mon ?? null,
+    tue: hoursJson.tue ?? null,
+    wed: hoursJson.wed ?? null,
+    thu: hoursJson.thu ?? null,
+    fri: hoursJson.fri ?? null,
+    sat: hoursJson.sat ?? null,
+    sun: hoursJson.sun ?? null,
+  };
+}
+
+// ─── Display-summary derivation ───────────────────────────────────────────────
+
+/** Day abbreviation labels used for human-readable summary strings. */
+const DAY_LABELS: Record<"mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun", string> = {
+  mon: "Mon",
+  tue: "Tue",
+  wed: "Wed",
+  thu: "Thu",
+  fri: "Fri",
+  sat: "Sat",
+  sun: "Sun",
+};
+
+/** Convert a 24-hour "HH:MM" string to a 12-hour "h:MM AM/PM" display string. */
+function to12h(time: string): string {
+  const [hStr, mStr] = time.split(":");
+  const h = parseInt(hStr, 10);
+  const m = mStr ?? "00";
+  const period = h < 12 ? "AM" : "PM";
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${h12}:${m} ${period}`;
+}
+
+/**
+ * Collapse a list of same-hours consecutive days into range strings — e.g.
+ * Mon–Fri sharing "9:00 AM–5:00 PM" collapses to one "Mon–Fri 9:00 AM–5:00 PM"
+ * entry. Closed (null) days are omitted.
+ */
+function collapseHoursGroups(
+  days: Array<"mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun">,
+  hoursJson: NonNullable<HoursJson>,
+): string[] {
+  const openDays = days.filter((d) => hoursJson[d] != null);
+  if (openDays.length === 0) return [];
+
+  const groups: Array<{
+    open: string;
+    close: string;
+    startDay: string;
+    endDay: string;
+  }> = [];
+
+  for (const day of openDays) {
+    const slot = hoursJson[day]!;
+    const last = groups[groups.length - 1];
+    if (last && last.open === slot.open && last.close === slot.close) {
+      last.endDay = DAY_LABELS[day];
+    } else {
+      groups.push({
+        open: slot.open,
+        close: slot.close,
+        startDay: DAY_LABELS[day],
+        endDay: DAY_LABELS[day],
+      });
+    }
+  }
+
+  return groups.map((g) => {
+    const dayRange = g.startDay === g.endDay ? g.startDay : `${g.startDay}–${g.endDay}`;
+    return `${dayRange} ${to12h(g.open)}–${to12h(g.close)}`;
+  });
+}
+
+/**
+ * Derive the three back-compat / filter fields from a structured `hoursJson`:
+ * `weekdayHours` (Mon–Fri summary), `weekendHours` (Sat/Sun summary, "Closed"
+ * when both closed), and `isOpenWeekends`. Mirrors the private copy in
+ * `showroom-stores.ts` so backfill writes stay in lockstep with intake writes.
+ */
+export function deriveHoursSummary(hoursJson: NonNullable<HoursJson>): {
+  weekdayHours: string;
+  weekendHours: string;
+  isOpenWeekends: boolean;
+} {
+  const weekdayGroups = collapseHoursGroups(["mon", "tue", "wed", "thu", "fri"], hoursJson);
+  const weekendGroups = collapseHoursGroups(["sat", "sun"], hoursJson);
+  return {
+    weekdayHours: weekdayGroups.length > 0 ? weekdayGroups.join(", ") : "Closed",
+    weekendHours: weekendGroups.length > 0 ? weekendGroups.join(", ") : "Closed",
+    isOpenWeekends: Boolean(hoursJson.sat || hoursJson.sun),
+  };
 }

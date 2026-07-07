@@ -29,7 +29,12 @@ import {
   showroomStoreCategoryMapping,
 } from "@backend/db/schema/showroom/index";
 import { GoogleMapsService } from "@backend/services/google/maps";
-import { hoursJsonSchema, hoursJsonToRows } from "@backend/utils/showroom-hours";
+import {
+  deriveHoursSummary,
+  hoursJsonSchema,
+  hoursJsonToRows,
+  normalizeHoursJson,
+} from "@backend/utils/showroom-hours";
 import type { ShowroomResearchAgent } from "@backend/ai/agents/ShowroomResearchAgent";
 import type { BackfillPhotoRef } from "@backend/ai/agents/ShowroomResearchAgent/methods";
 
@@ -134,6 +139,7 @@ showroomBackfillRouter.openapi(
         websiteUrl: showroomStores.websiteUrl,
         placeId: showroomStores.placeId,
         googleRating: showroomStores.googleRating,
+        hoursJson: showroomStores.hoursJson,
         heroImageCfImagesUrl: showroomStores.heroImageCfImagesUrl,
         reviewSummary: showroomStores.reviewSummary,
         reviewAiInsight: showroomStores.reviewAiInsight,
@@ -161,7 +167,9 @@ showroomBackfillRouter.openapi(
         if (!s.locationAddress) add("address");
         if (!s.phoneNumber) add("phone");
         if (!s.websiteUrl) add("website");
-        if (!hasHours.has(s.id)) add("hours");
+        // Hours exist when normalized rows are present OR the store still
+        // carries a pre-normalization hoursJson blob (reconciled on backfill).
+        if (!hasHours.has(s.id) && s.hoursJson == null) add("hours");
         if (s.googleRating == null) add("google_rating");
         if (!s.heroImageCfImagesUrl && !hasPhotos.has(s.id)) add("photo");
         if (!s.reviewSummary) add("review_summary");
@@ -457,6 +465,17 @@ showroomBackfillRouter.openapi(
       if (!store.reviewSummary && f.reviewSummary) update.reviewSummary = f.reviewSummary;
       if (!store.pricePoint && f.pricePoint) update.pricePoint = f.pricePoint;
 
+      // Structured hours — fill-blanks the store's hoursJson blob plus the
+      // derived display/filter fields (weekdayHours / weekendHours /
+      // isOpenWeekends), mirroring what the intake create handler derives.
+      if (f.hoursJson && store.hoursJson == null) {
+        const derived = deriveHoursSummary(f.hoursJson);
+        update.hoursJson = normalizeHoursJson(f.hoursJson);
+        update.weekdayHours = derived.weekdayHours;
+        update.weekendHours = derived.weekendHours;
+        update.isOpenWeekends = derived.isOpenWeekends;
+      }
+
       // Link the confirmed place_id — only when the store has none AND no other
       // showroom already owns it (the unique index would otherwise reject it).
       if (!store.placeId) {
@@ -482,15 +501,18 @@ showroomBackfillRouter.openapi(
         updated++;
       }
 
-      // Normalized hours — fill-blanks: only when the store has NO hours rows yet.
-      if (f.hoursJson) {
+      // Normalized hours — fill-blanks: only when the store has NO hours rows
+      // yet. Falls back to the store's own hoursJson so pre-normalization rows
+      // (created before showroom_hours existed) get reconciled on backfill.
+      const effectiveHours = f.hoursJson ?? store.hoursJson ?? null;
+      if (effectiveHours) {
         const [existingHours] = await db
           .select({ id: showroomHours.id })
           .from(showroomHours)
           .where(eq(showroomHours.showroomId, item.showroomId))
           .limit(1);
         if (!existingHours) {
-          const rows = hoursJsonToRows(item.showroomId, f.hoursJson);
+          const rows = hoursJsonToRows(item.showroomId, effectiveHours);
           if (rows.length > 0) {
             await db.insert(showroomHours).values(
               rows as [(typeof rows)[number], ...(typeof rows)[number][]],

@@ -352,6 +352,11 @@ export function mapPlaceToIntake(place: GooglePlaceDetails): MappedIntake {
   const reviewSummary = extractReviewSummary(place);
   if (reviewSummary) mapped.reviewSummary = reviewSummary;
 
+  // Structured business hours — consumed by the bulk-backfill submit payload
+  // (the single-add intake app calls mapPlaceToHoursJson itself for its form).
+  const hoursJson = mapPlaceToHoursJson(place.regularOpeningHours);
+  if (hoursJson) mapped.hoursJson = hoursJson;
+
   // Raw photo references (first 5) for the create body — NOT a persisted field.
   mapped._photos = (place.photos ?? []).slice(0, 5);
 
@@ -361,6 +366,7 @@ export function mapPlaceToIntake(place: GooglePlaceDetails): MappedIntake {
     description,
     phone,
     reviewSummary,
+    hoursJson,
   });
 
   return mapped;
@@ -387,6 +393,7 @@ function buildDiagnostics(
     description: string | undefined;
     phone: string | undefined;
     reviewSummary: string | undefined;
+    hoursJson: HoursJson | null;
   },
 ): IntakeDiagnostics {
   const diag: IntakeDiagnostics = {};
@@ -511,7 +518,7 @@ function buildDiagnostics(
   // hoursJson ← regularOpeningHours
   {
     const raw = place.regularOpeningHours ?? null;
-    const hours = mapPlaceToHoursJson(place.regularOpeningHours);
+    const hours = derived.hoursJson;
     diag.hoursJson = hours
       ? { source: "regularOpeningHours.periods", raw, ok: true }
       : {

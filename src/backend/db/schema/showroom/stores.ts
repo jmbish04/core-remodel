@@ -198,6 +198,18 @@ export const showroomStores = sqliteTable("showroom_stores", {
   instagramUrl: text("instagram_url"),
 
   /**
+   * Public Facebook page URL for this showroom location.
+   * Example: "https://www.facebook.com/davincimarble/"
+   */
+  facebookUrl: text("facebook_url"),
+
+  /**
+   * Public Pinterest profile URL for this showroom location.
+   * Example: "https://www.pinterest.com/davincimarble/"
+   */
+  pinterestUrl: text("pinterest_url"),
+
+  /**
    * Cloudflare Images delivery URL of the showroom's scraped favicon / brand icon.
    * Auto-populated by the favicon worker whenever `websiteUrl` is set or changed.
    * Example: "https://imagedelivery.net/<accountHash>/<imageId>/public"

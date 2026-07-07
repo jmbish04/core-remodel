@@ -1,0 +1,10 @@
+/**
+ * @fileoverview Showroom hero building blocks — category chips (editable),
+ * social icon links, and the office-hours mini-card + full hours/contact/map
+ * modal. Consumed by StoreViewportApp's enriched hero header.
+ */
+
+export { CategoryChipsEditor, type StoreCategoryChip } from "./CategoryChipsEditor";
+export { SocialLinks } from "./SocialLinks";
+export { HoursMiniCard } from "./HoursMiniCard";
+export { HoursContactModal, type HoursContactStore } from "./HoursContactModal";
