@@ -145,53 +145,63 @@ export function TagMultiSelect({
   return (
     <div className={cn("space-y-2", className)}>
       <Popover open={open} onOpenChange={setOpen}>
+        {/* Trigger is a div (role=combobox), NOT a <button>, so the chip-remove
+            <button>s below are valid children — a button can't nest interactive
+            descendants. Keyboard: Enter/Space/ArrowDown open the popover. */}
         <PopoverTrigger
           render={
-            <button
-              type="button"
+            <div
               id={id}
-              disabled={disabled}
+              role="combobox"
+              aria-expanded={open}
+              aria-haspopup="listbox"
               aria-label="Add tags"
+              aria-disabled={disabled || undefined}
+              tabIndex={disabled ? -1 : 0}
+              onKeyDown={(e) => {
+                if (disabled) return;
+                if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown") {
+                  e.preventDefault();
+                  setOpen(true);
+                }
+              }}
+              className={cn(
+                "flex min-h-9 w-full flex-wrap items-center gap-1.5 rounded-lg bg-card px-2.5 py-1.5 text-left text-sm ring-1 ring-border/40 transition-colors",
+                "cursor-text hover:ring-border/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+                disabled && "cursor-not-allowed opacity-60",
+              )}
             />
           }
         >
-          <span
-            className={cn(
-              "flex min-h-9 w-full flex-wrap items-center gap-1.5 rounded-lg bg-card px-2.5 py-1.5 text-left text-sm ring-1 ring-border/40 transition-colors",
-              "hover:ring-border/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-              disabled && "cursor-not-allowed opacity-60",
-            )}
-          >
-            {value.length === 0 ? (
-              <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-                <TagIcon className="size-3.5" />
-                {placeholder}
-              </span>
-            ) : (
-              value.map((tag) => (
-                <Badge
-                  key={tag}
-                  variant="secondary"
-                  className="gap-1 pr-1 font-normal"
+          {value.length === 0 ? (
+            <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+              <TagIcon className="size-3.5" />
+              {placeholder}
+            </span>
+          ) : (
+            value.map((tag) => (
+              <Badge
+                key={tag}
+                variant="secondary"
+                className="gap-1 pr-1 font-normal"
+              >
+                {tag}
+                <button
+                  type="button"
+                  aria-label={`Remove ${tag}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    removeTag(tag);
+                  }}
+                  onKeyDown={(e) => e.stopPropagation()}
+                  className="rounded-full p-0.5 text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/50"
                 >
-                  {tag}
-                  <span
-                    role="button"
-                    tabIndex={-1}
-                    aria-label={`Remove ${tag}`}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      removeTag(tag);
-                    }}
-                    className="rounded-full p-0.5 text-muted-foreground/70 transition-colors hover:bg-foreground/10 hover:text-foreground"
-                  >
-                    <X className="size-3" />
-                  </span>
-                </Badge>
-              ))
-            )}
-          </span>
+                  <X className="size-3" />
+                </button>
+              </Badge>
+            ))
+          )}
         </PopoverTrigger>
 
         <PopoverContent

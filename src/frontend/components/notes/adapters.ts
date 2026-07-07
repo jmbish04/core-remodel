@@ -187,10 +187,11 @@ const companyAdapter: NoteAdapter = {
   defaultReturn: (entityId) => `/admin/companies/${entityId}?tab=notes`,
 
   async load(entityId, noteId) {
-    const data = await apiGet<{ note: CompanyNoteRow }>(
+    const data = await apiGet<{ note?: CompanyNoteRow }>(
       `/api/companies/${entityId}/notes/${noteId}`,
     );
-    const note = data.note;
+    const note = data?.note;
+    if (!note) throw new Error("Note not found in response");
     return {
       title: note.title ?? "",
       tags: Array.isArray(note.tags) ? note.tags : [],

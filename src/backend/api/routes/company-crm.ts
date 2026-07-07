@@ -31,7 +31,7 @@
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { drizzle } from "drizzle-orm/d1";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNotNull } from "drizzle-orm";
 
 import { companies } from "@backend/db/schema/directory/companies";
 import { companyNotes } from "@backend/db/schema/directory/company_notes";
@@ -265,7 +265,7 @@ companyCrmRouter.openapi(
       const rows = await db
         .select({ tagsJson: companyNotes.tagsJson })
         .from(companyNotes)
-        .where(eq(companyNotes.isDeleted, false));
+        .where(and(eq(companyNotes.isDeleted, false), isNotNull(companyNotes.tagsJson)));
 
       const tagSet = new Set<string>();
       for (const row of rows) {

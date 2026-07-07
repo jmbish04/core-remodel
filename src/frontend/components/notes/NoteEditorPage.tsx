@@ -77,12 +77,22 @@ function parseParams(): ParsedParams {
   }
   const q = new URLSearchParams(window.location.search);
   const rawReturn = q.get("return");
-  // Open-redirect guard: only accept same-origin absolute PATHS ("/…"), never
-  // protocol-relative ("//evil") or absolute URLs.
-  const returnTo =
-    rawReturn && rawReturn.startsWith("/") && !rawReturn.startsWith("//")
-      ? rawReturn
-      : null;
+  // Open-redirect guard: resolve the raw value against our own origin and only
+  // accept it when it stays same-origin. A startsWith("/") check is NOT enough —
+  // e.g. "/\evil.com" or "/%2F..." can normalize to a cross-origin URL in some
+  // browsers. The URL constructor gives us the browser's real resolution.
+  let returnTo: string | null = null;
+  if (rawReturn) {
+    try {
+      const u = new URL(rawReturn, window.location.origin);
+      returnTo =
+        u.origin === window.location.origin
+          ? u.pathname + u.search + u.hash
+          : null;
+    } catch {
+      returnTo = null;
+    }
+  }
   const showTagsRaw = q.get("showTags");
   const showTagsOverride =
     showTagsRaw === "1" ? true : showTagsRaw === "0" ? false : null;
