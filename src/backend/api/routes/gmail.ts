@@ -20,7 +20,7 @@
  */
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
-import { and, desc, eq } from "drizzle-orm";
+import { desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { gmailMessages, gmailThreads } from "@backend/db";
@@ -37,6 +37,9 @@ const SENDER_EMAIL = "justin@126colby.com";
 
 /** Snippet length for thread-list previews. */
 const SNIPPET_CHARS = 140;
+
+/** D1's hard limit on bound parameters per statement (see documents/db-helpers.ts). */
+const D1_MAX_BOUND_PARAMS = 100;
 
 // ─── Shared error envelope ────────────────────────────────────────────────────
 
@@ -190,21 +193,37 @@ gmailRouter.openapi(
         .where(eq(gmailThreads.companyId, companyIdNum))
         .orderBy(desc(gmailThreads.timestampSent));
 
-      const result = [];
-      for (const thread of threads) {
-        const msgs = await db
-          .select()
-          .from(gmailMessages)
-          .where(eq(gmailMessages.threadId, thread.threadId))
-          .orderBy(desc(gmailMessages.timestamp));
+      // Batch-fetch every message for this page's threads in one (chunked)
+      // query instead of one query per thread (was an N+1 for companies with
+      // many threads).
+      const msgsByThread = new Map<string, GmailMessage[]>();
+      if (threads.length > 0) {
+        const threadIds = threads.map((t) => t.threadId);
+        for (let i = 0; i < threadIds.length; i += D1_MAX_BOUND_PARAMS) {
+          const idsChunk = threadIds.slice(i, i + D1_MAX_BOUND_PARAMS);
+          const chunkMsgs = await db
+            .select()
+            .from(gmailMessages)
+            .where(inArray(gmailMessages.threadId, idsChunk))
+            .orderBy(desc(gmailMessages.timestamp));
 
+          for (const msg of chunkMsgs) {
+            const list = msgsByThread.get(msg.threadId) ?? [];
+            list.push(msg);
+            msgsByThread.set(msg.threadId, list);
+          }
+        }
+      }
+
+      const result = threads.map((thread) => {
+        const msgs = msgsByThread.get(thread.threadId) ?? [];
         const latest = msgs[0];
-        result.push({
+        return {
           ...serializeThread(thread),
           messageCount: msgs.length,
           latestSnippet: latest?.body ? latest.body.slice(0, SNIPPET_CHARS) : "",
-        });
-      }
+        };
+      });
 
       return c.json({ success: true as const, threads: result }, 200);
     } catch (err) {
@@ -546,19 +565,31 @@ gmailRouter.openapi(
             filter: { kind: "gmail" },
             returnMetadata: "all",
           });
-          const groundingMessageIds = new Set(
-            matches.matches
-              .map((m) => (typeof m.metadata?.message_id === "string" ? m.metadata.message_id : null))
-              .filter((id): id is string => Boolean(id) && id !== latest.messageId),
-          );
-          if (groundingMessageIds.size > 0) {
-            const groundingRows = await db
-              .select()
-              .from(gmailMessages)
-              .where(eq(gmailMessages.threadId, threadId))
-              .all();
-            const relevant = groundingRows.filter((m) => groundingMessageIds.has(m.messageId));
-            groundingContext = relevant
+          const groundingMessageIds = [
+            ...new Set(
+              matches.matches
+                .map((m) =>
+                  typeof m.metadata?.message_id === "string" ? m.metadata.message_id : null,
+                )
+                .filter((id): id is string => Boolean(id) && id !== latest.messageId),
+            ),
+          ];
+          if (groundingMessageIds.length > 0) {
+            // Deliberately NOT scoped to `threadId` — Vectorize matches can (and
+            // are meant to) come from other threads/parties, so we look these
+            // messages up by their Gmail-native messageId across the whole
+            // table, chunked to respect D1's bound-parameter limit.
+            const groundingRows: GmailMessage[] = [];
+            for (let i = 0; i < groundingMessageIds.length; i += D1_MAX_BOUND_PARAMS) {
+              const idsChunk = groundingMessageIds.slice(i, i + D1_MAX_BOUND_PARAMS);
+              const rows = await db
+                .select()
+                .from(gmailMessages)
+                .where(inArray(gmailMessages.messageId, idsChunk))
+                .all();
+              groundingRows.push(...rows);
+            }
+            groundingContext = groundingRows
               .map((m) => `[${m.fromRecipient}]: ${(m.body ?? "").slice(0, 500)}`)
               .join("\n\n");
           }

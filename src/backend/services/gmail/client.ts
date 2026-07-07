@@ -31,12 +31,17 @@ async function gmailFetch(token: string, path: string, init?: RequestInit): Prom
 // ─── base64url decode (Gmail uses the URL-safe alphabet, no padding) ────────
 
 function base64UrlDecodeToString(data: string): string {
-  const normalized = data.replace(/-/g, "+").replace(/_/g, "/");
-  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
-  const binary = atob(padded);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new TextDecoder("utf-8").decode(bytes);
+  try {
+    const normalized = data.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new TextDecoder("utf-8").decode(bytes);
+  } catch (err) {
+    console.error("gmail/client: failed to decode base64url message part:", err);
+    return "";
+  }
 }
 
 function base64UrlEncodeFromString(input: string): string {

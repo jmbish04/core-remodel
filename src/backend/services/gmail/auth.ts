@@ -18,10 +18,14 @@
  * token endpoint using the `urn:ietf:params:oauth:grant-type:jwt-bearer`
  * grant -> receive a bearer access_token good for ~1hr.
  *
- * The minted token is cached per-isolate (module-level) and reused until it
- * has under 5 minutes left, since Workers reuse the global scope across
- * requests within an isolate. A cold isolate or eviction just re-mints —
- * there is no correctness risk in a stale-miss here.
+ * The minted token is cached per-isolate (module-level), keyed by the
+ * impersonated user's email, and reused until it has under 5 minutes left —
+ * Workers reuse the global scope across requests within an isolate. A cold
+ * isolate or eviction just re-mints; there is no correctness risk in a
+ * stale-miss here. Keying by `impersonate` (rather than a single shared slot)
+ * matters as soon as this is ever called for more than one Workspace user —
+ * a single-slot cache would silently hand user A's bearer token to a request
+ * impersonating user B.
  */
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
@@ -37,9 +41,10 @@ interface CachedToken {
   exp: number;
 }
 
-/** Per-isolate cache — NOT per-request state; safe because it only ever holds
- * a single upstream-issued bearer token that is valid for any request. */
-let cachedToken: CachedToken | null = null;
+/** Per-isolate cache, keyed by impersonated email — NOT per-request state;
+ * safe because each entry is just an upstream-issued bearer token that is
+ * valid for any request made on behalf of that same impersonated user. */
+const cachedTokens = new Map<string, CachedToken>();
 
 // ─── base64url helpers (no Buffer on Workers) ────────────────────────────────
 
@@ -175,8 +180,9 @@ export async function getGmailAccessToken(
   impersonate = "justin@126colby.com",
 ): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
-  if (cachedToken && cachedToken.exp - now > REFRESH_SKEW_SECONDS) {
-    return cachedToken.token;
+  const cached = cachedTokens.get(impersonate);
+  if (cached && cached.exp - now > REFRESH_SKEW_SECONDS) {
+    return cached.token;
   }
 
   const [clientEmail, keyPart1, keyPart2] = await Promise.all([
@@ -199,10 +205,11 @@ export async function getGmailAccessToken(
   const assertion = await buildSignedJwt(clientEmail, privateKey, impersonate);
   const tokenResponse = await exchangeJwtForAccessToken(assertion);
 
-  cachedToken = {
+  const newToken: CachedToken = {
     token: tokenResponse.access_token,
     exp: now + (tokenResponse.expires_in || 3600),
   };
+  cachedTokens.set(impersonate, newToken);
 
-  return cachedToken.token;
+  return newToken.token;
 }

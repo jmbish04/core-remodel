@@ -15,6 +15,7 @@
  * an offset/cursor).
  */
 
+import type { BatchItem } from "drizzle-orm/batch";
 import { and, eq, inArray, isNotNull, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -46,14 +47,48 @@ export interface IngestCompanyEmailsResult {
 }
 
 /**
+ * Public/consumer email providers — NEVER used for a domain-wide search, even
+ * when every contact for a company happens to share one. Domain-wide search
+ * (`from:@domain OR to:@domain`) is only safe for a company's own private
+ * domain; if that "shared domain" were e.g. `gmail.com`, the query would
+ * match — and ingest — every email in the user's ENTIRE mailbox to/from any
+ * Gmail address, leaking unrelated private correspondence into this
+ * company's thread history. When the shared domain is public we always fall
+ * back to exact-address OR clauses instead.
+ */
+const PUBLIC_EMAIL_DOMAINS = new Set([
+  "gmail.com",
+  "googlemail.com",
+  "yahoo.com",
+  "hotmail.com",
+  "outlook.com",
+  "live.com",
+  "msn.com",
+  "icloud.com",
+  "me.com",
+  "aol.com",
+  "mail.com",
+  "zoho.com",
+  "protonmail.com",
+  "proton.me",
+  "gmx.com",
+  "yandex.com",
+  "comcast.net",
+  "att.net",
+  "verizon.net",
+]);
+
+/**
  * Build the Gmail search query for a company's contact email addresses.
  *
  * Gmail search DOES support `from:@domain.com` / `to:@domain.com` as a
  * domain-scoped match (the `@` prefix on a bare domain, no wildcard needed —
  * `from:*@domain.com` is NOT valid Gmail search syntax). When every contact
- * shares one domain we use that compact form; otherwise we OR together each
- * contact's exact address, on both `from:` and `to:` so replies TO the
- * contractor (sent by justin@126colby.com) are captured too.
+ * shares one PRIVATE domain we use that compact form; otherwise (multiple
+ * domains, OR the shared domain is a public/consumer provider — see
+ * `PUBLIC_EMAIL_DOMAINS` above) we OR together each contact's exact address,
+ * on both `from:` and `to:` so replies TO the contractor (sent by
+ * justin@126colby.com) are captured too.
  */
 function buildCompanySearchQuery(emails: string[]): string | null {
   const cleaned = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter(Boolean))];
@@ -65,7 +100,9 @@ function buildCompanySearchQuery(emails: string[]): string | null {
 
   if (domains.size === 1) {
     const [domain] = domains;
-    return `from:@${domain} OR to:@${domain}`;
+    if (!PUBLIC_EMAIL_DOMAINS.has(domain)) {
+      return `from:@${domain} OR to:@${domain}`;
+    }
   }
 
   const clauses = cleaned.map((email) => `(from:${email} OR to:${email})`);
@@ -94,6 +131,38 @@ async function findExistingMessageIds(
     for (const row of rows) existing.add(row.messageId);
   }
   return existing;
+}
+
+/** Batch-select existing gmail_threads rows for the given native thread ids. */
+async function findExistingThreads(
+  db: ReturnType<typeof drizzle>,
+  threadIds: string[],
+): Promise<Map<string, typeof gmailThreads.$inferSelect>> {
+  const byThreadId = new Map<string, typeof gmailThreads.$inferSelect>();
+  for (const idsChunk of chunk(threadIds, D1_MAX_BOUND_PARAMS)) {
+    const rows = await db
+      .select()
+      .from(gmailThreads)
+      .where(inArray(gmailThreads.threadId, idsChunk))
+      .all();
+    for (const row of rows) byThreadId.set(row.threadId, row);
+  }
+  return byThreadId;
+}
+
+/** D1/Workers-safe chunked `db.batch()` — a single round-trip per chunk of statements. */
+async function runBatched(
+  db: ReturnType<typeof drizzle>,
+  statements: BatchItem<"sqlite">[],
+  batchSize = 50,
+): Promise<void> {
+  for (let i = 0; i < statements.length; i += batchSize) {
+    const slice = statements.slice(i, i + batchSize);
+    if (slice.length === 0) continue;
+    // `db.batch` requires a non-empty tuple type at the type level; the
+    // length check above guarantees that at runtime, so this cast is safe.
+    await db.batch(slice as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]);
+  }
 }
 
 /** Parse a Gmail `Date` header (RFC-2822-ish) or `internalDate` (epoch ms string) into a Date. */
@@ -231,60 +300,89 @@ export async function ingestCompanyEmails(env: Env): Promise<IngestCompanyEmails
       .filter((r) => !existingIds.has(r.id))
       .slice(0, MAX_NEW_MESSAGES_PER_COMPANY);
 
+    if (newResults.length === 0) continue;
+
+    // Fetch full message bodies first (network I/O), then batch every DB
+    // write for this company's new messages into chunked db.batch() calls —
+    // one round-trip per chunk instead of one per message.
+    const fetched: { messageId: string; full: Awaited<ReturnType<typeof getMessage>> }[] = [];
     for (const { id: messageId } of newResults) {
-      let full;
       try {
-        full = await getMessage(token, messageId);
+        const full = await getMessage(token, messageId);
+        fetched.push({ messageId, full });
       } catch (err) {
         console.error(`[gmail/ingestion] getMessage failed for ${messageId}:`, err);
-        continue;
       }
+    }
 
+    if (fetched.length === 0) continue;
+
+    const nativeThreadIds = [...new Set(fetched.map((f) => f.full.threadId))];
+    const existingThreadsByThreadId = await findExistingThreads(db, nativeThreadIds);
+
+    const threadStatements: BatchItem<"sqlite">[] = [];
+    const messageStatements: BatchItem<"sqlite">[] = [];
+    const toEmbed: { ragUuid: string; messageId: string; nativeThreadId: string; body: string }[] =
+      [];
+
+    for (const { messageId, full } of fetched) {
       const extracted = extractMessage(full);
       const nativeThreadId = full.threadId;
       const timestamp = resolveMessageTimestamp(extracted.date, full.internalDate);
 
       // Upsert the thread row: create if missing; otherwise bump
       // subject/timestampSent/companyId only when this message is newer.
-      const [existingThread] = await db
-        .select()
-        .from(gmailThreads)
-        .where(eq(gmailThreads.threadId, nativeThreadId))
-        .limit(1);
+      // `existingThreadsByThreadId` is updated in-memory as we go so multiple
+      // new messages in the same thread within this batch don't double-insert.
+      const existingThread = existingThreadsByThreadId.get(nativeThreadId);
 
       if (!existingThread) {
-        await db
-          .insert(gmailThreads)
-          .values({
-            threadId: nativeThreadId,
-            subject: extracted.subject || null,
-            timestampSent: timestamp,
-            companyId,
-          })
-          .onConflictDoNothing()
-          .run();
+        threadStatements.push(
+          db
+            .insert(gmailThreads)
+            .values({
+              threadId: nativeThreadId,
+              subject: extracted.subject || null,
+              timestampSent: timestamp,
+              companyId,
+            })
+            .onConflictDoNothing(),
+        );
         threadsTouched++;
+        existingThreadsByThreadId.set(nativeThreadId, {
+          id: 0,
+          threadId: nativeThreadId,
+          subject: extracted.subject || null,
+          timestampSent: timestamp,
+          companyId,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        });
       } else {
         const isNewer =
           !existingThread.timestampSent || timestamp > existingThread.timestampSent;
         if (isNewer) {
-          await db
-            .update(gmailThreads)
-            .set({
-              subject: extracted.subject || existingThread.subject,
-              timestampSent: timestamp,
-              companyId: existingThread.companyId ?? companyId,
-              updatedAt: new Date(),
-            })
-            .where(eq(gmailThreads.threadId, nativeThreadId))
-            .run();
+          threadStatements.push(
+            db
+              .update(gmailThreads)
+              .set({
+                subject: extracted.subject || existingThread.subject,
+                timestampSent: timestamp,
+                companyId: existingThread.companyId ?? companyId,
+                updatedAt: new Date(),
+              })
+              .where(eq(gmailThreads.threadId, nativeThreadId)),
+          );
+          existingThreadsByThreadId.set(nativeThreadId, {
+            ...existingThread,
+            timestampSent: timestamp,
+          });
         }
       }
 
       const ragUuid = crypto.randomUUID();
-
-      try {
-        await db
+      messageStatements.push(
+        db
           .insert(gmailMessages)
           .values({
             threadId: nativeThreadId,
@@ -296,15 +394,21 @@ export async function ingestCompanyEmails(env: Env): Promise<IngestCompanyEmails
             body: extracted.body,
             ragUuid,
           })
-          .onConflictDoNothing()
-          .run();
-        messagesIngested++;
-      } catch (err) {
-        console.error(`[gmail/ingestion] failed to insert message ${messageId}:`, err);
-        continue;
-      }
+          .onConflictDoNothing(),
+      );
+      messagesIngested++;
+      toEmbed.push({ ragUuid, messageId, nativeThreadId, body: extracted.body });
+    }
 
-      await embedMessage(env, ragUuid, messageId, nativeThreadId, extracted.body);
+    try {
+      await runBatched(db, [...threadStatements, ...messageStatements]);
+    } catch (err) {
+      console.error(`[gmail/ingestion] batched write failed for company ${companyId}:`, err);
+      continue;
+    }
+
+    for (const item of toEmbed) {
+      await embedMessage(env, item.ragUuid, item.messageId, item.nativeThreadId, item.body);
     }
   }
 
