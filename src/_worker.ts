@@ -25,6 +25,7 @@ export { ImageProcessingWorkflow } from "./backend/services/image-processor/work
 export { ImageBatchProcessingWorkflow } from "./backend/services/image-processor/batch-workflow";
 export { ChecklistRationaleWorkflow } from "./backend/services/checklist-rationale-workflow";
 export { ShowroomScrapeWorkflow } from "./backend/services/showroom-scrape-workflow";
+export { BlankCanvasBatchWorkflow } from "./backend/services/render/blank-canvas-batch-workflow";
 export { ResearchAgent } from "./backend/ai/agents/ResearchAgent";
 export { PermitIntelligenceAgent } from "./backend/ai/agents/PermitIntelligenceAgent/index";
 export { ShowroomResearchAgent } from "./backend/ai/agents/ShowroomResearchAgent/index";

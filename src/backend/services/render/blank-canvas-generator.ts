@@ -90,6 +90,13 @@ export interface BlankCanvasResult {
 // Service
 // ---------------------------------------------------------------------------
 
+/**
+ * Source images larger than this are rejected instead of buffered blindly —
+ * guards against unbounded `arrayBuffer()` reads (and the base64 blow-up
+ * that follows) on unexpectedly huge listing photos.
+ */
+const MAX_SOURCE_IMAGE_BYTES = 15 * 1024 * 1024; // 15MB
+
 /** Chunked base64 encode (avoids stack overflow on large images). */
 function bytesToBase64(bytes: Uint8Array): string {
   let bin = "";
@@ -205,10 +212,26 @@ export async function generateBlankCanvas(
     );
   }
 
+  // Reject oversized sources before buffering — Content-Length is a fast,
+  // cheap check that avoids reading the whole body into memory when the
+  // server tells us up front the image is too large.
+  const declaredLength = Number(imgRes.headers.get("content-length") || "0");
+  if (declaredLength > MAX_SOURCE_IMAGE_BYTES) {
+    throw new Error(
+      `Source image is too large (${(declaredLength / (1024 * 1024)).toFixed(1)}MB, max ${MAX_SOURCE_IMAGE_BYTES / (1024 * 1024)}MB): ${imageUrl}`,
+    );
+  }
+
   let imgBytes: Uint8Array;
   let mimeType: string;
   try {
-    imgBytes = new Uint8Array(await imgRes.arrayBuffer());
+    const buffer = await imgRes.arrayBuffer();
+    if (buffer.byteLength > MAX_SOURCE_IMAGE_BYTES) {
+      throw new Error(
+        `Source image is too large (${(buffer.byteLength / (1024 * 1024)).toFixed(1)}MB, max ${MAX_SOURCE_IMAGE_BYTES / (1024 * 1024)}MB): ${imageUrl}`,
+      );
+    }
+    imgBytes = new Uint8Array(buffer);
     mimeType = imgRes.headers.get("content-type") || "image/jpeg";
     console.log(
       `[generateBlankCanvas] Read image buffer. MimeType: ${mimeType}, Size: ${imgBytes.length} bytes`,

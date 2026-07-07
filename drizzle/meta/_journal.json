@@ -491,6 +491,13 @@
       "when": 1783402048244,
       "tag": "0069_condemned_santa_claus",
       "breakpoints": true
+    },
+    {
+      "idx": 70,
+      "version": "6",
+      "when": 1783403699508,
+      "tag": "0070_majestic_daredevil",
+      "breakpoints": true
     }
   ]
 }

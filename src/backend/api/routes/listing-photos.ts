@@ -2,7 +2,15 @@
  * @fileoverview Listing Photos API routes
  */
 
-import { aiEdits, images, listingPhotos, rooms, listingPhotoBlankCanvases } from "@backend/db";
+import {
+  aiEdits,
+  blankCanvasGenerationJobItems,
+  blankCanvasGenerationJobs,
+  images,
+  listingPhotos,
+  rooms,
+  listingPhotoBlankCanvases,
+} from "@backend/db";
 import { ensureHomeCatalogSeed } from "@backend/services/home-catalog";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { and, eq, inArray, isNull, desc } from "drizzle-orm";
@@ -11,6 +19,7 @@ import { Hono } from "hono";
 
 import { ImageProcessorService } from "../../services/image-processor";
 import { generateBlankCanvas, buildBlankCanvasPrompt } from "../../services/render/blank-canvas-generator";
+import type { BlankCanvasBatchWorkflowItem } from "../../services/render/blank-canvas-batch-workflow";
 
 const listingPhotosRouter = new Hono<{ Bindings: Env }>();
 
@@ -631,25 +640,6 @@ listingPhotosRouter.delete("/:id/blank-canvas", async (c) => {
   }
 });
 
-// ---------------------------------------------------------------------------
-// In-memory job tracker for blank-canvas generation (admin-only, single worker)
-// ---------------------------------------------------------------------------
-
-interface BlankCanvasJobItem {
-  listingPhotoId: number;
-  status: "pending" | "processing" | "done" | "failed";
-  error?: string;
-  blankCanvasCfImageId?: string;
-}
-
-interface BlankCanvasJob {
-  id: string;
-  items: BlankCanvasJobItem[];
-  startedAt: number;
-}
-
-const blankCanvasJobs = new Map<string, BlankCanvasJob>();
-
 /**
  * GET /api/listing-photos/download-script
  * Generate a Python script with CF Images URLs pre-filled for bulk download.
@@ -788,108 +778,61 @@ listingPhotosRouter.post("/generate-blank-canvases", async (c) => {
       return c.json({ error: "No valid listing photos found" }, 404);
     }
 
-    // Create job
-    const jobId = crypto.randomUUID();
-    const job: BlankCanvasJob = {
-      id: jobId,
-      items: photos.map((p) => ({
-        listingPhotoId: p.id,
-        status: "pending" as const,
-      })),
-      startedAt: Date.now(),
-    };
-    blankCanvasJobs.set(jobId, job);
-
-    // Process in the background (non-blocking)
+    // Confirm credentials are configured before creating any durable state —
+    // matches the previous behavior of failing fast with a 500 here.
     const credentials = await resolveCloudflareImagesCredentials(c.env);
     if (!credentials.accountId || credentials.apiTokens.length === 0) {
       return c.json({ error: "Cloudflare credentials not configured" }, 500);
     }
 
-    const processor = new ImageProcessorService(
-      c.env,
-      credentials.accountId,
-      credentials.apiTokens[0],
-      { fallbackApiTokens: credentials.apiTokens.slice(1) },
+    // Create the durable job + item rows in D1. Job state now survives
+    // isolate churn and redeploys — the previous in-memory Map did not.
+    const jobId = crypto.randomUUID();
+
+    await db.insert(blankCanvasGenerationJobs).values({
+      id: jobId,
+      status: "running",
+      leaveOutline,
+    });
+
+    await db.insert(blankCanvasGenerationJobItems).values(
+      photos.map((p) => ({
+        jobId,
+        listingPhotoId: p.id,
+        status: "pending" as const,
+      })),
     );
 
-    // Fire-and-forget: process each photo sequentially
-    c.executionCtx.waitUntil(
-      (async () => {
-        for (const item of job.items) {
-          item.status = "processing";
+    // Kick off the durable Workflow — it runs independently of this request's
+    // isolate and survives redeploys, unlike the old waitUntil loop.
+    const workflowItems: BlankCanvasBatchWorkflowItem[] = photos.map((p) => {
+      const cfImageId = p.cfImageId;
+      const sourceUrl = cfImageId.startsWith("http")
+        ? cfImageId
+        : `https://imagedelivery.net/${cfImageId}/public`;
+      return { listingPhotoId: p.id, sourceUrl };
+    });
 
-          try {
-            const photo = photos.find((p) => p.id === item.listingPhotoId);
-            if (!photo) {
-              item.status = "failed";
-              item.error = "Photo record not found";
-              continue;
-            }
-
-            // Build the source image URL
-            const cfImageId = photo.cfImageId;
-            const sourceUrl = cfImageId.startsWith("http")
-              ? cfImageId
-              : `https://imagedelivery.net/${cfImageId}/public`;
-
-            // Generate blank canvas via Gemini
-            const result = await generateBlankCanvas(sourceUrl, c.env, { leaveOutline });
-
-            // Upload the result to Cloudflare Images
-            const imageBlob = new Blob([result.imageBytes], { type: result.mimeType });
-            const imageId = crypto.randomUUID();
-            const uploadResponse = await processor.uploadToCloudflareImages(
-              imageBlob,
-              imageId,
-              `blank-canvas-${item.listingPhotoId}.${result.mimeType.includes("png") ? "png" : "jpg"}`,
-            );
-
-            if (!uploadResponse.success) {
-              item.status = "failed";
-              item.error = "Failed to upload generated image to Cloudflare";
-              continue;
-            }
-
-            const deliveryUrl = processor.getDeliveryUrl(uploadResponse, uploadResponse.result.id);
-            const deliveryToken =
-              ImageProcessorService.extractDeliveryTokenFromUrl(deliveryUrl) ||
-              `${credentials.accountId}/${uploadResponse.result.id}`;
-
-            // Update the listing photo with the blank canvas
-            await db.batch([
-              db.update(listingPhotos)
-                .set({ blankCanvasCfImageId: deliveryToken })
-                .where(eq(listingPhotos.id, item.listingPhotoId)),
-              db.insert(listingPhotoBlankCanvases)
-                .values({
-                  listingPhotoId: item.listingPhotoId,
-                  cfImageId: deliveryToken,
-                  prompt: "AI Generate (Batch)",
-                })
-            ]);
-
-            item.status = "done";
-            item.blankCanvasCfImageId = deliveryToken;
-          } catch (err) {
-            item.status = "failed";
-            item.error = err instanceof Error ? err.message : "Unknown error";
-            console.error(
-              `[BlankCanvas] Failed to generate for listing photo ${item.listingPhotoId}:`,
-              err,
-            );
-          }
-
-          // Small delay between generations to respect rate limits
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-        }
-
-        // Clean up old jobs after 30 minutes
-        setTimeout(() => {
-          blankCanvasJobs.delete(jobId);
-        }, 30 * 60 * 1000);
-      })(),
-    );
+    try {
+      await c.env.BLANK_CANVAS_WORKFLOW.create({
+        id: jobId,
+        params: { jobId, leaveOutline, items: workflowItems },
+      });
+    } catch (workflowErr) {
+      // The job/item rows already exist — if the Workflow itself never
+      // started, mark the job failed so a poller doesn't spin forever on a
+      // job stuck "running".
+      console.error(
+        `[BlankCanvas] Failed to start batch workflow for job ${jobId}:`,
+        workflowErr,
+      );
+      await db
+        .update(blankCanvasGenerationJobs)
+        .set({ status: "failed", updatedAt: new Date() })
+        .where(eq(blankCanvasGenerationJobs.id, jobId))
+        .run();
+      throw workflowErr;
+    }
 
     return c.json({
       success: true,
@@ -911,27 +854,48 @@ listingPhotosRouter.post("/generate-blank-canvases", async (c) => {
 /**
  * GET /api/listing-photos/generation-status/:jobId
  * Check the progress of a blank canvas generation job.
+ * Reads job + item state from D1 (see blank_canvas_jobs.ts) rather than an
+ * in-memory Map, so this works regardless of which isolate handles the poll.
  */
 listingPhotosRouter.get("/generation-status/:jobId", async (c) => {
   const jobId = c.req.param("jobId");
-  const job = blankCanvasJobs.get(jobId);
+  const db = drizzle(c.env.DB);
+
+  const job = await db
+    .select()
+    .from(blankCanvasGenerationJobs)
+    .where(eq(blankCanvasGenerationJobs.id, jobId))
+    .get();
 
   if (!job) {
     return c.json({ error: "Job not found or expired" }, 404);
   }
 
-  const done = job.items.filter((i) => i.status === "done").length;
-  const failed = job.items.filter((i) => i.status === "failed").length;
-  const processing = job.items.filter((i) => i.status === "processing").length;
-  const pending = job.items.filter((i) => i.status === "pending").length;
+  const itemRows = await db
+    .select()
+    .from(blankCanvasGenerationJobItems)
+    .where(eq(blankCanvasGenerationJobItems.jobId, jobId))
+    .all();
+
+  const done = itemRows.filter((i) => i.status === "done").length;
+  const failed = itemRows.filter((i) => i.status === "failed").length;
+  const processing = itemRows.filter((i) => i.status === "processing").length;
+  const pending = itemRows.filter((i) => i.status === "pending").length;
+
+  const items = itemRows.map((i) => ({
+    listingPhotoId: i.listingPhotoId,
+    status: i.status,
+    error: i.error ?? undefined,
+    blankCanvasCfImageId: i.blankCanvasCfImageId ?? undefined,
+  }));
 
   return c.json({
     success: true,
     jobId: job.id,
-    startedAt: job.startedAt,
-    summary: { total: job.items.length, done, failed, processing, pending },
+    startedAt: job.createdAt.getTime(),
+    summary: { total: itemRows.length, done, failed, processing, pending },
     isComplete: pending === 0 && processing === 0,
-    items: job.items,
+    items,
   });
 });
 
