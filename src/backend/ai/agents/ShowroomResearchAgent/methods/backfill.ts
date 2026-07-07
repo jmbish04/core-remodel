@@ -31,10 +31,12 @@ import { eq, sql } from "drizzle-orm";
 import {
   showroomStores,
   showroomPhotosMapping,
+  showroomStoreCategoryMapping,
   storeResearch,
 } from "@backend/db/schema/showroom/index";
 import { brands, showroomBrandMappings } from "@backend/db/schema/brands/index";
 import { GoogleMapsService } from "@backend/services/google/maps";
+import { inferAndMapCategories } from "@backend/utils/showroom-categories";
 import { ImageProcessorService } from "@backend/services/image-processor";
 import {
   resolveCloudflareImagesCredentials,
@@ -96,13 +98,28 @@ export async function fillBlanksFromPlacesAI(
   const needsRating = store.googleRating == null;
   const needsSummary = !store.reviewSummary;
   const needsPrice = !store.pricePoint;
-  if (!needsInsight && !needsRating && !needsSummary && !needsPrice) {
+  const needsAi = needsInsight || needsRating || needsSummary || needsPrice;
+
+  // Category inference is fill-blanks too: only when no mapping rows exist yet.
+  const [existingCategory] = await db
+    .select({ id: showroomStoreCategoryMapping.id })
+    .from(showroomStoreCategoryMapping)
+    .where(eq(showroomStoreCategoryMapping.storeId, showroomId))
+    .limit(1);
+  const needsCategories = !existingCategory;
+
+  if (!needsAi && !needsCategories) {
     return false;
   }
 
-  // placeDetails runs computeReviewInsight (Gemini) because skipAi is not set.
+  // placeDetails runs computeReviewInsight (Gemini) unless skipAi — when only
+  // categories are missing we still need the (cheap) place types, not Gemini.
   const service = new GoogleMapsService(env);
-  const details = (await service.placeDetails(placeId)) as Record<string, unknown>;
+  const details = (await service.placeDetails(
+    placeId,
+    undefined,
+    needsAi ? undefined : { skipAi: true },
+  )) as Record<string, unknown>;
 
   const aiInference = (details.aiInference ?? null) as ReviewAiInsight | null;
   const update: Partial<typeof showroomStores.$inferInsert> = {};
@@ -140,17 +157,41 @@ export async function fillBlanksFromPlacesAI(
     if (!store.isTradeRepRequired && attrs.tradeRepRequired?.value) update.isTradeRepRequired = true;
   }
 
-  if (Object.keys(update).length === 0) return false;
-
-  update.updatedAt = new Date();
-  await db.update(showroomStores).set(update).where(eq(showroomStores.id, showroomId));
+  let wrote = false;
+  if (Object.keys(update).length > 0) {
+    update.updatedAt = new Date();
+    await db.update(showroomStores).set(update).where(eq(showroomStores.id, showroomId));
+    wrote = true;
+  }
 
   // Brand create / map pipeline (mirrors the create handler). Best-effort.
   if (aiInference?.brands?.length) {
     await mapInsightBrands(env, showroomId, aiInference.brands);
   }
 
-  return true;
+  // Category inference — Places types + primaryType + AI-insight brand type
+  // strings ("Hardwood Flooring", "Tile", …) mapped onto the internal category
+  // vocabulary. Fill-blanks guarded again inside the helper.
+  if (needsCategories) {
+    const placeTypes = Array.isArray(details.types)
+      ? (details.types as unknown[]).filter((t): t is string => typeof t === "string")
+      : [];
+    const primaryType = typeof details.primaryType === "string" ? details.primaryType : null;
+    const insight = aiInference ?? store.reviewAiInsight ?? null;
+    const brandTypes = (insight?.brands ?? [])
+      .map((b) => (typeof b?.type === "string" ? b.type : null))
+      .filter((t): t is string => Boolean(t));
+    const mappedCount = await inferAndMapCategories(
+      env,
+      showroomId,
+      [...placeTypes, primaryType, ...brandTypes],
+      `Inferred from Google Places types [${[...placeTypes, primaryType].filter(Boolean).join(", ")}]` +
+        (brandTypes.length ? ` and stocked-brand types [${brandTypes.join(", ")}]` : ""),
+    );
+    if (mappedCount > 0) wrote = true;
+  }
+
+  return wrote;
 }
 
 /**

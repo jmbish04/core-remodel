@@ -2,13 +2,17 @@
  * @fileoverview StoreViewportApp — single-showroom viewport.
  *
  * Two stacked surfaces:
- *   1. Enriched hero header — mirrors the directory card's contact/rating
- *      patterns (favicon logo, price badge, categories, click-to-call, Globe +
- *      Instagram links, 1–5 visit stars + rating-context note) plus an action
- *      bar (record visit, add note, upload photo, associate brands/products).
+ *   1. Enriched hero header — favicon + banner, price badge, Google rating
+ *      (always shown when Places supplied one), editable category chips, AI
+ *      review summary, click-to-call + Globe + social links (IG/FB/Pinterest),
+ *      an office-hours mini-card (→ full hours/contact/map modal), the 1–5
+ *      visit stars + rating-context note, and the action bar (record visit,
+ *      add note, upload photo, associate brands/products).
  *   2. URL-routed bento — three sections (Brands & Products, Notes, Photos).
- *      Selecting a tile pushes `/admin/shopping/store/:id/:section` and a
- *      popstate listener syncs the active section back on browser navigation.
+ *      Photos hosts both the Google Places collection (moved out of the hero)
+ *      and the homeowner's visit uploads. Selecting a tile pushes
+ *      `/admin/shopping/store/:id/:section` and a popstate listener syncs the
+ *      active section back on browser navigation.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -19,7 +23,6 @@ import {
   CheckCircle2,
   Globe,
   ImagePlus,
-  Instagram,
   Loader2,
   MapPin,
   NotebookPen,
@@ -60,6 +63,14 @@ import { ShowroomPhotoPolaroid, type ShowroomPhoto } from "./photos/ShowroomPhot
 import { ShowroomBento, type ShowroomBentoSection } from "./bento/ShowroomBento";
 import { PhotoStack } from "./PhotoStack";
 import { ShowroomGalleryModal, type GalleryPhoto } from "./ShowroomGalleryModal";
+import {
+  CategoryChipsEditor,
+  HoursContactModal,
+  HoursMiniCard,
+  SocialLinks,
+  type StoreCategoryChip,
+} from "./hero";
+import type { HoursJson } from "./intake/hours-types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -95,10 +106,6 @@ interface BrandWithCount extends StoreBrand {
   productCount: number;
 }
 
-interface StoreCategory {
-  categoryName: string;
-}
-
 /** Store-owned product row (payload carries the full row; we only need brandId). */
 interface StoreProduct {
   id: number;
@@ -111,8 +118,11 @@ interface StoreDetail {
   description: string | null;
   pricePoint: string | null;
   phoneNumber: string | null;
+  emailAddress: string | null;
   websiteUrl: string | null;
   instagramUrl: string | null;
+  facebookUrl: string | null;
+  pinterestUrl: string | null;
   iconCfImagesUrl: string | null;
   heroImageCfImagesUrl: string | null;
   scrapeStatus: ScrapeStatus;
@@ -120,12 +130,18 @@ interface StoreDetail {
   rating: number | null;
   ratingContextHtml: string | null;
   ratingContextMarkdown: string | null;
+  hoursJson: HoursJson | null;
   weekdayHours: string | null;
   weekendHours: string | null;
+  locationAddress: string | null;
+  googleMapsLink: string | null;
+  googleRating: number | null;
+  userRatingCount: number | null;
+  reviewSummary: string | null;
   cityName: string | null;
   hubRoute: string | null;
   hubName: string | null;
-  categories: StoreCategory[];
+  categories: StoreCategoryChip[];
   brands: StoreBrand[];
   products: StoreProduct[];
 }
@@ -165,12 +181,6 @@ function fileToDataUrl(file: File): Promise<string> {
     reader.onerror = () => reject(reader.error ?? new Error("Failed to read file"));
     reader.readAsDataURL(file);
   });
-}
-
-/** Normalize a possibly-schemeless Instagram value into an absolute URL. */
-function instagramHref(url: string | null): string | null {
-  if (!url) return null;
-  return url.startsWith("http") ? url : `https://${url}`;
 }
 
 // ─── Hero favicon + banner ──────────────────────────────────────────────────────
@@ -256,6 +266,23 @@ function VisitStars({ rating }: { rating: number }) {
         <Star
           key={i}
           className={`size-4 ${i <= Math.round(rating) ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`}
+        />
+      ))}
+    </span>
+  );
+}
+
+/**
+ * Google aggregate stars — same visual language as VisitStars but driven by the
+ * fractional Places rating (filled when the star index ≤ rounded rating).
+ */
+function GoogleStars({ rating }: { rating: number }) {
+  return (
+    <span className="flex" aria-label={`${rating.toFixed(1)} of 5 on Google`}>
+      {[1, 2, 3, 4, 5].map((i) => (
+        <Star
+          key={i}
+          className={`size-3.5 ${i <= Math.round(rating) ? "fill-amber-400 text-amber-400" : "text-muted-foreground/30"}`}
         />
       ))}
     </span>
@@ -357,16 +384,19 @@ export function StoreViewportApp({
   const [notes, setNotes] = useState<NoteRow[]>([]);
   const [photos, setPhotos] = useState<ShowroomPhoto[]>([]);
 
-  // Google Places gallery photos (hero source + theater lightbox). Distinct
-  // from the homeowner's uploaded `photos` above.
+  // Google Places gallery photos (hero banner source + the Photos section's
+  // "From Google Places" collection + theater lightbox). Distinct from the
+  // homeowner's uploaded `photos` above.
   const [galleryPhotos, setGalleryPhotos] = useState<GalleryPhoto[]>([]);
   const [galleryOpen, setGalleryOpen] = useState(false);
+  const [galleryStartIndex, setGalleryStartIndex] = useState(0);
 
   // Modal state.
   const [visitOpen, setVisitOpen] = useState(false);
   const [brandsOpen, setBrandsOpen] = useState(false);
   const [productsOpen, setProductsOpen] = useState(false);
   const [scrapeResultsOpen, setScrapeResultsOpen] = useState(false);
+  const [hoursModalOpen, setHoursModalOpen] = useState(false);
 
   // Note delete (inline; create/edit now navigate to the full-page editor).
   const [deleteNoteTarget, setDeleteNoteTarget] = useState<NoteRow | null>(null);
@@ -749,15 +779,30 @@ export function StoreViewportApp({
       {
         key: "photos",
         title: "Showroom photos",
-        description: `${photos.length} photo${photos.length === 1 ? "" : "s"}`,
+        description: `${galleryPhotos.length + photos.length} photo${
+          galleryPhotos.length + photos.length === 1 ? "" : "s"
+        } · Places + your visits`,
         icon: <ImagePlus className="size-5" />,
+        preview:
+          galleryPhotos.length > 0 || photos.length > 0 ? (
+            <PhotoStack
+              images={[
+                ...galleryPhotos.map((p) => p.cfImagesPhotoUrl),
+                ...photos.map((p) => p.deliveryUrl),
+              ].slice(0, 3)}
+              count={`${galleryPhotos.length + photos.length} photo${
+                galleryPhotos.length + photos.length === 1 ? "" : "s"
+              }`}
+            />
+          ) : undefined,
       },
     ],
     [
       store?.brands.length,
       mappedProducts.length,
       notes.length,
-      photos.length,
+      photos,
+      galleryPhotos,
       brandsWithCounts,
     ],
   );
@@ -779,8 +824,6 @@ export function StoreViewportApp({
     );
   }
 
-  const igHref = instagramHref(store.instagramUrl);
-  const categoryNames = store.categories.map((c) => c.categoryName).filter(Boolean);
   // Prefer the polled status; fall back to the store row's value on first paint.
   const effectiveScrapeStatus: ScrapeStatus = scrapeStatus ?? store.scrapeStatus ?? "idle";
 
@@ -804,18 +847,10 @@ export function StoreViewportApp({
           src={galleryPhotos[0]?.cfImagesPhotoUrl ?? store.heroImageCfImagesUrl}
           iconSrc={store.iconCfImagesUrl}
           name={store.name}
-          overlay={
-            galleryPhotos.length > 0 ? (
-              <PhotoStack
-                images={galleryPhotos.slice(0, 3).map((p) => p.cfImagesPhotoUrl)}
-                count={`${galleryPhotos.length} photo${galleryPhotos.length === 1 ? "" : "s"}`}
-                onClick={() => setGalleryOpen(true)}
-              />
-            ) : null
-          }
         />
 
         <div className="p-5 pt-8 sm:p-6 sm:pt-9">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl font-semibold tracking-tight">{store.name}</h1>
@@ -843,25 +878,47 @@ export function StoreViewportApp({
               </div>
             ) : null}
 
-            {categoryNames.length > 0 ? (
-              <div className="mt-2 flex flex-wrap gap-1">
-                {categoryNames.map((c) => (
-                  <Badge
-                    key={c}
-                    variant="secondary"
-                    className="px-1.5 py-0 text-[10px] font-normal"
-                  >
-                    {c}
-                  </Badge>
-                ))}
+            {/* Google rating — always shown when Places supplied one, regardless
+                of whether the homeowner has visited/rated the showroom. */}
+            {store.googleRating != null ? (
+              <div className="mt-2 flex items-center gap-1.5 text-sm">
+                <GoogleStars rating={store.googleRating} />
+                <span className="font-medium tabular-nums">
+                  {store.googleRating.toFixed(1)}
+                </span>
+                {store.userRatingCount != null ? (
+                  <span className="text-muted-foreground">
+                    ({store.userRatingCount} Google review
+                    {store.userRatingCount === 1 ? "" : "s"})
+                  </span>
+                ) : null}
               </div>
             ) : null}
+
+            {/* Dedicated category section — AI-assigned, user-correctable. */}
+            <CategoryChipsEditor
+              storeId={id}
+              categories={store.categories}
+              onChanged={() => void loadStore()}
+            />
 
             {store.description ? (
               <p className="mt-2 text-sm text-muted-foreground">{store.description}</p>
             ) : null}
 
-            {/* Contact row — click-to-call + Globe + Instagram (card patterns). */}
+            {/* AI-summarized read of the Google reviews. */}
+            {store.reviewSummary ? (
+              <div className="mt-3 rounded-lg bg-muted/40 p-3">
+                <p className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                  <Sparkles className="size-3" /> AI review summary
+                </p>
+                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+                  {store.reviewSummary}
+                </p>
+              </div>
+            ) : null}
+
+            {/* Contact row — click-to-call + Globe + social profiles from D1. */}
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[13px]">
               {store.phoneNumber ? (
                 <a
@@ -883,23 +940,23 @@ export function StoreViewportApp({
                   Website
                 </a>
               ) : null}
-              {igHref ? (
-                <a
-                  href={igHref}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
-                >
-                  <Instagram className="size-3.5" />
-                  Instagram
-                </a>
-              ) : null}
-              {(store.weekdayHours || store.weekendHours) ? (
-                <span className="text-muted-foreground/80">
-                  {[store.weekdayHours, store.weekendHours].filter(Boolean).join(" · ")}
-                </span>
-              ) : null}
+              <SocialLinks
+                instagramUrl={store.instagramUrl}
+                facebookUrl={store.facebookUrl}
+                pinterestUrl={store.pinterestUrl}
+              />
             </div>
+          </div>
+
+          {/* Office-hours mini-card — click for full hours + contact + map. */}
+          <div className="shrink-0 sm:w-60">
+            <HoursMiniCard
+              hoursJson={store.hoursJson}
+              weekdayHours={store.weekdayHours}
+              weekendHours={store.weekendHours}
+              onClick={() => setHoursModalOpen(true)}
+            />
+          </div>
           </div>
 
         {/* Visit rating + context note. */}
@@ -994,10 +1051,15 @@ export function StoreViewportApp({
           />
         ) : (
           <PhotosSection
+            galleryPhotos={galleryPhotos}
             photos={photos}
             uploading={uploading}
             onUploadClick={() => fileInputRef.current?.click()}
             onPhotoSaved={loadPhotos}
+            onOpenGallery={(index) => {
+              setGalleryStartIndex(index);
+              setGalleryOpen(true);
+            }}
           />
         )}
       </div>
@@ -1083,22 +1145,59 @@ export function StoreViewportApp({
         photos={galleryPhotos}
         open={galleryOpen}
         onOpenChange={setGalleryOpen}
+        startIndex={galleryStartIndex}
+      />
+      <HoursContactModal
+        store={{
+          name: store.name,
+          hoursJson: store.hoursJson,
+          weekdayHours: store.weekdayHours,
+          weekendHours: store.weekendHours,
+          phoneNumber: store.phoneNumber,
+          emailAddress: store.emailAddress,
+          websiteUrl: store.websiteUrl,
+          locationAddress: store.locationAddress,
+          googleMapsLink: store.googleMapsLink,
+          cityName: store.cityName,
+        }}
+        open={hoursModalOpen}
+        onOpenChange={setHoursModalOpen}
       />
     </main>
   );
 }
 
-// ─── Brand mini logo stack (bento tile preview) ─────────────────────────────────
+// ─── Brand collage (bento tile preview) ──────────────────────────────────────────
 
-/** Small logo tile with a lettermark fallback, sized for the overlapping stack. */
-function BrandStackLogo({ image, name }: { image: string | null; name: string }) {
+/**
+ * Per-index tilt for the angled collage: alternating rotations + slight
+ * vertical drift so the row reads as a hand-fanned spread of logo cards.
+ */
+const COLLAGE_TILTS = [
+  "-rotate-6 translate-y-1",
+  "rotate-4 -translate-y-1",
+  "-rotate-3 translate-y-0.5",
+  "rotate-6 -translate-y-0.5",
+  "-rotate-2 translate-y-1",
+] as const;
+
+/** One tilted, zoomed logo card in the collage, with a lettermark fallback. */
+function AngledBrandCard({
+  image,
+  name,
+  tilt,
+}: {
+  image: string | null;
+  name: string;
+  tilt: string;
+}) {
   const [broken, setBroken] = useState(false);
   const showImage = Boolean(image) && !broken;
   const letter = name.trim().charAt(0).toUpperCase() || "?";
 
   return (
     <span
-      className="flex size-8 items-center justify-center overflow-hidden rounded-full bg-card ring-1 ring-border/40"
+      className={`flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-card shadow-lg ring-1 ring-border/40 transition-transform duration-500 ease-out motion-safe:group-hover/tile:rotate-0 motion-safe:group-hover/tile:translate-y-0 motion-safe:group-hover/tile:scale-105 ${tilt}`}
       title={name}
     >
       {showImage ? (
@@ -1108,10 +1207,10 @@ function BrandStackLogo({ image, name }: { image: string | null; name: string })
           aria-hidden
           loading="lazy"
           onError={() => setBroken(true)}
-          className="size-full object-contain p-1"
+          className="size-full scale-110 object-contain p-1.5"
         />
       ) : (
-        <span className="text-[11px] font-semibold text-muted-foreground" aria-hidden>
+        <span className="text-lg font-semibold text-muted-foreground" aria-hidden>
           {letter}
         </span>
       )}
@@ -1120,25 +1219,26 @@ function BrandStackLogo({ image, name }: { image: string | null; name: string })
 }
 
 /**
- * Compact stacked grid of up to ~6 overlapping brand logos with a "+N" overflow
- * chip. Purely decorative preview for the Brands & Products bento tile — no
- * interactive children (the tile itself is the button).
+ * Angled, zoomed brand-logo collage — a hand-fanned spread of oversized logo
+ * cards that straightens and breathes apart on tile hover, with a right-edge
+ * fade + "+N" chip for overflow. Purely decorative preview for the Brands &
+ * Products bento tile — no interactive children (the tile itself is the button).
  */
 function BrandsTilePreview({ brands }: { brands: BrandWithCount[] }) {
-  const MAX = 6;
+  const MAX = 5;
   const shown = brands.slice(0, MAX);
   const overflow = brands.length - shown.length;
 
   if (shown.length === 0) {
-    // No brands linked yet — an inviting ghost stack instead of a bare tile.
+    // No brands linked yet — an inviting ghost fan instead of a bare tile.
     // Decorative only; the tile button is the interactive element.
     return (
       <div className="space-y-2" aria-hidden>
-        <div className="flex -space-x-2.5">
+        <div className="flex -space-x-3 py-1">
           {[0, 1, 2].map((i) => (
             <span
               key={i}
-              className="flex size-9 items-center justify-center rounded-full bg-muted/70 ring-1 ring-border/40 motion-safe:animate-pulse"
+              className={`flex size-12 items-center justify-center rounded-xl bg-muted/70 ring-1 ring-border/40 motion-safe:animate-pulse ${COLLAGE_TILTS[i]}`}
               style={{ animationDelay: `${i * 220}ms`, animationDuration: "2.6s" }}
             >
               <Sparkles className="size-3.5 text-muted-foreground/60" />
@@ -1155,15 +1255,20 @@ function BrandsTilePreview({ brands }: { brands: BrandWithCount[] }) {
 
   return (
     <div className="space-y-2" aria-hidden>
-      <div className="flex items-center">
-        {/* The stack breathes apart on tile hover — a small "come on in" cue. */}
-        <div className="flex -space-x-2.5 group-hover/tile:-space-x-1 [&>*]:transition-[margin] [&>*]:duration-300 motion-reduce:[&>*]:transition-none">
-          {shown.map((b) => (
-            <BrandStackLogo key={b.id} image={b.iconCfImagesUrl} name={b.name} />
+      <div className="relative flex items-center overflow-hidden py-1.5 pl-1 [mask-image:linear-gradient(to_right,black_82%,transparent)]">
+        {/* The fan breathes apart + straightens on tile hover — a "come on in" cue. */}
+        <div className="flex -space-x-4 group-hover/tile:-space-x-2 [&>*]:transition-[margin,transform] [&>*]:duration-500 motion-reduce:[&>*]:transition-none">
+          {shown.map((b, i) => (
+            <AngledBrandCard
+              key={b.id}
+              image={b.iconCfImagesUrl}
+              name={b.name}
+              tilt={COLLAGE_TILTS[i % COLLAGE_TILTS.length]}
+            />
           ))}
         </div>
         {overflow > 0 ? (
-          <span className="ml-2 inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground ring-1 ring-border/40">
+          <span className="z-10 ml-3 inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground ring-1 ring-border/40">
             +{overflow}
           </span>
         ) : null}
@@ -1504,48 +1609,128 @@ function NotesSection({
 
 // ─── Section: Photos ────────────────────────────────────────────────────────────
 
+/** A Places-gallery thumbnail that opens the theater lightbox at its index. */
+function GalleryThumb({
+  photo,
+  index,
+  onOpen,
+}: {
+  photo: GalleryPhoto;
+  index: number;
+  onOpen: (index: number) => void;
+}) {
+  const [failed, setFailed] = useState(false);
+  if (failed) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => onOpen(index)}
+      aria-label={`Open photo ${index + 1} in gallery`}
+      className="group/thumb relative aspect-square overflow-hidden rounded-lg bg-muted ring-1 ring-border/40 transition-shadow hover:ring-2 hover:ring-primary/50"
+    >
+      <img
+        src={photo.cfImagesPhotoUrl}
+        alt=""
+        loading="lazy"
+        onError={() => setFailed(true)}
+        className="size-full object-cover transition-transform duration-300 group-hover/thumb:scale-105"
+      />
+    </button>
+  );
+}
+
+/**
+ * Photos section — two collections:
+ *   1. "From Google Places" — the stock photos pulled at intake/backfill time
+ *      (previously stacked in the hero). Thumbs open the theater lightbox.
+ *   2. "Your visit photos" — homeowner uploads as flip-polaroids, with the
+ *      upload affordance right in the collection.
+ */
 function PhotosSection({
+  galleryPhotos,
   photos,
   uploading,
   onUploadClick,
   onPhotoSaved,
+  onOpenGallery,
 }: {
+  galleryPhotos: GalleryPhoto[];
   photos: ShowroomPhoto[];
   uploading: boolean;
   onUploadClick: () => void;
   onPhotoSaved: () => void;
+  onOpenGallery: (index: number) => void;
 }) {
   return (
-    <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
-      <div className="flex items-center justify-between gap-2">
-        <h2 className="text-base font-semibold">Showroom photos ({photos.length})</h2>
-        <Button
-          size="sm"
-          variant="outline"
-          className="gap-1.5"
-          onClick={onUploadClick}
-          disabled={uploading}
-        >
-          {uploading ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            <Upload className="size-3.5" />
-          )}
-          Upload photo
-        </Button>
+    <div className="space-y-6">
+      {/* ── Collection: Google Places stock photos ── */}
+      <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-base font-semibold">
+            From Google Places ({galleryPhotos.length})
+          </h2>
+          {galleryPhotos.length > 0 ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              onClick={() => onOpenGallery(0)}
+            >
+              <ImagePlus className="size-3.5" /> Open gallery
+            </Button>
+          ) : null}
+        </div>
+        {galleryPhotos.length === 0 ? (
+          <p className="mt-3 text-sm text-muted-foreground">
+            No Google Places photos yet — link this showroom to its Google
+            listing (Manage → backfill) to pull them in.
+          </p>
+        ) : (
+          <>
+            <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5">
+              {galleryPhotos.map((p, i) => (
+                <GalleryThumb key={p.id} photo={p} index={i} onOpen={onOpenGallery} />
+              ))}
+            </div>
+            <p className="mt-3 text-[11px] text-muted-foreground/60">
+              Photos courtesy of the business &amp; Google Maps contributors.
+            </p>
+          </>
+        )}
       </div>
 
-      {photos.length === 0 ? (
-        <p className="mt-3 text-sm text-muted-foreground">
-          No photos yet. Upload a shot from your visit.
-        </p>
-      ) : (
-        <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-          {photos.map((photo) => (
-            <ShowroomPhotoPolaroid key={photo.id} photo={photo} onSaved={onPhotoSaved} />
-          ))}
+      {/* ── Collection: homeowner visit photos ── */}
+      <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-base font-semibold">Your visit photos ({photos.length})</h2>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5"
+            onClick={onUploadClick}
+            disabled={uploading}
+          >
+            {uploading ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Upload className="size-3.5" />
+            )}
+            Upload photo
+          </Button>
         </div>
-      )}
+
+        {photos.length === 0 ? (
+          <p className="mt-3 text-sm text-muted-foreground">
+            No photos yet. Upload a shot from your visit.
+          </p>
+        ) : (
+          <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            {photos.map((photo) => (
+              <ShowroomPhotoPolaroid key={photo.id} photo={photo} onSaved={onPhotoSaved} />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

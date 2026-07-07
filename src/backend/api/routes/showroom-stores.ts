@@ -357,6 +357,10 @@ const createStoreSchema = z.object({
   locationNotes: z.string().optional().nullable(),
   /** Public Instagram profile URL for this showroom location. */
   instagramUrl: z.string().optional().nullable(),
+  /** Public Facebook page URL for this showroom location. */
+  facebookUrl: z.string().optional().nullable(),
+  /** Public Pinterest profile URL for this showroom location. */
+  pinterestUrl: z.string().optional().nullable(),
   /**
    * Homeowner's rich overview note serialized to HTML by PlateJS.
    * Not accepted for `iconCfImagesUrl` — that column is server-managed via FaviconService.
@@ -1977,6 +1981,61 @@ showroomStoresRouter.put("/:id", async (c) => {
   }
 
   return c.json({ store: updated });
+});
+
+/**
+ * PUT /:id/categories — Replace the store's category set.
+ *
+ * The showroom-viewport hero's category editor calls this when the user
+ * corrects an AI-assigned (or missing) category. REPLACE-ALL semantics: all
+ * existing mapping rows for the store are dropped and re-inserted from the
+ * supplied `categoryIds` (deduped). User-set mappings carry no `aiRationale`,
+ * distinguishing them from agent-inferred rows.
+ */
+showroomStoresRouter.put("/:id/categories", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const body = await c.req.json();
+  const { categoryIds } = z
+    .object({ categoryIds: z.array(z.number().int()).max(50) })
+    .parse(body);
+
+  const [store] = await db
+    .select({ id: showroomStores.id })
+    .from(showroomStores)
+    .where(eq(showroomStores.id, storeId))
+    .limit(1);
+  if (!store) return c.json({ error: "Store not found" }, 404);
+
+  await db
+    .delete(showroomStoreCategoryMapping)
+    .where(eq(showroomStoreCategoryMapping.storeId, storeId));
+
+  const uniqueIds = [...new Set(categoryIds)];
+  for (const categoryId of uniqueIds) {
+    await db.insert(showroomStoreCategoryMapping).values({ storeId, categoryId });
+  }
+
+  // Return the joined category rows so the client can refresh in place.
+  const categories = await db
+    .select({
+      mapping: showroomStoreCategoryMapping,
+      category: showroomStoreCategory,
+    })
+    .from(showroomStoreCategoryMapping)
+    .innerJoin(
+      showroomStoreCategory,
+      eq(showroomStoreCategoryMapping.categoryId, showroomStoreCategory.id),
+    )
+    .where(eq(showroomStoreCategoryMapping.storeId, storeId));
+
+  return c.json({
+    categories: categories.map((r) => ({
+      ...r.mapping,
+      categoryName: r.category.name,
+      categoryDescription: r.category.description,
+    })),
+  });
 });
 
 /**
