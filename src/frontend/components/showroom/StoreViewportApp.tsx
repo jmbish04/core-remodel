@@ -1139,7 +1139,7 @@ function BrandListCard({
             >
               {brand.productCount} product{brand.productCount === 1 ? "" : "s"}
             </Badge>
-            {typeof brand.onlineRating === "number" ? (
+            {typeof brand.onlineRating === "number" && brand.onlineRating > 0 ? (
               <Badge
                 variant="outline"
                 className="gap-1 px-1.5 py-0 text-[10px] font-normal text-amber-300"
