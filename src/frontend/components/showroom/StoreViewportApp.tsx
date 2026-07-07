@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
+  ArrowRight,
   CalendarPlus,
   CheckCircle2,
   Globe,
@@ -26,6 +27,7 @@ import {
   Phone,
   RefreshCcw,
   ScanSearch,
+  Sparkles,
   Star,
   StickyNote,
   Tag,
@@ -376,6 +378,9 @@ export function StoreViewportApp({
     try {
       const data = await api<StoreDetail>(`/api/showroom-stores/${id}`);
       setStore(data);
+      // Tab title = the showroom's actual name (the Astro page can only know
+      // the numeric id at render time).
+      if (data?.name) document.title = data.name;
     } catch (e) {
       console.error("[store/load]", e);
       toast.error(e instanceof Error ? e.message : "Failed to load showroom");
@@ -681,10 +686,7 @@ export function StoreViewportApp({
         title: "Brands & Products",
         description: `${store?.brands.length ?? 0} brands · ${mappedProducts.length} products`,
         icon: <Tag className="size-5" />,
-        preview:
-          brandsWithCounts.length > 0 ? (
-            <BrandMiniStack brands={brandsWithCounts} />
-          ) : undefined,
+        preview: <BrandsTilePreview brands={brandsWithCounts} />,
       },
       {
         key: "notes",
@@ -1046,23 +1048,54 @@ function BrandStackLogo({ image, name }: { image: string | null; name: string })
  * chip. Purely decorative preview for the Brands & Products bento tile — no
  * interactive children (the tile itself is the button).
  */
-function BrandMiniStack({ brands }: { brands: BrandWithCount[] }) {
+function BrandsTilePreview({ brands }: { brands: BrandWithCount[] }) {
   const MAX = 6;
   const shown = brands.slice(0, MAX);
   const overflow = brands.length - shown.length;
 
-  return (
-    <div className="flex items-center" aria-hidden>
-      <div className="flex -space-x-2">
-        {shown.map((b) => (
-          <BrandStackLogo key={b.id} image={b.iconCfImagesUrl} name={b.name} />
-        ))}
+  if (shown.length === 0) {
+    // No brands linked yet — an inviting ghost stack instead of a bare tile.
+    // Decorative only; the tile button is the interactive element.
+    return (
+      <div className="space-y-2" aria-hidden>
+        <div className="flex -space-x-2.5">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="flex size-9 items-center justify-center rounded-full bg-muted/70 ring-1 ring-border/40 motion-safe:animate-pulse"
+              style={{ animationDelay: `${i * 220}ms`, animationDuration: "2.6s" }}
+            >
+              <Sparkles className="size-3.5 text-muted-foreground/60" />
+            </span>
+          ))}
+        </div>
+        <p className="flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors group-hover/tile:text-foreground">
+          Discover what they carry
+          <ArrowRight className="size-3.5 transition-transform group-hover/tile:translate-x-0.5" />
+        </p>
       </div>
-      {overflow > 0 ? (
-        <span className="ml-2 inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground ring-1 ring-border/40">
-          +{overflow}
-        </span>
-      ) : null}
+    );
+  }
+
+  return (
+    <div className="space-y-2" aria-hidden>
+      <div className="flex items-center">
+        {/* The stack breathes apart on tile hover — a small "come on in" cue. */}
+        <div className="flex -space-x-2.5 group-hover/tile:-space-x-1 [&>*]:transition-[margin] [&>*]:duration-300 motion-reduce:[&>*]:transition-none">
+          {shown.map((b) => (
+            <BrandStackLogo key={b.id} image={b.iconCfImagesUrl} name={b.name} />
+          ))}
+        </div>
+        {overflow > 0 ? (
+          <span className="ml-2 inline-flex items-center rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground ring-1 ring-border/40">
+            +{overflow}
+          </span>
+        ) : null}
+      </div>
+      <p className="flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors group-hover/tile:text-foreground">
+        Shop by brand
+        <ArrowRight className="size-3.5 transition-transform group-hover/tile:translate-x-0.5" />
+      </p>
     </div>
   );
 }
