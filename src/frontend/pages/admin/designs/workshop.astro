@@ -1,0 +1,18 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { WorkshopApp } from "@/components/workshop";
+---
+
+<BaseLayout
+  title="Design Workshop - 126 Colby"
+  description="An infinite sample-table canvas: sort inspiration into piles, harvest material samples, and mix them onto real photos of your house."
+>
+  <!--
+    The Workshop is the room-scoped Ann-Sacks "sample table" — an infinite konva
+    canvas with piles, a sample drawer, and node recipes. It reads ?roomId= from
+    the URL: without one it shows a room-pick screen; with one it opens that
+    room's table. The whole surface is interactive + owns the render realtime
+    socket, so it hydrates client-only.
+  -->
+  <WorkshopApp client:only="react" />
+</BaseLayout>
