@@ -21,6 +21,8 @@ export const companyNotes = sqliteTable(
     updatedAt: integer("updated_at", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),
+    /** JSON string[] of free-form tags — selected/created via the note editor's multi-select. */
+    tagsJson: text("tags_json"),
   },
   (t) => ({
     byCompanyId: index("idx_company_notes_company_id").on(t.companyId),

@@ -22,6 +22,8 @@ export interface Note {
   title: string;
   /** JSON string that parses to an array of PlateJS Slate nodes. */
   content: string;
+  /** Searchable tag labels attached to the note (may be absent on legacy rows). */
+  tags?: string[];
   isDeleted: boolean;
   createdAt: number | null;
   updatedAt: number | null;
