@@ -37,6 +37,7 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { EntityDocumentsPanel } from "@/components/documents";
 
 import { ScrapeResultsModal } from "./ScrapeResultsModal";
 import { RecordVisitModal } from "./visit/RecordVisitModal";
@@ -896,6 +897,11 @@ export function StoreViewportApp({
             onPhotoSaved={loadPhotos}
           />
         )}
+      </div>
+
+      {/* Documents linked to this showroom */}
+      <div className="mt-8">
+        <EntityDocumentsPanel entityType="showroom" entityId={String(id)} />
       </div>
 
       {/* Shared hidden file input for photo upload (hero + photos section). */}

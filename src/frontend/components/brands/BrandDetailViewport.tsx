@@ -44,6 +44,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { EntityDocumentsPanel } from "@/components/documents";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -663,6 +664,11 @@ export function BrandDetailViewport({ brandId }: { brandId: number }) {
           </div>
         )}
       </section>
+
+      {/* Documents linked to this brand */}
+      <div className="mt-6">
+        <EntityDocumentsPanel entityType="brand" entityId={String(brandId)} />
+      </div>
 
       <EditBrandDialog
         open={editOpen}

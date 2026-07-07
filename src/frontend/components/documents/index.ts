@@ -5,5 +5,6 @@ export { DocViewBucketApp } from "./DocViewBucketApp";
 export { DocViewBuilderApp } from "./DocViewBuilderApp";
 export { DocViewerApp } from "./DocViewerApp";
 export { DocumentUploader, type DocumentUploaderProps } from "./DocumentUploader";
+export { EntityDocumentsPanel } from "./EntityDocumentsPanel";
 export { PublicDocsApp } from "./PublicDocsApp";
 export * from "./shared";

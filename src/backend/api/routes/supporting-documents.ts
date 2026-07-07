@@ -521,6 +521,82 @@ supportingDocumentsRouter.get("/public", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// P2-05 — GET /api/supporting-documents/by-entity?entityType=&entityId=
+// ---------------------------------------------------------------------------
+/**
+ * Reverse lookup: all documents associated to one entity (company, brand,
+ * product, showroom, permit, floor) via documentEntityAssociations — powers
+ * the Documents tab on entity detail pages. Read-only, open like the router's
+ * other reads (the entity pages are admin-gated at the page level).
+ * Registered BEFORE GET /:id so "by-entity" is never captured as an id.
+ */
+supportingDocumentsRouter.get("/by-entity", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const entityType = c.req.query("entityType");
+    const entityId = c.req.query("entityId")?.trim();
+
+    if (!isValidEntityType(entityType)) {
+      return c.json(
+        { error: `entityType must be one of: ${ENTITY_TYPES.join(", ")}` },
+        400,
+      );
+    }
+    if (!entityId) {
+      return c.json({ error: "entityId is required" }, 400);
+    }
+
+    const assocRows = await db
+      .select({ documentId: documentEntityAssociations.documentId })
+      .from(documentEntityAssociations)
+      .where(
+        and(
+          eq(documentEntityAssociations.entityType, entityType),
+          eq(documentEntityAssociations.entityId, entityId),
+        ),
+      )
+      .all();
+
+    if (assocRows.length === 0) {
+      return c.json({ success: true, count: 0, documents: [] });
+    }
+
+    // Chunked — the association list is unbounded and D1 caps bound params.
+    const rows = await selectDocumentsByIds(
+      db,
+      assocRows.map((row) => row.documentId),
+    );
+    const documents = rows
+      .filter((row) => row.isActive)
+      .sort((a, b) => b.datetimeUpdated.getTime() - a.datetimeUpdated.getTime())
+      .map((row) => ({
+        id: row.id,
+        title: row.title,
+        sourceType: row.sourceType,
+        mimeType: row.mimeType,
+        docType: row.docType,
+        visibility: row.visibility,
+        extractionStatus: row.extractionStatus,
+        tags: parseStringArray(row.tagsJson),
+        r2Url: row.r2Url,
+        externalUrl: row.externalUrl,
+        description: row.description,
+        createdAt: row.datetimeCreated,
+      }));
+
+    return c.json({ success: true, count: documents.length, documents });
+  } catch (error) {
+    return c.json(
+      {
+        error: "Failed to list documents for entity",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      500,
+    );
+  }
+});
+
+// ---------------------------------------------------------------------------
 // P2-02 — GET /api/supporting-documents/search?q=
 // ---------------------------------------------------------------------------
 /**
