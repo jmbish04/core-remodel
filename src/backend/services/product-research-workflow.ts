@@ -42,6 +42,7 @@ import { scrapeUrl } from "@backend/ai/tools/browser-rendering";
 import { chunkMarkdown } from "@backend/ai/agents/ResearchAgent/methods/chunk-markdown";
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
+import { parseStructuredResponse } from "@backend/utils/ai-json";
 import {
   beginStep,
   completeJob,
@@ -611,11 +612,14 @@ ${findingsPreview}`;
     } as Parameters<typeof env.AI.run>[1],
   )) as { response?: unknown } & Partial<IntelExtraction>;
 
-  const wrapped = raw?.response;
-  const source =
-    wrapped && typeof wrapped === "object"
-      ? (wrapped as Partial<IntelExtraction>)
-      : (raw as Partial<IntelExtraction>);
+  // Workers-AI json_schema output arrives on `.response` — as a parsed object
+  // for some models, a JSON string for others (kimi via the gateway). Handle
+  // both; otherwise a string `.response` would fall through to the raw wrapper
+  // and every extracted field would come back null.
+  const source = parseStructuredResponse<IntelExtraction>(
+    raw,
+    "product structured intel",
+  );
 
   if (!source || typeof source !== "object") {
     throw new Error("product-research: intel extraction returned no object");
@@ -942,7 +946,7 @@ async function persistPhotos(
       if (seen.has(sourceUrl)) continue;
 
       try {
-        const resp = await fetch(sourceUrl);
+        const resp = await fetch(sourceUrl, { signal: AbortSignal.timeout(10_000) });
         if (!resp.ok) continue;
         const contentType = resp.headers.get("content-type") ?? "";
         if (!contentType.toLowerCase().startsWith("image/")) continue;

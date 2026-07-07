@@ -36,6 +36,7 @@ import { showroomStores } from "@backend/db/schema/showroom/stores";
 import { showroomStoreProducts } from "@backend/db/schema/showroom/store_products";
 import { brands } from "@backend/db/schema/brands/brands";
 import { runDeepResearch, type DeepResearchSource } from "@backend/ai/deep-research";
+import { parseStructuredResponse } from "@backend/utils/ai-json";
 import {
   beginStep,
   completeJob,
@@ -374,11 +375,12 @@ ${findings}`;
       } as Parameters<typeof env.AI.run>[1],
     )) as { response?: unknown; candidates?: unknown };
 
-    const wrapped = raw?.response;
-    const source =
-      wrapped && typeof wrapped === "object"
-        ? (wrapped as { candidates?: unknown })
-        : (raw as { candidates?: unknown });
+    // `.response` may be a parsed object or a JSON string (kimi via gateway);
+    // handle both, else a string response yields zero discovery candidates.
+    const source = parseStructuredResponse<{ candidates?: unknown }>(
+      raw,
+      "discovery candidates",
+    );
 
     return normalizeCandidates(source?.candidates);
   } catch (err) {

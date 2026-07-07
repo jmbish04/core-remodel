@@ -49,6 +49,7 @@ import { scrapeUrl } from "@backend/ai/tools/browser-rendering";
 import { chunkMarkdown } from "@backend/ai/agents/ResearchAgent/methods/chunk-markdown";
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
+import { parseStructuredResponse } from "@backend/utils/ai-json";
 import { faviconService } from "@backend/services/favicon";
 import { ingestRemoteDocument } from "@backend/services/documents/fetch-remote";
 import {
@@ -650,11 +651,15 @@ ${body}`;
       } as Parameters<typeof env.AI.run>[1],
     )) as { response?: unknown } & Partial<BrandStructuredInsight>;
 
-    const wrapped = raw?.response;
-    const source =
-      wrapped && typeof wrapped === "object"
-        ? (wrapped as Partial<BrandStructuredInsight>)
-        : (raw as Partial<BrandStructuredInsight>);
+    // Workers-AI json_schema output arrives on `.response` — as an already-
+    // parsed object for some models, but as a JSON STRING for others (kimi via
+    // the gateway). Handle both; falling through to `raw` when `.response`
+    // is a string would hand `normalizeInsight` a bare `{ response }` wrapper
+    // and every extracted field would come back null.
+    const source = parseStructuredResponse<BrandStructuredInsight>(
+      raw,
+      "brand structured insight",
+    );
 
     return normalizeInsight(source);
   } catch (err) {
