@@ -41,7 +41,7 @@
 | `/gallery` | Render gallery folds into designs/prepare surfaces |
 | `/supporting-docs` (root) + `/admin/supporting-docs` | Replaced by the Documents system (`/docs`, `/admin/docs`) |
 | `/photo-edits` | Upgraded to `/admin/designs/workshop` (nano-banana) |
-| `/docs/[audience]/[slug]`, `/docs/homeowners/permits` | Old static docs → new Documents system |
+| `/docs/[audience]/[slug]`, `/docs/homeowners/permits` | Old static docs → new Documents system — **DELETED in Phase 2 PR** (guide content preserved in `src/frontend/lib/docs.ts`; 301s → `/docs`) |
 | `/admin/planning/decision-room` | → `/admin/designs/decision-room` |
 | `/admin/planning/moodboards(/[slug])` | → `/admin/designs/moodboards` |
 | `/admin/showrooms/[id]/brands/[brandId]` (plural legacy) | → `/admin/shopping/brands/[id]` |

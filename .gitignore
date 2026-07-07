@@ -30,3 +30,4 @@ __pycache__/
 
 # Local D1 / miniflare state (created by migrate:local / wrangler dev)
 .wrangler/
+.swarm-context.md

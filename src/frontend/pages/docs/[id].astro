@@ -1,0 +1,19 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { DocViewerApp } from "@/components/documents/DocViewerApp";
+
+const { id } = Astro.params;
+
+if (!id) {
+  return Astro.redirect("/docs");
+}
+---
+
+<BaseLayout
+  title="Document — 126 Colby Remodel"
+  description="View a public project document for the 126 Colby remodel."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <DocViewerApp client:only="react" id={id} />
+  </main>
+</BaseLayout>

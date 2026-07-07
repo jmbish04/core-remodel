@@ -1,0 +1,19 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { DocViewBucketApp } from "@/components/documents/DocViewBucketApp";
+
+const { slug } = Astro.params;
+
+if (!slug) {
+  return Astro.redirect("/docs");
+}
+---
+
+<BaseLayout
+  title="Document Shelf — 126 Colby Remodel"
+  description="A curated shelf of public project documents for the 126 Colby remodel."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <DocViewBucketApp client:only="react" slug={slug} />
+  </main>
+</BaseLayout>

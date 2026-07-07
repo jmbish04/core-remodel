@@ -1,0 +1,13 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { AdminDocsApp } from "@/components/documents/AdminDocsApp";
+---
+
+<BaseLayout
+  title="Documents — The Monolith"
+  description="Upload, classify, and control the visibility of every 126 Colby remodel project document."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <AdminDocsApp client:only="react" />
+  </main>
+</BaseLayout>

@@ -1,0 +1,13 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { DocViewBuilderApp } from "@/components/documents/DocViewBuilderApp";
+---
+
+<BaseLayout
+  title="Document Views — The Monolith"
+  description="Curate static and dynamic document shelves for the 126 Colby remodel."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <DocViewBuilderApp client:only="react" />
+  </main>
+</BaseLayout>
