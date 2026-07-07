@@ -99,6 +99,11 @@
       "class_name": "ProductResearchWorkflow",
     },
     {
+      "name": "deep-research-job-workflow",
+      "binding": "DEEP_RESEARCH_JOB_WORKFLOW",
+      "class_name": "DeepResearchJobWorkflow",
+    },
+    {
       "name": "blank-canvas-batch",
       "binding": "BLANK_CANVAS_WORKFLOW",
       "class_name": "BlankCanvasBatchWorkflow",

@@ -42,6 +42,16 @@ import { scrapeUrl } from "@backend/ai/tools/browser-rendering";
 import { chunkMarkdown } from "@backend/ai/agents/ResearchAgent/methods/chunk-markdown";
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
+import {
+  beginStep,
+  completeJob,
+  completeStep,
+  createResearchJob,
+  enginePhaseRecorder,
+  failJob,
+  failStep,
+  updateJob,
+} from "@backend/services/research-jobs";
 
 // ---------------------------------------------------------------------------
 // Params + constants
@@ -49,7 +59,23 @@ import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 
 export interface ProductResearchParams {
   storeProductId: number;
+  /**
+   * Pre-created research-console job id. The API may create the job row
+   * before triggering the workflow so the UI can navigate to the live
+   * viewport immediately; when present the workflow records into it instead
+   * of creating its own.
+   */
+  researchJobId?: number;
 }
+
+/**
+ * Research-console step count: the 8 workflow steps recorded below
+ * (mark-running, deep-research, extract-structured, scrape-product-page,
+ * photos, persist, embed, mark-complete) plus the ~7 deep-research engine
+ * phases (plan, outline, research, evaluate-1, follow-ups-1, evaluate-2,
+ * compose) streamed in via `enginePhaseRecorder`.
+ */
+const TOTAL_JOB_STEPS = 15;
 
 /** Workers-AI embedding model — mirrors the showroom scrape pipeline. */
 const EMBED_MODEL = "@cf/baai/bge-large-en-v1.5" as const;
@@ -189,65 +215,237 @@ export class ProductResearchWorkflow extends WorkflowEntrypoint<
     const env = this.env;
     const db = drizzle(env.DB);
 
+    // Research-console job id — pre-created by the API when `researchJobId`
+    // is supplied, otherwise created inside mark-running (job creation lives
+    // inside the step.do so Workflow replays never mint duplicate job rows).
+    let jobId: number | null = event.payload.researchJobId ?? null;
+
+    const errText = (err: unknown): string =>
+      err instanceof Error ? err.message : String(err);
+
+    /**
+     * begin/complete/fail-wrap one workflow step for the research console.
+     * Recorder calls never throw, so this adds no failure modes — a work()
+     * failure is re-thrown exactly as before once failStep records it.
+     */
+    const recorded = async <T>(
+      key: string,
+      label: string,
+      sortOrder: number,
+      work: () => Promise<T>,
+      finalize?: (value: T) => { detail?: string | null; artifact?: unknown },
+    ): Promise<T> => {
+      await beginStep(env, jobId, key, label, sortOrder);
+      try {
+        const value = await work();
+        await completeStep(env, jobId, key, finalize?.(value));
+        return value;
+      } catch (err) {
+        await failStep(env, jobId, key, errText(err));
+        throw err;
+      }
+    };
+
     try {
       // ── 1. mark-running ─────────────────────────────────────────────────
-      // Upsert the 1:1 intel row → "running" and load product/brand/store
-      // context for the research topic.
-      const ctx = await step.do("mark-running", async () =>
-        markRunning(env, storeProductId),
-      );
+      // Upsert the 1:1 intel row → "running", load product/brand/store
+      // context for the research topic, and resolve the console job.
+      const marked = await step.do("mark-running", async () => {
+        const loaded = await markRunning(env, storeProductId);
+
+        // Resolve the research-console job: adopt the pre-created one when
+        // the API passed it (so the UI could navigate immediately), else
+        // create it now.
+        let resolvedJobId = event.payload.researchJobId ?? null;
+        if (resolvedJobId) {
+          await updateJob(env, resolvedJobId, {
+            workflowInstanceId: event.instanceId ?? null,
+            totalSteps: TOTAL_JOB_STEPS,
+          });
+        } else {
+          resolvedJobId = await createResearchJob(env, {
+            kind: "product",
+            title: `Product research — ${[loaded.brandName, loaded.itemName]
+              .filter(Boolean)
+              .join(" ")}`,
+            topic: buildResearchTopic(loaded),
+            entityType: "product",
+            entityId: storeProductId,
+            totalSteps: TOTAL_JOB_STEPS,
+            workflowInstanceId: event.instanceId ?? null,
+          });
+        }
+        await beginStep(
+          env,
+          resolvedJobId,
+          "mark-running",
+          "Loading product context & marking research running",
+          0,
+        );
+
+        return { ctx: loaded, jobId: resolvedJobId };
+      });
+      const ctx = marked.ctx;
+      jobId = marked.jobId ?? jobId;
+      await completeStep(env, jobId, "mark-running", {
+        detail: `Loaded "${productLabel(ctx)}" at ${ctx.storeName}`,
+        artifact: {
+          itemName: ctx.itemName,
+          brandName: ctx.brandName,
+          storeName: ctx.storeName,
+        },
+      });
 
       // ── 2. deep-research ────────────────────────────────────────────────
-      const research = await step.do("deep-research", async () =>
-        runDeepResearch(env, buildResearchTopic(ctx), {
-          guidance: buildResearchGuidance(ctx),
-          maxIterations: 2,
+      const research = await recorded(
+        "deep-research",
+        "Running deep research",
+        1,
+        () =>
+          step.do("deep-research", async () =>
+            runDeepResearch(env, buildResearchTopic(ctx), {
+              guidance: buildResearchGuidance(ctx),
+              maxIterations: 2,
+              onPhase: enginePhaseRecorder(env, jobId),
+            }),
+          ),
+        (r) => ({
+          detail: `${Object.keys(r.sources).length} sources across ${r.iterations} refinement pass(es)`,
+          artifact: {
+            sourceCount: Object.keys(r.sources).length,
+            iterations: r.iterations,
+            evaluationGrade: r.evaluation?.grade ?? null,
+          },
         }),
       );
+      // Mirror plan/outline onto the job row (enginePhaseRecorder streams
+      // them live already; this is a cheap idempotent backstop).
+      await updateJob(env, jobId, {
+        plan: research.plan,
+        outline: research.outline,
+      });
 
       // ── 3. extract-structured ───────────────────────────────────────────
-      const intel = await step.do("extract-structured", async () =>
-        extractIntel(env, ctx, research),
+      const intel = await recorded(
+        "extract-structured",
+        "Extracting structured purchase intel",
+        2,
+        () =>
+          step.do("extract-structured", async () =>
+            extractIntel(env, ctx, research),
+          ),
+        (value) => ({
+          detail: value.reviewSummary
+            ? "Structured intel extracted"
+            : "Extraction returned sparse data",
+          artifact: value,
+        }),
       );
 
       // ── 4. scrape-product-page ──────────────────────────────────────────
       // Locate + scrape the product page on the brand's own site (max 2
       // pages), archive markdown to R2, extract product imagery. Never throws.
-      const scraped = await step.do("scrape-product-page", async () =>
-        scrapeBrandProductPage(env, storeProductId, ctx, research),
+      const scraped = await recorded(
+        "scrape-product-page",
+        "Scraping brand product page",
+        3,
+        () =>
+          step.do("scrape-product-page", async () =>
+            scrapeBrandProductPage(env, storeProductId, ctx, research),
+          ),
+        (value) => ({
+          detail: `${value.pageUrls.length} page(s) scraped, ${value.images.length} image candidate(s)`,
+          artifact: {
+            pagesScraped: value.pageUrls.length,
+            imageUrls: value.images.length,
+          },
+        }),
       );
 
       // ── 5. photos ───────────────────────────────────────────────────────
       // Upload up to MAX_PHOTOS discovered images to Cloudflare Images and
       // insert product_images rows (reviewStatus "pending"). Never throws.
-      await step.do("photos", async () =>
-        persistPhotos(env, storeProductId, scraped.images),
+      await recorded(
+        "photos",
+        "Uploading product photos",
+        4,
+        () =>
+          step.do("photos", async () =>
+            persistPhotos(env, storeProductId, scraped.images),
+          ),
+        (value) => ({
+          detail: `${value.uploaded} photo(s) uploaded`,
+          artifact: {
+            uploaded: value.uploaded,
+            deliveryUrls: value.deliveryUrls.slice(0, 6),
+          },
+        }),
       );
 
       // ── 6. persist ──────────────────────────────────────────────────────
       // Fill-blanks onto the product row, insert specs, and write every intel
       // column + the research report/sources.
-      await step.do("persist", async () =>
-        persistIntel(env, storeProductId, intel, research),
+      await recorded(
+        "persist",
+        "Persisting research to product tables",
+        5,
+        () =>
+          step.do("persist", async () =>
+            persistIntel(env, storeProductId, intel, research),
+          ),
+        (value) => ({
+          detail: `${value.wrote.length} column(s)/table(s) written`,
+          artifact: { wrote: value.wrote },
+        }),
       );
+      await updateJob(env, jobId, {
+        report: research.report,
+        sources: research.sources,
+        result: intel,
+      });
 
       // ── 7. embed ────────────────────────────────────────────────────────
       // Chunk + embed the report into RESEARCH_INDEX. Never throws — a
       // Vectorize hiccup must not flip an otherwise-complete run to "failed".
-      await step.do("embed", async () =>
-        embedReport(env, storeProductId, research.report),
+      await recorded(
+        "embed",
+        "Embedding research report",
+        6,
+        () =>
+          step.do("embed", async () =>
+            embedReport(env, storeProductId, research.report),
+          ),
+        (written) => ({
+          detail: `${written} vector(s) written`,
+          artifact: { vectorsWritten: written },
+        }),
       );
 
       // ── 8. mark-complete ────────────────────────────────────────────────
-      await step.do("mark-complete", async () => {
-        await db
-          .update(storeProductIntel)
-          .set({ researchStatus: "complete", updatedAt: new Date() })
-          .where(eq(storeProductIntel.storeProductId, storeProductId));
+      await recorded(
+        "mark-complete",
+        "Marking research complete",
+        7,
+        () =>
+          step.do("mark-complete", async () => {
+            await db
+              .update(storeProductIntel)
+              .set({ researchStatus: "complete", updatedAt: new Date() })
+              .where(eq(storeProductIntel.storeProductId, storeProductId));
+          }),
+        () => ({ detail: `store_product_intel.research_status = "complete"` }),
+      );
+
+      await completeJob(env, jobId, {
+        report: research.report,
+        sources: research.sources,
+        result: intel,
       });
     } catch (error) {
       // Any unrecoverable failure flips status to "failed" then re-throws so
-      // Workflows records the error for observability.
+      // Workflows records the error for observability. The console job is
+      // failed alongside (failJob never throws).
+      await failJob(env, jobId, error);
       try {
         await db
           .update(storeProductIntel)
@@ -716,10 +914,11 @@ async function persistPhotos(
   env: Env,
   storeProductId: number,
   images: DiscoveredImage[],
-): Promise<void> {
+): Promise<{ uploaded: number; deliveryUrls: string[] }> {
+  const outcome = { uploaded: 0, deliveryUrls: [] as string[] };
   try {
     const candidates = images.slice(0, MAX_PHOTOS);
-    if (candidates.length === 0) return;
+    if (candidates.length === 0) return outcome;
 
     const db = drizzle(env.DB);
 
@@ -735,7 +934,7 @@ async function persistPhotos(
       console.error(
         `product-research: no CF Images credentials — skipping photos for product ${storeProductId}`,
       );
-      return;
+      return outcome;
     }
 
     for (let i = 0; i < candidates.length; i++) {
@@ -770,6 +969,8 @@ async function persistPhotos(
           })
           .onConflictDoNothing();
         seen.add(sourceUrl);
+        outcome.uploaded += 1;
+        outcome.deliveryUrls.push(deliveryUrl);
       } catch (err) {
         console.error(
           `product-research: photo upload failed for ${sourceUrl}`,
@@ -783,6 +984,7 @@ async function persistPhotos(
       err,
     );
   }
+  return outcome;
 }
 
 // ---------------------------------------------------------------------------
@@ -794,8 +996,9 @@ async function persistIntel(
   storeProductId: number,
   intel: IntelExtraction,
   research: DeepResearchResult,
-): Promise<void> {
+): Promise<{ wrote: string[] }> {
   const db = drizzle(env.DB);
+  const wrote: string[] = [];
 
   // ── Fill-blanks onto showroom_store_products. ────────────────────────────
   const [product] = await db
@@ -820,6 +1023,9 @@ async function persistIntel(
       updates.price = intel.aiRetailPrice;
     }
     if (Object.keys(updates).length > 0) {
+      wrote.push(
+        ...Object.keys(updates).map((col) => `showroom_store_products.${col}`),
+      );
       await db
         .update(showroomStoreProducts)
         .set({ ...updates, updatedAt: new Date() })
@@ -832,6 +1038,7 @@ async function persistIntel(
   // (storeProductId, specKey, sourceUrl) constraint won't dedupe null-source
   // rows — pre-check existing keys case-insensitively, then insert with
   // onConflictDoNothing as a belt-and-braces.
+  let specsInserted = 0;
   if (intel.specs.length > 0) {
     const firstSourceUrl = researchSourceUrls(research)[0] ?? null;
 
@@ -858,6 +1065,7 @@ async function persistIntel(
           })
           .onConflictDoNothing();
         seenKeys.add(spec.key.toLowerCase());
+        specsInserted += 1;
       } catch (err) {
         console.error(
           `product-research: spec insert failed for "${spec.key}"`,
@@ -866,28 +1074,38 @@ async function persistIntel(
       }
     }
   }
+  if (specsInserted > 0) {
+    wrote.push(`product_specs(+${specsInserted})`);
+  }
 
   // ── store_product_intel — every intel column + report + sources. ─────────
+  const intelSet = {
+    reviewSummary: intel.reviewSummary,
+    priceRangeLow: intel.priceRangeLow,
+    priceRangeHigh: intel.priceRangeHigh,
+    aiWholesalePrice: intel.aiWholesalePrice,
+    aiWholesaleRationale: intel.aiWholesaleRationale,
+    aiRetailPrice: intel.aiRetailPrice,
+    aiRetailRationale: intel.aiRetailRationale,
+    aiNegotiatedPrice: intel.aiNegotiatedPrice,
+    aiNegotiatedRationale: intel.aiNegotiatedRationale,
+    salesIntel: intel.salesIntel,
+    caRegulatoryFlag: intel.caRegulatoryFlag,
+    caRegulatoryNotes: intel.caRegulatoryNotes,
+    researchReport: research.report,
+    researchSources: research.sources,
+  };
   await db
     .update(storeProductIntel)
-    .set({
-      reviewSummary: intel.reviewSummary,
-      priceRangeLow: intel.priceRangeLow,
-      priceRangeHigh: intel.priceRangeHigh,
-      aiWholesalePrice: intel.aiWholesalePrice,
-      aiWholesaleRationale: intel.aiWholesaleRationale,
-      aiRetailPrice: intel.aiRetailPrice,
-      aiRetailRationale: intel.aiRetailRationale,
-      aiNegotiatedPrice: intel.aiNegotiatedPrice,
-      aiNegotiatedRationale: intel.aiNegotiatedRationale,
-      salesIntel: intel.salesIntel,
-      caRegulatoryFlag: intel.caRegulatoryFlag,
-      caRegulatoryNotes: intel.caRegulatoryNotes,
-      researchReport: research.report,
-      researchSources: research.sources,
-      updatedAt: new Date(),
-    })
+    .set({ ...intelSet, updatedAt: new Date() })
     .where(eq(storeProductIntel.storeProductId, storeProductId));
+  wrote.push(
+    ...Object.entries(intelSet)
+      .filter(([, value]) => value != null)
+      .map(([col]) => `store_product_intel.${col}`),
+  );
+
+  return { wrote };
 }
 
 // ---------------------------------------------------------------------------

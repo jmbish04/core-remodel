@@ -87,6 +87,22 @@ export interface DeepResearchResult extends DeepResearchState {
   evaluation: DeepResearchFeedback | null;
 }
 
+/**
+ * A live progress event emitted as the pipeline moves through its phases.
+ * `key` is stable per phase ("plan", "outline", "research", "evaluate-N",
+ * "follow-ups-N", "compose"); `index` orders phases for timeline rendering.
+ */
+export interface DeepResearchPhaseEvent {
+  key: string;
+  label: string;
+  status: "running" | "complete" | "failed";
+  index: number;
+  /** One-line human summary of what the phase produced. */
+  detail?: string;
+  /** Phase output artifact (plan/outline/report text, feedback object, …). */
+  artifact?: unknown;
+}
+
 /** Tunables for a deep-research run. */
 export interface DeepResearchOptions {
   /**
@@ -98,6 +114,12 @@ export interface DeepResearchOptions {
   maxIterations?: number;
   /** Number of initial `[RESEARCH]` goals in the plan. Default 5. */
   maxResearchGoals?: number;
+  /**
+   * Optional progress hook fired at every phase boundary — used by the
+   * research-job recorder to persist plans + every step into D1 so the
+   * research console can render the run live. Awaited; must never throw.
+   */
+  onPhase?: (event: DeepResearchPhaseEvent) => Promise<void>;
 }
 
 /** Default refinement-loop cap (matches the ADK `max_iterations=2` loop). */

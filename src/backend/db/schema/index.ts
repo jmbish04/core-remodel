@@ -105,6 +105,8 @@ export * from "./showroom/index";
 
 export * from "./brands/index";
 
+export * from "./research/index";
+
 export * from "./scrum/index";
 
 // gmail

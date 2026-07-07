@@ -28,6 +28,15 @@ import {
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import {
+  beginStep,
+  completeJob,
+  completeStep,
+  createResearchJob,
+  enginePhaseRecorder,
+  failJob,
+  failStep,
+} from "@backend/services/research-jobs";
+import {
   buildProductResearchPrompt,
   loadProductPromptContext,
 } from "./prompt-context";
@@ -1108,7 +1117,8 @@ async function runEngineStoreResearch(
   store: typeof showroomStores.$inferSelect,
   negativeConstraints: string[],
   result: ShowroomSweepResult,
-): Promise<void> {
+  jobId: number | null,
+): Promise<{ sourceCount: number }> {
   const topic = `Reputation and review research for the showroom/store "${store.name}"${store.locationAddress ? ` located at ${store.locationAddress}` : ""} (website: ${store.websiteUrl ?? "unknown"}), on behalf of a homeowner running a high-end San Francisco home remodel. Research homeowner-relevant reputation and review evidence across Google reviews, Reddit, Yelp, and Houzz: product quality, brands and product lines carried, customer experience, pricing posture, warranty and service policies, delivery and lead times, and whether this store is worth visiting or buying from.`;
 
   const guidance = `Extraction goals for this showroom sweep (surface concrete, source-backed evidence for each):
@@ -1127,8 +1137,33 @@ Store context:
 Negative constraints (avoid recommending anything matching these):
 ${bulletList(negativeConstraints)}`;
 
-  const research = await runDeepResearch(env, topic, { guidance });
-  await persistEngineStoreResearch(env, store.id, research, result);
+  const research = await runDeepResearch(env, topic, {
+    guidance,
+    onPhase: enginePhaseRecorder(env, jobId),
+  });
+
+  // Record the persistence pass as its own research-console step (sorted
+  // after the engine phases, which use sortBase 100).
+  const findingsBefore = result.findingsWritten;
+  await beginStep(env, jobId, "persist-findings", "Persisting engine findings", 200);
+  try {
+    await persistEngineStoreResearch(env, store.id, research, result);
+  } catch (error) {
+    await failStep(
+      env,
+      jobId,
+      "persist-findings",
+      error instanceof Error ? error.message : String(error),
+    );
+    throw error;
+  }
+  const findingsWritten = result.findingsWritten - findingsBefore;
+  await completeStep(env, jobId, "persist-findings", {
+    detail: `${findingsWritten} finding(s) written`,
+    artifact: { findingsWritten },
+  });
+
+  return { sourceCount: Object.keys(research.sources).length };
 }
 
 export async function deepSweepStore(
@@ -1145,18 +1180,35 @@ export async function deepSweepStore(
     .limit(1);
   if (!store) throw new Error(`Showroom store ${input.storeId} not found`);
 
+  // Research-console job for the sweep: 7 deep-research engine phases +
+  // persist-findings + legacy-sweep. createResearchJob never throws — a null
+  // jobId simply turns every recorder call below into a no-op.
+  const jobId = await createResearchJob(env, {
+    kind: "showroom",
+    title: `Showroom research — ${store.name}`,
+    topic: `Reputation and review research for the showroom/store "${store.name}" (Google, Reddit, Yelp, Houzz) on behalf of a high-end SF remodel.`,
+    entityType: "showroom",
+    entityId: input.storeId,
+    totalSteps: 9,
+  });
+
   // Engine-first research: the ADK-port pipeline is the primary findings
   // generator; the legacy citation-plan sweep below still runs for images,
   // ratings, specs, and per-page embeds (and acts as the findings fallback
-  // whenever the engine fails).
+  // whenever the engine fails). An engine failure is NOT a job failure —
+  // it is recorded via the engine's failed phase events and the sweep (and
+  // job) completes from the legacy path.
   progress?.("Running deep-research engine for store reputation", 5);
+  let engineSourceCount = 0;
   try {
-    await runEngineStoreResearch(
+    const engine = await runEngineStoreResearch(
       env,
       store,
       input.negativeConstraints ?? [],
       result,
+      jobId,
     );
+    engineSourceCount = engine.sourceCount;
   } catch (error) {
     console.error(
       `Deep-research engine failed for store ${input.storeId}; falling back to legacy sweep:`,
@@ -1185,50 +1237,85 @@ Negative constraints:
 ${bulletList(input.negativeConstraints ?? [])}`;
 
   progress?.("Discovering store citation URLs", 10);
-  const plan = await discoverCitationPlan(
+  const findingsBeforeLegacy = result.findingsWritten;
+  await beginStep(
     env,
-    prompt,
-    [...(input.seedCitationUrls ?? []), ...(store.websiteUrl ? [store.websiteUrl] : [])],
-    input.negativeConstraints ?? [],
-    clampMaxSources(input.maxSources),
-    {
-      researchMode: input.researchMode,
-      deepResearchWaitMs: input.deepResearchWaitMs,
-      enableMcpBridge: input.enableMcpBridge,
-      mcpServerUrl: input.mcpServerUrl,
-      mcpScope: {
-        type: "store",
-        id: input.storeId,
-        storeId: input.storeId,
-      },
-    },
+    jobId,
+    "legacy-sweep",
+    "Legacy citation sweep (images, ratings, embeds)",
+    201,
   );
-  result.citationsFound = plan.citationUrls.length;
+  try {
+    const plan = await discoverCitationPlan(
+      env,
+      prompt,
+      [...(input.seedCitationUrls ?? []), ...(store.websiteUrl ? [store.websiteUrl] : [])],
+      input.negativeConstraints ?? [],
+      clampMaxSources(input.maxSources),
+      {
+        researchMode: input.researchMode,
+        deepResearchWaitMs: input.deepResearchWaitMs,
+        enableMcpBridge: input.enableMcpBridge,
+        mcpServerUrl: input.mcpServerUrl,
+        mcpScope: {
+          type: "store",
+          id: input.storeId,
+          storeId: input.storeId,
+        },
+      },
+    );
+    result.citationsFound = plan.citationUrls.length;
 
-  const processor = await createImageProcessor(env);
-  const targetLabel = `Showroom store ${store.name}`;
+    const processor = await createImageProcessor(env);
+    const targetLabel = `Showroom store ${store.name}`;
 
-  let index = 0;
-  for (const sourceUrl of plan.citationUrls) {
-    index += 1;
-    progress?.(`Processing store source ${index}/${plan.citationUrls.length}`, 20 + index * 10);
-    try {
-      await processStoreSource(
-        env,
-        input.storeId,
-        sourceUrl,
-        targetLabel,
-        processor,
-        result,
-      );
-      result.sourcesProcessed += 1;
-    } catch (error) {
-      pushWarning(
-        result,
-        `Source skipped for store ${input.storeId} (${sourceUrl}): ${error instanceof Error ? error.message : String(error)}`,
-      );
+    let index = 0;
+    for (const sourceUrl of plan.citationUrls) {
+      index += 1;
+      progress?.(`Processing store source ${index}/${plan.citationUrls.length}`, 20 + index * 10);
+      try {
+        await processStoreSource(
+          env,
+          input.storeId,
+          sourceUrl,
+          targetLabel,
+          processor,
+          result,
+        );
+        result.sourcesProcessed += 1;
+      } catch (error) {
+        pushWarning(
+          result,
+          `Source skipped for store ${input.storeId} (${sourceUrl}): ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
+  } catch (error) {
+    // Only a whole-sweep failure fails the job — per-source errors above are
+    // warnings, and an engine failure earlier already fell back to this path.
+    await failStep(
+      env,
+      jobId,
+      "legacy-sweep",
+      error instanceof Error ? error.message : String(error),
+    );
+    await failJob(env, jobId, error);
+    throw error;
   }
+  await completeStep(env, jobId, "legacy-sweep", {
+    detail: `${result.sourcesProcessed} source(s) processed`,
+    artifact: { findingsCount: result.findingsWritten - findingsBeforeLegacy },
+  });
+
+  // Showrooms intentionally do not persist the full report — the job result
+  // carries the aggregate counts instead.
+  await completeJob(env, jobId, {
+    report: null,
+    result: {
+      findingsWritten: result.findingsWritten,
+      sourceCount: engineSourceCount + result.sourcesProcessed,
+    },
+  });
 
   progress?.("Store deep sweep complete", 100);
   return result;

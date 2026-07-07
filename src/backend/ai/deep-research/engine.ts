@@ -47,6 +47,7 @@ import {
   createInitialState,
   type DeepResearchFeedback,
   type DeepResearchOptions,
+  type DeepResearchPhaseEvent,
   type DeepResearchResult,
   type DeepResearchState,
 } from "./types";
@@ -344,7 +345,18 @@ export async function runDeepResearch(
   let state = createInitialState();
   let evaluation: DeepResearchFeedback | null = null;
 
+  // Progress hook — best-effort; a telemetry failure must never stall research.
+  const emit = async (event: DeepResearchPhaseEvent) => {
+    if (!opts.onPhase) return;
+    try {
+      await opts.onPhase(event);
+    } catch (err) {
+      console.error("[deep-research] onPhase hook failed:", err);
+    }
+  };
+
   // 1. Plan (non-fatal: a degraded single-goal plan still lets research run).
+  await emit({ key: "plan", label: "Generating research plan", status: "running", index: 0 });
   try {
     state.plan = await generateResearchPlan(env, topic, opts);
   } catch (error) {
@@ -354,33 +366,99 @@ export async function runDeepResearch(
     state.plan = `- [RESEARCH] Investigate and gather comprehensive, well-sourced information on: ${topic}
 - [DELIVERABLE][IMPLIED] Synthesize the gathered information into a structured summary of the findings.`;
   }
+  await emit({
+    key: "plan",
+    label: "Generating research plan",
+    status: "complete",
+    index: 0,
+    detail: `${state.plan.split("\n").filter((l) => l.trim().startsWith("-")).length} goals planned`,
+    artifact: state.plan,
+  });
 
   // 2. Report outline (non-fatal: composer tolerates an empty outline).
+  await emit({ key: "outline", label: "Structuring the report outline", status: "running", index: 1 });
   try {
     state.outline = await planReportSections(env, topic, state.plan);
   } catch (error) {
     console.error("[deep-research] section_planner failed:", error);
   }
+  await emit({
+    key: "outline",
+    label: "Structuring the report outline",
+    status: "complete",
+    index: 1,
+    artifact: state.outline,
+  });
 
   // 3. First research pass — the only step allowed to throw out of here.
-  state = await researchSections(env, topic, state, opts);
+  await emit({ key: "research", label: "Researching (grounded web search)", status: "running", index: 2 });
+  try {
+    state = await researchSections(env, topic, state, opts);
+  } catch (error) {
+    await emit({
+      key: "research",
+      label: "Researching (grounded web search)",
+      status: "failed",
+      index: 2,
+      detail: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
+  }
+  await emit({
+    key: "research",
+    label: "Researching (grounded web search)",
+    status: "complete",
+    index: 2,
+    detail: `${Object.keys(state.sources).length} sources collected`,
+    artifact: { findingsChars: state.findings.length, sourceCount: Object.keys(state.sources).length },
+  });
 
   // 4 + 5. Critique → refinement loop (all non-fatal past this point).
   try {
+    let round = 1;
+    await emit({ key: `evaluate-${round}`, label: `Evaluating research quality (pass ${round})`, status: "running", index: 2 + round * 2 });
     evaluation = await evaluateResearch(env, topic, state.findings);
+    await emit({
+      key: `evaluate-${round}`,
+      label: `Evaluating research quality (pass ${round})`,
+      status: "complete",
+      index: 2 + round * 2,
+      detail: `Grade: ${evaluation.grade}`,
+      artifact: evaluation,
+    });
     while (
       evaluation.grade === "fail" &&
       state.iterations < maxIterations &&
       (evaluation.followUpQueries?.length ?? 0) > 0
     ) {
+      await emit({ key: `follow-ups-${round}`, label: `Filling research gaps (pass ${round})`, status: "running", index: 3 + round * 2 });
       state = await executeFollowUps(env, topic, state, evaluation);
+      await emit({
+        key: `follow-ups-${round}`,
+        label: `Filling research gaps (pass ${round})`,
+        status: "complete",
+        index: 3 + round * 2,
+        detail: `${Object.keys(state.sources).length} sources total`,
+      });
+      round += 1;
+      await emit({ key: `evaluate-${round}`, label: `Evaluating research quality (pass ${round})`, status: "running", index: 2 + round * 2 });
       evaluation = await evaluateResearch(env, topic, state.findings);
+      await emit({
+        key: `evaluate-${round}`,
+        label: `Evaluating research quality (pass ${round})`,
+        status: "complete",
+        index: 2 + round * 2,
+        detail: `Grade: ${evaluation.grade}`,
+        artifact: evaluation,
+      });
     }
   } catch (error) {
     console.error("[deep-research] evaluation/refinement loop failed:", error);
   }
 
   // 6. Compose the cited report; fall back to raw findings on failure.
+  const composeIndex = 20; // stable slot after any evaluate/follow-up rounds
+  await emit({ key: "compose", label: "Composing the cited report", status: "running", index: composeIndex });
   let report = "";
   try {
     report = await composeCitedReport(env, topic, state);
@@ -388,6 +466,14 @@ export async function runDeepResearch(
     console.error("[deep-research] report_composer failed:", error);
   }
   if (!report.trim()) report = state.findings;
+  await emit({
+    key: "compose",
+    label: "Composing the cited report",
+    status: "complete",
+    index: composeIndex,
+    detail: `${report.length.toLocaleString()} chars, ${Object.keys(state.sources).length} cited sources`,
+    artifact: { reportChars: report.length },
+  });
 
   return { ...state, report, evaluation };
 }

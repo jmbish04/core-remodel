@@ -51,6 +51,16 @@ import { ImageProcessorService } from "@backend/services/image-processor";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { faviconService } from "@backend/services/favicon";
 import { ingestRemoteDocument } from "@backend/services/documents/fetch-remote";
+import {
+  beginStep,
+  completeJob,
+  completeStep,
+  createResearchJob,
+  enginePhaseRecorder,
+  failJob,
+  failStep,
+  updateJob,
+} from "@backend/services/research-jobs";
 
 // ---------------------------------------------------------------------------
 // Params + constants
@@ -58,6 +68,13 @@ import { ingestRemoteDocument } from "@backend/services/documents/fetch-remote";
 
 export interface BrandResearchParams {
   brandId: number;
+  /**
+   * Pre-created research-console job id. The API may create the job row
+   * before triggering the workflow so the UI can navigate to the live
+   * viewport immediately; when present the workflow records into it instead
+   * of creating its own.
+   */
+  researchJobId?: number;
 }
 
 /** Workers-AI embedding model — mirrors the showroom scrape RAG pipeline. */
@@ -90,6 +107,35 @@ const SUBPAGE_PRIORITY_RE =
 
 /** Valid brand price tiers. */
 const VALID_PRICE_POINTS = new Set(["$", "$$", "$$$", "$$$$"]);
+
+/**
+ * Research-console step count: the 10 workflow steps recorded below
+ * (mark-running, deep-research, extract-structured, scrape-site, photos,
+ * catalogs, favicon, persist, embed, mark-complete) plus the ~7 deep-research
+ * engine phases (plan, outline, research, evaluate-1, follow-ups-1,
+ * evaluate-2, compose) streamed in via {@link enginePhaseRecorder}.
+ */
+const TOTAL_JOB_STEPS = 17;
+
+/** The deep-research topic — also stored on the research-console job row. */
+function buildBrandResearchTopic(
+  brandName: string,
+  websiteUrl: string | null,
+): string {
+  return `Research the home-remodel brand "${brandName}"${websiteUrl ? ` (website: ${websiteUrl})` : ``} for a San Francisco Bay Area homeowner deciding whether to buy this brand through a showroom or elsewhere. Cover: online reviews and reputation across Google, Reddit, Houzz, and trade/homeowner forums; relative price tier; whether the brand is sold at big-box retailers (Lowe's, Home Depot) or general online retailers; how often the brand runs sales, coupons, or promotions; its most notable product lines; and its official social profiles.`;
+}
+
+/** Domain guidance woven into the deep-research plan + research prompts. */
+function buildBrandResearchGuidance(brandName: string): string {
+  return `Deliverables the final report MUST cover, each in its own section:
+1. REVIEWS & REPUTATION — what homeowners and trade professionals actually say about "${brandName}" on Google reviews, Reddit, Houzz, and forums; recurring praise and complaints; overall sentiment.
+2. PRICE TIER — where the brand sits on a "$" (budget) to "$$$$" (luxury) scale, with evidence.
+3. BIG-BOX / ONLINE AVAILABILITY — can it be bought at Lowe's, Home Depot, or mainstream online retailers (name each retailer with a URL when possible)? This is the "why pay a showroom premium?" signal — be explicit about whether showroom pricing is avoidable.
+4. SALES & COUPON CADENCE — how often the brand or its retailers run sales, coupon codes, or seasonal promotions, and when.
+5. TOP PRODUCT LINES — the ~5 most notable product lines / collections, one line each on what it is and why it's notable.
+6. SOCIAL PROFILES — the brand's official Instagram, Facebook, and Pinterest profile URLs when they exist.
+Prefer primary sources (the brand's own site, retailer listings, review platforms). Cite every claim.`;
+}
 
 // ---------------------------------------------------------------------------
 // Structured-extraction shapes
@@ -203,6 +249,8 @@ const PAGE_SCRAPE_JSON_SCHEMA = {
 
 /** Aggregate result of the "scrape-site" step. */
 interface SiteScrapeResult {
+  /** Number of pages successfully scraped (homepage + subpages). */
+  pagesScraped: number;
   imageUrls: Array<{ url: string; pageUrl: string }>;
   pdfUrls: string[];
   socials: {
@@ -225,9 +273,40 @@ export class BrandResearchWorkflow extends WorkflowEntrypoint<
     const env = this.env;
     const db = drizzle(env.DB);
 
+    // Research-console job id — pre-created by the API when `researchJobId`
+    // is supplied, otherwise created inside mark-running (job creation lives
+    // inside the step.do so Workflow replays never mint duplicate job rows).
+    let jobId: number | null = event.payload.researchJobId ?? null;
+
+    const errText = (err: unknown): string =>
+      err instanceof Error ? err.message : String(err);
+
+    /**
+     * begin/complete/fail-wrap one workflow step for the research console.
+     * Recorder calls never throw, so this adds no failure modes — a work()
+     * failure is re-thrown exactly as before once failStep records it.
+     */
+    const recorded = async <T>(
+      key: string,
+      label: string,
+      sortOrder: number,
+      work: () => Promise<T>,
+      finalize?: (value: T) => { detail?: string | null; artifact?: unknown },
+    ): Promise<T> => {
+      await beginStep(env, jobId, key, label, sortOrder);
+      try {
+        const value = await work();
+        await completeStep(env, jobId, key, finalize?.(value));
+        return value;
+      } catch (err) {
+        await failStep(env, jobId, key, errText(err));
+        throw err;
+      }
+    };
+
     try {
-      // ── 1. mark-running — upsert the intel row + load the brand ──────────
-      const brand = await step.do("mark-running", async () => {
+      // ── 1. mark-running — resolve the console job, upsert intel, load brand
+      const marked = await step.do("mark-running", async () => {
         const [row] = await db
           .select({
             name: brands.name,
@@ -241,6 +320,34 @@ export class BrandResearchWorkflow extends WorkflowEntrypoint<
           throw new Error(`brand-research: brand ${brandId} not found`);
         }
 
+        // Resolve the research-console job: adopt the pre-created one when
+        // the API passed it (so the UI could navigate immediately), else
+        // create it now.
+        let resolvedJobId = event.payload.researchJobId ?? null;
+        if (resolvedJobId) {
+          await updateJob(env, resolvedJobId, {
+            workflowInstanceId: event.instanceId ?? null,
+            totalSteps: TOTAL_JOB_STEPS,
+          });
+        } else {
+          resolvedJobId = await createResearchJob(env, {
+            kind: "brand",
+            title: `Brand research — ${row.name}`,
+            topic: buildBrandResearchTopic(row.name, row.websiteUrl),
+            entityType: "brand",
+            entityId: brandId,
+            totalSteps: TOTAL_JOB_STEPS,
+            workflowInstanceId: event.instanceId ?? null,
+          });
+        }
+        await beginStep(
+          env,
+          resolvedJobId,
+          "mark-running",
+          "Loading brand & marking research running",
+          0,
+        );
+
         await db
           .insert(brandIntel)
           .values({ brandId, researchStatus: "running" })
@@ -253,85 +360,216 @@ export class BrandResearchWorkflow extends WorkflowEntrypoint<
           name: row.name,
           websiteUrl: row.websiteUrl,
           iconCfImagesUrl: row.iconCfImagesUrl,
+          jobId: resolvedJobId,
         };
+      });
+      const brand = marked;
+      jobId = marked.jobId ?? jobId;
+      await completeStep(env, jobId, "mark-running", {
+        detail: `Brand "${brand.name}" loaded`,
+        artifact: { brandName: brand.name, websiteUrl: brand.websiteUrl },
       });
 
       // ── 2. deep-research — cited multi-source report ──────────────────────
-      const research = await step.do("deep-research", async () => {
-        const topic = `Research the home-remodel brand "${brand.name}"${brand.websiteUrl ? ` (website: ${brand.websiteUrl})` : ``} for a San Francisco Bay Area homeowner deciding whether to buy this brand through a showroom or elsewhere. Cover: online reviews and reputation across Google, Reddit, Houzz, and trade/homeowner forums; relative price tier; whether the brand is sold at big-box retailers (Lowe's, Home Depot) or general online retailers; how often the brand runs sales, coupons, or promotions; its most notable product lines; and its official social profiles.`;
-        const guidance = `Deliverables the final report MUST cover, each in its own section:
-1. REVIEWS & REPUTATION — what homeowners and trade professionals actually say about "${brand.name}" on Google reviews, Reddit, Houzz, and forums; recurring praise and complaints; overall sentiment.
-2. PRICE TIER — where the brand sits on a "$" (budget) to "$$$$" (luxury) scale, with evidence.
-3. BIG-BOX / ONLINE AVAILABILITY — can it be bought at Lowe's, Home Depot, or mainstream online retailers (name each retailer with a URL when possible)? This is the "why pay a showroom premium?" signal — be explicit about whether showroom pricing is avoidable.
-4. SALES & COUPON CADENCE — how often the brand or its retailers run sales, coupon codes, or seasonal promotions, and when.
-5. TOP PRODUCT LINES — the ~5 most notable product lines / collections, one line each on what it is and why it's notable.
-6. SOCIAL PROFILES — the brand's official Instagram, Facebook, and Pinterest profile URLs when they exist.
-Prefer primary sources (the brand's own site, retailer listings, review platforms). Cite every claim.`;
-
-        return runDeepResearch(env, topic, { guidance, maxIterations: 2 });
+      const research = await recorded(
+        "deep-research",
+        "Running deep research",
+        1,
+        () =>
+          step.do("deep-research", async () =>
+            runDeepResearch(
+              env,
+              buildBrandResearchTopic(brand.name, brand.websiteUrl),
+              {
+                guidance: buildBrandResearchGuidance(brand.name),
+                maxIterations: 2,
+                onPhase: enginePhaseRecorder(env, jobId),
+              },
+            ),
+          ),
+        (r) => ({
+          detail: `${Object.keys(r.sources).length} sources across ${r.iterations} refinement pass(es)`,
+          artifact: {
+            sourceCount: Object.keys(r.sources).length,
+            iterations: r.iterations,
+            evaluationGrade: r.evaluation?.grade ?? null,
+          },
+        }),
+      );
+      // Mirror plan/outline onto the job row (enginePhaseRecorder streams
+      // them live already; this is a cheap idempotent backstop).
+      await updateJob(env, jobId, {
+        plan: research.plan,
+        outline: research.outline,
       });
 
       // ── 3. extract-structured — Workers-AI over the report + findings ─────
-      const extracted = await step.do("extract-structured", async () =>
-        extractStructuredInsight(env, brand.name, research.report, research.findings),
-      );
-
-      // ── 4. scrape-site — homepage + prioritized subpages ─────────────────
-      const site = await step.do("scrape-site", async () =>
-        scrapeBrandSite(env, brandId, brand.websiteUrl),
-      );
-
-      // ── 5. photos — candidate images → CF Images → brand_images ──────────
-      await step.do("photos", async () =>
-        uploadBrandPhotos(env, brandId, site.imageUrls),
-      );
-
-      // ── 6. catalogs — PDF catalogs → R2 → document center ────────────────
-      await step.do("catalogs", async () => {
-        const pdfUrls = site.pdfUrls.slice(0, MAX_CATALOGS);
-        for (const url of pdfUrls) {
-          const filename = pdfFilename(url);
-          await ingestRemoteDocument(env, {
-            url,
-            title: `${brand.name} catalog — ${filename}`,
-            entityType: "brand",
-            entityId: String(brandId),
-            docType: "SPEC",
-          });
-        }
-        return { attempted: pdfUrls.length };
-      });
-
-      // ── 7. favicon — fill-blanks icon hydration ───────────────────────────
-      await step.do("favicon", async () => {
-        if (brand.websiteUrl && !brand.iconCfImagesUrl) {
-          await faviconService.hydrateBrandIcon(env, brandId, brand.websiteUrl);
-        }
-      });
-
-      // ── 8. persist — FILL-BLANKS writes across brand tables ──────────────
-      await step.do("persist", async () =>
-        persistResearch(env, brandId, extracted, site, {
-          report: research.report,
-          sources: research.sources,
+      const extracted = await recorded(
+        "extract-structured",
+        "Extracting structured brand insight",
+        2,
+        () =>
+          step.do("extract-structured", async () =>
+            extractStructuredInsight(env, brand.name, research.report, research.findings),
+          ),
+        (value) => ({
+          detail: value.reviewSummary
+            ? "Structured insight extracted"
+            : "Extraction returned sparse data",
+          artifact: value,
         }),
       );
 
+      // ── 4. scrape-site — homepage + prioritized subpages ─────────────────
+      const site = await recorded(
+        "scrape-site",
+        "Scraping brand website",
+        3,
+        () =>
+          step.do("scrape-site", async () =>
+            scrapeBrandSite(env, brandId, brand.websiteUrl),
+          ),
+        (value) => ({
+          detail: `${value.pagesScraped} page(s) scraped, ${value.imageUrls.length} image candidate(s), ${value.pdfUrls.length} PDF(s)`,
+          artifact: {
+            pagesScraped: value.pagesScraped,
+            imageUrls: value.imageUrls.length,
+            pdfUrls: value.pdfUrls,
+          },
+        }),
+      );
+
+      // ── 5. photos — candidate images → CF Images → brand_images ──────────
+      await recorded(
+        "photos",
+        "Uploading brand photos",
+        4,
+        () =>
+          step.do("photos", async () =>
+            uploadBrandPhotos(env, brandId, site.imageUrls),
+          ),
+        (value) => ({
+          detail: `${value.uploaded} photo(s) uploaded`,
+          artifact: {
+            uploaded: value.uploaded,
+            deliveryUrls: value.deliveryUrls.slice(0, 6),
+          },
+        }),
+      );
+
+      // ── 6. catalogs — PDF catalogs → R2 → document center ────────────────
+      await recorded(
+        "catalogs",
+        "Ingesting PDF catalogs",
+        5,
+        () =>
+          step.do("catalogs", async () => {
+            const pdfUrls = site.pdfUrls.slice(0, MAX_CATALOGS);
+            const ingested: Array<{ title: string; documentId: string }> = [];
+            for (const url of pdfUrls) {
+              const filename = pdfFilename(url);
+              const title = `${brand.name} catalog — ${filename}`;
+              const doc = await ingestRemoteDocument(env, {
+                url,
+                title,
+                entityType: "brand",
+                entityId: String(brandId),
+                docType: "SPEC",
+              });
+              if (doc) ingested.push({ title, documentId: doc.documentId });
+            }
+            return { attempted: pdfUrls.length, ingested };
+          }),
+        (value) => ({
+          detail: `${value.ingested.length}/${value.attempted} catalog(s) ingested`,
+          artifact: { ingested: value.ingested },
+        }),
+      );
+
+      // ── 7. favicon — fill-blanks icon hydration ───────────────────────────
+      await recorded(
+        "favicon",
+        "Hydrating brand favicon",
+        6,
+        () =>
+          step.do("favicon", async () => {
+            if (brand.websiteUrl && !brand.iconCfImagesUrl) {
+              await faviconService.hydrateBrandIcon(env, brandId, brand.websiteUrl);
+              return { hydrated: true };
+            }
+            return { hydrated: false };
+          }),
+        (value) => ({
+          detail: value.hydrated
+            ? "Favicon hydrated"
+            : "Favicon already present or no website",
+          artifact: value,
+        }),
+      );
+
+      // ── 8. persist — FILL-BLANKS writes across brand tables ──────────────
+      await recorded(
+        "persist",
+        "Persisting research to brand tables",
+        7,
+        () =>
+          step.do("persist", async () =>
+            persistResearch(env, brandId, extracted, site, {
+              report: research.report,
+              sources: research.sources,
+            }),
+          ),
+        (value) => ({
+          detail: `${value.wrote.length} column(s)/table(s) written`,
+          artifact: { wrote: value.wrote },
+        }),
+      );
+      await updateJob(env, jobId, {
+        report: research.report,
+        sources: research.sources,
+        result: extracted,
+      });
+
       // ── 9. embed — research report → RESEARCH_INDEX ───────────────────────
-      await step.do("embed", async () =>
-        embedResearchReport(env, brandId, research.report),
+      await recorded(
+        "embed",
+        "Embedding research report",
+        8,
+        () =>
+          step.do("embed", async () =>
+            embedResearchReport(env, brandId, research.report),
+          ),
+        (written) => ({
+          detail: `${written} vector(s) written`,
+          artifact: { vectorsWritten: written },
+        }),
       );
 
       // ── 10. mark-complete ─────────────────────────────────────────────────
-      await step.do("mark-complete", async () => {
-        await db
-          .update(brandIntel)
-          .set({ researchStatus: "complete", updatedAt: new Date() })
-          .where(eq(brandIntel.brandId, brandId));
+      await recorded(
+        "mark-complete",
+        "Marking research complete",
+        9,
+        () =>
+          step.do("mark-complete", async () => {
+            await db
+              .update(brandIntel)
+              .set({ researchStatus: "complete", updatedAt: new Date() })
+              .where(eq(brandIntel.brandId, brandId));
+          }),
+        () => ({ detail: `brand_intel.research_status = "complete"` }),
+      );
+
+      await completeJob(env, jobId, {
+        report: research.report,
+        sources: research.sources,
+        result: extracted,
       });
     } catch (error) {
       // Any unrecoverable failure flips status to "failed" then re-throws so
-      // Workflows records the error for observability.
+      // Workflows records the error for observability. The console job is
+      // failed alongside (failJob never throws).
+      await failJob(env, jobId, error);
       try {
         await db
           .update(brandIntel)
@@ -511,6 +749,7 @@ async function scrapeBrandSite(
   websiteUrl: string | null,
 ): Promise<SiteScrapeResult> {
   const result: SiteScrapeResult = {
+    pagesScraped: 0,
     imageUrls: [],
     pdfUrls: [],
     socials: { instagramUrl: null, facebookUrl: null, pinterestUrl: null },
@@ -558,6 +797,8 @@ async function scrapeBrandSite(
         console.error(`brand-research: subpage scrape failed for ${pageUrl}`, err);
       }
     }
+
+    result.pagesScraped = pages.length;
 
     const imageSeen = new Set<string>();
     const pdfSeen = new Set<string>();
@@ -766,14 +1007,14 @@ async function uploadBrandPhotos(
   env: Env,
   brandId: number,
   candidates: Array<{ url: string; pageUrl: string }>,
-): Promise<{ uploaded: number }> {
-  if (candidates.length === 0) return { uploaded: 0 };
+): Promise<{ uploaded: number; deliveryUrls: string[] }> {
+  if (candidates.length === 0) return { uploaded: 0, deliveryUrls: [] };
 
   const db = drizzle(env.DB);
   const processor = await tryCreateProcessor(env);
   if (!processor) {
     console.error(`brand-research: CF Images credentials missing for brand ${brandId}`);
-    return { uploaded: 0 };
+    return { uploaded: 0, deliveryUrls: [] };
   }
 
   // Pre-check existing sourceUrls so we don't burn CF Images uploads on dupes.
@@ -784,6 +1025,7 @@ async function uploadBrandPhotos(
   const existing = new Set(existingRows.map((r) => r.sourceUrl));
 
   let uploaded = 0;
+  const deliveryUrls: string[] = [];
   const capped = candidates.slice(0, MAX_PHOTOS);
   for (let i = 0; i < capped.length; i++) {
     const { url, pageUrl } = capped[i];
@@ -817,6 +1059,7 @@ async function uploadBrandPhotos(
         })
         .onConflictDoNothing();
       uploaded++;
+      deliveryUrls.push(deliveryUrl);
     } catch (err) {
       console.error(
         `brand-research: photo upload failed for brand ${brandId} (${url})`,
@@ -825,7 +1068,7 @@ async function uploadBrandPhotos(
     }
   }
 
-  return { uploaded };
+  return { uploaded, deliveryUrls };
 }
 
 // ---------------------------------------------------------------------------
@@ -856,6 +1099,9 @@ function pdfFilename(url: string): string {
  *   - `brand_intel`: reviewSummary / reviewAiInsight / isBigboxAvailable /
  *     bigboxAvailability / salesIntel / researchReport / researchSources —
  *     each only when currently NULL.
+ *
+ * Returns the list of columns/tables actually written (for the research
+ * console's "persist" step artifact).
  */
 async function persistResearch(
   env: Env,
@@ -863,8 +1109,9 @@ async function persistResearch(
   extracted: BrandStructuredInsight,
   site: SiteScrapeResult,
   research: { report: string; sources: Record<string, unknown> },
-): Promise<void> {
+): Promise<{ wrote: string[] }> {
   const db = drizzle(env.DB);
+  const wrote: string[] = [];
 
   // ── brands: fill-blanks columns ───────────────────────────────────────────
   const [current] = await db
@@ -878,7 +1125,7 @@ async function persistResearch(
     .from(brands)
     .where(eq(brands.id, brandId))
     .limit(1);
-  if (!current) return;
+  if (!current) return { wrote };
 
   const instagramUrl = extracted.instagramUrl ?? site.socials.instagramUrl;
   const facebookUrl = extracted.facebookUrl ?? site.socials.facebookUrl;
@@ -895,6 +1142,7 @@ async function persistResearch(
     brandUpdates.description = extracted.reviewSummary;
   }
   if (Object.keys(brandUpdates).length > 0) {
+    wrote.push(...Object.keys(brandUpdates).map((col) => `brands.${col}`));
     brandUpdates.updatedAt = new Date();
     await db.update(brands).set(brandUpdates).where(eq(brands.id, brandId));
   }
@@ -922,6 +1170,9 @@ async function persistResearch(
           .values({ brandId, typeId })
           .onConflictDoNothing();
       }
+      if (matchedIds.size > 0) {
+        wrote.push(`brand_type_mappings(+${matchedIds.size})`);
+      }
     } catch (err) {
       console.error(`brand-research: type mapping persist failed for brand ${brandId}`, err);
     }
@@ -948,6 +1199,7 @@ async function persistResearch(
           }));
         if (rows.length > 0) {
           await db.insert(brandProductLines).values(rows);
+          wrote.push(`brand_product_lines(+${rows.length})`);
         }
       }
     } catch (err) {
@@ -990,6 +1242,7 @@ async function persistResearch(
   }
 
   if (Object.keys(intelUpdates).length > 0) {
+    wrote.push(...Object.keys(intelUpdates).map((col) => `brand_intel.${col}`));
     intelUpdates.updatedAt = new Date();
     if (intel) {
       await db.update(brandIntel).set(intelUpdates).where(eq(brandIntel.brandId, brandId));
@@ -1002,6 +1255,8 @@ async function persistResearch(
       });
     }
   }
+
+  return { wrote };
 }
 
 // ---------------------------------------------------------------------------
