@@ -955,3 +955,19 @@ pnpm run build
 8. **Critical path visualization** → Gantt chart highlights critical path tasks in red
 9. **Flag overlay** → Kanban cards show AI_AUDIT/OVERDUE/CRITICAL_PATH badges
 10. **Alert banner** → System alert appears at top of tasks page when critical path is at risk
+
+---
+
+## Review notes (2026-07-07, Gemini on PR #64 — apply during the 0009 build)
+
+This plan was recovered verbatim from the W0 uncommitted-work rescue. Two pseudo-code
+defects were flagged in review; fix them in the actual implementation (do not trust the
+snippets above as-is):
+
+1. **Overdue check (~line 556):** also exclude ClickUp's `closed` status, matching the
+   active-task filter used later —
+   `task.status?.status !== "complete" && task.status?.status !== "closed"`.
+2. **Stale-flag cleanup (~line 640):** the snippet's `and()` clause has a placeholder
+   where the run filter belongs; the real query must include
+   `ne(clickupTaskFlags.auditRunId, auditRunId)` alongside `eq(resolved, false)` or every
+   active flag (including the current run's) gets resolved.
