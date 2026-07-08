@@ -312,9 +312,11 @@ Legend — annotations shown as `[R]` readOnly, `[W]` write/non-destructive, `[D
 
 These three are the only real modeling questions. Each has a recommendation; Justin confirms before any `db:generate`. **Migrations are generated with `pnpm run db:generate` and applied only via `pnpm run migrate:remote` — never raw SQL, never hand-edited migration files** (per repo memory).
 
+**Timestamp convention (applies to every new column below).** All `createdAt`/timestamp columns use `integer("created_at", { mode: "timestamp" }).notNull().default(sql\`(unixepoch())\`)` — **`(unixepoch())` is seconds**, matching every existing table (e.g. `materials/schedule_item.ts`, `brands/showroom_brand_mappings.ts`). Do **not** use millisecond defaults (no `* 1000`, no `unixepoch() * 1000`, no `CURRENT_TIMESTAMP` text) — a ms value would misread as a far-future date against the rest of the schema. *(Resolves Gemini review comments on lines 317 & 325.)*
+
 **A. product ↔ material.**
 Today: `showroomStoreProducts.materialId` (a product belongs to at most one material). The "2 Kohler toilets for hall + lower bath" case = one product model satisfying two materials → M:M.
-→ **Recommendation:** add `product_material_mappings` join `(productId, materialId, isPrimary, createdAt)` unique `(productId, materialId)`. Keep the existing `materialId` column as a denormalized "primary" pointer for back-compat.
+→ **Recommendation:** add `product_material_mappings` join `(productId, materialId, isPrimary, createdAt)` unique `(productId, materialId)`. `createdAt` = `(unixepoch())` seconds (see convention above). Keep the existing `materialId` column as a denormalized "primary" pointer for back-compat.
 
 **B. material ↔ room.**
 Today: `materialScheduleItems.roomName` is free text. Each material item is per-room ("Toilet — Primary Bath"), so this is **M:1**, not M:M.
@@ -322,7 +324,7 @@ Today: `materialScheduleItems.roomName` is free text. Each material item is per-
 
 **C. material ↔ budget item.**
 Today: nothing links a material to a budget line.
-→ **Recommendation:** add `budget_item_material_mappings` join. Reference the budget item by **`budgetItemTrackId`** (the stable revision-independent id), not the row `id`, because budget items revision in place — a row-id FK would dangle on every edit. Columns: `(budgetItemTrackId, materialId, createdAt)` unique `(budgetItemTrackId, materialId)`.
+→ **Recommendation:** add `budget_item_material_mappings` join. Reference the budget item by **`budgetItemTrackId`** (the stable revision-independent id), not the row `id`, because budget items revision in place — a row-id FK would dangle on every edit. Columns: `(budgetItemTrackId, materialId, createdAt)` unique `(budgetItemTrackId, materialId)`; `createdAt` = `(unixepoch())` seconds (see convention above).
 
 New schema files (if approved): `home/budget_item_material_mappings.ts`, `showroom/product_material_mappings.ts`, plus a column add to `materials/schedule_item.ts` — each re-exported from its domain barrel. `worker-configuration.d.ts` is regenerated, never hand-edited.
 
