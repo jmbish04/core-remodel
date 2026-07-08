@@ -138,6 +138,14 @@
       "id": "af8ca150b4a7480d923be0ed30baae73",
       "remote": true,
     },
+    {
+      // MCP connector OAuth (0015): @cloudflare/workers-oauth-provider stores
+      // clients / grants / access+refresh tokens here. Binding MUST be named
+      // OAUTH_KV (the library looks it up by that exact name).
+      "binding": "OAUTH_KV",
+      "id": "859ea6b96deb4140831a1d09a70ffcd4",
+      "remote": true,
+    },
   ],
   "d1_databases": [
     {
@@ -334,6 +342,13 @@
         "name": "ADMIN_CHAT_AGENT",
         "class_name": "AdminChatAgent",
       },
+      {
+        // 0015 MCP connector: McpAgent (agents/mcp) DO backing the OAuth-gated
+        // Model Context Protocol server at /api/mcp (+ /mcp/sse). One DO
+        // instance per MCP session; tools registered from src/backend/mcp.
+        "name": "REMODEL_MCP",
+        "class_name": "RemodelMcpAgent",
+      },
     ],
   },
   "migrations": [
@@ -393,6 +408,11 @@
     {
       "tag": "v13",
       "new_sqlite_classes": ["AdminChatAgent"],
+    },
+    {
+      // 0015 MCP connector DO (agents/mcp McpAgent).
+      "tag": "v14",
+      "new_sqlite_classes": ["RemodelMcpAgent"],
     },
   ],
   "worker_loaders": [
