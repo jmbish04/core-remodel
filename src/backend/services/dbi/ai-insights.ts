@@ -128,7 +128,8 @@ Guidance: "busy" = multiple open permits or very recent activity; "light" = some
         { role: "user", content: prompt },
       ],
       max_tokens: 600,
-    });
+      gateway: { id: env.AI_GATEWAY_ID },
+    } as Parameters<typeof env.AI.run>[1]);
 
     const rawText =
       isObject(response) && typeof response.response === "string"

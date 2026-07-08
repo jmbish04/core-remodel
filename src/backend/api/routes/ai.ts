@@ -49,7 +49,8 @@ aiRouter.post("/chat", zValidator("json", chatSchema), async (c) => {
     const response = await c.env.AI.run(model, {
       messages,
       stream: false,
-    });
+      gateway: { id: c.env.AI_GATEWAY_ID },
+    } as Parameters<typeof c.env.AI.run>[1]);
 
     return c.json(response);
   } catch (error) {
@@ -66,7 +67,8 @@ aiRouter.post("/chat/stream", zValidator("json", chatSchema), async (c) => {
     const stream = await c.env.AI.run(model, {
       messages,
       stream: true,
-    });
+      gateway: { id: c.env.AI_GATEWAY_ID },
+    } as Parameters<typeof c.env.AI.run>[1]);
 
     return new Response(stream as unknown as ReadableStream, {
       headers: {
@@ -91,7 +93,8 @@ aiRouter.post("/speech-to-text", zValidator("json", speechToTextSchema), async (
 
     const response = await c.env.AI.run("@cf/openai/whisper", {
       audio: Array.from(audioBuffer),
-    });
+      gateway: { id: c.env.AI_GATEWAY_ID },
+    } as Parameters<typeof c.env.AI.run>[1]);
 
     return c.json(response);
   } catch (error) {
@@ -108,7 +111,8 @@ aiRouter.post("/text-to-speech", zValidator("json", textToSpeechSchema), async (
     const response = await c.env.AI.run("@cf/deepgram/aura-1", {
       text,
       voice,
-    });
+      gateway: { id: c.env.AI_GATEWAY_ID },
+    } as Parameters<typeof c.env.AI.run>[1]);
 
     // Return audio as base64
     if (response instanceof ReadableStream) {
@@ -155,7 +159,8 @@ aiRouter.post(
     try {
       const response = await c.env.AI.run("@cf/baai/bge-base-en-v1.5", {
         text,
-      });
+        gateway: { id: c.env.AI_GATEWAY_ID },
+      } as Parameters<typeof c.env.AI.run>[1]);
 
       return c.json(response);
     } catch (error) {

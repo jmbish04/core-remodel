@@ -124,7 +124,8 @@ export class BidPortfolioAgent extends Agent<Env, BidPortfolioAgentState> {
           { role: "system", content: systemPrompt },
           { role: "user", content: prompt },
         ],
-      });
+        gateway: { id: this.env.AI_GATEWAY_ID },
+      } as Parameters<typeof this.env.AI.run>[1]);
 
       const generated =
         typeof response === "string"

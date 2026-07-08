@@ -13,13 +13,25 @@
  */
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
+import { drizzle } from "drizzle-orm/d1";
+import { gte, sql } from "drizzle-orm";
 
 import {
   GoogleMapsService,
   MAPS_MONTHLY_FREE_TIER_LIMIT,
 } from "@/backend/services/google/maps";
+import { geminiUsage } from "@backend/db/schema";
+import { getAiGatewayUsage } from "@backend/services/ai-gateway/analytics";
 
 export const adminIntegrationsRouter = new OpenAPIHono<{ Bindings: Env }>();
+
+/** Start of the current UTC calendar month, as a Date (Drizzle → unix seconds). */
+function currentMonthStart(): { start: Date; month: string } {
+  const now = new Date();
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const month = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+  return { start, month };
+}
 
 // ─── Response schema ─────────────────────────────────────────────────────────
 
@@ -129,5 +141,150 @@ adminIntegrationsRouter.openapi(
       console.error("[admin/integrations/usage] error:", message);
       return c.json({ error: `Failed to retrieve usage data: ${message}` }, 500);
     }
+  },
+);
+
+// ─── GET /gemini ───────────────────────────────────────────────────────────
+// Gemini token usage for the current month, from our own gemini_usage_log
+// ledger (direct API calls — Gemini bypasses AI Gateway). This is the
+// independent, first-party accounting used to reconcile provider billing.
+
+const GeminiFeatureSchema = z.object({
+  feature: z.string().openapi({ description: "Calling-surface label.", example: "email_classify" }),
+  calls: z.number().int().openapi({ description: "Calls attributed to this feature this month." }),
+  totalTokens: z.number().int().openapi({ description: "Total tokens for this feature this month." }),
+});
+
+const GeminiUsageSchema = z.object({
+  month: z.string().openapi({ description: "Calendar month in 'YYYY-MM' (UTC).", example: "2026-07" }),
+  totalCalls: z.number().int().openapi({ description: "Total Gemini calls this month." }),
+  okCalls: z.number().int().openapi({ description: "Successful calls." }),
+  errorCalls: z.number().int().openapi({ description: "Failed calls." }),
+  promptTokens: z.number().int().openapi({ description: "Sum of input/prompt tokens." }),
+  candidatesTokens: z.number().int().openapi({ description: "Sum of output tokens." }),
+  thoughtsTokens: z.number().int().openapi({ description: "Sum of reasoning tokens." }),
+  totalTokens: z.number().int().openapi({ description: "Sum of total tokens." }),
+  byFeature: z.array(GeminiFeatureSchema).openapi({ description: "Per-feature breakdown, busiest first." }),
+});
+
+adminIntegrationsRouter.openapi(
+  createRoute({
+    method: "get",
+    path: "/gemini",
+    operationId: "getAdminIntegrationsGeminiUsage",
+    tags: ["Admin"],
+    summary: "Gemini token usage for the current calendar month",
+    description:
+      "Aggregates gemini_usage_log (our first-party ledger of direct Gemini API calls) for the " +
+      "current UTC month: call counts, success/error split, token sums, and a per-feature breakdown.",
+    responses: {
+      200: {
+        description: "Current-month Gemini usage summary.",
+        content: { "application/json": { schema: GeminiUsageSchema } },
+      },
+      500: {
+        description: "Failed to retrieve Gemini usage.",
+        content: { "application/json": { schema: ErrorSchema } },
+      },
+    },
+  }),
+  async (c) => {
+    try {
+      const db = drizzle(c.env.DB);
+      const { start, month } = currentMonthStart();
+
+      const [totals] = await db
+        .select({
+          totalCalls: sql<number>`count(*)`,
+          okCalls: sql<number>`coalesce(sum(case when ${geminiUsage.status} = 'ok' then 1 else 0 end), 0)`,
+          errorCalls: sql<number>`coalesce(sum(case when ${geminiUsage.status} = 'error' then 1 else 0 end), 0)`,
+          promptTokens: sql<number>`coalesce(sum(${geminiUsage.promptTokens}), 0)`,
+          candidatesTokens: sql<number>`coalesce(sum(${geminiUsage.candidatesTokens}), 0)`,
+          thoughtsTokens: sql<number>`coalesce(sum(${geminiUsage.thoughtsTokens}), 0)`,
+          totalTokens: sql<number>`coalesce(sum(${geminiUsage.totalTokens}), 0)`,
+        })
+        .from(geminiUsage)
+        .where(gte(geminiUsage.timestamp, start));
+
+      const byFeature = await db
+        .select({
+          feature: geminiUsage.feature,
+          calls: sql<number>`count(*)`,
+          totalTokens: sql<number>`coalesce(sum(${geminiUsage.totalTokens}), 0)`,
+        })
+        .from(geminiUsage)
+        .where(gte(geminiUsage.timestamp, start))
+        .groupBy(geminiUsage.feature)
+        .orderBy(sql`count(*) desc`);
+
+      return c.json(
+        {
+          month,
+          totalCalls: Number(totals?.totalCalls ?? 0),
+          okCalls: Number(totals?.okCalls ?? 0),
+          errorCalls: Number(totals?.errorCalls ?? 0),
+          promptTokens: Number(totals?.promptTokens ?? 0),
+          candidatesTokens: Number(totals?.candidatesTokens ?? 0),
+          thoughtsTokens: Number(totals?.thoughtsTokens ?? 0),
+          totalTokens: Number(totals?.totalTokens ?? 0),
+          byFeature: byFeature.map((r) => ({
+            feature: r.feature,
+            calls: Number(r.calls),
+            totalTokens: Number(r.totalTokens),
+          })),
+        },
+        200,
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[admin/integrations/gemini] error:", message);
+      return c.json({ error: `Failed to retrieve Gemini usage: ${message}` }, 500);
+    }
+  },
+);
+
+// ─── GET /ai-gateway ─────────────────────────────────────────────────────────
+// AI Gateway request analytics for everything routed THROUGH the gateway
+// (Workers AI, Replicate, Fal, …). Best-effort: `available: false` + `reason`
+// when the Analytics API is unreachable / unauthorized (never 500s the panel).
+
+const AiGatewayModelSchema = z.object({
+  model: z.string(),
+  provider: z.string().nullable(),
+  requests: z.number().int(),
+});
+
+const AiGatewayUsageSchema = z.object({
+  available: z.boolean().openapi({ description: "False when analytics could not be read." }),
+  reason: z.string().optional().openapi({ description: "Why analytics is unavailable / partial." }),
+  gatewayId: z.string().openapi({ description: "The AI Gateway id queried.", example: "default-gateway" }),
+  month: z.string().openapi({ description: "Calendar month in 'YYYY-MM' (UTC)." }),
+  totalRequests: z.number().int(),
+  cachedRequests: z.number().int(),
+  erroredRequests: z.number().int(),
+  byModel: z.array(AiGatewayModelSchema).openapi({ description: "Per-model request counts, busiest first." }),
+});
+
+adminIntegrationsRouter.openapi(
+  createRoute({
+    method: "get",
+    path: "/ai-gateway",
+    operationId: "getAdminIntegrationsAiGatewayUsage",
+    tags: ["Admin"],
+    summary: "AI Gateway request analytics for the current calendar month",
+    description:
+      "Request-level analytics for the account's AI Gateway (Workers AI, Replicate, Fal, etc.) via " +
+      "the Cloudflare GraphQL Analytics API. Best-effort — returns available=false with a reason " +
+      "when the analytics token is missing or lacks permission, so the panel degrades gracefully.",
+    responses: {
+      200: {
+        description: "Current-month AI Gateway usage (or an unavailable marker).",
+        content: { "application/json": { schema: AiGatewayUsageSchema } },
+      },
+    },
+  }),
+  async (c) => {
+    const usage = await getAiGatewayUsage(c.env);
+    return c.json(usage, 200);
   },
 );

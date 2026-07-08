@@ -629,7 +629,8 @@ supportingDocumentsRouter.get("/search", async (c) => {
     try {
       const embedResult = (await c.env.AI.run("@cf/baai/bge-large-en-v1.5", {
         text: [q],
-      })) as { data: number[][] };
+        gateway: { id: c.env.AI_GATEWAY_ID },
+      } as Parameters<typeof c.env.AI.run>[1])) as { data: number[][] };
       const vector = embedResult.data?.[0];
       if (vector) {
         const matches = await c.env.VECTOR_INDEX.query(vector, {

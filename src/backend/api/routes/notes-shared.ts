@@ -123,6 +123,7 @@ notesSharedRouter.openapi(
           { role: "user", content: userContent },
         ],
         max_tokens: 64,
+        gateway: { id: c.env.AI_GATEWAY_ID },
       } as Parameters<typeof c.env.AI.run>[1])) as { response?: string };
 
       let title = (raw?.response ?? "").trim();

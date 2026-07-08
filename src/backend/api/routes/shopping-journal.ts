@@ -437,7 +437,8 @@ shoppingJournalRouter.post("/:id/attachments", async (c) => {
                   },
                 ],
                 max_tokens: 500,
-              });
+                gateway: { id: c.env.AI_GATEWAY_ID },
+              } as Parameters<typeof c.env.AI.run>[1]);
 
               if (aiRes && typeof (aiRes as any).response === "string") {
                 description = (aiRes as any).response.trim();
