@@ -141,11 +141,15 @@ export const workflowTools: RemodelTool[] = [
       }
 
       // 4) Per material: ensure row, links, purchased flag, optional expense.
+      // Load the material schedule once (not per-iteration) and keep the local
+      // list in sync as we create rows, so a later material in the same call can
+      // reuse one created earlier — avoids an N+1 query and duplicate inserts.
       const materialResults: Record<string, unknown>[] = [];
+      const allMaterials = await db.select().from(materialScheduleItems).all();
       for (const m of input.materials) {
         // 4a) find-or-create the material by title (+ room when provided).
         const titleLc = m.title.trim().toLowerCase();
-        const existing = (await db.select().from(materialScheduleItems).all()).find(
+        const existing = allMaterials.find(
           (row) =>
             row.title.trim().toLowerCase() === titleLc &&
             (m.roomId == null || row.roomId === m.roomId || row.roomId == null),
@@ -155,13 +159,14 @@ export const workflowTools: RemodelTool[] = [
         if (existing) {
           materialId = existing.id;
         } else {
-          const created = await call<{ material: { id: number } }>(ctx, "create_material", {
-            title: m.title,
-            roomId: m.roomId,
-            brand: input.brand,
-          });
+          const created = await call<{ material: typeof materialScheduleItems.$inferSelect }>(
+            ctx,
+            "create_material",
+            { title: m.title, roomId: m.roomId, brand: input.brand },
+          );
           materialId = created.material.id;
           materialCreated = true;
+          allMaterials.push(created.material);
         }
         const mSteps: string[] = [`${materialCreated ? "created" : "reused"} material #${materialId}`];
 

@@ -4,11 +4,13 @@
  *
  * Public, hand-written guide for connecting an MCP client (claude.ai custom
  * connector via OAuth, or Claude Code / curl via bearer token) to the 126
- * Colby remodel MCP server. The tool catalog itself lives at `/mcp/tools`
- * (auto-generated from the registry).
+ * Colby remodel MCP server. Served at `/connect`; the tool catalog lives at
+ * `/connect/tools` (auto-generated from the registry). NOTE: the machine MCP
+ * endpoint is `/mcp` (OAuth-gated), so the human docs must live OUTSIDE the
+ * `/mcp` prefix — the OAuthProvider apiHandler captures all of `/mcp/*`.
  *
  * Maintenance: update the prose here only when the CONNECTION FLOW changes.
- * New tools appear on /mcp/tools automatically — see AGENTS.md.
+ * New tools appear on /connect/tools automatically — see AGENTS.md.
  */
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import { Plug, KeyRound, TerminalSquare, Wrench, ShieldCheck } from "lucide-react";
@@ -37,7 +39,7 @@ const curlExample = `curl -s ${origin}/api/mcp \\
       <p class="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
         Connect Claude to the 126 Colby remodel and manage the whole project by chat — rooms,
         budget, materials, showrooms, brands, and products. Browse the full tool list at
-        <a class="text-foreground underline underline-offset-4" href="/mcp/tools">/mcp/tools</a>.
+        <a class="text-foreground underline underline-offset-4" href="/connect/tools">/connect/tools</a>.
       </p>
     </header>
 
@@ -90,7 +92,7 @@ const curlExample = `curl -s ${origin}/api/mcp \\
         <p class="text-xs leading-relaxed text-muted-foreground">
           The connector exposes tools across rooms, budget, materials, showrooms, brands, and
           products, plus render / measurement helpers. See the full, always-current list at
-          <a class="text-foreground underline underline-offset-4" href="/mcp/tools">/mcp/tools</a>.
+          <a class="text-foreground underline underline-offset-4" href="/connect/tools">/connect/tools</a>.
         </p>
       </div>
     </section>

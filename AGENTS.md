@@ -47,12 +47,14 @@ MCP server, the public catalog endpoint `GET /api/mcp-docs`, and the docs pages.
    `DESTRUCTIVE`; ≥1 `example`; money in cents).
 2. New domain file → import its array into `src/backend/mcp/tools/index.ts`
    (`ALL_TOOL_GROUPS`, order = docs order).
-3. **Maintain the frontend docs**: the `/mcp/tools` catalog page auto-renders
-   from the registry (via `/api/mcp-docs`), so a well-described tool needs no
-   manual doc edit — but VERIFY the card looks right, and update the prose on
-   `src/frontend/pages/mcp/index.astro` whenever the CONNECTION FLOW changes or
-   a new concept is introduced. A tool with no registry entry, a stale
-   description, or a missing example is a defect.
+3. **Maintain the frontend docs**: the `/connect/tools` catalog page
+   auto-renders from the registry (via `/api/mcp-docs`), so a well-described
+   tool needs no manual doc edit — but VERIFY the card looks right, and update
+   the prose on `src/frontend/pages/connect/index.astro` whenever the CONNECTION
+   FLOW changes or a new concept is introduced. A tool with no registry entry, a
+   stale description, or a missing example is a defect. NOTE: the human docs
+   live at `/connect` (NOT `/mcp`) because the OAuthProvider apiHandler owns the
+   entire `/mcp/*` prefix — never add a page under `/mcp/*`.
 4. Schema change? `pnpm run db:generate` then apply via `pnpm run migrate:remote`
    only — never raw SQL, never hand-edit migrations. New DO? bump the migration
    tag in `wrangler.jsonc` and export the class from `src/_worker.ts`.

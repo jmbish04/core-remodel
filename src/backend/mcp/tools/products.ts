@@ -29,7 +29,7 @@ import {
   showroomStoreProducts,
   showroomStores,
 } from "@backend/db";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { matchesQuery, paginate, toolError } from "../format";
@@ -419,19 +419,31 @@ export const productTools: RemodelTool[] = [
       if (input.brandId != null) await assertBrand(db, input.brandId);
       if (input.materialId != null) await assertMaterial(db, input.materialId);
 
-      const all = await db.select().from(showroomStoreProducts).all();
-
+      // Look up directly in the DB (don't load the whole catalog into memory).
       // 1) Exact sku match wins first.
-      let found = input.sku ? all.find((r) => r.sku != null && r.sku === input.sku) : undefined;
+      let found: typeof showroomStoreProducts.$inferSelect | undefined;
+      if (input.sku) {
+        [found] = await db
+          .select()
+          .from(showroomStoreProducts)
+          .where(eq(showroomStoreProducts.sku, input.sku))
+          .limit(1);
+      }
 
       // 2) Otherwise (brandId + case-insensitive itemName).
       if (!found) {
         const needle = input.itemName.trim().toLowerCase();
-        found = all.find(
-          (r) =>
-            (input.brandId == null ? r.brandId == null : r.brandId === input.brandId) &&
-            (r.itemName ?? "").trim().toLowerCase() === needle,
+        const conds = [eq(sql`lower(${showroomStoreProducts.itemName})`, needle)];
+        conds.push(
+          input.brandId == null
+            ? isNull(showroomStoreProducts.brandId)
+            : eq(showroomStoreProducts.brandId, input.brandId),
         );
+        [found] = await db
+          .select()
+          .from(showroomStoreProducts)
+          .where(and(...conds))
+          .limit(1);
       }
 
       if (found) return { created: false, product: productDto(found) };
