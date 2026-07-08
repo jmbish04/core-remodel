@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { z } from "zod";
 import { and, desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { workerEmails } from "@backend/db/schema/emails/worker_emails";
@@ -102,7 +103,25 @@ workerEmailsRouter.get("/:id", async (c) => {
 workerEmailsRouter.patch("/:id/status", async (c) => {
   const db = drizzle(c.env.DB);
   const id = parseInt(c.req.param("id"));
-  const { status, reviewNotes } = await c.req.json();
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+
+  const statusSchema = z.object({
+    status: z.string(),
+    reviewNotes: z.string().optional().nullable(),
+  });
+
+  const parsed = statusSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.message }, 400);
+  }
+
+  const { status, reviewNotes } = parsed.data;
 
   const [updated] = await db
     .update(workerEmails)
@@ -134,7 +153,8 @@ workerEmailsRouter.get("/:id/attachments/:attachmentId/download", async (c) => {
   const headers = new Headers();
   object.writeHttpMetadata(headers);
   headers.set("etag", object.httpEtag);
-  headers.set("Content-Disposition", `inline; filename="${attachment.filename}"`);
+  const safeFilename = encodeURIComponent(attachment.filename || "attachment");
+  headers.set("Content-Disposition", "inline; filename*=UTF-8''" + safeFilename);
 
   return new Response(object.body, { headers });
 });

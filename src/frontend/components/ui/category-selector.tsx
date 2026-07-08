@@ -40,18 +40,6 @@ function CategoryDropdownPanel({
   onClose: () => void;
 }) {
   const [search, setSearch] = useState("");
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  // Close on outside click
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    }
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [onClose]);
 
   const filtered = search.trim()
     ? allCategories.filter((c) =>
@@ -61,7 +49,6 @@ function CategoryDropdownPanel({
 
   return (
     <div
-      ref={panelRef}
       className="absolute left-0 top-full z-50 mt-1 w-[280px] rounded-md bg-popover shadow-lg ring-1 ring-border/40"
     >
       {/* Sticky search header */}
@@ -155,9 +142,20 @@ export function CategorySelector({
   label = "Category",
 }: CategorySelectorProps) {
   const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
 
   return (
-    <div className="relative">
+    <div ref={containerRef} className="relative">
       <Button
         size="sm"
         variant={selected.length > 0 ? "default" : "outline"}

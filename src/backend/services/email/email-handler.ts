@@ -23,6 +23,7 @@ import { workerEmailStagedCompanies } from "@backend/db/schema/emails/worker_ema
 import { companies } from "@backend/db/schema/directory/companies";
 import { createGeminiAiGatewayClient } from "@backend/services/render/providers/gemini-stage-provider";
 import { parsePdfToMarkdown } from "@backend/services/documents/liteparse";
+import { stripJsonFence } from "@backend/utils/ai-json";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Public entry point
@@ -164,6 +165,7 @@ async function matchCompany(
 
     const normalizedSender = senderName.toLowerCase().replace(/[^a-z0-9]/g, "");
     for (const company of allCompanies) {
+      if (!company.name) continue;
       const normalizedCompany = company.name.toLowerCase().replace(/[^a-z0-9]/g, "");
       if (
         normalizedCompany.includes(normalizedSender) ||
@@ -353,8 +355,8 @@ async function analyzeWithGemini(
   const rawText = response.text || "";
 
   try {
-    // Strip markdown code fences if present
-    const cleaned = rawText.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    // Strip markdown code fences and parse JSON using the shared helper
+    const cleaned = stripJsonFence(rawText);
     return JSON.parse(cleaned) as AiAnalysis;
   } catch (err) {
     console.error("[email-handler] Failed to parse Gemini response:", err, rawText.slice(0, 500));

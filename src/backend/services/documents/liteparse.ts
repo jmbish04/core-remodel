@@ -84,7 +84,7 @@ export async function parsePdfToMarkdown(
   config?: Partial<LiteParseConfig>,
 ): Promise<string> {
   const result = await parsePdf(pdfBytes, config);
-  return result.text || result.pages.map((p) => p.markdown || p.text).join("\n\n");
+  return result?.text || result?.pages?.map((p) => p?.markdown || p?.text || "").join("\n\n") || "";
 }
 
 /**

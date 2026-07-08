@@ -443,6 +443,7 @@ ${visionDescription}`,
         const res = await fetch(apiUrl, {
           method: "DELETE",
           headers: { Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(10000),
         });
         if (res.ok || res.status === 404) return true; // 404 = already gone
         const text = await res.text();
