@@ -168,20 +168,25 @@ async function matchCompany(
       .where(eq(companies.isArchived, false));
 
     const normalizedSender = senderName.toLowerCase().replace(/[^a-z0-9]/g, "");
-    for (const company of allCompanies) {
-      if (!company.name) continue;
-      const normalizedCompany = company.name
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, "");
-      if (
-        normalizedCompany.includes(normalizedSender) ||
-        normalizedSender.includes(normalizedCompany)
-      ) {
-        return {
-          companyId: company.id,
-          confidence: 0.7,
-          method: "name_fuzzy",
-        };
+    // Guard against an empty normalized sender (e.g. a name that is all
+    // punctuation/emoji): "".includes("") and x.includes("") are always true,
+    // which would false-positive match the first company in the directory.
+    if (normalizedSender) {
+      for (const company of allCompanies) {
+        if (!company.name) continue;
+        const normalizedCompany = company.name
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, "");
+        if (
+          normalizedCompany.includes(normalizedSender) ||
+          normalizedSender.includes(normalizedCompany)
+        ) {
+          return {
+            companyId: company.id,
+            confidence: 0.7,
+            method: "name_fuzzy",
+          };
+        }
       }
     }
   }

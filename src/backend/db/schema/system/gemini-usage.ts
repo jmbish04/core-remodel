@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
 import { randomUUID } from "node:crypto";
 
@@ -26,7 +27,7 @@ export const geminiUsage = sqliteTable("gemini_usage_log", {
 
   timestamp: integer("timestamp", { mode: "timestamp" })
     .notNull()
-    .$defaultFn(() => new Date()),
+    .default(sql`(unixepoch())`),
 
   /** Gemini model id, e.g. "gemini-2.5-flash", "gemini-3-pro-image". */
   model: text("model").notNull(),

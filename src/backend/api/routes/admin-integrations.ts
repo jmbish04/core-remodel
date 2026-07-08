@@ -14,7 +14,7 @@
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { drizzle } from "drizzle-orm/d1";
-import { gte, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 
 import {
   GoogleMapsService,
@@ -25,12 +25,21 @@ import { getAiGatewayUsage } from "@backend/services/ai-gateway/analytics";
 
 export const adminIntegrationsRouter = new OpenAPIHono<{ Bindings: Env }>();
 
-/** Start of the current UTC calendar month, as a Date (Drizzle → unix seconds). */
-function currentMonthStart(): { start: Date; month: string } {
+/**
+ * Start of the current UTC calendar month as a UNIX seconds boundary.
+ *
+ * `gemini_usage_log.timestamp` is stored in seconds (Drizzle `mode: "timestamp"`
+ * + a `(unixepoch())` default), so month-window queries compare against raw
+ * seconds via `sql` — the same pattern the google_maps_usage query uses.
+ * Passing a JS `Date` here would be ambiguous, so we return the integer directly.
+ */
+function currentMonthStart(): { startSeconds: number; month: string } {
   const now = new Date();
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const startSeconds = Math.floor(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1) / 1000,
+  );
   const month = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
-  return { start, month };
+  return { startSeconds, month };
 }
 
 // ─── Response schema ─────────────────────────────────────────────────────────
@@ -191,7 +200,7 @@ adminIntegrationsRouter.openapi(
   async (c) => {
     try {
       const db = drizzle(c.env.DB);
-      const { start, month } = currentMonthStart();
+      const { startSeconds, month } = currentMonthStart();
 
       const [totals] = await db
         .select({
@@ -204,7 +213,7 @@ adminIntegrationsRouter.openapi(
           totalTokens: sql<number>`coalesce(sum(${geminiUsage.totalTokens}), 0)`,
         })
         .from(geminiUsage)
-        .where(gte(geminiUsage.timestamp, start));
+        .where(sql`${geminiUsage.timestamp} >= ${startSeconds}`);
 
       const byFeature = await db
         .select({
@@ -213,7 +222,7 @@ adminIntegrationsRouter.openapi(
           totalTokens: sql<number>`coalesce(sum(${geminiUsage.totalTokens}), 0)`,
         })
         .from(geminiUsage)
-        .where(gte(geminiUsage.timestamp, start))
+        .where(sql`${geminiUsage.timestamp} >= ${startSeconds}`)
         .groupBy(geminiUsage.feature)
         .orderBy(sql`count(*) desc`);
 

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "16be2d69-84f9-40b3-888d-b3d976de4392",
+  "id": "2562a199-62c4-4efb-b415-f6c0ffa2393d",
   "prevId": "ce8d72f1-031e-4e06-b9c3-b52e2ebbeb7c",
   "tables": {
     "users": {
@@ -13692,7 +13692,8 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "(unixepoch())"
         },
         "model": {
           "name": "model",
