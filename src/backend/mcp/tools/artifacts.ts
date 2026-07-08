@@ -11,7 +11,7 @@
  * Registry contract (0015): hand-written Zod v4, annotations, examples.
  */
 import { artifactRevisions, artifacts } from "@backend/db";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, like, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { ALLOWED_COMPONENTS, ALLOWED_LIBS } from "../artifacts/scope";
@@ -32,17 +32,28 @@ function slugify(title: string): string {
   return base || "artifact";
 }
 
-/** Find a slug not already taken (appends -2, -3, … on collision). */
+/**
+ * Find a slug not already taken (appends -2, -3, … on collision). Queries only
+ * the exact slug first, then just the `base-%` family on collision — never the
+ * whole table.
+ */
 async function uniqueSlug(
   db: import("../types").RemodelDb,
   base: string,
 ): Promise<string> {
-  const existing = await db
+  const [exact] = await db
     .select({ slug: artifacts.slug })
     .from(artifacts)
+    .where(eq(artifacts.slug, base))
+    .limit(1);
+  if (!exact) return base;
+
+  const family = await db
+    .select({ slug: artifacts.slug })
+    .from(artifacts)
+    .where(like(artifacts.slug, `${base}-%`))
     .all();
-  const taken = new Set(existing.map((r) => r.slug));
-  if (!taken.has(base)) return base;
+  const taken = new Set(family.map((r) => r.slug));
   for (let i = 2; i < 1000; i++) {
     const candidate = `${base}-${i}`;
     if (!taken.has(candidate)) return candidate;
@@ -181,34 +192,42 @@ export const artifactTools: RemodelTool[] = [
       { title: "Published dashboards", args: { kind: "dashboard", status: "published" } },
     ],
     handler: async ({ db }, input) => {
-      const rows = await db.select().from(artifacts).orderBy(desc(artifacts.updatedAt)).all();
-      const counts = await db
-        .select({
-          artifactId: artifactRevisions.artifactId,
-          n: sql<number>`count(*)`,
-        })
-        .from(artifactRevisions)
-        .groupBy(artifactRevisions.artifactId)
-        .all();
-      const countByArtifact = new Map(counts.map((c) => [c.artifactId, Number(c.n)]));
+      // Filter + count + order + limit in SQL (single query, left-join keeps
+      // 0-revision artifacts).
+      const conditions = [];
+      if (input.kind) conditions.push(eq(artifacts.kind, input.kind));
+      if (input.status) conditions.push(eq(artifacts.status, input.status));
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
 
-      const filtered = rows.filter((r) => {
-        if (input.kind && r.kind !== input.kind) return false;
-        if (input.status && r.status !== input.status) return false;
-        return true;
-      });
-      const limited = filtered.slice(0, input.limit ?? 100);
+      const rows = await db
+        .select({
+          id: artifacts.id,
+          slug: artifacts.slug,
+          title: artifacts.title,
+          description: artifacts.description,
+          kind: artifacts.kind,
+          status: artifacts.status,
+          updatedAt: artifacts.updatedAt,
+          revisionCount: sql<number>`count(${artifactRevisions.id})`,
+        })
+        .from(artifacts)
+        .leftJoin(artifactRevisions, eq(artifacts.id, artifactRevisions.artifactId))
+        .where(whereClause)
+        .groupBy(artifacts.id)
+        .orderBy(desc(artifacts.updatedAt))
+        .limit(input.limit ?? 100)
+        .all();
 
       return {
-        count: limited.length,
-        artifacts: limited.map((r) => ({
+        count: rows.length,
+        artifacts: rows.map((r) => ({
           id: r.id,
           slug: r.slug,
           title: r.title,
           description: r.description,
           kind: r.kind,
           status: r.status,
-          revisionCount: countByArtifact.get(r.id) ?? 0,
+          revisionCount: Number(r.revisionCount),
           updatedAt: r.updatedAt,
           url: studioUrl(r.slug),
         })),

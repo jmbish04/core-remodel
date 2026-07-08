@@ -33,26 +33,28 @@ studioRouter.use("*", async (c, next) => {
 /** GET /api/studio — gallery list (id, slug, title, kind, status, counts). */
 studioRouter.get("/", async (c) => {
   const db = drizzle(c.env.DB);
-  const rows = await db.select().from(artifacts).orderBy(desc(artifacts.updatedAt)).all();
-  const counts = await db
-    .select({ artifactId: artifactRevisions.artifactId, n: sql<number>`count(*)` })
-    .from(artifactRevisions)
-    .groupBy(artifactRevisions.artifactId)
+  // Single query: left-join the revision count so a 0-revision artifact still
+  // shows (no second query + in-memory merge).
+  const rows = await db
+    .select({
+      id: artifacts.id,
+      slug: artifacts.slug,
+      title: artifacts.title,
+      description: artifacts.description,
+      kind: artifacts.kind,
+      status: artifacts.status,
+      openCount: artifacts.openCount,
+      updatedAt: artifacts.updatedAt,
+      revisionCount: sql<number>`count(${artifactRevisions.id})`,
+    })
+    .from(artifacts)
+    .leftJoin(artifactRevisions, eq(artifacts.id, artifactRevisions.artifactId))
+    .groupBy(artifacts.id)
+    .orderBy(desc(artifacts.updatedAt))
     .all();
-  const byArtifact = new Map(counts.map((r) => [r.artifactId, Number(r.n)]));
   return c.json({
     count: rows.length,
-    artifacts: rows.map((r) => ({
-      id: r.id,
-      slug: r.slug,
-      title: r.title,
-      description: r.description,
-      kind: r.kind,
-      status: r.status,
-      openCount: r.openCount,
-      revisionCount: byArtifact.get(r.id) ?? 0,
-      updatedAt: r.updatedAt,
-    })),
+    artifacts: rows.map((r) => ({ ...r, revisionCount: Number(r.revisionCount) })),
   });
 });
 

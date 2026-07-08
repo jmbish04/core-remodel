@@ -201,7 +201,16 @@ export const opsTools: RemodelTool[] = [
         })
         .onConflictDoUpdate({
           target: mcpAgentIssues.dedupeKey,
-          set: { details, severity: input.severity ?? "medium", updatedAt: now },
+          // Re-report = the defect is back: reopen it (a regression of a
+          // fixed/wontfix issue must not stay hidden) and clear the stale fix.
+          set: {
+            details,
+            severity: input.severity ?? "medium",
+            status: "open",
+            fixedByPr: null,
+            fixedAt: null,
+            updatedAt: now,
+          },
         })
         .returning({ id: mcpAgentIssues.id, status: mcpAgentIssues.status });
       return { id: row.id, status: row.status, url: `${OPS_BASE}/bugs` };
@@ -400,47 +409,43 @@ export const opsTools: RemodelTool[] = [
     handler: async ({ db }, input) => {
       const limit = input.limit ?? 10;
 
-      const sessions = await db
-        .select()
-        .from(mcpSessions)
-        .orderBy(desc(mcpSessions.lastSeenAt))
-        .limit(limit)
-        .all();
+      // One HTTP roundtrip to D1 for all four reads (vs four sequential ones).
+      const [sessions, recentCalls, recentErrors, totalRows] = await db.batch([
+        db
+          .select()
+          .from(mcpSessions)
+          .orderBy(desc(mcpSessions.lastSeenAt))
+          .limit(limit),
+        db
+          .select({
+            id: mcpToolInvocations.id,
+            sessionId: mcpToolInvocations.sessionId,
+            toolName: mcpToolInvocations.toolName,
+            ok: mcpToolInvocations.ok,
+            durationMs: mcpToolInvocations.durationMs,
+            createdAt: mcpToolInvocations.createdAt,
+          })
+          .from(mcpToolInvocations)
+          .orderBy(desc(mcpToolInvocations.createdAt))
+          .limit(limit),
+        db
+          .select({
+            id: mcpToolInvocations.id,
+            toolName: mcpToolInvocations.toolName,
+            errorText: mcpToolInvocations.errorText,
+            createdAt: mcpToolInvocations.createdAt,
+          })
+          .from(mcpToolInvocations)
+          .where(eq(mcpToolInvocations.ok, false))
+          .orderBy(desc(mcpToolInvocations.createdAt))
+          .limit(limit),
+        db.select({ total: sql<number>`count(*)` }).from(mcpToolInvocations),
+      ]);
 
-      const recentCalls = await db
-        .select({
-          id: mcpToolInvocations.id,
-          sessionId: mcpToolInvocations.sessionId,
-          toolName: mcpToolInvocations.toolName,
-          ok: mcpToolInvocations.ok,
-          durationMs: mcpToolInvocations.durationMs,
-          createdAt: mcpToolInvocations.createdAt,
-        })
-        .from(mcpToolInvocations)
-        .orderBy(desc(mcpToolInvocations.createdAt))
-        .limit(limit)
-        .all();
-
-      const recentErrors = await db
-        .select({
-          id: mcpToolInvocations.id,
-          toolName: mcpToolInvocations.toolName,
-          errorText: mcpToolInvocations.errorText,
-          createdAt: mcpToolInvocations.createdAt,
-        })
-        .from(mcpToolInvocations)
-        .where(eq(mcpToolInvocations.ok, false))
-        .orderBy(desc(mcpToolInvocations.createdAt))
-        .limit(limit)
-        .all();
-
-      const [{ total = 0 } = {}] = await db
-        .select({ total: sql<number>`count(*)` })
-        .from(mcpToolInvocations)
-        .all();
+      const total = Number(totalRows?.[0]?.total ?? 0);
 
       return {
-        totalToolCalls: Number(total),
+        totalToolCalls: total,
         sessions: sessions.map((s) => ({
           id: s.id,
           transport: s.transport,

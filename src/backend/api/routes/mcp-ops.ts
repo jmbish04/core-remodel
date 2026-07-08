@@ -43,33 +43,31 @@ function limitParam(c: { req: { query: (k: string) => string | undefined } }, de
 
 mcpOpsRouter.get("/overview", async (c) => {
   const db = drizzle(c.env.DB);
-  const [sessions, calls, errors, openBugs, openFeatures, conversations] = await Promise.all([
-    db.select({ n: sql<number>`count(*)` }).from(mcpSessions).get(),
-    db.select({ n: sql<number>`count(*)` }).from(mcpToolInvocations).get(),
+  // One HTTP roundtrip to D1 for all six counts (vs six concurrent ones).
+  const [sessions, calls, errors, openBugs, openFeatures, conversations] = await db.batch([
+    db.select({ n: sql<number>`count(*)` }).from(mcpSessions),
+    db.select({ n: sql<number>`count(*)` }).from(mcpToolInvocations),
     db
       .select({ n: sql<number>`count(*)` })
       .from(mcpToolInvocations)
-      .where(eq(mcpToolInvocations.ok, false))
-      .get(),
+      .where(eq(mcpToolInvocations.ok, false)),
     db
       .select({ n: sql<number>`count(*)` })
       .from(mcpAgentIssues)
-      .where(eq(mcpAgentIssues.status, "open"))
-      .get(),
+      .where(eq(mcpAgentIssues.status, "open")),
     db
       .select({ n: sql<number>`count(*)` })
       .from(mcpFeatureRequests)
-      .where(eq(mcpFeatureRequests.status, "requested"))
-      .get(),
-    db.select({ n: sql<number>`count(*)` }).from(mcpConversations).get(),
+      .where(eq(mcpFeatureRequests.status, "requested")),
+    db.select({ n: sql<number>`count(*)` }).from(mcpConversations),
   ]);
   return c.json({
-    sessions: Number(sessions?.n ?? 0),
-    toolCalls: Number(calls?.n ?? 0),
-    errors: Number(errors?.n ?? 0),
-    openBugs: Number(openBugs?.n ?? 0),
-    openFeatures: Number(openFeatures?.n ?? 0),
-    conversations: Number(conversations?.n ?? 0),
+    sessions: Number(sessions?.[0]?.n ?? 0),
+    toolCalls: Number(calls?.[0]?.n ?? 0),
+    errors: Number(errors?.[0]?.n ?? 0),
+    openBugs: Number(openBugs?.[0]?.n ?? 0),
+    openFeatures: Number(openFeatures?.[0]?.n ?? 0),
+    conversations: Number(conversations?.[0]?.n ?? 0),
   });
 });
 

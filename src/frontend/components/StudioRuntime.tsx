@@ -67,10 +67,17 @@ import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 /**
- * Read-only fetch helper exposed to artifacts as `@/studio/data`. Only same-
- * origin `/api/*` GETs are permitted (no writes in v1), matching the scope
- * catalog hint.
+ * Read-only data helper exposed to artifacts as `@/studio/data`.
+ *
+ * This code runs INSIDE a `sandbox="allow-scripts"` iframe whose document has an
+ * OPAQUE origin, so a direct `fetch("/api/…", { credentials })` is cross-origin
+ * and the SameSite=Lax admin cookie is NOT sent → it would 401. Instead we ask
+ * the parent Studio viewer (which holds the cookie) to perform the GET via
+ * `postMessage` and relay the JSON back. Only same-origin `/api/*` GETs are
+ * permitted (no writes in v1), matching the scope-catalog hint.
  */
+let studioReqSeq = 0;
+
 const studioData = {
   get: (path: string): Promise<unknown> => {
     if (typeof path !== "string" || !path.startsWith("/api/")) {
@@ -78,9 +85,36 @@ const studioData = {
         new Error(`studioData.get: only /api/* paths are allowed (got "${path}")`),
       );
     }
-    return fetch(path, { credentials: "include" }).then((r) => {
-      if (!r.ok) throw new Error(`GET ${path} failed (${r.status})`);
-      return r.json();
+    if (typeof window === "undefined" || window.parent === window) {
+      return Promise.reject(
+        new Error("studioData.get is only available inside the Studio viewer host."),
+      );
+    }
+    return new Promise<unknown>((resolve, reject) => {
+      // Correlate request/response by a per-frame sequence id so parallel gets
+      // don't collide.
+      const id = `sd-${(studioReqSeq += 1)}`;
+      const timer = setTimeout(() => {
+        window.removeEventListener("message", onMessage);
+        reject(new Error(`studioData.get timed out for ${path}`));
+      }, 15_000);
+      function onMessage(e: MessageEvent) {
+        const d = e.data as {
+          __studio?: boolean;
+          kind?: string;
+          id?: string;
+          ok?: boolean;
+          data?: unknown;
+          error?: string;
+        };
+        if (!d || d.__studio !== true || d.kind !== "fetch:result" || d.id !== id) return;
+        clearTimeout(timer);
+        window.removeEventListener("message", onMessage);
+        if (d.ok) resolve(d.data);
+        else reject(new Error(d.error ?? `GET ${path} failed`));
+      }
+      window.addEventListener("message", onMessage);
+      window.parent.postMessage({ __studio: true, kind: "fetch", id, path }, "*");
     });
   },
 };

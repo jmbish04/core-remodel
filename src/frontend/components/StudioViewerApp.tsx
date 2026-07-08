@@ -17,7 +17,7 @@
  * tokens only, mobile-responsive (side panel stacks under the frame).
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import {
   AlertCircle,
@@ -125,6 +125,44 @@ export function StudioViewerApp({ slug }: { slug: string }) {
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [sourceOpen, setSourceOpen] = useState(false);
+
+  // The sandboxed runtime iframe. It has an OPAQUE origin, so the artifact
+  // inside it cannot fetch our cookie-gated `/api/*` directly. Instead it posts
+  // a `studio:fetch` message here; this host (which HAS the admin cookie)
+  // proxies the read-only GET and posts the result back. See StudioRuntime.tsx.
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  useEffect(() => {
+    function onMessage(e: MessageEvent) {
+      const d = e.data as { __studio?: boolean; kind?: string; id?: string; path?: string };
+      if (!d || d.__studio !== true || d.kind !== "fetch") return;
+      // Only honor messages coming from OUR runtime iframe.
+      if (!iframeRef.current || e.source !== iframeRef.current.contentWindow) return;
+
+      const target = iframeRef.current.contentWindow;
+      const reply = (payload: Record<string, unknown>) =>
+        target?.postMessage({ __studio: true, kind: "fetch:result", id: d.id, ...payload }, "*");
+
+      // Read-only allowlist: same-origin `/api/*` GETs only (no writes in v1).
+      if (typeof d.path !== "string" || !d.path.startsWith("/api/")) {
+        reply({ ok: false, error: "studioData.get: only /api/* paths are allowed." });
+        return;
+      }
+      fetch(d.path, { credentials: "include" })
+        .then(async (r) => {
+          if (!r.ok) {
+            reply({ ok: false, error: `GET ${d.path} failed (${r.status})` });
+            return;
+          }
+          reply({ ok: true, data: await r.json() });
+        })
+        .catch((err: unknown) =>
+          reply({ ok: false, error: err instanceof Error ? err.message : String(err) }),
+        );
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
 
   const load = useCallback(
     async (revision: number | null) => {
@@ -299,6 +337,7 @@ export function StudioViewerApp({ slug }: { slug: string }) {
         <Card className="overflow-hidden py-0">
           <iframe
             key={iframeSrc}
+            ref={iframeRef}
             src={iframeSrc}
             sandbox="allow-scripts"
             title={artifact.title ?? artifact.slug}
