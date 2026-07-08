@@ -26,7 +26,7 @@
  */
 
 import { drizzle } from "drizzle-orm/d1";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import {
   showroomStores,
@@ -320,6 +320,26 @@ export async function runBackfillPhotoPipeline(
         const blob = await res.blob();
         const customId = `showroom-photo-${showroomId}-${i}`;
         const filename = `showroom-${showroomId}-${i}.jpg`;
+
+        // Per-photo dedup: skip if this exact Places photo was already uploaded
+        // (catches partial-run edge cases the outer guard doesn't).
+        if (photo.name) {
+          const [dup] = await db
+            .select({ id: showroomPhotosMapping.id })
+            .from(showroomPhotosMapping)
+            .where(
+              and(
+                eq(showroomPhotosMapping.showroomId, showroomId),
+                eq(showroomPhotosMapping.photoName, photo.name),
+              ),
+            )
+            .limit(1);
+          if (dup) {
+            console.log(`[backfill] photos: skipping duplicate photo ${i} (${photo.name}) for store ${showroomId}`);
+            continue;
+          }
+        }
+
         const uploadResp = await processor.uploadToCloudflareImages(blob, customId, filename);
         const url = processor.getDeliveryUrl(uploadResp, customId);
 

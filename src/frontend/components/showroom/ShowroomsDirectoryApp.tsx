@@ -25,7 +25,6 @@ import {
   Clock,
   DoorOpen,
   Droplets,
-  Filter,
   Flame,
   Globe,
   Grid3x3,
@@ -57,6 +56,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { CategorySelector } from "@/components/ui/category-selector";
 import {
   Dialog,
   DialogContent,
@@ -392,7 +392,6 @@ function isOpenNow(store: Store, pst: PstNow): boolean {
 
 /** Rounded logo placeholder + floating price badge. */
 function LogoBadge({ store }: { store: Store }) {
-  const Icon = categoryIconFor(store);
   const [iconBroken, setIconBroken] = useState(false);
   const showFavicon = Boolean(store.iconCfImagesUrl) && !iconBroken;
   return (
@@ -404,10 +403,6 @@ function LogoBadge({ store }: { store: Store }) {
           onError={() => setIconBroken(true)}
           className="size-11 rounded-full bg-card object-contain ring-1 ring-border/40"
         />
-      ) : Icon ? (
-        <div className="flex size-11 items-center justify-center rounded-full bg-muted text-muted-foreground ring-1 ring-border/60">
-          <Icon className="size-5" />
-        </div>
       ) : (
         <div
           className={`flex size-11 items-center justify-center rounded-full text-sm font-semibold ${avatarColor(store.name)}`}
@@ -750,7 +745,7 @@ function FilterBar({
   allCategories: Category[];
   pst: PstNow;
 }) {
-  const [catOpen, setCatOpen] = useState(false);
+
   const hasActiveFilters = JSON.stringify(filters) !== JSON.stringify(EMPTY_FILTERS);
 
   return (
@@ -878,50 +873,17 @@ function FilterBar({
         </Button>
 
         {/* Category dropdown */}
-        <div className="relative">
-          <Button
-            size="sm"
-            variant={filters.categories.length > 0 ? "default" : "outline"}
-            onClick={() => setCatOpen(!catOpen)}
-            className="h-7 gap-1 text-[11px]"
-          >
-            <Filter className="size-3" />
-            Category
-            {filters.categories.length > 0 && (
-              <Badge className="ml-0.5 h-4 px-1 text-[9px]">{filters.categories.length}</Badge>
-            )}
-            <ChevronDown className="size-3" />
-          </Button>
-          {catOpen && (
-            <div className="absolute left-0 top-full z-50 mt-1 max-h-[240px] min-w-[200px] overflow-y-auto rounded-md bg-popover p-1 shadow-lg ring-1 ring-border/40">
-              {allCategories.map((c) => {
-                const active = filters.categories.includes(c.name);
-                return (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => {
-                      const next = active
-                        ? filters.categories.filter((n) => n !== c.name)
-                        : [...filters.categories, c.name];
-                      onChange({ ...filters, categories: next });
-                    }}
-                    className={`flex w-full items-center gap-2 rounded-sm px-2.5 py-1.5 text-left text-xs transition ${
-                      active ? "bg-primary/10 text-primary" : "text-foreground/80 hover:bg-muted/60"
-                    }`}
-                  >
-                    <div
-                      className={`size-3.5 rounded border transition ${
-                        active ? "border-primary bg-primary" : "border-border"
-                      }`}
-                    />
-                    {c.name}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </div>
+        <CategorySelector
+          allCategories={allCategories}
+          selected={filters.categories}
+          onToggle={(name) => {
+            const next = filters.categories.includes(name)
+              ? filters.categories.filter((n) => n !== name)
+              : [...filters.categories, name];
+            onChange({ ...filters, categories: next });
+          }}
+          onClear={() => onChange({ ...filters, categories: [] })}
+        />
 
         {/* Reset */}
         {hasActiveFilters && (

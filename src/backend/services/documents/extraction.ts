@@ -8,13 +8,9 @@
  * into `extractionStatus: "failed"` plus `metadata.extractionError` so the
  * fire-and-forget caller can't crash the request/response cycle.
  *
- * PDF/office parsing note:
- * The original P2 roadmap spec named `@llamaindex/liteparse` for PDF parsing.
- * That package ships native N-API binaries (per-platform `.node` files under
- * `optionalDependencies`) and CANNOT run in the Cloudflare Workers V8 isolate
- * (no filesystem, no native addons). We use the Workers AI `env.AI.toMarkdown()`
- * binding instead — it is purpose-built for exactly this (PDF/DOCX/XLSX/HTML →
- * markdown) and runs entirely inside the Workers AI service, no native deps.
+ * PDF parsing: uses `@llamaindex/liteparse-wasm` (Rust-compiled WASM, runs
+ * locally in the V8 isolate — no external API calls). Falls back to Workers AI
+ * `env.AI.toMarkdown()` if WASM fails. DOCX/XLSX always use toMarkdown.
  */
 
 import { eq } from "drizzle-orm";
@@ -90,9 +86,11 @@ async function extractTextFromImage(env: Env, buf: ArrayBuffer): Promise<string>
 }
 
 /**
- * Convert a PDF/office-document buffer to markdown text via the Workers AI
- * `toMarkdown` service. This is the Workers-native substitute for
- * `@llamaindex/liteparse` (see file header note).
+ * Convert a PDF buffer to markdown via liteparse-wasm (local, no API call).
+ * Falls back to Workers AI `toMarkdown` if WASM fails.
+ *
+ * For DOCX/XLSX/HTML, uses Workers AI `toMarkdown` directly (liteparse
+ * only handles PDF).
  */
 async function extractTextFromDocument(
   env: Env,
@@ -100,6 +98,19 @@ async function extractTextFromDocument(
   mimeType: string,
   buf: ArrayBuffer,
 ): Promise<string> {
+  const isPdf = mimeType.includes("pdf") || name.toLowerCase().endsWith(".pdf");
+
+  if (isPdf) {
+    try {
+      const { parsePdfToMarkdown } = await import("@backend/services/documents/liteparse");
+      const markdown = await parsePdfToMarkdown(buf);
+      if (markdown) return markdown;
+    } catch (err) {
+      console.warn("[extraction] liteparse-wasm failed, falling back to AI.toMarkdown:", err);
+    }
+  }
+
+  // Fallback / non-PDF: Workers AI toMarkdown
   const blob = new Blob([buf], { type: mimeType });
   const result = await env.AI.toMarkdown({ name, blob });
   if (result.format === "error") {

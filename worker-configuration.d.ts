@@ -9,6 +9,7 @@ interface __BaseEnv_Env {
 	VECTOR_INDEX: VectorizeIndex;
 	RESEARCH_INDEX: VectorizeIndex;
 	PHOTO_INDEX: VectorizeIndex;
+	EMAIL: SendEmail;
 	GITHUB_TOKEN: SecretsStoreSecret;
 	CLOUDFLARE_ACCOUNT_ID: SecretsStoreSecret;
 	CLOUDFLARE_IMAGES_STREAM_TOKEN: SecretsStoreSecret;

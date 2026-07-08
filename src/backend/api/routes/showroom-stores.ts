@@ -363,9 +363,16 @@ const createStoreSchema = z.object({
   /** Public Pinterest profile URL for this showroom location. */
   pinterestUrl: z.string().optional().nullable(),
   /**
-   * Homeowner's rich overview note serialized to HTML by PlateJS.
-   * Not accepted for `iconCfImagesUrl` — that column is server-managed via FaviconService.
+   * Cloudflare Images delivery URL for the showroom's icon (favicon / logo).
+   * Normally set by the FaviconService, but can be manually overridden here.
    */
+  iconCfImagesUrl: z.string().optional().nullable(),
+  /**
+   * Cloudflare Images delivery URL for the showroom's hero banner image.
+   * Normally set by the Places photo pipeline, but can be manually overridden.
+   */
+  heroImageCfImagesUrl: z.string().optional().nullable(),
+  /** Homeowner's rich overview note serialized to HTML by PlateJS. */
   overviewNoteHtml: z.string().optional().nullable(),
   /** The same overview note serialized to Markdown by PlateJS (portable form). */
   overviewNoteMarkdown: z.string().optional().nullable(),
@@ -1293,8 +1300,10 @@ showroomStoresRouter.get("/", async (c) => {
         (base as any).categories = categoryMap.get(r.store.id) ?? [];
       }
       if (includes.has("ratings")) {
-        // Homeowner's own visit rating (null → "not yet visited" on the client).
-        (base as any).userRating = userRatingMap.get(r.store.id) ?? null;
+        // Homeowner's own visit rating — read from the denormalized column on
+        // showroom_stores (written by PUT /:id/visit-rating). The store_rating
+        // table is an audit trail; the canonical "latest visit" lives here.
+        (base as any).userRating = r.store.rating ?? null;
 
         // Aggregated online rating across external review platforms.
         const online = onlineRatingMap.get(r.store.id);
@@ -2125,7 +2134,7 @@ showroomStoresRouter.post("/:id/products", async (c) => {
   c.executionCtx.waitUntil(
     c.env.PRODUCT_RESEARCH_WORKFLOW.create({
       params: { storeProductId: inserted.id },
-    }).catch((err) =>
+    }).catch((err: any) =>
       console.error("[product-research] trigger failed:", err),
     ),
   );
@@ -2936,11 +2945,27 @@ showroomStoresRouter.put("/:id/visit-rating", async (c) => {
     return c.json({ success: false, error: parsed.error.message }, 400);
   }
 
+  // Sanitize PlateJS HTML — the editor sometimes serialises whitespace as
+  // numeric HTML entities (&#x20;, &#xa0;, etc.) which get double-encoded in
+  // the DB and render as visible text on the frontend.
+  let cleanHtml = parsed.data.ratingContextHtml ?? null;
+  if (cleanHtml) {
+    cleanHtml = cleanHtml
+      .replace(/&#x20;/gi, " ")
+      .replace(/&#xa0;/gi, " ")
+      .replace(/&#160;/gi, " ")
+      .replace(/&#32;/gi, " ")
+      // Collapse trailing whitespace before closing tags.
+      .replace(/\s+(<\/[^>]+>)/g, "$1")
+      // Strip empty paragraphs that are just whitespace.
+      .replace(/<p>\s*<\/p>/g, "");
+  }
+
   const [updated] = await db
     .update(showroomStores)
     .set({
       rating: parsed.data.rating,
-      ratingContextHtml: parsed.data.ratingContextHtml ?? null,
+      ratingContextHtml: cleanHtml,
       ratingContextMarkdown: parsed.data.ratingContextMarkdown ?? null,
       updatedAt: new Date(),
     } as Partial<typeof showroomStores.$inferInsert>)
@@ -3144,6 +3169,71 @@ showroomStoresRouter.post("/:id/pocs", async (c) => {
     .returning();
 
   return c.json({ poc: inserted }, 201);
+});
+
+/**
+ * PUT /:id/pocs/:pocId — Update an existing POC.
+ *
+ * Request body: same shape as POST /:id/pocs (all fields optional).
+ * Response 200:
+ *   { "poc": { ...updatedRow } }
+ */
+showroomStoresRouter.put("/:id/pocs/:pocId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const pocId = Number(c.req.param("pocId"));
+  if (!Number.isFinite(storeId) || !Number.isFinite(pocId)) {
+    return c.json({ success: false, error: "Invalid id" }, 400);
+  }
+
+  let body: unknown;
+  try { body = await c.req.json(); } catch { return c.json({ success: false, error: "Invalid JSON body" }, 400); }
+
+  const updatePocSchema = z.object({
+    fullName: z.string().optional().nullable(),
+    title: z.string().optional().nullable(),
+    company: z.string().optional().nullable(),
+    phone: z.string().optional().nullable(),
+    email: z.string().optional().nullable(),
+    website: z.string().optional().nullable(),
+    address: z.string().optional().nullable(),
+  });
+
+  const parsed = updatePocSchema.safeParse(body);
+  if (!parsed.success) return c.json({ success: false, error: parsed.error.message }, 400);
+
+  const [updated] = await db
+    .update(showroomPocs)
+    .set({ ...parsed.data, updatedAt: new Date() } as Partial<typeof showroomPocs.$inferInsert>)
+    .where(and(eq(showroomPocs.id, pocId), eq(showroomPocs.showroomId, storeId)))
+    .returning();
+
+  if (!updated) return c.json({ success: false, error: "POC not found" }, 404);
+  return c.json({ poc: updated });
+});
+
+/**
+ * DELETE /:id/pocs/:pocId — Soft-delete a POC (sets isActive = false).
+ *
+ * Response 200:
+ *   { "success": true }
+ */
+showroomStoresRouter.delete("/:id/pocs/:pocId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const pocId = Number(c.req.param("pocId"));
+  if (!Number.isFinite(storeId) || !Number.isFinite(pocId)) {
+    return c.json({ success: false, error: "Invalid id" }, 400);
+  }
+
+  const [updated] = await db
+    .update(showroomPocs)
+    .set({ isActive: false, updatedAt: new Date() } as Partial<typeof showroomPocs.$inferInsert>)
+    .where(and(eq(showroomPocs.id, pocId), eq(showroomPocs.showroomId, storeId)))
+    .returning();
+
+  if (!updated) return c.json({ success: false, error: "POC not found" }, 404);
+  return c.json({ success: true });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -3779,6 +3869,126 @@ showroomStoresRouter.get("/:id/photos-gallery", async (c) => {
     .orderBy(asc(showroomPhotosMapping.sortOrder));
 
   return c.json({ photos: rows });
+});
+
+/**
+ * DELETE /:id/photos-gallery/:photoId — Delete a Google Places gallery photo.
+ *
+ * Removes the `showroom_photos_mapping` row and deletes the binary from
+ * Cloudflare Images. If the deleted photo was the store's `heroImageCfImagesUrl`,
+ * promotes the next gallery photo (by sort order) to hero, or nulls it out.
+ *
+ * Response 200:
+ *   { "success": true }
+ */
+showroomStoresRouter.delete("/:id/photos-gallery/:photoId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const photoId = Number(c.req.param("photoId"));
+  if (!Number.isFinite(storeId) || !Number.isFinite(photoId)) {
+    return c.json({ success: false, error: "Invalid id" }, 400);
+  }
+
+  // Fetch the row to get the CF Images URL before deleting.
+  const [photo] = await db
+    .select()
+    .from(showroomPhotosMapping)
+    .where(
+      and(
+        eq(showroomPhotosMapping.id, photoId),
+        eq(showroomPhotosMapping.showroomId, storeId),
+      ),
+    )
+    .limit(1);
+  if (!photo) return c.json({ success: false, error: "Photo not found" }, 404);
+
+  // Delete from D1.
+  await db
+    .delete(showroomPhotosMapping)
+    .where(eq(showroomPhotosMapping.id, photoId));
+
+  // Best-effort delete from Cloudflare Images.
+  try {
+    const { accountId, apiTokens } = await resolveCloudflareImagesCredentials(c.env);
+    if (accountId && apiTokens.length > 0) {
+      const [primaryToken, ...fallbackApiTokens] = apiTokens;
+      const processor = new ImageProcessorService(c.env, accountId, primaryToken, { fallbackApiTokens });
+      // Extract the custom ID from the delivery URL (e.g. "showroom-photo-36-0").
+      const segments = new URL(photo.cfImagesPhotoUrl).pathname.split("/").filter(Boolean);
+      const cfImageId = segments.length >= 2 ? segments[1] : null;
+      if (cfImageId) await processor.deleteFromCloudflareImages(cfImageId);
+    }
+  } catch (err) {
+    console.error("[showroom-stores] gallery photo CF Images delete error:", err);
+  }
+
+  // If this was the hero image, promote the next one or null out.
+  const [store] = await db
+    .select({ heroImageCfImagesUrl: showroomStores.heroImageCfImagesUrl })
+    .from(showroomStores)
+    .where(eq(showroomStores.id, storeId))
+    .limit(1);
+
+  if (store?.heroImageCfImagesUrl === photo.cfImagesPhotoUrl) {
+    const [nextPhoto] = await db
+      .select({ cfImagesPhotoUrl: showroomPhotosMapping.cfImagesPhotoUrl })
+      .from(showroomPhotosMapping)
+      .where(eq(showroomPhotosMapping.showroomId, storeId))
+      .orderBy(asc(showroomPhotosMapping.sortOrder))
+      .limit(1);
+
+    await db
+      .update(showroomStores)
+      .set({
+        heroImageCfImagesUrl: nextPhoto?.cfImagesPhotoUrl ?? null,
+        updatedAt: new Date(),
+      })
+      .where(eq(showroomStores.id, storeId));
+  }
+
+  return c.json({ success: true });
+});
+
+/**
+ * DELETE /:id/photos/:imageId — Delete a visit photo (showroom_images row).
+ *
+ * Response 200:
+ *   { "success": true }
+ */
+showroomStoresRouter.delete("/:id/photos/:imageId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const imageId = Number(c.req.param("imageId"));
+  if (!Number.isFinite(storeId) || !Number.isFinite(imageId)) {
+    return c.json({ success: false, error: "Invalid id" }, 400);
+  }
+
+  const [image] = await db
+    .select()
+    .from(showroomImages)
+    .where(
+      and(eq(showroomImages.id, imageId), eq(showroomImages.storeId, storeId)),
+    )
+    .limit(1);
+  if (!image) return c.json({ success: false, error: "Image not found" }, 404);
+
+  await db.delete(showroomImages).where(eq(showroomImages.id, imageId));
+
+  // Best-effort delete from Cloudflare Images.
+  if (image.cfImageId) {
+    try {
+      const { accountId, apiTokens } = await resolveCloudflareImagesCredentials(c.env);
+      if (accountId && apiTokens.length > 0) {
+        const [primaryToken, ...fallbackApiTokens] = apiTokens;
+        const processor = new ImageProcessorService(c.env, accountId, primaryToken, { fallbackApiTokens });
+        await processor.deleteFromCloudflareImages(image.cfImageId);
+      }
+    } catch (err) {
+      console.error("[showroom-stores] visit photo CF Images delete error:", err);
+    }
+  }
+
+  return c.json({ success: true });
 });
 
 /**
