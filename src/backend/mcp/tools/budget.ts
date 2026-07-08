@@ -284,6 +284,21 @@ export const budgetTools: RemodelTool[] = [
 
       const [next] = await db.insert(budgetTrackerItems).values(merged).returning();
 
+      // Carry the room links forward. budgetTrackerItemRooms points at the row
+      // `id`, so a new revision would otherwise orphan every room association
+      // (they'd vanish from get_budget_item / list_budget_items / the report).
+      const roomLinks = await db
+        .select()
+        .from(budgetTrackerItemRooms)
+        .where(eq(budgetTrackerItemRooms.budgetTrackerItemId, current.id))
+        .all();
+      if (roomLinks.length > 0) {
+        await db
+          .insert(budgetTrackerItemRooms)
+          .values(roomLinks.map((link) => ({ budgetTrackerItemId: next.id, roomId: link.roomId })))
+          .run();
+      }
+
       // Retire the prior revision and chain it to the new one.
       await db
         .update(budgetTrackerItems)

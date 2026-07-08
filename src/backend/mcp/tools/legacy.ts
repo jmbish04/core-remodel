@@ -42,7 +42,7 @@ import { generateMoodBoard } from "../../services/render/mood-board";
 import { runStage } from "../../services/render/stage-runner";
 import type { StageType } from "../../services/render/types";
 import { rowToDto } from "../../api/routes/measurements.schemas";
-import { toolError } from "../format";
+import { num, toolError } from "../format";
 import { defineTool, READ_ONLY, WRITE, type RemodelTool } from "../types";
 
 /**
@@ -394,11 +394,6 @@ export const legacyTools: RemodelTool[] = [
             .map((s) => s.trim())
             .filter(Boolean)
         : undefined;
-      const num = (v: unknown): number | undefined => {
-        if (v == null) return undefined;
-        const n = Number(v);
-        return Number.isFinite(n) ? n : undefined;
-      };
       const rows = await listMeasurements(db, {
         roomId: num(args.roomId),
         elementTypes: elementTypes as MeasurementElementType[] | undefined,

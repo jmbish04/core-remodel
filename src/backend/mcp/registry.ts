@@ -47,11 +47,34 @@ export interface ToolMeta {
   examples: RemodelTool["examples"];
 }
 
+/** Zod v4 `_def` shape we introspect (kind on `.type`, wrappers hold `.innerType`). */
+interface ZodDefLike {
+  type?: string;
+  innerType?: { _def?: ZodDefLike };
+}
+const WRAPPER_TYPES = new Set(["optional", "nullable", "default"]);
+
 /**
- * Describe every tool for documentation. Field types are derived from the Zod
- * shape via its internal `_def.type` (best-effort — good enough for a docs
- * table; the authoritative schema still lives in each tool's `inputShape`).
+ * Best-effort field type + optionality for the docs table.
+ *
+ * Zod v4 exposes the schema KIND on `_def.type` ("string" | "number" |
+ * "optional" | ...) — NOT `_def.typeName` (that was Zod v3). Optional/nullable/
+ * default wrappers nest the real schema under `_def.innerType`, so we unwrap to
+ * report the underlying kind and flag the field optional when an optional/
+ * default wrapper is present. The authoritative schema still lives in each
+ * tool's `inputShape`; this is only for display.
  */
+function introspectField(schema: unknown): { type: string; optional: boolean } {
+  let def = (schema as { _def?: ZodDefLike })._def;
+  let optional = false;
+  while (def?.type && WRAPPER_TYPES.has(def.type) && def.innerType?._def) {
+    if (def.type === "optional" || def.type === "default") optional = true;
+    def = def.innerType._def;
+  }
+  return { type: def?.type ?? "unknown", optional };
+}
+
+/** Describe every tool for documentation (`/api/mcp-docs` → `/mcp/tools`). */
 export function describeTools(): ToolMeta[] {
   return TOOLS.map((t) => ({
     name: t.name,
@@ -61,18 +84,12 @@ export function describeTools(): ToolMeta[] {
     annotations: t.annotations,
     examples: t.examples ?? [],
     inputFields: Object.entries(t.inputShape).map(([name, schema]) => {
-      const def = (schema as { _def?: { type?: string }; isOptional?: () => boolean; description?: string });
-      let optional = false;
-      try {
-        optional = typeof def.isOptional === "function" ? def.isOptional() : false;
-      } catch {
-        optional = false;
-      }
+      const { type, optional } = introspectField(schema);
       return {
         name,
-        type: def._def?.type ?? "unknown",
+        type,
         optional,
-        description: def.description,
+        description: (schema as { description?: string }).description,
       };
     }),
   }));
