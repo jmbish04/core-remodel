@@ -1,48 +1,24 @@
 ---
 /**
- * `/mcp/tools` — auto-generated MCP tool catalog.
+ * `/connect/tools` — auto-generated MCP tool catalog.
  *
- * SSR-fetches the public registry metadata from `/api/mcp-docs` and renders one
- * card per tool, grouped by category. Because it reads the registry (via that
- * endpoint), adding a tool to `src/backend/mcp/tools/*` makes it appear here
- * with zero manual doc edits — the anti-drift guarantee from the 0015 plan.
- *
- * The endpoint is fetched at request time (this page is server-rendered), so
- * the heavy tool registry never enters the frontend bundle.
+ * Renders one card per registered tool, grouped by category. It reads the tool
+ * registry DIRECTLY via `describeTools()` — this runs only in Astro frontmatter
+ * (server-side during SSR, inside the Worker), and esbuild dedupes the registry
+ * module (already in the Worker bundle via the MCP agent), so there's no extra
+ * client bundle. Adding a tool to `src/backend/mcp/tools/*` makes it appear
+ * here with zero manual doc edits — the anti-drift guarantee from the 0015 plan.
  */
 import BaseLayout from "@/layouts/BaseLayout.astro";
+import { describeTools, getAllTools, type ToolMeta } from "@backend/mcp/registry";
 import { Wrench, ShieldCheck, Pencil, Trash2, ArrowLeft } from "lucide-react";
-
-interface ToolField {
-  name: string;
-  type: string;
-  optional: boolean;
-  description?: string;
-}
-interface ToolMeta {
-  name: string;
-  category: string;
-  title: string;
-  description: string;
-  annotations: {
-    readOnlyHint: boolean;
-    destructiveHint: boolean;
-    idempotentHint: boolean;
-    openWorldHint: boolean;
-  };
-  inputFields: ToolField[];
-  examples: { title: string; args: Record<string, unknown> }[];
-}
 
 let tools: ToolMeta[] = [];
 let toolCount = 0;
 let loadError: string | null = null;
 try {
-  const res = await fetch(new URL("/api/mcp-docs", Astro.url));
-  if (!res.ok) throw new Error(`catalog endpoint returned ${res.status}`);
-  const data = (await res.json()) as { tools: ToolMeta[]; toolCount: number };
-  tools = data.tools ?? [];
-  toolCount = data.toolCount ?? tools.length;
+  tools = describeTools();
+  toolCount = getAllTools().length;
 } catch (err) {
   loadError = err instanceof Error ? err.message : "Failed to load the tool catalog.";
 }
@@ -77,7 +53,7 @@ for (const c of grouped.keys()) if (!categoryOrder.includes(c)) categoryOrder.pu
 >
   <main class="mx-auto w-full max-w-4xl px-4 py-10 pb-16">
     <header class="mb-8">
-      <a href="/mcp" class="mb-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+      <a href="/connect" class="mb-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-3.5" /> Connect guide
       </a>
       <div class="flex items-center gap-2">

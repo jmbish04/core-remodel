@@ -339,7 +339,9 @@ export const legacyTools: RemodelTool[] = [
 
       // Coerce optional numerics defensively (the MCP path has no Zod gate): a stray
       // non-numeric becomes null rather than poisoning the row with NaN.
-      const num = (v: unknown): number | null => {
+      // Local coercion returns null (not undefined) so a cleared field is
+      // written as NULL. Named parseNum to avoid shadowing the imported `num`.
+      const parseNum = (v: unknown): number | null => {
         if (v == null) return null;
         const n = Number(v);
         return Number.isFinite(n) ? n : null;
@@ -349,16 +351,16 @@ export const legacyTools: RemodelTool[] = [
           ? Number(args.quantity)
           : undefined;
       const result = await createMeasurement(db, {
-        roomId: num(args.roomId),
+        roomId: parseNum(args.roomId),
         elementType: elementType as MeasurementElementType,
         label: args.label != null ? String(args.label) : null,
-        lengthFeet: num(args.lengthFeet),
-        lengthInches: num(args.lengthInches),
-        widthFeet: num(args.widthFeet),
-        widthInches: num(args.widthInches),
-        heightFeet: num(args.heightFeet),
-        heightInches: num(args.heightInches),
-        areaSqFt: num(args.areaSqFt),
+        lengthFeet: parseNum(args.lengthFeet),
+        lengthInches: parseNum(args.lengthInches),
+        widthFeet: parseNum(args.widthFeet),
+        widthInches: parseNum(args.widthInches),
+        heightFeet: parseNum(args.heightFeet),
+        heightInches: parseNum(args.heightInches),
+        areaSqFt: parseNum(args.areaSqFt),
         quantity,
         source,
         isApproximate: args.isApproximate != null ? Boolean(args.isApproximate) : undefined,
