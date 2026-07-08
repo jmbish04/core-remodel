@@ -66,3 +66,32 @@ declarations are duplicated between `src/backend/api/routes/mcp.ts` and the
 registry's `tools/legacy.ts` (both call the same services); unify onto the
 registry when convenient. `update_showroom`/`record_showroom_visit` do not bump
 `updatedAt`.
+
+### MCP Ops & the self-improving loop — 0017
+
+Every MCP tool call is logged automatically (`src/backend/mcp/logging.ts`,
+written via `ctx.waitUntil` from both transports) into `mcp_tool_invocations`,
+grouped by session in `mcp_sessions`. Claude also writes two backlogs during
+chats via the `ops` tools, and coding agents are expected to work them:
+
+> **Before starting Worker code work, check the MCP ops backlog:**
+> - **Open bugs:** `mcp_agent_issues` where `status='open'` — read via
+>   `pnpm run mcp:issues`, the `list_agent_issues` MCP tool, or
+>   `GET /api/mcp-ops/issues?status=open` (admin-gated). Fix what you can; when a
+>   fix lands, call `resolve_agent_issue` (or update the row) with the **PR
+>   number** that fixed it.
+> - **Feature requests:** `mcp_feature_requests` where `status='requested'`
+>   (`list_feature_requests` / `GET /api/mcp-ops/features?status=requested`).
+>   **Do NOT silently implement** — surface them and **plan with the user** first;
+>   set `status='planned'` + `planRef` when a plan doc exists, and `prNumber` +
+>   `status='shipped'` when merged.
+>
+> These backlogs are written by Claude via the MCP tools during chats — treat
+> them as authoritative TODOs for the connector.
+
+Exported chats land in `mcp_conversations` (via `export_conversation`; large
+transcripts offloaded to R2 `ARTIFACTS_BUCKET`). Admin reads: `/admin/mcp-ops`
+(backed by `GET /api/mcp-ops/*`). The `ops` tools live in
+`src/backend/mcp/tools/ops.ts` (category `"ops"`); logging itself is middleware,
+not a tool. Never log the auth token / `WORKER_API_KEY` — the logger caps blob
+sizes and redacts secret-ish keys.

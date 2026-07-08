@@ -45,6 +45,8 @@ import renderRouter from "./routes/render";
 import moodBoardRouter from "./routes/mood-board";
 import mcpRouter from "./routes/mcp";
 import mcpCatalogRouter from "./routes/mcp-catalog";
+import mcpOpsRouter from "./routes/mcp-ops";
+import studioRouter from "./routes/studio";
 import { portalRouter } from "./routes/portal";
 import { planningRouter } from "./routes/planning";
 import { planningExtendedRouter } from "./routes/planning-extended";
@@ -178,6 +180,8 @@ app.route("/api/mood-board", moodBoardRouter);
 app.route("/api/mcp", mcpRouter);
 // Public MCP tool catalog (no auth) — feeds the /mcp/tools docs page.
 app.route("/api/mcp-docs", mcpCatalogRouter);
+app.route("/api/mcp-ops", mcpOpsRouter);
+app.route("/api/studio", studioRouter);
 app.route("/api/portal", portalRouter);
 app.route("/api/planning", planningRouter);
 app.route("/api/planning", planningExtendedRouter);

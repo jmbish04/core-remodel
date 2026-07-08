@@ -116,3 +116,7 @@ export * from "./gmail/gmail_messages";
 
 // worker emails (Cloudflare Email Routing inbound)
 export * from "./emails/index";
+
+// MCP ops/observability (0017) + artifact studio (0016)
+export * from "./mcp/index";
+export * from "./artifacts/index";

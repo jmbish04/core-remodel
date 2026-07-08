@@ -5,10 +5,12 @@
  */
 import type { RemodelTool } from "../types";
 import { analyticsTools } from "./analytics";
+import { artifactTools } from "./artifacts";
 import { brandTools } from "./brands";
 import { budgetTools } from "./budget";
 import { legacyTools } from "./legacy";
 import { materialTools } from "./materials";
+import { opsTools } from "./ops";
 import { productTools } from "./products";
 import { roomTools } from "./rooms";
 import { showroomTools } from "./showrooms";
@@ -24,5 +26,7 @@ export const ALL_TOOL_GROUPS: RemodelTool[] = [
   ...brandTools,
   ...productTools,
   ...workflowTools,
+  ...artifactTools,
+  ...opsTools,
   ...legacyTools,
 ];

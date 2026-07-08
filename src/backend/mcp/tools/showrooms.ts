@@ -23,11 +23,37 @@
  * is both instantly displayable and durably logged.
  */
 import { showroomHours, showroomPocs, showroomStores, storeNotes } from "@backend/db";
-import { and, desc, eq } from "drizzle-orm";
+import { GoogleMapsService } from "@backend/services/google/maps";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { matchesQuery, paginate, toolError } from "../format";
-import { defineTool, READ_ONLY, WRITE, WRITE_IDEMPOTENT, type RemodelTool } from "../types";
+import {
+  defineTool,
+  READ_ONLY,
+  WRITE,
+  WRITE_IDEMPOTENT,
+  type RemodelTool,
+} from "../types";
+
+/** Browse URL for a store — the directory list view where a new store appears. */
+const SHOWROOM_LIST_URL = "/admin/shopping/showrooms/list";
+
+/**
+ * Turn a `MAPS_QUOTA_EXCEEDED` service error into an actionable tool error, and
+ * re-surface any other Places failure verbatim. Keeps the two Places-backed
+ * tools DRY and ensures the agent never silently spends past the free tier.
+ */
+function rethrowMapsError(err: unknown): never {
+  const message = err instanceof Error ? err.message : String(err);
+  if (message.includes("MAPS_QUOTA_EXCEEDED")) {
+    toolError(
+      "Google Maps monthly free-tier quota is exhausted — showroom search is paused to avoid spend. " +
+        "Try again next month or raise the cap in the Maps usage dashboard.",
+    );
+  }
+  toolError(`Google Places request failed: ${message}`);
+}
 
 /** Day-of-week enum shared by the hours tools — matches the `showroom_hours.day` column. */
 const DAY_ENUM = z.enum([
@@ -537,6 +563,175 @@ export const showroomTools: RemodelTool[] = [
         .limit(1);
 
       return { recorded: true, store: updated, note: visitNote };
+    },
+  }),
+
+  defineTool({
+    name: "search_showrooms",
+    category: "showrooms",
+    title: "Search for showrooms (Google Places)",
+    description:
+      "Discover candidate showrooms via Google Places text search — the kickstart for showroom research. " +
+      "Give a free-text `query` ('stone slab countertop showroom', 'European kitchen cabinetry'); optionally bias " +
+      "with `near` (a city like 'San Francisco, CA' or a 'lat,lng' pair), cap with `maxResults` (default 10, max 20), " +
+      "or narrow with a Places `includedType`. Returns candidate cards (placeId, name, address, rating, phone, " +
+      "website, primaryType, location) with each flagged `alreadyInDb` + `existingShowroomId` so you can skip dupes. " +
+      "This is READ-ONLY discovery — nothing is saved. To persist a pick, call import_showroom_from_place (or " +
+      "create_showroom). Hits an external, quota-metered API; surfaces MAPS_QUOTA_EXCEEDED clearly.",
+    inputShape: {
+      query: z.string().min(1).describe("Free-text place search (required)"),
+      near: z
+        .string()
+        .optional()
+        .describe("Location bias: a city name ('San Francisco, CA') or a 'lat,lng' pair"),
+      maxResults: z
+        .number()
+        .int()
+        .min(1)
+        .max(20)
+        .optional()
+        .describe("Number of candidates to return (default 10, hard cap 20)"),
+      includedType: z
+        .string()
+        .optional()
+        .describe("Optional Google Places primary type filter (e.g. 'home_goods_store')"),
+    },
+    annotations: { ...READ_ONLY, openWorldHint: true },
+    examples: [
+      {
+        title: "Stone/slab near SF",
+        args: { query: "stone slab countertop showroom", near: "San Francisco, CA", maxResults: 12 },
+      },
+      { title: "European cabinetry", args: { query: "European kitchen cabinetry Bay Area" } },
+    ],
+    handler: async ({ env, db }, input) => {
+      const query = input.query?.trim();
+      if (!query) toolError("`query` is required and cannot be empty.");
+
+      let candidates: Awaited<ReturnType<GoogleMapsService["placesTextSearchMany"]>>;
+      try {
+        candidates = await new GoogleMapsService(env).placesTextSearchMany(query, {
+          maxResults: input.maxResults,
+          near: input.near,
+          includedType: input.includedType,
+        });
+      } catch (err) {
+        rethrowMapsError(err);
+      }
+
+      // Cross-reference existing stores by placeId so the agent can skip dupes.
+      const placeIds = candidates.map((c) => c.placeId);
+      const existing =
+        placeIds.length > 0
+          ? await db
+              .select({ id: showroomStores.id, placeId: showroomStores.placeId })
+              .from(showroomStores)
+              .where(inArray(showroomStores.placeId, placeIds))
+              .all()
+          : [];
+      const byPlaceId = new Map(existing.map((s) => [s.placeId, s.id]));
+
+      return {
+        query,
+        near: input.near ?? null,
+        count: candidates.length,
+        candidates: candidates.map((c) => {
+          const existingShowroomId = byPlaceId.get(c.placeId);
+          return {
+            placeId: c.placeId,
+            name: c.displayName,
+            address: c.formattedAddress,
+            rating: c.rating,
+            userRatingCount: c.userRatingCount,
+            phone: c.nationalPhoneNumber,
+            website: c.websiteUri,
+            primaryType: c.primaryType,
+            location: c.location,
+            alreadyInDb: existingShowroomId != null,
+            existingShowroomId: existingShowroomId ?? null,
+          };
+        }),
+      };
+    },
+  }),
+
+  defineTool({
+    name: "import_showroom_from_place",
+    category: "showrooms",
+    title: "Import a showroom from a Google Place",
+    description:
+      "One-step add: create a showroom from a Google `placeId` (typically one returned by search_showrooms). " +
+      "Fetches Places Details (no AI/Gemini spend) to populate name, address, phone, website, hours summary, and " +
+      "the Google Maps link, and stores the `placeId` so later Places enrichment/backfill dedupes cleanly. " +
+      "Idempotent by `placeId`: if a showroom with that placeId already exists it is returned unchanged " +
+      "(`created:false`); otherwise a new row is inserted (`created:true`). Prefer this over create_showroom when " +
+      "you have a placeId. Quota-metered — surfaces MAPS_QUOTA_EXCEEDED clearly.",
+    inputShape: {
+      placeId: z
+        .string()
+        .min(1)
+        .describe("Google Place ID from search_showrooms (e.g. 'ChIJ...')"),
+    },
+    annotations: WRITE_IDEMPOTENT,
+    examples: [{ title: "Import a candidate", args: { placeId: "ChIJN1t_tDeuEmsRUsoyG83frY4" } }],
+    handler: async ({ env, db }, input) => {
+      const placeId = input.placeId?.trim();
+      if (!placeId) toolError("`placeId` is required and cannot be empty.");
+
+      // Idempotency: a store with this placeId already exists → return it.
+      const [existing] = await db
+        .select()
+        .from(showroomStores)
+        .where(eq(showroomStores.placeId, placeId))
+        .limit(1);
+      if (existing) {
+        return { created: false, showroomId: existing.id, url: SHOWROOM_LIST_URL, store: existing };
+      }
+
+      // Fetch raw Google fields (skipAi: no Gemini review analysis — fast + free).
+      let details: Record<string, unknown>;
+      try {
+        details = await new GoogleMapsService(env).placeDetails(placeId, undefined, {
+          skipAi: true,
+        });
+      } catch (err) {
+        rethrowMapsError(err);
+      }
+
+      const name = (details.displayName as { text?: string } | undefined)?.text?.trim();
+      if (!name) {
+        toolError(`Google returned no usable place for placeId "${placeId}".`);
+      }
+
+      // Human-readable hours summary from Google's weekday descriptions, if any.
+      const weekdayDescriptions = (
+        details.regularOpeningHours as { weekdayDescriptions?: string[] } | undefined
+      )?.weekdayDescriptions;
+      const hoursSummary =
+        Array.isArray(weekdayDescriptions) && weekdayDescriptions.length > 0
+          ? weekdayDescriptions.join("\n")
+          : undefined;
+
+      const editorialSummary = (
+        details.editorialSummary as { text?: string } | undefined
+      )?.text;
+      const googleMapsLink = `https://www.google.com/maps/place/?q=place_id:${placeId}`;
+
+      const [created] = await db
+        .insert(showroomStores)
+        .values({
+          name,
+          description: editorialSummary,
+          locationAddress: (details.formattedAddress as string | undefined) ?? undefined,
+          phoneNumber: (details.nationalPhoneNumber as string | undefined) ?? undefined,
+          websiteUrl: (details.websiteUri as string | undefined) ?? undefined,
+          googleMapsLink,
+          weekdayHours: hoursSummary,
+          placeId,
+        })
+        .returning();
+
+      return { created: true, showroomId: created.id, url: SHOWROOM_LIST_URL, store: created };
     },
   }),
 ];
