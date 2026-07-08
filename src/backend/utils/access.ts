@@ -47,6 +47,20 @@ async function getAccessCookieHash(env: Env): Promise<string> {
   return hashString(apiKey);
 }
 
+/**
+ * Public accessor for the access-cookie value (SHA-256 of WORKER_API_KEY).
+ *
+ * Used by the MCP OAuth consent screen (0015) to set the same `remodel_access`
+ * cookie the rest of the app trusts, from a raw `Response` rather than a Hono
+ * context. Returns "" when WORKER_API_KEY is unset.
+ */
+export async function issueAccessCookieValue(env: Env): Promise<string> {
+  return getAccessCookieHash(env);
+}
+
+/** Max-age (seconds) for the access cookie — shared with the OAuth consent UI. */
+export const ACCESS_COOKIE_MAX_AGE = ACCESS_COOKIE_MAX_AGE_SECONDS;
+
 export function getAccessCookieFromRequest(request: Request): string | null {
   return getCookieValueFromHeader(request.headers.get("cookie"), ACCESS_COOKIE_NAME);
 }

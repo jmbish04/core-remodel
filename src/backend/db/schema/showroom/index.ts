@@ -17,6 +17,7 @@ export * from "./sweep_sessions";
 export * from "./gaps";
 export * from "./pocs";
 export * from "./product_mappings";
+export * from "./product_material_mappings";
 export * from "./browser_run_pages";
 export * from "./photos_mapping";
 export * from "./hours";

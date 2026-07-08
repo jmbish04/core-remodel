@@ -24,6 +24,7 @@ export * from "./home/remodel_scenarios";
 export * from "./home/scenario_room_plans";
 export * from "./home/room_action_items";
 export * from "./home/budget_tracker_items";
+export * from "./home/budget_item_material_mappings";
 export * from "./home/truth_table_activities";
 export * from "./home/shopping_journal";
 export * from "./home/room_ai_summaries";

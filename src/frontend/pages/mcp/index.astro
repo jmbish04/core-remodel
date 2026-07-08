@@ -1,0 +1,98 @@
+---
+/**
+ * `/mcp` — MCP connector: how to connect.
+ *
+ * Public, hand-written guide for connecting an MCP client (claude.ai custom
+ * connector via OAuth, or Claude Code / curl via bearer token) to the 126
+ * Colby remodel MCP server. The tool catalog itself lives at `/mcp/tools`
+ * (auto-generated from the registry).
+ *
+ * Maintenance: update the prose here only when the CONNECTION FLOW changes.
+ * New tools appear on /mcp/tools automatically — see AGENTS.md.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { Plug, KeyRound, TerminalSquare, Wrench, ShieldCheck } from "lucide-react";
+
+const origin = Astro.url.origin;
+const mcpUrl = `${origin}/mcp`;
+
+// Rendered as a single {expression} so Astro does not try to parse the JSON
+// braces in the request body as JSX expressions.
+const curlExample = `curl -s ${origin}/api/mcp \\
+  -H "Authorization: Bearer $WORKER_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'`;
+---
+
+<BaseLayout
+  title="MCP Connector — 126 Colby Remodel"
+  description="Connect an MCP client (claude.ai, Claude Code) to the 126 Colby remodel to manage rooms, budget, materials, showrooms, brands, and products by chat."
+>
+  <main class="mx-auto w-full max-w-3xl px-4 py-10 pb-16">
+    <header class="mb-8">
+      <div class="mb-3 inline-flex items-center gap-2 rounded-full bg-card px-3 py-1 text-xs text-muted-foreground ring-1 ring-border/40">
+        <Plug className="size-3.5" /> Model Context Protocol
+      </div>
+      <h1 class="text-2xl font-semibold tracking-tight sm:text-3xl">Remodel MCP connector</h1>
+      <p class="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
+        Connect Claude to the 126 Colby remodel and manage the whole project by chat — rooms,
+        budget, materials, showrooms, brands, and products. Browse the full tool list at
+        <a class="text-foreground underline underline-offset-4" href="/mcp/tools">/mcp/tools</a>.
+      </p>
+    </header>
+
+    <!-- Connector URL -->
+    <section class="mb-8 rounded-xl bg-card p-5 ring-1 ring-border/40">
+      <h2 class="mb-1 text-sm font-medium">Connector URL</h2>
+      <p class="mb-3 text-xs text-muted-foreground">Point your MCP client at this endpoint.</p>
+      <code class="block overflow-x-auto rounded-lg bg-background px-3 py-2 font-mono text-sm text-foreground ring-1 ring-border/40">{mcpUrl}</code>
+      <p class="mt-2 text-xs text-muted-foreground">SSE fallback: <code class="font-mono">{origin}/mcp/sse</code></p>
+    </section>
+
+    <!-- claude.ai -->
+    <section class="mb-6 rounded-xl bg-card p-5 ring-1 ring-border/40">
+      <h2 class="mb-3 flex items-center gap-2 text-base font-medium"><KeyRound className="size-4 text-primary" /> Connect from claude.ai (OAuth)</h2>
+      <ol class="ml-4 list-decimal space-y-2 text-sm text-muted-foreground marker:text-muted-foreground/60">
+        <li>In claude.ai, open <span class="text-foreground">Settings → Connectors → Add custom connector</span>.</li>
+        <li>Paste the connector URL above and continue.</li>
+        <li>Claude discovers the OAuth server automatically (dynamic client registration) and opens the authorize screen.</li>
+        <li>Enter the <span class="text-foreground">access password</span> and click <span class="text-foreground">Approve</span>.</li>
+        <li>The remodel tools now appear in Claude. Ask it to "list the rooms" or "show the budget report".</li>
+      </ol>
+      <p class="mt-3 text-xs text-muted-foreground">
+        The authorize step runs in your browser — the connector uses OAuth 2.1 with PKCE and stores
+        no password, only a scoped access token.
+      </p>
+    </section>
+
+    <!-- Claude Code / curl -->
+    <section class="mb-6 rounded-xl bg-card p-5 ring-1 ring-border/40">
+      <h2 class="mb-3 flex items-center gap-2 text-base font-medium"><TerminalSquare className="size-4 text-primary" /> Connect from Claude Code / curl (bearer token)</h2>
+      <p class="mb-3 text-sm text-muted-foreground">
+        The legacy JSON-RPC endpoint at <code class="font-mono">/api/mcp</code> accepts the worker
+        API key as a bearer token — handy for scripts and local agents:
+      </p>
+      <pre class="overflow-x-auto rounded-lg bg-background p-3 font-mono text-xs text-foreground ring-1 ring-border/40"><code>{curlExample}</code></pre>
+    </section>
+
+    <!-- Scope + safety -->
+    <section class="mb-6 grid gap-4 sm:grid-cols-2">
+      <div class="rounded-xl bg-card p-5 ring-1 ring-border/40">
+        <h3 class="mb-2 flex items-center gap-2 text-sm font-medium"><ShieldCheck className="size-4 text-primary" /> Scope</h3>
+        <p class="text-xs leading-relaxed text-muted-foreground">
+          A single <code class="font-mono">remodel</code> scope grants full parity with the app —
+          anything you can do in the admin UI, Claude can do through the connector. Destructive
+          tools (unlink / delete) are labeled so the client can prompt before running them.
+        </p>
+      </div>
+      <div class="rounded-xl bg-card p-5 ring-1 ring-border/40">
+        <h3 class="mb-2 flex items-center gap-2 text-sm font-medium"><Wrench className="size-4 text-primary" /> Tools</h3>
+        <p class="text-xs leading-relaxed text-muted-foreground">
+          The connector exposes tools across rooms, budget, materials, showrooms, brands, and
+          products, plus render / measurement helpers. See the full, always-current list at
+          <a class="text-foreground underline underline-offset-4" href="/mcp/tools">/mcp/tools</a>.
+        </p>
+      </div>
+    </section>
+  </main>
+</BaseLayout>

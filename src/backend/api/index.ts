@@ -44,6 +44,7 @@ import { photoViewerNotesRouter } from "./routes/photo-viewer-notes";
 import renderRouter from "./routes/render";
 import moodBoardRouter from "./routes/mood-board";
 import mcpRouter from "./routes/mcp";
+import mcpCatalogRouter from "./routes/mcp-catalog";
 import { portalRouter } from "./routes/portal";
 import { planningRouter } from "./routes/planning";
 import { planningExtendedRouter } from "./routes/planning-extended";
@@ -175,6 +176,8 @@ app.route("/api/photo-edits", photoEditsRouter);
 app.route("/api/render", renderRouter);
 app.route("/api/mood-board", moodBoardRouter);
 app.route("/api/mcp", mcpRouter);
+// Public MCP tool catalog (no auth) — feeds the /mcp/tools docs page.
+app.route("/api/mcp-docs", mcpCatalogRouter);
 app.route("/api/portal", portalRouter);
 app.route("/api/planning", planningRouter);
 app.route("/api/planning", planningExtendedRouter);
