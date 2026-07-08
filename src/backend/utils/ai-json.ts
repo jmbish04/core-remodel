@@ -56,7 +56,7 @@ export function parseStructuredResponse<T>(
  * models wrap around JSON even under json_schema, and trim to the outermost
  * brace pair so leading prose never defeats `JSON.parse`.
  */
-function stripJsonFence(text: string): string {
+export function stripJsonFence(text: string): string {
   let t = text.trim();
   // Remove a leading ```json / ``` fence and any trailing ``` fence.
   t = t.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();

@@ -112,3 +112,6 @@ export * from "./scrum/index";
 // gmail
 export * from "./gmail/gmail_threads";
 export * from "./gmail/gmail_messages";
+
+// worker emails (Cloudflare Email Routing inbound)
+export * from "./emails/index";

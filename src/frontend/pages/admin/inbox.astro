@@ -1,0 +1,19 @@
+---
+import { InboxApp } from "@/components/inbox/InboxApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Inbox - 126 Colby Remodel Mission Control"
+  description="Manage inbound emails, invoices, and automated extractions."
+>
+  <main class="container mx-auto px-4 py-8">
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold tracking-tight">Inbox</h1>
+      <p class="mt-2 text-sm text-muted-foreground">
+        Review AI-classified emails and confirm extracted data like invoices and receipts.
+      </p>
+    </div>
+    <InboxApp client:only="react" />
+  </main>
+</BaseLayout>

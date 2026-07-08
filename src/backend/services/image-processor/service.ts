@@ -431,6 +431,32 @@ ${visionDescription}`,
     throw lastError || new Error("Failed to upload to Cloudflare Images");
   }
 
+  /**
+   * Delete an image from Cloudflare Images by its custom ID.
+   * Best-effort — logs errors but does not throw so callers can proceed with
+   * DB cleanup even if the CF Images delete fails.
+   */
+  async deleteFromCloudflareImages(imageId: string): Promise<boolean> {
+    const apiUrl = `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/images/v1/${imageId}`;
+    for (const token of this.apiTokens) {
+      try {
+        const res = await fetch(apiUrl, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(10000),
+        });
+        if (res.ok || res.status === 404) return true; // 404 = already gone
+        const text = await res.text();
+        console.warn(`[Images API] delete ${imageId} → ${res.status}: ${text}`);
+        if (res.status === 401 || res.status === 403) continue; // try next token
+        return false;
+      } catch (err) {
+        console.error(`[Images API] delete ${imageId} error:`, err);
+      }
+    }
+    return false;
+  }
+
   getDeliveryUrl(
     uploadResponse: CloudflareImagesResponse,
     fallbackId: string,

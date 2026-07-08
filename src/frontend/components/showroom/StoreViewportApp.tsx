@@ -27,6 +27,7 @@ import {
   MapPin,
   NotebookPen,
   Package,
+  Pencil,
   Phone,
   RefreshCcw,
   ScanSearch,
@@ -63,6 +64,8 @@ import { ShowroomPhotoPolaroid, type ShowroomPhoto } from "./photos/ShowroomPhot
 import { ShowroomBento, type ShowroomBentoSection } from "./bento/ShowroomBento";
 import { PhotoStack } from "./PhotoStack";
 import { ShowroomGalleryModal, type GalleryPhoto } from "./ShowroomGalleryModal";
+import { EditStoreModal, type EditableStore } from "./EditStoreModal";
+import { ManagePocsSection } from "./ManagePocsSection";
 import {
   CategoryChipsEditor,
   HoursContactModal,
@@ -397,6 +400,7 @@ export function StoreViewportApp({
   const [productsOpen, setProductsOpen] = useState(false);
   const [scrapeResultsOpen, setScrapeResultsOpen] = useState(false);
   const [hoursModalOpen, setHoursModalOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
 
   // Note delete (inline; create/edit now navigate to the full-page editor).
   const [deleteNoteTarget, setDeleteNoteTarget] = useState<NoteRow | null>(null);
@@ -476,6 +480,37 @@ export function StoreViewportApp({
       console.error("[store/photos-gallery]", e);
     }
   }, [id]);
+
+  const deleteGalleryPhoto = useCallback(async (photoId: number) => {
+    try {
+      const res = await fetch(`/api/showroom-stores/${id}/photos-gallery/${photoId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(`Failed (${res.status})`);
+      toast.success("Gallery photo deleted.");
+      void loadGalleryPhotos();
+      void loadStore(); // hero may have changed
+    } catch (e) {
+      console.error("[store/delete-gallery-photo]", e);
+      toast.error("Failed to delete photo.");
+    }
+  }, [id, loadGalleryPhotos, loadStore]);
+
+  const deleteVisitPhoto = useCallback(async (imageId: number) => {
+    try {
+      const res = await fetch(`/api/showroom-stores/${id}/photos/${imageId}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error(`Failed (${res.status})`);
+      toast.success("Visit photo deleted.");
+      void loadPhotos();
+    } catch (e) {
+      console.error("[store/delete-visit-photo]", e);
+      toast.error("Failed to delete photo.");
+    }
+  }, [id, loadPhotos]);
 
   useEffect(() => {
     setLoading(true);
@@ -854,6 +889,15 @@ export function StoreViewportApp({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-2xl font-semibold tracking-tight">{store.name}</h1>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7 text-muted-foreground hover:text-foreground"
+                onClick={() => setEditOpen(true)}
+                title="Edit showroom"
+              >
+                <Pencil className="size-3.5" />
+              </Button>
               {store.pricePoint ? (
                 <Badge
                   variant="outline"
@@ -1017,6 +1061,11 @@ export function StoreViewportApp({
             <Package className="size-3.5" /> Associate products
           </Button>
         </div>
+
+        {/* ── Points of Contact ─────────────────────────────────────────────── */}
+        <div className="mt-5 border-t border-border/30 pt-5">
+          <ManagePocsSection storeId={store.id} />
+        </div>
         </div>
       </section>
 
@@ -1060,6 +1109,8 @@ export function StoreViewportApp({
               setGalleryStartIndex(index);
               setGalleryOpen(true);
             }}
+            onDeleteGalleryPhoto={deleteGalleryPhoto}
+            onDeleteVisitPhoto={deleteVisitPhoto}
           />
         )}
       </div>
@@ -1162,6 +1213,12 @@ export function StoreViewportApp({
         }}
         open={hoursModalOpen}
         onOpenChange={setHoursModalOpen}
+      />
+      <EditStoreModal
+        store={store as unknown as EditableStore}
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        onSaved={loadStore}
       />
     </main>
   );
@@ -1653,6 +1710,8 @@ function PhotosSection({
   onUploadClick,
   onPhotoSaved,
   onOpenGallery,
+  onDeleteGalleryPhoto,
+  onDeleteVisitPhoto,
 }: {
   galleryPhotos: GalleryPhoto[];
   photos: ShowroomPhoto[];
@@ -1660,6 +1719,8 @@ function PhotosSection({
   onUploadClick: () => void;
   onPhotoSaved: () => void;
   onOpenGallery: (index: number) => void;
+  onDeleteGalleryPhoto: (photoId: number) => void;
+  onDeleteVisitPhoto: (imageId: number) => void;
 }) {
   return (
     <div className="space-y-6">
@@ -1689,7 +1750,17 @@ function PhotosSection({
           <>
             <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-4 lg:grid-cols-5">
               {galleryPhotos.map((p, i) => (
-                <GalleryThumb key={p.id} photo={p} index={i} onOpen={onOpenGallery} />
+                <div key={p.id} className="group/gthumb relative">
+                  <GalleryThumb photo={p} index={i} onOpen={onOpenGallery} />
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); onDeleteGalleryPhoto(p.id); }}
+                    className="absolute right-1 top-1 z-10 flex size-6 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity hover:bg-destructive group-hover/gthumb:opacity-100"
+                    title="Delete photo"
+                  >
+                    <Trash2 className="size-3" />
+                  </button>
+                </div>
               ))}
             </div>
             <p className="mt-3 text-[11px] text-muted-foreground/60">
@@ -1726,7 +1797,17 @@ function PhotosSection({
         ) : (
           <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
             {photos.map((photo) => (
-              <ShowroomPhotoPolaroid key={photo.id} photo={photo} onSaved={onPhotoSaved} />
+              <div key={photo.id} className="group/vphoto relative">
+                <ShowroomPhotoPolaroid photo={photo} onSaved={onPhotoSaved} />
+                <button
+                  type="button"
+                  onClick={() => onDeleteVisitPhoto(photo.id)}
+                  className="absolute right-1 top-1 z-10 flex size-6 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity hover:bg-destructive group-hover/vphoto:opacity-100"
+                  title="Delete photo"
+                >
+                  <Trash2 className="size-3" />
+                </button>
+              </div>
             ))}
           </div>
         )}

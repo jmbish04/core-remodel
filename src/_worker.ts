@@ -169,6 +169,13 @@ const handler: ExportedHandler<Env> = {
     // Let Astro handle everything else (SSR and static assets via env.ASSETS)
     return astroHandler.fetch!(request, env, ctx);
   },
+  async email(message, env, ctx) {
+    // Import dynamically or statically. Since we want to keep _worker.ts clean, we'll statically import.
+    // However, I need to add the static import at the top of the file as well.
+    // Let's do that with multi_replace_file_content if I need to. But I can also just do dynamic import here for safety.
+    const { handleInboundEmail } = await import("./backend/services/email/email-handler");
+    await handleInboundEmail(message, env, ctx);
+  },
   async scheduled(event, env, ctx) {
     // Gate by cron expression so each registered trigger fires its own job.
     // The existing 14:00 UTC trigger runs the permit sync; the new master-tick
