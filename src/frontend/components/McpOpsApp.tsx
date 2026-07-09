@@ -87,7 +87,7 @@ export function McpOpsApp({
   const [featureId, setFeatureId] = useState<string | null>(
     normalizeTab(initialTab) === "features" ? (initialDetailId ?? null) : null,
   );
-  const [conversationId] = useState<string | null>(
+  const [conversationId, setConversationId] = useState<string | null>(
     normalizeTab(initialTab) === "conversations" ? (initialDetailId ?? null) : null,
   );
   // A session id handed off from the Logs tab so Sessions opens pre-selected.
@@ -96,8 +96,12 @@ export function McpOpsApp({
   /** Switch tabs and push the canonical URL (no reload). */
   const goTab = useCallback((next: TabId, detailId?: string | null) => {
     setTab(next);
+    // Keep the two deep-linkable records in sync with the active tab so a stale
+    // id can't reopen a record after navigating away.
     if (next !== "features") setFeatureId(null);
     if (next === "features") setFeatureId(detailId ?? null);
+    if (next !== "conversations") setConversationId(null);
+    if (next === "conversations") setConversationId(detailId ?? null);
     if (typeof window !== "undefined") {
       window.history.pushState({}, "", buildUrl(next, detailId));
     }
@@ -110,6 +114,7 @@ export function McpOpsApp({
       const { tab: t, detailId } = parsePath(window.location.pathname);
       setTab(t);
       setFeatureId(t === "features" ? detailId : null);
+      setConversationId(t === "conversations" ? detailId : null);
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -126,6 +131,14 @@ export function McpOpsApp({
     setFeatureId(null);
     if (typeof window !== "undefined") {
       window.history.pushState({}, "", buildUrl("features"));
+    }
+  }, []);
+
+  /* -- Conversations deep-link (drives the /conversations/:id URL) -- */
+  const openConversation = useCallback((id: string) => {
+    setConversationId(id);
+    if (typeof window !== "undefined") {
+      window.history.pushState({}, "", buildUrl("conversations", id));
     }
   }, []);
 
@@ -173,7 +186,10 @@ export function McpOpsApp({
           <LogsTab onOpenSession={openSession} />
         </TabsContent>
         <TabsContent value="conversations" className="mt-4">
-          <ConversationsTab initialDetailId={conversationId} />
+          <ConversationsTab
+            initialDetailId={conversationId}
+            onOpenConversation={openConversation}
+          />
         </TabsContent>
         <TabsContent value="bugs" className="mt-4">
           <BugsTab />

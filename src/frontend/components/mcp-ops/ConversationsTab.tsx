@@ -36,8 +36,11 @@ import {
 
 export function ConversationsTab({
   initialDetailId,
+  onOpenConversation,
 }: {
   initialDetailId?: string | null;
+  /** Notify the parent so it can sync the /conversations/:id URL + history. */
+  onOpenConversation?: (id: string) => void;
 }) {
   const [rows, setRows] = useState<ConversationRow[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -93,7 +96,10 @@ export function ConversationsTab({
                 <button
                   key={c.id}
                   type="button"
-                  onClick={() => setSelectedId(c.id)}
+                  onClick={() => {
+                    setSelectedId(c.id);
+                    onOpenConversation?.(c.id);
+                  }}
                   className={cn(
                     "flex w-full flex-col gap-1 px-4 py-3 text-left transition-colors",
                     active ? "bg-muted/60" : "hover:bg-muted/30",
