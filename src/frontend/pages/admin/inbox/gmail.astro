@@ -1,0 +1,13 @@
+---
+import { GmailInboxApp } from "@/components/gmail";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Gmail Inbox - 126 Colby Remodel Mission Control"
+  description="Two-pane Gmail comms hub — read threads, reply, and draft with AI across every contractor conversation."
+>
+  <main class="container mx-auto px-4 py-8">
+    <GmailInboxApp client:only="react" />
+  </main>
+</BaseLayout>
