@@ -361,40 +361,36 @@ gmailRouter.openapi(
 
       let pageRows: GmailThread[] = [];
       if (matchingThreadIdsFilter) {
-        for (const idsChunk of [matchingThreadIdsFilter]) {
-          // Single query is fine here — inArray below chunks internally isn't
-          // needed for the WHERE itself since D1's bound-param limit applies
-          // per statement; a very large match set is chunked defensively.
-          if (idsChunk.length <= D1_MAX_BOUND_PARAMS) {
-            pageRows = await db
+        if (matchingThreadIdsFilter.length <= D1_MAX_BOUND_PARAMS) {
+          // Fits in one statement (D1's bound-param limit is per statement).
+          pageRows = await db
+            .select()
+            .from(gmailThreads)
+            .where(inArray(gmailThreads.threadId, matchingThreadIdsFilter))
+            .orderBy(orderExpr)
+            .limit(limit)
+            .offset(offset);
+        } else {
+          // Large match set: fetch matching threads across chunks, sort
+          // in-memory, then slice the requested page. Search result sets
+          // large enough to hit this path are rare in this mailbox.
+          const all: GmailThread[] = [];
+          for (let i = 0; i < matchingThreadIdsFilter.length; i += D1_MAX_BOUND_PARAMS) {
+            const slice = matchingThreadIdsFilter.slice(i, i + D1_MAX_BOUND_PARAMS);
+            const rows = await db
               .select()
               .from(gmailThreads)
-              .where(inArray(gmailThreads.threadId, idsChunk))
-              .orderBy(orderExpr)
-              .limit(limit)
-              .offset(offset);
-          } else {
-            // Large match set: fetch matching threads across chunks, sort
-            // in-memory, then slice the requested page. Search result sets
-            // large enough to hit this path are rare in this mailbox.
-            const all: GmailThread[] = [];
-            for (let i = 0; i < idsChunk.length; i += D1_MAX_BOUND_PARAMS) {
-              const slice = idsChunk.slice(i, i + D1_MAX_BOUND_PARAMS);
-              const rows = await db
-                .select()
-                .from(gmailThreads)
-                .where(inArray(gmailThreads.threadId, slice))
-                .all();
-              all.push(...rows);
-            }
-            all.sort((a, b) => {
-              const at = a.timestampSent ? new Date(a.timestampSent).getTime() : -1;
-              const bt = b.timestampSent ? new Date(b.timestampSent).getTime() : -1;
-              if (bt !== at) return bt - at;
-              return b.id - a.id;
-            });
-            pageRows = all.slice(offset, offset + limit);
+              .where(inArray(gmailThreads.threadId, slice))
+              .all();
+            all.push(...rows);
           }
+          all.sort((a, b) => {
+            const at = a.timestampSent ? new Date(a.timestampSent).getTime() : -1;
+            const bt = b.timestampSent ? new Date(b.timestampSent).getTime() : -1;
+            if (bt !== at) return bt - at;
+            return b.id - a.id;
+          });
+          pageRows = all.slice(offset, offset + limit);
         }
       } else {
         pageRows = await db

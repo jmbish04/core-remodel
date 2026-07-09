@@ -108,9 +108,13 @@ const BASE = "/api/gmail";
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     credentials: "include",
-    headers:
-      init?.body != null ? { "Content-Type": "application/json" } : undefined,
     ...init,
+    // Merge headers last so a body's default Content-Type survives even when
+    // the caller passes its own headers in `init`.
+    headers: {
+      ...(init?.body != null ? { "Content-Type": "application/json" } : {}),
+      ...(init?.headers ?? {}),
+    },
   });
 
   if (!res.ok) {

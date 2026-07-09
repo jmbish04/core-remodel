@@ -143,6 +143,14 @@ export function GmailThreadView({
   const [drafting, setDrafting] = useState(false);
   const [sending, setSending] = useState(false);
 
+  // Track the currently-displayed thread so in-flight draft/send handlers can
+  // drop their results if the user switches threads mid-request (otherwise a
+  // stale AI draft could land in a different thread's composer).
+  const activeThreadIdRef = useRef(threadId);
+  useEffect(() => {
+    activeThreadIdRef.current = threadId;
+  }, [threadId]);
+
   const load = useCallback(
     async (id: string, signal: AbortSignal, isActive: () => boolean) => {
       setLoading(true);
@@ -176,8 +184,10 @@ export function GmailThreadView({
     }
     let active = true;
     const controller = new AbortController();
-    // Reset the composer when switching threads.
+    // Reset the composer + in-flight flags when switching threads.
     setReplyBody("");
+    setDrafting(false);
+    setSending(false);
     void load(threadId, controller.signal, () => active);
     return () => {
       active = false;
@@ -194,15 +204,18 @@ export function GmailThreadView({
 
   const draftWithAi = useCallback(async () => {
     if (!threadId) return;
+    const forThread = threadId;
     setDrafting(true);
     try {
-      const { draft } = await gmailApi.draftAssist(threadId);
+      const { draft } = await gmailApi.draftAssist(forThread);
+      if (activeThreadIdRef.current !== forThread) return; // switched threads — drop stale draft
       setReplyBody(draft);
       toast.success("AI draft ready — review before sending.");
     } catch (err) {
+      if (activeThreadIdRef.current !== forThread) return;
       toast.error(err instanceof Error ? err.message : "Failed to generate draft");
     } finally {
-      setDrafting(false);
+      if (activeThreadIdRef.current === forThread) setDrafting(false);
     }
   }, [threadId]);
 
@@ -213,16 +226,19 @@ export function GmailThreadView({
       toast.error("Write a reply before sending.");
       return;
     }
+    const forThread = threadId;
     setSending(true);
     try {
-      await gmailApi.reply(threadId, body);
+      await gmailApi.reply(forThread, body);
+      if (activeThreadIdRef.current !== forThread) return; // switched threads mid-send
       toast.success("Reply sent.");
       setReplyBody("");
       refetch();
     } catch (err) {
+      if (activeThreadIdRef.current !== forThread) return;
       toast.error(err instanceof Error ? err.message : "Failed to send reply");
     } finally {
-      setSending(false);
+      if (activeThreadIdRef.current === forThread) setSending(false);
     }
   }, [threadId, replyBody, refetch]);
 
