@@ -46,12 +46,14 @@ export const analyticsTools: RemodelTool[] = [
     category: "budget",
     title: "Budget vs actual report",
     description:
-      "Portfolio budget health: total funding, total estimated (low/high), total actual spend, remaining vs funding, and an overall below/at/over flag. Also breaks actuals down BY CATEGORY and estimates BY ROOM. NOTE: actual expenses are attributed at the category/portfolio level (they are not line-item-linked to budget items); per-room figures are ESTIMATES from the budget↔room links.",
+      "Portfolio budget health: total funding, total estimated (low/high), total actual spend, remaining vs funding, and an overall below/at/over flag. Also breaks actuals down BY CATEGORY and estimates BY ROOM. NOTE: actual expenses are attributed at the category/portfolio level (they are not line-item-linked to budget items); per-room figures are ESTIMATES from the budget↔room links. Counts every ACTIVE line item — including drafts — by default (budget items default to isDraft=true, so excluding them would zero out the report and mismatch list_budget_items). Pass includeDrafts=false to count only finalized (non-draft) items.",
     inputShape: {
       includeDrafts: z
         .boolean()
         .optional()
-        .describe("Include draft budget items in the estimate totals (default false)"),
+        .describe(
+          "Include draft budget items in the totals. Default TRUE so the report matches the active items list_budget_items returns (items are drafts by default). Set false to exclude drafts.",
+        ),
     },
     annotations: READ_ONLY,
     outputShape: {
@@ -91,7 +93,10 @@ export const analyticsTools: RemodelTool[] = [
     },
     examples: [{ title: "Full report", args: {} }],
     handler: async ({ db }, input) => {
-      const includeDrafts = input.includeDrafts ?? false;
+      // Default TRUE: budget items are created with isDraft=true, so defaulting
+      // to exclude drafts zeroes the whole report and contradicts
+      // list_budget_items (which counts all active items). See agent bug #1.
+      const includeDrafts = input.includeDrafts ?? true;
 
       const [items, expenses, funding, itemRooms, allRooms] = await Promise.all([
         db.select().from(budgetTrackerItems).where(eq(budgetTrackerItems.isActive, true)).all(),
