@@ -1,0 +1,1 @@
+ALTER TABLE `worker_email_invoices` ADD `kind` text DEFAULT 'invoice' NOT NULL;

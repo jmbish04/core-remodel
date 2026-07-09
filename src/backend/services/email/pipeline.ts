@@ -23,6 +23,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { workerEmails } from "@backend/db/schema/emails/worker_emails";
 import { workerEmailAttachments } from "@backend/db/schema/emails/worker_email_attachments";
 import { workerEmailInvoices } from "@backend/db/schema/emails/worker_email_invoices";
+import { workerEmailInvoiceLineItems } from "@backend/db/schema/emails/worker_email_invoice_line_items";
 import { workerEmailContracts } from "@backend/db/schema/emails/worker_email_contracts";
 import { workerEmailStagedCompanies } from "@backend/db/schema/emails/worker_email_staged_companies";
 import { companies } from "@backend/db/schema/directory/companies";
@@ -500,24 +501,62 @@ export async function processEmail(args: ProcessEmailArgs): Promise<void> {
     .set(updatePayload)
     .where(eq(workerEmails.id, insertedEmail.id));
 
-  // ── Downstream: invoice extraction ───────────────────────────────────────
-  if (effectiveClassification === "invoice" && analysis.invoiceData) {
+  // ── Downstream: invoice / receipt extraction + line-item staging ─────────
+  // Both invoices (bills to pay) and receipts (completed purchases) carry line
+  // items a reviewer links to the materials schedule. We persist the header AND
+  // materialize each line item as an `unmatched` row so the HITL inbox can
+  // link / create / skip it against `material_schedule_items`.
+  if (
+    (effectiveClassification === "invoice" ||
+      effectiveClassification === "receipt") &&
+    analysis.invoiceData
+  ) {
     const inv = analysis.invoiceData;
-    await db.insert(workerEmailInvoices).values({
-      emailId: insertedEmail.id,
-      attachmentId: attachmentRecords[0]?.id || null,
-      vendorName: inv.vendorName,
-      invoiceNumber: inv.invoiceNumber,
-      invoiceDate: inv.invoiceDate,
-      dueDate: inv.dueDate,
-      subtotal: inv.subtotal,
-      tax: inv.tax,
-      total: inv.total,
-      lineItemsJson: JSON.stringify(inv.lineItems || []),
-      extractedRawJson: JSON.stringify(analysis),
-      confidence: analysis.classificationConfidence,
-      status: "draft",
-    });
+    const [insertedInvoice] = await db
+      .insert(workerEmailInvoices)
+      .values({
+        emailId: insertedEmail.id,
+        attachmentId: attachmentRecords[0]?.id || null,
+        kind: effectiveClassification === "receipt" ? "receipt" : "invoice",
+        vendorName: inv.vendorName,
+        invoiceNumber: inv.invoiceNumber,
+        invoiceDate: inv.invoiceDate,
+        dueDate: inv.dueDate,
+        subtotal: inv.subtotal,
+        tax: inv.tax,
+        total: inv.total,
+        lineItemsJson: JSON.stringify(inv.lineItems || []),
+        extractedRawJson: JSON.stringify(analysis),
+        confidence: analysis.classificationConfidence,
+        status: "draft",
+      })
+      .returning();
+
+    // Stage each extracted line item as an unmatched row pending a material link.
+    // Chunk the insert: D1 caps a query at 100 bound parameters and each row
+    // binds 6 columns, so a single multi-row INSERT of >16 rows would exceed it
+    // (a big receipt can have many line items).
+    const lineItems = inv.lineItems || [];
+    if (insertedInvoice && lineItems.length > 0) {
+      const rows = lineItems.map((li) => ({
+        invoiceId: insertedInvoice.id,
+        description: li.description ?? null,
+        quantity: typeof li.qty === "number" ? li.qty : null,
+        unitPrice: typeof li.unitPrice === "number" ? li.unitPrice : null,
+        lineTotal: typeof li.total === "number" ? li.total : null,
+        matchStatus: "unmatched",
+      }));
+      // Insert via chunked db.batch of single-row statements — the repo's D1
+      // bulk-write convention; each statement stays well under D1's 100
+      // bound-parameter cap regardless of how many line items a receipt has.
+      const BATCH = 50;
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const stmts = rows
+          .slice(i, i + BATCH)
+          .map((row) => db.insert(workerEmailInvoiceLineItems).values(row));
+        await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
+      }
+    }
 
     await db
       .update(workerEmails)
