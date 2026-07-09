@@ -168,7 +168,7 @@ export const legacyTools: RemodelTool[] = [
     // Envelope the opaque runStage result under `canvas` (passthrough) so the
     // tool carries an object outputSchema without enumerating every field.
     outputShape: {
-      canvas: looseObject({ id: z.string().optional() }),
+      canvas: looseObject({ id: z.string() }),
     },
     handler: async ({ env, db }, input) => {
       const args = input as {
@@ -243,7 +243,7 @@ export const legacyTools: RemodelTool[] = [
     annotations: WRITE,
     // Envelope the opaque generateMoodBoard result under `moodBoard` (passthrough).
     outputShape: {
-      moodBoard: looseObject({ id: z.union([z.number(), z.string()]).optional() }),
+      moodBoard: looseObject({ id: z.string() }),
     },
     handler: async ({ env }, input) => {
       const args = input as { prompt?: unknown; imageUrls?: unknown; roomId?: unknown };
@@ -363,7 +363,7 @@ export const legacyTools: RemodelTool[] = [
     // Envelope the measurement DTO under `measurement` (passthrough) so this
     // tool carries an object outputSchema.
     outputShape: {
-      measurement: looseObject({ id: z.union([z.number(), z.string()]).optional() }),
+      measurement: looseObject({ id: z.number().int() }),
     },
     handler: async ({ db }, input) => {
       const args = input as Record<string, any>;
@@ -436,7 +436,7 @@ export const legacyTools: RemodelTool[] = [
     },
     annotations: READ_ONLY,
     outputShape: {
-      items: z.array(looseObject({ id: z.union([z.number(), z.string()]).optional() })),
+      items: z.array(looseObject({ id: z.number().int() })),
     },
     handler: async ({ db }, input) => {
       const args = input as { roomId?: unknown; elementType?: unknown; q?: unknown; limit?: unknown };

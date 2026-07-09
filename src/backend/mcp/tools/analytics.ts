@@ -50,7 +50,7 @@ export const analyticsTools: RemodelTool[] = [
     inputShape: {
       includeDrafts: z
         .boolean()
-        .optional()
+        .default(true)
         .describe(
           "Include draft budget items in the totals. Default TRUE so the report matches the active items list_budget_items returns (items are drafts by default). Set false to exclude drafts.",
         ),
@@ -93,9 +93,11 @@ export const analyticsTools: RemodelTool[] = [
     },
     examples: [{ title: "Full report", args: {} }],
     handler: async ({ db }, input) => {
-      // Default TRUE: budget items are created with isDraft=true, so defaulting
-      // to exclude drafts zeroes the whole report and contradicts
-      // list_budget_items (which counts all active items). See agent bug #1.
+      // Defaults TRUE: budget items are created with isDraft=true, so excluding
+      // drafts would zero the whole report and contradict list_budget_items
+      // (agent bug #1). `.default(true)` on the input schema advertises the
+      // default to clients; the `?? true` is a defensive guard in case a
+      // transport hands the raw args through without applying the zod default.
       const includeDrafts = input.includeDrafts ?? true;
 
       const [items, expenses, funding, itemRooms, allRooms] = await Promise.all([
