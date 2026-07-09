@@ -113,6 +113,20 @@ for (const c of grouped.keys()) if (!categoryOrder.includes(c)) categoryOrder.pu
                   </ul>
                 </div>
               )}
+              {tool.outputFields.length > 0 && (
+                <div class="mt-3">
+                  <div class="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">Returns</div>
+                  <ul class="space-y-1">
+                    {tool.outputFields.map((f) => (
+                      <li class="flex flex-wrap items-baseline gap-x-2 text-xs">
+                        <code class="font-mono text-foreground">{f.name}</code>
+                        <span class="text-muted-foreground/60">{f.type}{f.optional ? "?" : ""}</span>
+                        {f.description && <span class="text-muted-foreground">— {f.description}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </article>
           ))}
         </div>
