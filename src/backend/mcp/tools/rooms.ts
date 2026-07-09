@@ -18,6 +18,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { formatCents, matchesQuery, paginate, toolError } from "../format";
+import { looseObject, pageOutput } from "../schemas";
 import { defineTool, READ_ONLY, WRITE, type RemodelTool, type RemodelDb } from "../types";
 
 /** Shape a room row for tool output (dimensions folded into a readable string). */
@@ -77,6 +78,18 @@ export const roomTools: RemodelTool[] = [
       offset: z.number().int().min(0).optional(),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      ...pageOutput(
+        looseObject({
+          id: z.number().int(),
+          roomCode: z.string().nullable(),
+          roomName: z.string().nullable(),
+          floorId: z.number().int().nullable(),
+          dimensions: z.string().nullable(),
+          areaSqFt: z.number().nullable(),
+        }),
+      ),
+    },
     examples: [{ title: "All rooms", args: {} }, { title: "Find bathrooms", args: { q: "bath" } }],
     handler: async ({ db }, input) => {
       const all = await db.select().from(rooms).where(eq(rooms.isActive, true)).all();
@@ -98,6 +111,45 @@ export const roomTools: RemodelTool[] = [
       roomCode: z.string().optional(),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      id: z.number().int(),
+      roomCode: z.string().nullable(),
+      roomName: z.string().nullable(),
+      floorId: z.number().int().nullable(),
+      dimensions: z.string().nullable(),
+      areaSqFt: z.number().nullable(),
+      isLivingSpace: z.boolean().nullable(),
+      floor: looseObject({ id: z.number().int(), key: z.string(), name: z.string() }).nullable(),
+      notes: z.object({
+        problemAreas: z.string().nullable(),
+        plumbing: z.string().nullable(),
+        electrical: z.string().nullable(),
+        structural: z.string().nullable(),
+        hvac: z.string().nullable(),
+        general: z.string().nullable(),
+      }),
+      budgetItems: z.array(
+        looseObject({
+          id: z.number().int(),
+          trackId: z.string(),
+          title: z.string().nullable(),
+          status: z.string().nullable(),
+          estimatedLow: z.string(),
+          estimatedHigh: z.string(),
+          estimatedLowCents: z.number().int().nullable(),
+          estimatedHighCents: z.number().int().nullable(),
+        }),
+      ),
+      materials: z.array(
+        looseObject({
+          id: z.number().int(),
+          title: z.string().nullable(),
+          brand: z.string().nullable(),
+          model: z.string().nullable(),
+          isPurchased: z.boolean().nullable(),
+        }),
+      ),
+    },
     examples: [{ title: "By id", args: { id: 1 } }, { title: "By code", args: { roomCode: "primary_bath" } }],
     handler: async ({ db }, input) => {
       if (input.id == null && !input.roomCode) {
@@ -162,6 +214,17 @@ export const roomTools: RemodelTool[] = [
       generalNotes: z.string().optional(),
     },
     annotations: WRITE,
+    outputShape: {
+      updated: z.boolean(),
+      room: looseObject({
+        id: z.number().int(),
+        roomCode: z.string().nullable(),
+        roomName: z.string().nullable(),
+        floorId: z.number().int().nullable(),
+        dimensions: z.string().nullable(),
+        areaSqFt: z.number().nullable(),
+      }),
+    },
     examples: [
       { title: "Add a plumbing note", args: { id: 3, plumbingNotes: "Move supply lines to the north wall." } },
     ],

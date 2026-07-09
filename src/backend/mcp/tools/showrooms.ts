@@ -28,6 +28,8 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { matchesQuery, paginate, toolError } from "../format";
+import { looseObject, pageOutput, urlField } from "../schemas";
+import { showroomUrl } from "../urls";
 import {
   defineTool,
   READ_ONLY,
@@ -35,9 +37,6 @@ import {
   WRITE_IDEMPOTENT,
   type RemodelTool,
 } from "../types";
-
-/** Browse URL for a store — the directory list view where a new store appears. */
-const SHOWROOM_LIST_URL = "/admin/shopping/showrooms/list";
 
 /**
  * Turn a `MAPS_QUOTA_EXCEEDED` service error into an actionable tool error, and
@@ -105,6 +104,17 @@ export const showroomTools: RemodelTool[] = [
       offset: z.number().int().min(0).optional(),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      ...pageOutput(
+        looseObject({
+          id: z.number().int(),
+          name: z.string().nullable(),
+          pricePoint: z.string().nullable(),
+          address: z.string().nullable(),
+          rating: z.number().nullable(),
+        }),
+      ),
+    },
     examples: [
       { title: "All showrooms", args: {} },
       { title: "Affordable tile places", args: { q: "tile", pricePoint: "$$" } },
@@ -135,6 +145,12 @@ export const showroomTools: RemodelTool[] = [
       id: z.number().int().positive().describe("Showroom store id (from list_showrooms)"),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      store: looseObject({ id: z.number().int(), name: z.string().nullable() }),
+      pocs: z.array(looseObject({ id: z.number().int(), fullName: z.string().nullable() })),
+      hours: z.array(looseObject({ id: z.number().int(), day: z.string() })),
+      notes: z.array(looseObject({ id: z.number().int(), title: z.string().nullable() })),
+    },
     examples: [{ title: "By id", args: { id: 1 } }],
     handler: async ({ db }, input) => {
       const [store] = await db
@@ -227,7 +243,12 @@ export const showroomTools: RemodelTool[] = [
         },
       },
     ],
-    handler: async ({ db }, input) => {
+    outputShape: {
+      created: z.boolean(),
+      store: looseObject({ id: z.number().int(), name: z.string().nullable() }),
+      url: urlField,
+    },
+    handler: async ({ env, db }, input) => {
       const name = input.name?.trim();
       if (!name) toolError("`name` is required and cannot be empty.");
       const [created] = await db
@@ -244,7 +265,7 @@ export const showroomTools: RemodelTool[] = [
           isAppointmentOnly: input.isAppointmentOnly,
         })
         .returning();
-      return { created: true, store: created };
+      return { created: true, store: created, url: showroomUrl(env, created.id) };
     },
   }),
 
@@ -304,7 +325,12 @@ export const showroomTools: RemodelTool[] = [
         },
       },
     ],
-    handler: async ({ db }, input) => {
+    outputShape: {
+      updated: z.boolean(),
+      store: looseObject({ id: z.number().int(), name: z.string().nullable() }),
+      url: urlField,
+    },
+    handler: async ({ env, db }, input) => {
       const { id, ...rest } = input;
       const patch = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined));
       if (Object.keys(patch).length === 0) {
@@ -324,7 +350,7 @@ export const showroomTools: RemodelTool[] = [
         .from(showroomStores)
         .where(eq(showroomStores.id, id))
         .limit(1);
-      return { updated: true, store: updated };
+      return { updated: true, store: updated, url: showroomUrl(env, id) };
     },
   }),
 
@@ -352,7 +378,12 @@ export const showroomTools: RemodelTool[] = [
         },
       },
     ],
-    handler: async ({ db }, input) => {
+    outputShape: {
+      created: z.boolean(),
+      note: looseObject({ id: z.number().int(), title: z.string().nullable() }),
+      url: urlField,
+    },
+    handler: async ({ env, db }, input) => {
       const body = input.body?.trim();
       if (!body) toolError("`body` is required and cannot be empty.");
       const [store] = await db
@@ -373,7 +404,7 @@ export const showroomTools: RemodelTool[] = [
           tagsJson: input.tags ? JSON.stringify(input.tags) : undefined,
         })
         .returning();
-      return { created: true, note: created };
+      return { created: true, note: created, url: showroomUrl(env, input.storeId) };
     },
   }),
 
@@ -406,7 +437,12 @@ export const showroomTools: RemodelTool[] = [
         },
       },
     ],
-    handler: async ({ db }, input) => {
+    outputShape: {
+      created: z.boolean(),
+      poc: looseObject({ id: z.number().int(), fullName: z.string().nullable() }),
+      url: urlField,
+    },
+    handler: async ({ env, db }, input) => {
       const fullName = input.fullName?.trim();
       if (!fullName) toolError("`fullName` is required and cannot be empty.");
       const [store] = await db
@@ -430,7 +466,7 @@ export const showroomTools: RemodelTool[] = [
           address: input.address,
         })
         .returning();
-      return { created: true, poc: created };
+      return { created: true, poc: created, url: showroomUrl(env, input.showroomId) };
     },
   }),
 
@@ -465,7 +501,12 @@ export const showroomTools: RemodelTool[] = [
         },
       },
     ],
-    handler: async ({ db }, input) => {
+    outputShape: {
+      upserted: z.boolean(),
+      hours: looseObject({ id: z.number().int(), day: z.string() }),
+      url: urlField,
+    },
+    handler: async ({ env, db }, input) => {
       const [store] = await db
         .select({ id: showroomStores.id })
         .from(showroomStores)
@@ -495,7 +536,7 @@ export const showroomTools: RemodelTool[] = [
           closeMinute: input.closeMinute ?? 0,
         })
         .returning();
-      return { upserted: true, hours: created };
+      return { upserted: true, hours: created, url: showroomUrl(env, input.showroomId) };
     },
   }),
 
@@ -523,7 +564,13 @@ export const showroomTools: RemodelTool[] = [
         },
       },
     ],
-    handler: async ({ db }, input) => {
+    outputShape: {
+      recorded: z.boolean(),
+      store: looseObject({ id: z.number().int(), rating: z.number().nullable() }),
+      note: looseObject({ id: z.number().int(), title: z.string().nullable() }),
+      url: urlField,
+    },
+    handler: async ({ env, db }, input) => {
       const note = input.note?.trim();
       if (!note) toolError("`note` is required and cannot be empty.");
       const [store] = await db
@@ -562,7 +609,12 @@ export const showroomTools: RemodelTool[] = [
         .where(eq(showroomStores.id, input.showroomId))
         .limit(1);
 
-      return { recorded: true, store: updated, note: visitNote };
+      return {
+        recorded: true,
+        store: updated,
+        note: visitNote,
+        url: showroomUrl(env, input.showroomId),
+      };
     },
   }),
 
@@ -597,6 +649,19 @@ export const showroomTools: RemodelTool[] = [
         .describe("Optional Google Places primary type filter (e.g. 'home_goods_store')"),
     },
     annotations: { ...READ_ONLY, openWorldHint: true },
+    outputShape: {
+      query: z.string(),
+      near: z.string().nullable(),
+      count: z.number().int(),
+      candidates: z.array(
+        looseObject({
+          placeId: z.string(),
+          name: z.string().nullable(),
+          alreadyInDb: z.boolean(),
+          existingShowroomId: z.number().int().nullable(),
+        }),
+      ),
+    },
     examples: [
       {
         title: "Stone/slab near SF",
@@ -673,6 +738,12 @@ export const showroomTools: RemodelTool[] = [
         .describe("Google Place ID from search_showrooms (e.g. 'ChIJ...')"),
     },
     annotations: WRITE_IDEMPOTENT,
+    outputShape: {
+      created: z.boolean(),
+      showroomId: z.number().int(),
+      url: urlField,
+      store: looseObject({ id: z.number().int(), name: z.string().nullable() }),
+    },
     examples: [{ title: "Import a candidate", args: { placeId: "ChIJN1t_tDeuEmsRUsoyG83frY4" } }],
     handler: async ({ env, db }, input) => {
       const placeId = input.placeId?.trim();
@@ -685,7 +756,12 @@ export const showroomTools: RemodelTool[] = [
         .where(eq(showroomStores.placeId, placeId))
         .limit(1);
       if (existing) {
-        return { created: false, showroomId: existing.id, url: SHOWROOM_LIST_URL, store: existing };
+        return {
+          created: false,
+          showroomId: existing.id,
+          url: showroomUrl(env, existing.id),
+          store: existing,
+        };
       }
 
       // Fetch raw Google fields (skipAi: no Gemini review analysis — fast + free).
@@ -731,7 +807,12 @@ export const showroomTools: RemodelTool[] = [
         })
         .returning();
 
-      return { created: true, showroomId: created.id, url: SHOWROOM_LIST_URL, store: created };
+      return {
+        created: true,
+        showroomId: created.id,
+        url: showroomUrl(env, created.id),
+        store: created,
+      };
     },
   }),
 ];

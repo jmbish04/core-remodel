@@ -29,7 +29,9 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { cents, formatCents, matchesQuery, paginate, toolError } from "../format";
+import { looseObject, pageOutput, urlField } from "../schemas";
 import { defineTool, DESTRUCTIVE, READ_ONLY, WRITE, WRITE_IDEMPOTENT, type RemodelTool, type RemodelDb } from "../types";
+import { budgetUrl } from "../urls";
 
 /** Shape a budget tracker item revision for tool output (money as cents + `$`). */
 function budgetItemDto(b: typeof budgetTrackerItems.$inferSelect) {
@@ -109,6 +111,20 @@ export const budgetTools: RemodelTool[] = [
       offset: z.number().int().min(0).optional(),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      ...pageOutput(
+        looseObject({
+          id: z.number().int(),
+          trackId: z.string(),
+          title: z.string().nullable(),
+          status: z.string().nullable(),
+          estimatedLowCents: z.number().int().nullable(),
+          estimatedHighCents: z.number().int().nullable(),
+          estimatedLow: z.string(),
+          estimatedHigh: z.string(),
+        }),
+      ),
+    },
     examples: [
       { title: "All active items", args: {} },
       { title: "Open items for a room", args: { roomId: 3, status: "open" } },
@@ -155,6 +171,23 @@ export const budgetTools: RemodelTool[] = [
       trackId: z.string().min(1).optional().describe("Stable track id (resolves to the active revision)"),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      id: z.number().int(),
+      trackId: z.string(),
+      revisionNumber: z.number().int(),
+      isActive: z.boolean(),
+      title: z.string().nullable(),
+      description: z.string().nullable(),
+      status: z.string().nullable(),
+      itemType: z.string().nullable(),
+      executionClass: z.string().nullable(),
+      scenarioId: z.string().nullable(),
+      estimatedLowCents: z.number().int().nullable(),
+      estimatedHighCents: z.number().int().nullable(),
+      estimatedLow: z.string(),
+      estimatedHigh: z.string(),
+      roomIds: z.array(z.number().int()),
+    },
     examples: [
       { title: "By id", args: { id: 12 } },
       { title: "By trackId", args: { trackId: "b1e2..." } },
@@ -199,13 +232,27 @@ export const budgetTools: RemodelTool[] = [
       scenarioId: z.string().optional().describe("Remodel scenario id this item belongs to"),
     },
     annotations: WRITE,
+    outputShape: {
+      created: z.boolean(),
+      item: looseObject({
+        id: z.number().int(),
+        trackId: z.string(),
+        title: z.string().nullable(),
+        status: z.string().nullable(),
+        estimatedLowCents: z.number().int().nullable(),
+        estimatedHighCents: z.number().int().nullable(),
+        estimatedLow: z.string(),
+        estimatedHigh: z.string(),
+      }),
+      url: urlField,
+    },
     examples: [
       {
         title: "New kitchen line item",
         args: { title: "Kitchen cabinets", estimatedLowCents: 800000, estimatedHighCents: 1200000 },
       },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const trackId = crypto.randomUUID();
       const values = {
         trackId,
@@ -221,7 +268,7 @@ export const budgetTools: RemodelTool[] = [
         scenarioId: input.scenarioId ?? null,
       };
       const [created] = await db.insert(budgetTrackerItems).values(values).returning();
-      return { created: true, item: budgetItemDto(created) };
+      return { created: true, item: budgetItemDto(created), url: budgetUrl(env) };
     },
   }),
 
@@ -244,11 +291,25 @@ export const budgetTools: RemodelTool[] = [
       scenarioId: z.string().optional(),
     },
     annotations: WRITE,
+    outputShape: {
+      updated: z.boolean(),
+      item: looseObject({
+        id: z.number().int(),
+        trackId: z.string(),
+        title: z.string().nullable(),
+        status: z.string().nullable(),
+        estimatedLowCents: z.number().int().nullable(),
+        estimatedHighCents: z.number().int().nullable(),
+        estimatedLow: z.string(),
+        estimatedHigh: z.string(),
+      }),
+      url: urlField,
+    },
     examples: [
       { title: "Approve an item", args: { id: 12, status: "approved" } },
       { title: "Revise estimate", args: { trackId: "b1e2...", estimatedHighCents: 1500000 } },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       if (input.id == null && !input.trackId) toolError("Provide either `id` or `trackId`.");
       const current = await activeBudgetItem(db, { id: input.id, trackId: input.trackId });
       if (!current) {
@@ -306,7 +367,7 @@ export const budgetTools: RemodelTool[] = [
         .where(eq(budgetTrackerItems.id, current.id))
         .run();
 
-      return { updated: true, item: budgetItemDto(next) };
+      return { updated: true, item: budgetItemDto(next), url: budgetUrl(env) };
     },
   }),
 
@@ -321,8 +382,14 @@ export const budgetTools: RemodelTool[] = [
       roomId: z.number().int().positive().describe("Room row id (see list_rooms)"),
     },
     annotations: WRITE_IDEMPOTENT,
+    outputShape: {
+      linked: z.boolean(),
+      created: z.boolean(),
+      id: z.number().int(),
+      url: urlField,
+    },
     examples: [{ title: "Link item to a room", args: { budgetTrackerItemId: 12, roomId: 3 } }],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const [item] = await db
         .select()
         .from(budgetTrackerItems)
@@ -343,13 +410,13 @@ export const budgetTools: RemodelTool[] = [
           ),
         )
         .limit(1);
-      if (existing) return { linked: true, created: false, id: existing.id };
+      if (existing) return { linked: true, created: false, id: existing.id, url: budgetUrl(env) };
 
       const [created] = await db
         .insert(budgetTrackerItemRooms)
         .values({ budgetTrackerItemId: input.budgetTrackerItemId, roomId: input.roomId })
         .returning();
-      return { linked: true, created: true, id: created.id };
+      return { linked: true, created: true, id: created.id, url: budgetUrl(env) };
     },
   }),
 
@@ -364,6 +431,10 @@ export const budgetTools: RemodelTool[] = [
       roomId: z.number().int().positive().describe("Room row id"),
     },
     annotations: DESTRUCTIVE,
+    outputShape: {
+      unlinked: z.boolean(),
+      id: z.number().int(),
+    },
     examples: [{ title: "Unlink item from a room", args: { budgetTrackerItemId: 12, roomId: 3 } }],
     handler: async ({ db }, input) => {
       const [existing] = await db
@@ -409,10 +480,23 @@ export const budgetTools: RemodelTool[] = [
       scenarioId: z.string().optional().describe("Remodel scenario id this expense belongs to"),
     },
     annotations: WRITE,
+    outputShape: {
+      created: z.boolean(),
+      expense: looseObject({
+        id: z.number().int(),
+        trackId: z.string(),
+        item: z.string().nullable(),
+        category: z.string().nullable(),
+        amountCents: z.number().int().nullable(),
+        amount: z.string(),
+        vendorName: z.string().nullable(),
+      }),
+      url: urlField,
+    },
     examples: [
       { title: "Log a purchase", args: { item: "Kitchen faucet", amountCents: 84500, vendorName: "Ferguson" } },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const amount = cents(input.amountCents);
       if (amount == null) toolError("`amountCents` must be a number of cents.");
 
@@ -440,7 +524,7 @@ export const budgetTools: RemodelTool[] = [
         scenarioId: input.scenarioId ?? null,
       };
       const [created] = await db.insert(budgetExpenseEntries).values(values).returning();
-      return { created: true, expense: expenseDto(created) };
+      return { created: true, expense: expenseDto(created), url: budgetUrl(env) };
     },
   }),
 
@@ -458,6 +542,19 @@ export const budgetTools: RemodelTool[] = [
       offset: z.number().int().min(0).optional(),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      ...pageOutput(
+        looseObject({
+          id: z.number().int(),
+          trackId: z.string(),
+          item: z.string().nullable(),
+          category: z.string().nullable(),
+          amountCents: z.number().int().nullable(),
+          amount: z.string(),
+          vendorName: z.string().nullable(),
+        }),
+      ),
+    },
     examples: [
       { title: "All expenses", args: {} },
       { title: "By vendor", args: { vendorName: "Ferguson" } },
@@ -490,6 +587,19 @@ export const budgetTools: RemodelTool[] = [
       "List every budget funding pool (e.g. cash, financed) with its available amount. Money is returned as both `amountCents` integers and `$` strings, plus a grand `total`.",
     inputShape: {},
     annotations: READ_ONLY,
+    outputShape: {
+      accounts: z.array(
+        looseObject({
+          id: z.number().int(),
+          accountKey: z.string(),
+          accountLabel: z.string().nullable(),
+          amountCents: z.number().int().nullable(),
+          amount: z.string(),
+        }),
+      ),
+      totalCents: z.number().int(),
+      total: z.string(),
+    },
     examples: [{ title: "All funding accounts", args: {} }],
     handler: async ({ db }) => {
       const rows = await db.select().from(budgetFundingAccounts).all();
@@ -520,10 +630,21 @@ export const budgetTools: RemodelTool[] = [
       accountLabel: z.string().optional().describe("Human label (required when creating a new account)"),
     },
     annotations: WRITE_IDEMPOTENT,
+    outputShape: {
+      created: z.boolean(),
+      account: looseObject({
+        id: z.number().int(),
+        accountKey: z.string(),
+        accountLabel: z.string().nullable(),
+        amountCents: z.number().int().nullable(),
+        amount: z.string(),
+      }),
+      url: urlField,
+    },
     examples: [
       { title: "Set cash pool", args: { accountKey: "cash_amount", accountLabel: "Cash", amountCents: 5000000 } },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const amount = cents(input.amountCents);
       if (amount == null) toolError("`amountCents` must be a number of cents.");
 
@@ -555,6 +676,7 @@ export const budgetTools: RemodelTool[] = [
             amountCents: updated.amountCents,
             amount: formatCents(updated.amountCents),
           },
+          url: budgetUrl(env),
         };
       }
 
@@ -575,6 +697,7 @@ export const budgetTools: RemodelTool[] = [
           amountCents: created.amountCents,
           amount: formatCents(created.amountCents),
         },
+        url: budgetUrl(env),
       };
     },
   }),

@@ -17,7 +17,35 @@ import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { matchesQuery, paginate, toolError } from "../format";
+import { looseObject, pageOutput, urlField } from "../schemas";
+import { brandsUrl } from "../urls";
 import { defineTool, READ_ONLY, WRITE, WRITE_IDEMPOTENT, DESTRUCTIVE, type RemodelTool } from "../types";
+
+/** Shared Zod output shape for a full brand DTO (mirrors `brandDto`). */
+const brandOutputShape = {
+  id: z.number().int(),
+  name: z.string(),
+  description: z.string().nullable(),
+  websiteUrl: z.string().nullable(),
+  instagramUrl: z.string().nullable(),
+  facebookUrl: z.string().nullable(),
+  pinterestUrl: z.string().nullable(),
+  iconCfImagesUrl: z.string().nullable(),
+  personalNotes: z.string().nullable(),
+  onlineRating: z.number().nullable(),
+  userRating: z.number().nullable(),
+  pricePoint: z.string().nullable(),
+};
+
+/** Shared Zod output shape for a compact brand-list DTO (mirrors `brandListDto`). */
+const brandListOutputShape = looseObject({
+  id: z.number().int(),
+  name: z.string(),
+  pricePoint: z.string().nullable(),
+  onlineRating: z.number().nullable(),
+  userRating: z.number().nullable(),
+  websiteUrl: z.string().nullable(),
+});
 
 /** Shape a brand row for compact list output. */
 function brandListDto(b: typeof brands.$inferSelect) {
@@ -78,6 +106,7 @@ export const brandTools: RemodelTool[] = [
       offset: z.number().int().min(0).optional(),
     },
     annotations: READ_ONLY,
+    outputShape: { ...pageOutput(brandListOutputShape) },
     examples: [
       { title: "All brands", args: {} },
       { title: "Find Waterworks", args: { q: "waterworks" } },
@@ -102,6 +131,11 @@ export const brandTools: RemodelTool[] = [
       name: z.string().optional().describe("Exact brand name (case-insensitive)"),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      ...brandOutputShape,
+      showrooms: z.array(looseObject({ id: z.number().int(), name: z.string() })),
+      products: z.array(looseObject({ id: z.number().int(), itemName: z.string() })),
+    },
     examples: [
       { title: "By id", args: { id: 1 } },
       { title: "By name", args: { name: "Waterworks" } },
@@ -165,6 +199,11 @@ export const brandTools: RemodelTool[] = [
       ...optionalBrandFields,
     },
     annotations: WRITE,
+    outputShape: {
+      created: z.boolean(),
+      brand: looseObject(brandOutputShape),
+      url: urlField,
+    },
     examples: [
       { title: "Minimal", args: { name: "The Galley" } },
       {
@@ -172,13 +211,13 @@ export const brandTools: RemodelTool[] = [
         args: { name: "THG Paris", websiteUrl: "https://thg-paris.com", pricePoint: "$$$$" },
       },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const patch = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined));
       const [created] = await db
         .insert(brands)
         .values(patch as unknown as typeof brands.$inferInsert)
         .returning();
-      return { created: true, brand: brandDto(created) };
+      return { created: true, brand: brandDto(created), url: brandsUrl(env, created.id) };
     },
   }),
 
@@ -194,11 +233,16 @@ export const brandTools: RemodelTool[] = [
       ...optionalBrandFields,
     },
     annotations: WRITE,
+    outputShape: {
+      updated: z.boolean(),
+      brand: looseObject(brandOutputShape),
+      url: urlField,
+    },
     examples: [
       { title: "Set a price tier", args: { id: 3, pricePoint: "$$$" } },
       { title: "Add a personal note", args: { id: 3, personalNotes: "Loved the finish in person." } },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const { id, ...rest } = input;
       const patch = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined));
       if (Object.keys(patch).length === 0) toolError("No fields to update — pass at least one field.");
@@ -206,7 +250,7 @@ export const brandTools: RemodelTool[] = [
       if (!existing) toolError(`Brand ${id} not found. Call list_brands for valid ids.`);
       await db.update(brands).set(patch).where(eq(brands.id, id)).run();
       const [updated] = await db.select().from(brands).where(eq(brands.id, id)).limit(1);
-      return { updated: true, brand: brandDto(updated) };
+      return { updated: true, brand: brandDto(updated), url: brandsUrl(env, id) };
     },
   }),
 
@@ -221,6 +265,11 @@ export const brandTools: RemodelTool[] = [
       ...optionalBrandFields,
     },
     annotations: WRITE_IDEMPOTENT,
+    outputShape: {
+      created: z.boolean(),
+      brand: looseObject(brandOutputShape),
+      url: urlField,
+    },
     examples: [
       { title: "Reuse or create", args: { name: "Waterworks" } },
       {
@@ -228,21 +277,21 @@ export const brandTools: RemodelTool[] = [
         args: { name: "Bain Ultra", websiteUrl: "https://bainultra.com", pricePoint: "$$$" },
       },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const target = input.name.trim().toLowerCase();
       // D1/SQLite LIKE is ASCII-case-insensitive, but do an explicit lowercase
       // compare in JS so the match is unambiguous regardless of collation.
       const all = await db.select().from(brands).all();
       const existing = all.find((b) => b.name.trim().toLowerCase() === target);
       if (existing) {
-        return { created: false, brand: brandDto(existing) };
+        return { created: false, brand: brandDto(existing), url: brandsUrl(env, existing.id) };
       }
       const patch = Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined));
       const [created] = await db
         .insert(brands)
         .values(patch as unknown as typeof brands.$inferInsert)
         .returning();
-      return { created: true, brand: brandDto(created) };
+      return { created: true, brand: brandDto(created), url: brandsUrl(env, created.id) };
     },
   }),
 
@@ -257,8 +306,17 @@ export const brandTools: RemodelTool[] = [
       showroomId: z.number().int().positive().describe("Showroom store id"),
     },
     annotations: WRITE_IDEMPOTENT,
+    outputShape: {
+      created: z.boolean(),
+      mapping: looseObject({
+        id: z.number().int(),
+        showroomId: z.number().int(),
+        brandId: z.number().int(),
+      }),
+      url: urlField,
+    },
     examples: [{ title: "Carry a brand", args: { brandId: 3, showroomId: 5 } }],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const [brand] = await db.select().from(brands).where(eq(brands.id, input.brandId)).limit(1);
       if (!brand) toolError(`Brand ${input.brandId} not found. Call list_brands for valid ids.`);
       const [store] = await db
@@ -279,7 +337,11 @@ export const brandTools: RemodelTool[] = [
         )
         .limit(1);
       if (existing) {
-        return { created: false, mapping: { id: existing.id, showroomId: existing.showroomId, brandId: existing.brandId } };
+        return {
+          created: false,
+          mapping: { id: existing.id, showroomId: existing.showroomId, brandId: existing.brandId },
+          url: brandsUrl(env, input.brandId),
+        };
       }
       const [mapping] = await db
         .insert(showroomBrandMappings)
@@ -288,6 +350,7 @@ export const brandTools: RemodelTool[] = [
       return {
         created: true,
         mapping: { id: mapping.id, showroomId: mapping.showroomId, brandId: mapping.brandId },
+        url: brandsUrl(env, input.brandId),
       };
     },
   }),
@@ -303,8 +366,13 @@ export const brandTools: RemodelTool[] = [
       showroomId: z.number().int().positive().describe("Showroom store id"),
     },
     annotations: DESTRUCTIVE,
+    outputShape: {
+      deleted: z.boolean(),
+      reason: z.string().optional(),
+      url: urlField,
+    },
     examples: [{ title: "Stop carrying a brand", args: { brandId: 3, showroomId: 5 } }],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const [existing] = await db
         .select()
         .from(showroomBrandMappings)
@@ -316,7 +384,11 @@ export const brandTools: RemodelTool[] = [
         )
         .limit(1);
       if (!existing) {
-        return { deleted: false, reason: "No mapping existed for that (showroomId, brandId)." };
+        return {
+          deleted: false,
+          reason: "No mapping existed for that (showroomId, brandId).",
+          url: brandsUrl(env, input.brandId),
+        };
       }
       await db
         .delete(showroomBrandMappings)
@@ -327,7 +399,7 @@ export const brandTools: RemodelTool[] = [
           )
         )
         .run();
-      return { deleted: true };
+      return { deleted: true, url: brandsUrl(env, input.brandId) };
     },
   }),
 ];

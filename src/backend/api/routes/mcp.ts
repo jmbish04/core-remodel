@@ -55,6 +55,23 @@ const mcpRouter = new Hono<{ Bindings: Env }>();
 const SERVER_INFO = { name: "renovation-studio", version: "1.0.0" };
 const PROTOCOL_VERSION = "2024-11-05";
 
+/**
+ * If `text` is a JSON OBJECT (not an array or primitive), parse and return it so
+ * it can be surfaced as MCP `structuredContent`. Returns `null` for arrays,
+ * primitives, or unparseable prose — callers then fall back to text-only.
+ */
+function parseJsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    /* not JSON — prose result, stays text-only */
+  }
+  return null;
+}
+
 interface McpTool {
   name: string;
   description: string;
@@ -742,7 +759,15 @@ mcpRouter.post("/", async (c) => {
               durationMs: Date.now() - startedAt,
             }),
           );
-          return { jsonrpc: "2.0", id, result: { content: [{ type: "text", text }] } };
+          // When a tool's text result is itself a JSON object, also hand it
+          // back as `structuredContent` so JSON-RPC clients get a parsed shape
+          // without re-parsing the text block (mirrors the registry transport).
+          // Prose results stay text-only.
+          const structuredContent = parseJsonObject(text);
+          const result = structuredContent
+            ? { content: [{ type: "text", text }], structuredContent }
+            : { content: [{ type: "text", text }] };
+          return { jsonrpc: "2.0", id, result };
         } catch (err) {
           c.executionCtx.waitUntil(
             logInvocation(c.env, {
