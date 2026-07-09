@@ -129,8 +129,10 @@ assert.equal(psp?.product_id, 1, "product_showroom_photos id=90001 must re-point
 // store_product_id-keyed child rows (id=90001) re-pointed to survivor id=1.
 const spn = d1("SELECT store_product_id FROM store_product_notes WHERE id=90001")[0];
 assert.equal(spn?.store_product_id, 1, "store_product_notes id=90001 must re-point to store_product_id=1");
-const pi = d1("SELECT store_product_id FROM product_images WHERE id=90001")[0];
-assert.equal(pi?.store_product_id, 1, "product_images id=90001 must re-point to store_product_id=1");
+// NOTE: product_images id=90001 was a collision (same store_product_id+source_url
+// as survivor row id=90000 once re-pointed to product 1), so it is COLLAPSED
+// (pre-deleted), not re-pointed. See the dedicated product_images/product_specs
+// collision-collapse assertions below.
 const spr = d1("SELECT store_product_id FROM store_product_rating WHERE id=90001")[0];
 assert.equal(spr?.store_product_id, 1, "store_product_rating id=90001 must re-point to store_product_id=1");
 
@@ -162,3 +164,84 @@ assert.equal(staleMapping, 0, "the (showroom=41, product=90001) mapping row must
 console.log(
   "OK: dedup re-pointing (90001 gone, product 1/2 intact, child rows re-pointed, mapping collapsed, orphans=0)"
 );
+
+// --- Fix 1: review-finding coverage (similar_model_map, scan_log, wishlist_items,
+// product_images/product_specs collision pre-collapse) ---
+
+// Zero rows may reference 90001 anywhere across every product-referencing table.
+const referencingTables = [
+  ["showroom_product_mappings", "product_id"],
+  ["product_material_mappings", "product_id"],
+  ["product_price_observations", "product_id"],
+  ["product_showroom_photos", "product_id"],
+  ["product_images", "store_product_id"],
+  ["product_specs", "store_product_id"],
+  ["store_product_docs", "store_product_id"],
+  ["store_product_intel", "store_product_id"],
+  ["store_product_research", "store_product_id"],
+  ["store_product_rating", "store_product_id"],
+  ["store_product_notes", "store_product_id"],
+  ["store_product_pa_mapping", "store_product_id"],
+  ["store_product_tag_mapping", "store_product_id"],
+  ["material_schedule_items", "purchased_showroom_product_id"],
+];
+for (const [table, col] of referencingTables) {
+  const c = d1(`SELECT count(*) c FROM ${table} WHERE ${col}=90001`)[0].c;
+  assert.equal(c, 0, `${table}.${col} must have zero rows referencing 90001, got ${c}`);
+}
+// Two-column tables.
+for (const col of ["parent_store_product_id", "similar_store_product_id"]) {
+  const c = d1(`SELECT count(*) c FROM store_product_similar_model_map WHERE ${col}=90001`)[0].c;
+  assert.equal(c, 0, `store_product_similar_model_map.${col} must have zero rows referencing 90001, got ${c}`);
+}
+for (const col of ["matched_store_product_id", "auto_created_product_id"]) {
+  const c = d1(`SELECT count(*) c FROM showroom_scan_log WHERE ${col}=90001`)[0].c;
+  assert.equal(c, 0, `showroom_scan_log.${col} must have zero rows referencing 90001, got ${c}`);
+}
+const wishlistRefs = d1(
+  "SELECT count(*) c FROM wishlist_items WHERE showroom_store_product_id=90001"
+)[0].c;
+assert.equal(wishlistRefs, 0, "wishlist_items.showroom_store_product_id must have zero rows referencing 90001");
+console.log("OK: zero references to 90001 across all product-referencing tables");
+
+// store_product_similar_model_map: no self-referential rows; surviving row -> product 1.
+const selfRefs = d1(
+  "SELECT count(*) c FROM store_product_similar_model_map WHERE parent_store_product_id = similar_store_product_id"
+)[0].c;
+assert.equal(selfRefs, 0, "store_product_similar_model_map must have no self-referential rows");
+const survivingSimilarRow = d1(
+  "SELECT parent_store_product_id, similar_store_product_id FROM store_product_similar_model_map WHERE id=90001"
+)[0];
+assert.ok(survivingSimilarRow, "store_product_similar_model_map id=90001 should still exist (not self-referential)");
+assert.equal(survivingSimilarRow.parent_store_product_id, 1, "similar_model_map id=90001 parent must re-point to 1");
+assert.equal(survivingSimilarRow.similar_store_product_id, 2, "similar_model_map id=90001 similar must remain 2");
+const droppedSimilarRow = d1("SELECT count(*) c FROM store_product_similar_model_map WHERE id=90002")[0].c;
+assert.equal(droppedSimilarRow, 0, "similar_model_map id=90002 (parent=1,similar->1 after re-point) must be deleted as self-referential");
+console.log("OK: store_product_similar_model_map self-reference cleanup");
+
+// product_images collision: exactly ONE row for the shared URL, on product 1; zero on 90001.
+const sharedImages = d1(
+  "SELECT id, store_product_id FROM product_images WHERE source_url='http://shared/a.jpg'"
+);
+assert.equal(sharedImages.length, 1, `expected exactly 1 product_images row for shared URL, got ${sharedImages.length}`);
+assert.equal(sharedImages[0].store_product_id, 1, "surviving shared product_images row must belong to product 1");
+const imagesOn90001 = d1("SELECT count(*) c FROM product_images WHERE store_product_id=90001")[0].c;
+assert.equal(imagesOn90001, 0, "zero product_images rows may reference store_product_id=90001");
+console.log("OK: product_images collision collapsed (1 row, product 1)");
+
+// product_specs collision: exactly ONE row for the shared URL, on product 1.
+const sharedSpecs = d1(
+  "SELECT id, store_product_id FROM product_specs WHERE source_url='http://shared/s.jpg'"
+);
+assert.equal(sharedSpecs.length, 1, `expected exactly 1 product_specs row for shared URL, got ${sharedSpecs.length}`);
+assert.equal(sharedSpecs[0].store_product_id, 1, "surviving shared product_specs row must belong to product 1");
+console.log("OK: product_specs collision collapsed (1 row, product 1)");
+
+// wishlist_items / showroom_scan_log: rows now reference product 1.
+const wishlistRow = d1("SELECT showroom_store_product_id FROM wishlist_items WHERE id=90001")[0];
+assert.equal(wishlistRow?.showroom_store_product_id, 1, "wishlist_items id=90001 must re-point to product 1");
+const scanLogMatched = d1("SELECT matched_store_product_id FROM showroom_scan_log WHERE id=90001")[0];
+assert.equal(scanLogMatched?.matched_store_product_id, 1, "showroom_scan_log id=90001 matched_store_product_id must re-point to product 1");
+const scanLogAuto = d1("SELECT auto_created_product_id FROM showroom_scan_log WHERE id=90002")[0];
+assert.equal(scanLogAuto?.auto_created_product_id, 1, "showroom_scan_log id=90002 auto_created_product_id must re-point to product 1");
+console.log("OK: wishlist_items / showroom_scan_log re-pointed to product 1");
