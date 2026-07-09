@@ -59,6 +59,20 @@ export const showroomStoreProducts = sqliteTable("showroom_store_products", {
    */
   productType: text("product_type"),
 
+  /** Real model identifier, promoted out of jsonDetails/sku. Nullable. */
+  modelNumber: text("model_number"),
+
+  /**
+   * Normalized model number (normalizeModelKey) — the field the (brandId, modelKey)
+   * unique index uses. Maintained app-side. Null for no-model# products (they never
+   * collide: SQLite treats NULLs as distinct in unique indexes).
+   */
+  modelKey: text("model_key"),
+
+  /** Manufacturer core / list price (MSRP) — text + numeric pair. Nullable. */
+  msrp: text("msrp"),
+  msrpCents: integer("msrp_cents"),
+
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),
