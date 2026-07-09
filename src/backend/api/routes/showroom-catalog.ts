@@ -18,6 +18,7 @@ import {
   showroomStores,
   storeBayareaCities,
   productSpecs,
+  showroomProductMappings,
 } from "@backend/db/schema/showroom/index";
 
 export const showroomCatalogRouter = new Hono<{ Bindings: Env }>();
@@ -32,6 +33,11 @@ showroomCatalogRouter.get("/catalog/products", async (c) => {
   const hub = c.req.query("hub");
   const linked = c.req.query("linked");
 
+  // A product has no owning store — it is global and may be carried by zero
+  // or more showrooms via showroom_product_mappings. A left join against the
+  // mapping (rather than a direct storeId column) preserves the original
+  // one-row-per-store semantics; unmapped products still surface with null
+  // store/hub columns via the outer join.
   let query = db
     .select({
       product: showroomStoreProducts,
@@ -42,7 +48,8 @@ showroomCatalogRouter.get("/catalog/products", async (c) => {
       cityName: storeBayareaCities.bayAreaCityName,
     })
     .from(showroomStoreProducts)
-    .leftJoin(showroomStores, eq(showroomStoreProducts.storeId, showroomStores.id))
+    .leftJoin(showroomProductMappings, eq(showroomProductMappings.productId, showroomStoreProducts.id))
+    .leftJoin(showroomStores, eq(showroomProductMappings.showroomId, showroomStores.id))
     .leftJoin(storeBayareaCities, eq(showroomStores.bayAreaCityId, storeBayareaCities.id))
     .orderBy(desc(showroomStoreProducts.createdAt))
     .$dynamic();
@@ -98,10 +105,13 @@ showroomCatalogRouter.get("/catalog/compare", async (c) => {
     return c.json({ products: [], specKeys: [], specMatrix: {} });
   }
 
+  // A product has no owning store — resolve a representative carrying
+  // showroom (if any) via showroom_product_mappings for display purposes.
   const rows = await db
     .select({ product: showroomStoreProducts, storeName: showroomStores.name })
     .from(showroomStoreProducts)
-    .leftJoin(showroomStores, eq(showroomStoreProducts.storeId, showroomStores.id))
+    .leftJoin(showroomProductMappings, eq(showroomProductMappings.productId, showroomStoreProducts.id))
+    .leftJoin(showroomStores, eq(showroomProductMappings.showroomId, showroomStores.id))
     .where(inArray(showroomStoreProducts.id, ids));
 
   const specRows = await db

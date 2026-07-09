@@ -6,7 +6,6 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
-import { showroomStores } from "./stores";
 import { materialScheduleItems } from "../materials/schedule_item";
 // Direct leaf import — avoids circular reference through the brands barrel
 import { brands } from "../brands/brands";
@@ -18,9 +17,6 @@ export const showroomStoreProducts = sqliteTable(
   "showroom_store_products",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
-    storeId: integer("store_id")
-      .notNull()
-      .references(() => showroomStores.id, { onDelete: "cascade" }),
 
     /**
      * The material schedule item this product is sourced for (nullable — a

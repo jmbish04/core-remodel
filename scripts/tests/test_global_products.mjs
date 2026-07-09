@@ -42,10 +42,13 @@ const obs = d1(
   "SELECT count(*) c FROM product_price_observations WHERE source_type='showroom'"
 )[0].c;
 assert.ok(obs >= withPrice, `expected >= ${withPrice} observations, got ${obs}`);
+// Post-0095, store_id no longer exists on showroom_store_products —
+// showroom_product_mappings is the sole source of truth for showroom<->product
+// links, so the "must be mapped" invariant is now: every product has >=1 mapping row.
 const unmapped = d1(
-  "SELECT count(*) c FROM showroom_store_products p WHERE p.store_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM showroom_product_mappings m WHERE m.showroom_id=p.store_id AND m.product_id=p.id)"
+  "SELECT count(*) c FROM showroom_store_products p WHERE NOT EXISTS (SELECT 1 FROM showroom_product_mappings m WHERE m.product_id=p.id)"
 )[0].c;
-assert.equal(unmapped, 0, "every product's store_id must be mapped");
+assert.equal(unmapped, 0, "every product must have a showroom_product_mappings row");
 console.log("OK: backfill (observations + mappings)");
 
 // --- Task 5: real-data checks (2 priced products seeded from prod snapshot) ---
@@ -245,3 +248,50 @@ assert.equal(scanLogMatched?.matched_store_product_id, 1, "showroom_scan_log id=
 const scanLogAuto = d1("SELECT auto_created_product_id FROM showroom_scan_log WHERE id=90002")[0];
 assert.equal(scanLogAuto?.auto_created_product_id, 1, "showroom_scan_log id=90002 auto_created_product_id must re-point to product 1");
 console.log("OK: wishlist_items / showroom_scan_log re-pointed to product 1");
+
+// --- Task 8: cascade-safe store_id drop (0095) ---
+// showroom_store_products must have exactly 2 rows (real-data products 1, 2)
+// and no longer have a store_id column.
+const productCount = d1("SELECT count(*) c FROM showroom_store_products")[0].c;
+assert.equal(productCount, 2, `expected 2 showroom_store_products rows after 0095, got ${productCount}`);
+const productCols = d1("SELECT name FROM pragma_table_info('showroom_store_products')").map(
+  (r) => r.name
+);
+assert.ok(
+  !productCols.includes("store_id"),
+  `showroom_store_products must not have a store_id column, got columns: ${productCols.join(", ")}`
+);
+
+// CASCADE children with real data must have survived the backup/restore wrap.
+const mappingsCount = d1("SELECT count(*) c FROM showroom_product_mappings")[0].c;
+assert.equal(mappingsCount, 2, `expected 2 showroom_product_mappings rows, got ${mappingsCount}`);
+const priceObsCount = d1("SELECT count(*) c FROM product_price_observations")[0].c;
+assert.equal(priceObsCount, 2, `expected 2 product_price_observations rows, got ${priceObsCount}`);
+
+// SET-NULL children must have their FK pointer restored (not left null).
+const wishlist95001 = d1(
+  "SELECT showroom_store_product_id FROM wishlist_items WHERE id=95001"
+)[0];
+assert.equal(
+  wishlist95001?.showroom_store_product_id,
+  1,
+  "wishlist_items id=95001 must have showroom_store_product_id restored to 1"
+);
+const material95001 = d1(
+  "SELECT purchased_showroom_product_id FROM material_schedule_items WHERE id=95001"
+)[0];
+assert.equal(
+  material95001?.purchased_showroom_product_id,
+  2,
+  "material_schedule_items id=95001 must have purchased_showroom_product_id restored to 2"
+);
+
+// No leftover __bak_* tables from the backup/restore wrap.
+const bakTables = d1(
+  "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE '__bak_%'"
+);
+assert.equal(bakTables.length, 0, `expected zero __bak_* tables, got: ${bakTables.map((r) => r.name).join(", ")}`);
+
+console.log(
+  "OK: 0095 cascade-safe store_id drop (2 products, no store_id column, 2 mappings, 2 price_obs, SET-NULL pointers restored, 0 __bak_* tables)"
+);

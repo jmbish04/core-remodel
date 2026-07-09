@@ -6,8 +6,8 @@
  * and the two join tables that fan a product out across the model:
  *
  *   - `showroom_product_mappings`   — which showroom LOCATIONS carry a product
- *     (many-to-many; a product may be sold at several stores even though its
- *     row carries a single owning `storeId`).
+ *     (many-to-many; a product is global and may be carried at zero or more
+ *     showrooms — there is no owning store).
  *   - `product_material_mappings`   — which material-schedule ITEMS a product
  *     satisfies (many-to-many; the product's legacy `materialId` column is the
  *     denormalized "primary" pointer that `isPrimary` mirrors).
@@ -16,10 +16,9 @@
  * hold "$1,299", "call for pricing", etc.), NOT integer cents — so unlike the
  * budget domain we accept a string here and only coerce numbers to a string.
  *
- * Every product references a `storeId` (the owning store — NOT NULL in the
- * schema) and optionally a `brandId` and a primary `materialId`. Link targets
- * (brand / store / material) are validated to exist before we write, so a tool
- * call never leaves a dangling FK.
+ * A product is global (no owning store) and optionally references a `brandId`
+ * and a primary `materialId`. Link targets (brand / material) are validated to
+ * exist before we write, so a tool call never leaves a dangling FK.
  */
 import {
   brands,
@@ -65,7 +64,6 @@ function productDto(p: typeof showroomStoreProducts.$inferSelect) {
     description: p.description,
     productType: p.productType,
     brandId: p.brandId,
-    storeId: p.storeId,
     materialId: p.materialId,
     sku: p.sku,
     price: p.price,
@@ -86,10 +84,10 @@ async function assertBrand(db: RemodelDb, brandId: number) {
   return row;
 }
 
-/** Confirm a store (showroom location) row exists. */
-async function assertStore(db: RemodelDb, storeId: number) {
-  const [row] = await db.select().from(showroomStores).where(eq(showroomStores.id, storeId)).limit(1);
-  if (!row) toolError(`Showroom store ${storeId} not found. Call list_showrooms for valid ids.`);
+/** Confirm a showroom (store) row exists. */
+async function assertStore(db: RemodelDb, showroomId: number) {
+  const [row] = await db.select().from(showroomStores).where(eq(showroomStores.id, showroomId)).limit(1);
+  if (!row) toolError(`Showroom ${showroomId} not found. Call list_showrooms for valid ids.`);
   return row;
 }
 
@@ -165,7 +163,7 @@ export const productTools: RemodelTool[] = [
     category: "products",
     title: "Get product detail",
     description:
-      "Full detail for one product by `id`: the product row, its brand (name), the material-schedule items it is linked to (both the many-to-many product_material_mappings rows AND the legacy/denormalized primary `materialId`), and the showrooms that carry it (owning `storeId` plus every showroom_product_mappings location, with store names).",
+      "Full detail for one product by `id`: the product row, its brand (name), the material-schedule items it is linked to (both the many-to-many product_material_mappings rows AND the legacy/denormalized primary `materialId`), and the showrooms that carry it (every showroom_product_mappings location, with store names — a product has no owning store).",
     inputShape: {
       id: z.number().int().positive().describe("Product id (from list_products)"),
     },
@@ -216,28 +214,26 @@ export const productTools: RemodelTool[] = [
         };
       });
 
-      // Showrooms carrying the product: owning store + mapped stores.
+      // Showrooms carrying the product: purely from showroom_product_mappings
+      // (a product has no owning store — it is global).
       const showroomLinks = await db
         .select()
         .from(showroomProductMappings)
         .where(eq(showroomProductMappings.productId, product.id))
         .all();
-      const storeIds = new Set<number>(showroomLinks.map((s) => s.showroomId));
-      storeIds.add(product.storeId);
+      const showroomIds = new Set<number>(showroomLinks.map((s) => s.showroomId));
       const storeRows =
-        storeIds.size > 0
+        showroomIds.size > 0
           ? await db
               .select()
               .from(showroomStores)
-              .where(inArray(showroomStores.id, [...storeIds]))
+              .where(inArray(showroomStores.id, [...showroomIds]))
               .all()
           : [];
       const storeById = new Map(storeRows.map((s) => [s.id, s]));
-      const showrooms = [...storeIds].map((sid) => ({
-        showroomId: sid,
+      const showrooms = [...showroomIds].map((sid) => ({
+        id: sid,
         name: storeById.get(sid)?.name ?? null,
-        isOwningStore: product.storeId === sid,
-        viaMapping: showroomLinks.some((l) => l.showroomId === sid),
       }));
 
       return {
@@ -254,10 +250,9 @@ export const productTools: RemodelTool[] = [
     category: "products",
     title: "Create product",
     description:
-      "Insert a new product into the catalog (`showroom_store_products`). Only `itemName` and the owning `storeId` are required (storeId is NOT NULL in the schema). `brandId`, `storeId`, and `materialId` are validated to exist when provided. `price` is free text (a number is coerced to a string). `jsonDetails` accepts an object (JSON.stringify-ed) or a pre-serialized string. Prefer `ensure_product` when you want reuse-or-create semantics.",
+      "Insert a new product into the catalog (`showroom_store_products`). Only `itemName` is required. `brandId` and `materialId` are validated to exist when provided. `price` is free text (a number is coerced to a string). `jsonDetails` accepts an object (JSON.stringify-ed) or a pre-serialized string. Prefer `ensure_product` when you want reuse-or-create semantics. Use link_product_to_showroom to associate the product with showroom locations.",
     inputShape: {
       itemName: z.string().min(1).describe("Product name (required)"),
-      storeId: z.number().int().positive().describe("Owning showroom store id (required, NOT NULL)"),
       brandId: z.number().int().positive().optional().describe("Brand id (validated)"),
       materialId: z
         .number()
@@ -280,12 +275,11 @@ export const productTools: RemodelTool[] = [
     },
     annotations: WRITE,
     examples: [
-      { title: "Minimal", args: { itemName: "Litze Pull-Down Faucet", storeId: 3 } },
+      { title: "Minimal", args: { itemName: "Litze Pull-Down Faucet" } },
       {
         title: "Full",
         args: {
           itemName: "Litze Pull-Down Faucet",
-          storeId: 3,
           brandId: 4,
           productType: "Faucet",
           price: "$899",
@@ -294,13 +288,11 @@ export const productTools: RemodelTool[] = [
       },
     ],
     handler: async ({ db }, input) => {
-      await assertStore(db, input.storeId);
       if (input.brandId != null) await assertBrand(db, input.brandId);
       if (input.materialId != null) await assertMaterial(db, input.materialId);
 
       const values = {
         itemName: input.itemName,
-        storeId: input.storeId,
         brandId: input.brandId ?? null,
         materialId: input.materialId ?? null,
         description: input.description ?? null,
@@ -324,11 +316,10 @@ export const productTools: RemodelTool[] = [
     category: "products",
     title: "Update product",
     description:
-      "Patch any column of an existing product (`showroom_store_products`). Only the fields you pass are changed. `brandId`/`storeId`/`materialId` are validated when passed. `price` is free text (number coerced to string); `jsonDetails` accepts an object (JSON.stringify-ed) or a string. Does NOT touch the join tables — use link_product_to_showroom / link_product_to_material for those.",
+      "Patch any column of an existing product (`showroom_store_products`). Only the fields you pass are changed. `brandId`/`materialId` are validated when passed. `price` is free text (number coerced to string); `jsonDetails` accepts an object (JSON.stringify-ed) or a string. Does NOT touch the join tables — use link_product_to_showroom / link_product_to_material for those.",
     inputShape: {
       id: z.number().int().positive().describe("Product id (from list_products)"),
       itemName: z.string().min(1).optional(),
-      storeId: z.number().int().positive().optional().describe("New owning store id (validated)"),
       brandId: z.number().int().positive().optional().describe("Brand id (validated)"),
       materialId: z
         .number()
@@ -362,7 +353,6 @@ export const productTools: RemodelTool[] = [
         .limit(1);
       if (!existing) toolError(`Product ${id} not found. Call list_products for valid ids.`);
 
-      if (rest.storeId != null) await assertStore(db, rest.storeId);
       if (rest.brandId != null) await assertBrand(db, rest.brandId);
       if (rest.materialId != null) await assertMaterial(db, rest.materialId);
 
@@ -393,10 +383,9 @@ export const productTools: RemodelTool[] = [
     category: "products",
     title: "Ensure product (find-or-create)",
     description:
-      "Reuse-or-create primitive. Finds an existing product by `sku` (when provided) OR by (`brandId` + case-insensitive `itemName`); if found, returns it with `created:false`. Otherwise inserts a new product from the provided fields and returns it with `created:true`. `storeId` is required for the create path (schema NOT NULL). Ideal for idempotent import/enrichment flows that must not duplicate catalog rows.",
+      "Reuse-or-create primitive. Finds an existing product by `sku` (when provided) OR by (`brandId` + case-insensitive `itemName`); if found, returns it with `created:false`. Otherwise inserts a new product from the provided fields and returns it with `created:true`. Ideal for idempotent import/enrichment flows that must not duplicate catalog rows.",
     inputShape: {
       itemName: z.string().min(1).describe("Product name (used for the brand+name match and on create)"),
-      storeId: z.number().int().positive().describe("Owning showroom store id (required for the create path)"),
       brandId: z.number().int().positive().optional().describe("Brand id — pairs with itemName for the lookup"),
       sku: z.string().optional().describe("If provided, an exact sku match wins the find before the name match"),
       materialId: z.number().int().positive().optional(),
@@ -411,11 +400,10 @@ export const productTools: RemodelTool[] = [
     },
     annotations: WRITE_IDEMPOTENT,
     examples: [
-      { title: "By sku", args: { itemName: "Litze Faucet", storeId: 3, sku: "63221LF-PC" } },
-      { title: "By brand+name", args: { itemName: "Litze Faucet", storeId: 3, brandId: 4 } },
+      { title: "By sku", args: { itemName: "Litze Faucet", sku: "63221LF-PC" } },
+      { title: "By brand+name", args: { itemName: "Litze Faucet", brandId: 4 } },
     ],
     handler: async ({ db }, input) => {
-      await assertStore(db, input.storeId);
       if (input.brandId != null) await assertBrand(db, input.brandId);
       if (input.materialId != null) await assertMaterial(db, input.materialId);
 
@@ -450,7 +438,6 @@ export const productTools: RemodelTool[] = [
 
       const values = {
         itemName: input.itemName,
-        storeId: input.storeId,
         brandId: input.brandId ?? null,
         materialId: input.materialId ?? null,
         description: input.description ?? null,

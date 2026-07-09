@@ -23,7 +23,11 @@ import { drizzle } from "drizzle-orm/d1";
 import { and, desc, eq, like } from "drizzle-orm";
 
 import { materialScheduleItems } from "@backend/db/schema/materials/index";
-import { showroomStores, showroomStoreProducts } from "@backend/db/schema/showroom/index";
+import {
+  showroomStores,
+  showroomStoreProducts,
+  showroomProductMappings,
+} from "@backend/db/schema/showroom/index";
 
 const LIMIT = 25;
 
@@ -113,10 +117,35 @@ export function buildChatDataTools(env: Env) {
       }),
       execute: async ({ storeId, search }) => {
         const db = drizzle(env.DB);
-        const conditions = [];
+
+        // Products are global (no owning store); scoping to one showroom
+        // now goes through the showroom_product_mappings join.
         if (typeof storeId === "number") {
-          conditions.push(eq(showroomStoreProducts.storeId, storeId));
+          const conditions = [eq(showroomProductMappings.showroomId, storeId)];
+          if (search) conditions.push(like(showroomStoreProducts.itemName, `%${search}%`));
+
+          const rows = await db
+            .select({ product: showroomStoreProducts })
+            .from(showroomProductMappings)
+            .innerJoin(
+              showroomStoreProducts,
+              eq(showroomProductMappings.productId, showroomStoreProducts.id),
+            )
+            .where(and(...conditions))
+            .orderBy(desc(showroomStoreProducts.createdAt))
+            .limit(LIMIT);
+
+          const products = rows.map(({ product: p }) => ({
+            id: p.id,
+            itemName: p.itemName,
+            sku: p.sku,
+            price: p.price,
+            leadTime: p.leadTime,
+          }));
+          return { count: products.length, products };
         }
+
+        const conditions = [];
         if (search) conditions.push(like(showroomStoreProducts.itemName, `%${search}%`));
 
         let q = db
@@ -131,7 +160,6 @@ export function buildChatDataTools(env: Env) {
         const products = rows.map((p) => ({
           id: p.id,
           itemName: p.itemName,
-          storeId: p.storeId,
           sku: p.sku,
           price: p.price,
           leadTime: p.leadTime,
