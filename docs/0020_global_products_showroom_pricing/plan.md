@@ -115,10 +115,13 @@ export function parseDiscountPct(
 
 ```js
 // scripts/tests/test_global_products.mjs
-// Run: node scripts/tests/test_global_products.mjs
+// Run: NODE_NO_WARNINGS=1 npx tsx scripts/tests/test_global_products.mjs
 import assert from "node:assert";
-import { normalizeModelKey } from "../../src/backend/lib/normalize-model.js";
-import { parsePriceCents, parseDiscountPct } from "../../src/backend/lib/money.js";
+// Dynamic import of the REAL .ts modules. Run under tsx. A static
+// `import { x } from ".ts"` from a .mjs entry fails ("no export named x")
+// because ESM static-links before tsx transforms; dynamic import() works.
+const { normalizeModelKey } = await import("../../src/backend/lib/normalize-model.ts");
+const { parsePriceCents, parseDiscountPct } = await import("../../src/backend/lib/money.ts");
 
 // --- Task 1: normalizeModelKey ---
 assert.equal(normalizeModelKey("MS 604-01"), "MS60401");
@@ -141,9 +144,9 @@ console.log("OK: helpers (normalizeModelKey, parsePriceCents, parseDiscountPct)"
 
 - [ ] **Step 4: Run it**
 
-Run: `node --experimental-strip-types scripts/tests/test_global_products.mjs` (or `npx tsx scripts/tests/test_global_products.mjs` if `tsx` is available)
-Expected: `OK: helpers (normalizeModelKey, parsePriceCents, parseDiscountPct)`
-> If neither resolves the `.ts` import, import from built output or inline-copy the functions — the assertion values are the contract.
+Run: `NODE_NO_WARNINGS=1 npx tsx scripts/tests/test_global_products.mjs`
+Expected: `OK: helpers (normalizeModelKey, parsePriceCents, parseDiscountPct)`, exit 0, pristine output.
+> tsx (v4) is installed. Use **dynamic** `import()` of the real `.ts` files (as shown above) — a static `import` of `.ts` from a `.mjs` entry fails; `NODE_NO_WARNINGS=1` hides tsx's internal loader deprecation notice. Do not fall back to inlined copies — that guards nothing.
 
 - [ ] **Step 5: Type-check**
 
@@ -582,7 +585,7 @@ assert.equal(unmapped, 0, "every product's store_id must be mapped");
 console.log("OK: backfill (observations + mappings)");
 ```
 
-Run: `node scripts/tests/test_global_products.mjs`
+Run: `NODE_NO_WARNINGS=1 npx tsx scripts/tests/test_global_products.mjs`
 Expected: `OK: backfill (observations + mappings)`
 
 - [ ] **Step 5: Commit**
@@ -689,7 +692,7 @@ assert.equal(orphanObs, 0, "no orphaned observations");
 console.log("OK: dedup integrity");
 ```
 
-Run: `node scripts/tests/test_global_products.mjs`
+Run: `NODE_NO_WARNINGS=1 npx tsx scripts/tests/test_global_products.mjs`
 Expected: `OK: dedup integrity`
 
 - [ ] **Step 5: Commit**
@@ -910,7 +913,7 @@ assert.ok(
 console.log("OK: product schema shape");
 ```
 
-Run: `node scripts/tests/test_global_products.mjs` — Expected: `OK: product schema shape`
+Run: `NODE_NO_WARNINGS=1 npx tsx scripts/tests/test_global_products.mjs` — Expected: `OK: product schema shape`
 
 - [ ] **Step 7: Commit**
 
@@ -1117,7 +1120,7 @@ git commit -m "feat(0020): product-detail API returns price observations + photo
 
 - [ ] **Step 1: Full smoke run**
 
-Run: `node scripts/tests/test_global_products.mjs`
+Run: `NODE_NO_WARNINGS=1 npx tsx scripts/tests/test_global_products.mjs`
 Expected: all `OK:` lines print, process exits 0.
 
 - [ ] **Step 2: Full type-check gate**
