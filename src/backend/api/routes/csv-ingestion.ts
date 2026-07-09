@@ -122,7 +122,8 @@ Please respond with JSON containing:
         },
       ],
       stream: false,
-    });
+      gateway: { id: env.AI_GATEWAY_ID },
+    } as Parameters<typeof env.AI.run>[1]);
 
     if (typeof response === "object" && response !== null && "response" in response) {
       const text = (response as { response: string }).response;

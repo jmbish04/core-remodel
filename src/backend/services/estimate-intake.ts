@@ -155,7 +155,8 @@ export async function transcribeAudioBase64(env: Env, audioBase64: string): Prom
   const audioBytes = decodeBase64(audioBase64);
   const response = await env.AI.run("@cf/openai/whisper", {
     audio: Array.from(audioBytes),
-  });
+    gateway: { id: env.AI_GATEWAY_ID },
+  } as Parameters<typeof env.AI.run>[1]);
   if (isRecord(response) && typeof response.text === "string") {
     return response.text;
   }
@@ -185,7 +186,8 @@ async function extractTextFromImageFile(env: Env, file: File): Promise<string> {
       },
     ],
     max_tokens: 4096,
-  });
+    gateway: { id: env.AI_GATEWAY_ID },
+  } as Parameters<typeof env.AI.run>[1]);
   if (isRecord(response) && typeof response.response === "string") {
     return response.response;
   }

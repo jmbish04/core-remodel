@@ -557,7 +557,8 @@ gmailRouter.openapi(
       try {
         const embedResult = (await c.env.AI.run("@cf/baai/bge-large-en-v1.5", {
           text: [latest.body ?? latest.subject ?? ""],
-        })) as { data: number[][] };
+          gateway: { id: c.env.AI_GATEWAY_ID },
+        } as Parameters<typeof c.env.AI.run>[1])) as { data: number[][] };
         const vector = embedResult.data?.[0];
         if (vector) {
           const matches = await c.env.VECTOR_INDEX.query(vector, {
@@ -616,6 +617,7 @@ gmailRouter.openapi(
           { role: "user", content: userContent },
         ],
         max_tokens: 1024,
+        gateway: { id: c.env.AI_GATEWAY_ID },
       } as Parameters<typeof c.env.AI.run>[1])) as { response?: string };
 
       const draft = raw?.response?.trim() ?? "";

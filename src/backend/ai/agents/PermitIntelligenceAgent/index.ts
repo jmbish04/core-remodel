@@ -37,7 +37,8 @@ Return ONLY a valid JSON array of strings, nothing else.`;
     const res = await this.env.AI.run("@cf/meta/llama-3.1-8b-instruct", {
       messages: [{ role: "user", content: prompt }],
       max_tokens: 200,
-    });
+      gateway: { id: this.env.AI_GATEWAY_ID },
+    } as Parameters<typeof this.env.AI.run>[1]);
 
     try {
       const text = (res as any).response || "";
@@ -167,7 +168,8 @@ Return a strict JSON with: riskLevel (low, medium, high), summary (1-2 sentences
         { role: "user", content: prompt }
       ],
       max_tokens: 300,
-    });
+      gateway: { id: this.env.AI_GATEWAY_ID },
+    } as Parameters<typeof this.env.AI.run>[1]);
 
     let riskLevel = "medium";
     let summary = "Workload analyzed.";

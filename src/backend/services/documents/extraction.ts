@@ -80,6 +80,7 @@ async function extractTextFromImage(env: Env, buf: ArrayBuffer): Promise<string>
     image: imageArray,
     prompt,
     max_tokens: 1024,
+    gateway: { id: env.AI_GATEWAY_ID },
   } as Parameters<typeof env.AI.run>[1])) as { description?: string; response?: string };
 
   return aiResponse.description || aiResponse.response || "";
@@ -135,7 +136,8 @@ async function embedAndUpsertDocumentChunks(
 
   const embeddingResult = (await env.AI.run(EMBEDDING_MODEL, {
     text: chunks,
-  })) as { data: number[][] };
+    gateway: { id: env.AI_GATEWAY_ID },
+  } as Parameters<typeof env.AI.run>[1])) as { data: number[][] };
 
   const vectors = embeddingResult.data.map((values, chunkIdx) => ({
     id: `doc:${documentId}:${chunkIdx}`,

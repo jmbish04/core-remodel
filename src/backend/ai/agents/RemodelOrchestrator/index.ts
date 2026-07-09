@@ -281,7 +281,8 @@ export class RemodelOrchestrator extends Agent<Env, RemodelOrchestratorState> {
             { role: "system", content: AUDITOR_SYSTEM_PROMPT },
             { role: "user", content: taskPayload },
           ],
-        })) as { response?: string };
+          gateway: { id: this.env.AI_GATEWAY_ID },
+        } as Parameters<typeof this.env.AI.run>[1])) as { response?: string };
 
         const responseText = aiResponse.response || "{}";
 
