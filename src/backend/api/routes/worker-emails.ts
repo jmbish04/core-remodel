@@ -251,7 +251,10 @@ workerEmailsRouter.patch(
   "/:id/invoices/:invoiceId/line-items/:lineItemId/link",
   async (c) => {
     const db = drizzle(c.env.DB);
-    const lineItemId = parseInt(c.req.param("lineItemId"));
+    const lineItemId = parseInt(c.req.param("lineItemId"), 10);
+    if (Number.isNaN(lineItemId)) {
+      return c.json({ error: "Invalid lineItemId" }, 400);
+    }
     const body = await c.req.json().catch(() => ({}));
     const materialId = Number(body.materialScheduleItemId);
     if (!Number.isInteger(materialId)) {
@@ -306,7 +309,10 @@ workerEmailsRouter.post(
   "/:id/invoices/:invoiceId/line-items/:lineItemId/create-material",
   async (c) => {
     const db = drizzle(c.env.DB);
-    const lineItemId = parseInt(c.req.param("lineItemId"));
+    const lineItemId = parseInt(c.req.param("lineItemId"), 10);
+    if (Number.isNaN(lineItemId)) {
+      return c.json({ error: "Invalid lineItemId" }, 400);
+    }
     const body = await c.req.json().catch(() => ({}));
 
     const [lineItem] = await db
@@ -353,7 +359,10 @@ workerEmailsRouter.post(
   "/:id/invoices/:invoiceId/line-items/:lineItemId/skip",
   async (c) => {
     const db = drizzle(c.env.DB);
-    const lineItemId = parseInt(c.req.param("lineItemId"));
+    const lineItemId = parseInt(c.req.param("lineItemId"), 10);
+    if (Number.isNaN(lineItemId)) {
+      return c.json({ error: "Invalid lineItemId" }, 400);
+    }
 
     const [updatedLine] = await db
       .update(workerEmailInvoiceLineItems)

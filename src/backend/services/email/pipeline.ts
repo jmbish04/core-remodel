@@ -533,18 +533,23 @@ export async function processEmail(args: ProcessEmailArgs): Promise<void> {
       .returning();
 
     // Stage each extracted line item as an unmatched row pending a material link.
+    // Chunk the insert: D1 caps a query at 100 bound parameters and each row
+    // binds 6 columns, so a single multi-row INSERT of >16 rows would exceed it
+    // (a big receipt can have many line items).
     const lineItems = inv.lineItems || [];
     if (insertedInvoice && lineItems.length > 0) {
-      await db.insert(workerEmailInvoiceLineItems).values(
-        lineItems.map((li) => ({
-          invoiceId: insertedInvoice.id,
-          description: li.description ?? null,
-          quantity: typeof li.qty === "number" ? li.qty : null,
-          unitPrice: typeof li.unitPrice === "number" ? li.unitPrice : null,
-          lineTotal: typeof li.total === "number" ? li.total : null,
-          matchStatus: "unmatched",
-        })),
-      );
+      const rows = lineItems.map((li) => ({
+        invoiceId: insertedInvoice.id,
+        description: li.description ?? null,
+        quantity: typeof li.qty === "number" ? li.qty : null,
+        unitPrice: typeof li.unitPrice === "number" ? li.unitPrice : null,
+        lineTotal: typeof li.total === "number" ? li.total : null,
+        matchStatus: "unmatched",
+      }));
+      const CHUNK = 16; // 16 rows × 6 params = 96 ≤ D1's 100-param cap
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        await db.insert(workerEmailInvoiceLineItems).values(rows.slice(i, i + CHUNK));
+      }
     }
 
     await db

@@ -62,6 +62,9 @@ export function LineItemMaterialLink({
   // Debounced search against the materials schedule.
   useEffect(() => {
     if (!picking) return;
+    // `active` guards against a slow earlier request resolving after a faster
+    // later one (stale results) and against setState after unmount.
+    let active = true;
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(async () => {
       setSearching(true);
@@ -71,14 +74,15 @@ export function LineItemMaterialLink({
           : "/api/materials";
         const res = await fetch(url, { credentials: "include" });
         const json = (await res.json()) as { materials?: MaterialOption[] };
-        setResults((json.materials ?? []).slice(0, 8));
+        if (active) setResults((json.materials ?? []).slice(0, 8));
       } catch {
-        setResults([]);
+        if (active) setResults([]);
       } finally {
-        setSearching(false);
+        if (active) setSearching(false);
       }
     }, 250);
     return () => {
+      active = false;
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [query, picking]);
