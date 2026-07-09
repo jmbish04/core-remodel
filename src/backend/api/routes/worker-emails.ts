@@ -257,8 +257,10 @@ workerEmailsRouter.patch(
     }
     const body = await c.req.json().catch(() => ({}));
     const materialId = Number(body.materialScheduleItemId);
-    if (!Number.isInteger(materialId)) {
-      return c.json({ error: "materialScheduleItemId (integer) is required" }, 400);
+    // Reject null/""/0 too — Number(null|"") === 0 which is a valid integer but
+    // never a valid id, so guard on a positive integer.
+    if (!Number.isInteger(materialId) || materialId <= 0) {
+      return c.json({ error: "materialScheduleItemId (positive integer) is required" }, 400);
     }
 
     const [lineItem] = await db
@@ -281,24 +283,30 @@ workerEmailsRouter.patch(
       .limit(1);
     if (!material) return c.json({ error: "Material schedule item not found" }, 404);
 
-    const [updatedLine] = await db
-      .update(workerEmailInvoiceLineItems)
-      .set({
-        materialScheduleItemId: materialId,
-        matchStatus: "matched",
-        updatedAt: new Date(),
-      })
-      .where(eq(workerEmailInvoiceLineItems.id, lineItemId))
-      .returning();
+    // Atomic: link the line item AND mark the material purchased together, so a
+    // failure can't leave the line "matched" while the material stays un-purchased.
+    const [updatedLine] = await db.transaction(async (tx) => {
+      const [line] = await tx
+        .update(workerEmailInvoiceLineItems)
+        .set({
+          materialScheduleItemId: materialId,
+          matchStatus: "matched",
+          updatedAt: new Date(),
+        })
+        .where(eq(workerEmailInvoiceLineItems.id, lineItemId))
+        .returning();
 
-    await db
-      .update(materialScheduleItems)
-      .set({
-        isPurchased: true,
-        notes: appendNote(material.notes, buildPurchaseNote(invoice, lineItem)),
-        updatedAt: new Date(),
-      })
-      .where(eq(materialScheduleItems.id, materialId));
+      await tx
+        .update(materialScheduleItems)
+        .set({
+          isPurchased: true,
+          notes: appendNote(material.notes, buildPurchaseNote(invoice, lineItem)),
+          updatedAt: new Date(),
+        })
+        .where(eq(materialScheduleItems.id, materialId));
+
+      return [line];
+    });
 
     return c.json({ lineItem: updatedLine, materialId });
   },
@@ -330,25 +338,31 @@ workerEmailsRouter.post(
 
     const title = String(body.title || lineItem.description || "Untitled material").slice(0, 200);
 
-    const [material] = await db
-      .insert(materialScheduleItems)
-      .values({
-        title,
-        roomName: body.roomName || null,
-        isPurchased: true,
-        notes: buildPurchaseNote(invoice, lineItem),
-      })
-      .returning();
+    // Atomic: create the material AND link the line item together, so a failure
+    // can't orphan a new material with the line item left unmatched.
+    const { material, updatedLine } = await db.transaction(async (tx) => {
+      const [newMaterial] = await tx
+        .insert(materialScheduleItems)
+        .values({
+          title,
+          roomName: body.roomName || null,
+          isPurchased: true,
+          notes: buildPurchaseNote(invoice, lineItem),
+        })
+        .returning();
 
-    const [updatedLine] = await db
-      .update(workerEmailInvoiceLineItems)
-      .set({
-        materialScheduleItemId: material.id,
-        matchStatus: "created",
-        updatedAt: new Date(),
-      })
-      .where(eq(workerEmailInvoiceLineItems.id, lineItemId))
-      .returning();
+      const [line] = await tx
+        .update(workerEmailInvoiceLineItems)
+        .set({
+          materialScheduleItemId: newMaterial.id,
+          matchStatus: "created",
+          updatedAt: new Date(),
+        })
+        .where(eq(workerEmailInvoiceLineItems.id, lineItemId))
+        .returning();
+
+      return { material: newMaterial, updatedLine: line };
+    });
 
     return c.json({ lineItem: updatedLine, material });
   },

@@ -546,9 +546,15 @@ export async function processEmail(args: ProcessEmailArgs): Promise<void> {
         lineTotal: typeof li.total === "number" ? li.total : null,
         matchStatus: "unmatched",
       }));
-      const CHUNK = 16; // 16 rows × 6 params = 96 ≤ D1's 100-param cap
-      for (let i = 0; i < rows.length; i += CHUNK) {
-        await db.insert(workerEmailInvoiceLineItems).values(rows.slice(i, i + CHUNK));
+      // Insert via chunked db.batch of single-row statements — the repo's D1
+      // bulk-write convention; each statement stays well under D1's 100
+      // bound-parameter cap regardless of how many line items a receipt has.
+      const BATCH = 50;
+      for (let i = 0; i < rows.length; i += BATCH) {
+        const stmts = rows
+          .slice(i, i + BATCH)
+          .map((row) => db.insert(workerEmailInvoiceLineItems).values(row));
+        await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
       }
     }
 
