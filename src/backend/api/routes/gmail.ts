@@ -1179,19 +1179,19 @@ gmailRouter.openapi(
         );
       }
 
-      let insertedApprox = 0;
-      for (const msg of page) {
-        const toRecipients = parseToRecipients(msg.toRecipientsJson);
-        const rows = buildParticipantRows({
+      // Accumulate every message's participant rows, then insert once (the
+      // insert itself batches) — one chunked write per page, not one per
+      // message (a 500-message page would otherwise be 500 round-trips).
+      const allRows = page.flatMap((msg) =>
+        buildParticipantRows({
           messageId: msg.id,
           threadId: msg.threadId,
           from: msg.fromRecipient,
-          toRecipients,
-        });
-        if (rows.length === 0) continue;
-        await insertParticipants(db, rows);
-        insertedApprox += rows.length;
-      }
+          toRecipients: parseToRecipients(msg.toRecipientsJson),
+        }),
+      );
+      await insertParticipants(db, allRows);
+      const insertedApprox = allRows.length;
 
       const lastId = page[page.length - 1]?.id ?? null;
       const nextAfterId = page.length === limit ? lastId : null;

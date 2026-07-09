@@ -87,8 +87,8 @@ export const PUBLIC_EMAIL_DOMAINS = new Set([
 /** D1's hard limit on bound parameters per statement (see documents/db-helpers.ts). */
 const D1_MAX_BOUND_PARAMS = 100;
 
-/** `gmail_message_participants` has 6 bound columns per row (id is autoincrement, omitted on insert: 5 explicit + createdAt default is NOT bound unless set). Stay well under the cap. */
-const PARTICIPANT_INSERT_CHUNK_ROWS = 16;
+/** Rows per db.batch of single-row participant inserts (one round-trip per batch). */
+const PARTICIPANT_INSERT_BATCH = 50;
 
 export interface ParsedEmailAddress {
   /** Lowercased bare email address (no display name / angle brackets). */
@@ -189,11 +189,9 @@ export function buildParticipantRows(
  * already-populated messages is always safe — no duplicate rows, no thrown
  * conflict errors.
  *
- * Chunked to `PARTICIPANT_INSERT_CHUNK_ROWS` rows per statement to stay well
- * under D1's `D1_MAX_BOUND_PARAMS` (100) bound-parameter cap per statement —
- * each row binds 5 explicit columns (messageId, threadId, email, domain,
- * role), so 16 rows/chunk is a comfortable safety margin even if a column is
- * added later.
+ * Uses chunked `db.batch()` of single-row statements (`PARTICIPANT_INSERT_BATCH`
+ * per batch) — one round-trip per batch, each statement far under D1's 100
+ * bound-parameter cap, and idempotent via `onConflictDoNothing`.
  */
 export async function insertParticipants(
   db: ReturnType<typeof drizzle>,
@@ -201,10 +199,15 @@ export async function insertParticipants(
 ): Promise<void> {
   if (rows.length === 0) return;
 
-  for (let i = 0; i < rows.length; i += PARTICIPANT_INSERT_CHUNK_ROWS) {
-    const slice = rows.slice(i, i + PARTICIPANT_INSERT_CHUNK_ROWS);
-    if (slice.length === 0) continue;
-    await db.insert(gmailMessageParticipants).values(slice).onConflictDoNothing().run();
+  // Insert via chunked db.batch of single-row statements (the repo's D1
+  // bulk-write convention): one batch = one round-trip for up to 50 rows, each
+  // statement well under D1's 100 bound-param cap, all idempotent.
+  for (let i = 0; i < rows.length; i += PARTICIPANT_INSERT_BATCH) {
+    const stmts = rows
+      .slice(i, i + PARTICIPANT_INSERT_BATCH)
+      .map((row) => db.insert(gmailMessageParticipants).values(row).onConflictDoNothing());
+    if (stmts.length === 0) continue;
+    await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
   }
 }
 
@@ -261,25 +264,35 @@ export async function findThreadIdsByParticipants(
   input: { privateDomains: string[]; publicEmails: string[] },
 ): Promise<string[]> {
   const { privateDomains, publicEmails } = input;
+
+  // The chunked lookups are independent — run them concurrently.
+  const domainChunks = chunkArray(privateDomains, D1_MAX_BOUND_PARAMS).filter(
+    (chunk) => chunk.length > 0,
+  );
+  const emailChunks = chunkArray(publicEmails, D1_MAX_BOUND_PARAMS).filter(
+    (chunk) => chunk.length > 0,
+  );
+
+  const queries = [
+    ...domainChunks.map((chunk) =>
+      db
+        .select({ threadId: gmailMessageParticipants.threadId })
+        .from(gmailMessageParticipants)
+        .where(inArray(gmailMessageParticipants.domain, chunk))
+        .all(),
+    ),
+    ...emailChunks.map((chunk) =>
+      db
+        .select({ threadId: gmailMessageParticipants.threadId })
+        .from(gmailMessageParticipants)
+        .where(inArray(gmailMessageParticipants.email, chunk))
+        .all(),
+    ),
+  ];
+
+  const results = await Promise.all(queries);
   const threadIds = new Set<string>();
-
-  for (const domainChunk of chunkArray(privateDomains, D1_MAX_BOUND_PARAMS)) {
-    if (domainChunk.length === 0) continue;
-    const rows = await db
-      .select({ threadId: gmailMessageParticipants.threadId })
-      .from(gmailMessageParticipants)
-      .where(inArray(gmailMessageParticipants.domain, domainChunk))
-      .all();
-    for (const row of rows) threadIds.add(row.threadId);
-  }
-
-  for (const emailChunk of chunkArray(publicEmails, D1_MAX_BOUND_PARAMS)) {
-    if (emailChunk.length === 0) continue;
-    const rows = await db
-      .select({ threadId: gmailMessageParticipants.threadId })
-      .from(gmailMessageParticipants)
-      .where(inArray(gmailMessageParticipants.email, emailChunk))
-      .all();
+  for (const rows of results) {
     for (const row of rows) threadIds.add(row.threadId);
   }
 
