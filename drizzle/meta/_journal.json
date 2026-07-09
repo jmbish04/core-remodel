@@ -610,6 +610,13 @@
       "when": 1783557673132,
       "tag": "0086_fearless_silvermane",
       "breakpoints": true
+    },
+    {
+      "idx": 87,
+      "version": "6",
+      "when": 1783559704578,
+      "tag": "0087_blue_shape",
+      "breakpoints": true
     }
   ]
 }
