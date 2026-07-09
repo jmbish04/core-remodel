@@ -3,6 +3,7 @@
   "version": "26.02.24",
   "description": "core-remodel moodboard and project management on cloudflare workers running Astro, Tailwind CSS, and shadcn/ui.",
   "license": "MIT",
+  "packageManager": "pnpm@10.33.2",
   "author": {
     "name": "126colby",
     "url": "https://github.com/126colby"

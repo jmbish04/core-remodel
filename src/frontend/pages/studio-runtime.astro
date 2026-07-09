@@ -23,6 +23,7 @@ import { isRequestAuthenticated } from "@backend/utils/access";
 import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { StudioRuntime } from "@/components/StudioRuntime";
 import "@/styles/global.css";
 
 const { env } = Astro.locals.runtime;
@@ -64,8 +65,6 @@ async function resolveSource(): Promise<{ sourceTsx: string | null; loadError: s
 }
 
 const { sourceTsx, loadError } = await resolveSource();
-
-const { StudioRuntime } = await import("@/components/StudioRuntime");
 ---
 
 <!doctype html>
