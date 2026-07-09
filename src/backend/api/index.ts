@@ -65,6 +65,7 @@ import { adminConfigRouter } from "./routes/admin-config";
 import { dialerRouter } from "./routes/dialer";
 import { showroomStoresRouter } from "./routes/showroom-stores";
 import { showroomProductsRouter } from "./routes/showroom-products";
+import { googlePhotosRouter } from "./routes/google-photos";
 import { brandsRouter } from "./routes/brands";
 import { showroomSeedRouter } from "./routes/showroom-seed";
 import { materialsRouter } from "./routes/materials";
@@ -118,6 +119,11 @@ app.use("/api/shopping-journal", requireAccessAuth);
 app.use("/api/shopping-journal/*", requireAccessAuth);
 app.use("/api/showroom-stores", requireAccessAuth);
 app.use("/api/showroom-stores/*", requireAccessAuth);
+// Google Photos Picker (0019) — admin-only. The OAuth callback is a top-level
+// browser redirect from Google that carries the visitor cookie, so it passes
+// this same guard.
+app.use("/api/google-photos", requireAccessAuth);
+app.use("/api/google-photos/*", requireAccessAuth);
 app.use("/api/research-jobs", requireAccessAuth);
 app.use("/api/research-jobs/*", requireAccessAuth);
 app.use("/api/showroom-products", requireAccessAuth);
@@ -168,6 +174,7 @@ app.route("/api/notifications", notificationsRouter);
 app.route("/api/ai", aiRouter);
 app.route("/api/documents", documentsRouter);
 app.route("/api/images", imagesRouter);
+app.route("/api/google-photos", googlePhotosRouter);
 app.route("/api/moodboards", moodBoardsRouter);
 app.route("/api/listing-photos", listingPhotosRouter);
 app.route("/api/photo-reviews", photoReviewsRouter);
