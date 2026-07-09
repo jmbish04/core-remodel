@@ -111,6 +111,10 @@ async function ensureConnected(): Promise<void> {
 
     const deadline = Date.now() + 3 * 60 * 1000;
     // Guard against overlapping polls when a request outlasts the interval.
+    // NOTE: we don't test `popup.closed` here — after the popup navigates to
+    // Google's cross-origin consent page (COOP), `closed` is unreliable and can
+    // read `true` while the window is open. We rely on the callback's
+    // postMessage plus polling /status, bounded by the deadline.
     let inFlight = false;
     const poll = setInterval(async () => {
       if (inFlight) return;
@@ -122,34 +126,40 @@ async function ensureConnected(): Promise<void> {
       } finally {
         inFlight = false;
       }
-      if (popup.closed) {
-        // Give the message/poll a beat to win, then treat as cancel.
-        if (await fetchConnected().catch(() => false)) return finish(resolve);
-        return finish(() => reject(new Error("Connection cancelled.")));
+      if (Date.now() > deadline) {
+        finish(() => reject(new Error("Timed out connecting to Google Photos. Please try again.")));
       }
-      if (Date.now() > deadline) finish(() => reject(new Error("Connection timed out.")));
     }, 1500);
   });
 }
 
 /**
- * Poll a session until the user finishes picking. Resolves true when items are
- * set, false if the user closes the picker without picking or it times out.
+ * Poll a session until the user finishes picking. Resolves true when
+ * `mediaItemsSet` flips, false on timeout.
+ *
+ * NOTE: we deliberately do NOT use `popup.closed` as a signal. Google's
+ * `pickerUri` is cross-origin and sets Cross-Origin-Opener-Policy, which severs
+ * the opener relationship — `popup.closed` then reads `true` even while the
+ * window is open, causing a premature (and silent) bail. Polling our own
+ * backend is unaffected by COOP, so we rely purely on the session state +
+ * timeout. Transient poll errors are ignored so a blip doesn't abort the wait.
  */
-async function waitForSelection(session: SessionResponse, popup: Window | null): Promise<boolean> {
-  const deadline = Date.now() + session.timeoutMs;
-  const interval = Math.max(1000, session.pollIntervalMs);
+async function waitForSelection(session: SessionResponse): Promise<boolean> {
+  // Cap the wait so a cancelled pick doesn't hang forever (no reliable
+  // cross-origin "closed" signal exists).
+  const deadline = Date.now() + Math.min(session.timeoutMs || 300_000, 5 * 60 * 1000);
+  const interval = Math.max(1500, session.pollIntervalMs || 3000);
 
   while (Date.now() < deadline) {
     await sleep(interval);
-    const res = await fetch(`${BASE}/sessions/${encodeURIComponent(session.sessionId)}`, {
-      credentials: "include",
-    });
-    const data = await jsonOrThrow<SessionResponse>(res);
-    if (data.mediaItemsSet) return true;
-    if (popup?.closed) {
-      // One last check in case selection landed just before close.
-      return data.mediaItemsSet;
+    try {
+      const res = await fetch(`${BASE}/sessions/${encodeURIComponent(session.sessionId)}`, {
+        credentials: "include",
+      });
+      const data = await jsonOrThrow<SessionResponse>(res);
+      if (data.mediaItemsSet) return true;
+    } catch {
+      /* transient network/API blip — keep polling */
     }
   }
   return false;
@@ -177,13 +187,15 @@ export interface UseGooglePhotosPicker {
 }
 
 /**
- * @param onFiles Called with the picked photos as `File[]` (empty selections and
- *                cancellations simply no-op).
- * @param onError Optional error sink (e.g. a toast). Defaults to console.error.
+ * @param onFiles  Called with the picked photos as `File[]`.
+ * @param onError  Optional error sink (e.g. a toast). Defaults to console.error.
+ * @param onNotice Optional neutral-message sink (e.g. an info toast) for
+ *                 progress/empty states so the flow is never silent.
  */
 export function useGooglePhotosPicker(
   onFiles: (files: File[]) => void | Promise<void>,
   onError?: (message: string) => void,
+  onNotice?: (message: string) => void,
 ): UseGooglePhotosPicker {
   const [phase, setPhase] = useState<PickerPhase>("idle");
   const running = useRef(false);
@@ -205,13 +217,18 @@ export function useGooglePhotosPicker(
       }
 
       setPhase("waiting");
-      const picked = await waitForSelection(session, picker);
+      onNotice?.("Pick your photos in the Google Photos window — they'll import automatically.");
+      const picked = await waitForSelection(session);
       try {
         picker.close();
       } catch {
         /* cross-origin close may throw — ignore */
       }
-      if (!picked) return; // cancelled / timed out — silent no-op
+      if (!picked) {
+        // Never silent: the user needs to know why nothing imported.
+        onNotice?.("No photos imported — timed out waiting for a selection. Try again.");
+        return;
+      }
 
       setPhase("downloading");
       const { items } = await jsonOrThrow<ItemsResponse>(
@@ -219,7 +236,10 @@ export function useGooglePhotosPicker(
           credentials: "include",
         }),
       );
-      if (items.length === 0) return;
+      if (items.length === 0) {
+        onNotice?.("No photos were selected.");
+        return;
+      }
 
       const files = await Promise.all(items.map((it) => downloadItem(session.sessionId, it)));
       await onFiles(files);
@@ -231,7 +251,7 @@ export function useGooglePhotosPicker(
       running.current = false;
       setPhase("idle");
     }
-  }, [onFiles, onError]);
+  }, [onFiles, onError, onNotice]);
 
   return { phase, isBusy: phase !== "idle", start };
 }

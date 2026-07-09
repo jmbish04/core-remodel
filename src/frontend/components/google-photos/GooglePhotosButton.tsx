@@ -56,7 +56,11 @@ export function GooglePhotosButton({
   className,
   disabled,
 }: GooglePhotosButtonProps) {
-  const { phase, isBusy, start } = useGooglePhotosPicker(onFiles, (message) => toast.error(message));
+  const { phase, isBusy, start } = useGooglePhotosPicker(
+    onFiles,
+    (message) => toast.error(message),
+    (message) => toast(message),
+  );
 
   return (
     <Button
