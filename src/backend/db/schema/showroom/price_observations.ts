@@ -5,6 +5,7 @@ import { sqliteTable, text, integer, real, index } from "drizzle-orm/sqlite-core
 // Direct leaf imports — avoid circular refs through the showroom barrel.
 import { showroomStoreProducts } from "./store_products";
 import { showroomStores } from "./stores";
+import { productShowroomPhotos } from "./product_photos";
 
 /**
  * Product Price Observations — the "different prices found across showrooms"
@@ -58,8 +59,11 @@ export const productPriceObservations = sqliteTable(
       .notNull()
       .default(sql`(unixepoch())`),
 
-    /** FK to product_showroom_photos.id — wired in Task 3. Nullable. */
-    sourcePhotoId: integer("source_photo_id"),
+    /** FK to product_showroom_photos.id. Nullable. */
+    sourcePhotoId: integer("source_photo_id").references(
+      () => productShowroomPhotos.id,
+      { onDelete: "set null" }
+    ),
 
     /** 0–100; 100 for manual entry, lower for AI extraction. */
     confidence: integer("confidence").notNull().default(100),
