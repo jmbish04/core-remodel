@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { WishlistApp } from "@/components/wishlist";
+---
+
+<BaseLayout
+  title="Wishlist — The Monolith"
+  description="The homeowner's curated wants layer over the products & materials catalog: saved by room and grouped into cross-room collections."
+>
+  <WishlistApp client:only="react" />
+</BaseLayout>
