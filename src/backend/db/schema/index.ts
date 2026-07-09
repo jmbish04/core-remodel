@@ -107,6 +107,8 @@ export * from "./materials/index";
 
 export * from "./showroom/index";
 
+export * from "./wishlist/index";
+
 export * from "./brands/index";
 
 export * from "./research/index";

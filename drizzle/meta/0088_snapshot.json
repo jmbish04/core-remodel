@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "65fc3b72-6b29-4130-a4bd-ded750564ac0",
-  "prevId": "fac19eaa-4cd0-462f-b041-94f51e7276d8",
+  "id": "4b644b60-576b-4698-a4d2-db1c87f3f748",
+  "prevId": "f703c669-9ddf-4f60-9f9c-2e5ca904e28e",
   "tables": {
     "users": {
       "name": "users",
@@ -18125,6 +18125,313 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {}
     },
+    "wishlist_items": {
+      "name": "wishlist_items",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "room_id": {
+          "name": "room_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "showroom_store_product_id": {
+          "name": "showroom_store_product_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "material_schedule_item_id": {
+          "name": "material_schedule_item_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "image_url": {
+          "name": "image_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "price": {
+          "name": "price",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "notes": {
+          "name": "notes",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'wishlist'"
+        },
+        "priority": {
+          "name": "priority",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        }
+      },
+      "indexes": {
+        "wishlist_items_room_idx": {
+          "name": "wishlist_items_room_idx",
+          "columns": [
+            "room_id"
+          ],
+          "isUnique": false
+        },
+        "wishlist_items_store_product_idx": {
+          "name": "wishlist_items_store_product_idx",
+          "columns": [
+            "showroom_store_product_id"
+          ],
+          "isUnique": false
+        },
+        "wishlist_items_material_item_idx": {
+          "name": "wishlist_items_material_item_idx",
+          "columns": [
+            "material_schedule_item_id"
+          ],
+          "isUnique": false
+        },
+        "wishlist_items_status_idx": {
+          "name": "wishlist_items_status_idx",
+          "columns": [
+            "status"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "wishlist_items_room_id_rooms_id_fk": {
+          "name": "wishlist_items_room_id_rooms_id_fk",
+          "tableFrom": "wishlist_items",
+          "tableTo": "rooms",
+          "columnsFrom": [
+            "room_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "wishlist_items_showroom_store_product_id_showroom_store_products_id_fk": {
+          "name": "wishlist_items_showroom_store_product_id_showroom_store_products_id_fk",
+          "tableFrom": "wishlist_items",
+          "tableTo": "showroom_store_products",
+          "columnsFrom": [
+            "showroom_store_product_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "wishlist_items_material_schedule_item_id_material_schedule_items_id_fk": {
+          "name": "wishlist_items_material_schedule_item_id_material_schedule_items_id_fk",
+          "tableFrom": "wishlist_items",
+          "tableTo": "material_schedule_items",
+          "columnsFrom": [
+            "material_schedule_item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "wishlist_collections": {
+      "name": "wishlist_collections",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "name": {
+          "name": "name",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "description": {
+          "name": "description",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "cover_image_url": {
+          "name": "cover_image_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "is_shared": {
+          "name": "is_shared",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false,
+          "default": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "wishlist_collection_items": {
+      "name": "wishlist_collection_items",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "collection_id": {
+          "name": "collection_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "wishlist_item_id": {
+          "name": "wishlist_item_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        }
+      },
+      "indexes": {
+        "wishlist_collection_items_collection_item_unique": {
+          "name": "wishlist_collection_items_collection_item_unique",
+          "columns": [
+            "collection_id",
+            "wishlist_item_id"
+          ],
+          "isUnique": true
+        },
+        "wishlist_collection_items_wishlist_item_idx": {
+          "name": "wishlist_collection_items_wishlist_item_idx",
+          "columns": [
+            "wishlist_item_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "wishlist_collection_items_collection_id_wishlist_collections_id_fk": {
+          "name": "wishlist_collection_items_collection_id_wishlist_collections_id_fk",
+          "tableFrom": "wishlist_collection_items",
+          "tableTo": "wishlist_collections",
+          "columnsFrom": [
+            "collection_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "wishlist_collection_items_wishlist_item_id_wishlist_items_id_fk": {
+          "name": "wishlist_collection_items_wishlist_item_id_wishlist_items_id_fk",
+          "tableFrom": "wishlist_collection_items",
+          "tableTo": "wishlist_items",
+          "columnsFrom": [
+            "wishlist_item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
     "brands": {
       "name": "brands",
       "columns": {
@@ -19908,6 +20215,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'invoice'"
         },
         "vendor_name": {
           "name": "vendor_name",

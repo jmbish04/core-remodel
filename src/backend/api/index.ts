@@ -71,6 +71,7 @@ import { googlePhotosRouter } from "./routes/google-photos";
 import { brandsRouter } from "./routes/brands";
 import { showroomSeedRouter } from "./routes/showroom-seed";
 import { materialsRouter } from "./routes/materials";
+import { wishlistRouter } from "./routes/wishlist";
 import { showroomGapsRouter } from "./routes/showroom-gaps";
 import { showroomCatalogRouter } from "./routes/showroom-catalog";
 import { showroomScanRouter } from "./routes/showroom-scan";
@@ -134,6 +135,8 @@ app.use("/api/brands", requireAccessAuth);
 app.use("/api/brands/*", requireAccessAuth);
 app.use("/api/materials", requireAccessAuth);
 app.use("/api/materials/*", requireAccessAuth);
+app.use("/api/wishlist", requireAccessAuth);
+app.use("/api/wishlist/*", requireAccessAuth);
 app.use("/api/places", requireAccessAuth);
 app.use("/api/places/*", requireAccessAuth);
 // Company CRM (notes + todos, 0013 roadmap P3-03/P3-04) — admin-only, no public read.
@@ -236,6 +239,7 @@ app.route("/api/showroom-stores", showroomScanRouter);
 app.route("/api/showroom-stores", showroomBackfillRouter);
 app.route("/api/research-jobs", researchJobsRouter);
 app.route("/api/materials", materialsRouter);
+app.route("/api/wishlist", wishlistRouter);
 app.route("/api/places", placesRouter);
 // adminIntegrationsRouter mounts under /api/admin/integrations — already covered
 // by the /api/admin/* requireAccessAuth middleware above.
