@@ -107,26 +107,47 @@ it. (We add a new table rather than overload the existing
 which is scoped to scraped web imagery with its own source-URL uniqueness; field
 capture is a different provenance.)
 
+**This table is the D1 half of a Vectorize pairing.** Following the repo's existing
+convention (`showroom_stores.ragUuid` ↔ `browser_run_pages.ragUuid` soft-linking D1
+rows to Vectorize vectors), each photo row carries a **`ragUuid`** that is written
+**both** onto the D1 row **and** onto the Vectorize vector's metadata in
+`PHOTO_INDEX`. The vector holds the embedding; this D1 row holds the
+AI-returned **structured attributes** (`attributes` JSON) for that same `ragUuid`.
+A similar-products / visual-quality query hits Vectorize, gets back `ragUuid`s, and
+joins to these rows for the human-readable attributes and status.
+
 Columns:
 
-- `id` (PK)
+- `id` (PK, autoincrement)
+- **`ragUuid`** (text, **unique, NOT NULL**) — the join key shared with the
+  Vectorize vector metadata in `PHOTO_INDEX`. 1:1 (one photo = one vector = one
+  uuid).
 - `productId` (FK → `showroom_store_products.id`, cascade delete)
 - `showroomId` (FK → `showroom_stores.id`, **nullable** — a photo may come from an
   online source), set-null delete
-- `cfImageId`, `deliveryUrl` — Cloudflare Images
+- `imageUrl` (text) — path to the stored asset (Cloudflare Images delivery URL in
+  the current pipeline; R2 object URL where originals are retained)
+- `cfImageId` (text, nullable) — Cloudflare Images asset id
+- `category` (text) — primary material category the photo depicts: `stone` |
+  `plumbing` | `cabinet` | `flooring` | `lighting` | `tile` | … (aligned to the
+  browse-by categories in B)
 - `photoKind` (enum: `product` | `price_card` | `spec_sheet` | `unknown`)
-- `extractedJson` (JSON) — raw AI extraction `{brand, modelNumber, colors, price,
-  salePrice, discountInfo, style, ...}` with per-field confidence
-- `embeddingId` (text, nullable) — Vectorize `PHOTO_INDEX` vector id for
-  visual-quality search / similar-products (populated by C)
-- `dominantColors` (JSON, nullable) — extracted color/quality attributes indexed in
-  D1 for filtering
-- `reviewStatus` (enum: `pending` | `approved` | `rejected`, default `pending`) —
-  HITL
+- `attributes` (JSON) — the AI structured-response payload, e.g.
+  `{"metal":"nickel","finish":"brushed","dominantColors":["#..."],"brand":"…",
+  "modelNumber":"…","style":"…"}`. This is what B filters on and what "similar
+  products" reads; per-field confidence included.
+- `status` (enum: `pending_review` | `approved` | `rejected`, default
+  `pending_review`) — HITL workflow state.
 - `reviewReason` (text, nullable), `reviewedAt` (timestamp, nullable)
 - `createdAt`, `updatedAt`
 
-A product accumulates photos from every showroom where it was seen.
+A product accumulates photos from every showroom where it was seen. `ragUuid` is
+generated app-side at upload time and used as the Vectorize vector id/metadata key
+so the two stores stay joinable without storing the embedding in D1.
+
+> Note: `product_price_observations.sourcePhotoId` (A4) references
+> `product_showroom_photos.id`; the extracted `price`/`salePrice`/`discountInfo`
+> that seed an observation come out of this row's `attributes`.
 
 ### A4. Price observations (`product_price_observations`, new table)
 
@@ -225,6 +246,8 @@ same discipline.
 - Unit: `modelKey` normalization; `ensure_product` dedup precedence.
 - Route/MCP: create product without storeId; record observations from all three
   source types; `get_product` returns grouped observations + photos.
+- Vectorize↔D1 pairing: a `ragUuid` written to `PHOTO_INDEX` metadata resolves to
+  exactly one `product_showroom_photos` row and back; `attributes` JSON round-trips.
 
 ---
 
@@ -253,6 +276,11 @@ same discipline.
   **color/visual qualities** + **Vectorize embeddings** (`PHOTO_INDEX`) for
   stone/paint/lighting so products are searchable by visual quality and PDPs can show
   similar products.
+- Each processed photo writes a **shared `ragUuid`** onto both the Vectorize vector
+  metadata and its `product_showroom_photos` D1 row (A3), storing the AI structured
+  response in `attributes` JSON. Similar-products/quality search queries Vectorize,
+  then joins returned `ragUuid`s back to D1 for attributes + status. This mirrors the
+  existing `browser_run_pages.ragUuid` pattern.
 - New/unmatched extractions **auto-create the global product** (from A) and queue it
   for **HITL review**; observations and photos land `pending`.
 - HITL review surface (extend `/admin/prepare/review` patterns) **and an MCP tool**
