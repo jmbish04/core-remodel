@@ -55,6 +55,23 @@ const mcpRouter = new Hono<{ Bindings: Env }>();
 const SERVER_INFO = { name: "renovation-studio", version: "1.0.0" };
 const PROTOCOL_VERSION = "2024-11-05";
 
+/**
+ * If `text` is a JSON OBJECT (not an array or primitive), parse and return it so
+ * it can be surfaced as MCP `structuredContent`. Returns `null` for arrays,
+ * primitives, or unparseable prose — callers then fall back to text-only.
+ */
+function parseJsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    /* not JSON — prose result, stays text-only */
+  }
+  return null;
+}
+
 interface McpTool {
   name: string;
   description: string;

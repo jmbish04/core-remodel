@@ -281,6 +281,11 @@ export const legacyTools: RemodelTool[] = [
       room: z.string().optional().describe("Floor-plan room key. Defaults to '126-colby'."),
     },
     annotations: WRITE,
+    outputShape: {
+      room: z.string().describe("The floor-plan room key that was signalled"),
+      elementId: z.string().describe("The wall segment id that flashed"),
+      delivered: z.any().describe("How many connected screens lit up"),
+    },
     handler: async ({ env }, input) => {
       const args = input as { elementId?: unknown; room?: unknown };
       const elementId = String(args.elementId ?? "").trim();
