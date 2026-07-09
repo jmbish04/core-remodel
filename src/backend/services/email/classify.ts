@@ -190,6 +190,13 @@ Respond with ONLY valid JSON matching this schema:
   ${contractSection(profile)}
 }
 
+IMPORTANT — populate "invoiceData" for BOTH invoices AND receipts (a receipt is a
+completed purchase, e.g. a store order confirmation). For a receipt, set
+"invoiceNumber" to the order/receipt number, "dueDate" to null, and include EVERY
+purchased product as its own entry in "lineItems" (this is how the homeowner links
+each purchased item back to their materials schedule). Extract all line items —
+do not summarize or omit any.
+
 EMAIL CONTENT:
 Subject: ${subject || "No Subject"}
 From: ${from}

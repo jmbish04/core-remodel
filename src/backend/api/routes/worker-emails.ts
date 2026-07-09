@@ -9,8 +9,29 @@ import { workerEmailInvoiceLineItems } from "@backend/db/schema/emails/worker_em
 import { workerEmailStagedCompanies } from "@backend/db/schema/emails/worker_email_staged_companies";
 import { workerEmailContracts } from "@backend/db/schema/emails/worker_email_contracts";
 import { companies } from "@backend/db/schema/directory/companies";
+import { materialScheduleItems } from "@backend/db/schema/materials/schedule_item";
 
 export const workerEmailsRouter = new Hono<{ Bindings: Env }>();
+
+/** Build a human-readable purchase note recorded on a linked material. */
+function buildPurchaseNote(
+  invoice: { vendorName?: string | null; invoiceDate?: string | null } | undefined,
+  lineItem: { lineTotal?: number | null },
+): string {
+  const vendor = invoice?.vendorName || "unknown vendor";
+  const date = invoice?.invoiceDate || "";
+  const price =
+    typeof lineItem?.lineTotal === "number" ? `$${lineItem.lineTotal.toFixed(2)}` : "";
+  const parts = [`Purchased from ${vendor}`];
+  if (price) parts.push(price);
+  if (date) parts.push(`on ${date}`);
+  return `${parts.join(" ")} (via email receipt).`;
+}
+
+/** Append a note line to an existing (possibly null) notes field. */
+function appendNote(existing: string | null | undefined, addition: string): string {
+  return existing && existing.trim() ? `${existing}\n${addition}` : addition;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Email CRUD
@@ -212,6 +233,138 @@ workerEmailsRouter.post("/:id/invoices/:invoiceId/reject", async (c) => {
 
   return c.json({ invoice: updated });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Line Items → Material Schedule linking (HITL)
+//
+// Each invoice/receipt line item is materialized as an `unmatched` row at
+// ingest. The reviewer resolves it to the materials schedule one of three ways:
+//   link            → attach to an EXISTING material_schedule_item
+//   create-material → create a NEW material from the line item, then attach
+//   skip            → dismiss (not a trackable material)
+// Linking a receipt line item marks the material as purchased and records the
+// vendor / price / date in the material's notes.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Link a line item to an existing material schedule item + mark it purchased. */
+workerEmailsRouter.patch(
+  "/:id/invoices/:invoiceId/line-items/:lineItemId/link",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const lineItemId = parseInt(c.req.param("lineItemId"));
+    const body = await c.req.json().catch(() => ({}));
+    const materialId = Number(body.materialScheduleItemId);
+    if (!Number.isInteger(materialId)) {
+      return c.json({ error: "materialScheduleItemId (integer) is required" }, 400);
+    }
+
+    const [lineItem] = await db
+      .select()
+      .from(workerEmailInvoiceLineItems)
+      .where(eq(workerEmailInvoiceLineItems.id, lineItemId))
+      .limit(1);
+    if (!lineItem) return c.json({ error: "Line item not found" }, 404);
+
+    const [invoice] = await db
+      .select()
+      .from(workerEmailInvoices)
+      .where(eq(workerEmailInvoices.id, lineItem.invoiceId))
+      .limit(1);
+
+    const [material] = await db
+      .select()
+      .from(materialScheduleItems)
+      .where(eq(materialScheduleItems.id, materialId))
+      .limit(1);
+    if (!material) return c.json({ error: "Material schedule item not found" }, 404);
+
+    const [updatedLine] = await db
+      .update(workerEmailInvoiceLineItems)
+      .set({
+        materialScheduleItemId: materialId,
+        matchStatus: "matched",
+        updatedAt: new Date(),
+      })
+      .where(eq(workerEmailInvoiceLineItems.id, lineItemId))
+      .returning();
+
+    await db
+      .update(materialScheduleItems)
+      .set({
+        isPurchased: true,
+        notes: appendNote(material.notes, buildPurchaseNote(invoice, lineItem)),
+        updatedAt: new Date(),
+      })
+      .where(eq(materialScheduleItems.id, materialId));
+
+    return c.json({ lineItem: updatedLine, materialId });
+  },
+);
+
+/** Create a new material schedule item from a line item, then link it. */
+workerEmailsRouter.post(
+  "/:id/invoices/:invoiceId/line-items/:lineItemId/create-material",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const lineItemId = parseInt(c.req.param("lineItemId"));
+    const body = await c.req.json().catch(() => ({}));
+
+    const [lineItem] = await db
+      .select()
+      .from(workerEmailInvoiceLineItems)
+      .where(eq(workerEmailInvoiceLineItems.id, lineItemId))
+      .limit(1);
+    if (!lineItem) return c.json({ error: "Line item not found" }, 404);
+
+    const [invoice] = await db
+      .select()
+      .from(workerEmailInvoices)
+      .where(eq(workerEmailInvoices.id, lineItem.invoiceId))
+      .limit(1);
+
+    const title = String(body.title || lineItem.description || "Untitled material").slice(0, 200);
+
+    const [material] = await db
+      .insert(materialScheduleItems)
+      .values({
+        title,
+        roomName: body.roomName || null,
+        isPurchased: true,
+        notes: buildPurchaseNote(invoice, lineItem),
+      })
+      .returning();
+
+    const [updatedLine] = await db
+      .update(workerEmailInvoiceLineItems)
+      .set({
+        materialScheduleItemId: material.id,
+        matchStatus: "created",
+        updatedAt: new Date(),
+      })
+      .where(eq(workerEmailInvoiceLineItems.id, lineItemId))
+      .returning();
+
+    return c.json({ lineItem: updatedLine, material });
+  },
+);
+
+/** Skip a line item (not a trackable material). */
+workerEmailsRouter.post(
+  "/:id/invoices/:invoiceId/line-items/:lineItemId/skip",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const lineItemId = parseInt(c.req.param("lineItemId"));
+
+    const [updatedLine] = await db
+      .update(workerEmailInvoiceLineItems)
+      .set({ matchStatus: "skipped", updatedAt: new Date() })
+      .where(eq(workerEmailInvoiceLineItems.id, lineItemId))
+      .returning();
+    if (!updatedLine) return c.json({ error: "Line item not found" }, 404);
+
+    return c.json({ lineItem: updatedLine });
+  },
+);
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Contracts (HITL)

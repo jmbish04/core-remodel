@@ -23,6 +23,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { workerEmails } from "@backend/db/schema/emails/worker_emails";
 import { workerEmailAttachments } from "@backend/db/schema/emails/worker_email_attachments";
 import { workerEmailInvoices } from "@backend/db/schema/emails/worker_email_invoices";
+import { workerEmailInvoiceLineItems } from "@backend/db/schema/emails/worker_email_invoice_line_items";
 import { workerEmailContracts } from "@backend/db/schema/emails/worker_email_contracts";
 import { workerEmailStagedCompanies } from "@backend/db/schema/emails/worker_email_staged_companies";
 import { companies } from "@backend/db/schema/directory/companies";
@@ -500,24 +501,51 @@ export async function processEmail(args: ProcessEmailArgs): Promise<void> {
     .set(updatePayload)
     .where(eq(workerEmails.id, insertedEmail.id));
 
-  // ── Downstream: invoice extraction ───────────────────────────────────────
-  if (effectiveClassification === "invoice" && analysis.invoiceData) {
+  // ── Downstream: invoice / receipt extraction + line-item staging ─────────
+  // Both invoices (bills to pay) and receipts (completed purchases) carry line
+  // items a reviewer links to the materials schedule. We persist the header AND
+  // materialize each line item as an `unmatched` row so the HITL inbox can
+  // link / create / skip it against `material_schedule_items`.
+  if (
+    (effectiveClassification === "invoice" ||
+      effectiveClassification === "receipt") &&
+    analysis.invoiceData
+  ) {
     const inv = analysis.invoiceData;
-    await db.insert(workerEmailInvoices).values({
-      emailId: insertedEmail.id,
-      attachmentId: attachmentRecords[0]?.id || null,
-      vendorName: inv.vendorName,
-      invoiceNumber: inv.invoiceNumber,
-      invoiceDate: inv.invoiceDate,
-      dueDate: inv.dueDate,
-      subtotal: inv.subtotal,
-      tax: inv.tax,
-      total: inv.total,
-      lineItemsJson: JSON.stringify(inv.lineItems || []),
-      extractedRawJson: JSON.stringify(analysis),
-      confidence: analysis.classificationConfidence,
-      status: "draft",
-    });
+    const [insertedInvoice] = await db
+      .insert(workerEmailInvoices)
+      .values({
+        emailId: insertedEmail.id,
+        attachmentId: attachmentRecords[0]?.id || null,
+        kind: effectiveClassification === "receipt" ? "receipt" : "invoice",
+        vendorName: inv.vendorName,
+        invoiceNumber: inv.invoiceNumber,
+        invoiceDate: inv.invoiceDate,
+        dueDate: inv.dueDate,
+        subtotal: inv.subtotal,
+        tax: inv.tax,
+        total: inv.total,
+        lineItemsJson: JSON.stringify(inv.lineItems || []),
+        extractedRawJson: JSON.stringify(analysis),
+        confidence: analysis.classificationConfidence,
+        status: "draft",
+      })
+      .returning();
+
+    // Stage each extracted line item as an unmatched row pending a material link.
+    const lineItems = inv.lineItems || [];
+    if (insertedInvoice && lineItems.length > 0) {
+      await db.insert(workerEmailInvoiceLineItems).values(
+        lineItems.map((li) => ({
+          invoiceId: insertedInvoice.id,
+          description: li.description ?? null,
+          quantity: typeof li.qty === "number" ? li.qty : null,
+          unitPrice: typeof li.unitPrice === "number" ? li.unitPrice : null,
+          lineTotal: typeof li.total === "number" ? li.total : null,
+          matchStatus: "unmatched",
+        })),
+      );
+    }
 
     await db
       .update(workerEmails)
