@@ -27,6 +27,7 @@ interface CompanyGmailPanelProps {
 
 export function CompanyGmailPanel({ companyId, companyName }: CompanyGmailPanelProps) {
   const [domains, setDomains] = useState<string[]>([]);
+  const [emails, setEmails] = useState<string[]>([]);
   const [threads, setThreads] = useState<GmailInboxThreadItem[]>([]);
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -44,6 +45,7 @@ export function CompanyGmailPanel({ companyId, companyName }: CompanyGmailPanelP
       .then((data) => {
         if (!active) return;
         setDomains(data.domains);
+        setEmails(data.emails);
         setThreads(data.threads);
         // Reset selection if it no longer exists in the fresh list.
         setSelectedThreadId((prev) =>
@@ -73,12 +75,17 @@ export function CompanyGmailPanel({ companyId, companyName }: CompanyGmailPanelP
     <div className="space-y-4">
       {/* Domain chips */}
       <div className="flex flex-wrap items-center gap-2">
-        {domains.length > 0 ? (
+        {domains.length > 0 || emails.length > 0 ? (
           <>
             <span className="text-xs text-muted-foreground">Matching</span>
             {domains.map((d) => (
-              <Badge key={d} variant="secondary" className="gap-1 text-[11px]">
+              <Badge key={`d-${d}`} variant="secondary" className="gap-1 text-[11px]">
                 <Building2 className="size-3" />@{d}
+              </Badge>
+            ))}
+            {emails.map((e) => (
+              <Badge key={`e-${e}`} variant="secondary" className="gap-1 text-[11px]">
+                <Mail className="size-3" />{e}
               </Badge>
             ))}
           </>
@@ -86,8 +93,8 @@ export function CompanyGmailPanel({ companyId, companyName }: CompanyGmailPanelP
           !loading &&
           !error && (
             <span className="text-xs text-muted-foreground">
-              No private email domains derived for this company yet — showing any
-              threads tagged to it.
+              No contact emails derived for this company yet — showing any threads
+              tagged to it.
             </span>
           )
         )}

@@ -72,7 +72,10 @@ export interface ListInboxResponse {
 
 export interface ThreadsByDomainResponse {
   success: true;
+  /** Matched PRIVATE domains (e.g. "company1.com") — shown as `@domain` chips. */
   domains: string[];
+  /** Matched exact addresses for public-provider contacts (e.g. "joe@gmail.com"). */
+  emails: string[];
   threads: GmailInboxThreadItem[];
 }
 

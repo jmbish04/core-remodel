@@ -29,6 +29,7 @@ import {
 
 import { getGmailAccessToken } from "./auth";
 import { extractMessage, getMessage, searchMessages } from "./client";
+import { PUBLIC_EMAIL_DOMAINS, buildParticipantRows, insertParticipants } from "./participants";
 
 /** D1's hard limit on bound parameters per statement (see documents/db-helpers.ts). */
 const D1_MAX_BOUND_PARAMS = 100;
@@ -45,38 +46,6 @@ export interface IngestCompanyEmailsResult {
   threads: number;
   messages: number;
 }
-
-/**
- * Public/consumer email providers — NEVER used for a domain-wide search, even
- * when every contact for a company happens to share one. Domain-wide search
- * (`from:@domain OR to:@domain`) is only safe for a company's own private
- * domain; if that "shared domain" were e.g. `gmail.com`, the query would
- * match — and ingest — every email in the user's ENTIRE mailbox to/from any
- * Gmail address, leaking unrelated private correspondence into this
- * company's thread history. When the shared domain is public we always fall
- * back to exact-address OR clauses instead.
- */
-const PUBLIC_EMAIL_DOMAINS = new Set([
-  "gmail.com",
-  "googlemail.com",
-  "yahoo.com",
-  "hotmail.com",
-  "outlook.com",
-  "live.com",
-  "msn.com",
-  "icloud.com",
-  "me.com",
-  "aol.com",
-  "mail.com",
-  "zoho.com",
-  "protonmail.com",
-  "proton.me",
-  "gmx.com",
-  "yandex.com",
-  "comcast.net",
-  "att.net",
-  "verizon.net",
-]);
 
 /**
  * Build the Gmail search query for a company's contact email addresses.
@@ -325,6 +294,12 @@ export async function ingestCompanyEmails(env: Env): Promise<IngestCompanyEmails
     const messageStatements: BatchItem<"sqlite">[] = [];
     const toEmbed: { ragUuid: string; messageId: string; nativeThreadId: string; body: string }[] =
       [];
+    const toParticipants: {
+      messageId: string;
+      nativeThreadId: string;
+      from: string;
+      toRecipients: string[];
+    }[] = [];
 
     for (const { messageId, full } of fetched) {
       const extracted = extractMessage(full);
@@ -399,6 +374,12 @@ export async function ingestCompanyEmails(env: Env): Promise<IngestCompanyEmails
       );
       messagesIngested++;
       toEmbed.push({ ragUuid, messageId, nativeThreadId, body: extracted.body });
+      toParticipants.push({
+        messageId,
+        nativeThreadId,
+        from: extracted.from,
+        toRecipients: [...extracted.to, ...extracted.cc],
+      });
     }
 
     try {
@@ -410,6 +391,48 @@ export async function ingestCompanyEmails(env: Env): Promise<IngestCompanyEmails
 
     for (const item of toEmbed) {
       await embedMessage(env, item.ragUuid, item.messageId, item.nativeThreadId, item.body);
+    }
+
+    // Populate gmail_message_participants for every message just written
+    // (whether the .onConflictDoNothing() insert was new or a no-op because
+    // the message already existed — either way, look up the DB `id` by the
+    // Gmail-native messageId, which is unique-indexed, and derive participant
+    // rows. Resilient by design: a failure here must never break ingestion
+    // itself, since these rows are a derived matching index, not primary
+    // data. If a message somehow can't be found post-batch (shouldn't
+    // happen — the batch either inserted it or it already existed), it's
+    // silently skipped; the `/backfill-participants` endpoint sweeps up any
+    // gaps.
+    try {
+      const gmailMessageIds = toParticipants.map((p) => p.messageId);
+      const idByMessageId = new Map<string, number>();
+      for (let i = 0; i < gmailMessageIds.length; i += D1_MAX_BOUND_PARAMS) {
+        const idsChunk = gmailMessageIds.slice(i, i + D1_MAX_BOUND_PARAMS);
+        const rows = await db
+          .select({ id: gmailMessages.id, messageId: gmailMessages.messageId })
+          .from(gmailMessages)
+          .where(inArray(gmailMessages.messageId, idsChunk))
+          .all();
+        for (const row of rows) idByMessageId.set(row.messageId, row.id);
+      }
+
+      const participantRows = toParticipants.flatMap((item) => {
+        const dbId = idByMessageId.get(item.messageId);
+        if (dbId === undefined) return [];
+        return buildParticipantRows({
+          messageId: dbId,
+          threadId: item.nativeThreadId,
+          from: item.from,
+          toRecipients: item.toRecipients,
+        });
+      });
+
+      await insertParticipants(db, participantRows);
+    } catch (err) {
+      console.error(
+        `[gmail/ingestion] participant indexing failed for company ${companyId}:`,
+        err,
+      );
     }
   }
 
