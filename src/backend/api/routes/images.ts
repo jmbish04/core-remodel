@@ -119,6 +119,7 @@ Rules:
           },
         ],
         max_tokens: 32,
+        gateway: { id: env.AI_GATEWAY_ID },
       } as Parameters<typeof env.AI.run>[1],
     );
 

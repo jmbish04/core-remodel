@@ -37,7 +37,9 @@ export async function embedAndUpsertChunks(
     // Generate embeddings via Workers AI — strict env.AI.run() pattern
     const embeddingResult = (await env.AI.run(
       "@cf/baai/bge-large-en-v1.5",
-      { text: batch },
+      { text: batch, gateway: { id: env.AI_GATEWAY_ID } } as Parameters<
+        typeof env.AI.run
+      >[1],
     )) as { data: number[][] };
 
     // Build Vectorize vectors with metadata

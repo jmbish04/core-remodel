@@ -342,7 +342,8 @@ export async function generateRoomSummary(
       },
     ],
     max_tokens: 1400,
-  })) as { response?: string };
+    gateway: { id: env.AI_GATEWAY_ID },
+  } as Parameters<typeof env.AI.run>[1])) as { response?: string };
 
   const structured = extractStructuredSummary(response.response || "", input);
   return {

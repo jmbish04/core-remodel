@@ -96,6 +96,7 @@ export * from "./bid-portfolios/bid_portfolio_comments";
 export * from "./bid-portfolios/bid_portfolio_chat_messages";
 export * from "./bid-portfolios/bid_portfolio_selected_photos";
 export * from "./system/google-maps-usage";
+export * from "./system/gemini-usage";
 
 export * from "./dialer/prospects";
 export * from "./dialer/state";

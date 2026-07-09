@@ -85,6 +85,7 @@ Rules:
         { role: "user", content: userPrompt },
       ],
       max_tokens: MAX_TOKENS,
+      gateway: { id: env.AI_GATEWAY_ID },
     } as Parameters<typeof env.AI.run>[1]);
 
     const improved = extractResponse(raw);
@@ -142,6 +143,7 @@ Write a brief summary of how this document applies to the ${room.roomName}.`;
         { role: "user", content: userPrompt },
       ],
       max_tokens: MAX_TOKENS,
+      gateway: { id: env.AI_GATEWAY_ID },
     } as Parameters<typeof env.AI.run>[1]);
 
     return extractResponse(raw);
@@ -191,6 +193,7 @@ Summarize these options in plain language for a homeowner.`;
         { role: "user", content: userPrompt },
       ],
       max_tokens: MAX_TOKENS,
+      gateway: { id: env.AI_GATEWAY_ID },
     } as Parameters<typeof env.AI.run>[1]);
 
     return extractResponse(raw);

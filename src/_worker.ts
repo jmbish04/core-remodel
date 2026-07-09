@@ -182,10 +182,11 @@ const legacyHandler: ExportedHandler<Env> = {
     return astroHandler.fetch!(request, env, ctx);
   },
   async email(message, env, ctx) {
-    // Import dynamically or statically. Since we want to keep _worker.ts clean, we'll statically import.
-    // However, I need to add the static import at the top of the file as well.
-    // Let's do that with multi_replace_file_content if I need to. But I can also just do dynamic import here for safety.
-    const { handleInboundEmail } = await import("./backend/services/email/email-handler");
+    // Inbound email → routing layer. The router applies auto-reply/loop
+    // protection, resolves the recipient address to a route (invoices /
+    // contracts / catch-all), rejects unknown recipients, and dispatches to
+    // the background processing pipeline. See src/backend/services/email/.
+    const { handleInboundEmail } = await import("./backend/services/email");
     await handleInboundEmail(message, env, ctx);
   },
   async scheduled(event, env, ctx) {

@@ -632,7 +632,8 @@ truthTableRouter.openapi(
 
         const result = (await c.env.AI.run("@cf/baai/bge-large-en-v1.5", {
           text: [text],
-        })) as { data: number[][] };
+          gateway: { id: c.env.AI_GATEWAY_ID },
+        } as Parameters<typeof c.env.AI.run>[1])) as { data: number[][] };
         const vector = result.data?.[0];
         if (!vector) {
           skipped++;
