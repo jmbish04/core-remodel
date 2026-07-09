@@ -29,6 +29,7 @@
 - `src/backend/db/schema/showroom/price_observations.ts` — `productPriceObservations` table
 - `src/backend/db/schema/showroom/product_photos.ts` — `productShowroomPhotos` table (ragUuid-keyed)
 - `src/backend/lib/normalize-model.ts` — `normalizeModelKey()` pure helper
+- `src/backend/lib/money.ts` — `parsePriceCents()` / `parseDiscountPct()` pure helpers
 - `src/backend/mcp/tools/price_observations.ts` — `record_price_observation`, `list_price_observations` tools
 - `scripts/tests/test_global_products.mjs` — node smoke script
 - Data migrations (via `--custom`): backfill, dedup, drop-storeId gate
@@ -43,16 +44,19 @@
 
 ---
 
-## Task 1: `normalizeModelKey()` helper
+## Task 1: Pure helpers — `normalizeModelKey()`, `parsePriceCents()`, `parseDiscountPct()`
 
 **Files:**
 - Create: `src/backend/lib/normalize-model.ts`
+- Create: `src/backend/lib/money.ts`
 - Test: `scripts/tests/test_global_products.mjs` (created here, extended later)
 
 **Interfaces:**
-- Produces: `normalizeModelKey(input: string | null | undefined): string | null` — uppercases and strips everything except `[A-Z0-9]`; returns `null` for empty/whitespace-only/null.
+- Produces: `normalizeModelKey(input): string | null` — uppercases and strips everything except `[A-Z0-9]`; `null` for empty/null.
+- Produces: `parsePriceCents(input): number | null` — free-text money → integer cents (×100, rounded); `null` when no number present ("call for pricing").
+- Produces: `parseDiscountPct(input): number | null` — free-text discount → percent as a real number (0–100 typical); `null` when no number present.
 
-- [ ] **Step 1: Write the helper**
+- [ ] **Step 1: Write the model-key helper**
 
 ```ts
 // src/backend/lib/normalize-model.ts
@@ -71,39 +75,85 @@ export function normalizeModelKey(
 }
 ```
 
-- [ ] **Step 2: Write a node smoke script that exercises it**
+- [ ] **Step 2: Write the money helpers**
+
+```ts
+// src/backend/lib/money.ts
+/**
+ * Parse a free-text price ("$1,299.00", "1,299", "1299") to INTEGER CENTS, or
+ * null when there is no parseable number ("call for pricing"). Keeps only digits
+ * and the decimal point, then ×100 rounded. Best-effort and HITL-correctable.
+ */
+export function parsePriceCents(
+  input: string | null | undefined
+): number | null {
+  if (input == null) return null;
+  const cleaned = String(input).replace(/[^0-9.]/g, "");
+  if (cleaned === "" || cleaned === ".") return null;
+  const dollars = Number.parseFloat(cleaned);
+  if (!Number.isFinite(dollars)) return null;
+  return Math.round(dollars * 100);
+}
+
+/**
+ * Parse a free-text discount ("15%", "15", "15% off") to a percent as a real
+ * number, or null when no number is present. Best-effort; a dollars-off markdown
+ * won't yield a meaningful percent — leave the text and null the numeric.
+ */
+export function parseDiscountPct(
+  input: string | null | undefined
+): number | null {
+  if (input == null) return null;
+  const cleaned = String(input).replace(/[^0-9.]/g, "");
+  if (cleaned === "" || cleaned === ".") return null;
+  const pct = Number.parseFloat(cleaned);
+  return Number.isFinite(pct) ? pct : null;
+}
+```
+
+- [ ] **Step 3: Write a node smoke script that exercises all three**
 
 ```js
 // scripts/tests/test_global_products.mjs
 // Run: node scripts/tests/test_global_products.mjs
 import assert from "node:assert";
 import { normalizeModelKey } from "../../src/backend/lib/normalize-model.js";
+import { parsePriceCents, parseDiscountPct } from "../../src/backend/lib/money.js";
 
 // --- Task 1: normalizeModelKey ---
 assert.equal(normalizeModelKey("MS 604-01"), "MS60401");
 assert.equal(normalizeModelKey("ms604"), "MS604");
 assert.equal(normalizeModelKey("  "), null);
 assert.equal(normalizeModelKey(null), null);
-assert.equal(normalizeModelKey(undefined), null);
 assert.equal(normalizeModelKey("#$%"), null);
-console.log("OK: normalizeModelKey");
+// --- Task 1: parsePriceCents ---
+assert.equal(parsePriceCents("$1,299.00"), 129900);
+assert.equal(parsePriceCents("1299"), 129900);
+assert.equal(parsePriceCents("$12.99"), 1299);
+assert.equal(parsePriceCents("call for pricing"), null);
+assert.equal(parsePriceCents(null), null);
+// --- Task 1: parseDiscountPct ---
+assert.equal(parseDiscountPct("15%"), 15);
+assert.equal(parseDiscountPct("15% off"), 15);
+assert.equal(parseDiscountPct("none"), null);
+console.log("OK: helpers (normalizeModelKey, parsePriceCents, parseDiscountPct)");
 ```
 
-- [ ] **Step 3: Run it**
+- [ ] **Step 4: Run it**
 
-Run: `node --experimental-strip-types scripts/tests/test_global_products.mjs` (or compile via `npx tsx scripts/tests/test_global_products.mjs` if `tsx` is available)
-Expected: `OK: normalizeModelKey`
-> If neither `--experimental-strip-types` nor `tsx` resolves the `.ts` import, change the script to import from the built output, or inline-copy the function into the test — the assertion values are the contract.
+Run: `node --experimental-strip-types scripts/tests/test_global_products.mjs` (or `npx tsx scripts/tests/test_global_products.mjs` if `tsx` is available)
+Expected: `OK: helpers (normalizeModelKey, parsePriceCents, parseDiscountPct)`
+> If neither resolves the `.ts` import, import from built output or inline-copy the functions — the assertion values are the contract.
 
-- [ ] **Step 4: Type-check**
+- [ ] **Step 5: Type-check**
 
-Run: `npx tsc --noEmit 2>&1 | grep normalize-model` — Expected: no output (no errors).
+Run: `npx tsc --noEmit 2>&1 | grep -E "normalize-model|lib/money"` — Expected: no output.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/backend/lib/normalize-model.ts scripts/tests/test_global_products.mjs
-git commit -m "feat(0020): normalizeModelKey helper for product dedup key"
+git add src/backend/lib/normalize-model.ts src/backend/lib/money.ts scripts/tests/test_global_products.mjs
+git commit -m "feat(0020): model-key + money/discount parse helpers"
 ```
 
 ---
@@ -122,7 +172,7 @@ git commit -m "feat(0020): normalizeModelKey helper for product dedup key"
 ```ts
 // src/backend/db/schema/showroom/price_observations.ts
 import { sql } from "drizzle-orm";
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, index } from "drizzle-orm/sqlite-core";
 
 // Direct leaf imports — avoid circular refs through the showroom barrel.
 import { showroomStoreProducts } from "./store_products";
@@ -158,10 +208,15 @@ export const productPriceObservations = sqliteTable(
     retailerName: text("retailer_name"),
     retailerUrl: text("retailer_url"),
 
-    /** Free-text TEXT prices ("$1,299", "call for pricing"). */
+    /** Free-text display prices ("$1,299", "call for pricing"). */
     price: text("price"),
     salePrice: text("sale_price"),
     discountInfo: text("discount_info"),
+
+    /** Numeric comparison pairs (derived from the text via money helpers). */
+    priceCents: integer("price_cents"),
+    salePriceCents: integer("sale_price_cents"),
+    discountPct: real("discount_pct"),
 
     condition: text("condition", {
       enum: ["new", "floor_model", "clearance", "as_is"] as const,
@@ -381,13 +436,13 @@ git commit -m "feat(0020): product_showroom_photos (ragUuid<->Vectorize) + link 
 
 ---
 
-## Task 4: Add `modelNumber`, `modelKey`, `msrp` to the product (additive, non-destructive)
+## Task 4: Add `modelNumber`, `modelKey`, `msrp`, `msrpCents` to the product (additive, non-destructive)
 
 **Files:**
 - Modify: `src/backend/db/schema/showroom/store_products.ts`
 
 **Interfaces:**
-- Produces: three new nullable columns on `showroomStoreProducts`: `modelNumber` (text), `modelKey` (text), `msrp` (text). `storeId` is UNTOUCHED in this task.
+- Produces: four new nullable columns on `showroomStoreProducts`: `modelNumber` (text), `modelKey` (text), `msrp` (text), `msrpCents` (integer cents). `storeId` is UNTOUCHED in this task.
 
 - [ ] **Step 1: Add the columns**
 
@@ -404,8 +459,9 @@ In `src/backend/db/schema/showroom/store_products.ts`, inside the `sqliteTable(.
    */
   modelKey: text("model_key"),
 
-  /** Manufacturer core / list price (MSRP). Free-text TEXT. Nullable. */
+  /** Manufacturer core / list price (MSRP) — text + numeric pair. Nullable. */
   msrp: text("msrp"),
+  msrpCents: integer("msrp_cents"),
 ```
 
 - [ ] **Step 2: Generate + apply**
@@ -477,6 +533,17 @@ SELECT p.id, 'showroom', p.store_id, p.price,
        unixepoch(), unixepoch()
 FROM showroom_store_products p
 WHERE p.price IS NOT NULL AND trim(p.price) <> '';
+--> statement-breakpoint
+-- Derive numeric price_cents from the copied text price (strip $ , spaces; ×100).
+-- Only for rows that look numeric (contain a digit, no letters) so "call for
+-- pricing" stays text with a NULL numeric.
+UPDATE product_price_observations
+SET price_cents = CAST(round(
+  CAST(replace(replace(replace(price,'$',''),',',''),' ','') AS REAL) * 100
+) AS INTEGER)
+WHERE price IS NOT NULL
+  AND price GLOB '*[0-9]*'
+  AND price NOT GLOB '*[A-Za-z]*';
 ```
 
 > Note: the app-side `normalizeModelKey` also strips `[^A-Z0-9]` beyond these five separators. The SQL covers the separators that actually appear in this data; any residue is corrected when a product is next written through the MCP tool (Task 7 recomputes on write). This is acceptable because dedup (Task 6) runs AFTER and any stragglers surface in the HITL merge queue.
@@ -745,12 +812,13 @@ git commit -m "feat(0020): drop storeId from products — product is fully globa
 
 - [ ] **Step 1: Update imports + `productDto`**
 
-Add to the imports: `import { normalizeModelKey } from "@backend/lib/normalize-model";` and add `productPriceObservations, productShowroomPhotos` to the `@backend/db` import. In `productDto`, remove the `storeId: p.storeId,` line and add:
+Add imports: `import { normalizeModelKey } from "@backend/lib/normalize-model";` and `import { parsePriceCents } from "@backend/lib/money";`. Add `productPriceObservations, productShowroomPhotos` to the `@backend/db` import. In `productDto`, remove the `storeId: p.storeId,` line and add:
 
 ```ts
     modelNumber: p.modelNumber,
     modelKey: p.modelKey,
     msrp: p.msrp,
+    msrpCents: p.msrpCents,
 ```
 
 - [ ] **Step 2: `create_product` — drop the storeId requirement, add fields**
@@ -760,9 +828,17 @@ In the `create_product` `inputShape`, remove `storeId` from required, delete the
 ```ts
       modelNumber: z.string().optional().describe("Manufacturer model number/name"),
       msrp: z.string().optional().describe("Manufacturer core/list price (MSRP), free text"),
+      msrpCents: z.number().int().optional().describe("MSRP in integer cents (else derived from msrp text)"),
 ```
 
-In the handler, before insert, compute `const modelKey = normalizeModelKey(input.modelNumber);` and include `modelNumber: input.modelNumber, modelKey, msrp: input.msrp` in the insert. Remove `storeId` from the insert object.
+In the handler, before insert, compute:
+
+```ts
+const modelKey = normalizeModelKey(input.modelNumber);
+const msrpCents = input.msrpCents ?? parsePriceCents(input.msrp);
+```
+
+and include `modelNumber: input.modelNumber, modelKey, msrp: input.msrp, msrpCents` in the insert. Remove `storeId` from the insert object.
 
 - [ ] **Step 3: `ensure_product` — dedup on (brandId, modelKey) first**
 
@@ -822,7 +898,15 @@ Append to `scripts/tests/test_global_products.mjs` a check that a product can be
 // --- Task 9: storeId column removed ---
 const cols = d1("PRAGMA table_info(showroom_store_products)").map((r) => r.name);
 assert.ok(!cols.includes("store_id"), "store_id column must be dropped");
-assert.ok(cols.includes("model_key") && cols.includes("msrp"), "new columns present");
+assert.ok(
+  ["model_key", "msrp", "msrp_cents"].every((c) => cols.includes(c)),
+  "new columns present"
+);
+const obsCols = d1("PRAGMA table_info(product_price_observations)").map((r) => r.name);
+assert.ok(
+  ["price_cents", "sale_price_cents", "discount_pct"].every((c) => obsCols.includes(c)),
+  "observation numeric columns present"
+);
 console.log("OK: product schema shape");
 ```
 
@@ -858,6 +942,7 @@ import {
 import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
+import { parsePriceCents, parseDiscountPct } from "@backend/lib/money";
 import { toolError } from "../format";
 import { defineTool, READ_ONLY, WRITE, type RemodelTool } from "../types";
 
@@ -878,6 +963,10 @@ export const priceObservationTools: RemodelTool[] = [
       price: z.string().optional(),
       salePrice: z.string().optional(),
       discountInfo: z.string().optional(),
+      // Explicit numeric overrides; when omitted they are derived from the text.
+      priceCents: z.number().int().optional(),
+      salePriceCents: z.number().int().optional(),
+      discountPct: z.number().optional(),
       condition: z.enum(["new", "floor_model", "clearance", "as_is"]).optional(),
       leadTime: z.string().optional(),
       notes: z.string().optional(),
@@ -894,6 +983,11 @@ export const priceObservationTools: RemodelTool[] = [
       if (input.sourceType === "showroom" && input.showroomId == null) {
         toolError("showroomId is required when sourceType='showroom'.");
       }
+      // Derive numeric comparison fields from the text when not given explicitly.
+      const priceCents = input.priceCents ?? parsePriceCents(input.price);
+      const salePriceCents =
+        input.salePriceCents ?? parsePriceCents(input.salePrice);
+      const discountPct = input.discountPct ?? parseDiscountPct(input.discountInfo);
       const [row] = await db
         .insert(productPriceObservations)
         .values({
@@ -905,6 +999,9 @@ export const priceObservationTools: RemodelTool[] = [
           price: input.price,
           salePrice: input.salePrice,
           discountInfo: input.discountInfo,
+          priceCents,
+          salePriceCents,
+          discountPct,
           condition: input.condition,
           leadTime: input.leadTime,
           notes: input.notes,
