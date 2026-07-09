@@ -34,7 +34,9 @@ export type ToolCategory =
   | "workflow"
   | "render"
   | "measurements"
-  | "research";
+  | "research"
+  | "ops"
+  | "artifacts";
 
 /**
  * Identity + authorization context resolved by whichever transport invoked the

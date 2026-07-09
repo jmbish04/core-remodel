@@ -1,0 +1,29 @@
+---
+/**
+ * @fileoverview 0017 — MCP Ops admin page.
+ *
+ * Thin Astro shell (matching `admin/config.astro`) that mounts the
+ * `<McpOpsApp />` React island. The island renders KPI cards + a 4-tab
+ * observability view (sessions/transcripts, conversations, bugs, features)
+ * over the admin-gated `/api/mcp-ops/*` JSON endpoints.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { McpOpsApp } from "@/components/McpOpsApp";
+---
+
+<BaseLayout
+  title="MCP Ops - 126 Colby - Remodel Mission Control"
+  description="Operational observability for the MCP server: sessions, transcripts, conversations, bugs, and feature requests."
+>
+  <main className="container mx-auto px-4 py-8 pb-12">
+    <div className="mb-8">
+      <h1 className="mb-2 text-3xl font-bold">MCP Ops</h1>
+      <p className="text-muted-foreground">
+        Live observability for the Model Context Protocol server — session
+        transcripts, saved conversations, bug reports, and feature requests.
+      </p>
+    </div>
+
+    <McpOpsApp client:only="react" />
+  </main>
+</BaseLayout>

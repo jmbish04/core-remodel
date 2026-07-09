@@ -1,0 +1,28 @@
+---
+/**
+ * @fileoverview 0016 — Artifact Studio gallery page.
+ *
+ * Thin Astro shell mounting the `<StudioGalleryApp />` island, which lists the
+ * chat-built TSX mini-apps stored on the Worker (created via MCP tools, not the
+ * UI). Each card links to `/admin/studio/<slug>`.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { StudioGalleryApp } from "@/components/StudioGalleryApp";
+---
+
+<BaseLayout
+  title="Artifact Studio - 126 Colby - Remodel Mission Control"
+  description="Gallery of chat-built TSX artifacts — reports, apps, and dashboards rendered live on the Worker."
+>
+  <main className="container mx-auto px-4 py-8 pb-12">
+    <div className="mb-8">
+      <h1 className="mb-2 text-3xl font-bold">Artifact Studio</h1>
+      <p className="text-muted-foreground">
+        Chat-built mini-apps — reports, apps, and dashboards — rendered live in
+        a sandboxed runtime on the Monolith theme.
+      </p>
+    </div>
+
+    <StudioGalleryApp client:only="react" />
+  </main>
+</BaseLayout>
