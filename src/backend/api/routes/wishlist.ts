@@ -59,26 +59,18 @@ async function resolveProductThumbnail(
   db: ReturnType<typeof drizzle>,
   storeProductId: number,
 ): Promise<string | null> {
-  const [approved] = await db
-    .select({ deliveryUrl: productImages.deliveryUrl })
-    .from(productImages)
-    .where(
-      and(
-        eq(productImages.storeProductId, storeProductId),
-        eq(productImages.reviewStatus, "approved"),
-      ),
-    )
-    .orderBy(productImages.id)
-    .limit(1);
-  if (approved) return approved.deliveryUrl;
-
-  const [any] = await db
+  // Single query: prefer an approved image, else the earliest-added of any
+  // status — the CASE sorts approved first, then insertion order breaks ties.
+  const [img] = await db
     .select({ deliveryUrl: productImages.deliveryUrl })
     .from(productImages)
     .where(eq(productImages.storeProductId, storeProductId))
-    .orderBy(productImages.id)
+    .orderBy(
+      sql`CASE WHEN ${productImages.reviewStatus} = 'approved' THEN 0 ELSE 1 END`,
+      productImages.id,
+    )
     .limit(1);
-  return any?.deliveryUrl ?? null;
+  return img?.deliveryUrl ?? null;
 }
 
 /** Look up a room's display name (or null). */
@@ -195,9 +187,12 @@ wishlistRouter.get("/", async (c) => {
   }
   if (status) conditions.push(eq(wishlistItems.status, status));
 
+  // leftJoin rooms so roomName comes back in the same query (no separate
+  // all-rooms fetch + in-memory map).
   let query = db
-    .select()
+    .select({ item: wishlistItems, roomName: rooms.roomName })
     .from(wishlistItems)
+    .leftJoin(rooms, eq(wishlistItems.roomId, rooms.id))
     .orderBy(
       sql`CASE WHEN ${wishlistItems.priority} IS NULL THEN 1 ELSE 0 END`,
       wishlistItems.priority,
@@ -211,24 +206,12 @@ wishlistRouter.get("/", async (c) => {
 
   if (itemIdsInCollection !== null) {
     const idSet = new Set(itemIdsInCollection);
-    rowsResult = rowsResult.filter((item) => idSet.has(item.id));
+    rowsResult = rowsResult.filter((row) => idSet.has(row.item.id));
   }
 
-  // Annotate roomName for items that have a roomId.
-  const roomIds = [...new Set(rowsResult.map((i) => i.roomId).filter((id): id is number => id != null))];
-  const roomNameById = new Map<number, string>();
-  if (roomIds.length > 0) {
-    const roomRows = await db
-      .select({ id: rooms.id, roomName: rooms.roomName })
-      .from(rooms);
-    for (const r of roomRows) {
-      if (roomIds.includes(r.id)) roomNameById.set(r.id, r.roomName);
-    }
-  }
-
-  const items = rowsResult.map((item) => ({
-    ...item,
-    roomName: item.roomId != null ? roomNameById.get(item.roomId) ?? null : null,
+  const items = rowsResult.map((row) => ({
+    ...row.item,
+    roomName: row.roomName ?? null,
   }));
 
   return c.json({ items });
@@ -525,25 +508,31 @@ wishlistRouter.post("/:id/promote-to-material", async (c) => {
 
   const roomName = await resolveRoomName(db, item.roomId);
 
-  const [material] = await db
-    .insert(materialScheduleItems)
-    .values({
-      title: item.title,
-      roomName,
-      roomId: item.roomId ?? null,
-      isPurchased: false,
-    })
-    .returning();
+  // Atomic: create the material AND flip the wishlist item to "chosen" together,
+  // so a failure can't orphan a material with the item left unlinked.
+  const { material, updatedItem } = await db.transaction(async (tx) => {
+    const [newMaterial] = await tx
+      .insert(materialScheduleItems)
+      .values({
+        title: item.title,
+        roomName,
+        roomId: item.roomId ?? null,
+        isPurchased: false,
+      })
+      .returning();
 
-  const [updatedItem] = await db
-    .update(wishlistItems)
-    .set({
-      materialScheduleItemId: material.id,
-      status: "chosen",
-      updatedAt: new Date(),
-    })
-    .where(eq(wishlistItems.id, id))
-    .returning();
+    const [updated] = await tx
+      .update(wishlistItems)
+      .set({
+        materialScheduleItemId: newMaterial.id,
+        status: "chosen",
+        updatedAt: new Date(),
+      })
+      .where(eq(wishlistItems.id, id))
+      .returning();
+
+    return { material: newMaterial, updatedItem: updated };
+  });
 
   return c.json({ material, item: updatedItem });
 });
@@ -628,13 +617,17 @@ wishlistRouter.get("/collections/:id", async (c) => {
   if (!collection) return c.json({ error: "Collection not found" }, 404);
 
   const items = await db
-    .select({ item: wishlistItems })
+    .select({ item: wishlistItems, roomName: rooms.roomName })
     .from(wishlistCollectionItems)
     .innerJoin(wishlistItems, eq(wishlistCollectionItems.wishlistItemId, wishlistItems.id))
+    .leftJoin(rooms, eq(wishlistItems.roomId, rooms.id))
     .where(eq(wishlistCollectionItems.collectionId, id))
     .orderBy(desc(wishlistCollectionItems.createdAt));
 
-  return c.json({ collection, items: items.map((row) => row.item) });
+  return c.json({
+    collection,
+    items: items.map((row) => ({ ...row.item, roomName: row.roomName ?? null })),
+  });
 });
 
 /**
