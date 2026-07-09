@@ -70,16 +70,27 @@ showroomCatalogRouter.get("/catalog/products", async (c) => {
 
   const rows = await query;
 
-  return c.json({
-    products: rows.map((r) => ({
+  // A product may be carried at multiple showrooms (many-to-many via
+  // showroom_product_mappings), producing one joined row per mapping. Collapse
+  // to a single card per product — the first matching mapping supplies the
+  // representative store/hub columns. Filters above still match a product if
+  // ANY of its mappings qualifies.
+  const seen = new Set<number>();
+  const products: Array<Record<string, unknown>> = [];
+  for (const r of rows) {
+    if (seen.has(r.product.id)) continue;
+    seen.add(r.product.id);
+    products.push({
       ...r.product,
       storeName: r.storeName,
       pricePoint: r.pricePoint,
       hubRoute: r.hubRoute,
       hubName: r.hubName,
       cityName: r.cityName,
-    })),
-  });
+    });
+  }
+
+  return c.json({ products });
 });
 
 /**
@@ -132,8 +143,10 @@ showroomCatalogRouter.get("/catalog/compare", async (c) => {
     specMatrix[key][s.storeProductId] = `${s.specValue ?? ""}${s.unit ? ` ${s.unit}` : ""}`.trim();
   }
 
-  // Preserve the caller's requested order.
-  const byId = new Map(rows.map((r) => [r.product.id, r]));
+  // Preserve the caller's requested order. A product may have multiple mapping
+  // rows; keep the first deterministically for the representative store name.
+  const byId = new Map<number, (typeof rows)[number]>();
+  for (const r of rows) if (!byId.has(r.product.id)) byId.set(r.product.id, r);
   const products = ids
     .map((id) => byId.get(id))
     .filter((r): r is NonNullable<typeof r> => r != null)
