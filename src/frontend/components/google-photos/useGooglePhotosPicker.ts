@@ -16,7 +16,7 @@
  * along (the routes are behind requireAccessAuth).
  */
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const BASE = "/api/google-photos";
 
@@ -40,7 +40,24 @@ interface ItemsResponse {
   items: Array<{ index: number; id: string; filename: string; mimeType: string }>;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** Resolve after `ms`, or early if the signal aborts. */
+const sleep = (ms: number, signal?: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(t);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+
+/** True when an error is an AbortError (component unmounted / cancelled). */
+function isAbort(err: unknown): boolean {
+  return err instanceof DOMException && err.name === "AbortError";
+}
 
 async function jsonOrThrow<T>(res: Response): Promise<T> {
   if (!res.ok) {
@@ -71,8 +88,8 @@ function openPopup(url: string, name: string, w = 560, h = 680): Window | null {
   );
 }
 
-async function fetchConnected(): Promise<boolean> {
-  const res = await fetch(`${BASE}/status`, { credentials: "include" });
+async function fetchConnected(signal?: AbortSignal): Promise<boolean> {
+  const res = await fetch(`${BASE}/status`, { credentials: "include", signal });
   const data = await jsonOrThrow<{ connected: boolean }>(res);
   return data.connected;
 }
@@ -82,8 +99,8 @@ async function fetchConnected(): Promise<boolean> {
  * Resolves early on the callback's postMessage; otherwise polls /status.
  * Rejects if the user closes the popup before connecting or on timeout (~3 min).
  */
-async function ensureConnected(): Promise<void> {
-  if (await fetchConnected()) return;
+async function ensureConnected(signal: AbortSignal): Promise<void> {
+  if (await fetchConnected(signal)) return;
 
   const popup = openPopup(`${BASE}/auth/start`, "google-photos-oauth", 520, 640);
   if (!popup) {
@@ -96,9 +113,13 @@ async function ensureConnected(): Promise<void> {
       if (settled) return;
       settled = true;
       window.removeEventListener("message", onMessage);
+      signal.removeEventListener("abort", onAbort);
       clearInterval(poll);
       fn();
     };
+
+    const onAbort = () => finish(() => reject(new DOMException("Aborted", "AbortError")));
+    signal.addEventListener("abort", onAbort);
 
     const onMessage = (event: MessageEvent) => {
       if (event.origin !== window.location.origin) return;
@@ -120,7 +141,7 @@ async function ensureConnected(): Promise<void> {
       if (inFlight) return;
       inFlight = true;
       try {
-        if (await fetchConnected()) return finish(resolve);
+        if (await fetchConnected(signal)) return finish(resolve);
       } catch {
         /* transient — keep polling */
       } finally {
@@ -144,22 +165,32 @@ async function ensureConnected(): Promise<void> {
  * backend is unaffected by COOP, so we rely purely on the session state +
  * timeout. Transient poll errors are ignored so a blip doesn't abort the wait.
  */
-async function waitForSelection(session: SessionResponse): Promise<boolean> {
+async function waitForSelection(session: SessionResponse, signal: AbortSignal): Promise<boolean> {
   // Cap the wait so a cancelled pick doesn't hang forever (no reliable
   // cross-origin "closed" signal exists).
   const deadline = Date.now() + Math.min(session.timeoutMs || 300_000, 5 * 60 * 1000);
   const interval = Math.max(1500, session.pollIntervalMs || 3000);
 
   while (Date.now() < deadline) {
-    await sleep(interval);
+    await sleep(interval, signal);
+    if (signal.aborted) return false;
     try {
       const res = await fetch(`${BASE}/sessions/${encodeURIComponent(session.sessionId)}`, {
         credentials: "include",
+        signal,
       });
-      const data = await jsonOrThrow<SessionResponse>(res);
+      if (!res.ok) {
+        // A permanent client error (expired/deleted session, logged out) will
+        // never recover — stop polling instead of spamming until the timeout.
+        if (res.status >= 400 && res.status < 500) return false;
+        // 5xx: treat as transient and keep polling.
+        continue;
+      }
+      const data = (await res.json()) as SessionResponse;
       if (data.mediaItemsSet) return true;
-    } catch {
-      /* transient network/API blip — keep polling */
+    } catch (err) {
+      if (isAbort(err)) return false;
+      /* transient network blip — keep polling */
     }
   }
   return false;
@@ -169,10 +200,11 @@ async function waitForSelection(session: SessionResponse): Promise<boolean> {
 async function downloadItem(
   sessionId: string,
   item: ItemsResponse["items"][number],
+  signal: AbortSignal,
 ): Promise<File> {
   const res = await fetch(
     `${BASE}/sessions/${encodeURIComponent(sessionId)}/items/${item.index}/bytes`,
-    { credentials: "include" },
+    { credentials: "include", signal },
   );
   if (!res.ok) throw new Error(`Failed to download ${item.filename} (${res.status})`);
   const blob = await res.blob();
@@ -200,16 +232,35 @@ export function useGooglePhotosPicker(
   const [phase, setPhase] = useState<PickerPhase>("idle");
   const running = useRef(false);
 
+  // Keep the latest callbacks in refs so `start` can stay stable (the surfaces
+  // pass inline arrows that change every render).
+  const onFilesRef = useRef(onFiles);
+  const onErrorRef = useRef(onError);
+  const onNoticeRef = useRef(onNotice);
+  useEffect(() => {
+    onFilesRef.current = onFiles;
+    onErrorRef.current = onError;
+    onNoticeRef.current = onNotice;
+  });
+
+  // Abort any in-flight polling/fetches when the component unmounts.
+  const abortRef = useRef<AbortController | null>(null);
+  useEffect(() => () => abortRef.current?.abort(), []);
+
   const start = useCallback(async () => {
     if (running.current) return;
     running.current = true;
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const { signal } = controller;
     try {
       setPhase("connecting");
-      await ensureConnected();
+      await ensureConnected(signal);
+      if (signal.aborted) return;
 
       setPhase("opening");
       const session = await jsonOrThrow<SessionResponse>(
-        await fetch(`${BASE}/sessions`, { method: "POST", credentials: "include" }),
+        await fetch(`${BASE}/sessions`, { method: "POST", credentials: "include", signal }),
       );
       const picker = openPopup(session.pickerUri, "google-photos-picker");
       if (!picker) {
@@ -217,16 +268,19 @@ export function useGooglePhotosPicker(
       }
 
       setPhase("waiting");
-      onNotice?.("Pick your photos in the Google Photos window — they'll import automatically.");
-      const picked = await waitForSelection(session);
+      onNoticeRef.current?.(
+        "Pick your photos in the Google Photos window — they'll import automatically.",
+      );
+      const picked = await waitForSelection(session, signal);
       try {
         picker.close();
       } catch {
         /* cross-origin close may throw — ignore */
       }
+      if (signal.aborted) return;
       if (!picked) {
         // Never silent: the user needs to know why nothing imported.
-        onNotice?.("No photos imported — timed out waiting for a selection. Try again.");
+        onNoticeRef.current?.("No photos imported — timed out waiting for a selection. Try again.");
         return;
       }
 
@@ -234,24 +288,30 @@ export function useGooglePhotosPicker(
       const { items } = await jsonOrThrow<ItemsResponse>(
         await fetch(`${BASE}/sessions/${encodeURIComponent(session.sessionId)}/items`, {
           credentials: "include",
+          signal,
         }),
       );
       if (items.length === 0) {
-        onNotice?.("No photos were selected.");
+        onNoticeRef.current?.("No photos were selected.");
         return;
       }
 
-      const files = await Promise.all(items.map((it) => downloadItem(session.sessionId, it)));
-      await onFiles(files);
+      const files = await Promise.all(
+        items.map((it) => downloadItem(session.sessionId, it, signal)),
+      );
+      if (signal.aborted) return;
+      await onFilesRef.current(files);
     } catch (err) {
+      if (isAbort(err) || signal.aborted) return; // unmounted / cancelled — stay quiet
       const message = err instanceof Error ? err.message : String(err);
-      if (onError) onError(message);
+      if (onErrorRef.current) onErrorRef.current(message);
       else console.error("[google-photos-picker]", message);
     } finally {
       running.current = false;
-      setPhase("idle");
+      // Skip the state update if this run was aborted by unmount.
+      if (!signal.aborted) setPhase("idle");
     }
-  }, [onFiles, onError, onNotice]);
+  }, []);
 
   return { phase, isBusy: phase !== "idle", start };
 }
