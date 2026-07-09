@@ -7,7 +7,16 @@
  */
 
 import { getAccessToken } from "./oauth";
-import { PICKER_BASE, type DownloadedBytes, type PickedItem, type PickerSession } from "./types";
+import {
+  GOOGLE_API_TIMEOUT_MS,
+  GOOGLE_DOWNLOAD_TIMEOUT_MS,
+  PICKER_BASE,
+  SESSION_ITEMS_PREFIX,
+  SESSION_ITEMS_TTL_SECONDS,
+  type DownloadedBytes,
+  type PickedItem,
+  type PickerSession,
+} from "./types";
 
 /**
  * Parse a Google protobuf duration string (e.g. "5s", "1.500s") to milliseconds.
@@ -47,6 +56,7 @@ export async function createSession(env: Env): Promise<PickerSession> {
       "Content-Type": "application/json",
     },
     body: "{}",
+    signal: AbortSignal.timeout(GOOGLE_API_TIMEOUT_MS),
   });
   if (!res.ok) {
     const detail = await res.text();
@@ -60,6 +70,7 @@ export async function getSession(env: Env, sessionId: string): Promise<PickerSes
   const accessToken = await getAccessToken(env);
   const res = await fetch(`${PICKER_BASE}/sessions/${encodeURIComponent(sessionId)}`, {
     headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(GOOGLE_API_TIMEOUT_MS),
   });
   if (!res.ok) {
     const detail = await res.text();
@@ -74,8 +85,25 @@ interface RawMediaItem {
   mediaFile?: { baseUrl?: string; mimeType?: string; filename?: string };
 }
 
-/** List all media items the user picked in a session (paginated). */
+/**
+ * List all media items the user picked in a session (paginated).
+ *
+ * The picked set is immutable once `mediaItemsSet` is true, and the download
+ * route re-resolves items per file, so the list is cached in CACHE KV per
+ * session. This eliminates a Google `mediaItems.list` round-trip on every
+ * single byte download (avoiding rate limits and latency).
+ */
 export async function listMediaItems(env: Env, sessionId: string): Promise<PickedItem[]> {
+  const cacheKey = `${SESSION_ITEMS_PREFIX}${sessionId}`;
+  const cached = await env.CACHE.get(cacheKey);
+  if (cached) {
+    try {
+      return JSON.parse(cached) as PickedItem[];
+    } catch {
+      // Corrupted cache — fall through and re-fetch.
+    }
+  }
+
   const accessToken = await getAccessToken(env);
   const items: PickedItem[] = [];
   let pageToken: string | undefined;
@@ -86,6 +114,7 @@ export async function listMediaItems(env: Env, sessionId: string): Promise<Picke
 
     const res = await fetch(`${PICKER_BASE}/mediaItems?${params.toString()}`, {
       headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(GOOGLE_API_TIMEOUT_MS),
     });
     if (!res.ok) {
       const detail = await res.text();
@@ -109,6 +138,10 @@ export async function listMediaItems(env: Env, sessionId: string): Promise<Picke
     pageToken = data.nextPageToken;
   } while (pageToken);
 
+  await env.CACHE.put(cacheKey, JSON.stringify(items), {
+    expirationTtl: SESSION_ITEMS_TTL_SECONDS,
+  });
+
   return items;
 }
 
@@ -122,6 +155,7 @@ export async function downloadItemBytes(env: Env, baseUrl: string): Promise<Down
   const accessToken = await getAccessToken(env);
   const res = await fetch(`${baseUrl}=d`, {
     headers: { Authorization: `Bearer ${accessToken}` },
+    signal: AbortSignal.timeout(GOOGLE_DOWNLOAD_TIMEOUT_MS),
   });
   if (!res.ok) {
     const detail = await res.text();

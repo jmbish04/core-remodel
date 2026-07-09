@@ -37,6 +37,18 @@ export const ACCESS_TOKEN_CACHE_KEY = "google-photos:access-token";
 /** CACHE KV key prefix for one-time CSRF state nonces. */
 export const OAUTH_STATE_PREFIX = "google-photos:oauth-state:";
 
+/** CACHE KV key prefix for a session's picked-item list (stable once set). */
+export const SESSION_ITEMS_PREFIX = "google-photos:session-items:";
+
+/** Seconds a cached picked-item list stays valid (covers the download phase). */
+export const SESSION_ITEMS_TTL_SECONDS = 600;
+
+/** Timeout (ms) for Google API JSON calls. */
+export const GOOGLE_API_TIMEOUT_MS = 15000;
+
+/** Timeout (ms) for downloading picked media bytes (larger payloads). */
+export const GOOGLE_DOWNLOAD_TIMEOUT_MS = 30000;
+
 /** Seconds a CSRF state nonce stays valid. */
 export const OAUTH_STATE_TTL_SECONDS = 600;
 

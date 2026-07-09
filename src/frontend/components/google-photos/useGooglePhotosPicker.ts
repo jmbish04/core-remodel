@@ -110,11 +110,17 @@ async function ensureConnected(): Promise<void> {
     window.addEventListener("message", onMessage);
 
     const deadline = Date.now() + 3 * 60 * 1000;
+    // Guard against overlapping polls when a request outlasts the interval.
+    let inFlight = false;
     const poll = setInterval(async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
         if (await fetchConnected()) return finish(resolve);
       } catch {
         /* transient — keep polling */
+      } finally {
+        inFlight = false;
       }
       if (popup.closed) {
         // Give the message/poll a beat to win, then treat as cancel.

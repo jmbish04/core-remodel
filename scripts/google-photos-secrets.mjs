@@ -32,7 +32,11 @@ import { readFileSync, existsSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 
+// Default location of the downloaded OAuth client-secret JSON. This is the
+// repo owner's canonical path; override per-machine with the
+// GOOGLE_PHOTOS_CLIENT_SECRET_PATH env var or by passing a path argument.
 const DEFAULT_SECRET_PATH =
+  process.env.GOOGLE_PHOTOS_CLIENT_SECRET_PATH ||
   "/Users/126colby/Developer/api_secrets/google/google-photos-client-secret-oauth.json";
 
 const WRANGLER_CONFIG = "wrangler.jsonc";

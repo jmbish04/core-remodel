@@ -22,6 +22,7 @@ import {
   ACCESS_TOKEN_CACHE_KEY,
   AUTH_ENDPOINT,
   CALLBACK_PATH,
+  GOOGLE_API_TIMEOUT_MS,
   OAUTH_STATE_PREFIX,
   OAUTH_STATE_TTL_SECONDS,
   PHOTOS_PICKER_SCOPE,
@@ -105,6 +106,7 @@ export async function exchangeCodeForTokens(
       redirect_uri: redirectUriForOrigin(origin),
       grant_type: "authorization_code",
     }),
+    signal: AbortSignal.timeout(GOOGLE_API_TIMEOUT_MS),
   });
 
   if (!res.ok) {
@@ -157,9 +159,19 @@ export async function isConnected(env: Env): Promise<boolean> {
   return (await getStoredRefreshToken(env)) !== null;
 }
 
-/** Cache a freshly minted access token, expiring slightly before Google does. */
-async function cacheAccessToken(env: Env, accessToken: string, expiresIn: number): Promise<void> {
-  const ttl = Math.max(60, expiresIn - 60);
+/**
+ * Cache a freshly minted access token, expiring slightly before Google does.
+ * Guards against a missing/malformed `expires_in` (which would make the TTL NaN
+ * and be rejected by KV) by falling back to one hour.
+ */
+async function cacheAccessToken(
+  env: Env,
+  accessToken: string,
+  expiresIn: number | undefined,
+): Promise<void> {
+  const seconds =
+    typeof expiresIn === "number" && Number.isFinite(expiresIn) ? expiresIn : 3600;
+  const ttl = Math.max(60, seconds - 60);
   await env.CACHE.put(ACCESS_TOKEN_CACHE_KEY, accessToken, { expirationTtl: ttl });
 }
 
@@ -187,6 +199,7 @@ export async function getAccessToken(env: Env): Promise<string> {
       refresh_token: refreshToken,
       grant_type: "refresh_token",
     }),
+    signal: AbortSignal.timeout(GOOGLE_API_TIMEOUT_MS),
   });
 
   if (!res.ok) {
