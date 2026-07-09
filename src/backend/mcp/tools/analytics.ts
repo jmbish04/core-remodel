@@ -23,6 +23,7 @@ import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { formatCents, num } from "../format";
+import { looseObject } from "../schemas";
 import { READ_ONLY, defineTool, type RemodelTool } from "../types";
 
 /** Classify an actual against an estimate range. */
@@ -53,6 +54,41 @@ export const analyticsTools: RemodelTool[] = [
         .describe("Include draft budget items in the estimate totals (default false)"),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      attribution: z.string(),
+      totals: z.object({
+        funding: z.string(),
+        fundingCents: z.number().int(),
+        estimatedLow: z.string(),
+        estimatedHigh: z.string(),
+        estimatedLowCents: z.number().int(),
+        estimatedHighCents: z.number().int(),
+        actual: z.string(),
+        actualCents: z.number().int(),
+        remainingVsFunding: z.string(),
+        remainingVsFundingCents: z.number().int(),
+      }),
+      overallStatus: z.enum(["below", "at", "over", "no_estimate"]),
+      activeItemCount: z.number().int(),
+      expenseCount: z.number().int(),
+      byCategory: z.array(
+        looseObject({
+          category: z.string(),
+          actualCents: z.number().int(),
+          actual: z.string(),
+        }),
+      ),
+      byRoom: z.array(
+        looseObject({
+          roomId: z.number().int(),
+          roomName: z.string(),
+          estimatedLow: z.string(),
+          estimatedHigh: z.string(),
+          estimatedLowCents: z.number().int(),
+          estimatedHighCents: z.number().int(),
+        }),
+      ),
+    },
     examples: [{ title: "Full report", args: {} }],
     handler: async ({ db }, input) => {
       const includeDrafts = input.includeDrafts ?? false;
@@ -145,6 +181,29 @@ export const analyticsTools: RemodelTool[] = [
       limit: z.number().int().positive().max(50).optional(),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      saving: z.string(),
+      savingCents: z.number().int(),
+      note: z.string(),
+      candidateBudgetItems: z.array(
+        looseObject({
+          id: z.number().int(),
+          trackId: z.string(),
+          title: z.string().nullable(),
+          status: z.string().nullable(),
+          executionClass: z.string().nullable(),
+          estimatedHigh: z.string(),
+          estimatedHighCents: z.number().int(),
+          rooms: z.array(z.string()),
+        }),
+      ),
+      roomsNeedingMaterials: z.array(
+        looseObject({
+          room: z.string(),
+          unpurchasedMaterials: z.number().int(),
+        }),
+      ),
+    },
     examples: [
       { title: "Where to apply $5,000", args: { savedCents: 500000 } },
       { title: "Into the primary bath", args: { savedCents: 500000, focusRoomId: 3 } },

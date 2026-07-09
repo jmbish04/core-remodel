@@ -43,6 +43,7 @@ import { runStage } from "../../services/render/stage-runner";
 import type { StageType } from "../../services/render/types";
 import { rowToDto } from "../../api/routes/measurements.schemas";
 import { num, toolError } from "../format";
+import { looseObject } from "../schemas";
 import { defineTool, READ_ONLY, WRITE, type RemodelTool } from "../types";
 
 /**
@@ -90,6 +91,9 @@ export const legacyTools: RemodelTool[] = [
         .describe("Optional room id this session belongs to."),
     },
     annotations: WRITE,
+    outputShape: {
+      sessionId: z.string().describe("The created render session id"),
+    },
     handler: async ({ db }, input) => {
       const args = input as { name: unknown; roomId?: unknown };
       const id = crypto.randomUUID();

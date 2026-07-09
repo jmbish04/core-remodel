@@ -33,7 +33,29 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { matchesQuery, paginate, toolError } from "../format";
+import { looseObject, pageOutput, urlField } from "../schemas";
+import { productsUrl } from "../urls";
 import { defineTool, READ_ONLY, WRITE, WRITE_IDEMPOTENT, type RemodelDb, type RemodelTool } from "../types";
+
+/** Shared Zod output shape for a full product DTO (mirrors `productDto`). */
+const productOutputShape = {
+  id: z.number().int(),
+  itemName: z.string(),
+  description: z.string().nullable(),
+  productType: z.string().nullable(),
+  brandId: z.number().int().nullable(),
+  storeId: z.number().int(),
+  materialId: z.number().int().nullable(),
+  sku: z.string().nullable(),
+  price: z.string().nullable(),
+  colors: z.string().nullable(),
+  preferredColor: z.string().nullable(),
+  leadTime: z.string().nullable(),
+  possibleDiscounts: z.string().nullable(),
+  tradeDiscount: z.string().nullable(),
+  jsonDetails: z.string().nullable(),
+  notes: z.string().nullable(),
+};
 
 /**
  * Normalize a `price` input to the schema's TEXT column: pass strings through,
@@ -131,6 +153,7 @@ export const productTools: RemodelTool[] = [
       offset: z.number().int().min(0).optional(),
     },
     annotations: READ_ONLY,
+    outputShape: { ...pageOutput(looseObject(productOutputShape)) },
     examples: [
       { title: "All products", args: {} },
       { title: "Faucets for a brand", args: { brandId: 4, productType: "Faucet" } },
@@ -170,6 +193,28 @@ export const productTools: RemodelTool[] = [
       id: z.number().int().positive().describe("Product id (from list_products)"),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      ...productOutputShape,
+      brand: looseObject({ id: z.number().int(), name: z.string() }).nullable(),
+      materials: z.array(
+        looseObject({
+          materialId: z.number().int(),
+          title: z.string().nullable(),
+          roomName: z.string().nullable(),
+          isPrimary: z.boolean(),
+          viaJoinTable: z.boolean(),
+          viaLegacyPointer: z.boolean(),
+        }),
+      ),
+      showrooms: z.array(
+        looseObject({
+          showroomId: z.number().int(),
+          name: z.string().nullable(),
+          isOwningStore: z.boolean(),
+          viaMapping: z.boolean(),
+        }),
+      ),
+    },
     examples: [{ title: "By id", args: { id: 12 } }],
     handler: async ({ db }, input) => {
       const [product] = await db
@@ -279,6 +324,11 @@ export const productTools: RemodelTool[] = [
       leadTime: z.string().optional(),
     },
     annotations: WRITE,
+    outputShape: {
+      created: z.boolean(),
+      product: looseObject(productOutputShape),
+      url: urlField,
+    },
     examples: [
       { title: "Minimal", args: { itemName: "Litze Pull-Down Faucet", storeId: 3 } },
       {
@@ -293,7 +343,7 @@ export const productTools: RemodelTool[] = [
         },
       },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       await assertStore(db, input.storeId);
       if (input.brandId != null) await assertBrand(db, input.brandId);
       if (input.materialId != null) await assertMaterial(db, input.materialId);
@@ -315,7 +365,7 @@ export const productTools: RemodelTool[] = [
       };
 
       const [created] = await db.insert(showroomStoreProducts).values(values).returning();
-      return { created: true, product: productDto(created) };
+      return { created: true, product: productDto(created), url: productsUrl(env, created.id) };
     },
   }),
 
@@ -349,11 +399,16 @@ export const productTools: RemodelTool[] = [
       tradeDiscount: z.string().optional(),
     },
     annotations: WRITE,
+    outputShape: {
+      updated: z.boolean(),
+      product: looseObject(productOutputShape),
+      url: urlField,
+    },
     examples: [
       { title: "Set price + sku", args: { id: 12, price: "$1,050", sku: "ABC-123" } },
       { title: "Categorize", args: { id: 12, productType: "Range" } },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const { id, ...rest } = input;
       const [existing] = await db
         .select()
@@ -384,7 +439,7 @@ export const productTools: RemodelTool[] = [
         .from(showroomStoreProducts)
         .where(eq(showroomStoreProducts.id, id))
         .limit(1);
-      return { updated: true, product: productDto(updated) };
+      return { updated: true, product: productDto(updated), url: productsUrl(env, id) };
     },
   }),
 
@@ -410,11 +465,16 @@ export const productTools: RemodelTool[] = [
       leadTime: z.string().optional(),
     },
     annotations: WRITE_IDEMPOTENT,
+    outputShape: {
+      created: z.boolean(),
+      product: looseObject(productOutputShape),
+      url: urlField,
+    },
     examples: [
       { title: "By sku", args: { itemName: "Litze Faucet", storeId: 3, sku: "63221LF-PC" } },
       { title: "By brand+name", args: { itemName: "Litze Faucet", storeId: 3, brandId: 4 } },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       await assertStore(db, input.storeId);
       if (input.brandId != null) await assertBrand(db, input.brandId);
       if (input.materialId != null) await assertMaterial(db, input.materialId);
@@ -446,7 +506,7 @@ export const productTools: RemodelTool[] = [
           .limit(1);
       }
 
-      if (found) return { created: false, product: productDto(found) };
+      if (found) return { created: false, product: productDto(found), url: productsUrl(env, found.id) };
 
       const values = {
         itemName: input.itemName,
@@ -464,7 +524,7 @@ export const productTools: RemodelTool[] = [
         leadTime: input.leadTime ?? null,
       };
       const [created] = await db.insert(showroomStoreProducts).values(values).returning();
-      return { created: true, product: productDto(created) };
+      return { created: true, product: productDto(created), url: productsUrl(env, created.id) };
     },
   }),
 
@@ -479,8 +539,17 @@ export const productTools: RemodelTool[] = [
       showroomId: z.number().int().positive().describe("Showroom store id (from list_showrooms)"),
     },
     annotations: WRITE_IDEMPOTENT,
+    outputShape: {
+      linked: z.boolean(),
+      mapping: looseObject({
+        id: z.number().int(),
+        showroomId: z.number().int(),
+        productId: z.number().int(),
+      }),
+      url: urlField,
+    },
     examples: [{ title: "Carry a product", args: { productId: 12, showroomId: 3 } }],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const [product] = await db
         .select()
         .from(showroomStoreProducts)
@@ -499,13 +568,13 @@ export const productTools: RemodelTool[] = [
           ),
         )
         .limit(1);
-      if (existing) return { linked: false, mapping: existing };
+      if (existing) return { linked: false, mapping: existing, url: productsUrl(env, input.productId) };
 
       const [mapping] = await db
         .insert(showroomProductMappings)
         .values({ showroomId: input.showroomId, productId: input.productId })
         .returning();
-      return { linked: true, mapping };
+      return { linked: true, mapping, url: productsUrl(env, input.productId) };
     },
   }),
 
@@ -524,11 +593,23 @@ export const productTools: RemodelTool[] = [
         .describe("Mark this material as the product's principal one; also sets the legacy materialId pointer"),
     },
     annotations: WRITE_IDEMPOTENT,
+    outputShape: {
+      linked: z.boolean(),
+      isPrimary: z.boolean(),
+      primaryPointerUpdated: z.boolean(),
+      mapping: looseObject({
+        id: z.number().int(),
+        productId: z.number().int(),
+        materialId: z.number().int(),
+        isPrimary: z.boolean(),
+      }),
+      url: urlField,
+    },
     examples: [
       { title: "Link", args: { productId: 12, materialId: 7 } },
       { title: "Link as primary", args: { productId: 12, materialId: 7, isPrimary: true } },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const [product] = await db
         .select()
         .from(showroomStoreProducts)
@@ -582,7 +663,13 @@ export const productTools: RemodelTool[] = [
         primarySet = true;
       }
 
-      return { linked, isPrimary, primaryPointerUpdated: primarySet, mapping };
+      return {
+        linked,
+        isPrimary,
+        primaryPointerUpdated: primarySet,
+        mapping,
+        url: productsUrl(env, input.productId),
+      };
     },
   }),
 ];

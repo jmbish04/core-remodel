@@ -28,6 +28,8 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { matchesQuery, paginate, toolError } from "../format";
+import { looseObject, pageOutput, urlField } from "../schemas";
+import { showroomUrl } from "../urls";
 import {
   defineTool,
   READ_ONLY,
@@ -35,9 +37,6 @@ import {
   WRITE_IDEMPOTENT,
   type RemodelTool,
 } from "../types";
-
-/** Browse URL for a store — the directory list view where a new store appears. */
-const SHOWROOM_LIST_URL = "/admin/shopping/showrooms/list";
 
 /**
  * Turn a `MAPS_QUOTA_EXCEEDED` service error into an actionable tool error, and

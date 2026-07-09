@@ -27,7 +27,9 @@ import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { matchesQuery, paginate, toolError } from "../format";
+import { looseObject, pageOutput, urlField } from "../schemas";
 import { defineTool, READ_ONLY, WRITE, WRITE_IDEMPOTENT, type RemodelTool } from "../types";
+import { materialUrl } from "../urls";
 
 /** Shape a material row for tool output. */
 function materialDto(m: typeof materialScheduleItems.$inferSelect) {
@@ -43,6 +45,19 @@ function materialDto(m: typeof materialScheduleItems.$inferSelect) {
     purchasedShowroomProductId: m.purchasedShowroomProductId,
   };
 }
+
+/** Output schema mirroring `materialDto` — used by every tool that returns one. */
+const materialDtoSchema = looseObject({
+  id: z.number().int(),
+  title: z.string().nullable(),
+  roomId: z.number().int().nullable(),
+  roomName: z.string().nullable(),
+  brand: z.string().nullable(),
+  model: z.string().nullable(),
+  notes: z.string().nullable(),
+  isPurchased: z.boolean(),
+  purchasedShowroomProductId: z.number().int().nullable(),
+});
 
 export const materialTools: RemodelTool[] = [
   defineTool({
@@ -68,6 +83,9 @@ export const materialTools: RemodelTool[] = [
       offset: z.number().int().min(0).optional(),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      ...pageOutput(materialDtoSchema),
+    },
     examples: [
       { title: "All materials", args: {} },
       { title: "Unpurchased items in a room", args: { roomId: 3, isPurchased: false } },
@@ -97,6 +115,22 @@ export const materialTools: RemodelTool[] = [
       id: z.number().int().positive().describe("Material id (from list_materials)"),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      ...materialDtoSchema.shape,
+      room: looseObject({ id: z.number().int(), roomName: z.string() }).nullable(),
+      requiredSpecs: z.array(looseObject({ id: z.number().int(), key: z.string(), value: z.string() })),
+      budgetItems: z.array(
+        looseObject({
+          id: z.number().int(),
+          trackId: z.string(),
+          title: z.string(),
+          status: z.string(),
+        }),
+      ),
+      products: z.array(
+        looseObject({ productId: z.number().int(), isPrimary: z.boolean().nullable() }),
+      ),
+    },
     examples: [{ title: "By id", args: { id: 1 } }],
     handler: async ({ db }, input) => {
       const [material] = await db
@@ -189,11 +223,16 @@ export const materialTools: RemodelTool[] = [
       notes: z.string().optional(),
     },
     annotations: WRITE,
+    outputShape: {
+      created: z.boolean(),
+      material: materialDtoSchema,
+      url: urlField,
+    },
     examples: [
       { title: "Minimal", args: { title: "Induction cooktop" } },
       { title: "Roomed + branded", args: { title: "Toilet", roomId: 3, brand: "Kohler", model: "K-3999" } },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       let roomName = input.roomName;
       if (input.roomId != null) {
         const [r] = await db.select().from(rooms).where(eq(rooms.id, input.roomId)).limit(1);
@@ -211,7 +250,7 @@ export const materialTools: RemodelTool[] = [
           notes: input.notes ?? null,
         })
         .returning();
-      return { created: true, material: materialDto(created) };
+      return { created: true, material: materialDto(created), url: materialUrl(env, created.id) };
     },
   }),
 
@@ -232,11 +271,16 @@ export const materialTools: RemodelTool[] = [
       isPurchased: z.boolean().optional(),
     },
     annotations: WRITE,
+    outputShape: {
+      updated: z.boolean(),
+      material: materialDtoSchema,
+      url: urlField,
+    },
     examples: [
       { title: "Set brand + model", args: { id: 5, brand: "Bosch", model: "NIT8069UC" } },
       { title: "Append a note", args: { id: 5, notes: "Confirm 240V rough-in exists." } },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const { id, ...rest } = input;
       const patch = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined));
       if (Object.keys(patch).length === 0) toolError("No fields to update — pass at least one field.");
@@ -256,7 +300,7 @@ export const materialTools: RemodelTool[] = [
         .from(materialScheduleItems)
         .where(eq(materialScheduleItems.id, id))
         .limit(1);
-      return { updated: true, material: materialDto(updated) };
+      return { updated: true, material: materialDto(updated), url: materialUrl(env, id) };
     },
   }),
 
@@ -279,6 +323,13 @@ export const materialTools: RemodelTool[] = [
         .describe("Spec rows to upsert (replace-by-key or insert)"),
     },
     annotations: WRITE,
+    outputShape: {
+      ok: z.boolean(),
+      inserted: z.number().int(),
+      replaced: z.number().int(),
+      requiredSpecs: z.array(looseObject({ id: z.number().int(), key: z.string(), value: z.string() })),
+      url: urlField,
+    },
     examples: [
       {
         title: "Set two specs",
@@ -291,7 +342,7 @@ export const materialTools: RemodelTool[] = [
         },
       },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const [material] = await db
         .select()
         .from(materialScheduleItems)
@@ -338,6 +389,7 @@ export const materialTools: RemodelTool[] = [
         inserted,
         replaced,
         requiredSpecs: specs.map((s) => ({ id: s.id, key: s.key, value: s.value })),
+        url: materialUrl(env, input.materialId),
       };
     },
   }),
@@ -353,8 +405,13 @@ export const materialTools: RemodelTool[] = [
       roomId: z.number().int().positive().describe("Canonical room id (from list_rooms)"),
     },
     annotations: WRITE_IDEMPOTENT,
+    outputShape: {
+      linked: z.boolean(),
+      material: materialDtoSchema,
+      url: urlField,
+    },
     examples: [{ title: "Link", args: { materialId: 5, roomId: 3 } }],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const [material] = await db
         .select()
         .from(materialScheduleItems)
@@ -376,7 +433,7 @@ export const materialTools: RemodelTool[] = [
         .from(materialScheduleItems)
         .where(eq(materialScheduleItems.id, input.materialId))
         .limit(1);
-      return { linked: true, material: materialDto(updated) };
+      return { linked: true, material: materialDto(updated), url: materialUrl(env, input.materialId) };
     },
   }),
 
@@ -401,11 +458,19 @@ export const materialTools: RemodelTool[] = [
         .describe("A budget item row id; its trackId is resolved automatically"),
     },
     annotations: WRITE_IDEMPOTENT,
+    outputShape: {
+      linked: z.boolean(),
+      created: z.boolean(),
+      mappingId: z.number().int(),
+      budgetItemTrackId: z.string(),
+      materialId: z.number().int(),
+      url: urlField,
+    },
     examples: [
       { title: "By trackId", args: { materialId: 5, budgetItemTrackId: "bud_kitchen_appliances" } },
       { title: "By row id", args: { materialId: 5, budgetItemId: 42 } },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       if (!input.budgetItemTrackId && input.budgetItemId == null) {
         toolError("Provide either `budgetItemTrackId` or `budgetItemId`.");
       }
@@ -459,6 +524,7 @@ export const materialTools: RemodelTool[] = [
           mappingId: existing.id,
           budgetItemTrackId: trackId,
           materialId: input.materialId,
+          url: materialUrl(env, input.materialId),
         };
       }
       const [created] = await db
@@ -471,6 +537,7 @@ export const materialTools: RemodelTool[] = [
         mappingId: created.id,
         budgetItemTrackId: trackId,
         materialId: input.materialId,
+        url: materialUrl(env, input.materialId),
       };
     },
   }),
@@ -491,11 +558,16 @@ export const materialTools: RemodelTool[] = [
         .describe("Showroom product id this material was purchased as (optional)"),
     },
     annotations: WRITE,
+    outputShape: {
+      purchased: z.boolean(),
+      material: materialDtoSchema,
+      url: urlField,
+    },
     examples: [
       { title: "Just mark purchased", args: { materialId: 5 } },
       { title: "With product", args: { materialId: 5, purchasedShowroomProductId: 88 } },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const [material] = await db
         .select()
         .from(materialScheduleItems)
@@ -520,7 +592,7 @@ export const materialTools: RemodelTool[] = [
         .from(materialScheduleItems)
         .where(eq(materialScheduleItems.id, input.materialId))
         .limit(1);
-      return { purchased: true, material: materialDto(updated) };
+      return { purchased: true, material: materialDto(updated), url: materialUrl(env, input.materialId) };
     },
   }),
 ];

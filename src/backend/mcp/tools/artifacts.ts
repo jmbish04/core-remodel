@@ -17,10 +17,9 @@ import { z } from "zod";
 import { ALLOWED_COMPONENTS, ALLOWED_LIBS } from "../artifacts/scope";
 import { validateArtifactSource } from "../artifacts/validate";
 import { toolError } from "../format";
+import { looseObject, urlField } from "../schemas";
+import { studioUrl } from "../urls";
 import { defineTool, READ_ONLY, WRITE, type RemodelTool } from "../types";
-
-/** Viewer URL for an artifact by slug. */
-const studioUrl = (slug: string) => `/admin/studio/${slug}`;
 
 /** Kebab-case a title into a URL slug base (letters/digits/hyphens only). */
 function slugify(title: string): string {
@@ -73,6 +72,23 @@ export const artifactTools: RemodelTool[] = [
       "— never a bespoke UI lib, never hardcoded colors, never inline styles, never raw <button>/<input>/<select>.",
     inputShape: {},
     annotations: READ_ONLY,
+    outputShape: {
+      components: z.array(
+        looseObject({
+          name: z.string(),
+          specifier: z.string(),
+          hint: z.string(),
+        }),
+      ),
+      libs: z.array(
+        looseObject({
+          name: z.string(),
+          specifier: z.string(),
+          hint: z.string(),
+        }),
+      ),
+      rules: z.array(z.string()),
+    },
     examples: [{ title: "Get the catalog", args: {} }],
     handler: async () => ({
       components: ALLOWED_COMPONENTS,
@@ -116,6 +132,13 @@ export const artifactTools: RemodelTool[] = [
         .describe("Freeform note on where this came from (the chat context)"),
     },
     annotations: WRITE,
+    outputShape: {
+      ok: z.boolean(),
+      id: z.number().int().optional().describe("The new artifact id (present when ok=true)"),
+      slug: z.string().optional().describe("The artifact slug (present when ok=true)"),
+      url: urlField.optional(),
+      errors: z.array(z.string()).optional().describe("Validation failures (present when ok=false)"),
+    },
     examples: [
       {
         title: "A tiny report",
@@ -130,7 +153,7 @@ export const artifactTools: RemodelTool[] = [
         },
       },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const title = input.title?.trim();
       const sourceTsx = input.sourceTsx;
       if (!title) toolError("`title` is required and cannot be empty.");
@@ -170,7 +193,7 @@ export const artifactTools: RemodelTool[] = [
         .where(eq(artifacts.id, artifact.id))
         .run();
 
-      return { ok: true, id: artifact.id, slug, url: studioUrl(slug) };
+      return { ok: true, id: artifact.id, slug, url: studioUrl(env, slug) };
     },
   }),
 
@@ -187,11 +210,25 @@ export const artifactTools: RemodelTool[] = [
       limit: z.number().int().positive().max(200).optional(),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      count: z.number().int(),
+      artifacts: z.array(
+        looseObject({
+          id: z.number().int(),
+          slug: z.string(),
+          title: z.string(),
+          kind: z.string(),
+          status: z.string(),
+          revisionCount: z.number().int(),
+          url: urlField,
+        }),
+      ),
+    },
     examples: [
       { title: "All", args: {} },
       { title: "Published dashboards", args: { kind: "dashboard", status: "published" } },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       // Filter + count + order + limit in SQL (single query, left-join keeps
       // 0-revision artifacts).
       const conditions = [];
@@ -229,7 +266,7 @@ export const artifactTools: RemodelTool[] = [
           status: r.status,
           revisionCount: Number(r.revisionCount),
           updatedAt: r.updatedAt,
-          url: studioUrl(r.slug),
+          url: studioUrl(env, r.slug),
         })),
       };
     },
@@ -253,11 +290,28 @@ export const artifactTools: RemodelTool[] = [
         .describe("Specific revisionNumber to fetch (defaults to current)"),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      id: z.number().int(),
+      slug: z.string(),
+      title: z.string(),
+      kind: z.string(),
+      status: z.string(),
+      url: urlField,
+      revisionNumber: z.number().int(),
+      sourceTsx: z.string(),
+      imports: z.array(z.string()),
+      revisions: z.array(
+        looseObject({
+          n: z.number().int(),
+          changeNote: z.string().nullable(),
+        }),
+      ),
+    },
     examples: [
       { title: "By slug", args: { slug: "closet-budget-summary" } },
       { title: "Old revision", args: { id: 3, revision: 1 } },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       if (input.id == null && !input.slug) {
         toolError("Pass either `id` or `slug`.");
       }
@@ -301,7 +355,7 @@ export const artifactTools: RemodelTool[] = [
         description: artifact.description,
         kind: artifact.kind,
         status: artifact.status,
-        url: studioUrl(artifact.slug),
+        url: studioUrl(env, artifact.slug),
         revisionNumber: revision.revisionNumber,
         sourceTsx: revision.sourceTsx,
         entryExport: revision.entryExport,
@@ -327,6 +381,14 @@ export const artifactTools: RemodelTool[] = [
       changeNote: z.string().optional().describe("What changed in this revision"),
     },
     annotations: WRITE,
+    outputShape: {
+      ok: z.boolean(),
+      id: z.number().int().optional().describe("The artifact id (present when ok=true)"),
+      slug: z.string().optional().describe("The artifact slug (present when ok=true)"),
+      revisionNumber: z.number().int().optional().describe("The newly stored revision number (present when ok=true)"),
+      url: urlField.optional(),
+      errors: z.array(z.string()).optional().describe("Validation failures (present when ok=false)"),
+    },
     examples: [
       {
         title: "Revise",
@@ -337,7 +399,7 @@ export const artifactTools: RemodelTool[] = [
         },
       },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       if (input.id == null && !input.slug) toolError("Pass either `id` or `slug`.");
       if (!input.sourceTsx?.trim()) toolError("`sourceTsx` is required and cannot be empty.");
 
@@ -379,7 +441,7 @@ export const artifactTools: RemodelTool[] = [
         .where(eq(artifacts.id, artifact.id))
         .run();
 
-      return { ok: true, id: artifact.id, slug: artifact.slug, revisionNumber, url: studioUrl(artifact.slug) };
+      return { ok: true, id: artifact.id, slug: artifact.slug, revisionNumber, url: studioUrl(env, artifact.slug) };
     },
   }),
 
@@ -396,6 +458,12 @@ export const artifactTools: RemodelTool[] = [
       status: z.enum(["draft", "published", "archived"]).describe("New status"),
     },
     annotations: WRITE,
+    outputShape: {
+      updated: z.boolean(),
+      id: z.number().int(),
+      slug: z.string(),
+      status: z.string(),
+    },
     examples: [{ title: "Archive", args: { slug: "closet-budget-summary", status: "archived" } }],
     handler: async ({ db }, input) => {
       if (input.id == null && !input.slug) toolError("Pass either `id` or `slug`.");

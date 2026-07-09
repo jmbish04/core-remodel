@@ -742,7 +742,15 @@ mcpRouter.post("/", async (c) => {
               durationMs: Date.now() - startedAt,
             }),
           );
-          return { jsonrpc: "2.0", id, result: { content: [{ type: "text", text }] } };
+          // When a tool's text result is itself a JSON object, also hand it
+          // back as `structuredContent` so JSON-RPC clients get a parsed shape
+          // without re-parsing the text block (mirrors the registry transport).
+          // Prose results stay text-only.
+          const structuredContent = parseJsonObject(text);
+          const result = structuredContent
+            ? { content: [{ type: "text", text }], structuredContent }
+            : { content: [{ type: "text", text }] };
+          return { jsonrpc: "2.0", id, result };
         } catch (err) {
           c.executionCtx.waitUntil(
             logInvocation(c.env, {

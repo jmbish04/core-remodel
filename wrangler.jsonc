@@ -45,6 +45,10 @@
   // routing via the email() handler (routing rule set up in Dashboard).
   "send_email": [{ "name": "EMAIL", "remote": true }],
   "vars": {
+    // Public origin of the deployed Worker. Used to build ABSOLUTE, clickable
+    // page URLs in MCP tool responses (e.g. the exact bug/budget/showroom page
+    // to open) instead of bare paths. No trailing slash.
+    "WORKER_URL": "https://core-remodel.hacolby.workers.dev",
     "AI_GATEWAY_ID": "default-gateway",
     "CLICKUP_LIST_ID": "901714811766",
     // TODO(justin): fill in a Google Programmable Search Engine "cx" id
