@@ -287,6 +287,20 @@
       "secret_name": "GOOGLE_CREDS_SA_CLIENT_EMAIL",
       "remote": true
     },
+    {
+      // Google Photos Picker API (0019): 3-legged OAuth client. Populate via
+      // `pnpm run secrets:google-photos` (parses the downloaded client-secret JSON).
+      "binding": "GOOGLE_PHOTOS_CLIENT_ID",
+      "store_id": "8c42fa70938644e0a8a109744467375f",
+      "secret_name": "GOOGLE_PHOTOS_CLIENT_ID",
+      "remote": true
+    },
+    {
+      "binding": "GOOGLE_PHOTOS_CLIENT_SECRET",
+      "store_id": "8c42fa70938644e0a8a109744467375f",
+      "secret_name": "GOOGLE_PHOTOS_CLIENT_SECRET",
+      "remote": true
+    },
   ],
   "durable_objects": {
     "bindings": [

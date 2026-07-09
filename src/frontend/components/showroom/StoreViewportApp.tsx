@@ -61,6 +61,7 @@ import { RecordVisitModal } from "./visit/RecordVisitModal";
 import { AssociateBrandsModal } from "./associate/AssociateBrandsModal";
 import { AssociateProductsModal } from "./associate/AssociateProductsModal";
 import { ShowroomPhotoPolaroid, type ShowroomPhoto } from "./photos/ShowroomPhotoPolaroid";
+import { GooglePhotosButton } from "@/components/google-photos/GooglePhotosButton";
 import { ShowroomBento, type ShowroomBentoSection } from "./bento/ShowroomBento";
 import { PhotoStack } from "./PhotoStack";
 import { ShowroomGalleryModal, type GalleryPhoto } from "./ShowroomGalleryModal";
@@ -718,6 +719,48 @@ export function StoreViewportApp({
     [uploadPhoto],
   );
 
+  /**
+   * Upload a batch of visit photos (used by the Google Photos import) through
+   * the same `/api/showroom-stores/:id/photos` endpoint the single-file picker
+   * uses. Sequential so we never hammer the endpoint; per-file errors are
+   * reported without aborting the rest.
+   */
+  const uploadPhotos = useCallback(
+    async (incoming: File[]) => {
+      if (uploading || incoming.length === 0) return;
+      setUploading(true);
+      let ok = 0;
+      try {
+        for (const file of incoming) {
+          try {
+            const dataUrl = await fileToDataUrl(file);
+            const res = await fetch(`/api/showroom-stores/${id}/photos`, {
+              method: "POST",
+              credentials: "include",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ image: dataUrl, altText: file.name }),
+            });
+            if (!res.ok) {
+              const payload = (await res.json().catch(() => ({}))) as { error?: string };
+              throw new Error(payload.error ?? `Upload failed (${res.status})`);
+            }
+            ok += 1;
+          } catch (e) {
+            console.error("[store/photo-upload]", e);
+            toast.error(e instanceof Error ? e.message : `Failed to upload ${file.name}`);
+          }
+        }
+        if (ok > 0) {
+          toast.success(ok === 1 ? "Photo uploaded" : `${ok} photos uploaded`);
+          await loadPhotos();
+        }
+      } finally {
+        setUploading(false);
+      }
+    },
+    [id, uploading, loadPhotos],
+  );
+
   // Notes now open a dedicated full-page editor (modals are too cramped for long
   // notes). We navigate the current tab and return to the Notes section here.
   const noteReturnPath = useCallback(
@@ -1104,6 +1147,7 @@ export function StoreViewportApp({
             photos={photos}
             uploading={uploading}
             onUploadClick={() => fileInputRef.current?.click()}
+            onImportFiles={uploadPhotos}
             onPhotoSaved={loadPhotos}
             onOpenGallery={(index) => {
               setGalleryStartIndex(index);
@@ -1708,6 +1752,7 @@ function PhotosSection({
   photos,
   uploading,
   onUploadClick,
+  onImportFiles,
   onPhotoSaved,
   onOpenGallery,
   onDeleteGalleryPhoto,
@@ -1717,6 +1762,7 @@ function PhotosSection({
   photos: ShowroomPhoto[];
   uploading: boolean;
   onUploadClick: () => void;
+  onImportFiles: (files: File[]) => void | Promise<void>;
   onPhotoSaved: () => void;
   onOpenGallery: (index: number) => void;
   onDeleteGalleryPhoto: (photoId: number) => void;
@@ -1774,20 +1820,27 @@ function PhotosSection({
       <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
         <div className="flex items-center justify-between gap-2">
           <h2 className="text-base font-semibold">Your visit photos ({photos.length})</h2>
-          <Button
-            size="sm"
-            variant="outline"
-            className="gap-1.5"
-            onClick={onUploadClick}
-            disabled={uploading}
-          >
-            {uploading ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <Upload className="size-3.5" />
-            )}
-            Upload photo
-          </Button>
+          <div className="flex items-center gap-2">
+            <GooglePhotosButton
+              variant="outline"
+              disabled={uploading}
+              onFiles={onImportFiles}
+            />
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              onClick={onUploadClick}
+              disabled={uploading}
+            >
+              {uploading ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : (
+                <Upload className="size-3.5" />
+              )}
+              Upload photo
+            </Button>
+          </div>
         </div>
 
         {photos.length === 0 ? (
