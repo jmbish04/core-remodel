@@ -137,7 +137,7 @@ async function detectMaterialGaps(env: Env, db: ReturnType<typeof drizzle>): Pro
   const catalog = await db
     .select({ id: rooms.id, roomName: rooms.roomName, floor: floors.name })
     .from(rooms)
-    .leftJoin(floors, eq(rooms.floorId, floors.id))
+    .innerJoin(floors, eq(rooms.floorId, floors.id))
     .where(eq(rooms.isActive, true))
     .all();
   const roomById = new Map(catalog.map((r) => [r.id, r.roomName]));
