@@ -72,6 +72,16 @@ export function showroomUrl(env: Env, storeId: number | string): string {
   return siteUrl(env, `/admin/shopping/store/${storeId}`);
 }
 
+/** The showroom drive-lists landing page. */
+export function driveListsUrl(env: Env): string {
+  return siteUrl(env, "/admin/shopping/drives");
+}
+
+/** A single showroom drive list (the drive viewport), by slug. */
+export function driveListUrl(env: Env, slug: string): string {
+  return siteUrl(env, `/admin/shopping/drives/${slug}`);
+}
+
 /** The brands directory, or a single brand when `brandId` is given. */
 export function brandsUrl(env: Env, brandId?: number | string): string {
   return siteUrl(env, brandId != null ? `/admin/shopping/brands/${brandId}` : "/admin/shopping/brands");

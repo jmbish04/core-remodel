@@ -28,6 +28,7 @@ export type ToolCategory =
   | "budget"
   | "materials"
   | "showrooms"
+  | "drives"
   | "brands"
   | "products"
   | "links"

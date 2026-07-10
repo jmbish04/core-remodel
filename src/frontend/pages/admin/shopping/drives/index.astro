@@ -1,0 +1,21 @@
+---
+/**
+ * @fileoverview Showroom Drive Lists — landing page.
+ *
+ * Thin Astro shell mounting the `<DriveListsApp />` island, which lists the
+ * drive sheets (newest-first) with per-drive completion progress and links each
+ * to its viewport at `/admin/shopping/drives/<slug>`. Drives are created via the
+ * `create_drive_list` MCP tool; data loads from D1 through `/api/drive-lists`.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { DriveListsApp } from "@/components/drives/DriveListsApp";
+---
+
+<BaseLayout
+  title="Showroom Drives - 126 Colby - Remodel Mission Control"
+  description="Planned showroom-visit drive sheets with per-drive completion progress."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <DriveListsApp client:only="react" />
+  </main>
+</BaseLayout>

@@ -126,3 +126,6 @@ export * from "./emails/index";
 // MCP ops/observability (0017) + artifact studio (0016)
 export * from "./mcp/index";
 export * from "./artifacts/index";
+
+// Showroom drive lists (planned showroom-visit route sheets)
+export * from "./drives/index";
