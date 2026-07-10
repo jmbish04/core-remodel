@@ -24,6 +24,7 @@ import {
 } from "@backend/db/schema/showroom/index";
 import { materialScheduleItems } from "@backend/db/schema/materials/index";
 import { rooms } from "@backend/db/schema/home/rooms";
+import { floors } from "@backend/db/schema/home/floors";
 import { generateStructuredOutput } from "@backend/ai/providers/index";
 
 export const showroomGapsRouter = new Hono<{ Bindings: Env }>();
@@ -33,6 +34,7 @@ type GapContext = "material" | "product" | "showroom";
 interface GapCandidate {
   context: GapContext;
   gapKey: string;
+  roomId: number | null;
   roomName: string | null;
   name: string;
   description: string | null;
@@ -83,6 +85,7 @@ async function upsertGaps(
       db.insert(showroomGaps).values({
         context,
         gapKey: c.gapKey,
+        roomId: c.roomId,
         roomName: c.roomName,
         name: c.name,
         description: c.description,
@@ -106,7 +109,9 @@ const MaterialGapSchema = z.object({
   gaps: z.array(
     z.object({
       name: z.string(),
-      roomName: z.string().nullable().optional(),
+      // The AI picks the exact canonical room by id from the supplied catalog —
+      // never a free-text name (room names repeat across floors).
+      roomId: z.number().int().nullable().optional(),
       description: z.string(),
       suggestedAction: z.string(),
     }),
@@ -116,12 +121,26 @@ const MaterialGapSchema = z.object({
 /** AI detection: implied-but-missing sibling materials from the current list. */
 async function detectMaterialGaps(env: Env, db: ReturnType<typeof drizzle>): Promise<GapCandidate[]> {
   const materials = await db
-    .select({ title: materialScheduleItems.title, roomName: rooms.roomName })
+    .select({
+      title: materialScheduleItems.title,
+      roomId: materialScheduleItems.roomId,
+      roomName: rooms.roomName,
+    })
     .from(materialScheduleItems)
     .leftJoin(rooms, eq(materialScheduleItems.roomId, rooms.id));
 
   if (materials.length === 0) return [];
   const existingNames = new Set(materials.map((m) => slug(m.title)));
+
+  // Room catalog with floor labels so the AI disambiguates same-named rooms
+  // (e.g. two "Bathroom"s on different floors) by picking a specific roomId.
+  const catalog = await db
+    .select({ id: rooms.id, roomName: rooms.roomName, floor: floors.name })
+    .from(rooms)
+    .innerJoin(floors, eq(rooms.floorId, floors.id))
+    .where(eq(rooms.isActive, true))
+    .all();
+  const roomById = new Map(catalog.map((r) => [r.id, r.roomName]));
 
   const result = await generateStructuredOutput(env, {
     schemaName: "MaterialGapAnalysis",
@@ -131,11 +150,11 @@ async function detectMaterialGaps(env: Env, db: ReturnType<typeof drizzle>): Pro
       {
         role: "system",
         content:
-          "You are a home-renovation sourcing assistant. Given the homeowner's CURRENT materials list, identify IMPLIED but MISSING sibling materials/components they likely need but have not logged. Example: if they logged 'closet', suggest 'closet system', 'closet lighting', 'closet island'. Only suggest genuinely missing, concrete, sourceable items — never duplicate something already in the list. Keep each to a short product-type name, attach the most relevant room, and give a one-sentence rationale plus a concrete suggested action. Return at most 12.",
+          "You are a home-renovation sourcing assistant. Given the homeowner's CURRENT materials list and the ROOM CATALOG, identify IMPLIED but MISSING sibling materials/components they likely need but have not logged. Example: if they logged 'closet', suggest 'closet system', 'closet lighting', 'closet island'. Only suggest genuinely missing, concrete, sourceable items — never duplicate something already in the list. For each, set `roomId` to the EXACT room from the catalog it belongs to (rooms repeat across floors — use the floor label to pick the right one); use null only if truly room-agnostic. Give a one-sentence rationale plus a concrete suggested action. Return at most 12.",
       },
       {
         role: "user",
-        content: `Current materials (JSON):\n${JSON.stringify(materials)}`,
+        content: `Room catalog (JSON):\n${JSON.stringify(catalog)}\n\nCurrent materials (JSON):\n${JSON.stringify(materials)}`,
       },
     ],
   });
@@ -143,10 +162,13 @@ async function detectMaterialGaps(env: Env, db: ReturnType<typeof drizzle>): Pro
   return result.gaps
     .filter((g) => !existingNames.has(slug(g.name)))
     .map((g) => {
-      const room = g.roomName?.trim() || null;
+      // Trust only a roomId that exists in the catalog; otherwise room-agnostic.
+      const roomId = g.roomId != null && roomById.has(g.roomId) ? g.roomId : null;
+      const room = roomId != null ? roomById.get(roomId) ?? null : null;
       return {
         context: "material" as const,
         gapKey: `material:${slug(room ?? "general")}:${slug(g.name)}`,
+        roomId,
         roomName: room,
         name: g.name.trim(),
         description: g.description,
@@ -159,7 +181,12 @@ async function detectMaterialGaps(env: Env, db: ReturnType<typeof drizzle>): Pro
 /** Deterministic: materials with no sourced showroom products. */
 async function detectProductGaps(db: ReturnType<typeof drizzle>): Promise<GapCandidate[]> {
   const materials = await db
-    .select({ id: materialScheduleItems.id, title: materialScheduleItems.title, roomName: rooms.roomName })
+    .select({
+      id: materialScheduleItems.id,
+      title: materialScheduleItems.title,
+      roomId: materialScheduleItems.roomId,
+      roomName: rooms.roomName,
+    })
     .from(materialScheduleItems)
     .leftJoin(rooms, eq(materialScheduleItems.roomId, rooms.id));
   if (materials.length === 0) return [];
@@ -174,6 +201,7 @@ async function detectProductGaps(db: ReturnType<typeof drizzle>): Promise<GapCan
     .map((m) => ({
       context: "product" as const,
       gapKey: `product:material:${m.id}`,
+      roomId: m.roomId,
       roomName: m.roomName,
       name: `No products sourced for "${m.title}"`,
       description: `The material "${m.title}" has no showroom products linked yet.`,
@@ -196,6 +224,7 @@ async function detectShowroomGaps(db: ReturnType<typeof drizzle>): Promise<GapCa
     .map((a) => ({
       context: "showroom" as const,
       gapKey: `showroom:area:${a.id}`,
+      roomId: null,
       roomName: a.roomName,
       name: a.name,
       description: a.description ?? `No showroom covers ${a.name}.`,
@@ -292,20 +321,11 @@ showroomGapsRouter.post("/meta/gaps/research", async (c) => {
 
   // Materialize the thing we're researching for (material-context gaps) in one
   // batched roundtrip instead of a sequential insert per gap.
-  // Hard FK: a material must belong to a real room. Resolve gap room NAMES to
-  // canonical room ids; only gaps whose room resolves get an auto-created
-  // material (others stay material-less, materialId null).
-  // Case-insensitive name→id (AI room names vary in casing; rooms are few, so
-  // fetch all and match lowercased).
+  // Hard FK: a material must belong to a real room. The gap already carries the
+  // AI-disambiguated `roomId` (persisted at detection) — only gaps with a room
+  // get an auto-created material (others stay material-less, materialId null).
   const gapsNeedingMaterial = gaps.filter((g) => g.context === "material" && !g.materialId);
-  const nameToRoomId = new Map<string, number>();
-  if (gapsNeedingMaterial.length > 0) {
-    const rs = await db.select({ id: rooms.id, roomName: rooms.roomName }).from(rooms).all();
-    for (const r of rs) nameToRoomId.set(r.roomName.toLowerCase(), r.id);
-  }
-  const creatable = gapsNeedingMaterial.filter(
-    (g) => g.roomName && nameToRoomId.has(g.roomName.toLowerCase()),
-  );
+  const creatable = gapsNeedingMaterial.filter((g) => g.roomId != null);
 
   const insertedMaterials: { id: number }[] = [];
   if (creatable.length > 0) {
@@ -314,7 +334,7 @@ showroomGapsRouter.post("/meta/gaps/research", async (c) => {
         .insert(materialScheduleItems)
         .values({
           title: gap.name,
-          roomId: nameToRoomId.get((gap.roomName as string).toLowerCase()) as number,
+          roomId: gap.roomId as number,
           notes: `Auto-created from gap research. ${gap.description ?? ""}`.trim(),
         })
         .returning({ id: materialScheduleItems.id }),
