@@ -24,6 +24,15 @@
  */
 import { showroomHours, showroomPocs, showroomStores, storeNotes } from "@backend/db";
 import { GoogleMapsService } from "@backend/services/google/maps";
+import {
+  computeStoreGeoPatch,
+  hoursJsonToRows,
+  mapPlaceDetailsToStoreInput,
+  scheduleShowroomEnrichment,
+  type MappedPlaceStore,
+} from "@backend/services/showroom/onboarding";
+import type { GooglePlaceDetails } from "@frontend/components/showroom/intake/places-mapper";
+import type { RemodelDb } from "../types";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
@@ -78,6 +87,58 @@ function storeListDto(s: typeof showroomStores.$inferSelect) {
     rating: s.rating,
     isAppointmentOnly: s.isAppointmentOnly,
   };
+}
+
+/**
+ * Persist a mapped Google Place as a showroom row and run the SAME enrichment
+ * the intake form fires: Places-photo → CF Images, brand create/map, favicon +
+ * website scrape, AI research, and category inference. Because MCP tool handlers
+ * have no `executionCtx.waitUntil`, the enrichment promises are collected and
+ * awaited here so the tool returns only once onboarding has actually run (work
+ * left un-awaited would be cancelled when the request isolate finishes).
+ */
+async function persistPlaceShowroom(
+  env: Env,
+  db: RemodelDb,
+  mapped: MappedPlaceStore,
+): Promise<typeof showroomStores.$inferSelect> {
+  const geo = computeStoreGeoPatch({
+    latitude: mapped.values.latitude,
+    longitude: mapped.values.longitude,
+    zipCode: mapped.values.zipCode,
+    locationAddress: mapped.values.locationAddress,
+  });
+
+  const [created] = await db
+    .insert(showroomStores)
+    .values({ ...mapped.values, ...geo })
+    .returning();
+
+  if (mapped.hoursJson) {
+    const rows = hoursJsonToRows(created.id, mapped.hoursJson);
+    if (rows.length > 0) {
+      await db
+        .insert(showroomHours)
+        .values(rows as [(typeof rows)[number], ...(typeof rows)[number][]]);
+    }
+  }
+
+  const tasks: Promise<unknown>[] = [];
+  scheduleShowroomEnrichment(
+    env,
+    created,
+    {
+      websiteUrl: mapped.values.websiteUrl,
+      photos: mapped.photos,
+      brands: mapped.brands,
+      categoryTokens: mapped.categoryTokens,
+      categoryRationale: "Inferred from Google Places at MCP import",
+    },
+    (p) => tasks.push(p),
+  );
+  await Promise.allSettled(tasks);
+
+  return created;
 }
 
 export const showroomTools: RemodelTool[] = [
@@ -218,11 +279,24 @@ export const showroomTools: RemodelTool[] = [
     category: "showrooms",
     title: "Create showroom",
     description:
-      "Intake a new showroom store location. Only `name` is required — pass any other details you already know (address, phone, website, email, pricePoint, description, appointmentOnly). Returns the created row. Use update_showroom later to fill in the rest.",
+      "Intake a new showroom store location. STRONGLY PREFER passing a Google `placeId` (from search_showrooms): " +
+      "with a placeId this runs the exact same FULL onboarding as import_showroom_from_place — Places Details + AI " +
+      "review analysis, coordinates + region-hub capture, photos, brands, favicon + website scrape, and AI research " +
+      "— and any explicit fields you also pass (e.g. pricePoint) override the Google-derived values. Without a " +
+      "placeId it creates a manual row from the fields you provide; only `name` is required. Either way the region " +
+      "hub (East Bay / South Bay / …) is captured from the coordinates/address/ZIP so the store shows under the " +
+      "correct directory filter, and AI research + a website scrape (when a websiteUrl is present) run in the " +
+      "background. Idempotent on `placeId` (an existing placeId returns the existing store unchanged).",
     inputShape: {
-      name: z.string().describe("Store / location name (required)"),
+      name: z.string().optional().describe("Store / location name (required unless a placeId is given)"),
+      placeId: z
+        .string()
+        .optional()
+        .describe("Google Place ID (from search_showrooms) — triggers full AI onboarding when provided"),
       description: z.string().optional(),
       locationAddress: z.string().optional().describe("Street address of the location"),
+      latitude: z.number().optional().describe("Latitude — enables the individual map marker"),
+      longitude: z.number().optional().describe("Longitude — enables the individual map marker"),
       phoneNumber: z.string().optional(),
       emailAddress: z.string().optional(),
       websiteUrl: z.string().optional(),
@@ -232,9 +306,10 @@ export const showroomTools: RemodelTool[] = [
     },
     annotations: WRITE,
     examples: [
-      { title: "Minimal", args: { name: "Studio Belmont" } },
+      { title: "From a Google Place (full onboarding)", args: { placeId: "ChIJN1t_tDeuEmsRUsoyG83frY4" } },
+      { title: "Minimal manual", args: { name: "Studio Belmont" } },
       {
-        title: "With details",
+        title: "Manual with details",
         args: {
           name: "DaVinci Marble",
           locationAddress: "150 Executive Park Blvd, San Francisco",
@@ -246,11 +321,68 @@ export const showroomTools: RemodelTool[] = [
     outputShape: {
       created: z.boolean(),
       store: looseObject({ id: z.number().int(), name: z.string().nullable() }),
+      region: z.string().nullable(),
       url: urlField,
     },
     handler: async ({ env, db }, input) => {
+      // ── placeId path: full onboarding, idempotent by placeId ──────────────
+      const placeId = input.placeId?.trim();
+      if (placeId) {
+        const [existing] = await db
+          .select()
+          .from(showroomStores)
+          .where(eq(showroomStores.placeId, placeId))
+          .limit(1);
+        if (existing) {
+          return {
+            created: false,
+            store: existing,
+            region: existing.hubName ?? null,
+            url: showroomUrl(env, existing.id),
+          };
+        }
+
+        let details: Record<string, unknown>;
+        try {
+          details = await new GoogleMapsService(env).placeDetails(placeId);
+        } catch (err) {
+          rethrowMapsError(err);
+        }
+        const mapped = mapPlaceDetailsToStoreInput(details as GooglePlaceDetails);
+        if (!mapped) toolError(`Google returned no usable place for placeId "${placeId}".`);
+        mapped.values.placeId = mapped.values.placeId ?? placeId;
+
+        // Explicit caller fields override the Google-derived values.
+        if (input.name?.trim()) mapped.values.name = input.name.trim();
+        if (input.description) mapped.values.description = input.description;
+        if (input.pricePoint) mapped.values.pricePoint = input.pricePoint;
+        if (input.phoneNumber) mapped.values.phoneNumber = input.phoneNumber;
+        if (input.emailAddress) mapped.values.emailAddress = input.emailAddress;
+        if (input.websiteUrl) mapped.values.websiteUrl = input.websiteUrl;
+        if (input.isAppointmentOnly != null) {
+          mapped.values.isAppointmentOnly = input.isAppointmentOnly;
+        }
+
+        const created = await persistPlaceShowroom(env, db, mapped);
+        return {
+          created: true,
+          store: created,
+          region: created.hubName ?? null,
+          url: showroomUrl(env, created.id),
+        };
+      }
+
+      // ── Manual path: name + provided fields, region + enrichment captured ──
       const name = input.name?.trim();
-      if (!name) toolError("`name` is required and cannot be empty.");
+      if (!name) toolError("`name` is required and cannot be empty (or pass a placeId).");
+
+      const geo = computeStoreGeoPatch({
+        latitude: input.latitude,
+        longitude: input.longitude,
+        zipCode: input.zipCode,
+        locationAddress: input.locationAddress,
+      });
+
       const [created] = await db
         .insert(showroomStores)
         .values({
@@ -263,9 +395,27 @@ export const showroomTools: RemodelTool[] = [
           zipCode: input.zipCode,
           pricePoint: input.pricePoint,
           isAppointmentOnly: input.isAppointmentOnly,
+          ...geo,
         })
         .returning();
-      return { created: true, store: created, url: showroomUrl(env, created.id) };
+
+      // Fire + await background enrichment (research always; favicon + scrape
+      // when a website is known). No waitUntil in MCP, so await it.
+      const tasks: Promise<unknown>[] = [];
+      scheduleShowroomEnrichment(
+        env,
+        created,
+        { websiteUrl: input.websiteUrl },
+        (p) => tasks.push(p),
+      );
+      await Promise.allSettled(tasks);
+
+      return {
+        created: true,
+        store: created,
+        region: created.hubName ?? null,
+        url: showroomUrl(env, created.id),
+      };
     },
   }),
 
@@ -725,12 +875,16 @@ export const showroomTools: RemodelTool[] = [
     category: "showrooms",
     title: "Import a showroom from a Google Place",
     description:
-      "One-step add: create a showroom from a Google `placeId` (typically one returned by search_showrooms). " +
-      "Fetches Places Details (no AI/Gemini spend) to populate name, address, phone, website, hours summary, and " +
-      "the Google Maps link, and stores the `placeId` so later Places enrichment/backfill dedupes cleanly. " +
-      "Idempotent by `placeId`: if a showroom with that placeId already exists it is returned unchanged " +
-      "(`created:false`); otherwise a new row is inserted (`created:true`). Prefer this over create_showroom when " +
-      "you have a placeId. Quota-metered — surfaces MAPS_QUOTA_EXCEEDED clearly.",
+      "One-step, FULL onboarding of a showroom from a Google `placeId` (typically one returned by search_showrooms) — " +
+      "the same flow the front-end intake form runs. Fetches Places Details WITH the Gemini review analysis to " +
+      "populate name, description, address, coordinates, phone, website, structured hours, Google rating/review " +
+      "count, an AI review summary, the inferred price tier, and the appointment/flagship/large-selection/bespoke/" +
+      "trade-rep flags. It captures the Bay Area region hub (from coordinates/address) so the store shows under the " +
+      "right East Bay / South Bay / etc. filter, then runs enrichment in the background: Google photos → Cloudflare " +
+      "Images (+ hero), detected-brand create/map, favicon + full website scrape, AI renovation-fit research, and " +
+      "category inference. Idempotent by `placeId`: an existing store is returned unchanged (`created:false`); " +
+      "otherwise a new row is inserted (`created:true`). Prefer this over create_showroom whenever you have a " +
+      "placeId. Quota-metered (Places + Gemini) — surfaces MAPS_QUOTA_EXCEEDED clearly.",
     inputShape: {
       placeId: z
         .string()
@@ -742,6 +896,7 @@ export const showroomTools: RemodelTool[] = [
       created: z.boolean(),
       showroomId: z.number().int(),
       url: urlField,
+      region: z.string().nullable(),
       store: looseObject({ id: z.number().int(), name: z.string().nullable() }),
     },
     examples: [{ title: "Import a candidate", args: { placeId: "ChIJN1t_tDeuEmsRUsoyG83frY4" } }],
@@ -760,58 +915,136 @@ export const showroomTools: RemodelTool[] = [
           created: false,
           showroomId: existing.id,
           url: showroomUrl(env, existing.id),
+          region: existing.hubName ?? null,
           store: existing,
         };
       }
 
-      // Fetch raw Google fields (skipAi: no Gemini review analysis — fast + free).
+      // Fetch Google fields + the Gemini review analysis (aiInference) inline so
+      // MCP onboarding matches the intake form. Non-fatal if Gemini is skipped.
       let details: Record<string, unknown>;
       try {
-        details = await new GoogleMapsService(env).placeDetails(placeId, undefined, {
-          skipAi: true,
-        });
+        details = await new GoogleMapsService(env).placeDetails(placeId);
       } catch (err) {
         rethrowMapsError(err);
       }
 
-      const name = (details.displayName as { text?: string } | undefined)?.text?.trim();
-      if (!name) {
+      const mapped = mapPlaceDetailsToStoreInput(details as GooglePlaceDetails);
+      if (!mapped) {
         toolError(`Google returned no usable place for placeId "${placeId}".`);
       }
+      // Ensure the placeId is stored even if the payload omitted `id`.
+      mapped.values.placeId = mapped.values.placeId ?? placeId;
 
-      // Human-readable hours summary from Google's weekday descriptions, if any.
-      const weekdayDescriptions = (
-        details.regularOpeningHours as { weekdayDescriptions?: string[] } | undefined
-      )?.weekdayDescriptions;
-      const hoursSummary =
-        Array.isArray(weekdayDescriptions) && weekdayDescriptions.length > 0
-          ? weekdayDescriptions.join("\n")
-          : undefined;
-
-      const editorialSummary = (
-        details.editorialSummary as { text?: string } | undefined
-      )?.text;
-      const googleMapsLink = `https://www.google.com/maps/place/?q=place_id:${placeId}`;
-
-      const [created] = await db
-        .insert(showroomStores)
-        .values({
-          name,
-          description: editorialSummary,
-          locationAddress: (details.formattedAddress as string | undefined) ?? undefined,
-          phoneNumber: (details.nationalPhoneNumber as string | undefined) ?? undefined,
-          websiteUrl: (details.websiteUri as string | undefined) ?? undefined,
-          googleMapsLink,
-          weekdayHours: hoursSummary,
-          placeId,
-        })
-        .returning();
+      const created = await persistPlaceShowroom(env, db, mapped);
 
       return {
         created: true,
         showroomId: created.id,
         url: showroomUrl(env, created.id),
+        region: created.hubName ?? null,
         store: created,
+      };
+    },
+  }),
+
+  defineTool({
+    name: "backfill_showroom_geo",
+    category: "showrooms",
+    title: "Backfill showroom coordinates + regions",
+    description:
+      "One-time maintenance for existing showrooms so the directory REGION filters (East Bay / South Bay / Peninsula / " +
+      "North Bay / SF) and the individual map markers are complete. For every store that is missing its captured " +
+      "region hub it derives one from the stored address / ZIP at NO API cost; for stores that also lack coordinates " +
+      "but have a Google `placeId` it fetches the Place location (one quota-metered Places call each, no Gemini) and " +
+      "captures lat/lng + region. Processes up to `limit` stores per call (default 25) so you can pace Places spend — " +
+      "re-run until `remaining` is 0. Idempotent: rows that already have a region/coordinates are skipped. Run this " +
+      "once after upgrading, or whenever showrooms were added without a placeId-driven import.",
+    inputShape: {
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(100)
+        .optional()
+        .describe("Max stores to process this run (default 25)"),
+      fetchCoordinates: z
+        .boolean()
+        .optional()
+        .describe(
+          "Fetch missing coordinates from Google Places by placeId (default true). " +
+            "Set false to only derive regions from stored addresses with zero API calls.",
+        ),
+    },
+    annotations: WRITE_IDEMPOTENT,
+    outputShape: {
+      processed: z.number().int(),
+      regionsSet: z.number().int(),
+      coordinatesSet: z.number().int(),
+      remaining: z.number().int(),
+    },
+    examples: [
+      { title: "Full backfill (25/run)", args: {} },
+      { title: "Regions only, no Places calls", args: { fetchCoordinates: false, limit: 100 } },
+    ],
+    handler: async ({ env, db }, input) => {
+      const limit = input.limit ?? 25;
+      const fetchCoordinates = input.fetchCoordinates ?? true;
+
+      const all = await db.select().from(showroomStores).all();
+      const candidates = all.filter(
+        (s) => s.hubRoute == null || s.latitude == null || s.longitude == null,
+      );
+      const batch = candidates.slice(0, limit);
+
+      const maps = new GoogleMapsService(env);
+      let regionsSet = 0;
+      let coordinatesSet = 0;
+
+      for (const s of batch) {
+        let lat = s.latitude;
+        let lng = s.longitude;
+
+        if ((lat == null || lng == null) && fetchCoordinates && s.placeId) {
+          try {
+            const d = await maps.placeDetails(s.placeId, undefined, { skipAi: true });
+            const loc = d.location as { latitude?: number; longitude?: number } | undefined;
+            if (typeof loc?.latitude === "number" && typeof loc?.longitude === "number") {
+              lat = loc.latitude;
+              lng = loc.longitude;
+              coordinatesSet++;
+            }
+          } catch {
+            // Tolerate quota / lookup failures — region derivation below still runs.
+          }
+        }
+
+        const geo = computeStoreGeoPatch({
+          latitude: lat,
+          longitude: lng,
+          zipCode: s.zipCode,
+          locationAddress: s.locationAddress,
+        });
+
+        const patch: Partial<typeof showroomStores.$inferInsert> = {};
+        if (geo.latitude != null && s.latitude == null) patch.latitude = geo.latitude;
+        if (geo.longitude != null && s.longitude == null) patch.longitude = geo.longitude;
+        if (geo.hubRoute && s.hubRoute == null) {
+          patch.hubRoute = geo.hubRoute;
+          patch.hubName = geo.hubName;
+          regionsSet++;
+        }
+        if (Object.keys(patch).length > 0) {
+          patch.updatedAt = new Date();
+          await db.update(showroomStores).set(patch).where(eq(showroomStores.id, s.id)).run();
+        }
+      }
+
+      return {
+        processed: batch.length,
+        regionsSet,
+        coordinatesSet,
+        remaining: Math.max(0, candidates.length - batch.length),
       };
     },
   }),
