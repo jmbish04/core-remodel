@@ -1,11 +1,4 @@
 ---
-import BaseLayout from "@/layouts/BaseLayout.astro";
-import { GlobalProductsLanding } from "@/components/products/GlobalProductsLanding";
+// ponytail: global products now lives at /admin/shopping/products (canonical). Static single-path redirect — no splat, safe with CF adapter.
+return Astro.redirect("/admin/shopping/products", 301);
 ---
-
-<BaseLayout
-  title="Global Products — The Monolith"
-  description="Every product across all brands and showrooms in one grid, groupable by type, brand, or showroom."
->
-  <GlobalProductsLanding client:only="react" />
-</BaseLayout>
