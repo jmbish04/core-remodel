@@ -263,26 +263,30 @@ export const driveTools: RemodelTool[] = [
         })
         .returning({ id: driveLists.id });
 
-      await db.insert(driveListStops).values(
-        input.stops.map((s, i) => ({
-          driveListId: drive.id,
-          showroomStoreId: s.showroomStoreId,
-          sortOrder: i,
-          leg: s.leg,
-          legWindow: s.legWindow,
-          name: s.name,
-          city: s.city,
-          address: s.address,
-          phone: s.phone,
-          hours: s.hours,
-          note: s.note,
-          pick: s.pick,
-          websiteUrl: s.websiteUrl,
-          latitude: s.latitude,
-          longitude: s.longitude,
-          isOptional: s.isOptional ?? false,
-        })),
-      );
+      const stopValues = input.stops.map((s, i) => ({
+        driveListId: drive.id,
+        showroomStoreId: s.showroomStoreId,
+        sortOrder: i,
+        leg: s.leg,
+        legWindow: s.legWindow,
+        name: s.name,
+        city: s.city,
+        address: s.address,
+        phone: s.phone,
+        hours: s.hours,
+        note: s.note,
+        pick: s.pick,
+        websiteUrl: s.websiteUrl,
+        latitude: s.latitude,
+        longitude: s.longitude,
+        isOptional: s.isOptional ?? false,
+      }));
+      // Chunk inserts: a stop row binds 16 params, and D1 caps a query at 100
+      // bound params — so a single multi-row insert of a full drive would blow
+      // the limit. 5 rows/insert = 80 params, safely under.
+      for (let i = 0; i < stopValues.length; i += 5) {
+        await db.insert(driveListStops).values(stopValues.slice(i, i + 5));
+      }
 
       return {
         ok: true,
@@ -376,14 +380,21 @@ export const driveTools: RemodelTool[] = [
       }));
 
       // Registered showrooms not referenced by ANY drive stop → future candidates.
-      const usedIds = db
+      // Materialize the used ids first: notInArray wants a primitive array (not a
+      // subquery), and an empty `NOT IN ()` is a SQLite syntax error — so only
+      // apply the filter when some showrooms are actually in use.
+      const usedRows = await db
         .selectDistinct({ id: driveListStops.showroomStoreId })
         .from(driveListStops)
-        .where(isNotNull(driveListStops.showroomStoreId));
+        .where(isNotNull(driveListStops.showroomStoreId))
+        .all();
+      const usedIds = usedRows
+        .map((r) => r.id)
+        .filter((id): id is number => id != null);
       const candidateRows = await db
         .select({ id: showroomStores.id, name: showroomStores.name })
         .from(showroomStores)
-        .where(notInArray(showroomStores.id, usedIds))
+        .where(usedIds.length ? notInArray(showroomStores.id, usedIds) : undefined)
         .limit(input.candidateLimit ?? 50)
         .all();
 
