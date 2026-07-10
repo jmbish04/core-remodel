@@ -363,6 +363,15 @@ export function ProductsBrowseApp() {
               <FilterSidebar
                 key={mode + categoryType}
                 sections={sections}
+                // Seed from applied state so the sidebar's checkboxes/slider stay
+                // in sync with the active query when it remounts on mode/category change.
+                initialFilters={{
+                  brandId: applied.brandId,
+                  productTypes: applied.productTypes,
+                  purchased: applied.purchased ? [applied.purchased] : [],
+                  wishlisted: applied.wishlisted ? [applied.wishlisted] : [],
+                }}
+                initialPriceRange={applied.price ?? undefined}
                 onApply={handleApply}
               />
             ) : null}

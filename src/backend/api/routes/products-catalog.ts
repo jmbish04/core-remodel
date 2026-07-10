@@ -13,7 +13,7 @@
 
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { and, desc, eq, gte, inArray, like, lte, notInArray, or, isNotNull } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, like, lte, notInArray, or, isNotNull } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -121,32 +121,63 @@ productsCatalogRouter.get("/catalog", async (c) => {
 
   const ids = rawProducts.map((p) => p.id);
 
-  // Batch every per-product lookup (purchased set, wishlisted set, min price,
-  // newest image) instead of N+1 querying — mirrors showroom-products.ts.
+  // D1 caps a query at 100 bound parameters, so chunk `ids` (<100) and run each
+  // chunk in parallel. Also scope purchased/wishlisted lookups to `ids` — an
+  // unfiltered scan would fetch every material/wishlist row in the DB.
+  const idChunks: number[][] = [];
+  for (let i = 0; i < ids.length; i += 90) idChunks.push(ids.slice(i, i + 90));
+  const perChunk = <T>(fn: (chunk: number[]) => Promise<T[]>) =>
+    Promise.all(idChunks.map(fn)).then((res) => res.flat());
+
   const [purchasedRows, wishlistedRows, priceRows, imageRows, photoRows] = await Promise.all([
-    db
-      .select({ purchasedShowroomProductId: materialScheduleItems.purchasedShowroomProductId })
-      .from(materialScheduleItems)
-      .where(and(eq(materialScheduleItems.isPurchased, true), isNotNull(materialScheduleItems.purchasedShowroomProductId))),
-    db
-      .select({ showroomStoreProductId: wishlistItems.showroomStoreProductId })
-      .from(wishlistItems)
-      .where(and(isNotNull(wishlistItems.showroomStoreProductId), notInArray(wishlistItems.status, ["dismissed"]))),
-    db
-      .select({ productId: productPriceObservations.productId, priceCents: productPriceObservations.priceCents })
-      .from(productPriceObservations)
-      .where(inArray(productPriceObservations.productId, ids)),
-    db
-      .select({ storeProductId: productImages.storeProductId, deliveryUrl: productImages.deliveryUrl })
-      .from(productImages)
-      .where(inArray(productImages.storeProductId, ids))
-      .orderBy(desc(productImages.createdAt)),
-    db
-      .select({ productId: productShowroomPhotos.productId, imageUrl: productShowroomPhotos.imageUrl })
-      .from(productShowroomPhotos)
-      .where(inArray(productShowroomPhotos.productId, ids))
-      .orderBy(desc(productShowroomPhotos.createdAt)),
+    perChunk((chunk) =>
+      db
+        .select({ purchasedShowroomProductId: materialScheduleItems.purchasedShowroomProductId })
+        .from(materialScheduleItems)
+        .where(
+          and(
+            eq(materialScheduleItems.isPurchased, true),
+            isNotNull(materialScheduleItems.purchasedShowroomProductId),
+            inArray(materialScheduleItems.purchasedShowroomProductId, chunk),
+          ),
+        ),
+    ),
+    perChunk((chunk) =>
+      db
+        .select({ showroomStoreProductId: wishlistItems.showroomStoreProductId })
+        .from(wishlistItems)
+        .where(
+          and(
+            isNotNull(wishlistItems.showroomStoreProductId),
+            notInArray(wishlistItems.status, ["dismissed"]),
+            inArray(wishlistItems.showroomStoreProductId, chunk),
+          ),
+        ),
+    ),
+    perChunk((chunk) =>
+      db
+        .select({ productId: productPriceObservations.productId, priceCents: productPriceObservations.priceCents })
+        .from(productPriceObservations)
+        .where(inArray(productPriceObservations.productId, chunk)),
+    ),
+    perChunk((chunk) =>
+      db
+        .select({ storeProductId: productImages.storeProductId, deliveryUrl: productImages.deliveryUrl })
+        .from(productImages)
+        .where(inArray(productImages.storeProductId, chunk))
+        .orderBy(desc(productImages.createdAt)),
+    ),
+    perChunk((chunk) =>
+      db
+        .select({ productId: productShowroomPhotos.productId, imageUrl: productShowroomPhotos.imageUrl })
+        .from(productShowroomPhotos)
+        .where(inArray(productShowroomPhotos.productId, chunk))
+        .orderBy(desc(productShowroomPhotos.createdAt)),
+    ),
   ]);
+  // Note: chunk boundaries mean the image/photo "newest wins" ordering is only
+  // guaranteed within a chunk; fine here since each product's rows stay together
+  // (filtered by that product's id) — cross-chunk mixing can't reorder a product.
 
   const purchasedSet = new Set(purchasedRows.map((r) => r.purchasedShowroomProductId).filter((v): v is number => v != null));
   const wishlistedSet = new Set(wishlistedRows.map((r) => r.showroomStoreProductId).filter((v): v is number => v != null));
@@ -253,22 +284,20 @@ productsCatalogRouter.get("/browse", async (c) => {
       .select({ id: showroomStoreCategory.id, name: showroomStoreCategory.name })
       .from(showroomStoreCategory)
       .where(eq(showroomStoreCategory.isActive, true)),
+    // "Needs a product" = unpurchased material with no product_material_mappings
+    // row. A left join + IS NULL does this in one query (no full-table fetch).
     db
       .select({ id: materialScheduleItems.id, title: materialScheduleItems.title, roomName: materialScheduleItems.roomName })
       .from(materialScheduleItems)
-      .where(eq(materialScheduleItems.isPurchased, false)),
+      .leftJoin(productMaterialMappings, eq(materialScheduleItems.id, productMaterialMappings.materialId))
+      .where(and(eq(materialScheduleItems.isPurchased, false), isNull(productMaterialMappings.materialId))),
   ]);
 
-  // "Needs a product" = a material that isn't purchased AND has no row in
-  // product_material_mappings at all. Fetched separately (rather than a
-  // NOT EXISTS subquery) so we can reuse the plain `db` select API; folded
-  // in JS the same way the rest of this file avoids N+1s.
-  const mappedMaterialIds = new Set(
-    (await db.select({ materialId: productMaterialMappings.materialId }).from(productMaterialMappings)).map((r) => r.materialId),
-  );
-  const materialsNeedingProduct = materialsNeedingProductRows
-    .filter((m) => !mappedMaterialIds.has(m.id))
-    .map((m) => ({ materialId: m.id, title: m.title, roomName: m.roomName ?? null }));
+  const materialsNeedingProduct = materialsNeedingProductRows.map((m) => ({
+    materialId: m.id,
+    title: m.title,
+    roomName: m.roomName ?? null,
+  }));
 
   const categories = [
     ...distinctTypes
