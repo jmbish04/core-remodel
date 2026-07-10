@@ -295,18 +295,17 @@ showroomGapsRouter.post("/meta/gaps/research", async (c) => {
   // Hard FK: a material must belong to a real room. Resolve gap room NAMES to
   // canonical room ids; only gaps whose room resolves get an auto-created
   // material (others stay material-less, materialId null).
+  // Case-insensitive name→id (AI room names vary in casing; rooms are few, so
+  // fetch all and match lowercased).
   const gapsNeedingMaterial = gaps.filter((g) => g.context === "material" && !g.materialId);
-  const wantNames = [...new Set(gapsNeedingMaterial.map((g) => g.roomName).filter((n): n is string => !!n))];
   const nameToRoomId = new Map<string, number>();
-  if (wantNames.length > 0) {
-    const rs = await db
-      .select({ id: rooms.id, roomName: rooms.roomName })
-      .from(rooms)
-      .where(inArray(rooms.roomName, wantNames))
-      .all();
-    for (const r of rs) nameToRoomId.set(r.roomName, r.id);
+  if (gapsNeedingMaterial.length > 0) {
+    const rs = await db.select({ id: rooms.id, roomName: rooms.roomName }).from(rooms).all();
+    for (const r of rs) nameToRoomId.set(r.roomName.toLowerCase(), r.id);
   }
-  const creatable = gapsNeedingMaterial.filter((g) => g.roomName && nameToRoomId.has(g.roomName));
+  const creatable = gapsNeedingMaterial.filter(
+    (g) => g.roomName && nameToRoomId.has(g.roomName.toLowerCase()),
+  );
 
   const insertedMaterials: { id: number }[] = [];
   if (creatable.length > 0) {
@@ -315,7 +314,7 @@ showroomGapsRouter.post("/meta/gaps/research", async (c) => {
         .insert(materialScheduleItems)
         .values({
           title: gap.name,
-          roomId: nameToRoomId.get(gap.roomName as string) as number,
+          roomId: nameToRoomId.get((gap.roomName as string).toLowerCase()) as number,
           notes: `Auto-created from gap research. ${gap.description ?? ""}`.trim(),
         })
         .returning({ id: materialScheduleItems.id }),

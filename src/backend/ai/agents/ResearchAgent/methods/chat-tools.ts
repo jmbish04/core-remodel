@@ -48,6 +48,7 @@ export function buildChatDataTools(env: Env) {
         if (room) {
           // Room filter is by name (homeowner UX) → resolve to canonical room ids.
           const rs = await db.select({ id: rooms.id }).from(rooms).where(eq(rooms.roomName, room)).all();
+          if (rs.length === 0) return { count: 0, items: [] }; // inArray([]) is invalid SQL on D1
           conditions.push(inArray(materialScheduleItems.roomId, rs.map((r) => r.id)));
         }
         if (typeof purchased === "boolean") {
