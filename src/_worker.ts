@@ -179,7 +179,26 @@ const legacyHandler: ExportedHandler<Env> = {
     }
 
     // Let Astro handle everything else (SSR and static assets via env.ASSETS)
-    return astroHandler.fetch!(request, env, ctx);
+    const astroResponse = await astroHandler.fetch!(request, env, ctx);
+
+    // Studio artifact runtime (/studio-runtime) renders inside a
+    // `sandbox="allow-scripts"` iframe, which gives the frame an OPAQUE origin.
+    // Its Astro island hydrates by fetching `/_astro/*` module scripts, and a
+    // module fetch from an opaque origin is cross-origin — so without CORS
+    // headers the browser blocks it and the island never mounts (blank frame).
+    // Build assets are public app code, so it's safe to allow any origin.
+    if (url.pathname.startsWith("/_astro/")) {
+      const headers = new Headers(astroResponse.headers);
+      headers.set("Access-Control-Allow-Origin", "*");
+      headers.set("Cross-Origin-Resource-Policy", "cross-origin");
+      return new Response(astroResponse.body, {
+        status: astroResponse.status,
+        statusText: astroResponse.statusText,
+        headers,
+      });
+    }
+
+    return astroResponse;
   },
   async email(message, env, ctx) {
     // Inbound email → routing layer. The router applies auto-reply/loop

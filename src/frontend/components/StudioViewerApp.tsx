@@ -23,6 +23,7 @@ import {
   AlertCircle,
   ArrowLeft,
   Code2,
+  ExternalLink,
   Loader2,
   RefreshCw,
   Save,
@@ -321,15 +322,27 @@ export function StudioViewerApp({ slug }: { slug: string }) {
           <ArrowLeft className="mr-2 h-4 w-4" />
           Back to gallery
         </Button>
-        <Button
-          variant="outline"
-          size="icon"
-          onClick={() => load(revisionNumber)}
-          disabled={loading}
-          aria-label="Reload"
-        >
-          <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Open the artifact standalone — chrome-free full page (no sidebar,
+              no viewer panel), the same runtime the iframe embeds. */}
+          <Button
+            variant="outline"
+            size="sm"
+            render={<a href={iframeSrc} target="_blank" rel="noopener noreferrer" />}
+          >
+            <ExternalLink className="mr-2 h-4 w-4" />
+            Open full page
+          </Button>
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => load(revisionNumber)}
+            disabled={loading}
+            aria-label="Reload"
+          >
+            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+          </Button>
+        </div>
       </div>
 
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
