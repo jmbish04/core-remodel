@@ -6,9 +6,9 @@
  * "Induction cooktop", "Primary closet system"). This is the seed that feeds
  * downstream showroom discovery, product sourcing, gap analysis, and research.
  *
- * A material carries a required-spec sheet (`material_required_specs`), an
- * optional canonical room link (`material_schedule_items.roomId` → `rooms.id`,
- * with `roomName` kept as a human-readable label), budget-line attributions
+ * A material carries a required-spec sheet (`material_required_specs`), a
+ * REQUIRED canonical room (`material_schedule_items.roomId` → `rooms.id`, hard
+ * FK; the display name is derived by joining `rooms`), budget-line attributions
  * (`budget_item_material_mappings`, keyed by the STABLE budget `trackId`), and
  * mapped showroom products (`product_material_mappings`).
  *
@@ -31,13 +31,13 @@ import { looseObject, pageOutput, urlField } from "../schemas";
 import { defineTool, READ_ONLY, WRITE, WRITE_IDEMPOTENT, type RemodelTool } from "../types";
 import { materialUrl } from "../urls";
 
-/** Shape a material row for tool output. */
-function materialDto(m: typeof materialScheduleItems.$inferSelect) {
+/** Shape a material row for tool output. `roomName` is derived (joined from `rooms`). */
+function materialDto(m: typeof materialScheduleItems.$inferSelect, roomName: string | null) {
   return {
     id: m.id,
     title: m.title,
     roomId: m.roomId,
-    roomName: m.roomName,
+    roomName,
     brand: m.brand,
     model: m.model,
     notes: m.notes,
@@ -50,7 +50,7 @@ function materialDto(m: typeof materialScheduleItems.$inferSelect) {
 const materialDtoSchema = looseObject({
   id: z.number().int(),
   title: z.string().nullable(),
-  roomId: z.number().int().nullable(),
+  roomId: z.number().int(),
   roomName: z.string().nullable(),
   brand: z.string().nullable(),
   model: z.string().nullable(),
@@ -58,6 +58,21 @@ const materialDtoSchema = looseObject({
   isPurchased: z.boolean(),
   purchasedShowroomProductId: z.number().int().nullable(),
 });
+
+/** Resolve room ids to display names in one query (for the derived `roomName`). */
+async function roomNameMap(
+  db: Parameters<RemodelTool["handler"]>[0]["db"],
+  roomIds: number[],
+): Promise<Map<number, string>> {
+  const ids = [...new Set(roomIds)];
+  if (ids.length === 0) return new Map();
+  const rows = await db
+    .select({ id: rooms.id, roomName: rooms.roomName })
+    .from(rooms)
+    .where(inArray(rooms.id, ids))
+    .all();
+  return new Map(rows.map((r) => [r.id, r.roomName]));
+}
 
 export const materialTools: RemodelTool[] = [
   defineTool({
@@ -101,7 +116,12 @@ export const materialTools: RemodelTool[] = [
         if (input.q && !matchesQuery([m.title, m.brand, m.model, m.notes], input.q)) return false;
         return true;
       });
-      return paginate(filtered.map(materialDto), input.limit ?? 50, input.offset ?? 0);
+      const roomName = await roomNameMap(db, filtered.map((m) => m.roomId));
+      return paginate(
+        filtered.map((m) => materialDto(m, roomName.get(m.roomId) ?? null)),
+        input.limit ?? 50,
+        input.offset ?? 0,
+      );
     },
   }),
 
@@ -149,12 +169,10 @@ export const materialTools: RemodelTool[] = [
         .where(eq(materialRequiredSpecs.materialId, material.id))
         .all();
 
-      // Linked canonical room (label fallback lives on the material itself).
+      // Linked canonical room (name derived by joining rooms).
       let room: { id: number; roomName: string } | null = null;
-      if (material.roomId != null) {
-        const [r] = await db.select().from(rooms).where(eq(rooms.id, material.roomId)).limit(1);
-        if (r) room = { id: r.id, roomName: r.roomName };
-      }
+      const [r] = await db.select().from(rooms).where(eq(rooms.id, material.roomId)).limit(1);
+      if (r) room = { id: r.id, roomName: r.roomName };
 
       // Budget lines: mappings carry the stable trackId; resolve to ACTIVE rows.
       const budgetLinks = await db
@@ -191,7 +209,7 @@ export const materialTools: RemodelTool[] = [
         .all();
 
       return {
-        ...materialDto(material),
+        ...materialDto(material, room?.roomName ?? null),
         room,
         requiredSpecs: specs.map((s) => ({ id: s.id, key: s.key, value: s.value })),
         budgetItems,
@@ -208,16 +226,14 @@ export const materialTools: RemodelTool[] = [
     category: "materials",
     title: "Create material",
     description:
-      "Add a new material schedule item. `title` is required. Optionally set `roomName` (freeform label), `roomId` (canonical room FK — validated), `brand`, `model`, `notes`. When `roomId` is given, the room is validated and `roomName` is backfilled from the room's name if you did not supply one.",
+      "Add a new material schedule item. `title` and `roomId` are required — every material belongs to a canonical room (hard FK, validated). Optionally set `brand`, `model`, `notes`. The room's display name is derived on read; there is no freeform room label.",
     inputShape: {
       title: z.string().min(1).describe("Material name, e.g. \"Induction cooktop\""),
-      roomName: z.string().optional().describe("Human-readable room label (auto-filled from roomId if omitted)"),
       roomId: z
         .number()
         .int()
         .positive()
-        .optional()
-        .describe("Canonical room id to link (from list_rooms)"),
+        .describe("Canonical room id this material belongs to (from list_rooms) — required"),
       brand: z.string().optional(),
       model: z.string().optional(),
       notes: z.string().optional(),
@@ -229,28 +245,22 @@ export const materialTools: RemodelTool[] = [
       url: urlField,
     },
     examples: [
-      { title: "Minimal", args: { title: "Induction cooktop" } },
       { title: "Roomed + branded", args: { title: "Toilet", roomId: 3, brand: "Kohler", model: "K-3999" } },
     ],
     handler: async ({ env, db }, input) => {
-      let roomName = input.roomName;
-      if (input.roomId != null) {
-        const [r] = await db.select().from(rooms).where(eq(rooms.id, input.roomId)).limit(1);
-        if (!r) toolError(`Room ${input.roomId} not found. Call list_rooms for valid ids.`);
-        if (roomName == null) roomName = r.roomName;
-      }
+      const [r] = await db.select().from(rooms).where(eq(rooms.id, input.roomId)).limit(1);
+      if (!r) toolError(`Room ${input.roomId} not found. Call list_rooms for valid ids.`);
       const [created] = await db
         .insert(materialScheduleItems)
         .values({
           title: input.title,
-          roomName: roomName ?? null,
-          roomId: input.roomId ?? null,
+          roomId: input.roomId,
           brand: input.brand ?? null,
           model: input.model ?? null,
           notes: input.notes ?? null,
         })
         .returning();
-      return { created: true, material: materialDto(created), url: materialUrl(env, created.id) };
+      return { created: true, material: materialDto(created, r.roomName), url: materialUrl(env, created.id) };
     },
   }),
 
@@ -259,11 +269,10 @@ export const materialTools: RemodelTool[] = [
     category: "materials",
     title: "Update material",
     description:
-      "Patch a material's fields. Only the fields you pass are changed. Editable: title, roomName, roomId, brand, model, notes, isPurchased. Note: changing `roomId` here does NOT auto-sync `roomName` — use link_material_to_room for that. To record a purchase with its product, prefer mark_material_purchased.",
+      "Patch a material's fields. Only the fields you pass are changed. Editable: title, roomId (canonical room FK, validated), brand, model, notes, isPurchased. To record a purchase with its product, prefer mark_material_purchased.",
     inputShape: {
       id: z.number().int().positive().describe("Material id (from list_materials)"),
       title: z.string().min(1).optional(),
-      roomName: z.string().optional(),
       roomId: z.number().int().positive().optional().describe("Canonical room id (validated if passed)"),
       brand: z.string().optional(),
       model: z.string().optional(),
@@ -300,7 +309,12 @@ export const materialTools: RemodelTool[] = [
         .from(materialScheduleItems)
         .where(eq(materialScheduleItems.id, id))
         .limit(1);
-      return { updated: true, material: materialDto(updated), url: materialUrl(env, id) };
+      const roomName = await roomNameMap(db, [updated.roomId]);
+      return {
+        updated: true,
+        material: materialDto(updated, roomName.get(updated.roomId) ?? null),
+        url: materialUrl(env, id),
+      };
     },
   }),
 
@@ -399,7 +413,7 @@ export const materialTools: RemodelTool[] = [
     category: "materials",
     title: "Link material to room",
     description:
-      "Set a material's canonical room. Updates `roomId` AND syncs `roomName` to the room's display name. Idempotent — safe to retry; re-linking to the same room is a no-op. Validates that both the material and the room exist.",
+      "Set a material's canonical room (`roomId` FK). Idempotent — safe to retry; re-linking to the same room is a no-op. Validates that both the material and the room exist.",
     inputShape: {
       materialId: z.number().int().positive().describe("Material id (from list_materials)"),
       roomId: z.number().int().positive().describe("Canonical room id (from list_rooms)"),
@@ -425,7 +439,7 @@ export const materialTools: RemodelTool[] = [
 
       await db
         .update(materialScheduleItems)
-        .set({ roomId: room.id, roomName: room.roomName })
+        .set({ roomId: room.id })
         .where(eq(materialScheduleItems.id, input.materialId))
         .run();
       const [updated] = await db
@@ -433,7 +447,11 @@ export const materialTools: RemodelTool[] = [
         .from(materialScheduleItems)
         .where(eq(materialScheduleItems.id, input.materialId))
         .limit(1);
-      return { linked: true, material: materialDto(updated), url: materialUrl(env, input.materialId) };
+      return {
+        linked: true,
+        material: materialDto(updated, room.roomName),
+        url: materialUrl(env, input.materialId),
+      };
     },
   }),
 
@@ -592,7 +610,12 @@ export const materialTools: RemodelTool[] = [
         .from(materialScheduleItems)
         .where(eq(materialScheduleItems.id, input.materialId))
         .limit(1);
-      return { purchased: true, material: materialDto(updated), url: materialUrl(env, input.materialId) };
+      const roomName = await roomNameMap(db, [updated.roomId]);
+      return {
+        purchased: true,
+        material: materialDto(updated, roomName.get(updated.roomId) ?? null),
+        url: materialUrl(env, input.materialId),
+      };
     },
   }),
 ];

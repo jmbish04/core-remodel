@@ -166,7 +166,7 @@ export const roomTools: RemodelTool[] = [
       const materials = await db
         .select()
         .from(materialScheduleItems)
-        .where(eq(materialScheduleItems.roomName, room.roomName))
+        .where(eq(materialScheduleItems.roomId, room.id))
         .all();
 
       return {
