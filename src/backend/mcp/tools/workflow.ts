@@ -70,7 +70,7 @@ export const workflowTools: RemodelTool[] = [
         .array(
           z.object({
             title: z.string().min(1).describe("Material title, e.g. 'Toilet — Primary Bath'"),
-            roomId: z.number().int().positive().optional(),
+            roomId: z.number().int().positive().describe("Canonical room id (required — materials belong to a room)"),
             budgetItemTrackId: z.string().optional(),
             budgetItemId: z.number().int().positive().optional(),
             purchasePriceCents: z

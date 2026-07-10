@@ -23,6 +23,7 @@ import {
   showroomStoreProducts,
 } from "@backend/db/schema/showroom/index";
 import { materialScheduleItems } from "@backend/db/schema/materials/index";
+import { rooms } from "@backend/db/schema/home/rooms";
 import { generateStructuredOutput } from "@backend/ai/providers/index";
 
 export const showroomGapsRouter = new Hono<{ Bindings: Env }>();
@@ -115,8 +116,9 @@ const MaterialGapSchema = z.object({
 /** AI detection: implied-but-missing sibling materials from the current list. */
 async function detectMaterialGaps(env: Env, db: ReturnType<typeof drizzle>): Promise<GapCandidate[]> {
   const materials = await db
-    .select({ title: materialScheduleItems.title, roomName: materialScheduleItems.roomName })
-    .from(materialScheduleItems);
+    .select({ title: materialScheduleItems.title, roomName: rooms.roomName })
+    .from(materialScheduleItems)
+    .leftJoin(rooms, eq(materialScheduleItems.roomId, rooms.id));
 
   if (materials.length === 0) return [];
   const existingNames = new Set(materials.map((m) => slug(m.title)));
@@ -157,8 +159,9 @@ async function detectMaterialGaps(env: Env, db: ReturnType<typeof drizzle>): Pro
 /** Deterministic: materials with no sourced showroom products. */
 async function detectProductGaps(db: ReturnType<typeof drizzle>): Promise<GapCandidate[]> {
   const materials = await db
-    .select({ id: materialScheduleItems.id, title: materialScheduleItems.title, roomName: materialScheduleItems.roomName })
-    .from(materialScheduleItems);
+    .select({ id: materialScheduleItems.id, title: materialScheduleItems.title, roomName: rooms.roomName })
+    .from(materialScheduleItems)
+    .leftJoin(rooms, eq(materialScheduleItems.roomId, rooms.id));
   if (materials.length === 0) return [];
 
   const linked = await db
@@ -289,15 +292,30 @@ showroomGapsRouter.post("/meta/gaps/research", async (c) => {
 
   // Materialize the thing we're researching for (material-context gaps) in one
   // batched roundtrip instead of a sequential insert per gap.
+  // Hard FK: a material must belong to a real room. Resolve gap room NAMES to
+  // canonical room ids; only gaps whose room resolves get an auto-created
+  // material (others stay material-less, materialId null).
   const gapsNeedingMaterial = gaps.filter((g) => g.context === "material" && !g.materialId);
+  const wantNames = [...new Set(gapsNeedingMaterial.map((g) => g.roomName).filter((n): n is string => !!n))];
+  const nameToRoomId = new Map<string, number>();
+  if (wantNames.length > 0) {
+    const rs = await db
+      .select({ id: rooms.id, roomName: rooms.roomName })
+      .from(rooms)
+      .where(inArray(rooms.roomName, wantNames))
+      .all();
+    for (const r of rs) nameToRoomId.set(r.roomName, r.id);
+  }
+  const creatable = gapsNeedingMaterial.filter((g) => g.roomName && nameToRoomId.has(g.roomName));
+
   const insertedMaterials: { id: number }[] = [];
-  if (gapsNeedingMaterial.length > 0) {
-    const insertQueries = gapsNeedingMaterial.map((gap) =>
+  if (creatable.length > 0) {
+    const insertQueries = creatable.map((gap) =>
       db
         .insert(materialScheduleItems)
         .values({
           title: gap.name,
-          roomName: gap.roomName,
+          roomId: nameToRoomId.get(gap.roomName as string) as number,
           notes: `Auto-created from gap research. ${gap.description ?? ""}`.trim(),
         })
         .returning({ id: materialScheduleItems.id }),
@@ -310,10 +328,10 @@ showroomGapsRouter.post("/meta/gaps/research", async (c) => {
     }
   }
 
-  // Map each material gap to its freshly-created material id (1:1, same order).
+  // Map each creatable gap to its freshly-created material id (1:1, same order).
   const gapToMaterialId = new Map<number, number>();
   let insertIdx = 0;
-  for (const gap of gapsNeedingMaterial) {
+  for (const gap of creatable) {
     const material = insertedMaterials[insertIdx++];
     if (material) gapToMaterialId.set(gap.id, material.id);
   }

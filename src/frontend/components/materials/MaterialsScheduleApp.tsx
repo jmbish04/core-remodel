@@ -18,10 +18,12 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { GapPanel } from "@/components/showroom/GapPanel";
+import { RoomSelect } from "@/components/ui/room-select";
 
 interface Material {
   id: number;
   title: string;
+  roomId: number;
   roomName: string | null;
   brand: string | null;
   model: string | null;
@@ -214,11 +216,21 @@ function MaterialCard({ material, onChange, onDelete }: { material: Material; on
 function AddMaterialDialog({ onCreated }: { onCreated: () => void }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ title: "", roomName: "", brand: "", model: "", notes: "" });
+  const [form, setForm] = useState<{
+    title: string;
+    roomId: number | null;
+    brand: string;
+    model: string;
+    notes: string;
+  }>({ title: "", roomId: null, brand: "", model: "", notes: "" });
 
   const submit = async () => {
     if (!form.title.trim()) {
       toast.error("Title is required");
+      return;
+    }
+    if (form.roomId == null) {
+      toast.error("Room is required");
       return;
     }
     setSaving(true);
@@ -228,14 +240,14 @@ function AddMaterialDialog({ onCreated }: { onCreated: () => void }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: form.title.trim(),
-          roomName: form.roomName.trim() || null,
+          roomId: form.roomId,
           brand: form.brand.trim() || null,
           model: form.model.trim() || null,
           notes: form.notes.trim() || null,
         }),
       });
       toast.success("Material added");
-      setForm({ title: "", roomName: "", brand: "", model: "", notes: "" });
+      setForm({ title: "", roomId: null, brand: "", model: "", notes: "" });
       setOpen(false);
       onCreated();
     } catch (e) {
@@ -263,7 +275,7 @@ function AddMaterialDialog({ onCreated }: { onCreated: () => void }) {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="m-room">Room</Label>
-              <Input id="m-room" value={form.roomName} onChange={(e) => setForm({ ...form, roomName: e.target.value })} placeholder="Kitchen" />
+              <RoomSelect value={form.roomId} onChange={(roomId) => setForm({ ...form, roomId })} placeholder="Select a room" />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="m-brand">Brand</Label>
