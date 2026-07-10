@@ -73,9 +73,11 @@ export const priceObservationTools: RemodelTool[] = [
         .values({
           productId: input.productId,
           sourceType: input.sourceType,
-          showroomId: input.showroomId ?? null,
-          retailerName: input.retailerName ?? null,
-          retailerUrl: input.retailerUrl ?? null,
+          // Persist source-specific fields only for their matching sourceType, so an
+          // online-retailer observation can't carry a stray showroomId (and vice versa).
+          showroomId: input.sourceType === "showroom" ? (input.showroomId ?? null) : null,
+          retailerName: input.sourceType === "online_retailer" ? (input.retailerName ?? null) : null,
+          retailerUrl: input.sourceType === "online_retailer" ? (input.retailerUrl ?? null) : null,
           price: input.price ?? null,
           salePrice: input.salePrice ?? null,
           discountInfo: input.discountInfo ?? null,
