@@ -1,17 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { Search, Loader2, Package, ExternalLink, Heart } from "lucide-react";
+import { Search, Loader2, Package, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { RoomSelect } from "@/components/ui/room-select";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { AddToWishlistButton } from "@/components/products/AddToWishlistButton";
 import { GapPanel } from "@/components/showroom/GapPanel";
 
 interface CatalogProduct {
@@ -39,96 +34,6 @@ async function api<T>(url: string): Promise<T> {
 }
 
 const HUBS = ["A", "B", "C", "D", "E"];
-
-/**
- * Small "Add to wishlist" affordance for a product card. Opens a popover with
- * an optional room picker, then POSTs `/api/wishlist/from-product/:productId`
- * (with `{ roomId }` when a room is chosen). The wishlist API denormalizes the
- * product's title/price/thumbnail server-side, so no product data is passed.
- *
- * The trigger stops event propagation / prevents default so clicking it never
- * navigates the enclosing product-detail `<a>`.
- */
-function AddToWishlistButton({ productId }: { productId: number }) {
-  const [open, setOpen] = useState(false);
-  const [roomId, setRoomId] = useState<number | null>(null);
-  const [saving, setSaving] = useState(false);
-
-  async function add() {
-    setSaving(true);
-    try {
-      const res = await fetch(`/api/wishlist/from-product/${productId}`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(roomId != null ? { roomId } : {}),
-      });
-      if (!res.ok) {
-        const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-        throw new Error((payload.error as string) ?? `Request failed (${res.status})`);
-      }
-      toast.success("Added to wishlist");
-      setOpen(false);
-      setRoomId(null);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to add to wishlist");
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        render={
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 px-2 text-muted-foreground hover:text-foreground"
-            aria-label="Add to wishlist"
-            onClick={(e) => {
-              // Keep the click inside the popover, not the product-detail link.
-              e.preventDefault();
-              e.stopPropagation();
-            }}
-          >
-            <Heart className="mr-1 h-3.5 w-3.5" /> Wishlist
-          </Button>
-        }
-      />
-      <PopoverContent
-        className="w-64 p-3"
-        side="bottom"
-        align="end"
-        // Prevent the wrapping <a> from navigating on any interaction inside.
-        onClick={(e) => e.preventDefault()}
-      >
-        <p className="mb-2 text-xs font-medium text-muted-foreground">
-          Add to wishlist for a room (optional)
-        </p>
-        <RoomSelect
-          value={roomId}
-          onChange={setRoomId}
-          includeAllOption
-          allOptionLabel="All rooms"
-          aria-label="Wishlist room"
-        />
-        <Button
-          size="sm"
-          className="mt-3 w-full"
-          disabled={saving}
-          onClick={(e) => {
-            e.preventDefault();
-            void add();
-          }}
-        >
-          {saving ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Heart className="mr-1.5 h-4 w-4" />}
-          Add to wishlist
-        </Button>
-      </PopoverContent>
-    </Popover>
-  );
-}
 
 export function ProductsCatalogApp() {
   const [products, setProducts] = useState<CatalogProduct[]>([]);
