@@ -277,9 +277,9 @@ export function StudioViewerApp({ slug }: { slug: string }) {
   };
 
   const downloadSource = () => {
-    const src = artifact?.revision?.sourceTsx;
-    if (!src) return;
-    const rev = artifact.revision?.revisionNumber ?? 1;
+    if (!artifact || !artifact.revision) return;
+    const src = artifact.revision.sourceTsx;
+    const rev = artifact.revision.revisionNumber;
     const blob = new Blob([src], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
