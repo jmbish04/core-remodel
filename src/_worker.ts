@@ -191,7 +191,10 @@ const legacyHandler: ExportedHandler<Env> = {
       const headers = new Headers(astroResponse.headers);
       headers.set("Access-Control-Allow-Origin", "*");
       headers.set("Cross-Origin-Resource-Policy", "cross-origin");
-      return new Response(astroResponse.body, {
+      // Cached assets return a null-body status (304 on conditional GETs, 204);
+      // passing a body to `new Response` for those throws a TypeError in Workers.
+      const body = [204, 304].includes(astroResponse.status) ? null : astroResponse.body;
+      return new Response(body, {
         status: astroResponse.status,
         statusText: astroResponse.statusText,
         headers,
