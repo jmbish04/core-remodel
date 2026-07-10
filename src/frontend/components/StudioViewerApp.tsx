@@ -23,6 +23,7 @@ import {
   AlertCircle,
   ArrowLeft,
   Code2,
+  Download,
   ExternalLink,
   Loader2,
   RefreshCw,
@@ -275,6 +276,21 @@ export function StudioViewerApp({ slug }: { slug: string }) {
     }
   };
 
+  const downloadSource = () => {
+    if (!artifact || !artifact.revision) return;
+    const src = artifact.revision.sourceTsx;
+    const rev = artifact.revision.revisionNumber;
+    const blob = new Blob([src], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${artifact.slug}-v${rev}.tsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
   if (loading && !artifact) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -332,6 +348,16 @@ export function StudioViewerApp({ slug }: { slug: string }) {
           >
             <ExternalLink className="mr-2 h-4 w-4" />
             Open full page
+          </Button>
+          {/* Export the current revision's TSX source as a downloadable file. */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={downloadSource}
+            disabled={!artifact.revision}
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Download .tsx
           </Button>
           <Button
             variant="outline"
