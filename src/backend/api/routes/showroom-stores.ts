@@ -39,6 +39,8 @@ import {
   browserRunPages,
   showroomPhotosMapping,
   showroomHours,
+  productPriceObservations,
+  productShowroomPhotos,
 } from "@backend/db/schema/showroom/index";
 import {
   brands,
@@ -759,8 +761,17 @@ showroomStoresRouter.get("/products/:pid/research/context", async (c) => {
     return c.json({ success: false, error: "Product not found" }, 404);
   }
 
-  const [findings, images, specs, ratings, intelRows, storeRows, brandRows] =
-    await Promise.all([
+  const [
+    findings,
+    images,
+    specs,
+    ratings,
+    intelRows,
+    storeRows,
+    brandRows,
+    priceObservationRows,
+    photos,
+  ] = await Promise.all([
       db
         .select()
         .from(storeProductResearch)
@@ -804,6 +815,17 @@ showroomStoresRouter.get("/products/:pid/research/context", async (c) => {
             .where(eq(brands.id, product.brandId))
             .limit(1)
         : Promise.resolve([] as Array<{ id: number; name: string }>),
+      // Every price seen for this product (showroom / online retailer /
+      // manufacturer), with the showroom name resolved when present.
+      db
+        .select({ obs: productPriceObservations, showroomName: showroomStores.name })
+        .from(productPriceObservations)
+        .leftJoin(showroomStores, eq(showroomStores.id, productPriceObservations.showroomId))
+        .where(eq(productPriceObservations.productId, productId)),
+      db
+        .select()
+        .from(productShowroomPhotos)
+        .where(eq(productShowroomPhotos.productId, productId)),
     ]);
 
   return c.json({
@@ -816,6 +838,8 @@ showroomStoresRouter.get("/products/:pid/research/context", async (c) => {
     findings,
     images,
     specs,
+    priceObservations: priceObservationRows.map((r) => ({ ...r.obs, showroomName: r.showroomName })),
+    photos,
     rating: ratings[0] ?? null,
     intel: intelRows[0] ?? null,
   });
