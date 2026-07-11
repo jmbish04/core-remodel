@@ -1,1 +1,0 @@
-ALTER TABLE `showroom_gaps` ADD `room_id` integer;

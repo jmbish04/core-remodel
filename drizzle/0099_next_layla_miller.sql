@@ -1,1 +1,0 @@
-CREATE UNIQUE INDEX `showroom_store_products_brand_model_uniq` ON `showroom_store_products` (`brand_id`,`model_key`);
