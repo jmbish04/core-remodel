@@ -129,7 +129,7 @@ export const productPhotoTools: RemodelTool[] = [
     ],
     handler: async ({ env, db }, input) => {
       const result = await reviewProductPhotoCore(db, input);
-      return { ...result, url: productsUrl(env, result.photo.productId) };
+      return { ...result, url: productsUrl(env, result.photo.productId ?? undefined) };
     },
   }),
 
@@ -171,7 +171,9 @@ export const productPhotoTools: RemodelTool[] = [
         .all();
       if (rows.length === 0) return paginate([], input.limit ?? 50, input.offset ?? 0);
 
-      const productIds = [...new Set(rows.map((r) => r.productId))];
+      const productIds = [
+        ...new Set(rows.map((r) => r.productId).filter((id): id is number => id != null)),
+      ];
       const photoIds = rows.map((r) => r.id);
       const [products, observations] = await Promise.all([
         db.select().from(showroomStoreProducts).where(inArray(showroomStoreProducts.id, productIds)).all(),
@@ -184,7 +186,7 @@ export const productPhotoTools: RemodelTool[] = [
         id: r.id,
         ragUuid: r.ragUuid,
         productId: r.productId,
-        itemName: productById.get(r.productId)?.itemName ?? null,
+        itemName: (r.productId != null ? productById.get(r.productId)?.itemName : null) ?? null,
         showroomId: r.showroomId,
         imageUrl: r.imageUrl,
         category: r.category,

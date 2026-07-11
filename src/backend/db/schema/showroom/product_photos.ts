@@ -28,9 +28,12 @@ export const productShowroomPhotos = sqliteTable(
     /** Join key shared with the Vectorize vector's metadata. 1 photo = 1 vector. */
     ragUuid: text("rag_uuid").notNull(),
 
-    productId: integer("product_id")
-      .notNull()
-      .references(() => showroomStoreProducts.id, { onDelete: "cascade" }),
+    /** Nullable — the C2 intake wizard stages photos before a product exists;
+     * the product row is created only at "Process with AI". */
+    productId: integer("product_id").references(
+      () => showroomStoreProducts.id,
+      { onDelete: "cascade" }
+    ),
 
     /** Nullable — a photo may come from an online source, not a showroom. */
     showroomId: integer("showroom_id").references(() => showroomStores.id, {
