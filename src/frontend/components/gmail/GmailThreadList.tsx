@@ -35,6 +35,8 @@ interface GmailThreadListProps {
   searchPlaceholder?: string;
   /** Message shown when the list is empty (and not loading). */
   emptyLabel?: string;
+  /** Rich empty-state node; overrides `emptyLabel` when the list is empty. */
+  emptyContent?: React.ReactNode;
   /** Optional footer slot (e.g. a "Load more" button in the global inbox). */
   footer?: React.ReactNode;
 }
@@ -62,6 +64,7 @@ export function GmailThreadList({
   onSearch,
   searchPlaceholder = "Search mail",
   emptyLabel = "No conversations found.",
+  emptyContent,
   footer,
 }: GmailThreadListProps) {
   const [query, setQuery] = useState("");
@@ -104,6 +107,8 @@ export function GmailThreadList({
               <ThreadRowSkeleton key={i} />
             ))}
           </div>
+        ) : threads.length === 0 && emptyContent ? (
+          emptyContent
         ) : threads.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-6 py-16 text-center">
             <div className="rounded-full bg-muted/60 p-3">
