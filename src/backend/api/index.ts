@@ -70,6 +70,7 @@ import { showroomStoresRouter } from "./routes/showroom-stores";
 import { showroomProductsRouter } from "./routes/showroom-products";
 import { productsCatalogRouter } from "./routes/products-catalog";
 import { productPhotosRouter } from "./routes/product-photos";
+import { configRouter } from "./routes/config";
 import { googlePhotosRouter } from "./routes/google-photos";
 import { brandsRouter } from "./routes/brands";
 import { showroomSeedRouter } from "./routes/showroom-seed";
@@ -141,6 +142,9 @@ app.use("/api/product-photos/*", requireAccessAuth);
 // showroom-products, which this mirrors.
 app.use("/api/products", requireAccessAuth);
 app.use("/api/products/*", requireAccessAuth);
+// Config-driven vocabularies (0020-C2: categories/subcategories/colors + mappings).
+app.use("/api/config", requireAccessAuth);
+app.use("/api/config/*", requireAccessAuth);
 app.use("/api/brands", requireAccessAuth);
 app.use("/api/brands/*", requireAccessAuth);
 app.use("/api/materials", requireAccessAuth);
@@ -246,6 +250,7 @@ app.route("/api/showroom-stores", showroomStoresRouter);
 app.route("/api/showroom-products", showroomProductsRouter);
 app.route("/api/product-photos", productPhotosRouter);
 app.route("/api/products", productsCatalogRouter);
+app.route("/api/config", configRouter);
 app.route("/api/brands", brandsRouter);
 app.route("/api/showroom-stores", showroomSeedRouter);
 app.route("/api/showroom-stores", showroomGapsRouter);
