@@ -10,6 +10,7 @@ import { workerEmailStagedCompanies } from "@backend/db/schema/emails/worker_ema
 import { workerEmailContracts } from "@backend/db/schema/emails/worker_email_contracts";
 import { companies } from "@backend/db/schema/directory/companies";
 import { materialScheduleItems } from "@backend/db/schema/materials/schedule_item";
+import { attachServiceNames } from "@backend/services/service-names";
 
 export const workerEmailsRouter = new Hono<{ Bindings: Env }>();
 
@@ -85,14 +86,14 @@ workerEmailsRouter.get("/:id", async (c) => {
         .select()
         .from(workerEmailInvoiceLineItems)
         .where(eq(workerEmailInvoiceLineItems.invoiceId, invoice.id));
-      return { ...invoice, lineItems };
+      return { ...invoice, lineItems: await attachServiceNames(db, lineItems) };
     }),
   );
 
-  const contracts = await db
-    .select()
-    .from(workerEmailContracts)
-    .where(eq(workerEmailContracts.emailId, id));
+  const contracts = await attachServiceNames(
+    db,
+    await db.select().from(workerEmailContracts).where(eq(workerEmailContracts.emailId, id)),
+  );
 
   const [stagedCompany] = await db
     .select()
