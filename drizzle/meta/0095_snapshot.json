@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5aa3fa57-d850-47d7-bcec-afebdbd2d0fa",
-  "prevId": "fbe87072-343c-487a-8e4f-be920eb51c7c",
+  "id": "fe09913a-c06f-428a-80de-4cbc9d924097",
+  "prevId": "2d51870c-a7cb-4df4-afaa-c235cea5dca5",
   "tables": {
     "users": {
       "name": "users",
@@ -14837,6 +14837,13 @@
           "notNull": true,
           "autoincrement": true
         },
+        "store_id": {
+          "name": "store_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "material_id": {
           "name": "material_id",
           "type": "integer",
@@ -14943,34 +14950,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "model_number": {
-          "name": "model_number",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "model_key": {
-          "name": "model_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "msrp": {
-          "name": "msrp",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "msrp_cents": {
-          "name": "msrp_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -14988,17 +14967,21 @@
           "default": "(unixepoch())"
         }
       },
-      "indexes": {
-        "showroom_store_products_brand_model_uniq": {
-          "name": "showroom_store_products_brand_model_uniq",
-          "columns": [
-            "brand_id",
-            "model_key"
-          ],
-          "isUnique": true
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
+        "showroom_store_products_store_id_showroom_stores_id_fk": {
+          "name": "showroom_store_products_store_id_showroom_stores_id_fk",
+          "tableFrom": "showroom_store_products",
+          "tableTo": "showroom_stores",
+          "columnsFrom": [
+            "store_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
         "showroom_store_products_material_id_material_schedule_items_id_fk": {
           "name": "showroom_store_products_material_id_material_schedule_items_id_fk",
           "tableFrom": "showroom_store_products",

@@ -15,6 +15,7 @@ import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { cents, toolError } from "../format";
+import { looseObject } from "../schemas";
 import { brandTools } from "./brands";
 import { budgetTools } from "./budget";
 import { materialTools } from "./materials";
@@ -69,7 +70,7 @@ export const workflowTools: RemodelTool[] = [
         .array(
           z.object({
             title: z.string().min(1).describe("Material title, e.g. 'Toilet — Primary Bath'"),
-            roomId: z.number().int().positive().optional(),
+            roomId: z.number().int().positive().describe("Canonical room id (required — materials belong to a room)"),
             budgetItemTrackId: z.string().optional(),
             budgetItemId: z.number().int().positive().optional(),
             purchasePriceCents: z
@@ -85,6 +86,19 @@ export const workflowTools: RemodelTool[] = [
         .describe("One or more material items this product satisfies"),
     },
     annotations: WRITE,
+    outputShape: {
+      reconciled: z.boolean(),
+      brandId: z.number().int(),
+      productId: z.number().int(),
+      steps: z.array(z.string()),
+      materials: z.array(
+        looseObject({
+          title: z.string(),
+          materialId: z.number().int(),
+          steps: z.array(z.string()),
+        }),
+      ),
+    },
     examples: [
       {
         title: "Toto toilet for the primary bath",

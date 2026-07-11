@@ -20,9 +20,10 @@
 import { tool } from "ai";
 import { z } from "zod";
 import { drizzle } from "drizzle-orm/d1";
-import { and, desc, eq, like } from "drizzle-orm";
+import { and, desc, eq, inArray, like } from "drizzle-orm";
 
 import { materialScheduleItems } from "@backend/db/schema/materials/index";
+import { rooms } from "@backend/db/schema/home/rooms";
 import {
   showroomStores,
   showroomStoreProducts,
@@ -48,7 +49,12 @@ export function buildChatDataTools(env: Env) {
       execute: async ({ room, purchased, search }) => {
         const db = drizzle(env.DB);
         const conditions = [];
-        if (room) conditions.push(eq(materialScheduleItems.roomName, room));
+        if (room) {
+          // Room filter is by name (homeowner UX) → resolve to canonical room ids.
+          const rs = await db.select({ id: rooms.id }).from(rooms).where(eq(rooms.roomName, room)).all();
+          if (rs.length === 0) return { count: 0, items: [] }; // inArray([]) is invalid SQL on D1
+          conditions.push(inArray(materialScheduleItems.roomId, rs.map((r) => r.id)));
+        }
         if (typeof purchased === "boolean") {
           conditions.push(eq(materialScheduleItems.isPurchased, purchased));
         }
@@ -63,10 +69,19 @@ export function buildChatDataTools(env: Env) {
         if (conditions.length > 0) q = q.where(and(...conditions));
 
         const rows = await q;
+        // Derive room names (no stored column) in one query.
+        const roomIds = [...new Set(rows.map((r) => r.roomId))];
+        const roomName = roomIds.length
+          ? new Map(
+              (await db.select({ id: rooms.id, roomName: rooms.roomName }).from(rooms).where(inArray(rooms.id, roomIds)).all()).map(
+                (r) => [r.id, r.roomName],
+              ),
+            )
+          : new Map<number, string>();
         const items = rows.map((m) => ({
           id: m.id,
           title: m.title,
-          room: m.roomName,
+          room: roomName.get(m.roomId) ?? null,
           brand: m.brand,
           model: m.model,
           purchased: m.isPurchased,

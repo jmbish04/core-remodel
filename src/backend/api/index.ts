@@ -47,6 +47,7 @@ import mcpRouter from "./routes/mcp";
 import mcpCatalogRouter from "./routes/mcp-catalog";
 import mcpOpsRouter from "./routes/mcp-ops";
 import studioRouter from "./routes/studio";
+import driveListsRouter from "./routes/drive-lists";
 import { portalRouter } from "./routes/portal";
 import { planningRouter } from "./routes/planning";
 import { planningExtendedRouter } from "./routes/planning-extended";
@@ -72,6 +73,7 @@ import { brandsRouter } from "./routes/brands";
 import { showroomSeedRouter } from "./routes/showroom-seed";
 import { materialsRouter } from "./routes/materials";
 import { wishlistRouter } from "./routes/wishlist";
+import { workerEmailsRouter } from "./routes/worker-emails";
 import { showroomGapsRouter } from "./routes/showroom-gaps";
 import { showroomCatalogRouter } from "./routes/showroom-catalog";
 import { showroomScanRouter } from "./routes/showroom-scan";
@@ -137,6 +139,8 @@ app.use("/api/materials", requireAccessAuth);
 app.use("/api/materials/*", requireAccessAuth);
 app.use("/api/wishlist", requireAccessAuth);
 app.use("/api/wishlist/*", requireAccessAuth);
+app.use("/api/worker-emails", requireAccessAuth);
+app.use("/api/worker-emails/*", requireAccessAuth);
 app.use("/api/places", requireAccessAuth);
 app.use("/api/places/*", requireAccessAuth);
 // Company CRM (notes + todos, 0013 roadmap P3-03/P3-04) — admin-only, no public read.
@@ -192,6 +196,7 @@ app.route("/api/mcp", mcpRouter);
 app.route("/api/mcp-docs", mcpCatalogRouter);
 app.route("/api/mcp-ops", mcpOpsRouter);
 app.route("/api/studio", studioRouter);
+app.route("/api/drive-lists", driveListsRouter);
 app.route("/api/portal", portalRouter);
 app.route("/api/planning", planningRouter);
 app.route("/api/planning", planningExtendedRouter);
@@ -240,6 +245,9 @@ app.route("/api/showroom-stores", showroomBackfillRouter);
 app.route("/api/research-jobs", researchJobsRouter);
 app.route("/api/materials", materialsRouter);
 app.route("/api/wishlist", wishlistRouter);
+// Worker-email HITL inbox API (invoices / contracts / receipts / staged
+// companies). Mounting this is what makes /admin/inbox show emails.
+app.route("/api/worker-emails", workerEmailsRouter);
 app.route("/api/places", placesRouter);
 // adminIntegrationsRouter mounts under /api/admin/integrations — already covered
 // by the /api/admin/* requireAccessAuth middleware above.

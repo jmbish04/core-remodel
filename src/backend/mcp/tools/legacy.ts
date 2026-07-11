@@ -43,6 +43,7 @@ import { runStage } from "../../services/render/stage-runner";
 import type { StageType } from "../../services/render/types";
 import { rowToDto } from "../../api/routes/measurements.schemas";
 import { num, toolError } from "../format";
+import { looseObject } from "../schemas";
 import { defineTool, READ_ONLY, WRITE, type RemodelTool } from "../types";
 
 /**
@@ -90,6 +91,9 @@ export const legacyTools: RemodelTool[] = [
         .describe("Optional room id this session belongs to."),
     },
     annotations: WRITE,
+    outputShape: {
+      sessionId: z.string().describe("The created render session id"),
+    },
     handler: async ({ db }, input) => {
       const args = input as { name: unknown; roomId?: unknown };
       const id = crypto.randomUUID();
@@ -111,6 +115,17 @@ export const legacyTools: RemodelTool[] = [
       roomId: z.number().describe("Room id whose listing photos to list."),
     },
     annotations: READ_ONLY,
+    // Envelope the array under `items` so the tool can carry an object
+    // outputSchema (MCP structuredContent must be an object, never a bare array).
+    outputShape: {
+      items: z.array(
+        looseObject({
+          listingPhotoId: z.number().int(),
+          roomName: z.string().nullable(),
+          hasBlankCanvas: z.boolean(),
+        }),
+      ),
+    },
     handler: async ({ db }, input) => {
       const args = input as { roomId: unknown };
       const rows = await db
@@ -118,11 +133,13 @@ export const legacyTools: RemodelTool[] = [
         .from(listingPhotos)
         .where(eq(listingPhotos.roomId, Number(args.roomId)))
         .all();
-      return rows.map((r) => ({
-        listingPhotoId: r.id,
-        roomName: r.roomName,
-        hasBlankCanvas: !!r.blankCanvasCfImageId,
-      }));
+      return {
+        items: rows.map((r) => ({
+          listingPhotoId: r.id,
+          roomName: r.roomName,
+          hasBlankCanvas: !!r.blankCanvasCfImageId,
+        })),
+      };
     },
   }),
 
@@ -148,6 +165,11 @@ export const legacyTools: RemodelTool[] = [
       prompt: z.string().describe("The render prompt."),
     },
     annotations: WRITE,
+    // Envelope the opaque runStage result under `canvas` (passthrough) so the
+    // tool carries an object outputSchema without enumerating every field.
+    outputShape: {
+      canvas: looseObject({ id: z.string() }),
+    },
     handler: async ({ env, db }, input) => {
       const args = input as {
         actionType: unknown;
@@ -200,7 +222,7 @@ export const legacyTools: RemodelTool[] = [
         listingPhotoId,
         roomId,
       });
-      return result;
+      return { canvas: result };
     },
   }),
 
@@ -219,6 +241,10 @@ export const legacyTools: RemodelTool[] = [
       roomId: z.number().optional().describe("Optional room id to associate."),
     },
     annotations: WRITE,
+    // Envelope the opaque generateMoodBoard result under `moodBoard` (passthrough).
+    outputShape: {
+      moodBoard: looseObject({ id: z.string() }),
+    },
     handler: async ({ env }, input) => {
       const args = input as { prompt?: unknown; imageUrls?: unknown; roomId?: unknown };
       const mb = await generateMoodBoard({
@@ -228,7 +254,7 @@ export const legacyTools: RemodelTool[] = [
         roomId: (args.roomId as number | null) ?? null,
         source: "api",
       });
-      return mb;
+      return { moodBoard: mb };
     },
   }),
 
@@ -243,6 +269,15 @@ export const legacyTools: RemodelTool[] = [
       roomId: z.number().optional().describe("Filter to a single room id."),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      items: z.array(
+        looseObject({
+          id: z.union([z.number(), z.string()]),
+          aiTitle: z.string().nullable(),
+          outputImageUrl: z.string().nullable(),
+        }),
+      ),
+    },
     handler: async ({ db }, input) => {
       const args = input as { q?: unknown; roomId?: unknown };
       const rows = await db.select().from(moodBoardGenerations).all();
@@ -256,11 +291,13 @@ export const legacyTools: RemodelTool[] = [
             (r.aiDescription ?? "").toLowerCase().includes(q),
         );
       }
-      return filtered.map((r) => ({
-        id: r.id,
-        aiTitle: r.aiTitle,
-        outputImageUrl: r.outputImageUrl,
-      }));
+      return {
+        items: filtered.map((r) => ({
+          id: r.id,
+          aiTitle: r.aiTitle,
+          outputImageUrl: r.outputImageUrl,
+        })),
+      };
     },
   }),
 
@@ -277,6 +314,11 @@ export const legacyTools: RemodelTool[] = [
       room: z.string().optional().describe("Floor-plan room key. Defaults to '126-colby'."),
     },
     annotations: WRITE,
+    outputShape: {
+      room: z.string().describe("The floor-plan room key that was signalled"),
+      elementId: z.string().describe("The wall segment id that flashed"),
+      delivered: z.any().describe("How many connected screens lit up"),
+    },
     handler: async ({ env }, input) => {
       const args = input as { elementId?: unknown; room?: unknown };
       const elementId = String(args.elementId ?? "").trim();
@@ -318,6 +360,11 @@ export const legacyTools: RemodelTool[] = [
       notes: z.string().optional(),
     },
     annotations: WRITE,
+    // Envelope the measurement DTO under `measurement` (passthrough) so this
+    // tool carries an object outputSchema.
+    outputShape: {
+      measurement: looseObject({ id: z.number().int() }),
+    },
     handler: async ({ db }, input) => {
       const args = input as Record<string, any>;
       const elementType = String(args.elementType ?? "");
@@ -368,7 +415,7 @@ export const legacyTools: RemodelTool[] = [
         notes: args.notes != null ? String(args.notes) : null,
       });
       if (!result.ok) toolError(result.error);
-      return rowToDto(result.row);
+      return { measurement: rowToDto(result.row) };
     },
   }),
 
@@ -388,6 +435,9 @@ export const legacyTools: RemodelTool[] = [
       limit: z.number().optional().describe("Max rows to return."),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      items: z.array(looseObject({ id: z.number().int() })),
+    },
     handler: async ({ db }, input) => {
       const args = input as { roomId?: unknown; elementType?: unknown; q?: unknown; limit?: unknown };
       const elementTypes = args.elementType
@@ -402,7 +452,7 @@ export const legacyTools: RemodelTool[] = [
         q: args.q != null ? String(args.q) : undefined,
         limit: num(args.limit),
       });
-      return rows.map(rowToDto);
+      return { items: rows.map(rowToDto) };
     },
   }),
 
@@ -414,9 +464,14 @@ export const legacyTools: RemodelTool[] = [
       "Summarize measurement coverage across all active rooms — per-room counts and which element types are recorded — plus the active rooms that still have ZERO measurements. Answers 'what still needs measuring?'.",
     inputShape: {},
     annotations: READ_ONLY,
+    // Envelope the coverage summary under `coverage` (passthrough) so this tool
+    // carries an object outputSchema.
+    outputShape: {
+      coverage: looseObject({}),
+    },
     handler: async ({ db }) => {
       const coverage = await getMeasurementCoverage(db);
-      return coverage;
+      return { coverage };
     },
   }),
 ];

@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "fbe87072-343c-487a-8e4f-be920eb51c7c",
-  "prevId": "6e20ca6e-b5fc-43d7-8026-019a61f7f9f6",
+  "id": "2d51870c-a7cb-4df4-afaa-c235cea5dca5",
+  "prevId": "4b644b60-576b-4698-a4d2-db1c87f3f748",
   "tables": {
     "users": {
       "name": "users",
@@ -14950,34 +14950,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "model_number": {
-          "name": "model_number",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "model_key": {
-          "name": "model_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "msrp": {
-          "name": "msrp",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "msrp_cents": {
-          "name": "msrp_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -14995,16 +14967,7 @@
           "default": "(unixepoch())"
         }
       },
-      "indexes": {
-        "showroom_store_products_brand_model_uniq": {
-          "name": "showroom_store_products_brand_model_uniq",
-          "columns": [
-            "brand_id",
-            "model_key"
-          ],
-          "isUnique": true
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "showroom_store_products_store_id_showroom_stores_id_fk": {
           "name": "showroom_store_products_store_id_showroom_stores_id_fk",
@@ -18162,166 +18125,6 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {}
     },
-    "product_showroom_photos": {
-      "name": "product_showroom_photos",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "rag_uuid": {
-          "name": "rag_uuid",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "product_id": {
-          "name": "product_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "showroom_id": {
-          "name": "showroom_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "image_url": {
-          "name": "image_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "cf_image_id": {
-          "name": "cf_image_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "category": {
-          "name": "category",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "photo_kind": {
-          "name": "photo_kind",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'unknown'"
-        },
-        "attributes": {
-          "name": "attributes",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'pending_review'"
-        },
-        "review_reason": {
-          "name": "review_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "reviewed_at": {
-          "name": "reviewed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(unixepoch())"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(unixepoch())"
-        }
-      },
-      "indexes": {
-        "product_showroom_photos_rag_uuid_uniq": {
-          "name": "product_showroom_photos_rag_uuid_uniq",
-          "columns": [
-            "rag_uuid"
-          ],
-          "isUnique": true
-        },
-        "product_showroom_photos_product_idx": {
-          "name": "product_showroom_photos_product_idx",
-          "columns": [
-            "product_id"
-          ],
-          "isUnique": false
-        },
-        "product_showroom_photos_showroom_idx": {
-          "name": "product_showroom_photos_showroom_idx",
-          "columns": [
-            "showroom_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "product_showroom_photos_product_id_showroom_store_products_id_fk": {
-          "name": "product_showroom_photos_product_id_showroom_store_products_id_fk",
-          "tableFrom": "product_showroom_photos",
-          "tableTo": "showroom_store_products",
-          "columnsFrom": [
-            "product_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "product_showroom_photos_showroom_id_showroom_stores_id_fk": {
-          "name": "product_showroom_photos_showroom_id_showroom_stores_id_fk",
-          "tableFrom": "product_showroom_photos",
-          "tableTo": "showroom_stores",
-          "columnsFrom": [
-            "showroom_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {}
-    },
     "product_price_observations": {
       "name": "product_price_observations",
       "columns": {
@@ -18528,19 +18331,6 @@
           "tableTo": "showroom_stores",
           "columnsFrom": [
             "showroom_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "product_price_observations_source_photo_id_product_showroom_photos_id_fk": {
-          "name": "product_price_observations_source_photo_id_product_showroom_photos_id_fk",
-          "tableFrom": "product_price_observations",
-          "tableTo": "product_showroom_photos",
-          "columnsFrom": [
-            "source_photo_id"
           ],
           "columnsTo": [
             "id"

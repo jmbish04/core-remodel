@@ -28,13 +28,12 @@ import { and, desc, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { toolError } from "../format";
+import { looseObject, urlField } from "../schemas";
+import { conversationUrl, opsUrl } from "../urls";
 import { defineTool, READ_ONLY, WRITE, WRITE_IDEMPOTENT, type RemodelTool } from "../types";
 
 /** Inline-vs-R2 threshold (chars) for an exported transcript's content. */
 const CONVERSATION_INLINE_CAP = 96_000;
-
-/** Admin ops URLs returned to the agent so the user can open the record. */
-const OPS_BASE = "/admin/mcp-ops";
 
 export const opsTools: RemodelTool[] = [
   defineTool({
@@ -70,6 +69,12 @@ export const opsTools: RemodelTool[] = [
         .describe("Session id to dedupe against for same-session re-exports"),
     },
     annotations: WRITE,
+    outputShape: {
+      created: z.boolean().optional().describe("True when a new record was inserted"),
+      updated: z.boolean().optional().describe("True when an existing same-session record was updated"),
+      id: z.number().int().describe("The saved conversation id"),
+      url: urlField,
+    },
     examples: [
       {
         title: "Save a chat",
@@ -130,7 +135,7 @@ export const opsTools: RemodelTool[] = [
           return {
             updated: true,
             id: existing.id,
-            url: `${OPS_BASE}/conversations/${existing.id}`,
+            url: conversationUrl(env, existing.id),
           };
         }
       }
@@ -147,7 +152,7 @@ export const opsTools: RemodelTool[] = [
           messageCount,
         })
         .returning({ id: mcpConversations.id });
-      return { created: true, id: created.id, url: `${OPS_BASE}/conversations/${created.id}` };
+      return { created: true, id: created.id, url: conversationUrl(env, created.id) };
     },
   }),
 
@@ -169,6 +174,11 @@ export const opsTools: RemodelTool[] = [
       sessionId: z.string().optional().describe("Session id where the bug was hit, if known"),
     },
     annotations: WRITE_IDEMPOTENT,
+    outputShape: {
+      id: z.number().int().describe("The bug (agent issue) id"),
+      status: z.string().describe("Current status: open | in_progress | fixed | wontfix"),
+      url: urlField,
+    },
     examples: [
       {
         title: "Docs gating bug",
@@ -180,7 +190,7 @@ export const opsTools: RemodelTool[] = [
         },
       },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const summary = input.summary?.trim();
       const details = input.details?.trim();
       if (!summary) toolError("`summary` is required and cannot be empty.");
@@ -213,7 +223,7 @@ export const opsTools: RemodelTool[] = [
           },
         })
         .returning({ id: mcpAgentIssues.id, status: mcpAgentIssues.status });
-      return { id: row.id, status: row.status, url: `${OPS_BASE}/bugs` };
+      return { id: row.id, status: row.status, url: opsUrl(env, "bugs") };
     },
   }),
 
@@ -232,11 +242,26 @@ export const opsTools: RemodelTool[] = [
       limit: z.number().int().positive().max(200).optional(),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      status: z.string().describe("The status filter that was applied"),
+      count: z.number().int(),
+      url: urlField.describe("The bugs board where these issues are listed"),
+      issues: z.array(
+        looseObject({
+          id: z.number().int(),
+          tool: z.string().nullable(),
+          summary: z.string().nullable(),
+          severity: z.string().nullable(),
+          status: z.string().nullable(),
+          fixedByPr: z.union([z.number(), z.string()]).nullable(),
+        }),
+      ),
+    },
     examples: [
       { title: "Open bugs", args: {} },
       { title: "All bugs", args: { status: "all" } },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const status = input.status ?? "open";
       const limit = input.limit ?? 50;
       const rows = await db
@@ -249,6 +274,7 @@ export const opsTools: RemodelTool[] = [
       return {
         status,
         count: rows.length,
+        url: opsUrl(env, "bugs"),
         issues: rows.map((r) => ({
           id: r.id,
           tool: r.toolName,
@@ -280,8 +306,14 @@ export const opsTools: RemodelTool[] = [
       fixedByPr: z.number().int().positive().optional().describe("PR number that fixed it"),
     },
     annotations: WRITE,
+    outputShape: {
+      updated: z.boolean(),
+      id: z.number().int(),
+      status: z.string(),
+      url: urlField,
+    },
     examples: [{ title: "Mark fixed", args: { id: 3, status: "fixed", fixedByPr: 81 } }],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const [existing] = await db
         .select({ id: mcpAgentIssues.id })
         .from(mcpAgentIssues)
@@ -301,7 +333,7 @@ export const opsTools: RemodelTool[] = [
         })
         .where(eq(mcpAgentIssues.id, input.id))
         .run();
-      return { updated: true, id: input.id, status: input.status };
+      return { updated: true, id: input.id, status: input.status, url: opsUrl(env, "bugs") };
     },
   }),
 
@@ -321,6 +353,11 @@ export const opsTools: RemodelTool[] = [
       sessionId: z.string().optional().describe("Session id where the ask came up, if known"),
     },
     annotations: WRITE,
+    outputShape: {
+      created: z.boolean(),
+      id: z.number().int().describe("The feature request id"),
+      url: urlField,
+    },
     examples: [
       {
         title: "Export to PDF",
@@ -331,7 +368,7 @@ export const opsTools: RemodelTool[] = [
         },
       },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const title = input.title?.trim();
       const description = input.description?.trim();
       if (!title) toolError("`title` is required and cannot be empty.");
@@ -346,7 +383,7 @@ export const opsTools: RemodelTool[] = [
           sessionId: input.sessionId,
         })
         .returning({ id: mcpFeatureRequests.id });
-      return { created: true, id: created.id, url: `${OPS_BASE}/features` };
+      return { created: true, id: created.id, url: opsUrl(env, "features") };
     },
   }),
 
@@ -365,8 +402,21 @@ export const opsTools: RemodelTool[] = [
       limit: z.number().int().positive().max(200).optional(),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      status: z.string(),
+      count: z.number().int(),
+      url: urlField.describe("The features board where these requests are listed"),
+      requests: z.array(
+        looseObject({
+          id: z.number().int(),
+          title: z.string().nullable(),
+          status: z.string().nullable(),
+          prNumber: z.union([z.number(), z.string()]).nullable(),
+        }),
+      ),
+    },
     examples: [{ title: "Open requests", args: {} }],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const status = input.status ?? "requested";
       const limit = input.limit ?? 50;
       const rows = await db
@@ -379,6 +429,7 @@ export const opsTools: RemodelTool[] = [
       return {
         status,
         count: rows.length,
+        url: opsUrl(env, "features"),
         requests: rows.map((r) => ({
           id: r.id,
           title: r.title,
@@ -405,8 +456,15 @@ export const opsTools: RemodelTool[] = [
       limit: z.number().int().positive().max(100).optional().describe("Rows per section (default 10)"),
     },
     annotations: READ_ONLY,
+    outputShape: {
+      totalToolCalls: z.number().int(),
+      url: urlField.describe("The MCP Ops console (sessions + logs)"),
+      sessions: z.array(looseObject({ id: z.string(), toolCallCount: z.number().int() })),
+      recentCalls: z.array(looseObject({ id: z.string(), toolName: z.string() })),
+      recentErrors: z.array(looseObject({ id: z.string(), toolName: z.string() })),
+    },
     examples: [{ title: "Recent activity", args: {} }],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       const limit = input.limit ?? 10;
 
       // One HTTP roundtrip to D1 for all four reads (vs four sequential ones).
@@ -446,6 +504,7 @@ export const opsTools: RemodelTool[] = [
 
       return {
         totalToolCalls: total,
+        url: opsUrl(env),
         sessions: sessions.map((s) => ({
           id: s.id,
           transport: s.transport,

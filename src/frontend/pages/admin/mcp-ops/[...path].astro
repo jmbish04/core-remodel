@@ -1,0 +1,52 @@
+---
+/**
+ * @fileoverview 0017 — MCP Ops deep-link / tab routing shell.
+ *
+ * Catch-all route that makes every MCP-Ops tab URL-addressable. Without it,
+ * `/admin/mcp-ops/bugs` (and every other sub-tab) 404s because only the flat
+ * `mcp-ops.astro` page exists.
+ *
+ * It reads the trailing path segments and hands the React island:
+ *   - `initialTab`      — first segment, validated against the known tab ids
+ *                         (falls back to "sessions" for anything unknown).
+ *   - `initialDetailId` — optional second segment (e.g. a conversation or
+ *                         feature id) so the island can open that record on
+ *                         load.
+ *
+ * The shell markup (BaseLayout + <main> heading block) is kept identical to
+ * `mcp-ops.astro` so the two entry points render the same chrome.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { McpOpsApp } from "@/components/McpOpsApp";
+
+const VALID_TABS = ["sessions", "logs", "conversations", "bugs", "features"];
+
+// `path` is the matched catch-all, e.g. "bugs" or "features/5".
+const raw = Astro.params.path ?? "";
+const segments = raw.split("/").filter(Boolean);
+const first = segments[0] ?? "";
+const initialTab = VALID_TABS.includes(first) ? first : "sessions";
+const initialDetailId = segments[1];
+---
+
+<BaseLayout
+  title="MCP Ops - 126 Colby - Remodel Mission Control"
+  description="Operational observability for the MCP server: sessions, logs, conversations, bugs, and feature requests."
+>
+  <main className="container mx-auto px-4 py-8 pb-12">
+    <div className="mb-8">
+      <h1 className="mb-2 text-3xl font-bold">MCP Ops</h1>
+      <p className="text-muted-foreground">
+        Live observability for the Model Context Protocol server — session
+        transcripts, tool-call logs, saved conversations, bug reports, and
+        feature requests.
+      </p>
+    </div>
+
+    <McpOpsApp
+      initialTab={initialTab}
+      initialDetailId={initialDetailId}
+      client:only="react"
+    />
+  </main>
+</BaseLayout>

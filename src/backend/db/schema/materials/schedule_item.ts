@@ -17,14 +17,15 @@ export const materialScheduleItems = sqliteTable("material_schedule_items", {
     .default(sql`(unixepoch())`),
 
   title: text("title").notNull(),
-  roomName: text("room_name"),
   /**
-   * Canonical room this material belongs to (0015 migration B). A material item
-   * is per-room ("Toilet — Primary Bath"), so this is a plain M:1 FK. Nullable
-   * + set-null-on-delete so a material can be un-roomed or outlive a merged
-   * room; `roomName` remains a human-readable fallback/label.
+   * Canonical room this material belongs to. HARD relationship: every material
+   * is per-room ("Toilet — Primary Bath"), so `roomId` is a required M:1 FK.
+   * The display name is derived by joining `rooms` — never stored (no
+   * denormalized `room_name`).
    */
-  roomId: integer("room_id").references(() => rooms.id, { onDelete: "set null" }),
+  roomId: integer("room_id")
+    .notNull()
+    .references(() => rooms.id, { onDelete: "cascade" }),
   brand: text("brand"),
   model: text("model"),
   notes: text("notes"),
