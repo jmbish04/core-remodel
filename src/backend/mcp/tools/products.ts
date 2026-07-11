@@ -47,8 +47,11 @@ const productOutputShape = {
   description: z.string().nullable(),
   productType: z.string().nullable(),
   brandId: z.number().int().nullable(),
-  storeId: z.number().int(),
   materialId: z.number().int().nullable(),
+  modelNumber: z.string().nullable(),
+  modelKey: z.string().nullable(),
+  msrp: z.string().nullable(),
+  msrpCents: z.number().int().nullable(),
   sku: z.string().nullable(),
   price: z.string().nullable(),
   colors: z.string().nullable(),
@@ -260,7 +263,7 @@ export const productTools: RemodelTool[] = [
         return {
           materialId: mid,
           title: m?.title ?? null,
-          roomName: m?.roomName ?? null,
+          roomId: m?.roomId ?? null,
           isPrimary: link ? link.isPrimary : product.materialId === mid,
           viaJoinTable: Boolean(link),
           viaLegacyPointer: product.materialId === mid,
@@ -366,7 +369,7 @@ export const productTools: RemodelTool[] = [
         },
       },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       if (input.brandId != null) await assertBrand(db, input.brandId);
       if (input.materialId != null) await assertMaterial(db, input.materialId);
 
@@ -506,7 +509,7 @@ export const productTools: RemodelTool[] = [
       { title: "By sku", args: { itemName: "Litze Faucet", sku: "63221LF-PC" } },
       { title: "By brand+name", args: { itemName: "Litze Faucet", brandId: 4 } },
     ],
-    handler: async ({ db }, input) => {
+    handler: async ({ env, db }, input) => {
       if (input.brandId != null) await assertBrand(db, input.brandId);
       if (input.materialId != null) await assertMaterial(db, input.materialId);
 
