@@ -26,23 +26,28 @@ export const PRODUCT_CATEGORY_VALUES = [
 ] as const;
 
 export const PRODUCT_EXTRACTION_SCHEMA = z.object({
-  brand: z.string().nullable().describe("Manufacturer/brand name, verbatim as printed"),
-  modelNumber: z.string().nullable().describe("Model/SKU number, verbatim as printed"),
-  itemName: z.string().nullable().describe("Product name/title as printed or visually described"),
-  colors: z.array(z.string()).nullable().describe("Named colors/finishes visible or printed (e.g. 'Brushed Nickel')"),
-  style: z.string().nullable().describe("Design style, e.g. 'modern', 'transitional', 'farmhouse'"),
+  brand: z.string().nullable().optional().catch(null).describe("Manufacturer/brand name, verbatim as printed"),
+  modelNumber: z.string().nullable().optional().catch(null).describe("Model/SKU number, verbatim as printed"),
+  itemName: z.string().nullable().optional().catch(null).describe("Product name/title as printed or visually described"),
+  colors: z.array(z.string()).nullable().optional().catch(null).describe("Named colors/finishes visible or printed (e.g. 'Brushed Nickel')"),
+  style: z.string().nullable().optional().catch(null).describe("Design style, e.g. 'modern', 'transitional', 'farmhouse'"),
   category: z
     .enum(PRODUCT_CATEGORY_VALUES)
     .nullable()
+    .optional()
+    .catch(null)
     .describe("Coarse material category this product belongs to"),
   photoKind: z
     .enum(["product", "price_card", "spec_sheet", "unknown"])
+    .nullable()
+    .optional()
+    .catch("unknown")
     .describe("What this photo actually shows: the product itself, a price card/tag, a spec sheet, or unclear"),
-  price: z.string().nullable().describe("Regular/list price, verbatim as printed (e.g. '$1,299.00')"),
-  salePrice: z.string().nullable().describe("Sale/discounted price, verbatim as printed"),
-  discountInfo: z.string().nullable().describe("Any discount/promo text, verbatim (e.g. '15% off', 'Save $200')"),
-  dominantColors: z.array(z.string()).nullable().describe("Dominant colors visible in the photo, as hex codes"),
-  confidence: z.number().int().min(0).max(100).describe("Overall confidence 0-100 in this extraction"),
+  price: z.string().nullable().optional().catch(null).describe("Regular/list price, verbatim as printed (e.g. '$1,299.00')"),
+  salePrice: z.string().nullable().optional().catch(null).describe("Sale/discounted price, verbatim as printed"),
+  discountInfo: z.string().nullable().optional().catch(null).describe("Any discount/promo text, verbatim (e.g. '15% off', 'Save $200')"),
+  dominantColors: z.array(z.string()).nullable().optional().catch(null).describe("Dominant colors visible in the photo, as hex codes"),
+  confidence: z.number().int().min(0).max(100).nullable().optional().catch(null).describe("Overall confidence 0-100 in this extraction"),
 });
 
 export type ProductExtraction = z.infer<typeof PRODUCT_EXTRACTION_SCHEMA>;
