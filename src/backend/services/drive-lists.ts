@@ -143,11 +143,14 @@ export async function createDriveList(
     longitude: s.longitude,
     isOptional: s.isOptional ?? false,
   }));
-  // Chunk inserts: a stop row binds 16 params, and D1 caps a query at 100 bound
-  // params — so a single multi-row insert of a full drive would blow the limit.
-  // 5 rows/insert = 80 params, safely under.
-  for (let i = 0; i < stopValues.length; i += 5) {
-    await db.insert(driveListStops).values(stopValues.slice(i, i + 5));
+  // Write via db.batch() of single-row inserts, chunked, so we never approach
+  // Cloudflare D1's 100-bound-parameter-per-query limit on large drives.
+  const STOP_BATCH_SIZE = 50;
+  for (let i = 0; i < stopValues.length; i += STOP_BATCH_SIZE) {
+    const chunk = stopValues.slice(i, i + STOP_BATCH_SIZE);
+    const stmts = chunk.map((val) => db.insert(driveListStops).values(val));
+    // chunk is always non-empty here; cast to the non-empty tuple db.batch expects.
+    await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
   }
 
   return { id: drive.id, slug, stopCount: input.stops.length };
