@@ -114,6 +114,7 @@ registry — there is always one).
 - `id` INTEGER PK autoincrement (ALWAYS)
 - `<def>_id` FK → the definition table (ALWAYS an FK)
 - `<object>_id` FK → the owning row (ALWAYS an FK)
+- UNIQUE index on `(<def>_id, <object>_id)` (ALWAYS — no duplicate mappings)
 
 **API (per multi-select), ALWAYS provide:**
 - list all active options (for the autoselect component)
@@ -131,9 +132,14 @@ registry — there is always one).
 `/config/photo/colors`) to manage its definitions. `/config` opens in a new tab with
 its own dedicated sidebar, grouped. One page per vocabulary; all share the config sidebar.
 
-**Categories:** a shared `categories` definition table + `subcategories` (each mapped to a
-parent category) + a generic object↔category mapping (photos, brands, products all map via
-`category_id` FK). Reconstruct as `{category} / {subcategory}`.
+**Categories:** a shared `categories` definition table + `subcategories` (each with a
+`category_id` FK to its parent). Objects (photos, brands, products) map to categories via a
+`<object>_categories` table (`category_id` FK) AND — where subcategory precision is wanted —
+to subcategories via a separate `<object>_subcategories` table (`subcategory_id` FK). Keep the
+two mappings separate (category multi-select is independent of subcategory); reconstruct the
+`{category} / {subcategory}` path by joining the subcategory mapping back through its parent
+`category_id`. Do NOT collapse to a single subcategory-only FK — a photo can carry a bare
+category with no subcategory.
 
 ## Reusable data-entry components (USE THESE — do not hand-roll)
 
