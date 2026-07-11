@@ -3497,6 +3497,8 @@ showroomStoresRouter.post("/:id/photos", async (c) => {
   let deliveryUrl: string;
   let cfImageId: string | null = null;
   let photoMeta: PhotoMetadata = {};
+  // MIME of the STORED image: HEIC/HEIF get transcoded to JPEG on upload.
+  let storedMimeType: string | null = null;
   try {
     const { accountId, apiTokens } = await resolveCloudflareImagesCredentials(c.env);
     if (!accountId || apiTokens.length === 0) {
@@ -3514,6 +3516,7 @@ showroomStoresRouter.post("/:id/photos", async (c) => {
       return c.json({ success: false, error: "Invalid image data URL" }, 400);
     }
     const [, mime, b64] = match;
+    storedMimeType = /heic|heif/i.test(mime) ? "image/jpeg" : mime;
     const binary = atob(b64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
@@ -3544,7 +3547,7 @@ showroomStoresRouter.post("/:id/photos", async (c) => {
     imageKind: "visit" as const,
     width: photoMeta.width ?? null,
     height: photoMeta.height ?? null,
-    mimeType: photoMeta.format ?? null,
+    mimeType: storedMimeType,
     metadataJson: Object.keys(photoMeta).length ? JSON.stringify(photoMeta) : null,
   };
 
