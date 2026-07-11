@@ -16,6 +16,7 @@ import {
   extractStructuredEstimate,
   flattenStructuredProperties,
 } from "@backend/services/estimate-intake";
+import { attachServiceNames } from "@backend/services/service-names";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
@@ -1001,7 +1002,7 @@ estimatesRouter.get("/:id/revisions/:revisionId", async (c) => {
     return c.json({
       revision,
       documents,
-      lineItems,
+      lineItems: await attachServiceNames(db, lineItems),
       roomMappings,
       propValues,
       snapshots,
