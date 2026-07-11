@@ -1,1 +1,0 @@
-ALTER TABLE `sample_clippings` ADD `is_global` integer DEFAULT false NOT NULL;

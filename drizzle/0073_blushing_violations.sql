@@ -1,1 +1,0 @@
-ALTER TABLE `brands` ADD `price_point` text;
