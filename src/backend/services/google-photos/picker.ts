@@ -127,6 +127,9 @@ export async function listMediaItems(env: Env, sessionId: string): Promise<Picke
     };
     for (const raw of data.mediaItems ?? []) {
       if (!raw.mediaFile?.baseUrl) continue;
+      // Skip videos (mp4 etc.) — we only import still photos into CF Images.
+      // Filtering here keeps the list + per-index bytes route consistent.
+      if (raw.type === "VIDEO" || raw.mediaFile.mimeType?.startsWith("video/")) continue;
       items.push({
         id: raw.id,
         type: raw.type ?? "TYPE_UNSPECIFIED",
