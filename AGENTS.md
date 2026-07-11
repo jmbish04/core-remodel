@@ -95,3 +95,42 @@ transcripts offloaded to R2 `ARTIFACTS_BUCKET`). Admin reads: `/admin/mcp-ops`
 `src/backend/mcp/tools/ops.ts` (category `"ops"`); logging itself is middleware,
 not a tool. Never log the auth token / `WORKER_API_KEY` — the logger caps blob
 sizes and redacts secret-ish keys.
+
+## Multi-select & config-driven definitions (MANDATORY)
+
+**NEVER store or render a multi-select as a comma-separated string.** Not colors,
+not tags, not categories — nothing. It is sloppy and forbidden. Use a real
+definition + mapping pair and a proper multi-select component (shadcn / shadcn
+registry — there is always one).
+
+**Definition table** (one per multi-select vocabulary, e.g. `colors`, `categories`):
+- `id` INTEGER PK autoincrement (ALWAYS)
+- `name` TEXT NOT NULL (ALWAYS)
+- `description` TEXT (ALWAYS)
+- `is_active` INTEGER boolean default true (ALWAYS — soft-delete, never hard-delete a choice)
+- domain extras when useful (e.g. colors get `hex_code`)
+
+**Mapping table** (join the definition to the owning object, e.g. `photo_colors`):
+- `id` INTEGER PK autoincrement (ALWAYS)
+- `<def>_id` FK → the definition table (ALWAYS an FK)
+- `<object>_id` FK → the owning row (ALWAYS an FK)
+
+**API (per multi-select), ALWAYS provide:**
+- list all active options (for the autoselect component)
+- create an "Other" option from the UI (returns the new definition row)
+- create/replace the mappings as part of a form submit AND standalone (for backfills)
+- return the mappings when reading the owning object
+- search/filter owning objects by mapping(s)
+
+**UX, ALWAYS:**
+- support "Other" (creates a new definition + selects it)
+- if the definition has `hex_code`, show a color swatch in the option (`[▧] Name`) and a color picker when creating "Other"
+- show the option **display name**, never the option id
+
+**Config pages:** every config vocabulary gets a `/config/<group>/<name>` page (e.g.
+`/config/photo/colors`) to manage its definitions. `/config` opens in a new tab with
+its own dedicated sidebar, grouped. One page per vocabulary; all share the config sidebar.
+
+**Categories:** a shared `categories` definition table + `subcategories` (each mapped to a
+parent category) + a generic object↔category mapping (photos, brands, products all map via
+`category_id` FK). Reconstruct as `{category} / {subcategory}`.
