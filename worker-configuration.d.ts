@@ -9,8 +9,9 @@ declare namespace Cloudflare {
 		CACHE: KVNamespace;
 		SESSIONS: KVNamespace;
 		OAUTH_KV: KVNamespace;
+		AGENT_ADHOC_MEMORY_KV: KVNamespace;
 		WORKER_URL: "https://core-remodel.hacolby.workers.dev";
-		AI_GATEWAY_ID: "default-gateway";
+		AI_GATEWAY_ID: "core-remodel";
 		CLICKUP_LIST_ID: "901714811766";
 		GOOGLE_SEARCH_CX: "";
 		RENOVATION_AGENT: DurableObjectNamespace<import("./src/_worker").RenovationAgent>;
