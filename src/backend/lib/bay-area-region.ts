@@ -225,13 +225,29 @@ export function regionFromAddress(address: string | null | undefined): RegionRes
     if (idx === -1) continue;
     const before = idx === 0 ? " " : hay[idx - 1];
     const after = idx + city.length >= hay.length ? " " : hay[idx + city.length];
-    if (/[a-z]/.test(before) || /[a-z]/.test(after)) continue;
+    // Reject a match glued to another alphanumeric token (a letter OR a digit),
+    // so "napa" inside "123napa" / "napafoo" is not treated as the city Napa.
+    if (/[a-z0-9]/.test(before) || /[a-z0-9]/.test(after)) continue;
     if (!best || city.length > best.len) best = { route, len: city.length };
   }
   return best ? hubResult(best.route) : null;
 }
 
 // ─── 3. ZIP prefix → region (coarse fallback) ──────────────────────────────────
+
+/**
+ * Napa + Solano ZIP codes that fall inside (or adjacent to) the East Bay 945xx /
+ * 956xx numeric ranges. Enumerated because they can't be captured by a clean
+ * range without also grabbing genuine East Bay (945xx) or Sacramento-area
+ * (956xx) ZIPs. Napa: 94508/94515/94558/94559/94562/94567/94573/94574/94576/
+ * 94581/94599. Solano: 94510/94512/94533/94534/94535/94571/94585/94589/94590/
+ * 94591/94592/95620/95625/95687/95688/95696.
+ */
+const NORTH_BAY_ZIPS = new Set<number>([
+  94508, 94510, 94512, 94515, 94533, 94534, 94535, 94558, 94559, 94562, 94567,
+  94571, 94573, 94574, 94576, 94581, 94585, 94589, 94590, 94591, 94592, 94599,
+  95620, 95625, 95687, 95688, 95696,
+]);
 
 /**
  * Coarse county-level ZIP classifier. Bay Area ZIPs overlap at boundaries, so
@@ -249,16 +265,19 @@ export function regionFromZip(zip: string | null | undefined): RegionResult | nu
   if (n >= 94101 && n <= 94199) return hubResult("A");
   // Santa Clara / South Bay: 95001–95199 (San Jose metro).
   if (n >= 95001 && n <= 95199) return hubResult("B");
-  // North Bay: Marin 94900–94999, Sonoma 95400–95499, Napa 94500–94599 pocket,
-  // Solano 94500–94599 pocket (Vallejo/Benicia/Fairfield) + 95600–95699.
-  if (n >= 94900 && n <= 94999) return hubResult("E"); // Marin
-  if (n >= 95400 && n <= 95499) return hubResult("E"); // Sonoma
+  // North Bay: Marin 94900–94999, Sonoma 95400–95499, plus the scattered
+  // Napa + Solano pockets that interleave with the East Bay 945xx / 956xx
+  // ranges (Napa, Vallejo, Benicia, Fairfield, Suisun, Vacaville, Dixon, …).
+  // These are enumerated so they are NOT swept into East Bay below.
+  if ((n >= 94900 && n <= 94999) || (n >= 95400 && n <= 95499) || NORTH_BAY_ZIPS.has(n)) {
+    return hubResult("E");
+  }
   // San Mateo / Peninsula: 94002–94099 (excluding the SF 941xx and Santa Clara
   // pockets handled by city-name matching above) + 94400–94499.
   if (n >= 94002 && n <= 94099) return hubResult("C");
   if (n >= 94400 && n <= 94499) return hubResult("C");
-  // East Bay: Alameda + Contra Costa: 94500–94899 (Napa/Solano pockets in the
-  // 945xx range are caught earlier by city-name matching).
+  // East Bay: Alameda + Contra Costa: 94500–94899 (Napa/Solano 945xx pockets
+  // are handled above; anything left here is genuinely East Bay).
   if (n >= 94500 && n <= 94899) return hubResult("D");
   return null;
 }
