@@ -44,8 +44,20 @@ async function resolveBrandId(db: Db, name: string | null | undefined): Promise<
     .limit(1);
   if (existing) return existing.id;
 
-  const [created] = await db.insert(brands).values({ name: trimmed }).returning();
-  return created.id;
+  try {
+    const [created] = await db.insert(brands).values({ name: trimmed }).returning();
+    return created.id;
+  } catch {
+    // A concurrent ingest created the same brand between our select and insert —
+    // re-select instead of failing on the unique-name violation.
+    const [row] = await db
+      .select()
+      .from(brands)
+      .where(eq(sql`lower(${brands.name})`, trimmed.toLowerCase()))
+      .limit(1);
+    if (row) return row.id;
+    throw new Error(`brand resolve failed for "${trimmed}"`);
+  }
 }
 
 /**
@@ -85,18 +97,32 @@ async function ensureProductFromExtraction(db: Db, attrs: ProductExtraction) {
 
   if (found) return { created: false, product: found };
 
-  const [created] = await db
-    .insert(showroomStoreProducts)
-    .values({
-      itemName: itemName || "Unnamed",
-      brandId,
-      modelNumber: attrs.modelNumber ?? null,
-      modelKey,
-      colors: attrs.colors && attrs.colors.length > 0 ? attrs.colors.join(", ") : null,
-      productType: attrs.category ?? null,
-    })
-    .returning();
-  return { created: true, product: created };
+  try {
+    const [created] = await db
+      .insert(showroomStoreProducts)
+      .values({
+        itemName: itemName || "Unnamed",
+        brandId,
+        modelNumber: attrs.modelNumber ?? null,
+        modelKey,
+        colors: attrs.colors && attrs.colors.length > 0 ? attrs.colors.join(", ") : null,
+        productType: attrs.category ?? null,
+      })
+      .returning();
+    return { created: true, product: created };
+  } catch {
+    // A concurrent ingest created the same (brandId, modelKey) product — re-select
+    // instead of failing on the unique-index violation.
+    if (brandId != null && modelKey != null) {
+      const [row] = await db
+        .select()
+        .from(showroomStoreProducts)
+        .where(and(eq(showroomStoreProducts.brandId, brandId), eq(showroomStoreProducts.modelKey, modelKey)))
+        .limit(1);
+      if (row) return { created: false, product: row };
+    }
+    throw new Error("product resolve failed after concurrent insert");
+  }
 }
 
 // ─── POST /ingest ───────────────────────────────────────────────────────────
@@ -118,12 +144,14 @@ productPhotosRouter.post("/ingest", async (c) => {
     if (!(file instanceof File)) {
       return c.json({ error: "file is required (multipart form field)" }, 400);
     }
-    if (showroomIdRaw == null || String(showroomIdRaw).trim() === "") {
-      return c.json({ error: "showroomId is required" }, 400);
-    }
-    const showroomId = Number(showroomIdRaw);
-    if (!Number.isFinite(showroomId)) {
-      return c.json({ error: "showroomId must be an integer" }, 400);
+    // showroomId is OPTIONAL (nullable in the schema) — a photo may be captured
+    // with no showroom selected (or from an online source). Only validate when given.
+    let showroomId: number | null = null;
+    if (showroomIdRaw != null && String(showroomIdRaw).trim() !== "") {
+      showroomId = Number(showroomIdRaw);
+      if (!Number.isFinite(showroomId)) {
+        return c.json({ error: "showroomId must be an integer" }, 400);
+      }
     }
 
     const credentials = await resolveCloudflareImagesCredentials(c.env);
@@ -152,7 +180,7 @@ productPhotosRouter.post("/ingest", async (c) => {
     // 4. Embed + upsert into PHOTO_INDEX, keyed by a fresh ragUuid (the join key
     //    shared with the product_showroom_photos row below).
     const ragUuid = crypto.randomUUID();
-    const embeddingText = [attrs.brand, attrs.modelNumber, attrs.colors?.join(", "), attrs.style, attrs.category]
+    const embeddingText = [attrs.itemName, attrs.brand, attrs.modelNumber, attrs.colors?.join(", "), attrs.style, attrs.category]
       .filter((v): v is string => Boolean(v))
       .join(" — ");
     if (embeddingText) {
