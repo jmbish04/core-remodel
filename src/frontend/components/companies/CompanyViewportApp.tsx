@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { EntityDocumentsPanel } from "@/components/documents";
+import { CompanyGmailPanel } from "@/components/gmail";
 import { CompanyNotesTab } from "@/components/companies/crm/CompanyNotesTab";
 import { CompanyTodosTab } from "@/components/companies/crm/CompanyTodosTab";
 
@@ -46,7 +47,7 @@ interface Portfolio {
   datetimeCreated: string;
 }
 
-const COMPANY_TABS = ["overview", "rolodex", "bids", "documents", "notes", "todos"];
+const COMPANY_TABS = ["overview", "rolodex", "comms", "bids", "documents", "notes", "todos"];
 
 /** Read the initial tab from `?tab=`; falls back to overview. Lets deep links
  *  (e.g. returning from the full-page note editor) land on the right tab. */
@@ -142,6 +143,7 @@ export function CompanyViewportApp({ companyId }: { companyId: number }) {
             <TabsList>
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="rolodex">Rolodex ({contacts.length})</TabsTrigger>
+              <TabsTrigger value="comms">Comms</TabsTrigger>
               <TabsTrigger value="bids">Bid History</TabsTrigger>
               <TabsTrigger value="documents">Documents</TabsTrigger>
               <TabsTrigger value="notes">Notes</TabsTrigger>
@@ -257,6 +259,22 @@ export function CompanyViewportApp({ companyId }: { companyId: number }) {
                       ))}
                     </div>
                   )}
+                </CardContent>
+              </Card>
+            </TabsContent>
+
+            <TabsContent value="comms" className="space-y-6 mt-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Mail className="w-4 h-4" /> Gmail / Comms
+                  </CardTitle>
+                  <CardDescription>
+                    Threads matched to {company.name} by its private email domain(s), newest first.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <CompanyGmailPanel companyId={companyId} companyName={company.name} />
                 </CardContent>
               </Card>
             </TabsContent>

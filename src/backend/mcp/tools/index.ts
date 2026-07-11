@@ -8,6 +8,7 @@ import { analyticsTools } from "./analytics";
 import { artifactTools } from "./artifacts";
 import { brandTools } from "./brands";
 import { budgetTools } from "./budget";
+import { driveTools } from "./drives";
 import { legacyTools } from "./legacy";
 import { materialTools } from "./materials";
 import { opsTools } from "./ops";
@@ -24,6 +25,7 @@ export const ALL_TOOL_GROUPS: RemodelTool[] = [
   ...analyticsTools,
   ...materialTools,
   ...showroomTools,
+  ...driveTools,
   ...brandTools,
   ...productTools,
   ...priceObservationTools,

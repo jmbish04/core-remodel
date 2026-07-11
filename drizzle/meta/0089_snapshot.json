@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "2d51870c-a7cb-4df4-afaa-c235cea5dca5",
+  "id": "0fc66221-a121-4a87-908c-3794817e3e9d",
   "prevId": "4b644b60-576b-4698-a4d2-db1c87f3f748",
   "tables": {
     "users": {
@@ -18125,223 +18125,6 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {}
     },
-    "product_price_observations": {
-      "name": "product_price_observations",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "product_id": {
-          "name": "product_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "source_type": {
-          "name": "source_type",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "showroom_id": {
-          "name": "showroom_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "retailer_name": {
-          "name": "retailer_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "retailer_url": {
-          "name": "retailer_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "price": {
-          "name": "price",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "sale_price": {
-          "name": "sale_price",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "discount_info": {
-          "name": "discount_info",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "price_cents": {
-          "name": "price_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "sale_price_cents": {
-          "name": "sale_price_cents",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "discount_pct": {
-          "name": "discount_pct",
-          "type": "real",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "condition": {
-          "name": "condition",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "lead_time": {
-          "name": "lead_time",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "notes": {
-          "name": "notes",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "observed_at": {
-          "name": "observed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(unixepoch())"
-        },
-        "source_photo_id": {
-          "name": "source_photo_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "confidence": {
-          "name": "confidence",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 100
-        },
-        "review_status": {
-          "name": "review_status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'pending'"
-        },
-        "review_reason": {
-          "name": "review_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "reviewed_at": {
-          "name": "reviewed_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(unixepoch())"
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(unixepoch())"
-        }
-      },
-      "indexes": {
-        "price_observations_product_idx": {
-          "name": "price_observations_product_idx",
-          "columns": [
-            "product_id"
-          ],
-          "isUnique": false
-        },
-        "price_observations_showroom_idx": {
-          "name": "price_observations_showroom_idx",
-          "columns": [
-            "showroom_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "product_price_observations_product_id_showroom_store_products_id_fk": {
-          "name": "product_price_observations_product_id_showroom_store_products_id_fk",
-          "tableFrom": "product_price_observations",
-          "tableTo": "showroom_store_products",
-          "columnsFrom": [
-            "product_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "product_price_observations_showroom_id_showroom_stores_id_fk": {
-          "name": "product_price_observations_showroom_id_showroom_stores_id_fk",
-          "tableFrom": "product_price_observations",
-          "tableTo": "showroom_stores",
-          "columnsFrom": [
-            "showroom_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {}
-    },
     "wishlist_items": {
       "name": "wishlist_items",
       "columns": {
@@ -20065,6 +19848,117 @@
         }
       },
       "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "gmail_message_participants": {
+      "name": "gmail_message_participants",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "message_id": {
+          "name": "message_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "domain": {
+          "name": "domain",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "role": {
+          "name": "role",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        }
+      },
+      "indexes": {
+        "gmail_message_participants_email_idx": {
+          "name": "gmail_message_participants_email_idx",
+          "columns": [
+            "email"
+          ],
+          "isUnique": false
+        },
+        "gmail_message_participants_domain_idx": {
+          "name": "gmail_message_participants_domain_idx",
+          "columns": [
+            "domain"
+          ],
+          "isUnique": false
+        },
+        "gmail_message_participants_thread_id_idx": {
+          "name": "gmail_message_participants_thread_id_idx",
+          "columns": [
+            "thread_id"
+          ],
+          "isUnique": false
+        },
+        "gmail_message_participants_message_id_idx": {
+          "name": "gmail_message_participants_message_id_idx",
+          "columns": [
+            "message_id"
+          ],
+          "isUnique": false
+        },
+        "gmail_message_participants_message_email_role_unique": {
+          "name": "gmail_message_participants_message_email_role_unique",
+          "columns": [
+            "message_id",
+            "email",
+            "role"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "gmail_message_participants_message_id_gmail_messages_id_fk": {
+          "name": "gmail_message_participants_message_id_gmail_messages_id_fk",
+          "tableFrom": "gmail_message_participants",
+          "tableTo": "gmail_messages",
+          "columnsFrom": [
+            "message_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {}
     },

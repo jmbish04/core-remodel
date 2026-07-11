@@ -1,8 +1,8 @@
 {
-  "id": "6e20ca6e-b5fc-43d7-8026-019a61f7f9f6",
-  "prevId": "a8ece5e9-4d3c-4087-8f37-42dceb88ad93",
   "version": "6",
   "dialect": "sqlite",
+  "id": "fbe87072-343c-487a-8e4f-be920eb51c7c",
+  "prevId": "6e20ca6e-b5fc-43d7-8026-019a61f7f9f6",
   "tables": {
     "users": {
       "name": "users",
@@ -118,15 +118,15 @@
         "sessions_user_id_users_id_fk": {
           "name": "sessions_user_id_users_id_fk",
           "tableFrom": "sessions",
+          "tableTo": "users",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "users",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -318,15 +318,15 @@
         "threads_user_id_users_id_fk": {
           "name": "threads_user_id_users_id_fk",
           "tableFrom": "threads",
+          "tableTo": "users",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "users",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -384,15 +384,15 @@
         "messages_thread_id_threads_id_fk": {
           "name": "messages_thread_id_threads_id_fk",
           "tableFrom": "messages",
+          "tableTo": "threads",
           "columnsFrom": [
             "thread_id"
           ],
-          "tableTo": "threads",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -510,15 +510,15 @@
         "notifications_user_id_users_id_fk": {
           "name": "notifications_user_id_users_id_fk",
           "tableFrom": "notifications",
+          "tableTo": "users",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "users",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -730,15 +730,15 @@
         "plan_tasks_plan_slug_plans_slug_fk": {
           "name": "plan_tasks_plan_slug_plans_slug_fk",
           "tableFrom": "plan_tasks",
+          "tableTo": "plans",
           "columnsFrom": [
             "plan_slug"
           ],
-          "tableTo": "plans",
           "columnsTo": [
             "slug"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -797,15 +797,15 @@
         "documents_user_id_users_id_fk": {
           "name": "documents_user_id_users_id_fk",
           "tableFrom": "documents",
+          "tableTo": "users",
           "columnsFrom": [
             "user_id"
           ],
-          "tableTo": "users",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -858,28 +858,28 @@
         "supporting_document_room_mappings_supporting_document_id_supporting_documents_id_fk": {
           "name": "supporting_document_room_mappings_supporting_document_id_supporting_documents_id_fk",
           "tableFrom": "supporting_document_room_mappings",
+          "tableTo": "supporting_documents",
           "columnsFrom": [
             "supporting_document_id"
           ],
-          "tableTo": "supporting_documents",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "supporting_document_room_mappings_room_id_rooms_id_fk": {
           "name": "supporting_document_room_mappings_room_id_rooms_id_fk",
           "tableFrom": "supporting_document_room_mappings",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -932,28 +932,28 @@
         "supporting_document_scenario_mappings_supporting_document_id_supporting_documents_id_fk": {
           "name": "supporting_document_scenario_mappings_supporting_document_id_supporting_documents_id_fk",
           "tableFrom": "supporting_document_scenario_mappings",
+          "tableTo": "supporting_documents",
           "columnsFrom": [
             "supporting_document_id"
           ],
-          "tableTo": "supporting_documents",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "supporting_document_scenario_mappings_scenario_id_remodel_scenarios_id_fk": {
           "name": "supporting_document_scenario_mappings_scenario_id_remodel_scenarios_id_fk",
           "tableFrom": "supporting_document_scenario_mappings",
+          "tableTo": "remodel_scenarios",
           "columnsFrom": [
             "scenario_id"
           ],
-          "tableTo": "remodel_scenarios",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1006,28 +1006,28 @@
         "supporting_document_vision_node_mappings_supporting_document_id_supporting_documents_id_fk": {
           "name": "supporting_document_vision_node_mappings_supporting_document_id_supporting_documents_id_fk",
           "tableFrom": "supporting_document_vision_node_mappings",
+          "tableTo": "supporting_documents",
           "columnsFrom": [
             "supporting_document_id"
           ],
-          "tableTo": "supporting_documents",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "supporting_document_vision_node_mappings_vision_node_id_vision_plan_nodes_id_fk": {
           "name": "supporting_document_vision_node_mappings_vision_node_id_vision_plan_nodes_id_fk",
           "tableFrom": "supporting_document_vision_node_mappings",
+          "tableTo": "vision_plan_nodes",
           "columnsFrom": [
             "vision_node_id"
           ],
-          "tableTo": "vision_plan_nodes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1203,28 +1203,28 @@
         "supporting_documents_revision_of_id_supporting_documents_id_fk": {
           "name": "supporting_documents_revision_of_id_supporting_documents_id_fk",
           "tableFrom": "supporting_documents",
+          "tableTo": "supporting_documents",
           "columnsFrom": [
             "revision_of_id"
           ],
-          "tableTo": "supporting_documents",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "supporting_documents_replaced_by_id_supporting_documents_id_fk": {
           "name": "supporting_documents_replaced_by_id_supporting_documents_id_fk",
           "tableFrom": "supporting_documents",
+          "tableTo": "supporting_documents",
           "columnsFrom": [
             "replaced_by_id"
           ],
-          "tableTo": "supporting_documents",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1286,28 +1286,28 @@
         "vision_node_image_mappings_vision_node_id_vision_plan_nodes_id_fk": {
           "name": "vision_node_image_mappings_vision_node_id_vision_plan_nodes_id_fk",
           "tableFrom": "vision_node_image_mappings",
+          "tableTo": "vision_plan_nodes",
           "columnsFrom": [
             "vision_node_id"
           ],
-          "tableTo": "vision_plan_nodes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "vision_node_image_mappings_image_id_images_id_fk": {
           "name": "vision_node_image_mappings_image_id_images_id_fk",
           "tableFrom": "vision_node_image_mappings",
+          "tableTo": "images",
           "columnsFrom": [
             "image_id"
           ],
-          "tableTo": "images",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1360,28 +1360,28 @@
         "vision_node_room_mappings_vision_node_id_vision_plan_nodes_id_fk": {
           "name": "vision_node_room_mappings_vision_node_id_vision_plan_nodes_id_fk",
           "tableFrom": "vision_node_room_mappings",
+          "tableTo": "vision_plan_nodes",
           "columnsFrom": [
             "vision_node_id"
           ],
-          "tableTo": "vision_plan_nodes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "vision_node_room_mappings_room_id_rooms_id_fk": {
           "name": "vision_node_room_mappings_room_id_rooms_id_fk",
           "tableFrom": "vision_node_room_mappings",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1492,41 +1492,41 @@
         "vision_plan_nodes_parent_id_vision_plan_nodes_id_fk": {
           "name": "vision_plan_nodes_parent_id_vision_plan_nodes_id_fk",
           "tableFrom": "vision_plan_nodes",
+          "tableTo": "vision_plan_nodes",
           "columnsFrom": [
             "parent_id"
           ],
-          "tableTo": "vision_plan_nodes",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "vision_plan_nodes_scenario_id_remodel_scenarios_id_fk": {
           "name": "vision_plan_nodes_scenario_id_remodel_scenarios_id_fk",
           "tableFrom": "vision_plan_nodes",
+          "tableTo": "remodel_scenarios",
           "columnsFrom": [
             "scenario_id"
           ],
-          "tableTo": "remodel_scenarios",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "vision_plan_nodes_thumbnail_image_id_images_id_fk": {
           "name": "vision_plan_nodes_thumbnail_image_id_images_id_fk",
           "tableFrom": "vision_plan_nodes",
+          "tableTo": "images",
           "columnsFrom": [
             "thumbnail_image_id"
           ],
-          "tableTo": "images",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1595,15 +1595,15 @@
         "document_entity_associations_document_id_supporting_documents_id_fk": {
           "name": "document_entity_associations_document_id_supporting_documents_id_fk",
           "tableFrom": "document_entity_associations",
+          "tableTo": "supporting_documents",
           "columnsFrom": [
             "document_id"
           ],
-          "tableTo": "supporting_documents",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1880,15 +1880,15 @@
         "estimate_company_contacts_estimate_company_id_estimate_companies_id_fk": {
           "name": "estimate_company_contacts_estimate_company_id_estimate_companies_id_fk",
           "tableFrom": "estimate_company_contacts",
+          "tableTo": "estimate_companies",
           "columnsFrom": [
             "estimate_company_id"
           ],
-          "tableTo": "estimate_companies",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -1982,15 +1982,15 @@
         "estimate_documents_estimate_revision_id_estimate_revisions_id_fk": {
           "name": "estimate_documents_estimate_revision_id_estimate_revisions_id_fk",
           "tableFrom": "estimate_documents",
+          "tableTo": "estimate_revisions",
           "columnsFrom": [
             "estimate_revision_id"
           ],
-          "tableTo": "estimate_revisions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2091,15 +2091,15 @@
         "estimate_line_items_estimate_revision_id_estimate_revisions_id_fk": {
           "name": "estimate_line_items_estimate_revision_id_estimate_revisions_id_fk",
           "tableFrom": "estimate_line_items",
+          "tableTo": "estimate_revisions",
           "columnsFrom": [
             "estimate_revision_id"
           ],
-          "tableTo": "estimate_revisions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2249,41 +2249,41 @@
         "estimate_prop_values_estimate_revision_id_estimate_revisions_id_fk": {
           "name": "estimate_prop_values_estimate_revision_id_estimate_revisions_id_fk",
           "tableFrom": "estimate_prop_values",
+          "tableTo": "estimate_revisions",
           "columnsFrom": [
             "estimate_revision_id"
           ],
-          "tableTo": "estimate_revisions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "estimate_prop_values_estimate_document_id_estimate_documents_id_fk": {
           "name": "estimate_prop_values_estimate_document_id_estimate_documents_id_fk",
           "tableFrom": "estimate_prop_values",
+          "tableTo": "estimate_documents",
           "columnsFrom": [
             "estimate_document_id"
           ],
-          "tableTo": "estimate_documents",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "estimate_prop_values_estimate_prop_key_type_id_estimate_prop_key_types_id_fk": {
           "name": "estimate_prop_values_estimate_prop_key_type_id_estimate_prop_key_types_id_fk",
           "tableFrom": "estimate_prop_values",
+          "tableTo": "estimate_prop_key_types",
           "columnsFrom": [
             "estimate_prop_key_type_id"
           ],
-          "tableTo": "estimate_prop_key_types",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2342,15 +2342,15 @@
         "estimate_revision_snapshots_estimate_revision_id_estimate_revisions_id_fk": {
           "name": "estimate_revision_snapshots_estimate_revision_id_estimate_revisions_id_fk",
           "tableFrom": "estimate_revision_snapshots",
+          "tableTo": "estimate_revisions",
           "columnsFrom": [
             "estimate_revision_id"
           ],
-          "tableTo": "estimate_revisions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2504,28 +2504,28 @@
         "estimate_revisions_estimate_id_estimates_id_fk": {
           "name": "estimate_revisions_estimate_id_estimates_id_fk",
           "tableFrom": "estimate_revisions",
+          "tableTo": "estimates",
           "columnsFrom": [
             "estimate_id"
           ],
-          "tableTo": "estimates",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "estimate_revisions_estimate_status_id_estimate_statuses_id_fk": {
           "name": "estimate_revisions_estimate_status_id_estimate_statuses_id_fk",
           "tableFrom": "estimate_revisions",
+          "tableTo": "estimate_statuses",
           "columnsFrom": [
             "estimate_status_id"
           ],
-          "tableTo": "estimate_statuses",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2569,28 +2569,28 @@
         "estimate_room_mappings_estimate_revision_id_estimate_revisions_id_fk": {
           "name": "estimate_room_mappings_estimate_revision_id_estimate_revisions_id_fk",
           "tableFrom": "estimate_room_mappings",
+          "tableTo": "estimate_revisions",
           "columnsFrom": [
             "estimate_revision_id"
           ],
-          "tableTo": "estimate_revisions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "estimate_room_mappings_room_id_rooms_id_fk": {
           "name": "estimate_room_mappings_room_id_rooms_id_fk",
           "tableFrom": "estimate_room_mappings",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2655,28 +2655,28 @@
         "estimate_source_events_estimate_revision_id_estimate_revisions_id_fk": {
           "name": "estimate_source_events_estimate_revision_id_estimate_revisions_id_fk",
           "tableFrom": "estimate_source_events",
+          "tableTo": "estimate_revisions",
           "columnsFrom": [
             "estimate_revision_id"
           ],
-          "tableTo": "estimate_revisions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "estimate_source_events_estimate_document_id_estimate_documents_id_fk": {
           "name": "estimate_source_events_estimate_document_id_estimate_documents_id_fk",
           "tableFrom": "estimate_source_events",
+          "tableTo": "estimate_documents",
           "columnsFrom": [
             "estimate_document_id"
           ],
-          "tableTo": "estimate_documents",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2888,28 +2888,28 @@
         "estimates_scenario_id_remodel_scenarios_id_fk": {
           "name": "estimates_scenario_id_remodel_scenarios_id_fk",
           "tableFrom": "estimates",
+          "tableTo": "remodel_scenarios",
           "columnsFrom": [
             "scenario_id"
           ],
-          "tableTo": "remodel_scenarios",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "estimates_estimate_company_id_estimate_companies_id_fk": {
           "name": "estimates_estimate_company_id_estimate_companies_id_fk",
           "tableFrom": "estimates",
+          "tableTo": "estimate_companies",
           "columnsFrom": [
             "estimate_company_id"
           ],
-          "tableTo": "estimate_companies",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -2982,15 +2982,15 @@
         "contract_clause_findings_contract_revision_id_contract_revisions_id_fk": {
           "name": "contract_clause_findings_contract_revision_id_contract_revisions_id_fk",
           "tableFrom": "contract_clause_findings",
+          "tableTo": "contract_revisions",
           "columnsFrom": [
             "contract_revision_id"
           ],
-          "tableTo": "contract_revisions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3071,15 +3071,15 @@
         "contract_documents_contract_revision_id_contract_revisions_id_fk": {
           "name": "contract_documents_contract_revision_id_contract_revisions_id_fk",
           "tableFrom": "contract_documents",
+          "tableTo": "contract_revisions",
           "columnsFrom": [
             "contract_revision_id"
           ],
-          "tableTo": "contract_revisions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3159,41 +3159,41 @@
         "contract_monitoring_events_contract_id_contracts_id_fk": {
           "name": "contract_monitoring_events_contract_id_contracts_id_fk",
           "tableFrom": "contract_monitoring_events",
+          "tableTo": "contracts",
           "columnsFrom": [
             "contract_id"
           ],
-          "tableTo": "contracts",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "contract_monitoring_events_contract_revision_id_contract_revisions_id_fk": {
           "name": "contract_monitoring_events_contract_revision_id_contract_revisions_id_fk",
           "tableFrom": "contract_monitoring_events",
+          "tableTo": "contract_revisions",
           "columnsFrom": [
             "contract_revision_id"
           ],
-          "tableTo": "contract_revisions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "contract_monitoring_events_related_estimate_id_estimates_id_fk": {
           "name": "contract_monitoring_events_related_estimate_id_estimates_id_fk",
           "tableFrom": "contract_monitoring_events",
+          "tableTo": "estimates",
           "columnsFrom": [
             "related_estimate_id"
           ],
-          "tableTo": "estimates",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3266,15 +3266,15 @@
         "contract_negotiation_items_contract_revision_id_contract_revisions_id_fk": {
           "name": "contract_negotiation_items_contract_revision_id_contract_revisions_id_fk",
           "tableFrom": "contract_negotiation_items",
+          "tableTo": "contract_revisions",
           "columnsFrom": [
             "contract_revision_id"
           ],
-          "tableTo": "contract_revisions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3369,15 +3369,15 @@
         "contract_payment_milestones_contract_revision_id_contract_revisions_id_fk": {
           "name": "contract_payment_milestones_contract_revision_id_contract_revisions_id_fk",
           "tableFrom": "contract_payment_milestones",
+          "tableTo": "contract_revisions",
           "columnsFrom": [
             "contract_revision_id"
           ],
-          "tableTo": "contract_revisions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3482,28 +3482,28 @@
         "contract_revisions_contract_id_contracts_id_fk": {
           "name": "contract_revisions_contract_id_contracts_id_fk",
           "tableFrom": "contract_revisions",
+          "tableTo": "contracts",
           "columnsFrom": [
             "contract_id"
           ],
-          "tableTo": "contracts",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "contract_revisions_contract_status_id_contract_statuses_id_fk": {
           "name": "contract_revisions_contract_status_id_contract_statuses_id_fk",
           "tableFrom": "contract_revisions",
+          "tableTo": "contract_statuses",
           "columnsFrom": [
             "contract_status_id"
           ],
-          "tableTo": "contract_statuses",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3653,15 +3653,15 @@
         "contract_timeline_milestones_contract_revision_id_contract_revisions_id_fk": {
           "name": "contract_timeline_milestones_contract_revision_id_contract_revisions_id_fk",
           "tableFrom": "contract_timeline_milestones",
+          "tableTo": "contract_revisions",
           "columnsFrom": [
             "contract_revision_id"
           ],
-          "tableTo": "contract_revisions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3734,15 +3734,15 @@
         "contract_warranty_terms_contract_revision_id_contract_revisions_id_fk": {
           "name": "contract_warranty_terms_contract_revision_id_contract_revisions_id_fk",
           "tableFrom": "contract_warranty_terms",
+          "tableTo": "contract_revisions",
           "columnsFrom": [
             "contract_revision_id"
           ],
-          "tableTo": "contract_revisions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -3824,41 +3824,41 @@
         "contracts_scenario_id_remodel_scenarios_id_fk": {
           "name": "contracts_scenario_id_remodel_scenarios_id_fk",
           "tableFrom": "contracts",
+          "tableTo": "remodel_scenarios",
           "columnsFrom": [
             "scenario_id"
           ],
-          "tableTo": "remodel_scenarios",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "contracts_estimate_company_id_estimate_companies_id_fk": {
           "name": "contracts_estimate_company_id_estimate_companies_id_fk",
           "tableFrom": "contracts",
+          "tableTo": "estimate_companies",
           "columnsFrom": [
             "estimate_company_id"
           ],
-          "tableTo": "estimate_companies",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "contracts_linked_estimate_id_estimates_id_fk": {
           "name": "contracts_linked_estimate_id_estimates_id_fk",
           "tableFrom": "contracts",
+          "tableTo": "estimates",
           "columnsFrom": [
             "linked_estimate_id"
           ],
-          "tableTo": "estimates",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4113,15 +4113,15 @@
         "rooms_floor_id_floors_id_fk": {
           "name": "rooms_floor_id_floors_id_fk",
           "tableFrom": "rooms",
+          "tableTo": "floors",
           "columnsFrom": [
             "floor_id"
           ],
-          "tableTo": "floors",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4310,28 +4310,28 @@
         "measurements_room_id_rooms_id_fk": {
           "name": "measurements_room_id_rooms_id_fk",
           "tableFrom": "measurements",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "measurements_floor_id_floors_id_fk": {
           "name": "measurements_floor_id_floors_id_fk",
           "tableFrom": "measurements",
+          "tableTo": "floors",
           "columnsFrom": [
             "floor_id"
           ],
-          "tableTo": "floors",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4501,28 +4501,28 @@
         "scenario_room_plans_scenario_id_remodel_scenarios_id_fk": {
           "name": "scenario_room_plans_scenario_id_remodel_scenarios_id_fk",
           "tableFrom": "scenario_room_plans",
+          "tableTo": "remodel_scenarios",
           "columnsFrom": [
             "scenario_id"
           ],
-          "tableTo": "remodel_scenarios",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "scenario_room_plans_room_id_rooms_id_fk": {
           "name": "scenario_room_plans_room_id_rooms_id_fk",
           "tableFrom": "scenario_room_plans",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4626,28 +4626,28 @@
         "room_action_items_room_id_rooms_id_fk": {
           "name": "room_action_items_room_id_rooms_id_fk",
           "tableFrom": "room_action_items",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "room_action_items_scenario_id_remodel_scenarios_id_fk": {
           "name": "room_action_items_scenario_id_remodel_scenarios_id_fk",
           "tableFrom": "room_action_items",
+          "tableTo": "remodel_scenarios",
           "columnsFrom": [
             "scenario_id"
           ],
-          "tableTo": "remodel_scenarios",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -4825,15 +4825,15 @@
         "budget_expense_entries_scenario_id_remodel_scenarios_id_fk": {
           "name": "budget_expense_entries_scenario_id_remodel_scenarios_id_fk",
           "tableFrom": "budget_expense_entries",
+          "tableTo": "remodel_scenarios",
           "columnsFrom": [
             "scenario_id"
           ],
-          "tableTo": "remodel_scenarios",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -5014,28 +5014,28 @@
         "budget_tracker_item_rooms_budget_tracker_item_id_budget_tracker_items_id_fk": {
           "name": "budget_tracker_item_rooms_budget_tracker_item_id_budget_tracker_items_id_fk",
           "tableFrom": "budget_tracker_item_rooms",
+          "tableTo": "budget_tracker_items",
           "columnsFrom": [
             "budget_tracker_item_id"
           ],
-          "tableTo": "budget_tracker_items",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "budget_tracker_item_rooms_room_id_rooms_id_fk": {
           "name": "budget_tracker_item_rooms_room_id_rooms_id_fk",
           "tableFrom": "budget_tracker_item_rooms",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -5243,15 +5243,15 @@
         "budget_tracker_items_scenario_id_remodel_scenarios_id_fk": {
           "name": "budget_tracker_items_scenario_id_remodel_scenarios_id_fk",
           "tableFrom": "budget_tracker_items",
+          "tableTo": "remodel_scenarios",
           "columnsFrom": [
             "scenario_id"
           ],
-          "tableTo": "remodel_scenarios",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -5386,15 +5386,15 @@
         "budget_item_material_mappings_material_id_material_schedule_items_id_fk": {
           "name": "budget_item_material_mappings_material_id_material_schedule_items_id_fk",
           "tableFrom": "budget_item_material_mappings",
+          "tableTo": "material_schedule_items",
           "columnsFrom": [
             "material_id"
           ],
-          "tableTo": "material_schedule_items",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -5727,15 +5727,15 @@
         "journal_attachments_journal_entry_id_shopping_journal_entries_id_fk": {
           "name": "journal_attachments_journal_entry_id_shopping_journal_entries_id_fk",
           "tableFrom": "journal_attachments",
+          "tableTo": "shopping_journal_entries",
           "columnsFrom": [
             "journal_entry_id"
           ],
-          "tableTo": "shopping_journal_entries",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -5836,28 +5836,28 @@
         "shopping_journal_entries_store_id_showroom_stores_id_fk": {
           "name": "shopping_journal_entries_store_id_showroom_stores_id_fk",
           "tableFrom": "shopping_journal_entries",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "store_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "shopping_journal_entries_research_session_id_research_sessions_id_fk": {
           "name": "shopping_journal_entries_research_session_id_research_sessions_id_fk",
           "tableFrom": "shopping_journal_entries",
+          "tableTo": "research_sessions",
           "columnsFrom": [
             "research_session_id"
           ],
-          "tableTo": "research_sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -5959,28 +5959,28 @@
         "room_ai_summaries_room_id_rooms_id_fk": {
           "name": "room_ai_summaries_room_id_rooms_id_fk",
           "tableFrom": "room_ai_summaries",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "room_ai_summaries_representative_image_id_images_id_fk": {
           "name": "room_ai_summaries_representative_image_id_images_id_fk",
           "tableFrom": "room_ai_summaries",
+          "tableTo": "images",
           "columnsFrom": [
             "representative_image_id"
           ],
-          "tableTo": "images",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -6223,15 +6223,15 @@
         "visitor_events_visitor_id_visitor_sessions_id_fk": {
           "name": "visitor_events_visitor_id_visitor_sessions_id_fk",
           "tableFrom": "visitor_events",
+          "tableTo": "visitor_sessions",
           "columnsFrom": [
             "visitor_id"
           ],
-          "tableTo": "visitor_sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -6565,67 +6565,67 @@
         "planning_tasks_epic_id_planning_epics_id_fk": {
           "name": "planning_tasks_epic_id_planning_epics_id_fk",
           "tableFrom": "planning_tasks",
+          "tableTo": "planning_epics",
           "columnsFrom": [
             "epic_id"
           ],
-          "tableTo": "planning_epics",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "planning_tasks_room_id_rooms_id_fk": {
           "name": "planning_tasks_room_id_rooms_id_fk",
           "tableFrom": "planning_tasks",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "planning_tasks_owner_participant_id_planning_participants_id_fk": {
           "name": "planning_tasks_owner_participant_id_planning_participants_id_fk",
           "tableFrom": "planning_tasks",
+          "tableTo": "planning_participants",
           "columnsFrom": [
             "owner_participant_id"
           ],
-          "tableTo": "planning_participants",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "planning_tasks_responsible_participant_id_planning_participants_id_fk": {
           "name": "planning_tasks_responsible_participant_id_planning_participants_id_fk",
           "tableFrom": "planning_tasks",
+          "tableTo": "planning_participants",
           "columnsFrom": [
             "responsible_participant_id"
           ],
-          "tableTo": "planning_participants",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "planning_tasks_accountable_participant_id_planning_participants_id_fk": {
           "name": "planning_tasks_accountable_participant_id_planning_participants_id_fk",
           "tableFrom": "planning_tasks",
+          "tableTo": "planning_participants",
           "columnsFrom": [
             "accountable_participant_id"
           ],
-          "tableTo": "planning_participants",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -6756,41 +6756,41 @@
         "planning_task_updates_task_id_planning_tasks_id_fk": {
           "name": "planning_task_updates_task_id_planning_tasks_id_fk",
           "tableFrom": "planning_task_updates",
+          "tableTo": "planning_tasks",
           "columnsFrom": [
             "task_id"
           ],
-          "tableTo": "planning_tasks",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "planning_task_updates_created_by_participant_id_planning_participants_id_fk": {
           "name": "planning_task_updates_created_by_participant_id_planning_participants_id_fk",
           "tableFrom": "planning_task_updates",
+          "tableTo": "planning_participants",
           "columnsFrom": [
             "created_by_participant_id"
           ],
-          "tableTo": "planning_participants",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "planning_task_updates_approved_by_participant_id_planning_participants_id_fk": {
           "name": "planning_task_updates_approved_by_participant_id_planning_participants_id_fk",
           "tableFrom": "planning_task_updates",
+          "tableTo": "planning_participants",
           "columnsFrom": [
             "approved_by_participant_id"
           ],
-          "tableTo": "planning_participants",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -6841,28 +6841,28 @@
         "planning_task_update_images_task_update_id_planning_task_updates_id_fk": {
           "name": "planning_task_update_images_task_update_id_planning_task_updates_id_fk",
           "tableFrom": "planning_task_update_images",
+          "tableTo": "planning_task_updates",
           "columnsFrom": [
             "task_update_id"
           ],
-          "tableTo": "planning_task_updates",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "planning_task_update_images_image_id_images_id_fk": {
           "name": "planning_task_update_images_image_id_images_id_fk",
           "tableFrom": "planning_task_update_images",
+          "tableTo": "images",
           "columnsFrom": [
             "image_id"
           ],
-          "tableTo": "images",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -6963,15 +6963,15 @@
         "planning_logs_author_participant_id_planning_participants_id_fk": {
           "name": "planning_logs_author_participant_id_planning_participants_id_fk",
           "tableFrom": "planning_logs",
+          "tableTo": "planning_participants",
           "columnsFrom": [
             "author_participant_id"
           ],
-          "tableTo": "planning_participants",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -7305,15 +7305,15 @@
         "permits_records_latest_run_id_permits_sync_runs_id_fk": {
           "name": "permits_records_latest_run_id_permits_sync_runs_id_fk",
           "tableFrom": "permits_records",
+          "tableTo": "permits_sync_runs",
           "columnsFrom": [
             "latest_run_id"
           ],
-          "tableTo": "permits_sync_runs",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -7385,15 +7385,15 @@
         "permits_record_revisions_run_id_permits_sync_runs_id_fk": {
           "name": "permits_record_revisions_run_id_permits_sync_runs_id_fk",
           "tableFrom": "permits_record_revisions",
+          "tableTo": "permits_sync_runs",
           "columnsFrom": [
             "run_id"
           ],
-          "tableTo": "permits_sync_runs",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -7755,15 +7755,15 @@
         "permits_contact_activity_run_id_permits_sync_runs_id_fk": {
           "name": "permits_contact_activity_run_id_permits_sync_runs_id_fk",
           "tableFrom": "permits_contact_activity",
+          "tableTo": "permits_sync_runs",
           "columnsFrom": [
             "run_id"
           ],
-          "tableTo": "permits_sync_runs",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -8090,15 +8090,15 @@
         "trade_data_work_item_type_id_work_item_types_id_fk": {
           "name": "trade_data_work_item_type_id_work_item_types_id_fk",
           "tableFrom": "trade_data",
+          "tableTo": "work_item_types",
           "columnsFrom": [
             "work_item_type_id"
           ],
-          "tableTo": "work_item_types",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -8264,41 +8264,41 @@
         "standard_costs_room_id_rooms_id_fk": {
           "name": "standard_costs_room_id_rooms_id_fk",
           "tableFrom": "standard_costs",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "standard_costs_work_item_type_id_work_item_types_id_fk": {
           "name": "standard_costs_work_item_type_id_work_item_types_id_fk",
           "tableFrom": "standard_costs",
+          "tableTo": "work_item_types",
           "columnsFrom": [
             "work_item_type_id"
           ],
-          "tableTo": "work_item_types",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "standard_costs_trade_data_id_trade_data_id_fk": {
           "name": "standard_costs_trade_data_id_trade_data_id_fk",
           "tableFrom": "standard_costs",
+          "tableTo": "trade_data",
           "columnsFrom": [
             "trade_data_id"
           ],
-          "tableTo": "trade_data",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -8462,15 +8462,15 @@
         "static_budget_items_floor_id_floors_id_fk": {
           "name": "static_budget_items_floor_id_floors_id_fk",
           "tableFrom": "static_budget_items",
+          "tableTo": "floors",
           "columnsFrom": [
             "floor_id"
           ],
-          "tableTo": "floors",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -8632,15 +8632,15 @@
         "budget_variance_line_items_scenario_id_budget_variance_scenarios_id_fk": {
           "name": "budget_variance_line_items_scenario_id_budget_variance_scenarios_id_fk",
           "tableFrom": "budget_variance_line_items",
+          "tableTo": "budget_variance_scenarios",
           "columnsFrom": [
             "scenario_id"
           ],
-          "tableTo": "budget_variance_scenarios",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -9248,28 +9248,28 @@
         "images_room_id_rooms_id_fk": {
           "name": "images_room_id_rooms_id_fk",
           "tableFrom": "images",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "images_scope_floor_id_floors_id_fk": {
           "name": "images_scope_floor_id_floors_id_fk",
           "tableFrom": "images",
+          "tableTo": "floors",
           "columnsFrom": [
             "scope_floor_id"
           ],
-          "tableTo": "floors",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -9322,28 +9322,28 @@
         "inspirational_image_rooms_image_id_images_id_fk": {
           "name": "inspirational_image_rooms_image_id_images_id_fk",
           "tableFrom": "inspirational_image_rooms",
+          "tableTo": "images",
           "columnsFrom": [
             "image_id"
           ],
-          "tableTo": "images",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "inspirational_image_rooms_room_id_rooms_id_fk": {
           "name": "inspirational_image_rooms_room_id_rooms_id_fk",
           "tableFrom": "inspirational_image_rooms",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -9394,15 +9394,15 @@
         "listing_photo_blank_canvases_listing_photo_id_listing_photos_id_fk": {
           "name": "listing_photo_blank_canvases_listing_photo_id_listing_photos_id_fk",
           "tableFrom": "listing_photo_blank_canvases",
+          "tableTo": "listing_photos",
           "columnsFrom": [
             "listing_photo_id"
           ],
-          "tableTo": "listing_photos",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -9482,28 +9482,28 @@
         "listing_photos_image_id_images_id_fk": {
           "name": "listing_photos_image_id_images_id_fk",
           "tableFrom": "listing_photos",
+          "tableTo": "images",
           "columnsFrom": [
             "image_id"
           ],
-          "tableTo": "images",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "listing_photos_room_id_rooms_id_fk": {
           "name": "listing_photos_room_id_rooms_id_fk",
           "tableFrom": "listing_photos",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -9554,15 +9554,15 @@
         "ai_edits_original_listing_id_listing_photos_id_fk": {
           "name": "ai_edits_original_listing_id_listing_photos_id_fk",
           "tableFrom": "ai_edits",
+          "tableTo": "listing_photos",
           "columnsFrom": [
             "original_listing_id"
           ],
-          "tableTo": "listing_photos",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -9937,15 +9937,15 @@
         "image_edit_sessions_source_image_id_images_id_fk": {
           "name": "image_edit_sessions_source_image_id_images_id_fk",
           "tableFrom": "image_edit_sessions",
+          "tableTo": "images",
           "columnsFrom": [
             "source_image_id"
           ],
-          "tableTo": "images",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -10053,41 +10053,41 @@
         "image_edit_revisions_session_id_image_edit_sessions_id_fk": {
           "name": "image_edit_revisions_session_id_image_edit_sessions_id_fk",
           "tableFrom": "image_edit_revisions",
+          "tableTo": "image_edit_sessions",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "image_edit_sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "image_edit_revisions_source_image_id_images_id_fk": {
           "name": "image_edit_revisions_source_image_id_images_id_fk",
           "tableFrom": "image_edit_revisions",
+          "tableTo": "images",
           "columnsFrom": [
             "source_image_id"
           ],
-          "tableTo": "images",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "image_edit_revisions_output_image_id_images_id_fk": {
           "name": "image_edit_revisions_output_image_id_images_id_fk",
           "tableFrom": "image_edit_revisions",
+          "tableTo": "images",
           "columnsFrom": [
             "output_image_id"
           ],
-          "tableTo": "images",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -10190,15 +10190,15 @@
         "image_upload_staging_image_id_images_id_fk": {
           "name": "image_upload_staging_image_id_images_id_fk",
           "tableFrom": "image_upload_staging",
+          "tableTo": "images",
           "columnsFrom": [
             "image_id"
           ],
-          "tableTo": "images",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -10320,28 +10320,28 @@
         "image_tag_mappings_image_id_images_id_fk": {
           "name": "image_tag_mappings_image_id_images_id_fk",
           "tableFrom": "image_tag_mappings",
+          "tableTo": "images",
           "columnsFrom": [
             "image_id"
           ],
-          "tableTo": "images",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "image_tag_mappings_tag_id_image_tags_id_fk": {
           "name": "image_tag_mappings_tag_id_image_tags_id_fk",
           "tableFrom": "image_tag_mappings",
+          "tableTo": "image_tags",
           "columnsFrom": [
             "tag_id"
           ],
-          "tableTo": "image_tags",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -10437,15 +10437,15 @@
         "image_review_highlights_image_id_images_id_fk": {
           "name": "image_review_highlights_image_id_images_id_fk",
           "tableFrom": "image_review_highlights",
+          "tableTo": "images",
           "columnsFrom": [
             "image_id"
           ],
-          "tableTo": "images",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -10519,15 +10519,15 @@
         "render_sessions_room_id_rooms_id_fk": {
           "name": "render_sessions_room_id_rooms_id_fk",
           "tableFrom": "render_sessions",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -10672,54 +10672,54 @@
         "render_canvases_session_id_render_sessions_id_fk": {
           "name": "render_canvases_session_id_render_sessions_id_fk",
           "tableFrom": "render_canvases",
+          "tableTo": "render_sessions",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "render_sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "render_canvases_room_id_rooms_id_fk": {
           "name": "render_canvases_room_id_rooms_id_fk",
           "tableFrom": "render_canvases",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "render_canvases_listing_photo_id_listing_photos_id_fk": {
           "name": "render_canvases_listing_photo_id_listing_photos_id_fk",
           "tableFrom": "render_canvases",
+          "tableTo": "listing_photos",
           "columnsFrom": [
             "listing_photo_id"
           ],
-          "tableTo": "listing_photos",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "render_canvases_output_image_id_images_id_fk": {
           "name": "render_canvases_output_image_id_images_id_fk",
           "tableFrom": "render_canvases",
+          "tableTo": "images",
           "columnsFrom": [
             "output_image_id"
           ],
-          "tableTo": "images",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -10777,28 +10777,28 @@
         "canvas_inspiration_references_canvas_id_render_canvases_id_fk": {
           "name": "canvas_inspiration_references_canvas_id_render_canvases_id_fk",
           "tableFrom": "canvas_inspiration_references",
+          "tableTo": "render_canvases",
           "columnsFrom": [
             "canvas_id"
           ],
-          "tableTo": "render_canvases",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "canvas_inspiration_references_inspiration_image_id_images_id_fk": {
           "name": "canvas_inspiration_references_inspiration_image_id_images_id_fk",
           "tableFrom": "canvas_inspiration_references",
+          "tableTo": "images",
           "columnsFrom": [
             "inspiration_image_id"
           ],
-          "tableTo": "images",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "restrict"
+          "onDelete": "restrict",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {
@@ -10929,28 +10929,28 @@
         "mood_board_generations_room_id_rooms_id_fk": {
           "name": "mood_board_generations_room_id_rooms_id_fk",
           "tableFrom": "mood_board_generations",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "mood_board_generations_floor_id_floors_id_fk": {
           "name": "mood_board_generations_floor_id_floors_id_fk",
           "tableFrom": "mood_board_generations",
+          "tableTo": "floors",
           "columnsFrom": [
             "floor_id"
           ],
-          "tableTo": "floors",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -11091,15 +11091,15 @@
         "blank_canvas_generation_job_items_job_id_blank_canvas_generation_jobs_id_fk": {
           "name": "blank_canvas_generation_job_items_job_id_blank_canvas_generation_jobs_id_fk",
           "tableFrom": "blank_canvas_generation_job_items",
+          "tableTo": "blank_canvas_generation_jobs",
           "columnsFrom": [
             "job_id"
           ],
-          "tableTo": "blank_canvas_generation_jobs",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -11207,15 +11207,15 @@
         "workstation_boards_room_id_rooms_id_fk": {
           "name": "workstation_boards_room_id_rooms_id_fk",
           "tableFrom": "workstation_boards",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -11389,28 +11389,28 @@
         "board_nodes_board_id_workstation_boards_id_fk": {
           "name": "board_nodes_board_id_workstation_boards_id_fk",
           "tableFrom": "board_nodes",
+          "tableTo": "workstation_boards",
           "columnsFrom": [
             "board_id"
           ],
-          "tableTo": "workstation_boards",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "board_nodes_render_canvas_id_render_canvases_id_fk": {
           "name": "board_nodes_render_canvas_id_render_canvases_id_fk",
           "tableFrom": "board_nodes",
+          "tableTo": "render_canvases",
           "columnsFrom": [
             "render_canvas_id"
           ],
-          "tableTo": "render_canvases",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -11492,15 +11492,15 @@
         "photo_collection_items_collection_id_photo_collections_id_fk": {
           "name": "photo_collection_items_collection_id_photo_collections_id_fk",
           "tableFrom": "photo_collection_items",
+          "tableTo": "photo_collections",
           "columnsFrom": [
             "collection_id"
           ],
-          "tableTo": "photo_collections",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -11568,15 +11568,15 @@
         "photo_collections_board_id_workstation_boards_id_fk": {
           "name": "photo_collections_board_id_workstation_boards_id_fk",
           "tableFrom": "photo_collections",
+          "tableTo": "workstation_boards",
           "columnsFrom": [
             "board_id"
           ],
-          "tableTo": "workstation_boards",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -11672,28 +11672,28 @@
         "sample_clippings_room_id_rooms_id_fk": {
           "name": "sample_clippings_room_id_rooms_id_fk",
           "tableFrom": "sample_clippings",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "sample_clippings_render_canvas_id_render_canvases_id_fk": {
           "name": "sample_clippings_render_canvas_id_render_canvases_id_fk",
           "tableFrom": "sample_clippings",
+          "tableTo": "render_canvases",
           "columnsFrom": [
             "render_canvas_id"
           ],
-          "tableTo": "render_canvases",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -11814,28 +11814,28 @@
         "checklist_answers_question_id_checklist_questions_id_fk": {
           "name": "checklist_answers_question_id_checklist_questions_id_fk",
           "tableFrom": "checklist_answers",
+          "tableTo": "checklist_questions",
           "columnsFrom": [
             "question_id"
           ],
-          "tableTo": "checklist_questions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "checklist_answers_scenario_id_remodel_scenarios_id_fk": {
           "name": "checklist_answers_scenario_id_remodel_scenarios_id_fk",
           "tableFrom": "checklist_answers",
+          "tableTo": "remodel_scenarios",
           "columnsFrom": [
             "scenario_id"
           ],
-          "tableTo": "remodel_scenarios",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -11908,15 +11908,15 @@
         "checklist_questions_section_id_checklist_sections_id_fk": {
           "name": "checklist_questions_section_id_checklist_sections_id_fk",
           "tableFrom": "checklist_questions",
+          "tableTo": "checklist_sections",
           "columnsFrom": [
             "section_id"
           ],
-          "tableTo": "checklist_sections",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -11984,28 +11984,28 @@
         "checklist_room_mappings_question_id_checklist_questions_id_fk": {
           "name": "checklist_room_mappings_question_id_checklist_questions_id_fk",
           "tableFrom": "checklist_room_mappings",
+          "tableTo": "checklist_questions",
           "columnsFrom": [
             "question_id"
           ],
-          "tableTo": "checklist_questions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "checklist_room_mappings_room_id_rooms_id_fk": {
           "name": "checklist_room_mappings_room_id_rooms_id_fk",
           "tableFrom": "checklist_room_mappings",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -12216,15 +12216,15 @@
         "room_material_quotes_room_id_rooms_id_fk": {
           "name": "room_material_quotes_room_id_rooms_id_fk",
           "tableFrom": "room_material_quotes",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -12446,15 +12446,15 @@
         "research_plan_revisions_session_id_research_sessions_id_fk": {
           "name": "research_plan_revisions_session_id_research_sessions_id_fk",
           "tableFrom": "research_plan_revisions",
+          "tableTo": "research_sessions",
           "columnsFrom": [
             "session_id"
           ],
-          "tableTo": "research_sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -12787,15 +12787,15 @@
         "companies_business_type_id_business_types_id_fk": {
           "name": "companies_business_type_id_business_types_id_fk",
           "tableFrom": "companies",
+          "tableTo": "business_types",
           "columnsFrom": [
             "business_type_id"
           ],
-          "tableTo": "business_types",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -12854,28 +12854,28 @@
         "company_contacts_company_id_companies_id_fk": {
           "name": "company_contacts_company_id_companies_id_fk",
           "tableFrom": "company_contacts",
+          "tableTo": "companies",
           "columnsFrom": [
             "company_id"
           ],
-          "tableTo": "companies",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "company_contacts_contact_id_contacts_id_fk": {
           "name": "company_contacts_contact_id_contacts_id_fk",
           "tableFrom": "company_contacts",
+          "tableTo": "contacts",
           "columnsFrom": [
             "contact_id"
           ],
-          "tableTo": "contacts",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -12957,15 +12957,15 @@
         "company_notes_company_id_companies_id_fk": {
           "name": "company_notes_company_id_companies_id_fk",
           "tableFrom": "company_notes",
+          "tableTo": "companies",
           "columnsFrom": [
             "company_id"
           ],
-          "tableTo": "companies",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -13077,15 +13077,15 @@
         "company_todos_company_id_companies_id_fk": {
           "name": "company_todos_company_id_companies_id_fk",
           "tableFrom": "company_todos",
+          "tableTo": "companies",
           "columnsFrom": [
             "company_id"
           ],
-          "tableTo": "companies",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -13264,15 +13264,15 @@
         "bid_portfolios_company_id_companies_id_fk": {
           "name": "bid_portfolios_company_id_companies_id_fk",
           "tableFrom": "bid_portfolios",
+          "tableTo": "companies",
           "columnsFrom": [
             "company_id"
           ],
-          "tableTo": "companies",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -13364,28 +13364,28 @@
         "bid_portfolio_room_configs_portfolio_id_bid_portfolios_id_fk": {
           "name": "bid_portfolio_room_configs_portfolio_id_bid_portfolios_id_fk",
           "tableFrom": "bid_portfolio_room_configs",
+          "tableTo": "bid_portfolios",
           "columnsFrom": [
             "portfolio_id"
           ],
-          "tableTo": "bid_portfolios",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "bid_portfolio_room_configs_room_id_rooms_id_fk": {
           "name": "bid_portfolio_room_configs_room_id_rooms_id_fk",
           "tableFrom": "bid_portfolio_room_configs",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -13465,28 +13465,28 @@
         "bid_portfolio_comments_portfolio_id_bid_portfolios_id_fk": {
           "name": "bid_portfolio_comments_portfolio_id_bid_portfolios_id_fk",
           "tableFrom": "bid_portfolio_comments",
+          "tableTo": "bid_portfolios",
           "columnsFrom": [
             "portfolio_id"
           ],
-          "tableTo": "bid_portfolios",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "bid_portfolio_comments_room_id_rooms_id_fk": {
           "name": "bid_portfolio_comments_room_id_rooms_id_fk",
           "tableFrom": "bid_portfolio_comments",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -13544,15 +13544,15 @@
         "bid_portfolio_chat_messages_portfolio_id_bid_portfolios_id_fk": {
           "name": "bid_portfolio_chat_messages_portfolio_id_bid_portfolios_id_fk",
           "tableFrom": "bid_portfolio_chat_messages",
+          "tableTo": "bid_portfolios",
           "columnsFrom": [
             "portfolio_id"
           ],
-          "tableTo": "bid_portfolios",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -13618,41 +13618,41 @@
         "bid_portfolio_selected_photos_portfolio_id_bid_portfolios_id_fk": {
           "name": "bid_portfolio_selected_photos_portfolio_id_bid_portfolios_id_fk",
           "tableFrom": "bid_portfolio_selected_photos",
+          "tableTo": "bid_portfolios",
           "columnsFrom": [
             "portfolio_id"
           ],
-          "tableTo": "bid_portfolios",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "bid_portfolio_selected_photos_room_id_rooms_id_fk": {
           "name": "bid_portfolio_selected_photos_room_id_rooms_id_fk",
           "tableFrom": "bid_portfolio_selected_photos",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "bid_portfolio_selected_photos_image_id_images_id_fk": {
           "name": "bid_portfolio_selected_photos_image_id_images_id_fk",
           "tableFrom": "bid_portfolio_selected_photos",
+          "tableTo": "images",
           "columnsFrom": [
             "image_id"
           ],
-          "tableTo": "images",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -14289,15 +14289,15 @@
         "material_schedule_items_room_id_rooms_id_fk": {
           "name": "material_schedule_items_room_id_rooms_id_fk",
           "tableFrom": "material_schedule_items",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -14356,15 +14356,15 @@
         "material_required_specs_material_id_material_schedule_items_id_fk": {
           "name": "material_required_specs_material_id_material_schedule_items_id_fk",
           "tableFrom": "material_required_specs",
+          "tableTo": "material_schedule_items",
           "columnsFrom": [
             "material_id"
           ],
-          "tableTo": "material_schedule_items",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -14813,15 +14813,15 @@
         "showroom_stores_bay_area_city_id_store_bayarea_cities_id_fk": {
           "name": "showroom_stores_bay_area_city_id_store_bayarea_cities_id_fk",
           "tableFrom": "showroom_stores",
+          "tableTo": "store_bayarea_cities",
           "columnsFrom": [
             "bay_area_city_id"
           ],
-          "tableTo": "store_bayarea_cities",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -14995,46 +14995,55 @@
           "default": "(unixepoch())"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "showroom_store_products_brand_model_uniq": {
+          "name": "showroom_store_products_brand_model_uniq",
+          "columns": [
+            "brand_id",
+            "model_key"
+          ],
+          "isUnique": true
+        }
+      },
       "foreignKeys": {
         "showroom_store_products_store_id_showroom_stores_id_fk": {
           "name": "showroom_store_products_store_id_showroom_stores_id_fk",
           "tableFrom": "showroom_store_products",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "store_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "showroom_store_products_material_id_material_schedule_items_id_fk": {
           "name": "showroom_store_products_material_id_material_schedule_items_id_fk",
           "tableFrom": "showroom_store_products",
+          "tableTo": "material_schedule_items",
           "columnsFrom": [
             "material_id"
           ],
-          "tableTo": "material_schedule_items",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "showroom_store_products_brand_id_brands_id_fk": {
           "name": "showroom_store_products_brand_id_brands_id_fk",
           "tableFrom": "showroom_store_products",
+          "tableTo": "brands",
           "columnsFrom": [
             "brand_id"
           ],
-          "tableTo": "brands",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -15130,28 +15139,28 @@
         "showroom_store_category_mapping_store_id_showroom_stores_id_fk": {
           "name": "showroom_store_category_mapping_store_id_showroom_stores_id_fk",
           "tableFrom": "showroom_store_category_mapping",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "store_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "showroom_store_category_mapping_category_id_showroom_store_category_id_fk": {
           "name": "showroom_store_category_mapping_category_id_showroom_store_category_id_fk",
           "tableFrom": "showroom_store_category_mapping",
+          "tableTo": "showroom_store_category",
           "columnsFrom": [
             "category_id"
           ],
-          "tableTo": "showroom_store_category",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -15202,15 +15211,15 @@
         "store_product_docs_store_product_id_showroom_store_products_id_fk": {
           "name": "store_product_docs_store_product_id_showroom_store_products_id_fk",
           "tableFrom": "store_product_docs",
+          "tableTo": "showroom_store_products",
           "columnsFrom": [
             "store_product_id"
           ],
-          "tableTo": "showroom_store_products",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -15290,15 +15299,15 @@
         "store_product_research_store_product_id_showroom_store_products_id_fk": {
           "name": "store_product_research_store_product_id_showroom_store_products_id_fk",
           "tableFrom": "store_product_research",
+          "tableTo": "showroom_store_products",
           "columnsFrom": [
             "store_product_id"
           ],
-          "tableTo": "showroom_store_products",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -15378,15 +15387,15 @@
         "store_research_store_id_showroom_stores_id_fk": {
           "name": "store_research_store_id_showroom_stores_id_fk",
           "tableFrom": "store_research",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "store_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -15422,28 +15431,28 @@
         "store_pa_mapping_store_id_showroom_stores_id_fk": {
           "name": "store_pa_mapping_store_id_showroom_stores_id_fk",
           "tableFrom": "store_pa_mapping",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "store_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "store_pa_mapping_product_area_id_store_product_area_def_id_fk": {
           "name": "store_pa_mapping_product_area_id_store_product_area_def_id_fk",
           "tableFrom": "store_pa_mapping",
+          "tableTo": "store_product_area_def",
           "columnsFrom": [
             "product_area_id"
           ],
-          "tableTo": "store_product_area_def",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -15524,28 +15533,28 @@
         "store_product_pa_mapping_store_product_id_showroom_store_products_id_fk": {
           "name": "store_product_pa_mapping_store_product_id_showroom_store_products_id_fk",
           "tableFrom": "store_product_pa_mapping",
+          "tableTo": "showroom_store_products",
           "columnsFrom": [
             "store_product_id"
           ],
-          "tableTo": "showroom_store_products",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "store_product_pa_mapping_product_area_id_store_product_area_def_id_fk": {
           "name": "store_product_pa_mapping_product_area_id_store_product_area_def_id_fk",
           "tableFrom": "store_product_pa_mapping",
+          "tableTo": "store_product_area_def",
           "columnsFrom": [
             "product_area_id"
           ],
-          "tableTo": "store_product_area_def",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -15625,15 +15634,15 @@
         "store_notes_store_id_showroom_stores_id_fk": {
           "name": "store_notes_store_id_showroom_stores_id_fk",
           "tableFrom": "store_notes",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "store_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -15685,15 +15694,15 @@
         "store_product_notes_store_product_id_showroom_store_products_id_fk": {
           "name": "store_product_notes_store_product_id_showroom_store_products_id_fk",
           "tableFrom": "store_product_notes",
+          "tableTo": "showroom_store_products",
           "columnsFrom": [
             "store_product_id"
           ],
-          "tableTo": "showroom_store_products",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -15807,28 +15816,28 @@
         "store_product_similar_model_map_parent_store_product_id_showroom_store_products_id_fk": {
           "name": "store_product_similar_model_map_parent_store_product_id_showroom_store_products_id_fk",
           "tableFrom": "store_product_similar_model_map",
+          "tableTo": "showroom_store_products",
           "columnsFrom": [
             "parent_store_product_id"
           ],
-          "tableTo": "showroom_store_products",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "store_product_similar_model_map_similar_store_product_id_showroom_store_products_id_fk": {
           "name": "store_product_similar_model_map_similar_store_product_id_showroom_store_products_id_fk",
           "tableFrom": "store_product_similar_model_map",
+          "tableTo": "showroom_store_products",
           "columnsFrom": [
             "similar_store_product_id"
           ],
-          "tableTo": "showroom_store_products",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -15935,28 +15944,28 @@
         "store_similar_map_parent_store_id_showroom_stores_id_fk": {
           "name": "store_similar_map_parent_store_id_showroom_stores_id_fk",
           "tableFrom": "store_similar_map",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "parent_store_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "store_similar_map_similar_store_id_showroom_stores_id_fk": {
           "name": "store_similar_map_similar_store_id_showroom_stores_id_fk",
           "tableFrom": "store_similar_map",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "similar_store_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -16068,28 +16077,28 @@
         "store_product_tag_mapping_showroom_tag_id_showroom_tag_def_id_fk": {
           "name": "store_product_tag_mapping_showroom_tag_id_showroom_tag_def_id_fk",
           "tableFrom": "store_product_tag_mapping",
+          "tableTo": "showroom_tag_def",
           "columnsFrom": [
             "showroom_tag_id"
           ],
-          "tableTo": "showroom_tag_def",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "store_product_tag_mapping_store_product_id_showroom_store_products_id_fk": {
           "name": "store_product_tag_mapping_store_product_id_showroom_store_products_id_fk",
           "tableFrom": "store_product_tag_mapping",
+          "tableTo": "showroom_store_products",
           "columnsFrom": [
             "store_product_id"
           ],
-          "tableTo": "showroom_store_products",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -16133,28 +16142,28 @@
         "store_tag_mapping_showroom_tag_id_showroom_tag_def_id_fk": {
           "name": "store_tag_mapping_showroom_tag_id_showroom_tag_def_id_fk",
           "tableFrom": "store_tag_mapping",
+          "tableTo": "showroom_tag_def",
           "columnsFrom": [
             "showroom_tag_id"
           ],
-          "tableTo": "showroom_tag_def",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "store_tag_mapping_store_id_showroom_stores_id_fk": {
           "name": "store_tag_mapping_store_id_showroom_stores_id_fk",
           "tableFrom": "store_tag_mapping",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "store_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -16219,15 +16228,15 @@
         "showroom_store_ratings_store_id_showroom_stores_id_fk": {
           "name": "showroom_store_ratings_store_id_showroom_stores_id_fk",
           "tableFrom": "showroom_store_ratings",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "store_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -16293,15 +16302,15 @@
         "store_product_rating_store_product_id_showroom_store_products_id_fk": {
           "name": "store_product_rating_store_product_id_showroom_store_products_id_fk",
           "tableFrom": "store_product_rating",
+          "tableTo": "showroom_store_products",
           "columnsFrom": [
             "store_product_id"
           ],
-          "tableTo": "showroom_store_products",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -16367,15 +16376,15 @@
         "store_rating_store_id_showroom_stores_id_fk": {
           "name": "store_rating_store_id_showroom_stores_id_fk",
           "tableFrom": "store_rating",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "store_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -16490,41 +16499,41 @@
         "showroom_scan_log_matched_store_product_id_showroom_store_products_id_fk": {
           "name": "showroom_scan_log_matched_store_product_id_showroom_store_products_id_fk",
           "tableFrom": "showroom_scan_log",
+          "tableTo": "showroom_store_products",
           "columnsFrom": [
             "matched_store_product_id"
           ],
-          "tableTo": "showroom_store_products",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "showroom_scan_log_auto_created_product_id_showroom_store_products_id_fk": {
           "name": "showroom_scan_log_auto_created_product_id_showroom_store_products_id_fk",
           "tableFrom": "showroom_scan_log",
+          "tableTo": "showroom_store_products",
           "columnsFrom": [
             "auto_created_product_id"
           ],
-          "tableTo": "showroom_store_products",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "showroom_scan_log_store_id_showroom_stores_id_fk": {
           "name": "showroom_scan_log_store_id_showroom_stores_id_fk",
           "tableFrom": "showroom_scan_log",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "store_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -16692,15 +16701,15 @@
         "product_images_store_product_id_showroom_store_products_id_fk": {
           "name": "product_images_store_product_id_showroom_store_products_id_fk",
           "tableFrom": "product_images",
+          "tableTo": "showroom_store_products",
           "columnsFrom": [
             "store_product_id"
           ],
-          "tableTo": "showroom_store_products",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -16805,15 +16814,15 @@
         "product_specs_store_product_id_showroom_store_products_id_fk": {
           "name": "product_specs_store_product_id_showroom_store_products_id_fk",
           "tableFrom": "product_specs",
+          "tableTo": "showroom_store_products",
           "columnsFrom": [
             "store_product_id"
           ],
-          "tableTo": "showroom_store_products",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -16995,15 +17004,15 @@
         "showroom_images_store_id_showroom_stores_id_fk": {
           "name": "showroom_images_store_id_showroom_stores_id_fk",
           "tableFrom": "showroom_images",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "store_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -17069,15 +17078,15 @@
         "sourcing_plan_revisions_sweep_session_id_sourcing_sweep_sessions_id_fk": {
           "name": "sourcing_plan_revisions_sweep_session_id_sourcing_sweep_sessions_id_fk",
           "tableFrom": "sourcing_plan_revisions",
+          "tableTo": "sourcing_sweep_sessions",
           "columnsFrom": [
             "sweep_session_id"
           ],
-          "tableTo": "sourcing_sweep_sessions",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -17498,15 +17507,15 @@
         "showroom_pocs_showroom_id_showroom_stores_id_fk": {
           "name": "showroom_pocs_showroom_id_showroom_stores_id_fk",
           "tableFrom": "showroom_pocs",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "showroom_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -17559,28 +17568,28 @@
         "showroom_product_mappings_showroom_id_showroom_stores_id_fk": {
           "name": "showroom_product_mappings_showroom_id_showroom_stores_id_fk",
           "tableFrom": "showroom_product_mappings",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "showroom_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "showroom_product_mappings_product_id_showroom_store_products_id_fk": {
           "name": "showroom_product_mappings_product_id_showroom_store_products_id_fk",
           "tableFrom": "showroom_product_mappings",
+          "tableTo": "showroom_store_products",
           "columnsFrom": [
             "product_id"
           ],
-          "tableTo": "showroom_store_products",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -17641,28 +17650,28 @@
         "product_material_mappings_product_id_showroom_store_products_id_fk": {
           "name": "product_material_mappings_product_id_showroom_store_products_id_fk",
           "tableFrom": "product_material_mappings",
+          "tableTo": "showroom_store_products",
           "columnsFrom": [
             "product_id"
           ],
-          "tableTo": "showroom_store_products",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "product_material_mappings_material_id_material_schedule_items_id_fk": {
           "name": "product_material_mappings_material_id_material_schedule_items_id_fk",
           "tableFrom": "product_material_mappings",
+          "tableTo": "material_schedule_items",
           "columnsFrom": [
             "material_id"
           ],
-          "tableTo": "material_schedule_items",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -17771,15 +17780,15 @@
         "browser_run_pages_showroom_id_showroom_stores_id_fk": {
           "name": "browser_run_pages_showroom_id_showroom_stores_id_fk",
           "tableFrom": "browser_run_pages",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "showroom_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -17881,15 +17890,15 @@
         "showroom_photos_mapping_showroom_id_showroom_stores_id_fk": {
           "name": "showroom_photos_mapping_showroom_id_showroom_stores_id_fk",
           "tableFrom": "showroom_photos_mapping",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "showroom_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -17972,15 +17981,15 @@
         "showroom_hours_showroom_id_showroom_stores_id_fk": {
           "name": "showroom_hours_showroom_id_showroom_stores_id_fk",
           "tableFrom": "showroom_hours",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "showroom_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -18139,15 +18148,15 @@
         "store_product_intel_store_product_id_showroom_store_products_id_fk": {
           "name": "store_product_intel_store_product_id_showroom_store_products_id_fk",
           "tableFrom": "store_product_intel",
+          "tableTo": "showroom_store_products",
           "columnsFrom": [
             "store_product_id"
           ],
-          "tableTo": "showroom_store_products",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -18286,28 +18295,28 @@
         "product_showroom_photos_product_id_showroom_store_products_id_fk": {
           "name": "product_showroom_photos_product_id_showroom_store_products_id_fk",
           "tableFrom": "product_showroom_photos",
+          "tableTo": "showroom_store_products",
           "columnsFrom": [
             "product_id"
           ],
-          "tableTo": "showroom_store_products",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "product_showroom_photos_showroom_id_showroom_stores_id_fk": {
           "name": "product_showroom_photos_showroom_id_showroom_stores_id_fk",
           "tableFrom": "product_showroom_photos",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "showroom_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -18503,41 +18512,41 @@
         "product_price_observations_product_id_showroom_store_products_id_fk": {
           "name": "product_price_observations_product_id_showroom_store_products_id_fk",
           "tableFrom": "product_price_observations",
+          "tableTo": "showroom_store_products",
           "columnsFrom": [
             "product_id"
           ],
-          "tableTo": "showroom_store_products",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "product_price_observations_showroom_id_showroom_stores_id_fk": {
           "name": "product_price_observations_showroom_id_showroom_stores_id_fk",
           "tableFrom": "product_price_observations",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "showroom_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "product_price_observations_source_photo_id_product_showroom_photos_id_fk": {
           "name": "product_price_observations_source_photo_id_product_showroom_photos_id_fk",
           "tableFrom": "product_price_observations",
+          "tableTo": "product_showroom_photos",
           "columnsFrom": [
             "source_photo_id"
           ],
-          "tableTo": "product_showroom_photos",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -18668,41 +18677,41 @@
         "wishlist_items_room_id_rooms_id_fk": {
           "name": "wishlist_items_room_id_rooms_id_fk",
           "tableFrom": "wishlist_items",
+          "tableTo": "rooms",
           "columnsFrom": [
             "room_id"
           ],
-          "tableTo": "rooms",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "wishlist_items_showroom_store_product_id_showroom_store_products_id_fk": {
           "name": "wishlist_items_showroom_store_product_id_showroom_store_products_id_fk",
           "tableFrom": "wishlist_items",
+          "tableTo": "showroom_store_products",
           "columnsFrom": [
             "showroom_store_product_id"
           ],
-          "tableTo": "showroom_store_products",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         },
         "wishlist_items_material_schedule_item_id_material_schedule_items_id_fk": {
           "name": "wishlist_items_material_schedule_item_id_material_schedule_items_id_fk",
           "tableFrom": "wishlist_items",
+          "tableTo": "material_schedule_items",
           "columnsFrom": [
             "material_schedule_item_id"
           ],
-          "tableTo": "material_schedule_items",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -18823,28 +18832,28 @@
         "wishlist_collection_items_collection_id_wishlist_collections_id_fk": {
           "name": "wishlist_collection_items_collection_id_wishlist_collections_id_fk",
           "tableFrom": "wishlist_collection_items",
+          "tableTo": "wishlist_collections",
           "columnsFrom": [
             "collection_id"
           ],
-          "tableTo": "wishlist_collections",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "wishlist_collection_items_wishlist_item_id_wishlist_items_id_fk": {
           "name": "wishlist_collection_items_wishlist_item_id_wishlist_items_id_fk",
           "tableFrom": "wishlist_collection_items",
+          "tableTo": "wishlist_items",
           "columnsFrom": [
             "wishlist_item_id"
           ],
-          "tableTo": "wishlist_items",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -19059,28 +19068,28 @@
         "brand_type_mappings_brand_id_brands_id_fk": {
           "name": "brand_type_mappings_brand_id_brands_id_fk",
           "tableFrom": "brand_type_mappings",
+          "tableTo": "brands",
           "columnsFrom": [
             "brand_id"
           ],
-          "tableTo": "brands",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "brand_type_mappings_type_id_brand_types_def_id_fk": {
           "name": "brand_type_mappings_type_id_brand_types_def_id_fk",
           "tableFrom": "brand_type_mappings",
+          "tableTo": "brand_types_def",
           "columnsFrom": [
             "type_id"
           ],
-          "tableTo": "brand_types_def",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -19133,28 +19142,28 @@
         "showroom_brand_mappings_showroom_id_showroom_stores_id_fk": {
           "name": "showroom_brand_mappings_showroom_id_showroom_stores_id_fk",
           "tableFrom": "showroom_brand_mappings",
+          "tableTo": "showroom_stores",
           "columnsFrom": [
             "showroom_id"
           ],
-          "tableTo": "showroom_stores",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "showroom_brand_mappings_brand_id_brands_id_fk": {
           "name": "showroom_brand_mappings_brand_id_brands_id_fk",
           "tableFrom": "showroom_brand_mappings",
+          "tableTo": "brands",
           "columnsFrom": [
             "brand_id"
           ],
-          "tableTo": "brands",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -19264,15 +19273,15 @@
         "brand_intel_brand_id_brands_id_fk": {
           "name": "brand_intel_brand_id_brands_id_fk",
           "tableFrom": "brand_intel",
+          "tableTo": "brands",
           "columnsFrom": [
             "brand_id"
           ],
-          "tableTo": "brands",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -19426,15 +19435,15 @@
         "brand_images_brand_id_brands_id_fk": {
           "name": "brand_images_brand_id_brands_id_fk",
           "tableFrom": "brand_images",
+          "tableTo": "brands",
           "columnsFrom": [
             "brand_id"
           ],
-          "tableTo": "brands",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -19515,15 +19524,15 @@
         "brand_product_lines_brand_id_brands_id_fk": {
           "name": "brand_product_lines_brand_id_brands_id_fk",
           "tableFrom": "brand_product_lines",
+          "tableTo": "brands",
           "columnsFrom": [
             "brand_id"
           ],
-          "tableTo": "brands",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -19634,15 +19643,15 @@
         "research_job_steps_job_id_research_jobs_id_fk": {
           "name": "research_job_steps_job_id_research_jobs_id_fk",
           "tableFrom": "research_job_steps",
+          "tableTo": "research_jobs",
           "columnsFrom": [
             "job_id"
           ],
-          "tableTo": "research_jobs",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -20139,15 +20148,15 @@
         "gmail_threads_company_id_companies_id_fk": {
           "name": "gmail_threads_company_id_companies_id_fk",
           "tableFrom": "gmail_threads",
+          "tableTo": "companies",
           "columnsFrom": [
             "company_id"
           ],
-          "tableTo": "companies",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -20500,15 +20509,15 @@
         "worker_emails_matched_company_id_companies_id_fk": {
           "name": "worker_emails_matched_company_id_companies_id_fk",
           "tableFrom": "worker_emails",
+          "tableTo": "companies",
           "columnsFrom": [
             "matched_company_id"
           ],
-          "tableTo": "companies",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -20596,15 +20605,15 @@
         "worker_email_attachments_email_id_worker_emails_id_fk": {
           "name": "worker_email_attachments_email_id_worker_emails_id_fk",
           "tableFrom": "worker_email_attachments",
+          "tableTo": "worker_emails",
           "columnsFrom": [
             "email_id"
           ],
-          "tableTo": "worker_emails",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -20786,28 +20795,28 @@
         "worker_email_invoices_email_id_worker_emails_id_fk": {
           "name": "worker_email_invoices_email_id_worker_emails_id_fk",
           "tableFrom": "worker_email_invoices",
+          "tableTo": "worker_emails",
           "columnsFrom": [
             "email_id"
           ],
-          "tableTo": "worker_emails",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "worker_email_invoices_attachment_id_worker_email_attachments_id_fk": {
           "name": "worker_email_invoices_attachment_id_worker_email_attachments_id_fk",
           "tableFrom": "worker_email_invoices",
+          "tableTo": "worker_email_attachments",
           "columnsFrom": [
             "attachment_id"
           ],
-          "tableTo": "worker_email_attachments",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -20910,28 +20919,28 @@
         "worker_email_invoice_line_items_invoice_id_worker_email_invoices_id_fk": {
           "name": "worker_email_invoice_line_items_invoice_id_worker_email_invoices_id_fk",
           "tableFrom": "worker_email_invoice_line_items",
+          "tableTo": "worker_email_invoices",
           "columnsFrom": [
             "invoice_id"
           ],
-          "tableTo": "worker_email_invoices",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "worker_email_invoice_line_items_material_schedule_item_id_material_schedule_items_id_fk": {
           "name": "worker_email_invoice_line_items_material_schedule_item_id_material_schedule_items_id_fk",
           "tableFrom": "worker_email_invoice_line_items",
+          "tableTo": "material_schedule_items",
           "columnsFrom": [
             "material_schedule_item_id"
           ],
-          "tableTo": "material_schedule_items",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -21048,28 +21057,28 @@
         "worker_email_staged_companies_email_id_worker_emails_id_fk": {
           "name": "worker_email_staged_companies_email_id_worker_emails_id_fk",
           "tableFrom": "worker_email_staged_companies",
+          "tableTo": "worker_emails",
           "columnsFrom": [
             "email_id"
           ],
-          "tableTo": "worker_emails",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "worker_email_staged_companies_confirmed_company_id_companies_id_fk": {
           "name": "worker_email_staged_companies_confirmed_company_id_companies_id_fk",
           "tableFrom": "worker_email_staged_companies",
+          "tableTo": "companies",
           "columnsFrom": [
             "confirmed_company_id"
           ],
-          "tableTo": "companies",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -21264,28 +21273,28 @@
         "worker_email_contracts_email_id_worker_emails_id_fk": {
           "name": "worker_email_contracts_email_id_worker_emails_id_fk",
           "tableFrom": "worker_email_contracts",
+          "tableTo": "worker_emails",
           "columnsFrom": [
             "email_id"
           ],
-          "tableTo": "worker_emails",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         },
         "worker_email_contracts_attachment_id_worker_email_attachments_id_fk": {
           "name": "worker_email_contracts_attachment_id_worker_email_attachments_id_fk",
           "tableFrom": "worker_email_contracts",
+          "tableTo": "worker_email_attachments",
           "columnsFrom": [
             "attachment_id"
           ],
-          "tableTo": "worker_email_attachments",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "set null"
+          "onDelete": "set null",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -21974,15 +21983,15 @@
         "artifact_revisions_artifact_id_artifacts_id_fk": {
           "name": "artifact_revisions_artifact_id_artifacts_id_fk",
           "tableFrom": "artifact_revisions",
+          "tableTo": "artifacts",
           "columnsFrom": [
             "artifact_id"
           ],
-          "tableTo": "artifacts",
           "columnsTo": [
             "id"
           ],
-          "onUpdate": "no action",
-          "onDelete": "cascade"
+          "onDelete": "cascade",
+          "onUpdate": "no action"
         }
       },
       "compositePrimaryKeys": {},
@@ -21991,9 +22000,9 @@
   },
   "enums": {},
   "_meta": {
-    "columns": {},
     "schemas": {},
-    "tables": {}
+    "tables": {},
+    "columns": {}
   },
   "internal": {
     "indexes": {}

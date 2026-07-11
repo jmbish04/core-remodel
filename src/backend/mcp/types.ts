@@ -28,6 +28,7 @@ export type ToolCategory =
   | "budget"
   | "materials"
   | "showrooms"
+  | "drives"
   | "brands"
   | "products"
   | "links"
@@ -75,10 +76,16 @@ export interface ToolExample {
 }
 
 /**
- * A single registered tool. `inputShape` is a raw Zod shape (a record of
- * field schemas) so it drops straight into the MCP SDK's
- * `registerTool({ inputSchema })` and can also be wrapped with `z.object()`
- * for validation on the legacy JSON-RPC path.
+ * A single registered tool. `inputShape` and `outputShape` are raw Zod shapes
+ * (records of field schemas) so they drop straight into the MCP SDK's
+ * `registerTool({ inputSchema, outputSchema })` and can also be wrapped with
+ * `z.object()` for validation on the legacy JSON-RPC path.
+ *
+ * `outputShape` documents the tool's response so an AI client can anticipate the
+ * shape before calling. When present, the transport returns validated
+ * `structuredContent` alongside the text result (see `agent.ts`). See
+ * `schemas.ts` for the validation contract (top-level keys must be enumerated;
+ * use `looseObject` for rich nested DTOs).
  */
 export interface RemodelTool {
   name: string;
@@ -86,6 +93,7 @@ export interface RemodelTool {
   title: string;
   description: string;
   inputShape: ZodRawShape;
+  outputShape?: ZodRawShape;
   annotations: ToolAnnotations;
   examples?: ToolExample[];
   handler: (ctx: ToolCtx, input: Record<string, unknown>) => Promise<unknown>;
@@ -102,6 +110,7 @@ export function defineTool<S extends ZodRawShape>(tool: {
   title: string;
   description: string;
   inputShape: S;
+  outputShape?: ZodRawShape;
   annotations: ToolAnnotations;
   examples?: ToolExample[];
   handler: (ctx: ToolCtx, input: z.infer<z.ZodObject<S>>) => Promise<unknown>;

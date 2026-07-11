@@ -36,6 +36,14 @@ export function getToolsByCategory(...categories: ToolCategory[]): RemodelTool[]
   return TOOLS.filter((t) => set.has(t.category));
 }
 
+/** One introspected field row for the docs table (input or output). */
+export interface ToolField {
+  name: string;
+  type: string;
+  optional: boolean;
+  description?: string;
+}
+
 /** Lightweight metadata for the docs page / `/context` (no handlers). */
 export interface ToolMeta {
   name: string;
@@ -43,7 +51,9 @@ export interface ToolMeta {
   title: string;
   description: string;
   annotations: RemodelTool["annotations"];
-  inputFields: { name: string; type: string; optional: boolean; description?: string }[];
+  inputFields: ToolField[];
+  /** Top-level fields of the tool's response (empty when no outputSchema). */
+  outputFields: ToolField[];
   examples: RemodelTool["examples"];
 }
 
@@ -74,6 +84,20 @@ function introspectField(schema: unknown): { type: string; optional: boolean } {
   return { type: def?.type ?? "unknown", optional };
 }
 
+/** Map a Zod raw shape to introspected doc fields (used for input + output). */
+function describeShape(shape: RemodelTool["inputShape"] | undefined): ToolField[] {
+  if (!shape) return [];
+  return Object.entries(shape).map(([name, schema]) => {
+    const { type, optional } = introspectField(schema);
+    return {
+      name,
+      type,
+      optional,
+      description: (schema as { description?: string }).description,
+    };
+  });
+}
+
 /** Describe every tool for documentation (`/api/mcp-docs` → `/mcp/tools`). */
 export function describeTools(): ToolMeta[] {
   return TOOLS.map((t) => ({
@@ -83,14 +107,7 @@ export function describeTools(): ToolMeta[] {
     description: t.description,
     annotations: t.annotations,
     examples: t.examples ?? [],
-    inputFields: Object.entries(t.inputShape).map(([name, schema]) => {
-      const { type, optional } = introspectField(schema);
-      return {
-        name,
-        type,
-        optional,
-        description: (schema as { description?: string }).description,
-      };
-    }),
+    inputFields: describeShape(t.inputShape),
+    outputFields: describeShape(t.outputShape),
   }));
 }

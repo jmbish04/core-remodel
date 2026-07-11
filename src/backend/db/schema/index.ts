@@ -118,6 +118,7 @@ export * from "./scrum/index";
 // gmail
 export * from "./gmail/gmail_threads";
 export * from "./gmail/gmail_messages";
+export * from "./gmail/gmail_message_participants";
 
 // worker emails (Cloudflare Email Routing inbound)
 export * from "./emails/index";
@@ -125,3 +126,6 @@ export * from "./emails/index";
 // MCP ops/observability (0017) + artifact studio (0016)
 export * from "./mcp/index";
 export * from "./artifacts/index";
+
+// Showroom drive lists (planned showroom-visit route sheets)
+export * from "./drives/index";

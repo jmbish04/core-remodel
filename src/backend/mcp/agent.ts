@@ -39,6 +39,10 @@ export class RemodelMcpAgent extends McpAgent<Env, unknown, McpProps> {
           title: tool.title,
           description: tool.description,
           inputSchema: tool.inputShape,
+          // Register the response schema when the tool declares one so MCP
+          // clients can anticipate the shape and we can return validated
+          // `structuredContent` below. Omitted for tools without an outputShape.
+          ...(tool.outputShape ? { outputSchema: tool.outputShape } : {}),
           annotations: { title: tool.title, ...tool.annotations },
         },
         async (args: Record<string, unknown>) => {
@@ -74,6 +78,19 @@ export class RemodelMcpAgent extends McpAgent<Env, unknown, McpProps> {
               }),
             );
             const text = typeof result === "string" ? result : JSON.stringify(result, null, 2);
+            // When the tool declared an outputSchema, hand back validated
+            // structuredContent too (the SDK requires it and validates it
+            // against the schema). Handlers with an outputShape always return a
+            // plain object; guard defensively so a stray primitive can't crash
+            // the transport.
+            const isPlainObject =
+              typeof result === "object" && result !== null && !Array.isArray(result);
+            if (tool.outputShape && isPlainObject) {
+              return {
+                content: [{ type: "text" as const, text }],
+                structuredContent: result as Record<string, unknown>,
+              };
+            }
             return { content: [{ type: "text" as const, text }] };
           } catch (err) {
             const message = err instanceof Error ? err.message : String(err);

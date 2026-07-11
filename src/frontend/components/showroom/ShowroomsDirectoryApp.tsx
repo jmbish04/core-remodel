@@ -71,6 +71,7 @@ import {
   MapMarker,
   MarkerContent,
   MarkerPopup,
+  type MapViewport,
 } from "@/components/ui/map";
 import {
   mapPlaceToHoursJson,
@@ -101,6 +102,9 @@ interface Store {
   cityName: string | null;
   hubRoute: string | null;
   hubName: string | null;
+  /** Captured coordinates — power the individual map markers when zoomed in. */
+  latitude: number | null;
+  longitude: number | null;
   categories: string[];
   /** Aggregated external review-platform rating (Yelp/Google/etc). */
   onlineRating: number | null;
@@ -954,6 +958,37 @@ function CardGrid({ stores, pst }: { stores: Store[]; pst: PstNow }) {
 
 // ─── Map View (map on top, cards stacked below — mobile friendly) ──────────────
 
+/** Zoom at/above which the map swaps region clusters for individual showrooms. */
+const ZOOM_INDIVIDUAL = 10.5;
+
+/** A pin for a single showroom, positioned by its captured coordinates. */
+function ShowroomMarker({ store }: { store: Store }) {
+  return (
+    <MapMarker longitude={store.longitude as number} latitude={store.latitude as number}>
+      <MarkerContent className="z-10">
+        <div className="flex size-6 items-center justify-center rounded-full bg-emerald-500/90 ring-2 ring-white/80 shadow-lg transition-transform hover:scale-110">
+          <MapPin className="size-3.5 text-white" />
+        </div>
+      </MarkerContent>
+      <MarkerPopup closeButton className="max-w-64">
+        <a href={`/admin/shopping/store/${store.id}`} className="block space-y-1">
+          <p className="text-sm font-semibold leading-tight">{store.name}</p>
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+            {store.cityName && <span>{store.cityName}</span>}
+            {store.pricePoint && <span className="font-mono">{store.pricePoint}</span>}
+            {store.onlineRating !== null && (
+              <span className="text-amber-400">{store.onlineRating}★</span>
+            )}
+          </div>
+          {store.locationAddress && (
+            <p className="text-[10px] text-muted-foreground/70">{store.locationAddress}</p>
+          )}
+        </a>
+      </MarkerPopup>
+    </MapMarker>
+  );
+}
+
 function MapView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
   const byHub = useMemo(() => {
     const map = new Map<string, Store[]>();
@@ -968,45 +1003,77 @@ function MapView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
   const hubKeys = useMemo(() => hubEntries.map(([route]) => route), [hubEntries]);
   const { openKey, toggle } = useAccordionGroup(hubKeys);
 
+  // Stores with captured coordinates get an individual pin when zoomed in.
+  const geoStores = useMemo(
+    () => stores.filter((s) => s.latitude != null && s.longitude != null),
+    [stores],
+  );
+
+  // Controlled viewport so we can react to the zoom level (cluster ↔ pins) while
+  // still allowing free pan/zoom — onViewportChange feeds our own state back.
+  const [viewport, setViewport] = useState<Partial<MapViewport>>({
+    center: [-122.27, 37.72],
+    zoom: 8.2,
+  });
+  const zoom = viewport.zoom ?? 8.2;
+  const showIndividual = zoom >= ZOOM_INDIVIDUAL;
+
   return (
     <div className="space-y-4">
       <Card className="overflow-hidden">
         <GeoMap
           className="h-[320px] w-full sm:h-[420px]"
           theme="dark"
-          viewport={{ center: [-122.27, 37.72], zoom: 8.2 }}
+          viewport={viewport}
+          onViewportChange={setViewport}
         >
           <MapControls showZoom />
-          {[...byHub.entries()].map(([route, hubStores]) => {
-            const hub = HUBS[route];
-            return (
-              <MapMarker key={route} longitude={hub.lng} latitude={hub.lat}>
-                <MarkerContent className="z-20">
-                  <div className="flex items-center gap-1.5 rounded-full bg-sky-500/90 px-2.5 py-1 text-xs font-semibold text-white shadow-lg">
-                    <MapPin className="size-3.5" /> {HUB_LABEL[route]} · {hubStores.length}
-                  </div>
-                </MarkerContent>
-                <MarkerPopup closeButton className="max-w-72">
-                  <div className="space-y-1.5">
-                    <p className="text-sm font-semibold">{HUB_LABEL[route]}</p>
-                    <ul className="space-y-1 text-xs text-muted-foreground">
-                      {hubStores.slice(0, 8).map((s) => (
-                        <li key={s.id} className="flex items-center gap-1 truncate">
-                          <span className="truncate">{s.name}</span>
-                          {s.onlineRating !== null && (
-                            <span className="ml-auto shrink-0 text-[10px] text-amber-400">
-                              {s.onlineRating}★
-                            </span>
-                          )}
-                        </li>
-                      ))}
-                      {hubStores.length > 8 && <li>+{hubStores.length - 8} more</li>}
-                    </ul>
-                  </div>
-                </MarkerPopup>
-              </MapMarker>
-            );
-          })}
+
+          {/* Zoomed out → one labeled marker per region hub. Click to zoom in. */}
+          {!showIndividual &&
+            hubEntries.map(([route, hubStores]) => {
+              const hub = HUBS[route];
+              return (
+                <MapMarker
+                  key={route}
+                  longitude={hub.lng}
+                  latitude={hub.lat}
+                  onClick={() =>
+                    setViewport((v) => ({ ...v, center: [hub.lng, hub.lat], zoom: 12 }))
+                  }
+                >
+                  <MarkerContent className="z-20">
+                    <div className="flex items-center gap-1.5 rounded-full bg-sky-500/90 px-2.5 py-1 text-xs font-semibold text-white shadow-lg transition-transform hover:scale-105">
+                      <MapPin className="size-3.5" /> {HUB_LABEL[route]} · {hubStores.length}
+                    </div>
+                  </MarkerContent>
+                  <MarkerPopup closeButton className="max-w-72">
+                    <div className="space-y-1.5">
+                      <p className="text-sm font-semibold">{HUB_LABEL[route]}</p>
+                      <ul className="space-y-1 text-xs text-muted-foreground">
+                        {hubStores.slice(0, 8).map((s) => (
+                          <li key={s.id} className="flex items-center gap-1 truncate">
+                            <span className="truncate">{s.name}</span>
+                            {s.onlineRating !== null && (
+                              <span className="ml-auto shrink-0 text-[10px] text-amber-400">
+                                {s.onlineRating}★
+                              </span>
+                            )}
+                          </li>
+                        ))}
+                        {hubStores.length > 8 && <li>+{hubStores.length - 8} more</li>}
+                      </ul>
+                      <p className="text-[10px] text-muted-foreground/60">
+                        Click the pin to zoom in and see each showroom.
+                      </p>
+                    </div>
+                  </MarkerPopup>
+                </MapMarker>
+              );
+            })}
+
+          {/* Zoomed in → an individual marker for each showroom with coordinates. */}
+          {showIndividual && geoStores.map((s) => <ShowroomMarker key={s.id} store={s} />)}
         </GeoMap>
       </Card>
 
@@ -1413,6 +1480,8 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
     locationAddress: "",
     zipCode: "",
     googleMapsLink: "",
+    latitude: undefined as number | undefined,
+    longitude: undefined as number | undefined,
     hoursJson: DEFAULT_HOURS as HoursJson,
     googleRating: undefined as number | undefined,
     userRatingCount: undefined as number | undefined,
@@ -1554,6 +1623,8 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
           zipCode: mapped.zipCode ?? "",
           googleMapsLink: mapped.googleMapsLink ?? "",
           phoneNumber: mapped.phoneNumber ?? "",
+          latitude: typeof place.location?.latitude === "number" ? place.location.latitude : undefined,
+          longitude: typeof place.location?.longitude === "number" ? place.location.longitude : undefined,
           googleRating: mapped.googleRating,
           userRatingCount: mapped.userRatingCount,
           reviewSummary: mapped.reviewSummary ?? "",
@@ -1719,6 +1790,9 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
       if (form.locationAddress) body.locationAddress = form.locationAddress;
       if (form.zipCode) body.zipCode = form.zipCode;
       if (form.googleMapsLink) body.googleMapsLink = form.googleMapsLink;
+      // Captured coordinates — enable the individual map marker + region capture.
+      if (typeof form.latitude === "number") body.latitude = form.latitude;
+      if (typeof form.longitude === "number") body.longitude = form.longitude;
       // Google-sourced review signals (read-only in the UI).
       if (typeof form.googleRating === "number") body.googleRating = form.googleRating;
       if (typeof form.userRatingCount === "number") body.userRatingCount = form.userRatingCount;
@@ -2262,6 +2336,8 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
           isOpenWeekends: s.isOpenWeekends ?? false,
           hours: s.hours ?? [],
           heroImageCfImagesUrl: s.heroImageCfImagesUrl ?? null,
+          latitude: s.latitude ?? null,
+          longitude: s.longitude ?? null,
           googleRating: s.googleRating ?? null,
           userRatingCount: s.userRatingCount ?? null,
           isLargeSelection: s.isLargeSelection ?? false,

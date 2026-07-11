@@ -1,0 +1,22 @@
+---
+/**
+ * @fileoverview Showroom Drive viewport — a single drive sheet.
+ *
+ * Dynamic route mounting `<DriveViewportApp slug={…} />`, which renders the
+ * drive template (showrooms grouped by leg/city, per-stop details, tap-to-
+ * navigate addresses, and a visited check-off) from D1 via `/api/drive-lists`.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { DriveViewportApp } from "@/components/drives/DriveViewportApp";
+
+const { slug } = Astro.params;
+---
+
+<BaseLayout
+  title="Drive — Showroom Drives - 126 Colby - Remodel Mission Control"
+  description="A showroom-visit drive sheet with tap-to-navigate stops and a visited check-off."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <DriveViewportApp client:only="react" slug={slug} />
+  </main>
+</BaseLayout>

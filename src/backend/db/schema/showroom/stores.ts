@@ -39,6 +39,28 @@ export const showroomStores = sqliteTable("showroom_stores", {
   zipCode: text("zip_code"),
   googleMapsLink: text("google_maps_link"),
 
+  /**
+   * Geographic coordinates for this location, captured at intake (from the
+   * Google Places `location` field). Source of truth for individual map
+   * markers and for deriving the region hub below. Nullable — legacy /
+   * manual rows may not have coordinates until backfilled.
+   */
+  latitude: real("latitude"),
+  longitude: real("longitude"),
+
+  /**
+   * Region hub CAPTURED for this specific location, derived from its address /
+   * coordinates at intake (see `classifyBayAreaRegion`). Denormalized onto the
+   * store so the directory filter and map are region-accurate WITHOUT joining
+   * the legacy `store_bayarea_cities` table or calling the Places API on load.
+   *
+   * `hubRoute` is the A–E route letter; `hubName` the human-readable hub name
+   * ("East Bay", "North Bay", …). Nullable — falls back to the city-derived hub
+   * at read time when unset.
+   */
+  hubRoute: text("hub_route"),
+  hubName: text("hub_name"),
+
   // ── Hours & access ────────────────────────────────────────────────────
   /**
    * Structured opening hours — source of truth for the hours UI.
