@@ -193,13 +193,18 @@ export function IntakeWizardApp() {
       if (files.length === 0) return;
       setUploading((cur) => ({ ...cur, [showroomId]: true }));
       try {
-        const payload = await Promise.all(
-          files.map(async (f) => ({ fileName: f.name, dataUrl: await readAsDataUrl(f) })),
-        );
-        await api<{ photos: Photo[] }>("/api/intake/uploads", {
-          method: "POST",
-          body: JSON.stringify({ showroomId, files: payload }),
-        });
+        // Chunk to a few files per request — base64 data URLs are large and a
+        // single big JSON body risks the Worker's memory / request-size limits.
+        const CHUNK = 3;
+        for (let i = 0; i < files.length; i += CHUNK) {
+          const payload = await Promise.all(
+            files.slice(i, i + CHUNK).map(async (f) => ({ fileName: f.name, dataUrl: await readAsDataUrl(f) })),
+          );
+          await api<{ photos: Photo[] }>("/api/intake/uploads", {
+            method: "POST",
+            body: JSON.stringify({ showroomId, files: payload }),
+          });
+        }
         await refreshPhotos(showroomId);
         toast.success(`Uploaded ${files.length} photo${files.length === 1 ? "" : "s"}`);
       } catch (e) {

@@ -17,7 +17,7 @@
  */
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { asc, eq, inArray, and } from "drizzle-orm";
+import { asc, eq, inArray, and, isNull } from "drizzle-orm";
 
 import { photoCategories, photoColors, productPhotoBuckets, productPriceObservations, productShowroomPhotos } from "@backend/db";
 import { ImageProcessorService } from "@backend/services/image-processor";
@@ -94,22 +94,23 @@ intakeRouter.post("/uploads", async (c) => {
     );
 
     const db = drizzle(c.env.DB);
-    const rows = await db
-      .insert(productShowroomPhotos)
-      .values(
-        uploaded.map((u, index) => ({
-          ragUuid: crypto.randomUUID(),
-          productId: null,
-          showroomId,
-          bucketId: null,
-          fileName: u.fileName,
-          sortOrder: index,
-          imageUrl: u.imageUrl,
-          cfImageId: u.cfImageId,
-          status: "uploaded" as const,
-        })),
-      )
-      .returning();
+    const values = uploaded.map((u, index) => ({
+      ragUuid: crypto.randomUUID(),
+      productId: null,
+      showroomId,
+      bucketId: null,
+      fileName: u.fileName,
+      sortOrder: index,
+      imageUrl: u.imageUrl,
+      cfImageId: u.cfImageId,
+      status: "uploaded" as const,
+    }));
+    // Chunk inserts: 9 bound params/row vs D1's 100-param cap → ≤11 rows/query.
+    const rows: (typeof productShowroomPhotos.$inferSelect)[] = [];
+    for (let i = 0; i < values.length; i += 10) {
+      const inserted = await db.insert(productShowroomPhotos).values(values.slice(i, i + 10)).returning();
+      rows.push(...inserted);
+    }
 
     return c.json({
       photos: rows.map((r) => ({ id: r.id, imageUrl: r.imageUrl, fileName: r.fileName, bucketId: r.bucketId })),
@@ -239,7 +240,16 @@ intakeRouter.patch("/buckets/:id", async (c) => {
       await db
         .update(productShowroomPhotos)
         .set({ bucketId })
-        .where(and(eq(productShowroomPhotos.showroomId, bucket.showroomId as number), inArray(productShowroomPhotos.id, addIds)))
+        .where(
+          and(
+            // bucket.showroomId is nullable (online/manufacturer intake) — NULL = NULL is
+            // never true in SQLite, so match with isNull rather than eq in that case.
+            bucket.showroomId == null
+              ? isNull(productShowroomPhotos.showroomId)
+              : eq(productShowroomPhotos.showroomId, bucket.showroomId),
+            inArray(productShowroomPhotos.id, addIds),
+          ),
+        )
         .run();
     }
 
