@@ -287,9 +287,10 @@ productsCatalogRouter.get("/browse", async (c) => {
     // "Needs a product" = unpurchased material with no product_material_mappings
     // row. A left join + IS NULL does this in one query (no full-table fetch).
     db
-      .select({ id: materialScheduleItems.id, title: materialScheduleItems.title, roomName: materialScheduleItems.roomName })
+      .select({ id: materialScheduleItems.id, title: materialScheduleItems.title, roomName: rooms.roomName })
       .from(materialScheduleItems)
       .leftJoin(productMaterialMappings, eq(materialScheduleItems.id, productMaterialMappings.materialId))
+      .leftJoin(rooms, eq(materialScheduleItems.roomId, rooms.id))
       .where(and(eq(materialScheduleItems.isPurchased, false), isNull(productMaterialMappings.materialId))),
   ]);
 
