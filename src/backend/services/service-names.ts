@@ -3,15 +3,16 @@
  * `serviceName`, so detail GETs echo a display name and the UI doesn't fall
  * back to `Service #<id>` until a full refetch.
  *
- * One `WHERE id IN (...)` lookup for the whole batch; rows with a null (or
- * dangling) serviceId get `serviceName: null`.
+ * Batched `WHERE id IN (...)` lookup; rows with a null (or dangling) serviceId
+ * get `serviceName: null`. Ids are chunked at 100 to stay under D1's bound-
+ * parameter ceiling.
  */
 import { inArray } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { services } from "@backend/db/schema/services/services";
 
-export async function attachServiceNames<T extends { serviceId: number | null }>(
+export async function attachServiceNames<T extends { serviceId?: number | null }>(
   db: DrizzleD1Database,
   rows: T[],
 ): Promise<(T & { serviceName: string | null })[]> {
@@ -21,11 +22,17 @@ export async function attachServiceNames<T extends { serviceId: number | null }>
   if (ids.length === 0) {
     return rows.map((r) => ({ ...r, serviceName: null }));
   }
-  const found = await db
-    .select({ id: services.id, name: services.name })
-    .from(services)
-    .where(inArray(services.id, ids))
-    .all();
+  const chunks: number[][] = [];
+  for (let i = 0; i < ids.length; i += 100) {
+    chunks.push(ids.slice(i, i + 100));
+  }
+  const found = (
+    await Promise.all(
+      chunks.map((chunk) =>
+        db.select({ id: services.id, name: services.name }).from(services).where(inArray(services.id, chunk)).all(),
+      ),
+    )
+  ).flat();
   const nameById = new Map(found.map((s) => [s.id, s.name]));
   return rows.map((r) => ({
     ...r,
