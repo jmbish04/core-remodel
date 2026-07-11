@@ -996,6 +996,10 @@ imagesRouter.post("/upload", async (c) => {
           continue;
         }
 
+        // Extract EXIF/dimensions from the ORIGINAL bytes before upload
+        // (upload may transcode HEIC→JPEG and strip EXIF).
+        const photoMetadata = await processor.extractPhotoMetadata(file);
+
         const uploadResponse = await processor.uploadToCloudflareImages(
           file,
           undefined,
@@ -1020,6 +1024,7 @@ imagesRouter.post("/upload", async (c) => {
           deliveryToken,
           processingStatus: "queued",
           uploadFingerprint,
+          photo: photoMetadata,
         });
 
         let insertedImage: typeof images.$inferSelect | undefined;

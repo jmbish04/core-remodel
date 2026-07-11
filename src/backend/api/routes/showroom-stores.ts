@@ -52,7 +52,7 @@ import {
   scheduleShowroomEnrichment,
 } from "@backend/services/showroom/onboarding";
 import { businessCardService } from "@backend/services/business-card";
-import { ImageProcessorService } from "@backend/services/image-processor";
+import { ImageProcessorService, type PhotoMetadata } from "@backend/services/image-processor";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { faviconService } from "@backend/services/favicon";
 import {
@@ -3496,6 +3496,9 @@ showroomStoresRouter.post("/:id/photos", async (c) => {
   // Upload to Cloudflare Images.
   let deliveryUrl: string;
   let cfImageId: string | null = null;
+  let photoMeta: PhotoMetadata = {};
+  // MIME of the STORED image: HEIC/HEIF get transcoded to JPEG on upload.
+  let storedMimeType: string | null = null;
   try {
     const { accountId, apiTokens } = await resolveCloudflareImagesCredentials(c.env);
     if (!accountId || apiTokens.length === 0) {
@@ -3513,10 +3516,14 @@ showroomStoresRouter.post("/:id/photos", async (c) => {
       return c.json({ success: false, error: "Invalid image data URL" }, 400);
     }
     const [, mime, b64] = match;
+    storedMimeType = /heic|heif/i.test(mime) ? "image/jpeg" : mime;
     const binary = atob(b64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     const blob = new Blob([bytes], { type: mime });
+
+    // EXIF/dimensions from the ORIGINAL bytes (before any HEIC→JPEG transcode).
+    photoMeta = await processor.extractPhotoMetadata(blob);
 
     const customId = `showroom-visit-${storeId}-${crypto.randomUUID()}`;
     const uploadResponse = await processor.uploadToCloudflareImages(
@@ -3538,6 +3545,10 @@ showroomStoresRouter.post("/:id/photos", async (c) => {
     cfImageId,
     altText: parsed.data.altText ?? null,
     imageKind: "visit" as const,
+    width: photoMeta.width ?? null,
+    height: photoMeta.height ?? null,
+    mimeType: storedMimeType,
+    metadataJson: Object.keys(photoMeta).length ? JSON.stringify(photoMeta) : null,
   };
 
   const [inserted] = await db

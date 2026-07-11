@@ -1,5 +1,6 @@
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, inArray } from "drizzle-orm";
+import exifr from "exifr";
 import { imageTagMappings, imageTags, images, imageReviews } from "@backend/db";
 import { WorkersAIProvider } from "@backend/ai/providers/workers-ai";
 import { modelRegistry } from "@backend/ai/models/index";
@@ -37,11 +38,23 @@ import {
   buildAiPrefillPayload,
 } from "./helpers";
 
+/** Compact photo metadata extracted at upload time (stored in the image row's JSON). */
+export interface PhotoMetadata {
+  width?: number;
+  height?: number;
+  format?: string;
+  cameraMake?: string;
+  cameraModel?: string;
+  takenAt?: string;
+  gps?: { lat: number; lng: number };
+}
+
 export class ImageProcessorService {
   private provider: WorkersAIProvider;
   private ai: Ai;
   private vectorIndex: VectorizeIndex;
   private db: D1Database;
+  private images: ImagesBinding;
   private accountId: string;
   private apiTokens: string[];
 
@@ -57,7 +70,7 @@ export class ImageProcessorService {
     this.ai = env.AI;
     this.vectorIndex = env.PHOTO_INDEX;
     this.db = env.DB;
-    1;
+    this.images = env.IMAGES;
     this.accountId = accountId;
     this.apiTokens = Array.from(
       new Set(
@@ -358,12 +371,87 @@ ${visionDescription}`,
     return null;
   }
 
+  /**
+   * Cloudflare Images REST storage rejects HEIC/HEIF on ingest (common for
+   * iPhone photos). The IMAGES binding CAN decode HEIC, so transcode to JPEG
+   * before upload. Web-safe formats pass through untouched. Best-effort: on any
+   * transcode failure we fall back to the original bytes (the REST upload will
+   * surface a clear error if it truly can't handle them).
+   */
+  private async normalizeForCfImages(
+    imageBlob: Blob,
+    filename?: string,
+  ): Promise<{ blob: Blob; filename?: string }> {
+    const type = (imageBlob.type || "").toLowerCase();
+    const name = (filename || "").toLowerCase();
+    const isHeic =
+      type.includes("heic") ||
+      type.includes("heif") ||
+      name.endsWith(".heic") ||
+      name.endsWith(".heif");
+    if (!isHeic) return { blob: imageBlob, filename };
+
+    try {
+      const out = await this.images.input(imageBlob.stream()).output({ format: "image/jpeg" });
+      const jpeg = await out.response().blob();
+      const jpegName = filename ? filename.replace(/\.(heic|heif)$/i, ".jpg") : "image.jpg";
+      return { blob: jpeg, filename: jpegName };
+    } catch (err) {
+      console.warn("[Images] HEIC→JPEG transcode failed, uploading original:", err);
+      return { blob: imageBlob, filename };
+    }
+  }
+
+  /**
+   * Extract photo metadata from the ORIGINAL bytes for storage: EXIF (camera,
+   * capture time, exposure, GPS-if-present) via exifr, plus format/dimensions
+   * via the free IMAGES.info() call. Best-effort — returns {} on any failure so
+   * it can never break an upload. NOTE: Google Photos strips GPS from its API
+   * bytes, so `gps` is virtually always null for Google imports.
+   */
+  async extractPhotoMetadata(imageBlob: Blob): Promise<PhotoMetadata> {
+    const meta: PhotoMetadata = {};
+
+    try {
+      const info = await this.images.info(imageBlob.stream());
+      if ("width" in info) {
+        meta.width = info.width;
+        meta.height = info.height;
+        meta.format = info.format;
+      }
+    } catch {
+      /* info unavailable — skip dimensions */
+    }
+
+    try {
+      const buf = await imageBlob.arrayBuffer();
+      const exif = (await exifr.parse(buf, { tiff: true, exif: true, gps: true })) as
+        | Record<string, unknown>
+        | undefined;
+      if (exif) {
+        meta.cameraMake = typeof exif.Make === "string" ? exif.Make.trim() : undefined;
+        meta.cameraModel = typeof exif.Model === "string" ? exif.Model.trim() : undefined;
+        const taken = exif.DateTimeOriginal ?? exif.CreateDate;
+        if (taken instanceof Date) meta.takenAt = taken.toISOString();
+        else if (typeof taken === "string") meta.takenAt = taken;
+        if (typeof exif.latitude === "number" && typeof exif.longitude === "number") {
+          meta.gps = { lat: exif.latitude, lng: exif.longitude };
+        }
+      }
+    } catch {
+      /* no EXIF / parse failed (Google likely stripped it) */
+    }
+
+    return meta;
+  }
+
   async uploadToCloudflareImages(
     imageBlob: Blob,
     customId?: string,
     filename?: string,
     options?: CloudflareImagesUploadRequestOptions,
   ): Promise<CloudflareImagesResponse> {
+    ({ blob: imageBlob, filename } = await this.normalizeForCfImages(imageBlob, filename));
     const apiUrl =
       options?.endpoint ||
       `https://api.cloudflare.com/client/v4/accounts/${this.accountId}/images/v1`;
