@@ -177,8 +177,14 @@ export function ProductsBrowseApp() {
     try {
       const params = new URLSearchParams();
       // Category chip (single) OR sidebar productType selection — sidebar wins.
-      const productType = applied.productTypes[0] ?? categoryType;
-      if (productType) params.set("productType", productType);
+      // Browse categories come in two flavours: a plain productType, or a
+      // showroom category encoded as "category:<id>". Send each to its own
+      // param so a category id is never mistakenly filtered as a productType.
+      const selected = applied.productTypes[0] ?? categoryType;
+      if (selected) {
+        if (selected.startsWith("category:")) params.set("categoryId", selected.slice("category:".length));
+        else params.set("productType", selected);
+      }
       if (applied.brandId.length) params.set("brandId", applied.brandId.join(","));
       if (applied.purchased) params.set("purchased", applied.purchased);
       if (applied.wishlisted) params.set("wishlisted", applied.wishlisted);

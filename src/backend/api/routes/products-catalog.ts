@@ -43,6 +43,8 @@ const catalogQuerySchema = z.object({
   priceMax: z.coerce.number().int().optional(),
   q: z.string().min(1).optional(),
   needsProduct: z.coerce.number().int().optional(),
+  limit: z.coerce.number().int().min(1).max(500).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
 });
 
 // ─── GET /catalog ───────────────────────────────────────────────────────────
@@ -109,6 +111,9 @@ productsCatalogRouter.get("/catalog", async (c) => {
     .$dynamic();
 
   if (conditions.length > 0) baseQuery = baseQuery.where(and(...conditions));
+  // Bound the fetch (and the downstream per-id batch queries) — the catalog can
+  // grow unbounded otherwise. Default page 200, hard cap 500.
+  baseQuery = baseQuery.limit(q.limit ?? 200).offset(q.offset ?? 0);
 
   const rawProducts = await baseQuery;
 
@@ -192,7 +197,7 @@ productsCatalogRouter.get("/catalog", async (c) => {
   // productImages rows are DESC by createdAt — first hit per product wins.
   const imageMap = new Map<number, string>();
   for (const r of imageRows) {
-    if (!imageMap.has(r.storeProductId)) imageMap.set(r.storeProductId, r.deliveryUrl);
+    if (!imageMap.has(r.storeProductId) && r.deliveryUrl) imageMap.set(r.storeProductId, r.deliveryUrl);
   }
   // Fall back to productShowroomPhotos (also DESC) for products with no productImages row.
   for (const r of photoRows) {
