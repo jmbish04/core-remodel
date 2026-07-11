@@ -1018,4 +1018,41 @@ estimatesRouter.get("/:id/revisions/:revisionId", async (c) => {
   }
 });
 
+/**
+ * Set (or clear) the services-catalog tie on a single estimate line item.
+ *
+ * Body: `{ serviceId: number | null }`. A positive integer attaches the line
+ * item to that `services` catalog row (for business/architect/consulting
+ * estimates that bill services rather than materials); `null` clears the
+ * tie. This is a narrow, single-field PATCH — full line-item edits still go
+ * through the bulk `/drafts/:id/autosave` replace-all-line-items flow.
+ */
+estimatesRouter.patch("/line-items/:lineItemId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const lineItemId = parseInt(c.req.param("lineItemId"), 10);
+  if (Number.isNaN(lineItemId)) {
+    return c.json({ error: "Invalid lineItemId" }, 400);
+  }
+  const body = await c.req.json().catch(() => ({}));
+
+  let serviceId: number | null;
+  if (body.serviceId === null) {
+    serviceId = null;
+  } else {
+    if (typeof body.serviceId !== "number" || !Number.isInteger(body.serviceId) || body.serviceId <= 0) {
+      return c.json({ error: "serviceId must be a positive integer or null" }, 400);
+    }
+    serviceId = body.serviceId;
+  }
+
+  const [updated] = await db
+    .update(estimateLineItems)
+    .set({ serviceId, datetimeUpdated: new Date() })
+    .where(eq(estimateLineItems.id, lineItemId))
+    .returning();
+  if (!updated) return c.json({ error: "Line item not found" }, 404);
+
+  return c.json({ lineItem: updated });
+});
+
 export { estimatesRouter };
