@@ -13,43 +13,14 @@
  * Registry contract (0015): hand-written Zod v4, annotations, examples.
  */
 import { driveListStops, driveLists, showroomStores } from "@backend/db";
+import { createDriveList, parseDriveNotes } from "@backend/services/drive-lists";
 import { and, desc, eq, isNotNull, notInArray, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import { toolError } from "../format";
 import { looseObject, urlField } from "../schemas";
 import { driveListUrl, showroomUrl } from "../urls";
-import { defineTool, READ_ONLY, WRITE, type RemodelDb, type RemodelTool } from "../types";
-
-/** Kebab-case a title into a URL slug base (letters/digits/hyphens only). */
-function slugify(title: string): string {
-  const base = title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60);
-  return base || "drive-list";
-}
-
-/** Find a drive-list slug not already taken (appends -2, -3, … on collision). */
-async function uniqueSlug(db: RemodelDb, base: string): Promise<string> {
-  const [exact] = await db
-    .select({ slug: driveLists.slug })
-    .from(driveLists)
-    .where(eq(driveLists.slug, base))
-    .limit(1);
-  if (!exact) return base;
-  for (let i = 2; i < 1000; i++) {
-    const candidate = `${base}-${i}`;
-    const [hit] = await db
-      .select({ slug: driveLists.slug })
-      .from(driveLists)
-      .where(eq(driveLists.slug, candidate))
-      .limit(1);
-    if (!hit) return candidate;
-  }
-  return `${base}-${crypto.randomUUID().slice(0, 8)}`;
-}
+import { defineTool, READ_ONLY, WRITE, type RemodelTool } from "../types";
 
 /** One stop as accepted by create_drive_list. */
 const stopInput = looseObject({
@@ -159,6 +130,7 @@ export const driveTools: RemodelTool[] = [
       title: z.string(),
       status: z.string(),
       url: urlField,
+      notes: z.array(z.string()).describe("Planning notes, one entry per note card"),
       stopCount: z.number().int(),
       visitedCount: z.number().int(),
       stops: z.array(looseObject({ id: z.number().int(), name: z.string(), visited: z.boolean() })),
@@ -185,7 +157,7 @@ export const driveTools: RemodelTool[] = [
         slug: drive.slug,
         title: drive.title,
         description: drive.description,
-        notes: drive.notes,
+        notes: parseDriveNotes(drive.notes),
         status: drive.status,
         url: driveListUrl(env, drive.slug),
         stopCount: stops.length,
@@ -205,11 +177,17 @@ export const driveTools: RemodelTool[] = [
       "viewport. Pass a `title` and a `stops` array (in visit order); each stop needs a `name` and " +
       "should include an `address` (the tap-to-navigate destination) and, when it maps to a " +
       "registered showroom, a `showroomStoreId` so drive coverage can be analyzed later. Group " +
-      "stops into legs with `leg`/`legWindow`. Returns { ok, id, slug, url }.",
+      "stops into legs with `leg`/`legWindow`. Optional `notes` is an ARRAY of short note strings " +
+      "— each renders as its own full-width card at the bottom of the drive (put timing, hard " +
+      "constraints, priorities, date checks in separate entries; do NOT jam them into one string). " +
+      "Returns { ok, id, slug, url }.",
     inputShape: {
       title: z.string().min(1).describe("Drive title (required)"),
       description: z.string().optional(),
-      notes: z.string().optional().describe("Freeform planning notes for the day"),
+      notes: z
+        .array(z.string().min(1))
+        .optional()
+        .describe("Planning notes as an array — one entry per note card (not required)"),
       status: z.enum(["draft", "active", "completed", "archived"]).optional(),
       sourceConversation: z.string().optional().describe("Note on where this came from (chat context)"),
       stops: z.array(stopInput).min(1).describe("Stops in visit order (at least one)"),
@@ -227,6 +205,10 @@ export const driveTools: RemodelTool[] = [
         title: "A two-stop drive",
         args: {
           title: "East Bay Stone Run",
+          notes: [
+            "City Lights closes 4pm Sat — do it FIRST and budget 1–2 hrs.",
+            "All appliance stops carry panel-ready dishwashers + wall ovens.",
+          ],
           stops: [
             {
               name: "All Natural Stone",
@@ -250,51 +232,16 @@ export const driveTools: RemodelTool[] = [
       if (!title) toolError("`title` is required and cannot be empty.");
       if (!input.stops?.length) toolError("`stops` must contain at least one stop.");
 
-      const slug = await uniqueSlug(db, slugify(title));
-      const [drive] = await db
-        .insert(driveLists)
-        .values({
-          slug,
-          title,
-          description: input.description,
-          notes: input.notes,
-          status: input.status ?? "active",
-          sourceConversation: input.sourceConversation,
-        })
-        .returning({ id: driveLists.id });
+      const { id, slug, stopCount } = await createDriveList(db, {
+        title,
+        description: input.description,
+        notes: input.notes,
+        status: input.status,
+        sourceConversation: input.sourceConversation,
+        stops: input.stops,
+      });
 
-      const stopValues = input.stops.map((s, i) => ({
-        driveListId: drive.id,
-        showroomStoreId: s.showroomStoreId,
-        sortOrder: i,
-        leg: s.leg,
-        legWindow: s.legWindow,
-        name: s.name,
-        city: s.city,
-        address: s.address,
-        phone: s.phone,
-        hours: s.hours,
-        note: s.note,
-        pick: s.pick,
-        websiteUrl: s.websiteUrl,
-        latitude: s.latitude,
-        longitude: s.longitude,
-        isOptional: s.isOptional ?? false,
-      }));
-      // Chunk inserts: a stop row binds 16 params, and D1 caps a query at 100
-      // bound params — so a single multi-row insert of a full drive would blow
-      // the limit. 5 rows/insert = 80 params, safely under.
-      for (let i = 0; i < stopValues.length; i += 5) {
-        await db.insert(driveListStops).values(stopValues.slice(i, i + 5));
-      }
-
-      return {
-        ok: true,
-        id: drive.id,
-        slug,
-        url: driveListUrl(env, slug),
-        stopCount: input.stops.length,
-      };
+      return { ok: true, id, slug, url: driveListUrl(env, slug), stopCount };
     },
   }),
 

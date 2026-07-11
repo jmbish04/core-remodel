@@ -1,19 +1,50 @@
 /**
  * @fileoverview Admin API for Showroom Drive Lists.
  *
- * `GET/PATCH /api/drive-lists*` — admin-gated reads + the drive check-off,
- * backing the `/admin/shopping/drives` landing page and the
- * `/admin/shopping/drives/[slug]` viewport. Drive lists are CREATED through the
- * `create_drive_list` MCP tool (from a chat), not here; these routes cover
- * browsing, opening a drive, and toggling a stop's visited state as you drive.
+ * `GET/POST/PATCH /api/drive-lists*` — admin-gated reads, create, and the drive
+ * check-off, backing the `/admin/shopping/drives` landing page and the
+ * `/admin/shopping/drives/[slug]` viewport. Drive lists are usually CREATED
+ * through the `create_drive_list` MCP tool (from a chat); `POST` here is the
+ * equivalent HTTP surface. Both take `notes` as an optional array of strings.
  *
  * Mounted at `/api/drive-lists`.
  */
 import { driveListStops, driveLists } from "@backend/db";
+import { createDriveList, parseDriveNotes } from "@backend/services/drive-lists";
 import { isRequestAuthenticated } from "@backend/utils/access";
 import { asc, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
+import { z } from "zod";
+
+/** Body accepted by `POST /api/drive-lists`. `notes` is optional, and an array. */
+const createBody = z.object({
+  title: z.string().min(1),
+  description: z.string().optional(),
+  notes: z.array(z.string().min(1)).optional(),
+  status: z.enum(["draft", "active", "completed", "archived"]).optional(),
+  sourceConversation: z.string().optional(),
+  stops: z
+    .array(
+      z.object({
+        name: z.string().min(1),
+        showroomStoreId: z.number().int().optional(),
+        city: z.string().optional(),
+        address: z.string().optional(),
+        phone: z.string().optional(),
+        hours: z.string().optional(),
+        note: z.string().optional(),
+        pick: z.string().optional(),
+        websiteUrl: z.string().optional(),
+        latitude: z.number().optional(),
+        longitude: z.number().optional(),
+        leg: z.string().optional(),
+        legWindow: z.string().optional(),
+        isOptional: z.boolean().optional(),
+      }),
+    )
+    .min(1),
+});
 
 const driveListsRouter = new Hono<{ Bindings: Env }>();
 
@@ -56,6 +87,17 @@ driveListsRouter.get("/", async (c) => {
   });
 });
 
+/** POST /api/drive-lists — create a drive list (HTTP twin of create_drive_list). */
+driveListsRouter.post("/", async (c) => {
+  const parsed = createBody.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) {
+    return c.json({ error: "Invalid body", issues: parsed.error.issues }, 400);
+  }
+  const db = drizzle(c.env.DB);
+  const { id, slug, stopCount } = await createDriveList(db, parsed.data);
+  return c.json({ ok: true, id, slug, stopCount }, 201);
+});
+
 /** GET /api/drive-lists/:slug — one drive + its ordered stops. */
 driveListsRouter.get("/:slug", async (c) => {
   const db = drizzle(c.env.DB);
@@ -70,7 +112,7 @@ driveListsRouter.get("/:slug", async (c) => {
     .orderBy(asc(driveListStops.sortOrder), asc(driveListStops.id))
     .all();
 
-  return c.json({ ...drive, stops });
+  return c.json({ ...drive, notes: parseDriveNotes(drive.notes), stops });
 });
 
 /** PATCH /api/drive-lists/:slug/stops/:stopId — toggle/set a stop's visited state. */
