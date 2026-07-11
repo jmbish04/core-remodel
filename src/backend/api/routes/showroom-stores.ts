@@ -42,13 +42,16 @@ import {
 } from "@backend/db/schema/showroom/index";
 import {
   brands,
-  brandTypesDef,
-  brandTypeMappings,
   showroomBrandMappings,
 } from "@backend/db/schema/brands/index";
+import { classifyBayAreaRegion } from "@backend/lib/bay-area-region";
+import {
+  computeStoreGeoPatch,
+  scheduleShowroomEnrichment,
+} from "@backend/services/showroom/onboarding";
 import { businessCardService } from "@backend/services/business-card";
 import { ImageProcessorService } from "@backend/services/image-processor";
-import { resolveCloudflareImagesCredentials, getGoogleMapsApiKey } from "@backend/utils/secrets";
+import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { faviconService } from "@backend/services/favicon";
 import {
   generateProductDraftPrompt,
@@ -297,6 +300,13 @@ const createStoreSchema = z.object({
   websiteUrl: z.string().optional().nullable(),
   zipCode: z.string().optional().nullable(),
   googleMapsLink: z.string().optional().nullable(),
+  /**
+   * Geographic coordinates (from Google Places `location`). Captured on the row
+   * for individual map markers + region derivation. Optional/nullable — manual
+   * entries may omit them, in which case the region is derived from address/ZIP.
+   */
+  latitude: z.number().optional().nullable(),
+  longitude: z.number().optional().nullable(),
   /**
    * Google Places API `place_id` for this showroom. Used to prevent
    * duplicate showroom creation from the same Places selection — see
@@ -1287,11 +1297,30 @@ showroomStoresRouter.get("/", async (c) => {
 
   return c.json({
     stores: rows.map((r) => {
+      // Effective region — captured store hub wins; otherwise derive it at read
+      // time from the store's own coordinates / address / ZIP (cheap, no Places
+      // call); finally fall back to the legacy city-derived hub. This is what
+      // makes the East Bay / North Bay filters accurate for rows added via MCP
+      // or imported without a matched Bay Area city.
+      const derived =
+        r.store.hubRoute == null
+          ? classifyBayAreaRegion({
+              latitude: r.store.latitude,
+              longitude: r.store.longitude,
+              zipCode: r.store.zipCode,
+              address: r.store.locationAddress,
+            })
+          : null;
+      const effectiveHubRoute = r.store.hubRoute ?? derived?.route ?? r.hubRoute;
+      const effectiveHubName = r.store.hubName ?? derived?.name ?? r.hubName;
+
       const base = {
         ...r.store,
         cityName: r.cityName,
-        hubRoute: r.hubRoute,
-        hubName: r.hubName,
+        hubRoute: effectiveHubRoute,
+        hubName: effectiveHubName,
+        latitude: r.store.latitude,
+        longitude: r.store.longitude,
         // Normalized per-day hours (only open days; absent day = closed).
         hours: hoursMap.get(r.store.id) ?? [],
       };
@@ -1469,11 +1498,21 @@ showroomStoresRouter.get("/:id", async (c) => {
     .from(showroomHours)
     .where(eq(showroomHours.showroomId, storeId));
 
+  const detailDerived =
+    store.store.hubRoute == null
+      ? classifyBayAreaRegion({
+          latitude: store.store.latitude,
+          longitude: store.store.longitude,
+          zipCode: store.store.zipCode,
+          address: store.store.locationAddress,
+        })
+      : null;
+
   return c.json({
     ...store.store,
     cityName: store.cityName,
-    hubRoute: store.hubRoute,
-    hubName: store.hubName,
+    hubRoute: store.store.hubRoute ?? detailDerived?.route ?? store.hubRoute,
+    hubName: store.store.hubName ?? detailDerived?.name ?? store.hubName,
     hours,
     products,
     categories: categories.map((r) => ({
@@ -1523,6 +1562,19 @@ showroomStoresRouter.post("/", async (c) => {
     storeValues.weekendHours = derived.weekendHours;
     storeValues.isOpenWeekends = derived.isOpenWeekends;
   }
+
+  // Capture geo columns: pass through Places coordinates and derive the region
+  // hub (A–E) from coordinates / address / ZIP so the row is filter- and
+  // map-ready without a Places call on load.
+  Object.assign(
+    storeValues,
+    computeStoreGeoPatch({
+      latitude: storeValues.latitude,
+      longitude: storeValues.longitude,
+      zipCode: storeValues.zipCode,
+      locationAddress: storeValues.locationAddress,
+    }),
+  );
 
   // ── Duplicate prevention by Google Places place_id ──────────────────────
   // Pre-check before inserting: if a showroom already exists for this
@@ -1628,227 +1680,25 @@ showroomStoresRouter.post("/", async (c) => {
     }
   }
 
-  // Fire background work: AI research + favicon hydration (if websiteUrl present).
-  c.executionCtx.waitUntil(
-    (async () => {
-      try {
-        const agent = await getShowroomResearchAgent(c.env);
-        await agent.researchStore(inserted.id);
-      } catch (error) {
-        console.error(`ShowroomResearchAgent store research failed for ${inserted.id}:`, error);
-      }
-    })(),
+  // Fire the full background enrichment pipeline — AI research, favicon +
+  // website scrape, the Places-photo → CF Images pipeline, and brand
+  // create/map — via the shared onboarding service so this matches exactly what
+  // the MCP onboarding tools run. Detached through executionCtx.waitUntil.
+  scheduleShowroomEnrichment(
+    c.env,
+    inserted,
+    {
+      websiteUrl: data.websiteUrl,
+      photos,
+      brands: (
+        data.reviewAiInsight as
+          | { brands?: Array<{ name?: string; type?: string; websiteUrl?: string }> }
+          | null
+          | undefined
+      )?.brands,
+    },
+    (p) => c.executionCtx.waitUntil(p),
   );
-
-  if (data.websiteUrl && data.websiteUrl.length > 0) {
-    c.executionCtx.waitUntil(
-      faviconService.hydrateShowroomIcon(c.env, inserted.id, data.websiteUrl),
-    );
-
-    // Post-submit website SCRAPE workflow: mint a RAG UUID, mark the store
-    // "pending", then kick the ShowroomScrapeWorkflow. The workflow crawls the
-    // site, archives markdown to R2, screenshots to CF Images, embeds into
-    // Vectorize, extracts brands/Instagram/hours/hero, and hydrates the store.
-    const ragUuid = crypto.randomUUID();
-    c.executionCtx.waitUntil(
-      (async () => {
-        try {
-          await db
-            .update(showroomStores)
-            .set({ ragUuid, scrapeStatus: "pending", updatedAt: new Date() })
-            .where(eq(showroomStores.id, inserted.id));
-          await c.env.SHOWROOM_SCRAPE_WORKFLOW.create({
-            params: {
-              showroomId: inserted.id,
-              websiteUrl: data.websiteUrl as string,
-              ragUuid,
-            },
-          });
-        } catch (error) {
-          console.error(
-            `showroom scrape workflow trigger failed for ${inserted.id}:`,
-            error,
-          );
-        }
-      })(),
-    );
-  }
-
-  // Fire background photo pipeline: fetch each Places photo media URL, upload
-  // to Cloudflare Images, store a showroom_photos_mapping row, and set the hero
-  // image from photo[0]. Error-guarded — never throws out of waitUntil.
-  if (photos && photos.length > 0) {
-    const storeId = inserted.id;
-    c.executionCtx.waitUntil(
-      (async () => {
-        try {
-          const { accountId, apiTokens } = await resolveCloudflareImagesCredentials(c.env);
-          if (!accountId || apiTokens.length === 0) {
-            console.error(`[showroom-stores] photos pipeline: CF Images credentials missing for store ${storeId}`);
-            return;
-          }
-          const [primaryToken, ...fallbackApiTokens] = apiTokens;
-          const processor = new ImageProcessorService(c.env, accountId, primaryToken, { fallbackApiTokens });
-
-          const mapsKey = await getGoogleMapsApiKey(c.env).catch(() => null);
-          if (!mapsKey) {
-            console.error(`[showroom-stores] photos pipeline: Google Maps API key missing for store ${storeId}`);
-            return;
-          }
-
-          const db = drizzle(c.env.DB);
-          const capped = photos.slice(0, 5);
-
-          for (let i = 0; i < capped.length; i++) {
-            const photo = capped[i];
-            try {
-              // Fetch the Places photo media bytes. The endpoint 302-redirects to
-              // the actual image; fetch follows the redirect automatically.
-              const mediaUrl = `https://places.googleapis.com/v1/${photo.name}/media?maxWidthPx=1600&key=${mapsKey}`;
-              const res = await fetch(mediaUrl, { signal: AbortSignal.timeout(8000) });
-              if (!res.ok) {
-                console.warn(`[showroom-stores] photos pipeline: non-ok response ${res.status} for photo ${i} of store ${storeId}`);
-                continue;
-              }
-              const blob = await res.blob();
-
-              // Upload to Cloudflare Images.
-              const customId = `showroom-photo-${storeId}-${i}`;
-              const filename = `showroom-${storeId}-${i}.jpg`;
-              const uploadResp = await processor.uploadToCloudflareImages(blob, customId, filename);
-              const url = processor.getDeliveryUrl(uploadResp, customId);
-
-              // Store the mapping row.
-              await db.insert(showroomPhotosMapping).values({
-                showroomId: storeId,
-                cfImagesPhotoUrl: url,
-                photoName: photo.name,
-                photoWidthPx: photo.widthPx ?? null,
-                photoHeightPx: photo.heightPx ?? null,
-                authorAttributes: photo.authorAttributions ?? null,
-                flagContentUri: photo.flagContentUri ?? null,
-                googleMapsUri: photo.googleMapsUri ?? null,
-                sortOrder: i,
-              } as typeof showroomPhotosMapping.$inferInsert);
-
-              // Set the hero image from the first photo.
-              if (i === 0) {
-                await db
-                  .update(showroomStores)
-                  .set({ heroImageCfImagesUrl: url, updatedAt: new Date() } as Partial<typeof showroomStores.$inferInsert>)
-                  .where(eq(showroomStores.id, storeId));
-              }
-            } catch (photoErr) {
-              console.error(`[showroom-stores] photos pipeline: error on photo ${i} for store ${storeId}:`, photoErr);
-              // Continue to the next photo — one failure must not abort the pipeline.
-            }
-          }
-        } catch (pipelineErr) {
-          console.error(`[showroom-stores] photos pipeline: outer error for store ${inserted.id}:`, pipelineErr);
-        }
-      })(),
-    );
-  }
-
-  // Brand create / map / type pipeline from reviewAiInsight.brands.
-  // Runs entirely in the background — never throws out of waitUntil.
-  // Cap at 15 entries; dedupe by trimmed lowercase name before processing.
-  const insightBrands = data.reviewAiInsight?.brands;
-  if (Array.isArray(insightBrands) && insightBrands.length > 0) {
-    const showroomIdForBrands = inserted.id;
-    c.executionCtx.waitUntil(
-      (async () => {
-        try {
-          const db2 = drizzle(c.env.DB);
-          // Dedupe: keep first occurrence of each lowercase-trimmed name.
-          const seen = new Set<string>();
-          const uniqueBrands: Array<{ name: string; type: string; websiteUrl: string }> = [];
-          for (const b of insightBrands) {
-            if (!b || typeof b.name !== "string") continue;
-            const key = b.name.trim().toLowerCase();
-            if (!key || seen.has(key)) continue;
-            seen.add(key);
-            uniqueBrands.push({
-              name: b.name.trim(),
-              type: typeof b.type === "string" ? b.type.trim() : "",
-              websiteUrl: typeof b.websiteUrl === "string" ? b.websiteUrl.trim() : "",
-            });
-            if (uniqueBrands.length >= 15) break;
-          }
-
-          for (const { name, type, websiteUrl } of uniqueBrands) {
-            try {
-              // 1. Find or create the brand row.
-              let brandId: number;
-              const [existingBrand] = await db2
-                .select({ id: brands.id })
-                .from(brands)
-                .where(sql`lower(${brands.name}) = lower(${name})`)
-                .limit(1);
-
-              if (existingBrand) {
-                brandId = existingBrand.id;
-              } else {
-                const [newBrand] = await db2
-                  .insert(brands)
-                  .values({
-                    name,
-                    websiteUrl: websiteUrl || null,
-                  } as typeof brands.$inferInsert)
-                  .returning({ id: brands.id });
-                brandId = newBrand.id;
-              }
-
-              // 2. Map the brand to this showroom (ignore duplicate).
-              await db2
-                .insert(showroomBrandMappings)
-                .values({
-                  showroomId: showroomIdForBrands,
-                  brandId,
-                } as typeof showroomBrandMappings.$inferInsert)
-                .onConflictDoNothing();
-
-              // 3. Find or create the type row and create the brand→type mapping.
-              if (type) {
-                let typeId: number;
-                const [existingType] = await db2
-                  .select({ id: brandTypesDef.id })
-                  .from(brandTypesDef)
-                  .where(sql`lower(${brandTypesDef.name}) = lower(${type})`)
-                  .limit(1);
-
-                if (existingType) {
-                  typeId = existingType.id;
-                } else {
-                  const [newType] = await db2
-                    .insert(brandTypesDef)
-                    .values({
-                      name: type,
-                      isActive: true,
-                    } as typeof brandTypesDef.$inferInsert)
-                    .returning({ id: brandTypesDef.id });
-                  typeId = newType.id;
-                }
-
-                await db2
-                  .insert(brandTypeMappings)
-                  .values({
-                    brandId,
-                    typeId,
-                  } as typeof brandTypeMappings.$inferInsert)
-                  .onConflictDoNothing();
-              }
-            } catch (brandErr) {
-              console.error(`[showroom-stores] brand pipeline: error processing brand "${name}" for store ${showroomIdForBrands}:`, brandErr);
-              // Continue — one brand failure must not abort the rest.
-            }
-          }
-        } catch (outerErr) {
-          console.error(`[showroom-stores] brand pipeline: outer error for store ${inserted.id}:`, outerErr);
-        }
-      })(),
-    );
-  }
 
   return c.json({ store: inserted }, 201);
 });
