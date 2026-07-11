@@ -147,6 +147,7 @@ export function CompanyViewportApp({ companyId }: { companyId: number }) {
           <DialogHeader>
             <DialogTitle>Add contact to {company.name}</DialogTitle>
           </DialogHeader>
+          <form onSubmit={(e) => { e.preventDefault(); void addContact(); }}>
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label>Name</Label>
@@ -169,6 +170,7 @@ export function CompanyViewportApp({ companyId }: { companyId: number }) {
               <div className="space-y-1.5">
                 <Label>Phone</Label>
                 <Input
+                  type="tel"
                   value={contactForm.phone}
                   onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })}
                 />
@@ -184,9 +186,10 @@ export function CompanyViewportApp({ companyId }: { companyId: number }) {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAddOpen(false)} disabled={savingContact}>Cancel</Button>
-            <Button onClick={addContact} disabled={savingContact}>{savingContact ? "Adding…" : "Add contact"}</Button>
+            <Button type="button" variant="outline" onClick={() => setAddOpen(false)} disabled={savingContact}>Cancel</Button>
+            <Button type="submit" disabled={savingContact}>{savingContact ? "Adding…" : "Add contact"}</Button>
           </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 
