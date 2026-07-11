@@ -70,6 +70,7 @@ import { showroomStoresRouter } from "./routes/showroom-stores";
 import { showroomProductsRouter } from "./routes/showroom-products";
 import { productsCatalogRouter } from "./routes/products-catalog";
 import { productPhotosRouter } from "./routes/product-photos";
+import { intakeRouter } from "./routes/intake";
 import { configRouter } from "./routes/config";
 import { googlePhotosRouter } from "./routes/google-photos";
 import { brandsRouter } from "./routes/brands";
@@ -139,6 +140,8 @@ app.use("/api/showroom-products", requireAccessAuth);
 app.use("/api/showroom-products/*", requireAccessAuth);
 app.use("/api/product-photos", requireAccessAuth);
 app.use("/api/product-photos/*", requireAccessAuth);
+app.use("/api/intake", requireAccessAuth);
+app.use("/api/intake/*", requireAccessAuth);
 // Products catalog page (0020 subsystem B) — same admin-only posture as
 // showroom-products, which this mirrors.
 app.use("/api/products", requireAccessAuth);
@@ -252,6 +255,7 @@ app.route("/api/shopping-journal", shoppingJournalRouter);
 app.route("/api/showroom-stores", showroomStoresRouter);
 app.route("/api/showroom-products", showroomProductsRouter);
 app.route("/api/product-photos", productPhotosRouter);
+app.route("/api/intake", intakeRouter);
 app.route("/api/products", productsCatalogRouter);
 app.route("/api/config", configRouter);
 app.route("/api/brands", brandsRouter);

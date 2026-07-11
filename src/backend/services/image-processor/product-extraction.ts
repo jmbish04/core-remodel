@@ -115,6 +115,46 @@ function buildSystemPrompt(ctx?: ExtractionVocabContext): string {
 }
 
 /**
+ * Structured-output pass over one or more ALREADY-COMPUTED vision descriptions.
+ * Single-photo `extractShowroomProduct` below is just this called with a
+ * one-element array — this is the shared extraction step.
+ *
+ * ponytail: multi-image support here is "describe each photo separately, then
+ * do one structured-JSON pass over the concatenated descriptions" (MVP —
+ * `generateStructuredOutput` only takes text, not N images at once). Upgrade
+ * path if a bucket's photos disagree in practice: swap to a true multi-image
+ * vision call (single describeImage-equivalent fed all N photos) once the
+ * provider supports it, rather than text-concatenating N separate descriptions.
+ */
+export async function extractShowroomProductFromDescriptions(
+  env: Env,
+  visionDescriptions: string[],
+  ctx?: ExtractionVocabContext,
+): Promise<ProductExtraction> {
+  const combined =
+    visionDescriptions.length === 1
+      ? visionDescriptions[0]
+      : visionDescriptions.map((d, i) => `Photo ${i + 1} of ${visionDescriptions.length}:\n${d}`).join("\n\n");
+
+  const intro =
+    visionDescriptions.length === 1
+      ? "Vision model's description of the showroom photo:"
+      : `Vision model's descriptions of ${visionDescriptions.length} photos of the SAME product (a burst of shots taken together):`;
+
+  return generateStructuredOutput(env, {
+    messages: [
+      { role: "system", content: buildSystemPrompt(ctx) },
+      {
+        role: "user",
+        content: `${intro}\n\n${combined}\n\nExtract ONE structured product/price record that best represents this product across all the description(s) above.`,
+      },
+    ],
+    schema: PRODUCT_EXTRACTION_SCHEMA,
+    schemaName: "ShowroomProductExtraction",
+  });
+}
+
+/**
  * Describe the photo with the vision model, then parse that description into a
  * structured `ProductExtraction` via gpt-oss-120b json_schema output.
  *
@@ -129,16 +169,5 @@ export async function extractShowroomProduct(
 ): Promise<ProductExtraction> {
   const service = new ImageProcessorService(env, "", "");
   const visionDescription = await service.describeImage(imageDataUrl);
-
-  return generateStructuredOutput(env, {
-    messages: [
-      { role: "system", content: buildSystemPrompt(ctx) },
-      {
-        role: "user",
-        content: `Vision model's description of the showroom photo:\n\n${visionDescription}\n\nExtract the structured product/price fields from this description.`,
-      },
-    ],
-    schema: PRODUCT_EXTRACTION_SCHEMA,
-    schemaName: "ShowroomProductExtraction",
-  });
+  return extractShowroomProductFromDescriptions(env, [visionDescription], ctx);
 }

@@ -23,4 +23,5 @@ export * from "./photos_mapping";
 export * from "./hours";
 export * from "./product_intel";
 export * from "./product_photos";
+export * from "./product_photo_buckets";
 export * from "./price_observations";

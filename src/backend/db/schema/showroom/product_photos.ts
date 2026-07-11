@@ -10,6 +10,7 @@ import {
 
 import { showroomStoreProducts } from "./store_products";
 import { showroomStores } from "./stores";
+import { productPhotoBuckets } from "./product_photo_buckets";
 
 /**
  * Product Showroom Photos — the D1 half of a Vectorize pairing. Each row is a
@@ -27,14 +28,27 @@ export const productShowroomPhotos = sqliteTable(
     /** Join key shared with the Vectorize vector's metadata. 1 photo = 1 vector. */
     ragUuid: text("rag_uuid").notNull(),
 
-    productId: integer("product_id")
-      .notNull()
-      .references(() => showroomStoreProducts.id, { onDelete: "cascade" }),
+    /** Nullable — the C2 intake wizard stages photos before a product exists;
+     * the product row is created only at "Process with AI". */
+    productId: integer("product_id").references(
+      () => showroomStoreProducts.id,
+      { onDelete: "cascade" }
+    ),
 
     /** Nullable — a photo may come from an online source, not a showroom. */
     showroomId: integer("showroom_id").references(() => showroomStores.id, {
       onDelete: "set null",
     }),
+
+    /** C2 intake wizard grouping — nullable until the photo is merged into a bucket. */
+    bucketId: integer("bucket_id").references(() => productPhotoBuckets.id, {
+      onDelete: "set null",
+    }),
+
+    /** Original uploaded filename, kept for the filename-ASC ordering step. */
+    fileName: text("file_name"),
+    /** Manual reorder override within a bucket; defaults to filename-ASC. */
+    sortOrder: integer("sort_order").notNull().default(0),
 
     /** Stored asset path: CF Images delivery URL (current pipeline) or R2 URL. */
     imageUrl: text("image_url"),
@@ -53,8 +67,13 @@ export const productShowroomPhotos = sqliteTable(
      * modelNumber, style, price, salePrice, discountInfo, ...} + per-field confidence. */
     attributes: text("attributes", { mode: "json" }),
 
+    // ponytail: widened for the C2 intake wizard (uploaded → processed) without a
+    // migration — sqlite/D1 `text` columns here carry no CHECK constraint, so this
+    // union is TS-only and safe to extend in place. 'uploaded'/'processed' are the
+    // intake-wizard lifecycle; 'pending_review'/'approved'/'rejected' remain the
+    // single-photo /product-photos/ingest HITL review lifecycle.
     status: text("status", {
-      enum: ["pending_review", "approved", "rejected"] as const,
+      enum: ["uploaded", "pending_review", "processed", "approved", "rejected"] as const,
     })
       .notNull()
       .default("pending_review"),
@@ -76,6 +95,7 @@ export const productShowroomPhotos = sqliteTable(
     showroomIdx: index("product_showroom_photos_showroom_idx").on(
       table.showroomId
     ),
+    bucketIdx: index("product_showroom_photos_bucket_idx").on(table.bucketId),
   })
 );
 
