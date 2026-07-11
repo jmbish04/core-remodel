@@ -315,11 +315,16 @@ intakeRouter.get("/buckets", async (c) => {
     if (buckets.length === 0) return c.json({ buckets: [] });
 
     const bucketIds = buckets.map((b) => b.id);
-    const photos = await db
-      .select()
-      .from(productShowroomPhotos)
-      .where(inArray(productShowroomPhotos.bucketId, bucketIds))
-      .orderBy(asc(productShowroomPhotos.fileName), asc(productShowroomPhotos.id));
+    // Chunk the id list: one bound param per id vs D1's 100-param cap.
+    const photos: (typeof productShowroomPhotos.$inferSelect)[] = [];
+    for (let i = 0; i < bucketIds.length; i += 90) {
+      const chunk = await db
+        .select()
+        .from(productShowroomPhotos)
+        .where(inArray(productShowroomPhotos.bucketId, bucketIds.slice(i, i + 90)))
+        .orderBy(asc(productShowroomPhotos.fileName), asc(productShowroomPhotos.id));
+      photos.push(...chunk);
+    }
 
     const photosByBucket = new Map<number, { id: number; imageUrl: string | null; fileName: string | null }[]>();
     for (const p of photos) {
@@ -474,11 +479,16 @@ intakeRouter.get("/review-queue", async (c) => {
     if (buckets.length === 0) return c.json({ buckets: [] });
 
     const bucketIds = buckets.map((b) => b.id);
-    const photos = await db
-      .select()
-      .from(productShowroomPhotos)
-      .where(inArray(productShowroomPhotos.bucketId, bucketIds))
-      .orderBy(asc(productShowroomPhotos.fileName), asc(productShowroomPhotos.id));
+    // Chunk the id list: one bound param per id vs D1's 100-param cap.
+    const photos: (typeof productShowroomPhotos.$inferSelect)[] = [];
+    for (let i = 0; i < bucketIds.length; i += 90) {
+      const chunk = await db
+        .select()
+        .from(productShowroomPhotos)
+        .where(inArray(productShowroomPhotos.bucketId, bucketIds.slice(i, i + 90)))
+        .orderBy(asc(productShowroomPhotos.fileName), asc(productShowroomPhotos.id));
+      photos.push(...chunk);
+    }
 
     const photosByBucket = new Map<number, typeof photos>();
     for (const p of photos) {

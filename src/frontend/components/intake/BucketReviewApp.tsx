@@ -36,11 +36,11 @@ export function BucketReviewApp() {
   const loadVocab = useCallback(async () => {
     try {
       const [cats, cols] = await Promise.all([
-        api<CategoryRow[]>("/api/config/categories"),
-        api<ColorRow[]>("/api/config/colors"),
+        api<{ categories: CategoryRow[] }>("/api/config/categories"),
+        api<{ colors: ColorRow[] }>("/api/config/colors"),
       ]);
-      setCategories(cats ?? []);
-      setColors(cols ?? []);
+      setCategories(cats.categories ?? []);
+      setColors(cols.colors ?? []);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to load vocab");
     }

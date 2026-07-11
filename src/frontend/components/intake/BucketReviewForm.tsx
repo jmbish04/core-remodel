@@ -178,8 +178,8 @@ export function BucketReviewForm({
         }
       })
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load brands"));
-    void api<{ id: number; name: string }[]>(`/api/config/subcategories${qs}`)
-      .then((rows) => setSubcatOptions(rows.map((s) => ({ value: String(s.id), label: s.name }))))
+    void api<{ subcategories: { id: number; name: string }[] }>(`/api/config/subcategories${qs}`)
+      .then((r) => setSubcatOptions(r.subcategories.map((s) => ({ value: String(s.id), label: s.name }))))
       .catch((e) => toast.error(e instanceof Error ? e.message : "Failed to load subcategories"));
     void api<{ styles: string[] }>(`/api/config/styles${qs}`)
       .then((r) => setStyleOptions(r.styles.map((s) => ({ value: s, label: s }))))
@@ -198,7 +198,7 @@ export function BucketReviewForm({
   const createCategory = useCallback(
     async (name: string) => {
       try {
-        const row = await api<CategoryRow>("/api/config/categories", {
+        const { category: row } = await api<{ category: CategoryRow }>("/api/config/categories", {
           method: "POST",
           body: JSON.stringify({ name }),
         });
@@ -654,7 +654,7 @@ function BrandCreateModal({
     }
     setSaving(true);
     try {
-      const row = await api<{ id: number; name: string }>("/api/config/brands", {
+      const { brand: row } = await api<{ brand: { id: number; name: string } }>("/api/config/brands", {
         method: "POST",
         body: JSON.stringify({
           name: name.trim(),
@@ -735,7 +735,7 @@ function ColorCreateModal({
     }
     setSaving(true);
     try {
-      const row = await api<ColorRow>("/api/config/colors", {
+      const { color: row } = await api<{ color: ColorRow }>("/api/config/colors", {
         method: "POST",
         body: JSON.stringify({ name: name.trim(), hexCode: hex }),
       });
