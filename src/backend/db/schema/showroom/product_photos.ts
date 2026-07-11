@@ -10,6 +10,7 @@ import {
 
 import { showroomStoreProducts } from "./store_products";
 import { showroomStores } from "./stores";
+import { productPhotoBuckets } from "./product_photo_buckets";
 
 /**
  * Product Showroom Photos — the D1 half of a Vectorize pairing. Each row is a
@@ -35,6 +36,16 @@ export const productShowroomPhotos = sqliteTable(
     showroomId: integer("showroom_id").references(() => showroomStores.id, {
       onDelete: "set null",
     }),
+
+    /** C2 intake wizard grouping — nullable until the photo is merged into a bucket. */
+    bucketId: integer("bucket_id").references(() => productPhotoBuckets.id, {
+      onDelete: "set null",
+    }),
+
+    /** Original uploaded filename, kept for the filename-ASC ordering step. */
+    fileName: text("file_name"),
+    /** Manual reorder override within a bucket; defaults to filename-ASC. */
+    sortOrder: integer("sort_order").notNull().default(0),
 
     /** Stored asset path: CF Images delivery URL (current pipeline) or R2 URL. */
     imageUrl: text("image_url"),
@@ -76,6 +87,7 @@ export const productShowroomPhotos = sqliteTable(
     showroomIdx: index("product_showroom_photos_showroom_idx").on(
       table.showroomId
     ),
+    bucketIdx: index("product_showroom_photos_bucket_idx").on(table.bucketId),
   })
 );
 
