@@ -61,8 +61,9 @@ export function PhotoReviewCard({
   const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
 
   const confidence = useMemo(() => {
+    // confidence is already an integer 0-100 from the extraction schema — do NOT ×100.
     const c = attrs.confidence;
-    return typeof c === "number" ? Math.round(c * 100) : null;
+    return typeof c === "number" ? Math.max(0, Math.min(100, Math.round(c))) : null;
   }, [attrs.confidence]);
 
   const submit = async (action: "approve" | "reject") => {

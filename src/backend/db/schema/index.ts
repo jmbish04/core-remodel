@@ -131,3 +131,8 @@ export * from "./artifacts/index";
 
 // Showroom drive lists (planned showroom-visit route sheets)
 export * from "./drives/index";
+
+// Config-driven multi-select vocabularies (0020-C2): categories, subcategories,
+// colors + generic object<->definition mappings (AGENTS.md "Multi-select &
+// config-driven definitions").
+export * from "./config/index";

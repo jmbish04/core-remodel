@@ -1,0 +1,15 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ConfigDefinitionPage } from "@/components/config";
+---
+
+<BaseLayout title="Photo Categories — Configuration" description="Manage the photo & product category vocabulary.">
+  <ConfigDefinitionPage
+    client:only="react"
+    activeHref="/config/photo/categories"
+    title="Photo Categories"
+    description="Top-level categories used to classify products and price-card photos."
+    endpoint="/api/config/categories"
+    columns={["name", "description"]}
+  />
+</BaseLayout>

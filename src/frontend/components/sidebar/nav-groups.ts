@@ -101,6 +101,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
       { href: "/admin/mcp-ops", label: "MCP Ops" },
       { href: "/admin/integrations/usage", label: "Integrations Usage" },
       { href: "/admin/config", label: "Config" },
+      { href: "/config/photo/categories", label: "Configuration" },
     ],
   },
   {

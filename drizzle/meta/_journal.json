@@ -708,6 +708,13 @@
       "when": 1783707691003,
       "tag": "0100_cold_shadow_king",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "6",
+      "when": 1783707692003,
+      "tag": "0101_c2_config_tables",
+      "breakpoints": true
     }
   ]
 }

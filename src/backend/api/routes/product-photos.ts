@@ -17,12 +17,20 @@ import { and, desc, eq, inArray, sql } from "drizzle-orm";
 
 import {
   brands,
+  categories,
+  colors,
+  photoCategories,
+  photoColors,
   productPriceObservations,
   productShowroomPhotos,
   showroomStoreProducts,
 } from "@backend/db";
 import { ImageProcessorService } from "@backend/services/image-processor";
-import { extractShowroomProduct, type ProductExtraction } from "@backend/services/image-processor/product-extraction";
+import {
+  extractShowroomProduct,
+  type ExtractionVocabContext,
+  type ProductExtraction,
+} from "@backend/services/image-processor/product-extraction";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { normalizeModelKey } from "@backend/lib/normalize-model";
 import { parseDiscountPct, parsePriceCents } from "@backend/lib/money";
@@ -57,6 +65,79 @@ async function resolveBrandId(db: Db, name: string | null | undefined): Promise<
       .limit(1);
     if (row) return row.id;
     throw new Error(`brand resolve failed for "${trimmed}"`);
+  }
+}
+
+/**
+ * Load the live config vocabulary (0020-C2) to inject into the AI extraction
+ * prompt — active category names, active colors (id/name/hexCode), and brand
+ * names. Fed as `ctx` to `extractShowroomProduct` so the model reuses existing
+ * definitions instead of drifting into free-text near-duplicates.
+ */
+async function loadExtractionVocab(db: Db): Promise<ExtractionVocabContext> {
+  const [categoryRows, colorRows, brandRows] = await Promise.all([
+    db.select({ name: categories.name }).from(categories).where(eq(categories.isActive, true)),
+    db
+      .select({ id: colors.id, name: colors.name, hexCode: colors.hexCode })
+      .from(colors)
+      .where(eq(colors.isActive, true)),
+    db.select({ name: brands.name }).from(brands),
+  ]);
+
+  return {
+    categories: categoryRows.map((r) => r.name),
+    colors: colorRows,
+    brands: brandRows.map((r) => r.name),
+  };
+}
+
+/**
+ * Case-insensitive lookup of an active category by name. Does NOT create —
+ * the extraction prompt is instructed to prefer names from the provided
+ * vocabulary, so a miss here means the model returned freeform text outside
+ * the known list; the photo is simply left uncategorized rather than
+ * silently growing the `categories` table from AI guesses (unlike colors,
+ * which explicitly supports AI-originated "Other" values per AGENTS.md).
+ */
+async function resolveCategoryId(db: Db, name: string | null | undefined): Promise<number | null> {
+  const trimmed = (name ?? "").trim();
+  if (!trimmed) return null;
+
+  const [existing] = await db
+    .select({ id: categories.id })
+    .from(categories)
+    .where(and(eq(sql`lower(${categories.name})`, trimmed.toLowerCase()), eq(categories.isActive, true)))
+    .limit(1);
+  return existing?.id ?? null;
+}
+
+/**
+ * Find-or-create a color by case-insensitive name — the AI-creates-"Other"
+ * path for the `colors` config vocabulary (AGENTS.md "Multi-select &
+ * config-driven definitions"). Reuses an existing active color's id when the
+ * name matches; otherwise inserts a new `colors` row with the AI-supplied hex.
+ */
+async function resolveOrCreateColorId(db: Db, name: string, hexCode: string | null | undefined): Promise<number> {
+  const trimmed = name.trim();
+  const [existing] = await db
+    .select({ id: colors.id })
+    .from(colors)
+    .where(eq(sql`lower(${colors.name})`, trimmed.toLowerCase()))
+    .limit(1);
+  if (existing) return existing.id;
+
+  try {
+    const [created] = await db.insert(colors).values({ name: trimmed, hexCode: hexCode ?? null }).returning();
+    return created.id;
+  } catch {
+    // Concurrent ingest created the same color between our select and insert.
+    const [row] = await db
+      .select({ id: colors.id })
+      .from(colors)
+      .where(eq(sql`lower(${colors.name})`, trimmed.toLowerCase()))
+      .limit(1);
+    if (row) return row.id;
+    throw new Error(`color resolve failed for "${trimmed}"`);
   }
 }
 
@@ -105,7 +186,7 @@ async function ensureProductFromExtraction(db: Db, attrs: ProductExtraction) {
         brandId,
         modelNumber: attrs.modelNumber ?? null,
         modelKey,
-        colors: attrs.colors && attrs.colors.length > 0 ? attrs.colors.join(", ") : null,
+        colors: attrs.colors && attrs.colors.length > 0 ? attrs.colors.map((c) => c.name).join(", ") : null,
         productType: attrs.category ?? null,
       })
       .returning();
@@ -169,18 +250,28 @@ productPhotosRouter.post("/ingest", async (c) => {
     const deliveryUrl = processor.getDeliveryUrl(uploadResponse, uploadResponse.result.id);
     const cfImageId = uploadResponse.result.id;
 
-    // 2. AI extraction (vision description -> structured JSON).
+    // 2. AI extraction (vision description -> structured JSON), primed with the
+    //    live categories/colors/brands vocabulary (0020-C2) so the model reuses
+    //    existing config-table definitions instead of drifting into near-duplicates.
+    const db = drizzle(c.env.DB);
     const dataUrl = ImageProcessorService.arrayBufferToDataUrl(bytes, file.type || "image/jpeg");
-    const attrs = await extractShowroomProduct(c.env, dataUrl);
+    const vocab = await loadExtractionVocab(db);
+    const attrs = await extractShowroomProduct(c.env, dataUrl, vocab);
 
     // 3. Find-or-create the product this photo depicts.
-    const db = drizzle(c.env.DB);
     const { product } = await ensureProductFromExtraction(db, attrs);
 
     // 4. Embed + upsert into PHOTO_INDEX, keyed by a fresh ragUuid (the join key
     //    shared with the product_showroom_photos row below).
     const ragUuid = crypto.randomUUID();
-    const embeddingText = [attrs.itemName, attrs.brand, attrs.modelNumber, attrs.colors?.join(", "), attrs.style, attrs.category]
+    const embeddingText = [
+      attrs.itemName,
+      attrs.brand,
+      attrs.modelNumber,
+      attrs.colors?.map((cAttr) => cAttr.name).join(", "),
+      attrs.style,
+      attrs.category,
+    ]
       .filter((v): v is string => Boolean(v))
       .join(" — ");
     if (embeddingText) {
@@ -206,6 +297,24 @@ productPhotosRouter.post("/ingest", async (c) => {
         status: "pending_review",
       })
       .returning();
+
+    // 5b. Map the photo to its config vocabulary rows (0020-C2): resolve
+    //     attrs.category -> an existing active category (no AI-create — see
+    //     resolveCategoryId doc), and resolve/create each attrs.colors[]
+    //     entry against the shared `colors` table (the AI-creates-"Other"
+    //     path for colors). Best-effort — a resolution miss never fails ingest.
+    const categoryId = await resolveCategoryId(db, attrs.category);
+    if (categoryId != null) {
+      await db.insert(photoCategories).values({ photoId: photo.id, categoryId }).onConflictDoNothing();
+    }
+    if (attrs.colors && attrs.colors.length > 0) {
+      const uniqueColors = new Map(attrs.colors.map((cAttr) => [cAttr.name.trim().toLowerCase(), cAttr]));
+      for (const cAttr of uniqueColors.values()) {
+        if (!cAttr.name.trim()) continue;
+        const colorId = await resolveOrCreateColorId(db, cAttr.name, cAttr.hexCode);
+        await db.insert(photoColors).values({ photoId: photo.id, colorId }).onConflictDoNothing();
+      }
+    }
 
     // 6. Record a price observation, if a price was actually read off the photo.
     let observation: typeof productPriceObservations.$inferSelect | null = null;

@@ -95,3 +95,80 @@ transcripts offloaded to R2 `ARTIFACTS_BUCKET`). Admin reads: `/admin/mcp-ops`
 `src/backend/mcp/tools/ops.ts` (category `"ops"`); logging itself is middleware,
 not a tool. Never log the auth token / `WORKER_API_KEY` — the logger caps blob
 sizes and redacts secret-ish keys.
+
+## Multi-select & config-driven definitions (MANDATORY)
+
+**NEVER store or render a multi-select as a comma-separated string.** Not colors,
+not tags, not categories — nothing. It is sloppy and forbidden. Use a real
+definition + mapping pair and a proper multi-select component (shadcn / shadcn
+registry — there is always one).
+
+**Definition table** (one per multi-select vocabulary, e.g. `colors`, `categories`):
+- `id` INTEGER PK autoincrement (ALWAYS)
+- `name` TEXT NOT NULL (ALWAYS)
+- `description` TEXT (ALWAYS)
+- `is_active` INTEGER boolean default true (ALWAYS — soft-delete, never hard-delete a choice)
+- domain extras when useful (e.g. colors get `hex_code`)
+
+**Mapping table** (join the definition to the owning object, e.g. `photo_colors`):
+- `id` INTEGER PK autoincrement (ALWAYS)
+- `<def>_id` FK → the definition table (ALWAYS an FK)
+- `<object>_id` FK → the owning row (ALWAYS an FK)
+- UNIQUE index on `(<def>_id, <object>_id)` (ALWAYS — no duplicate mappings)
+
+**API (per multi-select), ALWAYS provide:**
+- list all active options (for the autoselect component)
+- create an "Other" option from the UI (returns the new definition row)
+- create/replace the mappings as part of a form submit AND standalone (for backfills)
+- return the mappings when reading the owning object
+- search/filter owning objects by mapping(s)
+
+**UX, ALWAYS:**
+- support "Other" (creates a new definition + selects it)
+- if the definition has `hex_code`, show a color swatch in the option (`[▧] Name`) and a color picker when creating "Other"
+- show the option **display name**, never the option id
+
+**Config pages:** every config vocabulary gets a `/config/<group>/<name>` page (e.g.
+`/config/photo/colors`) to manage its definitions. `/config` opens in a new tab with
+its own dedicated sidebar, grouped. One page per vocabulary; all share the config sidebar.
+
+**Categories:** a shared `categories` definition table + `subcategories` (each with a
+`category_id` FK to its parent). Objects (photos, brands, products) map to categories via a
+`<object>_categories` table (`category_id` FK) AND — where subcategory precision is wanted —
+to subcategories via a separate `<object>_subcategories` table (`subcategory_id` FK). Keep the
+two mappings separate (category multi-select is independent of subcategory); reconstruct the
+`{category} / {subcategory}` path by joining the subcategory mapping back through its parent
+`category_id`. Do NOT collapse to a single subcategory-only FK — a photo can carry a bare
+category with no subcategory.
+
+## Reusable data-entry components (USE THESE — do not hand-roll)
+
+**Currency / price** → `@/components/ui/currency-input` `<CurrencyInput>`.
+- Renders a `$`-prepended field; `onValueChange(text, cents)` hands back BOTH the
+  verbatim text and integer cents. NEVER a bare `<Input>` for money.
+- **D1 for currency: store BOTH** a `<field>_text` TEXT column (verbatim, e.g.
+  "$1,299.00" or "call for pricing") AND a `<field>_cents` INTEGER column (numeric,
+  for sort/compare/sum). The API accepts text and derives cents (or takes an explicit
+  override). See `product_price_observations` (price/priceCents) for the pattern.
+
+**Single-select with "Other"** → `@/components/ui/combobox-with-other` `<ComboboxWithOther>`
+(brand, style, single category…). **Multi-select with "Other"** → `@/components/ui/multiple-selector`
+`<MultipleSelector>` (colors, categories…). Both support option create via `onCreateOther`/
+`onCreateOption` (wire to the definition-table create API) and hex swatches (pass `hexCode`).
+NEVER a native `<select>` when "Other" creation is expected; NEVER comma-separated multi-values.
+
+**Config pages** → every definition vocabulary gets a `/config/<group>/<name>` page
+(e.g. `/config/photo/colors`) built on the reusable **`ConfigShell`** scaffold
+(`@/components/config/ConfigShell` — shared config sidebar + a definition-table CRUD panel:
+list active rows, add, edit, soft-deactivate; color picker when the definition has `hex_code`).
+`/config` opens in its own tab with the grouped config sidebar. One page per vocabulary.
+
+## MANDATORY planning-phase compliance scan
+
+During ANY planning/design/review phase, scan the touched surface for **currency** and
+**multi-select** data points. For EACH one found that is NOT properly represented across
+**all three** layers — UX (the reusable component above), D1 (currency = text+cents;
+multi-select = definition + mapping tables), and API (list options / create-Other / map /
+list-mappings / filter-by-mapping) — **FLAG it to the user** and ask, per instance, whether
+it should **stay as-is** or be **brought into compliance**. Do not silently leave a
+comma-separated multi-value or a text-only currency field; surface it.
