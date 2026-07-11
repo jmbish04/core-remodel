@@ -17,7 +17,7 @@ import { services } from "@backend/db/schema/services/services";
 export const servicesRouter = new Hono<{ Bindings: Env }>();
 
 const upsertSchema = z.object({
-  name: z.string().min(1),
+  name: z.string().trim().min(1),
   description: z.string().optional().nullable(),
   category: z.string().optional().nullable(),
   defaultUnitCost: z.number().optional().nullable(),
@@ -51,7 +51,7 @@ servicesRouter.post("/", async (c) => {
   const [row] = await db
     .insert(services)
     .values({
-      name: parsed.data.name.trim(),
+      name: parsed.data.name,
       description: parsed.data.description ?? null,
       category: parsed.data.category ?? null,
       defaultUnitCost: parsed.data.defaultUnitCost ?? null,
