@@ -49,7 +49,7 @@
     // page URLs in MCP tool responses (e.g. the exact bug/budget/showroom page
     // to open) instead of bare paths. No trailing slash.
     "WORKER_URL": "https://core-remodel.hacolby.workers.dev",
-    "AI_GATEWAY_ID": "default-gateway",
+    "AI_GATEWAY_ID": "core-remodel",
     "CLICKUP_LIST_ID": "901714811766",
     // TODO(justin): fill in a Google Programmable Search Engine "cx" id
     // (https://programmablesearchengine.google.com/) to enable Custom Search
