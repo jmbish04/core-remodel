@@ -37,6 +37,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     label: "Contractors",
     admin: true,
     items: [
+      { href: "/admin/inbox/all", label: "All Inboxes" },
       { href: "/admin/inbox", label: "Email Inbox" },
       { href: "/admin/inbox/gmail", label: "Gmail Inbox" },
       { href: "/admin/companies", label: "Companies" },

@@ -7,6 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { EntityDocumentsPanel } from "@/components/documents";
 import { CompanyGmailPanel } from "@/components/gmail";
 import { CompanyNotesTab } from "@/components/companies/crm/CompanyNotesTab";
@@ -63,6 +66,43 @@ export function CompanyViewportApp({ companyId }: { companyId: number }) {
   const [insights, setInsights] = useState<any>(null);
   const [activity, setActivity] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  // Add-contact dialog (registers a POC — name/email/phone — to this company;
+  // the email is what the Gmail comms hub searches on).
+  const [addOpen, setAddOpen] = useState(false);
+  const [savingContact, setSavingContact] = useState(false);
+  const [contactForm, setContactForm] = useState({ contactName: "", email: "", phone: "", title: "" });
+
+  async function addContact() {
+    if (!contactForm.contactName.trim()) {
+      toast.error("Contact name is required");
+      return;
+    }
+    setSavingContact(true);
+    try {
+      const res = await fetch("/api/bid-portfolios/contacts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyId,
+          contactName: contactForm.contactName.trim(),
+          email: contactForm.email.trim() || null,
+          phone: contactForm.phone.trim() || null,
+          title: contactForm.title.trim() || null,
+        }),
+      });
+      if (!res.ok) throw new Error("Request failed");
+      toast.success("Contact added");
+      setAddOpen(false);
+      setContactForm({ contactName: "", email: "", phone: "", title: "" });
+      setReloadKey((k) => k + 1);
+    } catch {
+      toast.error("Failed to add contact");
+    } finally {
+      setSavingContact(false);
+    }
+  }
 
   // Since we don't have a direct /companies/:id GET yet, we fetch all and filter
   // or we can implement the GET /companies/:id endpoint if needed.
@@ -94,13 +134,62 @@ export function CompanyViewportApp({ companyId }: { companyId: number }) {
       }
     };
     load();
-  }, [companyId]);
+  }, [companyId, reloadKey]);
 
   if (loading) return <div className="py-10 text-center">Loading company details...</div>;
   if (!company) return <div className="py-10 text-center text-destructive">Company not found</div>;
 
   return (
     <div className="space-y-6">
+      {/* Add-contact dialog */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add contact to {company.name}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label>Name</Label>
+              <Input
+                value={contactForm.contactName}
+                onChange={(e) => setContactForm({ ...contactForm, contactName: e.target.value })}
+                placeholder="Full name"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Email</Label>
+              <Input
+                type="email"
+                value={contactForm.email}
+                onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })}
+                placeholder="name@company.com — searched by the Gmail comms hub"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Phone</Label>
+                <Input
+                  value={contactForm.phone}
+                  onChange={(e) => setContactForm({ ...contactForm, phone: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Title</Label>
+                <Input
+                  value={contactForm.title}
+                  onChange={(e) => setContactForm({ ...contactForm, title: e.target.value })}
+                  placeholder="e.g. Project Manager"
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddOpen(false)} disabled={savingContact}>Cancel</Button>
+            <Button onClick={addContact} disabled={savingContact}>{savingContact ? "Adding…" : "Add contact"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Header */}
       <div className="flex flex-col md:flex-row items-start justify-between gap-4">
         <div className="flex items-start space-x-4">
@@ -230,7 +319,7 @@ export function CompanyViewportApp({ companyId }: { companyId: number }) {
                     <CardTitle>Company Contacts</CardTitle>
                     <CardDescription>People associated with {company.name}</CardDescription>
                   </div>
-                  <Button variant="outline" size="sm"><PlusCircle className="w-4 h-4 mr-2" /> Add Contact</Button>
+                  <Button variant="outline" size="sm" onClick={() => setAddOpen(true)}><PlusCircle className="w-4 h-4 mr-2" /> Add Contact</Button>
                 </CardHeader>
                 <CardContent>
                   {contacts.length === 0 ? (
