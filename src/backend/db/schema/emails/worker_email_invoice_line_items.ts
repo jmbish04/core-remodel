@@ -3,6 +3,7 @@ import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core
 
 import { workerEmailInvoices } from "./worker_email_invoices";
 import { materialScheduleItems } from "../materials/schedule_item";
+import { services } from "../services/services";
 
 /**
  * Worker Email Invoice Line Items — individual line items from an extracted
@@ -38,6 +39,14 @@ export const workerEmailInvoiceLineItems = sqliteTable(
       { onDelete: "set null" },
     ),
 
+    /**
+     * Optional FK to the services catalog this line item matches. A line
+     * item ties to a material OR a service, not both.
+     */
+    serviceId: integer("service_id").references(() => services.id, {
+      onDelete: "set null",
+    }),
+
     /** HITL match status: "unmatched" | "matched" | "created" | "skipped". */
     matchStatus: text("match_status").notNull().default("unmatched"),
 
@@ -51,6 +60,7 @@ export const workerEmailInvoiceLineItems = sqliteTable(
   (table) => ({
     invoiceIdx: index("worker_email_invoice_line_items_invoice_idx").on(table.invoiceId),
     materialIdx: index("worker_email_invoice_line_items_material_idx").on(table.materialScheduleItemId),
+    serviceIdx: index("worker_email_invoice_line_items_service_idx").on(table.serviceId),
   }),
 );
 

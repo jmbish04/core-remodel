@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/componen
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { ServicePicker } from "@/components/services";
 import { LineItemMaterialLink } from "./LineItemMaterialLink";
 
 export function InvoiceReviewPanel({ emailId, invoice, onUpdate }: { emailId: number, invoice: any, onUpdate: () => void }) {
@@ -167,6 +168,31 @@ export function InvoiceReviewPanel({ emailId, invoice, onUpdate }: { emailId: nu
                     lineItem={li}
                     onUpdate={onUpdate}
                   />
+                  {/* Tie this line to a catalog service (independent of the
+                      material link). Persists to the dedicated /service
+                      endpoint, then refetches via onUpdate. */}
+                  <div className="mt-1.5">
+                    <ServicePicker
+                      serviceId={li.serviceId ?? null}
+                      serviceName={li.serviceName ?? null}
+                      onPick={async (serviceId) => {
+                        const res = await fetch(
+                          `/api/worker-emails/${emailId}/invoices/${invoice.id}/line-items/${li.id}/service`,
+                          {
+                            method: "PATCH",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({ serviceId }),
+                            credentials: "include",
+                          },
+                        );
+                        if (!res.ok) {
+                          const j = (await res.json().catch(() => ({}))) as { error?: string };
+                          throw new Error(j.error ?? `Failed to link service (${res.status})`);
+                        }
+                        onUpdate();
+                      }}
+                    />
+                  </div>
                 </div>
               ))}
             </div>

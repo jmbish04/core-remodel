@@ -368,6 +368,53 @@ workerEmailsRouter.post(
   },
 );
 
+/**
+ * Set (or clear) the services-catalog tie on an invoice line item.
+ *
+ * Body: `{ serviceId: number | null }`. A positive integer attaches the line
+ * item to that `services` catalog row and — mirroring the material `/link`
+ * endpoint above — flips `matchStatus` to `"matched"` since the reviewer has
+ * now resolved this line to something trackable. Passing `null` clears the
+ * tie (and leaves `matchStatus` alone; the reviewer may still want to link a
+ * material separately, or may be intentionally un-resolving the row).
+ */
+workerEmailsRouter.patch(
+  "/:id/invoices/:invoiceId/line-items/:lineItemId/service",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const lineItemId = parseInt(c.req.param("lineItemId"), 10);
+    if (Number.isNaN(lineItemId)) {
+      return c.json({ error: "Invalid lineItemId" }, 400);
+    }
+    const body = await c.req.json().catch(() => ({}));
+
+    // serviceId must be either `null` (clear the tie) or a positive integer.
+    let serviceId: number | null;
+    if (body.serviceId === null) {
+      serviceId = null;
+    } else {
+      const parsedId = Number(body.serviceId);
+      if (!Number.isInteger(parsedId) || parsedId <= 0) {
+        return c.json({ error: "serviceId must be a positive integer or null" }, 400);
+      }
+      serviceId = parsedId;
+    }
+
+    const [updatedLine] = await db
+      .update(workerEmailInvoiceLineItems)
+      .set({
+        serviceId,
+        ...(serviceId !== null ? { matchStatus: "matched" } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(workerEmailInvoiceLineItems.id, lineItemId))
+      .returning();
+    if (!updatedLine) return c.json({ error: "Line item not found" }, 404);
+
+    return c.json({ lineItem: updatedLine });
+  },
+);
+
 /** Skip a line item (not a trackable material). */
 workerEmailsRouter.post(
   "/:id/invoices/:invoiceId/line-items/:lineItemId/skip",
@@ -393,10 +440,30 @@ workerEmailsRouter.post(
 // Contracts (HITL)
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Update a reviewed contract. Also accepts `serviceId` (number | null) to
+ * tie the contract to a `services` catalog row — `null` clears the tie,
+ * omitting the field leaves it untouched (undefined is a no-op for Drizzle
+ * `.set()`), a positive integer attaches it. No matchStatus side effect here
+ * since contracts don't carry a match-status column.
+ */
 workerEmailsRouter.patch("/:id/contracts/:contractId", async (c) => {
   const db = drizzle(c.env.DB);
   const contractId = parseInt(c.req.param("contractId"));
   const updates = await c.req.json();
+
+  let serviceId: number | null | undefined;
+  if (updates.serviceId === undefined) {
+    serviceId = undefined;
+  } else if (updates.serviceId === null) {
+    serviceId = null;
+  } else {
+    const parsedId = Number(updates.serviceId);
+    if (!Number.isInteger(parsedId) || parsedId <= 0) {
+      return c.json({ error: "serviceId must be a positive integer or null" }, 400);
+    }
+    serviceId = parsedId;
+  }
 
   const [updated] = await db
     .update(workerEmailContracts)
@@ -408,6 +475,7 @@ workerEmailsRouter.patch("/:id/contracts/:contractId", async (c) => {
       effectiveDate: updates.effectiveDate,
       completionDate: updates.completionDate,
       notes: updates.notes,
+      ...(serviceId !== undefined ? { serviceId } : {}),
       updatedAt: new Date(),
     })
     .where(eq(workerEmailContracts.id, contractId))

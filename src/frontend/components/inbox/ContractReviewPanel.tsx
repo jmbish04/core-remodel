@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/componen
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import { ServicePicker } from "@/components/services";
 
 interface ContractReviewPanelProps {
   emailId: number;
@@ -19,6 +20,9 @@ export function ContractReviewPanel({ emailId, contract, onUpdate }: ContractRev
     effectiveDate: contract.effectiveDate || "",
     completionDate: contract.completionDate || "",
     notes: contract.notes || "",
+    // Catalog service tie — saved alongside the other fields via the contract
+    // PATCH endpoint, which accepts `serviceId` (number | null).
+    serviceId: (contract.serviceId ?? null) as number | null,
   });
   const [isSaving, setIsSaving] = useState(false);
 
@@ -168,6 +172,15 @@ export function ContractReviewPanel({ emailId, contract, onUpdate }: ContractRev
                 setFormData({ ...formData, totalValue: parseFloat(e.target.value) })
               }
               disabled={isConfirmed}
+            />
+          </div>
+          <div className="col-span-2 space-y-1.5">
+            <Label>Service</Label>
+            <ServicePicker
+              serviceId={formData.serviceId}
+              serviceName={contract.serviceName ?? null}
+              disabled={isConfirmed}
+              onPick={(serviceId) => setFormData({ ...formData, serviceId })}
             />
           </div>
         </div>
