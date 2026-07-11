@@ -4,6 +4,7 @@ import { drizzle } from "drizzle-orm/d1";
 import {
   productImages,
   productSpecs,
+  showroomProductMappings,
   showroomStoreProducts,
   showroomStores,
   storeProductRating,
@@ -136,11 +137,16 @@ export async function loadProductPromptContext(
     throw new Error(`Showroom product ${productId} not found`);
   }
 
+  // A product has no owning store — it is global. Resolve one representative
+  // showroom (if any) that carries it via showroom_product_mappings, purely
+  // to ground the research prompt with store context when available.
   const [store] = await db
-    .select()
-    .from(showroomStores)
-    .where(eq(showroomStores.id, product.storeId))
-    .limit(1);
+    .select({ store: showroomStores })
+    .from(showroomProductMappings)
+    .innerJoin(showroomStores, eq(showroomProductMappings.showroomId, showroomStores.id))
+    .where(eq(showroomProductMappings.productId, productId))
+    .limit(1)
+    .then((rows) => rows.map((r) => r.store));
 
   const [
     activeProductRatings,

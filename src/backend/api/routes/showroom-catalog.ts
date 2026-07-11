@@ -18,6 +18,7 @@ import {
   showroomStores,
   storeBayareaCities,
   productSpecs,
+  showroomProductMappings,
 } from "@backend/db/schema/showroom/index";
 
 export const showroomCatalogRouter = new Hono<{ Bindings: Env }>();
@@ -32,6 +33,11 @@ showroomCatalogRouter.get("/catalog/products", async (c) => {
   const hub = c.req.query("hub");
   const linked = c.req.query("linked");
 
+  // A product has no owning store — it is global and may be carried by zero
+  // or more showrooms via showroom_product_mappings. A left join against the
+  // mapping (rather than a direct storeId column) preserves the original
+  // one-row-per-store semantics; unmapped products still surface with null
+  // store/hub columns via the outer join.
   let query = db
     .select({
       product: showroomStoreProducts,
@@ -42,7 +48,8 @@ showroomCatalogRouter.get("/catalog/products", async (c) => {
       cityName: storeBayareaCities.bayAreaCityName,
     })
     .from(showroomStoreProducts)
-    .leftJoin(showroomStores, eq(showroomStoreProducts.storeId, showroomStores.id))
+    .leftJoin(showroomProductMappings, eq(showroomProductMappings.productId, showroomStoreProducts.id))
+    .leftJoin(showroomStores, eq(showroomProductMappings.showroomId, showroomStores.id))
     .leftJoin(storeBayareaCities, eq(showroomStores.bayAreaCityId, storeBayareaCities.id))
     .orderBy(desc(showroomStoreProducts.createdAt))
     .$dynamic();
@@ -63,16 +70,27 @@ showroomCatalogRouter.get("/catalog/products", async (c) => {
 
   const rows = await query;
 
-  return c.json({
-    products: rows.map((r) => ({
+  // A product may be carried at multiple showrooms (many-to-many via
+  // showroom_product_mappings), producing one joined row per mapping. Collapse
+  // to a single card per product — the first matching mapping supplies the
+  // representative store/hub columns. Filters above still match a product if
+  // ANY of its mappings qualifies.
+  const seen = new Set<number>();
+  const products: Array<Record<string, unknown>> = [];
+  for (const r of rows) {
+    if (seen.has(r.product.id)) continue;
+    seen.add(r.product.id);
+    products.push({
       ...r.product,
       storeName: r.storeName,
       pricePoint: r.pricePoint,
       hubRoute: r.hubRoute,
       hubName: r.hubName,
       cityName: r.cityName,
-    })),
-  });
+    });
+  }
+
+  return c.json({ products });
 });
 
 /**
@@ -98,10 +116,13 @@ showroomCatalogRouter.get("/catalog/compare", async (c) => {
     return c.json({ products: [], specKeys: [], specMatrix: {} });
   }
 
+  // A product has no owning store — resolve a representative carrying
+  // showroom (if any) via showroom_product_mappings for display purposes.
   const rows = await db
     .select({ product: showroomStoreProducts, storeName: showroomStores.name })
     .from(showroomStoreProducts)
-    .leftJoin(showroomStores, eq(showroomStoreProducts.storeId, showroomStores.id))
+    .leftJoin(showroomProductMappings, eq(showroomProductMappings.productId, showroomStoreProducts.id))
+    .leftJoin(showroomStores, eq(showroomProductMappings.showroomId, showroomStores.id))
     .where(inArray(showroomStoreProducts.id, ids));
 
   const specRows = await db
@@ -122,8 +143,10 @@ showroomCatalogRouter.get("/catalog/compare", async (c) => {
     specMatrix[key][s.storeProductId] = `${s.specValue ?? ""}${s.unit ? ` ${s.unit}` : ""}`.trim();
   }
 
-  // Preserve the caller's requested order.
-  const byId = new Map(rows.map((r) => [r.product.id, r]));
+  // Preserve the caller's requested order. A product may have multiple mapping
+  // rows; keep the first deterministically for the representative store name.
+  const byId = new Map<number, (typeof rows)[number]>();
+  for (const r of rows) if (!byId.has(r.product.id)) byId.set(r.product.id, r);
   const products = ids
     .map((id) => byId.get(id))
     .filter((r): r is NonNullable<typeof r> => r != null)

@@ -39,6 +39,8 @@ import {
   browserRunPages,
   showroomPhotosMapping,
   showroomHours,
+  productPriceObservations,
+  productShowroomPhotos,
 } from "@backend/db/schema/showroom/index";
 import {
   brands,
@@ -437,7 +439,6 @@ const createStoreSchema = z.object({
 });
 
 const createProductSchema = z.object({
-  storeId: z.number(),
   itemName: z.string().min(1),
   description: z.string().optional().nullable(),
   colors: z.string().optional().nullable(),
@@ -770,8 +771,17 @@ showroomStoresRouter.get("/products/:pid/research/context", async (c) => {
     return c.json({ success: false, error: "Product not found" }, 404);
   }
 
-  const [findings, images, specs, ratings, intelRows, storeRows, brandRows] =
-    await Promise.all([
+  const [
+    findings,
+    images,
+    specs,
+    ratings,
+    intelRows,
+    storeRows,
+    brandRows,
+    priceObservationRows,
+    photos,
+  ] = await Promise.all([
       db
         .select()
         .from(storeProductResearch)
@@ -801,11 +811,13 @@ showroomStoresRouter.get("/products/:pid/research/context", async (c) => {
         .from(storeProductIntel)
         .where(eq(storeProductIntel.storeProductId, productId))
         .limit(1),
+      // A product has no owning store — resolve carrying showrooms via the
+      // showroom_product_mappings join instead.
       db
         .select({ id: showroomStores.id, name: showroomStores.name })
-        .from(showroomStores)
-        .where(eq(showroomStores.id, product.storeId))
-        .limit(1),
+        .from(showroomProductMappings)
+        .innerJoin(showroomStores, eq(showroomProductMappings.showroomId, showroomStores.id))
+        .where(eq(showroomProductMappings.productId, productId)),
       product.brandId != null
         ? db
             .select({ id: brands.id, name: brands.name })
@@ -813,6 +825,17 @@ showroomStoresRouter.get("/products/:pid/research/context", async (c) => {
             .where(eq(brands.id, product.brandId))
             .limit(1)
         : Promise.resolve([] as Array<{ id: number; name: string }>),
+      // Every price seen for this product (showroom / online retailer /
+      // manufacturer), with the showroom name resolved when present.
+      db
+        .select({ obs: productPriceObservations, showroomName: showroomStores.name })
+        .from(productPriceObservations)
+        .leftJoin(showroomStores, eq(showroomStores.id, productPriceObservations.showroomId))
+        .where(eq(productPriceObservations.productId, productId)),
+      db
+        .select()
+        .from(productShowroomPhotos)
+        .where(eq(productShowroomPhotos.productId, productId)),
     ]);
 
   return c.json({
@@ -820,11 +843,13 @@ showroomStoresRouter.get("/products/:pid/research/context", async (c) => {
     product: {
       ...product,
       brandName: brandRows[0]?.name ?? null,
-      storeName: storeRows[0]?.name ?? null,
+      showrooms: storeRows,
     },
     findings,
     images,
     specs,
+    priceObservations: priceObservationRows.map((r) => ({ ...r.obs, showroomName: r.showroomName })),
+    photos,
     rating: ratings[0] ?? null,
     intel: intelRows[0] ?? null,
   });
@@ -926,12 +951,12 @@ showroomStoresRouter.patch("/research/findings/:id", async (c) => {
   }
   const { scope, reviewStatus, reviewReason } = parsed.data;
 
-  // ── Ownership check ───────────────────────────────────────────────────────
-  // Resolve the owning storeId from the finding row so we can confirm it
-  // belongs to a real store, guarding against ID-guessing across entities.
+  // ── Existence check ────────────────────────────────────────────────────────
+  // Confirm the finding row joins to a real product, guarding against
+  // ID-guessing across entities. Products have no owning store to resolve.
   if (scope === "product") {
     const [row] = await db
-      .select({ storeId: showroomStoreProducts.storeId })
+      .select({ productId: showroomStoreProducts.id })
       .from(storeProductResearch)
       .innerJoin(
         showroomStoreProducts,
@@ -996,12 +1021,13 @@ showroomStoresRouter.patch("/research/images/:id", async (c) => {
   }
   const { scope, reviewStatus, reviewReason } = parsed.data;
 
-  // ── Ownership check ───────────────────────────────────────────────────────
-  // Resolve the owning storeId from the image row to guard against
-  // cross-entity ID guessing before applying the patch.
+  // ── Existence check ────────────────────────────────────────────────────────
+  // Confirm the image row joins to a real product, guarding against
+  // cross-entity ID guessing before applying the patch. Products have no
+  // owning store to resolve.
   if (scope === "product") {
     const [row] = await db
-      .select({ storeId: showroomStoreProducts.storeId })
+      .select({ productId: showroomStoreProducts.id })
       .from(productImages)
       .innerJoin(
         showroomStoreProducts,
@@ -1374,11 +1400,18 @@ showroomStoresRouter.get("/:id", async (c) => {
   // Parallel data loads
   const [products, categories, notes, ratings, externalRatings, research, tags, directBrands, productBrands] =
     await Promise.all([
+      // A product has no owning store — products "for" this store are those
+      // carried via showroom_product_mappings.
       db
-        .select()
-        .from(showroomStoreProducts)
-        .where(eq(showroomStoreProducts.storeId, storeId))
-        .orderBy(desc(showroomStoreProducts.createdAt)),
+        .select({ product: showroomStoreProducts })
+        .from(showroomProductMappings)
+        .innerJoin(
+          showroomStoreProducts,
+          eq(showroomProductMappings.productId, showroomStoreProducts.id)
+        )
+        .where(eq(showroomProductMappings.showroomId, storeId))
+        .orderBy(desc(showroomStoreProducts.createdAt))
+        .then((rows) => rows.map((r) => r.product)),
       db
         .select({
           mapping: showroomStoreCategoryMapping,
@@ -1939,33 +1972,48 @@ showroomStoresRouter.delete("/:id", async (c) => {
 
 /**
  * GET /:id/products — List products for a store.
+ *
+ * A product has no owning store — this returns products carried by the
+ * store via `showroom_product_mappings`.
  */
 showroomStoresRouter.get("/:id/products", async (c) => {
   const db = drizzle(c.env.DB);
   const storeId = Number(c.req.param("id"));
 
-  const products = await db
-    .select()
-    .from(showroomStoreProducts)
-    .where(eq(showroomStoreProducts.storeId, storeId))
+  const rows = await db
+    .select({ product: showroomStoreProducts })
+    .from(showroomProductMappings)
+    .innerJoin(
+      showroomStoreProducts,
+      eq(showroomProductMappings.productId, showroomStoreProducts.id)
+    )
+    .where(eq(showroomProductMappings.showroomId, storeId))
     .orderBy(desc(showroomStoreProducts.createdAt));
 
-  return c.json({ products });
+  return c.json({ products: rows.map((r) => r.product) });
 });
 
 /**
  * POST /:id/products — Add a product to a store.
+ *
+ * A product is global (no owning store); this endpoint creates the row and
+ * then upserts a `showroom_product_mappings` link so the store carries it.
  */
 showroomStoresRouter.post("/:id/products", async (c) => {
   const db = drizzle(c.env.DB);
   const storeId = Number(c.req.param("id"));
   const body = await c.req.json();
-  const data = createProductSchema.parse({ ...body, storeId });
+  const data = createProductSchema.parse(body);
 
   const [inserted] = await db
     .insert(showroomStoreProducts)
     .values(data)
     .returning();
+
+  await db
+    .insert(showroomProductMappings)
+    .values({ showroomId: storeId, productId: inserted.id })
+    .onConflictDoNothing();
 
   c.executionCtx.waitUntil(
     (async () => {
@@ -2299,12 +2347,12 @@ showroomStoresRouter.post("/scan", async (c) => {
           extractionStatus = "success";
           aiRationale = `VLM extracted product: ${parsed.product_name ?? "unknown"}`;
 
-          // Auto-create product if we have a store context
+          // Auto-create product (global catalog) if we have a store context,
+          // then link it to that showroom via showroom_product_mappings.
           if (body.storeId && parsed.product_name) {
             const [created] = await db
               .insert(showroomStoreProducts)
               .values({
-                storeId: body.storeId,
                 itemName: parsed.product_name,
                 description: parsed.description,
                 colors: parsed.color_finish,
@@ -2315,6 +2363,11 @@ showroomStoresRouter.post("/scan", async (c) => {
               .returning();
 
             autoCreatedProductId = created.id;
+
+            await db
+              .insert(showroomProductMappings)
+              .values({ showroomId: body.storeId, productId: created.id })
+              .onConflictDoNothing();
           }
         } catch {
           extractionStatus = "partial";
