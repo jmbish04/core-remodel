@@ -20,6 +20,10 @@
  *     GET/PUT /brands/:brandId/categories
  *     GET/PUT /products/:productId/categories
  *
+ *   Phase-3 review-form vocab:
+ *     GET  /brands?categoryId=          POST /brands
+ *     GET  /styles?categoryId=
+ *
  * Mounts at /api/config (wired in api/index.ts), behind requireAccessAuth.
  * Plain Hono + hand-written Zod v4 (drizzle-zod is banned — breaks the build,
  * see products-catalog.ts / showroom-products.ts for the established pattern
@@ -27,7 +31,7 @@
  */
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { and, eq, asc } from "drizzle-orm";
+import { and, eq, asc, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -39,7 +43,11 @@ import {
   photoColors,
   brandCategories,
   productCategories,
+  brands,
+  productShowroomPhotos,
+  productPhotoBuckets,
 } from "@backend/db";
+import { resolveBrandId } from "@backend/services/image-processor/intake-helpers";
 
 export const configRouter = new Hono<{ Bindings: Env }>();
 
@@ -61,7 +69,7 @@ function badRequest(c: { json: (body: unknown, status: 400) => Response }, messa
  * atomic. De-dupes `defIds` — the unique index on the mapping table would
  * otherwise reject repeats.
  */
-async function replaceMapping(
+export async function replaceMapping(
   db: Db,
   mapTable: any,
   ownerCol: any,
@@ -225,6 +233,104 @@ configRouter.patch("/colors/:id", async (c) => {
   const [updated] = await db.update(colors).set(bodyParsed.data).where(eq(colors.id, idParsed.data.id)).returning();
   if (!updated) return c.json({ error: { code: "not_found", message: "Color not found" } }, 404);
   return c.json({ color: updated });
+});
+
+// ─── BRANDS (Phase 3 review form) ──────────────────────────────────────────
+
+const brandsQuerySchema = z.object({ categoryId: z.coerce.number().int().positive().optional() });
+const createBrandSchema = z.object({
+  name: z.string().min(1),
+  categoryId: z.number().int().positive().optional(),
+});
+
+/**
+ * GET /brands?categoryId= — brand picker for the review form. `brands` has no
+ * `isActive` column (unlike categories/subcategories/colors), so every row is
+ * eligible; when `categoryId` is given, scope to brands mapped via
+ * `brand_categories` (the Phase-1 mapping table).
+ */
+configRouter.get("/brands", async (c) => {
+  const parsed = brandsQuerySchema.safeParse(c.req.query());
+  if (!parsed.success) return badRequest(c, "Invalid query params", parsed.error.flatten());
+
+  const db = drizzle(c.env.DB);
+  if (parsed.data.categoryId != null) {
+    const rows = await db
+      .select({ id: brands.id, name: brands.name })
+      .from(brands)
+      .innerJoin(brandCategories, eq(brandCategories.brandId, brands.id))
+      .where(eq(brandCategories.categoryId, parsed.data.categoryId))
+      .orderBy(asc(brands.name));
+    return c.json({ brands: rows });
+  }
+
+  const rows = await db.select({ id: brands.id, name: brands.name }).from(brands).orderBy(asc(brands.name));
+  return c.json({ brands: rows });
+});
+
+/**
+ * POST /brands — the review form's "Other" brand create path. Reuses
+ * `resolveBrandId` (case-insensitive find-or-create) so a brand typed here
+ * never diverges from the one an AI extraction would resolve to. Optionally
+ * maps the new brand to a category in the same request.
+ */
+configRouter.post("/brands", async (c) => {
+  const parsed = createBrandSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return badRequest(c, "Invalid brand body", parsed.error.flatten());
+
+  const db = drizzle(c.env.DB);
+  const brandId = await resolveBrandId(db, parsed.data.name);
+  if (brandId == null) return badRequest(c, "Invalid brand name");
+
+  if (parsed.data.categoryId != null) {
+    await db.insert(brandCategories).values({ brandId, categoryId: parsed.data.categoryId }).onConflictDoNothing();
+  }
+
+  const [brand] = await db.select({ id: brands.id, name: brands.name }).from(brands).where(eq(brands.id, brandId)).limit(1);
+  return c.json({ brand }, 201);
+});
+
+// ─── STYLES (Phase 3 review form) ──────────────────────────────────────────
+
+const stylesQuerySchema = z.object({ categoryId: z.coerce.number().int().positive().optional() });
+
+/**
+ * GET /styles?categoryId= — free-text style autocomplete for the review form.
+ * `showroom_store_products` has no `style` column (checked: it doesn't exist),
+ * so styles are sourced from `product_showroom_photos.attributes->>'style'`
+ * (the AI extraction seed, corrected by the reviewer) on REVIEWED buckets only
+ * — draft/processed-but-unreviewed style guesses aren't offered as vocabulary.
+ * Lowercase-deduped (first-seen casing wins), capped at 100, alphabetical.
+ */
+configRouter.get("/styles", async (c) => {
+  const parsed = stylesQuerySchema.safeParse(c.req.query());
+  if (!parsed.success) return badRequest(c, "Invalid query params", parsed.error.flatten());
+
+  const db = drizzle(c.env.DB);
+  const styleExpr = sql<string>`json_extract(${productShowroomPhotos.attributes}, '$.style')`;
+  const conditions = [
+    eq(productPhotoBuckets.status, "reviewed"),
+    sql`${styleExpr} is not null`,
+    sql`trim(${styleExpr}) != ''`,
+  ];
+  if (parsed.data.categoryId != null) conditions.push(eq(photoCategories.categoryId, parsed.data.categoryId));
+
+  const rows = await db
+    .selectDistinct({ style: styleExpr })
+    .from(productShowroomPhotos)
+    .innerJoin(productPhotoBuckets, eq(productShowroomPhotos.bucketId, productPhotoBuckets.id))
+    .leftJoin(photoCategories, eq(photoCategories.photoId, productShowroomPhotos.id))
+    .where(and(...conditions))
+    .orderBy(asc(styleExpr));
+
+  const seen = new Map<string, string>();
+  for (const row of rows) {
+    const value = (row.style ?? "").trim();
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (!seen.has(key)) seen.set(key, value);
+  }
+  return c.json({ styles: [...seen.values()].slice(0, 100) });
 });
 
 // ─── MAPPINGS ───────────────────────────────────────────────────────────────

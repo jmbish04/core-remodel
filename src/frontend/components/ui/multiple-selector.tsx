@@ -17,6 +17,19 @@ export interface MultipleSelectorOption {
   label: string;
   description?: string;
   disabled?: boolean;
+  /** Optional hex color — renders a swatch before the label (e.g. for colors). */
+  hexCode?: string | null;
+}
+
+function Swatch({ hex }: { hex?: string | null }) {
+  if (!hex) return null;
+  return (
+    <span
+      aria-hidden="true"
+      className="mr-1.5 inline-block size-3 shrink-0 rounded-[3px] ring-1 ring-border/60"
+      style={{ backgroundColor: hex }}
+    />
+  );
 }
 
 export interface MultipleSelectorProps {
@@ -204,7 +217,10 @@ export function MultipleSelector(props: MultipleSelectorProps) {
                   </span>
 
                   <span className="min-w-0 flex-1">
-                    <span className="block truncate font-medium">{option.label}</span>
+                    <span className="flex items-center truncate font-medium">
+                      <Swatch hex={option.hexCode} />
+                      {option.label}
+                    </span>
                     {option.description && (
                       <span className="block text-xs text-muted-foreground">
                         {option.description}
@@ -258,6 +274,7 @@ export function MultipleSelector(props: MultipleSelectorProps) {
               onClick={() => toggle(option.value)}
               className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-1 text-[11px] text-muted-foreground hover:bg-muted/80"
             >
+              <Swatch hex={option.hexCode} />
               <span>{option.label}</span>
               <X className="size-3" />
             </button>
