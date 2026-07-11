@@ -1,8 +1,9 @@
 import { sql } from "drizzle-orm";
-import { integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 import { remodelScenarios } from "../home/remodel_scenarios";
 import { rooms } from "../home/rooms";
+import { services } from "../services/services";
 
 export const estimateStatuses = sqliteTable("estimate_statuses", {
   id: integer("id").primaryKey({ autoIncrement: true }),
@@ -136,26 +137,36 @@ export const estimateDocuments = sqliteTable("estimate_documents", {
     .default(sql`(unixepoch())`),
 });
 
-export const estimateLineItems = sqliteTable("estimate_line_items", {
-  id: integer("id").primaryKey({ autoIncrement: true }),
-  estimateRevisionId: integer("estimate_revision_id")
-    .notNull()
-    .references(() => estimateRevisions.id, { onDelete: "cascade" }),
-  itemCode: text("item_code"),
-  description: text("description").notNull(),
-  qty: real("qty"),
-  uom: text("uom"),
-  unitCostCents: integer("unit_cost_cents"),
-  lineTotalCents: integer("line_total_cents"),
-  taxCents: integer("tax_cents"),
-  notes: text("notes"),
-  datetimeCreated: integer("datetime_created", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  datetimeUpdated: integer("datetime_updated", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-});
+export const estimateLineItems = sqliteTable(
+  "estimate_line_items",
+  {
+    id: integer("id").primaryKey({ autoIncrement: true }),
+    estimateRevisionId: integer("estimate_revision_id")
+      .notNull()
+      .references(() => estimateRevisions.id, { onDelete: "cascade" }),
+    itemCode: text("item_code"),
+    description: text("description").notNull(),
+    qty: real("qty"),
+    uom: text("uom"),
+    unitCostCents: integer("unit_cost_cents"),
+    lineTotalCents: integer("line_total_cents"),
+    taxCents: integer("tax_cents"),
+    notes: text("notes"),
+    // Billed service (labor/design/consulting) this line item bills against,
+    // for business/architect/consulting estimates that bill services rather
+    // than materials. Nullable — most line items are material-based.
+    serviceId: integer("service_id").references(() => services.id, { onDelete: "set null" }),
+    datetimeCreated: integer("datetime_created", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    datetimeUpdated: integer("datetime_updated", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (t) => ({
+    byServiceId: index("idx_estimate_line_items_service_id").on(t.serviceId),
+  }),
+);
 
 export const estimateRoomMappings = sqliteTable("estimate_room_mappings", {
   id: integer("id").primaryKey({ autoIncrement: true }),

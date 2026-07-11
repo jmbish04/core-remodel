@@ -74,6 +74,7 @@ import { googlePhotosRouter } from "./routes/google-photos";
 import { brandsRouter } from "./routes/brands";
 import { showroomSeedRouter } from "./routes/showroom-seed";
 import { materialsRouter } from "./routes/materials";
+import { servicesRouter } from "./routes/services";
 import { wishlistRouter } from "./routes/wishlist";
 import { workerEmailsRouter } from "./routes/worker-emails";
 import { showroomGapsRouter } from "./routes/showroom-gaps";
@@ -145,6 +146,8 @@ app.use("/api/brands", requireAccessAuth);
 app.use("/api/brands/*", requireAccessAuth);
 app.use("/api/materials", requireAccessAuth);
 app.use("/api/materials/*", requireAccessAuth);
+app.use("/api/services", requireAccessAuth);
+app.use("/api/services/*", requireAccessAuth);
 app.use("/api/wishlist", requireAccessAuth);
 app.use("/api/wishlist/*", requireAccessAuth);
 app.use("/api/worker-emails", requireAccessAuth);
@@ -254,6 +257,7 @@ app.route("/api/showroom-stores", showroomScanRouter);
 app.route("/api/showroom-stores", showroomBackfillRouter);
 app.route("/api/research-jobs", researchJobsRouter);
 app.route("/api/materials", materialsRouter);
+app.route("/api/services", servicesRouter);
 app.route("/api/wishlist", wishlistRouter);
 // Worker-email HITL inbox API (invoices / contracts / receipts / staged
 // companies). Mounting this is what makes /admin/inbox show emails.

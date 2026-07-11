@@ -115,6 +115,8 @@ export * from "./research/index";
 
 export * from "./scrum/index";
 
+export * from "./services/index";
+
 // gmail
 export * from "./gmail/gmail_threads";
 export * from "./gmail/gmail_messages";
