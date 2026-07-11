@@ -11,7 +11,11 @@ import { dispatchDueWorkflows } from "./backend/services/workflow-dispatcher";
 import { autoHealImageUploads } from "./backend/services/image-processor/auto-heal";
 import { monitorShowroomSourcingCoverage } from "./backend/services/showroom-sourcing-monitor";
 import { ingestCompanyEmails } from "./backend/services/gmail/ingestion";
-import { isRequestAuthenticated } from "./backend/utils/access";
+import {
+  getLandingPrefFromRequest,
+  isRequestAuthenticated,
+  isSafeInternalPath,
+} from "./backend/utils/access";
 import { handleOAuthAuthorize } from "./backend/mcp/oauth-ui";
 import { RemodelMcpAgent } from "./backend/mcp/agent";
 import { routeAgentRequest } from "agents";
@@ -125,6 +129,24 @@ const legacyHandler: ExportedHandler<Env> = {
       if (url.pathname === from || url.pathname.startsWith(`${from}/`)) {
         const rest = url.pathname.slice(from.length);
         return Response.redirect(`${url.origin}${to}${rest}${url.search}`, 301);
+      }
+    }
+
+    // Device-scoped landing preference: an authed device that has chosen a
+    // default landing page (from /admin/config/preferences) is redirected there
+    // when it hits the app root exactly. The choice lives in a per-device cookie,
+    // so each device routes independently (Tesla → drives, phone → showrooms).
+    // Only fires for authed devices; unauthed root hits fall through to the
+    // normal home/login. Path is validated to block open-redirects.
+    if (url.pathname === "/") {
+      const landing = getLandingPrefFromRequest(request);
+      if (
+        landing &&
+        landing !== "/" &&
+        isSafeInternalPath(landing) &&
+        (await isRequestAuthenticated(request, env))
+      ) {
+        return Response.redirect(`${url.origin}${landing}`, 302);
       }
     }
 

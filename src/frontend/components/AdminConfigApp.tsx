@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Save, Loader2, RefreshCw } from "lucide-react";
+import { Save, Loader2, RefreshCw, ChevronRight, MapPinned } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -89,6 +89,24 @@ export function AdminConfigApp() {
 
   return (
     <div className="space-y-6 max-w-4xl">
+      <a
+        href="/admin/config/preferences"
+        className="group block rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Card className="transition-colors group-hover:bg-card/80">
+          <CardContent className="flex items-center gap-4 py-4">
+            <MapPinned className="size-5 shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <p className="font-semibold">Device Preferences</p>
+              <p className="text-sm text-muted-foreground">
+                Set this device's default landing page (Tesla → drives, phone → showrooms).
+              </p>
+            </div>
+            <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+          </CardContent>
+        </Card>
+      </a>
+
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">

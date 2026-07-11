@@ -5,6 +5,15 @@ import { deleteCookie, setCookie } from "hono/cookie";
 export const ACCESS_COOKIE_NAME = "remodel_access";
 export const VISITOR_COOKIE_NAME = "remodel_visitor";
 
+/**
+ * Device-scoped landing preference. Holds the internal path an authed device
+ * should be redirected to when it hits the app root (`/`) — set per device from
+ * `/admin/config/preferences`, so a Tesla can land on the drive list while a
+ * phone lands on the showroom directory. Not sensitive: it only controls this
+ * device's own redirect, so it is a plain (JS-writable) cookie.
+ */
+export const LANDING_PREF_COOKIE_NAME = "remodel_landing";
+
 const ACCESS_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const VISITOR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 
@@ -67,6 +76,19 @@ export function getAccessCookieFromRequest(request: Request): string | null {
 
 export function getVisitorCookieFromRequest(request: Request): string | null {
   return getCookieValueFromHeader(request.headers.get("cookie"), VISITOR_COOKIE_NAME);
+}
+
+export function getLandingPrefFromRequest(request: Request): string | null {
+  return getCookieValueFromHeader(request.headers.get("cookie"), LANDING_PREF_COOKIE_NAME);
+}
+
+/**
+ * A safe internal redirect target: an absolute in-app path only. Blocks
+ * protocol-relative (`//host`) and off-site URLs so the root-landing redirect
+ * can never be turned into an open redirect via a crafted cookie.
+ */
+export function isSafeInternalPath(path: string): boolean {
+  return path.startsWith("/") && !path.startsWith("//") && /^\/[A-Za-z0-9/_-]*$/.test(path);
 }
 
 export async function isRequestAuthenticated(request: Request, env: Env): Promise<boolean> {
