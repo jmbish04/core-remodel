@@ -82,8 +82,10 @@ export function ServicePicker({
     if (!open) return;
     let active = true;
     if (debounceRef.current) clearTimeout(debounceRef.current);
+    // Show the searching state immediately (not after the 250ms debounce) so the
+    // empty-list message can't flash before the request starts.
+    setSearching(true);
     debounceRef.current = setTimeout(async () => {
-      setSearching(true);
       try {
         const url = query.trim()
           ? `/api/services?search=${encodeURIComponent(query.trim())}`

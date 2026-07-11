@@ -393,11 +393,10 @@ workerEmailsRouter.patch(
     if (body.serviceId === null) {
       serviceId = null;
     } else {
-      const parsedId = Number(body.serviceId);
-      if (!Number.isInteger(parsedId) || parsedId <= 0) {
+      if (typeof body.serviceId !== "number" || !Number.isInteger(body.serviceId) || body.serviceId <= 0) {
         return c.json({ error: "serviceId must be a positive integer or null" }, 400);
       }
-      serviceId = parsedId;
+      serviceId = body.serviceId;
     }
 
     const [updatedLine] = await db
@@ -458,11 +457,10 @@ workerEmailsRouter.patch("/:id/contracts/:contractId", async (c) => {
   } else if (updates.serviceId === null) {
     serviceId = null;
   } else {
-    const parsedId = Number(updates.serviceId);
-    if (!Number.isInteger(parsedId) || parsedId <= 0) {
+    if (typeof updates.serviceId !== "number" || !Number.isInteger(updates.serviceId) || updates.serviceId <= 0) {
       return c.json({ error: "serviceId must be a positive integer or null" }, 400);
     }
-    serviceId = parsedId;
+    serviceId = updates.serviceId;
   }
 
   const [updated] = await db

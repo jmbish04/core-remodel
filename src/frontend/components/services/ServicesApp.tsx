@@ -119,7 +119,7 @@ export function ServicesApp() {
   // Debounced reload whenever the search or archived filter changes.
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => void load(), 250);
+    debounceRef.current = setTimeout(() => void load({ silent: true }), 250);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
@@ -128,7 +128,13 @@ export function ServicesApp() {
   const sorted = useMemo(() => {
     const copy = [...services];
     copy.sort((a, b) => {
-      if (sortKey === "cost") return (b.defaultUnitCost ?? -1) - (a.defaultUnitCost ?? -1);
+      if (sortKey === "cost") {
+        // Nulls always sort to the bottom (a -1 fallback would misorder discounts).
+        if (a.defaultUnitCost == null && b.defaultUnitCost == null) return a.name.localeCompare(b.name);
+        if (a.defaultUnitCost == null) return 1;
+        if (b.defaultUnitCost == null) return -1;
+        return b.defaultUnitCost - a.defaultUnitCost;
+      }
       if (sortKey === "category") {
         return (a.category ?? "").localeCompare(b.category ?? "") || a.name.localeCompare(b.name);
       }

@@ -1039,11 +1039,10 @@ estimatesRouter.patch("/line-items/:lineItemId", async (c) => {
   if (body.serviceId === null) {
     serviceId = null;
   } else {
-    const parsedId = Number(body.serviceId);
-    if (!Number.isInteger(parsedId) || parsedId <= 0) {
+    if (typeof body.serviceId !== "number" || !Number.isInteger(body.serviceId) || body.serviceId <= 0) {
       return c.json({ error: "serviceId must be a positive integer or null" }, 400);
     }
-    serviceId = parsedId;
+    serviceId = body.serviceId;
   }
 
   const [updated] = await db
