@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { GmailThreadList } from "./GmailThreadList";
 import { GmailThreadView } from "./GmailThreadView";
+import { EmptyMailbox } from "./EmptyMailbox";
 import { gmailApi, type GmailInboxThreadItem } from "./types";
 
 const PAGE_SIZE = 50;
@@ -131,11 +132,8 @@ export function GmailInboxApp() {
             loading={loading}
             onSearch={handleSearch}
             searchPlaceholder="Search mail"
-            emptyLabel={
-              query
-                ? `No conversations match “${query}”.`
-                : "No conversations yet."
-            }
+            emptyLabel={query ? `No conversations match “${query}”.` : "No conversations yet."}
+            emptyContent={query ? undefined : <EmptyMailbox />}
             footer={
               hasMore ? (
                 <Button
