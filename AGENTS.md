@@ -134,3 +134,35 @@ its own dedicated sidebar, grouped. One page per vocabulary; all share the confi
 **Categories:** a shared `categories` definition table + `subcategories` (each mapped to a
 parent category) + a generic object↔category mapping (photos, brands, products all map via
 `category_id` FK). Reconstruct as `{category} / {subcategory}`.
+
+## Reusable data-entry components (USE THESE — do not hand-roll)
+
+**Currency / price** → `@/components/ui/currency-input` `<CurrencyInput>`.
+- Renders a `$`-prepended field; `onValueChange(text, cents)` hands back BOTH the
+  verbatim text and integer cents. NEVER a bare `<Input>` for money.
+- **D1 for currency: store BOTH** a `<field>_text` TEXT column (verbatim, e.g.
+  "$1,299.00" or "call for pricing") AND a `<field>_cents` INTEGER column (numeric,
+  for sort/compare/sum). The API accepts text and derives cents (or takes an explicit
+  override). See `product_price_observations` (price/priceCents) for the pattern.
+
+**Single-select with "Other"** → `@/components/ui/combobox-with-other` `<ComboboxWithOther>`
+(brand, style, single category…). **Multi-select with "Other"** → `@/components/ui/multiple-selector`
+`<MultipleSelector>` (colors, categories…). Both support option create via `onCreateOther`/
+`onCreateOption` (wire to the definition-table create API) and hex swatches (pass `hexCode`).
+NEVER a native `<select>` when "Other" creation is expected; NEVER comma-separated multi-values.
+
+**Config pages** → every definition vocabulary gets a `/config/<group>/<name>` page
+(e.g. `/config/photo/colors`) built on the reusable **`ConfigShell`** scaffold
+(`@/components/config/ConfigShell` — shared config sidebar + a definition-table CRUD panel:
+list active rows, add, edit, soft-deactivate; color picker when the definition has `hex_code`).
+`/config` opens in its own tab with the grouped config sidebar. One page per vocabulary.
+
+## MANDATORY planning-phase compliance scan
+
+During ANY planning/design/review phase, scan the touched surface for **currency** and
+**multi-select** data points. For EACH one found that is NOT properly represented across
+**all three** layers — UX (the reusable component above), D1 (currency = text+cents;
+multi-select = definition + mapping tables), and API (list options / create-Other / map /
+list-mappings / filter-by-mapping) — **FLAG it to the user** and ask, per instance, whether
+it should **stay as-is** or be **brought into compliance**. Do not silently leave a
+comma-separated multi-value or a text-only currency field; surface it.
