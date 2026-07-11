@@ -150,6 +150,15 @@
       "id": "859ea6b96deb4140831a1d09a70ffcd4",
       "remote": true,
     },
+    // Ad-hoc agent memories from any endpoint including mcp tools
+    // this is intended to provide agents a place to park memories, 
+    // notes, works in progress that either don't have a place in d1 yet,
+    // d1 is blocked for some reason or outage, etc.
+    {
+      "binding": "AGENT_ADHOC_MEMORY_KV",
+      "id": "d2c2b93046e742b88c24915e63c7f0ad",
+      "remote": true,
+    }
   ],
   "d1_databases": [
     {
