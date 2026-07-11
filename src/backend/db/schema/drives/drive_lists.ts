@@ -26,7 +26,12 @@ export const driveLists = sqliteTable(
     title: text("title").notNull(),
     description: text("description"),
 
-    /** Optional freeform planning notes for the day. */
+    /**
+     * Optional planning notes — a JSON-encoded array of note strings, each
+     * rendered as its own full-width card in the drive viewport. Read/written
+     * via `parseDriveNotes`/`serializeDriveNotes` (legacy rows hold one freeform
+     * chunk and are split on blank lines on read).
+     */
     notes: text("notes"),
 
     /** Lifecycle: draft → active (drivable) → completed → archived. */

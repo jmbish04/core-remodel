@@ -21,6 +21,7 @@ import {
   Navigation,
   Phone,
   ShieldAlert,
+  StickyNote,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -54,7 +55,7 @@ type Drive = {
   slug: string;
   title: string;
   description: string | null;
-  notes: string | null;
+  notes: string[];
   status: string;
   stops: Stop[];
 };
@@ -328,8 +329,20 @@ export function DriveViewportApp({ slug }: { slug: string }) {
         })}
       </div>
 
-      {drive.notes ? (
-        <footer className="mt-8 text-sm leading-relaxed text-muted-foreground">{drive.notes}</footer>
+      {drive.notes.length > 0 ? (
+        <footer className="mt-8 space-y-3">
+          <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-widest text-muted-foreground">
+            <StickyNote className="size-4" />
+            Notes
+          </h2>
+          {drive.notes.map((note, i) => (
+            <Card key={i} className="w-full py-0">
+              <CardContent className="whitespace-pre-line px-5 py-4 text-sm leading-relaxed text-muted-foreground">
+                {note}
+              </CardContent>
+            </Card>
+          ))}
+        </footer>
       ) : null}
     </div>
   );
