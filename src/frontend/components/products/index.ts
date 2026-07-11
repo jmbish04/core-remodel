@@ -5,6 +5,8 @@
  */
 
 export { GlobalProductsLanding } from "./GlobalProductsLanding";
+export { PhotoReviewQueueApp } from "./PhotoReviewQueueApp";
+export * from "./photo-review-types";
 export { ProductGallery } from "./ProductGallery";
 export { PricingIntelBlock } from "./PricingIntelBlock";
 export { ProductTabs } from "./ProductTabs";

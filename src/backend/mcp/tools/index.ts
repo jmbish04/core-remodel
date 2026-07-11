@@ -14,6 +14,7 @@ import { materialTools } from "./materials";
 import { opsTools } from "./ops";
 import { priceObservationTools } from "./price_observations";
 import { productTools } from "./products";
+import { productPhotoTools } from "./product_photos";
 import { roomTools } from "./rooms";
 import { showroomTools } from "./showrooms";
 import { workflowTools } from "./workflow";
@@ -28,6 +29,7 @@ export const ALL_TOOL_GROUPS: RemodelTool[] = [
   ...driveTools,
   ...brandTools,
   ...productTools,
+  ...productPhotoTools,
   ...priceObservationTools,
   ...workflowTools,
   ...artifactTools,
