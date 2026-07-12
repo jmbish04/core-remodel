@@ -1,0 +1,27 @@
+---
+/**
+ * @fileoverview Device Preferences — config page.
+ *
+ * Thin Astro shell mounting `<PreferencesApp />`, which sets this device's
+ * default landing page (the `remodel_landing` cookie the Worker reads at the app
+ * root to auto-redirect an authed device). See `src/_worker.ts`.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { PreferencesApp } from "@/components/config/PreferencesApp";
+---
+
+<BaseLayout
+  title="Device Preferences - 126 Colby - Remodel Mission Control"
+  description="Set this device's default landing page for the app root."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 text-3xl font-bold">Device Preferences</h1>
+      <p class="text-muted-foreground">
+        Per-device settings for this browser — starting with the page the app opens to.
+      </p>
+    </div>
+
+    <PreferencesApp client:only="react" />
+  </main>
+</BaseLayout>
