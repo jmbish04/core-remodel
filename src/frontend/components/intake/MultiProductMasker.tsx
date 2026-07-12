@@ -228,6 +228,8 @@ export function MultiProductMasker({
       const rect = draft;
       setDraft(null);
       if (!canvas || !rect || rect.width < 4 || rect.height < 4 || !naturalSize) return;
+      // Guard against a not-yet-laid-out canvas: dividing by 0 → Infinity/NaN bbox.
+      if (canvas.width === 0 || canvas.height === 0) return;
 
       // display-px → source-px (mirror ExtractClippingDialog) …
       const scaleX = naturalSize.w / canvas.width;
@@ -245,7 +247,10 @@ export function MultiProductMasker({
         width: source.width / naturalSize.w,
         height: source.height / naturalSize.h,
       };
-      setRegions((cur) => [...cur, { id: nextId.current++, bbox, label: "" }]);
+      // Compute the id OUTSIDE the updater — mutating a ref inside setState is a
+      // side effect that double-fires (and double-increments) under StrictMode.
+      const id = nextId.current++;
+      setRegions((cur) => [...cur, { id, bbox, label: "" }]);
     },
     [draft, naturalSize],
   );

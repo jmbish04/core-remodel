@@ -732,13 +732,19 @@ intakeRouter.post("/buckets/:id/review", async (c) => {
 
 // ─── POST /buckets/:id/regions ──────────────────────────────────────────────
 
-const NormalizedBboxSchema = z.object({
-  x: z.number().min(0).max(1),
-  y: z.number().min(0).max(1),
-  // width/height must be > 0 — a zero-area crop is a client error, not a valid region.
-  width: z.number().gt(0).max(1),
-  height: z.number().gt(0).max(1),
-});
+const NormalizedBboxSchema = z
+  .object({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    // width/height must be > 0 — a zero-area crop is a client error, not a valid region.
+    width: z.number().gt(0).max(1),
+    height: z.number().gt(0).max(1),
+  })
+  // The box must fit inside the image — otherwise the crop trim would run past
+  // the source bounds. x+width and y+height must both stay within [0,1].
+  .refine((b) => b.x + b.width <= 1 && b.y + b.height <= 1, {
+    message: "bbox must fit within the image (x+width and y+height ≤ 1)",
+  });
 
 const RegionsBodySchema = z.object({
   sourcePhotoId: z.number().int().positive(),
