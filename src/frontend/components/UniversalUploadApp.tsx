@@ -435,7 +435,7 @@ export function UniversalUploadApp() {
         } catch {
           throw new Error(`Server returned non-JSON response (${response.status}): ${text.slice(0, 150)}`);
         }
-      } catch {
+      } catch (e) {
         throw e instanceof Error ? e : new Error(String(e));
       }
 
