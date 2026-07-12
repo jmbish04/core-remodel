@@ -52,14 +52,27 @@ const OPTIONS: ReadonlyArray<{ value: string; label: string }> = [
   { value: "/admin/inbox", label: "Inbox" },
 ];
 
-/** Same guard the Worker applies before redirecting — absolute in-app path only. */
+/** Same guard the Worker applies before redirecting — absolute in-app path only,
+ * never the login page. Mirrors `isSafeInternalPath` in backend/utils/access.ts. */
 function isSafeInternalPath(path: string): boolean {
-  return path.startsWith("/") && !path.startsWith("//") && /^\/[A-Za-z0-9/_-]*$/.test(path);
+  const normalized = path.replace(/\/$/, "");
+  return (
+    path.startsWith("/") &&
+    !path.startsWith("//") &&
+    normalized !== "/access" &&
+    /^\/[A-Za-z0-9/_-]*$/.test(path)
+  );
 }
 
 function readCookie(name: string): string | null {
   const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
-  return match ? decodeURIComponent(match[1]) : null;
+  if (!match) return null;
+  // A malformed percent-encoding would throw — fall back to the raw value.
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
 }
 
 function writeCookie(name: string, value: string) {

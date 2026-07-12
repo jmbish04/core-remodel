@@ -85,10 +85,17 @@ export function getLandingPrefFromRequest(request: Request): string | null {
 /**
  * A safe internal redirect target: an absolute in-app path only. Blocks
  * protocol-relative (`//host`) and off-site URLs so the root-landing redirect
- * can never be turned into an open redirect via a crafted cookie.
+ * can never be turned into an open redirect via a crafted cookie, and excludes
+ * `/access` (the login page) so an authed device is never bounced back to login.
  */
 export function isSafeInternalPath(path: string): boolean {
-  return path.startsWith("/") && !path.startsWith("//") && /^\/[A-Za-z0-9/_-]*$/.test(path);
+  const normalized = path.replace(/\/$/, "");
+  return (
+    path.startsWith("/") &&
+    !path.startsWith("//") &&
+    normalized !== "/access" &&
+    /^\/[A-Za-z0-9/_-]*$/.test(path)
+  );
 }
 
 export async function isRequestAuthenticated(request: Request, env: Env): Promise<boolean> {
