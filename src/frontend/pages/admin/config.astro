@@ -1,20 +1,19 @@
 ---
+/**
+ * @fileoverview Configuration home — `/admin/config`.
+ *
+ * The single entry point to the config area (opened in its own tab via the header
+ * cog). Renders `<ConfigHomeApp>`, which outlines every configuration area inside
+ * the dedicated config sidebar (ConfigShell). Individual vocabularies live at
+ * `/admin/config/<group>/<name>`.
+ */
 import BaseLayout from "@/layouts/BaseLayout.astro";
-import { AdminConfigApp } from "@/components/AdminConfigApp";
+import { ConfigHomeApp } from "@/components/config/ConfigHomeApp";
 ---
 
 <BaseLayout
-  title="Admin Config - 126 Colby - Remodel Mission Control"
-  description="System configuration for Permits Intelligence and other pipelines."
+  title="Configuration — 126 Colby"
+  description="System configuration hub — property, device, and photo/product vocabularies."
 >
-  <main className="container mx-auto px-4 py-8 pb-12">
-    <div className="mb-8">
-      <h1 className="mb-2 text-3xl font-bold">System Configuration</h1>
-      <p className="text-muted-foreground">
-        Manage project variables, intelligence targets, and pipeline settings.
-      </p>
-    </div>
-
-    <AdminConfigApp client:only="react" />
-  </main>
+  <ConfigHomeApp client:only="react" />
 </BaseLayout>

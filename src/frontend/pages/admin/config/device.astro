@@ -1,0 +1,16 @@
+---
+/**
+ * @fileoverview Device config page — `/admin/config/device`.
+ * Thin shell mounting `<DeviceConfigApp>` (ConfigShell inside). Sets this
+ * device's default landing page (stored per device in D1).
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { DeviceConfigApp } from "@/components/config/DeviceConfigApp";
+---
+
+<BaseLayout
+  title="Device — Configuration"
+  description="This device's default landing page for the app root."
+>
+  <DeviceConfigApp client:only="react" />
+</BaseLayout>

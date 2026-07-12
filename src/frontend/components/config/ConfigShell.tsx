@@ -22,7 +22,7 @@ export function ConfigShell({ activeHref, title, description, children }: Config
     <div className="mx-auto flex min-h-screen w-full max-w-6xl gap-6 px-4 py-8 lg:gap-10">
       <aside className="hidden w-56 shrink-0 lg:block">
         <div className="sticky top-8">
-          <a href="/config" className="mb-4 block text-sm font-semibold tracking-tight text-foreground">
+          <a href="/admin/config" className="mb-4 block text-sm font-semibold tracking-tight text-foreground">
             Configuration
           </a>
           <nav className="flex flex-col gap-5">

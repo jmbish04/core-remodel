@@ -102,8 +102,8 @@ export const NAV_GROUPS: NavGroupDef[] = [
       { href: "/admin/studio", label: "Studio" },
       { href: "/admin/mcp-ops", label: "MCP Ops" },
       { href: "/admin/integrations/usage", label: "Integrations Usage" },
-      { href: "/admin/config", label: "Config" },
-      { href: "/config/photo/categories", label: "Configuration" },
+      // Config is reached via the cog wheel in the top header (opens /admin/config
+      // in its own tab with the dedicated config sidebar) — not a sidebar item.
     ],
   },
   {
