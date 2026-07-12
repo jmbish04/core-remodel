@@ -6,6 +6,7 @@ import {
   integer,
   index,
   uniqueIndex,
+  type AnySQLiteColumn,
 } from "drizzle-orm/sqlite-core";
 
 import { showroomStoreProducts } from "./store_products";
@@ -44,6 +45,21 @@ export const productShowroomPhotos = sqliteTable(
     bucketId: integer("bucket_id").references(() => productPhotoBuckets.id, {
       onDelete: "set null",
     }),
+
+    /** Phase 4 masking — set on a crop child, pointing back at the wide source
+     * photo it was cropped from. Null for originals (including the wide photo
+     * itself, which stays parentless). */
+    parentPhotoId: integer("parent_photo_id").references(
+      (): AnySQLiteColumn => productShowroomPhotos.id,
+      { onDelete: "set null" }
+    ),
+    /** Phase 4 masking — normalized 0..1 bbox of this crop within its parent. */
+    cropRegion: text("crop_region", { mode: "json" }).$type<{
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+    }>(),
 
     /** Original uploaded filename, kept for the filename-ASC ordering step. */
     fileName: text("file_name"),
@@ -98,6 +114,9 @@ export const productShowroomPhotos = sqliteTable(
       table.showroomId
     ),
     bucketIdx: index("product_showroom_photos_bucket_idx").on(table.bucketId),
+    parentIdx: index("product_showroom_photos_parent_idx").on(
+      table.parentPhotoId
+    ),
   })
 );
 
