@@ -184,7 +184,7 @@ export function UniversalUploadApp() {
           }),
         );
       }
-    } catch {
+    } catch (e) {
       setUrlImportStatus(e instanceof Error ? e.message : "URL import failed");
     } finally {
       setUrlImporting(false);
