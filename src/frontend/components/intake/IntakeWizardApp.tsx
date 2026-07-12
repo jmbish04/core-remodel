@@ -22,11 +22,12 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Boxes, ImageIcon, Loader2, Sparkles, Store, Trash2, Upload } from "lucide-react";
+import { Boxes, ImageIcon, Loader2, Scissors, Sparkles, Store, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { api } from "@/components/products/types";
 import { GooglePhotosButton } from "@/components/google-photos/GooglePhotosButton";
+import { MultiProductMasker } from "./MultiProductMasker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -114,6 +115,8 @@ export function IntakeWizardApp() {
 
   const [selectedPhotoIds, setSelectedPhotoIds] = useState<Set<number>>(new Set());
   const [processing, setProcessing] = useState<Set<number>>(new Set());
+
+  const [maskBucket, setMaskBucket] = useState<{ bucketId: number; photoId: number; imageUrl: string } | null>(null);
 
   const [dialogOpen, setDialogOpen] = useState(false);
   const [bucketKind, setBucketKind] = useState<"single" | "multi">("multi");
@@ -529,6 +532,24 @@ export function IntakeWizardApp() {
                               <div className="text-[11px] text-muted-foreground">
                                 {b.photos.length} photo{b.photos.length === 1 ? "" : "s"}
                               </div>
+                              {b.kind === "multi" && b.photos.length > 0 && (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="secondary"
+                                  className="w-full"
+                                  onClick={() =>
+                                    setMaskBucket({
+                                      bucketId: b.id,
+                                      photoId: b.photos[0].id,
+                                      imageUrl: b.photos[0].imageUrl,
+                                    })
+                                  }
+                                >
+                                  <Scissors className="mr-1.5 size-3.5" />
+                                  Mask products
+                                </Button>
+                              )}
                             </CardContent>
                           </Card>
                         ))}
@@ -704,6 +725,23 @@ export function IntakeWizardApp() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Multi-product masking: draw a box per product → one single bucket each. */}
+      {maskBucket && (
+        <MultiProductMasker
+          open={maskBucket != null}
+          bucketId={maskBucket.bucketId}
+          photoId={maskBucket.photoId}
+          imageUrl={maskBucket.imageUrl}
+          onOpenChange={(open) => !open && setMaskBucket(null)}
+          onDone={() => {
+            if (focusedId != null) {
+              void refreshPhotos(focusedId);
+              void refreshBuckets(focusedId);
+            }
+          }}
+        />
+      )}
     </div>
   );
 }
