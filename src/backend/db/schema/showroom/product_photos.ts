@@ -67,13 +67,15 @@ export const productShowroomPhotos = sqliteTable(
      * modelNumber, style, price, salePrice, discountInfo, ...} + per-field confidence. */
     attributes: text("attributes", { mode: "json" }),
 
-    // ponytail: widened for the C2 intake wizard (uploaded → processed) without a
-    // migration — sqlite/D1 `text` columns here carry no CHECK constraint, so this
-    // union is TS-only and safe to extend in place. 'uploaded'/'processed' are the
-    // intake-wizard lifecycle; 'pending_review'/'approved'/'rejected' remain the
-    // single-photo /product-photos/ingest HITL review lifecycle.
+    // ponytail: widened for the C2 intake wizard (uploaded → processed) and the
+    // Phase-3 review form (processed → reviewed/rejected) without a migration —
+    // sqlite/D1 `text` columns here carry no CHECK constraint, so this union is
+    // TS-only and safe to extend in place. 'uploaded'/'processed'/'reviewed' are
+    // the intake-wizard + review-form lifecycle; 'pending_review'/'approved'/
+    // 'rejected' remain the single-photo /product-photos/ingest HITL lifecycle
+    // ('rejected' is shared by both).
     status: text("status", {
-      enum: ["uploaded", "pending_review", "processed", "approved", "rejected"] as const,
+      enum: ["uploaded", "pending_review", "processed", "approved", "rejected", "reviewed"] as const,
     })
       .notNull()
       .default("pending_review"),

@@ -32,8 +32,12 @@ export const productPhotoBuckets = sqliteTable(
       .notNull()
       .default("single"),
 
+    // ponytail: widened for the C2 review form (Phase 3 approve/reject) without a
+    // migration — sqlite `text` column carries no CHECK constraint, so this union
+    // is TS-only and safe to extend in place. 'rejected' = the review form's
+    // reject action.
     status: text("status", {
-      enum: ["draft", "processing", "processed", "reviewed"] as const,
+      enum: ["draft", "processing", "processed", "reviewed", "rejected"] as const,
     })
       .notNull()
       .default("draft"),

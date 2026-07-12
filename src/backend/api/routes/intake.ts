@@ -10,16 +10,30 @@
  *   PATCH /buckets/:id          — rename/re-kind a bucket, add/remove photos.
  *   GET  /buckets                — buckets for a showroom, each with its photos.
  *   POST /buckets/:id/process   — AI-extract the bucket's photos into ONE product.
+ *   GET  /review-queue          — Phase-3: every 'processed' bucket, all showrooms.
+ *   POST /buckets/:id/review    — Phase-3: approve (finalize product+mappings+price)
+ *                                 or reject (with reason) a bucket.
  *
  * Mounts at /api/intake (wired in api/index.ts), behind requireAccessAuth.
  * Reuses the same vocab/brand/category/color/product-ensure helpers as
- * `product-photos.ts` (single-photo ingest) via `image-processor/intake-helpers`.
+ * `product-photos.ts` (single-photo ingest) via `image-processor/intake-helpers`,
+ * and the config mapping-replace helper from `config.ts`.
  */
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { asc, eq, inArray, and, isNull } from "drizzle-orm";
+import { asc, desc, eq, inArray, and, isNull } from "drizzle-orm";
+import { z } from "zod";
 
-import { photoCategories, photoColors, productPhotoBuckets, productPriceObservations, productShowroomPhotos } from "@backend/db";
+import {
+  brandCategories,
+  photoCategories,
+  photoColors,
+  photoSubcategories,
+  productPhotoBuckets,
+  productPriceObservations,
+  productShowroomPhotos,
+  showroomStoreProducts,
+} from "@backend/db";
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { extractShowroomProductFromDescriptions } from "@backend/services/image-processor/product-extraction";
 import {
@@ -31,6 +45,8 @@ import {
 } from "@backend/services/image-processor/intake-helpers";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { parseDiscountPct, parsePriceCents } from "@backend/lib/money";
+import { normalizeModelKey } from "@backend/lib/normalize-model";
+import { replaceMapping } from "./config";
 
 export const intakeRouter = new Hono<{ Bindings: Env }>();
 
@@ -299,11 +315,16 @@ intakeRouter.get("/buckets", async (c) => {
     if (buckets.length === 0) return c.json({ buckets: [] });
 
     const bucketIds = buckets.map((b) => b.id);
-    const photos = await db
-      .select()
-      .from(productShowroomPhotos)
-      .where(inArray(productShowroomPhotos.bucketId, bucketIds))
-      .orderBy(asc(productShowroomPhotos.fileName), asc(productShowroomPhotos.id));
+    // Chunk the id list: one bound param per id vs D1's 100-param cap.
+    const photos: (typeof productShowroomPhotos.$inferSelect)[] = [];
+    for (let i = 0; i < bucketIds.length; i += 90) {
+      const chunk = await db
+        .select()
+        .from(productShowroomPhotos)
+        .where(inArray(productShowroomPhotos.bucketId, bucketIds.slice(i, i + 90)))
+        .orderBy(asc(productShowroomPhotos.fileName), asc(productShowroomPhotos.id));
+      photos.push(...chunk);
+    }
 
     const photosByBucket = new Map<number, { id: number; imageUrl: string | null; fileName: string | null }[]>();
     for (const p of photos) {
@@ -433,6 +454,273 @@ intakeRouter.post("/buckets/:id/process", async (c) => {
     await db.update(productPhotoBuckets).set({ status: "draft" }).where(eq(productPhotoBuckets.id, bucketId)).run();
     return c.json(
       { error: "Failed to process bucket", details: error instanceof Error ? error.message : "Unknown" },
+      500,
+    );
+  }
+});
+
+// ─── GET /review-queue ──────────────────────────────────────────────────────
+
+/**
+ * GET /api/intake/review-queue
+ * Every `status='processed'` bucket across ALL showrooms (the Phase-3 review
+ * form's worklist), newest-first. `attributes` is the seed AI extraction taken
+ * from the bucket's first photo (filename-ASC) — the review form pre-fills its
+ * fields from this and lets the reviewer correct them.
+ */
+intakeRouter.get("/review-queue", async (c) => {
+  try {
+    const db = drizzle(c.env.DB);
+    const buckets = await db
+      .select()
+      .from(productPhotoBuckets)
+      .where(eq(productPhotoBuckets.status, "processed"))
+      .orderBy(desc(productPhotoBuckets.createdAt));
+    if (buckets.length === 0) return c.json({ buckets: [] });
+
+    const bucketIds = buckets.map((b) => b.id);
+    // Chunk the id list: one bound param per id vs D1's 100-param cap.
+    const photos: (typeof productShowroomPhotos.$inferSelect)[] = [];
+    for (let i = 0; i < bucketIds.length; i += 90) {
+      const chunk = await db
+        .select()
+        .from(productShowroomPhotos)
+        .where(inArray(productShowroomPhotos.bucketId, bucketIds.slice(i, i + 90)))
+        .orderBy(asc(productShowroomPhotos.fileName), asc(productShowroomPhotos.id));
+      photos.push(...chunk);
+    }
+
+    const photosByBucket = new Map<number, typeof photos>();
+    for (const p of photos) {
+      const key = p.bucketId as number;
+      if (!photosByBucket.has(key)) photosByBucket.set(key, []);
+      photosByBucket.get(key)!.push(p);
+    }
+
+    return c.json({
+      buckets: buckets.map((b) => {
+        const bucketPhotos = photosByBucket.get(b.id) ?? [];
+        return {
+          id: b.id,
+          kind: b.kind,
+          label: b.label,
+          status: b.status,
+          productId: b.productId,
+          photos: bucketPhotos.map((p) => ({ id: p.id, imageUrl: p.imageUrl, fileName: p.fileName })),
+          attributes: bucketPhotos[0]?.attributes ?? null,
+        };
+      }),
+    });
+  } catch (error) {
+    console.error("Review queue error:", error);
+    return c.json({ error: "Failed to load review queue" }, 500);
+  }
+});
+
+// ─── POST /buckets/:id/review ───────────────────────────────────────────────
+
+const reviewBodySchema = z.object({
+  action: z.enum(["approve", "reject"]),
+  itemName: z.string().min(1).optional(),
+  modelNumber: z.string().optional().nullable(),
+  style: z.string().optional().nullable(),
+  brandId: z.number().int().positive().optional().nullable(),
+  categoryIds: z.array(z.number().int().positive()).optional(),
+  subcategoryIds: z.array(z.number().int().positive()).optional(),
+  colorIds: z.array(z.number().int().positive()).optional(),
+  price: z.string().optional().nullable(),
+  priceCents: z.number().int().optional().nullable(),
+  salePrice: z.string().optional().nullable(),
+  salePriceCents: z.number().int().optional().nullable(),
+  discountInfo: z.string().optional().nullable(),
+  discountPct: z.number().optional().nullable(),
+  reason: z.string().optional(),
+  rejectReasonCodes: z.array(z.string()).optional(),
+});
+
+/** Build a partial object keeping only keys whose value isn't `undefined`, for merging into a photo's JSON `attributes` without clobbering unset seed fields. */
+function definedFields<T extends Record<string, unknown>>(obj: T): Partial<T> {
+  const out: Partial<T> = {};
+  for (const [key, value] of Object.entries(obj)) {
+    if (value !== undefined) (out as Record<string, unknown>)[key] = value;
+  }
+  return out;
+}
+
+/**
+ * POST /api/intake/buckets/:id/review
+ *
+ * approve: finalizes the bucket's product (itemName/modelNumber/brandId),
+ * REPLACES the category/subcategory/color mappings on EVERY photo in the
+ * bucket (and the brand<->category mapping), upserts ONE price observation
+ * for the product, and marks bucket+photos `status='reviewed'`. The edited
+ * fields are also merged into each photo's `attributes` JSON (source for the
+ * `/config/styles` vocabulary).
+ *
+ * reject: marks bucket+photos `status='rejected'` and stores the reason /
+ * reason codes into each photo's `attributes` JSON. Requires a non-empty
+ * `reason` OR at least one `rejectReasonCodes` entry.
+ *
+ * The bucket's status is only flipped to its terminal value (reviewed/
+ * rejected) as the LAST write in each branch — a failure partway through
+ * leaves the bucket at `processed` (retryable) rather than a wrong terminal
+ * status, and any error is caught and returned as 4xx/5xx with a message.
+ */
+intakeRouter.post("/buckets/:id/review", async (c) => {
+  const bucketId = Number(c.req.param("id"));
+  if (!Number.isFinite(bucketId)) return c.json({ error: "Invalid bucket id" }, 400);
+
+  const bodyParsed = reviewBodySchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!bodyParsed.success) {
+    return c.json({ error: "Invalid review body", details: bodyParsed.error.flatten() }, 400);
+  }
+  const body = bodyParsed.data;
+
+  const db = drizzle(c.env.DB);
+  const [bucket] = await db.select().from(productPhotoBuckets).where(eq(productPhotoBuckets.id, bucketId)).limit(1);
+  if (!bucket) return c.json({ error: "Bucket not found" }, 404);
+
+  const photos = await db.select().from(productShowroomPhotos).where(eq(productShowroomPhotos.bucketId, bucketId));
+  if (photos.length === 0) return c.json({ error: "Bucket has no photos" }, 400);
+
+  try {
+    if (body.action === "reject") {
+      const hasReason = (body.reason ?? "").trim().length > 0;
+      const hasCodes = Array.isArray(body.rejectReasonCodes) && body.rejectReasonCodes.length > 0;
+      if (!hasReason && !hasCodes) {
+        return c.json({ error: "reason or rejectReasonCodes is required to reject" }, 400);
+      }
+
+      for (const photo of photos) {
+        const attrs = (photo.attributes as Record<string, unknown> | null) ?? {};
+        await db
+          .update(productShowroomPhotos)
+          .set({
+            status: "rejected",
+            attributes: { ...attrs, reviewReason: body.reason ?? null, rejectReasonCodes: body.rejectReasonCodes ?? [] },
+          })
+          .where(eq(productShowroomPhotos.id, photo.id))
+          .run();
+      }
+      // Terminal status write LAST.
+      await db.update(productPhotoBuckets).set({ status: "rejected" }).where(eq(productPhotoBuckets.id, bucketId)).run();
+
+      return c.json({ bucketId, status: "rejected" });
+    }
+
+    // ── approve ──────────────────────────────────────────────────────────
+    if (!bucket.productId) return c.json({ error: "Bucket has no product to approve (process it first)" }, 400);
+    const productId = bucket.productId;
+
+    const productUpdates: Partial<typeof showroomStoreProducts.$inferInsert> = {};
+    if (body.itemName !== undefined) productUpdates.itemName = body.itemName;
+    if (body.modelNumber !== undefined) {
+      const trimmed = (body.modelNumber ?? "").trim();
+      const modelNumber = trimmed && trimmed.toUpperCase() !== "N/A" ? trimmed : null;
+      productUpdates.modelNumber = modelNumber;
+      productUpdates.modelKey = normalizeModelKey(modelNumber);
+    }
+    if (body.brandId !== undefined) productUpdates.brandId = body.brandId;
+    // NOTE: `showroom_store_products` has no `style` column — style is
+    // persisted only into each photo's `attributes` JSON below (and is the
+    // source for GET /api/config/styles).
+
+    if (Object.keys(productUpdates).length > 0) {
+      await db.update(showroomStoreProducts).set(productUpdates).where(eq(showroomStoreProducts.id, productId)).run();
+    }
+
+    // REPLACE mappings for EVERY photo in the bucket.
+    const categoryIds = body.categoryIds ?? [];
+    const subcategoryIds = body.subcategoryIds ?? [];
+    const colorIds = body.colorIds ?? [];
+    for (const photo of photos) {
+      await replaceMapping(db, photoCategories, photoCategories.photoId, photo.id, categoryIds, (categoryId) => ({
+        photoId: photo.id,
+        categoryId,
+      }));
+      await replaceMapping(db, photoSubcategories, photoSubcategories.photoId, photo.id, subcategoryIds, (subcategoryId) => ({
+        photoId: photo.id,
+        subcategoryId,
+      }));
+      await replaceMapping(db, photoColors, photoColors.photoId, photo.id, colorIds, (colorId) => ({
+        photoId: photo.id,
+        colorId,
+      }));
+    }
+    if (body.brandId != null && categoryIds.length > 0) {
+      await replaceMapping(db, brandCategories, brandCategories.brandId, body.brandId, categoryIds, (categoryId) => ({
+        brandId: body.brandId!,
+        categoryId,
+      }));
+    }
+
+    // Upsert ONE price observation for the product. `process` (Phase 2) may
+    // have already inserted a 'pending' AI-read observation sourced off this
+    // bucket's photos — update that one in place; otherwise insert fresh.
+    const photoIds = photos.map((p) => p.id);
+    const [existingObs] = await db
+      .select()
+      .from(productPriceObservations)
+      .where(and(eq(productPriceObservations.productId, productId), inArray(productPriceObservations.sourcePhotoId, photoIds)))
+      .limit(1);
+
+    const priceCents = body.priceCents !== undefined ? body.priceCents : parsePriceCents(body.price ?? null);
+    const salePriceCents = body.salePriceCents !== undefined ? body.salePriceCents : parsePriceCents(body.salePrice ?? null);
+    const discountPct = body.discountPct !== undefined ? body.discountPct : parseDiscountPct(body.discountInfo ?? null);
+
+    const obsFields = {
+      price: body.price ?? null,
+      salePrice: body.salePrice ?? null,
+      discountInfo: body.discountInfo ?? null,
+      priceCents: priceCents ?? null,
+      salePriceCents: salePriceCents ?? null,
+      discountPct: discountPct ?? null,
+      reviewStatus: "approved" as const,
+      reviewedAt: new Date(),
+    };
+
+    if (existingObs) {
+      await db.update(productPriceObservations).set(obsFields).where(eq(productPriceObservations.id, existingObs.id)).run();
+    } else if (body.price || priceCents != null) {
+      await db.insert(productPriceObservations).values({
+        productId,
+        sourceType: "showroom",
+        showroomId: bucket.showroomId,
+        sourcePhotoId: photos[0].id,
+        confidence: 100,
+        ...obsFields,
+      });
+    }
+
+    // Persist the reviewer-edited fields back into every photo's `attributes` JSON.
+    const editedAttrs = definedFields({
+      itemName: body.itemName,
+      modelNumber: productUpdates.modelNumber,
+      style: body.style,
+      brandId: body.brandId,
+      price: body.price,
+      priceCents,
+      salePrice: body.salePrice,
+      salePriceCents,
+      discountInfo: body.discountInfo,
+      discountPct,
+    });
+    for (const photo of photos) {
+      const attrs = (photo.attributes as Record<string, unknown> | null) ?? {};
+      await db
+        .update(productShowroomPhotos)
+        .set({ status: "reviewed", attributes: { ...attrs, ...editedAttrs } })
+        .where(eq(productShowroomPhotos.id, photo.id))
+        .run();
+    }
+    // Terminal status write LAST.
+    await db.update(productPhotoBuckets).set({ status: "reviewed" }).where(eq(productPhotoBuckets.id, bucketId)).run();
+
+    return c.json({ bucketId, productId, status: "reviewed" });
+  } catch (error) {
+    console.error("Bucket review error:", error);
+    return c.json(
+      { error: "Failed to review bucket", details: error instanceof Error ? error.message : "Unknown" },
       500,
     );
   }

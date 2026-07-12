@@ -1,11 +1,11 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
-import { PhotoReviewQueueApp } from "@/components/products/PhotoReviewQueueApp";
+import { BucketReviewApp } from "@/components/intake/BucketReviewApp";
 ---
 
 <BaseLayout
   title="Price-Card Review — The Monolith"
-  description="Capture a showroom price card or product photo, then confirm the AI-extracted brand, model, price and attributes before they land on the product."
+  description="Confirm the AI-extracted brand, model, price and attributes for each showroom photo bucket before they land on the product."
 >
-  <PhotoReviewQueueApp client:only="react" />
+  <BucketReviewApp client:only="react" />
 </BaseLayout>
