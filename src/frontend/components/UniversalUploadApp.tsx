@@ -184,7 +184,7 @@ export function UniversalUploadApp() {
           }),
         );
       }
-    } catch (e) {
+    } catch {
       setUrlImportStatus(e instanceof Error ? e.message : "URL import failed");
     } finally {
       setUrlImporting(false);
@@ -435,7 +435,7 @@ export function UniversalUploadApp() {
         } catch {
           throw new Error(`Server returned non-JSON response (${response.status}): ${text.slice(0, 150)}`);
         }
-      } catch (e) {
+      } catch {
         throw e instanceof Error ? e : new Error(String(e));
       }
 

@@ -93,18 +93,14 @@ function resolveImageUrl(image: PendingImage): string | null {
 }
 
 export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
-  const { refreshToken = 0, onSummaryChange, category = "inspirational", onCategoryChange } = props;
+  const { refreshToken = 0, onSummaryChange, category, onCategoryChange } = props;
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string>("");
-  const [activeCategory, setActiveCategory] = useState<MappingCategory>(category);
-
-  // Sync with prop
-  useEffect(() => {
-    setActiveCategory(category);
-  }, [category]);
+  const [localCategory, setLocalCategory] = useState<MappingCategory>("inspirational");
+  const activeCategory = category ?? localCategory;
 
   const handleCategoryChange = useCallback((newCategory: MappingCategory) => {
-    setActiveCategory(newCategory);
+    setLocalCategory(newCategory);
     onCategoryChange?.(newCategory);
   }, [onCategoryChange]);
   const [summary, setSummary] = useState<MappingSummary>({
