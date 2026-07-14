@@ -267,28 +267,17 @@
       "secret_name": "GOOGLE_SEARCH_API_KEY",
       "remote": true
     },
-    {
-      // Tessie API token — drive-list "Send to Tesla" nav + park-webhook auto-visit.
-      "binding": "TESSIE_TOKEN",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "TESSIE_TOKEN",
-      "remote": true
-    },
-    {
-      // The vehicle VIN Tessie commands are addressed to.
-      "binding": "TESSIE_VIN",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "TESSIE_VIN",
-      "remote": true
-    },
-    {
-      // Shared secret the inbound Tessie park webhook must present (header
-      // X-Webhook-Secret or ?secret=). Gates POST /api/tesla/webhook.
-      "binding": "TESLA_WEBHOOK_SECRET",
-      "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "TESLA_WEBHOOK_SECRET",
-      "remote": true
-    },
+    // NOTE: the Tesla/Tessie creds (TESSIE_TOKEN, TESSIE_VIN, TESLA_WEBHOOK_SECRET)
+    // are intentionally NOT declared here. Secrets Store bindings are validated at
+    // deploy time, so listing them before the secrets exist fails the deploy
+    // (error 10182). They are read as OPTIONAL plain Worker secrets instead (see
+    // src/backend/services/tesla.ts) — the drive app just hides the Tesla button /
+    // no-ops the webhook until they're set. To enable, set them with:
+    //   wrangler secret put TESSIE_TOKEN
+    //   wrangler secret put TESSIE_VIN
+    //   wrangler secret put TESLA_WEBHOOK_SECRET
+    // (or add them to the Secrets Store and re-add bindings here — the reader
+    // accepts either a plain string or a SecretsStoreSecret).
     {
       // ClickUp task mirror (0009): consumed by RemodelOrchestrator + /api/clickup.
       "binding": "CLICKUP_TOKEN",
