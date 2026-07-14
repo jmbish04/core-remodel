@@ -589,6 +589,13 @@
       "when": 1784003702125,
       "tag": "0083_lean_gateway",
       "breakpoints": true
+    },
+    {
+      "idx": 84,
+      "version": "6",
+      "when": 1784004669735,
+      "tag": "0084_curvy_norrin_radd",
+      "breakpoints": true
     }
   ]
 }

@@ -19,7 +19,7 @@
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, and, ne, inArray } from "drizzle-orm";
+import { eq, and, ne, inArray, isNull, isNotNull } from "drizzle-orm";
 import { getAgentByName } from "agents";
 
 import {
@@ -540,3 +540,87 @@ showroomBackfillRouter.openapi(
     return c.json({ updated, queued, skipped }, 200);
   },
 );
+
+// ─── POST /backfill/addresses ────────────────────────────────────────────────
+//
+// One-shot maintenance: split each place-linked store's address into the
+// granular location_* columns and refresh location_address + google_maps_link
+// from Google Places (authoritative — overwrites city-only stubs like
+// "San Carlos, CA"). Targets stores that have a place_id but no
+// location_street_number yet, so re-runs skip completed rows.
+//
+// Dry-run by default; pass ?apply=true to write. ?limit=N caps the batch.
+showroomBackfillRouter.post("/backfill/addresses", async (c) => {
+  const apply = c.req.query("apply") === "true" || c.req.query("apply") === "1";
+  const limit = Math.min(Math.max(parseInt(c.req.query("limit") ?? "200", 10) || 200, 1), 500);
+  const db = drizzle(c.env.DB);
+  const maps = new GoogleMapsService(c.env);
+
+  if (!(await maps.canUseGoogleMaps())) {
+    return c.json({ error: "Google Maps monthly free tier exceeded" }, 429);
+  }
+
+  const candidates = await db
+    .select({
+      id: showroomStores.id,
+      placeId: showroomStores.placeId,
+      locationAddress: showroomStores.locationAddress,
+    })
+    .from(showroomStores)
+    .where(
+      and(
+        isNotNull(showroomStores.placeId),
+        isNull(showroomStores.locationStreetNumber),
+      ),
+    )
+    .limit(limit);
+
+  let updated = 0;
+  const errors: Array<{ id: number; error: string }> = [];
+  const preview: Array<{ id: number; formattedAddress: string | null; city: string | null; zip: string | null }> = [];
+
+  for (const store of candidates) {
+    if (!store.placeId) continue;
+    try {
+      const parsed = await maps.placeAddressComponents(store.placeId);
+      if (!parsed) {
+        errors.push({ id: store.id, error: "no address components" });
+        continue;
+      }
+      preview.push({ id: store.id, formattedAddress: parsed.formattedAddress, city: parsed.city, zip: parsed.zipCode });
+      if (!apply) continue;
+
+      await db
+        .update(showroomStores)
+        .set({
+          // Places is authoritative — overwrite the granular parts + the
+          // formatted address + maps link + zip. Only writes non-null values so
+          // a partial Google response never nulls out existing good data.
+          ...(parsed.streetNumber ? { locationStreetNumber: parsed.streetNumber } : {}),
+          ...(parsed.streetName ? { locationStreetName: parsed.streetName } : {}),
+          ...(parsed.city ? { locationCity: parsed.city } : {}),
+          ...(parsed.state ? { locationState: parsed.state } : {}),
+          ...(parsed.zipCode ? { locationZipCode: parsed.zipCode, zipCode: parsed.zipCode } : {}),
+          ...(parsed.formattedAddress ? { locationAddress: parsed.formattedAddress } : {}),
+          ...(parsed.googleMapsUri ? { googleMapsLink: parsed.googleMapsUri } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(showroomStores.id, store.id));
+      updated++;
+    } catch (err) {
+      errors.push({ id: store.id, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  return c.json(
+    {
+      apply,
+      candidates: candidates.length,
+      updated,
+      errorCount: errors.length,
+      errors: errors.slice(0, 25),
+      preview: apply ? undefined : preview.slice(0, 25),
+    },
+    200,
+  );
+});

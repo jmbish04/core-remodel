@@ -32,10 +32,27 @@ export const showroomStores = sqliteTable("showroom_stores", {
     () => storeBayareaCities.id,
     { onDelete: "set null" }
   ),
+  /** Full formatted address (Google `formattedAddress`) — display source. */
   locationAddress: text("location_address"),
+
+  // ── Granular address parts ────────────────────────────────────────────
+  // Parsed from Google Places `addressComponents` (or a submitted address
+  // payload); callers may send a whole address and the worker fields it out.
+  /** Street number, e.g. "1049". */
+  locationStreetNumber: text("location_street_number"),
+  /** Street / route name, e.g. "El Camino Real". */
+  locationStreetName: text("location_street_name"),
+  /** City / locality, e.g. "San Carlos". */
+  locationCity: text("location_city"),
+  /** State (2-letter), e.g. "CA". */
+  locationState: text("location_state"),
+  /** ZIP / postal code, e.g. "94070". Canonical granular zip. */
+  locationZipCode: text("location_zip_code"),
+
   phoneNumber: text("phone_number"),
   emailAddress: text("email_address"),
   websiteUrl: text("website_url"),
+  /** Legacy zip — kept in sync with `locationZipCode`; slated for removal. */
   zipCode: text("zip_code"),
   googleMapsLink: text("google_maps_link"),
 

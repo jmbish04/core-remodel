@@ -26,6 +26,45 @@ interface LogUsageMeta {
   statusCode?: number;
 }
 
+/** Granular address parts parsed from a Google Places response. */
+export interface ParsedAddress {
+  formattedAddress: string | null;
+  streetNumber: string | null;
+  streetName: string | null;
+  city: string | null;
+  state: string | null;
+  zipCode: string | null;
+  googleMapsUri: string | null;
+}
+
+/**
+ * Parse a Google Places (v1) place payload into granular address parts.
+ * Reads `addressComponents` (type-tagged), preferring `locality` for city and
+ * falling back to `postal_town` / `sublocality`. State uses the 2-letter
+ * `shortText`. Returns all-null parts when no components are present.
+ */
+export function parseGoogleAddressComponents(
+  data: Record<string, unknown>,
+): ParsedAddress {
+  const comps = (data.addressComponents as
+    | Array<{ longText?: string; shortText?: string; types?: string[] }>
+    | undefined) ?? [];
+  const pick = (type: string, short = false): string | null => {
+    const c = comps.find((x) => x.types?.includes(type));
+    if (!c) return null;
+    return (short ? c.shortText : c.longText) ?? c.longText ?? c.shortText ?? null;
+  };
+  return {
+    formattedAddress: (data.formattedAddress as string | undefined) ?? null,
+    streetNumber: pick("street_number"),
+    streetName: pick("route"),
+    city: pick("locality") ?? pick("postal_town") ?? pick("sublocality"),
+    state: pick("administrative_area_level_1", true),
+    zipCode: pick("postal_code"),
+    googleMapsUri: (data.googleMapsUri as string | undefined) ?? null,
+  };
+}
+
 export class GoogleMapsService {
   constructor(private readonly env: Env) {}
 
@@ -974,6 +1013,45 @@ Rules for each field:
       nationalPhoneNumber: top.nationalPhoneNumber ?? null,
       websiteUri: top.websiteUri ?? null,
     };
+  }
+
+  /**
+   * Fetch only the address parts for a place — a minimal cousin of
+   * {@link placeDetails} used by the address-split backfill. Requests
+   * `addressComponents` + `googleMapsUri` + `formattedAddress` and NEVER runs
+   * the Gemini review analysis. Returns granular parts parsed from Google's
+   * `addressComponents`, or `null` when Google returns nothing.
+   *
+   * @throws Error('MAPS_QUOTA_EXCEEDED') when the monthly free-tier limit is reached.
+   * @throws Error('PLACES_DETAILS_ERROR: <message>') on upstream failure.
+   */
+  async placeAddressComponents(placeId: string): Promise<ParsedAddress | null> {
+    if (!(await this.isUnderMonthlyQuota())) {
+      throw new Error("MAPS_QUOTA_EXCEEDED");
+    }
+    const gmapKey = await getGoogleMapsApiKey(this.env);
+    const fieldMask = ["id", "formattedAddress", "addressComponents", "googleMapsUri"].join(",");
+    const url = `https://places.googleapis.com/v1/places/${encodeURIComponent(placeId)}`;
+
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { "X-Goog-Api-Key": gmapKey, "X-Goog-FieldMask": fieldMask },
+      signal: AbortSignal.timeout(5000),
+    });
+    const data = (await res.json()) as Record<string, unknown>;
+
+    await this.logUsage(
+      "places:details",
+      { placeId, addressOnly: true },
+      data,
+      { endpoint: "details:address", statusCode: res.status },
+    );
+
+    if (!res.ok) {
+      const err = data as { error?: { message?: string } };
+      throw new Error(`PLACES_DETAILS_ERROR: ${err.error?.message ?? `HTTP ${res.status}`}`);
+    }
+    return parseGoogleAddressComponents(data);
   }
 
   async computeCommute(

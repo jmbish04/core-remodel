@@ -119,6 +119,13 @@ const createStoreSchema = z.object({
   pricePoint: z.enum(["$", "$$", "$$$", "$$$$"]).optional().nullable(),
   bayAreaCityId: z.number().optional().nullable(),
   locationAddress: z.string().optional().nullable(),
+  // Granular address parts — usually filled by the place-import / address
+  // backfill from Google Places, but accepted directly here too.
+  locationStreetNumber: z.string().optional().nullable(),
+  locationStreetName: z.string().optional().nullable(),
+  locationCity: z.string().optional().nullable(),
+  locationState: z.string().optional().nullable(),
+  locationZipCode: z.string().optional().nullable(),
   phoneNumber: z.string().optional().nullable(),
   emailAddress: z.string().optional().nullable(),
   websiteUrl: z.string().optional().nullable(),
