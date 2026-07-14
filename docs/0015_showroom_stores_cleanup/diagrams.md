@@ -4,6 +4,73 @@ Validated with `pnpm run mermaid:validate docs/0015_showroom_stores_cleanup/diag
 These are the focused per-phase diagrams embedded on the changelog detail pages
 (`src/frontend/data/changelog-detail.ts`).
 
+## Architecture overview (after)
+
+The whole point of the cleanup: `showroom_stores` shed its inline columns into
+typed child tables.
+
+```mermaid
+erDiagram
+  showroom_stores ||--o{ showroom_store_hours : "hours"
+  showroom_stores ||--o{ showroom_store_links : "urls"
+  showroom_stores ||--o{ showroom_store_contacts : "people"
+  showroom_store_contacts ||--o{ showroom_store_contact_log : "interactions"
+  showroom_store_contacts ||--o{ showroom_store_contact_business_cards : "cards"
+  showroom_stores {
+    integer id PK
+    text name
+    text location_address
+    text location_city
+    text location_state
+    integer is_open_weekends
+  }
+  showroom_store_hours {
+    integer id PK
+    integer showroom_id FK
+    text day
+    integer open_hour
+    integer close_hour
+  }
+  showroom_store_links {
+    integer id PK
+    integer store_id FK
+    text url
+    text type
+  }
+  showroom_store_contacts {
+    integer id PK
+    integer store_id FK
+    text type
+    text first_name
+    text last_name
+    text email_address
+    integer is_draft
+  }
+  showroom_store_contact_log {
+    integer id PK
+    integer store_contact_id FK
+    text outcome_of_conversation
+  }
+  showroom_store_contact_business_cards {
+    integer id PK
+    integer contact_id FK
+    text status
+    text cf_image_url
+  }
+```
+
+## Build timeline
+
+```mermaid
+gitGraph
+  commit id: "Phase 1 hours"
+  commit id: "Phase 2 address"
+  commit id: "Phase 3 links"
+  commit id: "Phase 4 contacts"
+  commit id: "Phase 5 email"
+  commit id: "changelog + docs"
+```
+
 ## Phase 1 — Hours
 
 ```mermaid

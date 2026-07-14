@@ -30,6 +30,8 @@ export interface ChangelogBranch {
   prNumber?: number;
   /** Full URL to the PR. */
   prUrl?: string;
+  /** Branch-level Mermaid diagrams (architecture ER, build timeline). */
+  diagrams?: { caption: string; code: string }[];
 }
 
 export interface ChangelogEntry {
@@ -60,6 +62,67 @@ export const BRANCHES: ChangelogBranch[] = [
     date: "2026-07-13",
     status: "staged",
     // prNumber / prUrl set once the PR is opened.
+    diagrams: [
+      {
+        caption: "Architecture (after) — showroom_stores shed its inline columns into typed child tables.",
+        code: `erDiagram
+  showroom_stores ||--o{ showroom_store_hours : "hours"
+  showroom_stores ||--o{ showroom_store_links : "urls"
+  showroom_stores ||--o{ showroom_store_contacts : "people"
+  showroom_store_contacts ||--o{ showroom_store_contact_log : "interactions"
+  showroom_store_contacts ||--o{ showroom_store_contact_business_cards : "cards"
+  showroom_stores {
+    integer id PK
+    text name
+    text location_city
+    text location_state
+    integer is_open_weekends
+  }
+  showroom_store_hours {
+    integer id PK
+    integer showroom_id FK
+    text day
+    integer open_hour
+    integer close_hour
+  }
+  showroom_store_links {
+    integer id PK
+    integer store_id FK
+    text url
+    text type
+  }
+  showroom_store_contacts {
+    integer id PK
+    integer store_id FK
+    text type
+    text first_name
+    text last_name
+    text email_address
+    integer is_draft
+  }
+  showroom_store_contact_log {
+    integer id PK
+    integer store_contact_id FK
+    text outcome_of_conversation
+  }
+  showroom_store_contact_business_cards {
+    integer id PK
+    integer contact_id FK
+    text status
+    text cf_image_url
+  }`,
+      },
+      {
+        caption: "Build timeline — the five phases on this branch.",
+        code: `gitGraph
+  commit id: "Phase 1 hours"
+  commit id: "Phase 2 address"
+  commit id: "Phase 3 links"
+  commit id: "Phase 4 contacts"
+  commit id: "Phase 5 email"
+  commit id: "changelog + docs"`,
+      },
+    ],
   },
 ];
 

@@ -2,6 +2,7 @@
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import { BRANCHES, CHANGELOG, type ChangeKind } from "@/data/changelog";
 import { CHANGELOG_DETAIL } from "@/data/changelog-detail";
+import { MermaidCn } from "@/components/mermaidcn/MermaidCn";
 
 const KIND: Record<ChangeKind, { label: string; cls: string; dot: string }> = {
   added: { label: "Added", cls: "bg-emerald-500/12 text-emerald-300", dot: "bg-emerald-400" },
@@ -79,6 +80,21 @@ const orphans = CHANGELOG.filter((e) => !declared.has(e.branch));
               <h2 class="mt-3 text-xl font-semibold tracking-tight">{branch.title}</h2>
               {branch.summary && (
                 <p class="mt-1 text-sm leading-relaxed text-muted-foreground">{branch.summary}</p>
+              )}
+
+              {/* ── Branch-level diagrams (architecture + build timeline) ── */}
+              {branch.diagrams && branch.diagrams.length > 0 && (
+                <details class="group mt-4 rounded-lg bg-muted/20 p-3">
+                  <summary class="cursor-pointer list-none text-xs font-medium text-muted-foreground hover:text-foreground">
+                    <span class="inline-block transition-transform group-open:rotate-90">▸</span>
+                    Diagrams — architecture &amp; build timeline
+                  </summary>
+                  <div class="mt-4 space-y-6">
+                    {branch.diagrams.map((d) => (
+                      <MermaidCn code={d.code} caption={d.caption} client:visible />
+                    ))}
+                  </div>
+                </details>
               )}
 
               {/* ── Nested phase entries ── */}
