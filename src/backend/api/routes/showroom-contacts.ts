@@ -218,8 +218,6 @@ const personSchema = z.object({
   isTextingOk: z.boolean().optional(),
   bestContactTimesJson: z.record(z.string(), z.unknown()).optional().nullable(),
   notes: z.string().optional().nullable(),
-}).refine((p) => Boolean(p.firstName?.trim() || p.fullName?.trim()), {
-  message: "A person contact requires a first name (or a full name to split).",
 });
 
 const createContactsSchema = z.object({
@@ -278,7 +276,10 @@ const createContactsSchema = z.object({
    */
   businessCardFront: z.string().optional().nullable(),
   businessCardBack: z.string().optional().nullable(),
-});
+}).refine(
+  (d) => (d.people ?? []).every((p) => Boolean(p.firstName?.trim() || p.fullName?.trim())),
+  { message: "Each person contact requires a first name (or a full name to split)." },
+);
 
 // ─── Create (smart field-out) ─────────────────────────────────────────────────
 
