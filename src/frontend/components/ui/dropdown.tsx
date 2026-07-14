@@ -81,9 +81,7 @@ export function Dropdown<TValue extends string = string>({
     <Select
       value={value}
       defaultValue={defaultValue}
-      onValueChange={
-        onValueChange as ((value: string) => void) | undefined
-      }
+      onValueChange={onValueChange}
       disabled={disabled}
       name={name}
     >

@@ -865,7 +865,7 @@ export function BrandsDirectoryApp() {
           onValueChange={(v) => setTypeFilter(!v || v === FILTER_ALL ? null : Number(v))}
         >
           <SelectTrigger
-            className="h-9 w-full shrink-0 text-xs"
+            className="h-9 w-full sm:w-fit shrink-0 text-xs"
             aria-label="Filter by category"
           >
             <SelectValue items={typeSelectItems} placeholder="Category" />
@@ -885,7 +885,7 @@ export function BrandsDirectoryApp() {
           onValueChange={(v) => setMinRating(!v || v === FILTER_ALL ? 0 : Number(v))}
         >
           <SelectTrigger
-            className="h-9 w-full shrink-0 text-xs"
+            className="h-9 w-full sm:w-fit shrink-0 text-xs"
             aria-label="Filter by minimum rating"
           >
             <SelectValue items={MIN_RATING_OPTIONS} placeholder="Rating" />
