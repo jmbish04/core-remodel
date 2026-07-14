@@ -100,6 +100,7 @@ export async function getLocation(env: Env): Promise<TeslaLocation | null> {
   try {
     const res = await fetch(`${TESSIE_BASE}/${encodeURIComponent(cfg.vin)}/location`, {
       headers: { Authorization: `Bearer ${cfg.token}`, Accept: "application/json" },
+      signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return null;
     const data = (await res.json()) as {
@@ -141,6 +142,9 @@ export async function sendNavigation(env: Env, dest: string): Promise<SendNavRes
     const res = await fetch(url, {
       method: "POST",
       headers: { Authorization: `Bearer ${cfg.token}`, Accept: "application/json" },
+      // Wake-and-share can be slow; cap it so a hung Tessie call can't stall the
+      // request/webhook indefinitely.
+      signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");

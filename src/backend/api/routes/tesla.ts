@@ -34,7 +34,7 @@ const teslaRouter = new Hono<{ Bindings: Env }>();
 
 /** Admin gate for everything EXCEPT the secret-verified webhook. */
 teslaRouter.use("*", async (c, next) => {
-  if (c.req.path.endsWith("/webhook")) return next();
+  if (c.req.path === "/api/tesla/webhook") return next();
   if (!(await isRequestAuthenticated(c.req.raw, c.env))) {
     return c.json({ error: "Unauthorized" }, 401);
   }
