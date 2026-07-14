@@ -36,6 +36,58 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "showroom-editing": {
+    slug: "showroom-editing",
+    problem:
+      "Once normalized, the hours / address / links still needed to be CORRECTABLE — intake misses fields, Google Places is sometimes wrong, and a store can move. And a business card often carries generic store details (name, address, website, socials, phone, email) that belong to the showroom, not the person.",
+    approach:
+      "Dedicated correction endpoints + MCP tools for each (hours, address, links) so a human, a looping script, or an AI chat can fix them. The contact-create path additionally accepts optional `showroom` details: when present they fuzzy-match the store (id / placeId / website-domain / phone / email-domain / address / name) and FILL-BLANKS the store — address/phone/email onto the store row + GENERAL_CONTACT, website/socials into the links table. Never overwrites existing data.",
+    apiChanges: [
+      "PUT /api/showroom-stores/:id/hours — hoursJson → rows + is_open_weekends",
+      "PUT /api/showroom-stores/:id/address — granular parts + formatted + maps link (zip columns synced)",
+      "GET/POST /api/showroom-stores/:id/links + PUT/DELETE /:id/links/:linkId",
+      "POST /api/showroom-contacts — person requires a name; accepts optional showroom{name,address,website,phone,email,instagram,facebook,pinterest} → match + fill store",
+    ],
+    mcpChanges: [
+      "set_showroom_address (NEW), set_showroom_links (NEW, replace-all), set_showroom_hours",
+      "create_showroom_contact — same showroom-details field-out",
+    ],
+    filesTouched: [
+      "src/backend/api/routes/showroom-stores.ts (/:id/hours, /:id/address)",
+      "src/backend/api/routes/showroom-contacts.ts (matchStore + showroom fill)",
+      "src/backend/api/routes/mcp.ts",
+      "src/frontend/components/showroom/StoreViewportApp.tsx + intake",
+    ],
+    migrations: [],
+    code: [
+      {
+        title: "Contact create with a business card's showroom details",
+        lang: "json",
+        code: `{
+  "people": [{ "firstName": "Peter", "lastName": "Huynh", "emailAddress": "peter@davincimarble.com" }],
+  "showroom": {
+    "name": "DaVinci Marble", "website": "https://davincimarble.com",
+    "phone": "(510) 895-4900", "email": "info@davincimarble.com",
+    "address": "2000 Marina Blvd, San Leandro, CA", "instagram": "https://instagram.com/davincimarble"
+  }
+}
+// → matches the store, fills its blank address/phone/email + GENERAL_CONTACT,
+//   and adds the website + instagram to the links table.`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "A business card's showroom details match the store and fill any blanks.",
+        code: `flowchart TD
+  A["create contact + showroom{...}"] --> B["matchStore (name / website / email / phone / address)"]
+  B -- matched --> C["fill-blanks store row (address / phone / email)"]
+  B -- matched --> D["upsert GENERAL_CONTACT (office / email)"]
+  B -- matched --> E["website + socials to links table"]
+  B -- no match --> F["contact saved as draft"]`,
+      },
+    ],
+  },
+
   "showroom-hours": {
     slug: "showroom-hours",
     problem:

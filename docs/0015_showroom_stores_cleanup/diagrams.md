@@ -288,3 +288,14 @@ flowchart TD
   D_Contacts -- "1:N (logs)" --> D_ContactLogs
   D_Contacts -- "1:N (cards)" --> D_ContactCards
 ```
+
+## Phase 6 — Business-card showroom fill
+
+```mermaid
+flowchart TD
+  A["create contact + showroom{...}"] --> B["matchStore (name / website / email / phone / address)"]
+  B -- matched --> C["fill-blanks store row (address / phone / email)"]
+  B -- matched --> D["upsert GENERAL_CONTACT (office / email)"]
+  B -- matched --> E["website + socials to links table"]
+  B -- no match --> F["contact saved as draft"]
+```

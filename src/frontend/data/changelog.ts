@@ -216,6 +216,24 @@ export const BRANCHES: ChangelogBranch[] = [
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "showroom-editing",
+    branch: "claude/showroom-stores-cleanup-775bb5",
+    date: "2026-07-14",
+    tag: "Phase 6",
+    area: "Showrooms",
+    title: "Edit hours, address & links — and smarter contact intake",
+    summary:
+      "Everything the cleanup normalized can now be corrected after intake — hours, address, and links — from the API, an MCP tool, or the showroom page. And a business card that carries store details now fills the showroom in automatically.",
+    status: "staged",
+    changes: [
+      { kind: "added", text: "Correct a showroom's hours / address / links after intake — PUT /:id/hours, PUT /:id/address, /:id/links CRUD, plus a Contacts-style editor on the showroom page." },
+      { kind: "added", text: "MCP tools set_showroom_address + set_showroom_links (with set_showroom_hours) so an AI or a script can bulk-fill or fix these." },
+      { kind: "changed", text: "Creating a contact now requires a name and optionally accepts the generic showroom details a business card carries (name/address/website/socials/phone/email) — the worker matches the store and fills any missing store info." },
+      { kind: "added", text: "The intake form collects links; the store viewport lets you add/edit/delete them." },
+      { kind: "fixed", text: "The email-to-contacts flow diagram was malformed — rewritten + validated." },
+    ],
+  },
+  {
     id: "showroom-email-contacts",
     branch: "claude/showroom-stores-cleanup-775bb5",
     date: "2026-07-13",
