@@ -32,17 +32,24 @@ record of the work.
 - When you change an API endpoint or MCP tool, the changelog entry + detail page
   MUST reflect it (both the REST route and the `/mcp` tool).
 
-### Generating D1 ER diagrams (Mermaid)
+### Generating D1 ER diagrams (Mermaid) — MANDATORY validation
 
-Use the vendored generator, then paste its `erDiagram` (trimmed to the relevant
-tables) into the `diagrams` of the `PhaseDetail`:
+Use the ESM Mermaid suite (`scripts/documentation/mermaid/*`; the old
+`mermaid.py` is deprecated). `mermaid:erd` self-validates its output.
 
 ```bash
-python3 scripts/documentation/d1_schema/mermaid.py --from-migrations drizzle \
-  --tables 'showroom_store_*' 'showroom_stores' --theme dark
-# output: scripts/documentation/d1_schema/diagram/<timestamp>_diagram.md
-# --local (default) introspects the local wrangler D1 instead of the migrations.
+# after-state ERD from the migrations (feeds a PhaseDetail diagram):
+pnpm run mermaid:erd -- --tables 'showroom_store_*' --theme dark
+# → scripts/documentation/mermaid/output/<ts>_diagram.md (auto-validated)
+
+# validate any diagram / doc before committing (exit 1 = fix + re-run):
+pnpm run mermaid:validate <path-to-.md-or-.mmd>
 ```
+
+Every Mermaid diagram an agent generates or hand-authors MUST pass
+`mermaid:validate` before commit. Feed only focused table sets — a 50-column
+parent table produces a malformed box. Keep a validated copy of the phase
+diagrams in `docs/<feature>/diagrams.md`.
 
 ## Active design specs (read-only references for agents)
 

@@ -304,40 +304,53 @@ export function parsePhoneField(raw): LabeledPhones {
     ],
     diagrams: [
       {
-        caption: "Contacts, their interaction log, and scanned business cards — all keyed off the store.",
+        caption:
+          "Contacts, their interaction log, and scanned business cards — generated from the migrations via `pnpm run mermaid:erd` and validated.",
         code: `erDiagram
-  showroom_stores ||--o{ showroom_store_contacts : "has (store_id->id)"
-  showroom_store_contacts ||--o{ showroom_store_contact_log : "logged (store_contact_id->id)"
-  showroom_store_contacts ||--o{ showroom_store_contact_business_cards : "scanned (contact_id->id)"
-  showroom_store_contacts {
-    integer id PK
-    integer store_id FK
-    text type
-    text first_name
-    text last_name
-    text office_phone_number
-    text mobile_phone_number
-    text fax_phone_number
-    text email_address
-    integer is_texting_ok
-    integer is_draft
-  }
-  showroom_store_contact_log {
-    integer id PK
-    integer store_id FK
-    integer store_contact_id FK
-    text outcome_of_conversation
-    integer is_followup_needed
-  }
-  showroom_store_contact_business_cards {
-    integer id PK
-    integer store_id FK
-    integer contact_id FK
-    text status
-    text cf_image_url
-    text cf_image_url_back
-    text image_json
-  }`,
+    showroom_stores ||--o{ showroom_store_contacts : "has (store_id->id)"
+    showroom_store_contacts ||--o{ showroom_store_contact_business_cards : "has (contact_id->id)"
+    showroom_store_contacts ||--o{ showroom_store_contact_log : "has (store_contact_id->id)"
+    showroom_store_contacts {
+        integer id PK
+        integer store_id
+        text type
+        text notes
+        text first_name
+        text last_name
+        text office_phone_number
+        text office_phone_extension
+        text mobile_phone_number
+        text fax_phone_number
+        text email_address
+        integer is_texting_ok
+        text best_contact_times_json
+        integer is_draft
+        text draft_notes
+    }
+    showroom_store_contact_log {
+        integer id PK
+        integer store_id
+        integer store_contact_id
+        integer timestamp_contact_start
+        integer timestamp_contact_end
+        integer estimated_call_duration
+        text transcript_json
+        text context_of_conversation
+        text outcome_of_conversation
+        integer is_followup_needed
+        text followup_notes
+    }
+    showroom_store_contact_business_cards {
+        integer id PK
+        integer store_id
+        integer contact_id
+        text status
+        integer is_draft
+        text draft_notes
+        text cf_image_url
+        text cf_image_url_back
+        text image_json
+    }`,
       },
     ],
   },

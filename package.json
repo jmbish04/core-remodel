@@ -20,6 +20,15 @@
     "lint": "oxlint",
     "check": "oxlint && oxfmt",
     "db:generate": "drizzle-kit generate",
+    "mermaid:erd": "node scripts/documentation/mermaid/erd.mjs --from-migrations",
+    "mermaid:erd:remote": "node scripts/documentation/mermaid/erd.mjs --remote",
+    "mermaid:validate": "node scripts/documentation/mermaid/validate.mjs",
+    "mermaid:arch": "node scripts/documentation/mermaid/arch.mjs",
+    "mermaid:flow": "node scripts/documentation/mermaid/flow.mjs",
+    "mermaid:seq": "node scripts/documentation/mermaid/seq.mjs",
+    "mermaid:gitgraph": "node scripts/documentation/mermaid/gitgraph.mjs",
+    "mermaid:branch-impact": "node scripts/documentation/mermaid/branch-impact.mjs",
+    "mermaid:setup-ui": "node scripts/documentation/mermaid/setup-mermaidcn.mjs",
     "db:seed": "npx wrangler@latest d1 execute DB --remote --file=seed.sql",
     "migrate:local": "pnpm run db:generate && node scripts/d1-migrate.mjs --local",
     "migrate:remote": "node scripts/d1-migrate.mjs --remote",
@@ -120,6 +129,7 @@
     "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
+    "@mermaid-js/parser": "^1.2.0",
     "@types/lodash.throttle": "^4.1.9",
     "@types/node": "^24.12.2",
     "@types/react": "^19.2.14",
