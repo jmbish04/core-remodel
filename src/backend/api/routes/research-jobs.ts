@@ -31,6 +31,7 @@ import {
   type ResearchJob,
 } from "@backend/db/schema/research/index";
 import { showroomStores } from "@backend/db/schema/showroom/stores";
+import { showroomStoreLinks } from "@backend/db/schema/showroom/links";
 import { showroomStoreProducts } from "@backend/db/schema/showroom/store_products";
 import { brands } from "@backend/db/schema/brands/brands";
 import { GoogleMapsService } from "@backend/services/google/maps";
@@ -710,13 +711,18 @@ async function intakeShowroom(env: Env, candidate: DiscoveryCandidate): Promise<
     if (!conflict) linkablePlaceId = match.placeId;
   }
 
+  // Website goes to showroom_store_links (added after the store insert below).
+  const websiteUrl =
+    linkablePlaceId && match
+      ? match.websiteUri ?? candidate.websiteUrl ?? null
+      : candidate.websiteUrl ?? null;
+
   const [inserted] = await db
     .insert(showroomStores)
     .values(
       linkablePlaceId && match
         ? {
             name: candidate.name,
-            websiteUrl: match.websiteUri ?? candidate.websiteUrl ?? null,
             locationAddress: match.formattedAddress ?? candidate.address ?? null,
             placeId: linkablePlaceId,
             phoneNumber: match.nationalPhoneNumber ?? null,
@@ -725,12 +731,19 @@ async function intakeShowroom(env: Env, candidate: DiscoveryCandidate): Promise<
           }
         : {
             name: candidate.name,
-            websiteUrl: candidate.websiteUrl ?? null,
             locationAddress: candidate.address ?? null,
           },
     )
     .returning({ id: showroomStores.id });
   const showroomId = inserted.id;
+
+  if (websiteUrl && websiteUrl.trim()) {
+    await db.insert(showroomStoreLinks).values({
+      storeId: showroomId,
+      url: websiteUrl.trim(),
+      type: "WEBSITE",
+    });
+  }
 
   // Best-effort heavy enrichment (Places prefill → Gemini → research → scrape)
   // on the agent's durable queue — requires a confirmed place_id.

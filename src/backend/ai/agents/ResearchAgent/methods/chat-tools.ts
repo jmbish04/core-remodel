@@ -24,6 +24,7 @@ import { and, desc, eq, like } from "drizzle-orm";
 
 import { materialScheduleItems } from "@backend/db/schema/materials/index";
 import { showroomStores, showroomStoreProducts } from "@backend/db/schema/showroom/index";
+import { getStoreLinksMap, linksToLegacyUrls } from "@backend/utils/showroom-links";
 
 const LIMIT = 25;
 
@@ -93,11 +94,12 @@ export function buildChatDataTools(env: Env) {
         if (conditions.length > 0) q = q.where(and(...conditions));
 
         const rows = await q;
+        const linksMap = await getStoreLinksMap(db, rows.map((s) => s.id));
         const stores = rows.map((s) => ({
           id: s.id,
           name: s.name,
           pricePoint: s.pricePoint,
-          websiteUrl: s.websiteUrl,
+          websiteUrl: linksToLegacyUrls(linksMap.get(s.id) ?? []).websiteUrl,
           scale: s.scale,
         }));
         return { count: rows.length, stores };

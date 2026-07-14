@@ -51,7 +51,7 @@ export const showroomStores = sqliteTable("showroom_stores", {
 
   phoneNumber: text("phone_number"),
   emailAddress: text("email_address"),
-  websiteUrl: text("website_url"),
+  // Website + social URLs moved to the showroom_store_links table.
   /** Legacy zip — kept in sync with `locationZipCode`; slated for removal. */
   zipCode: text("zip_code"),
   googleMapsLink: text("google_maps_link"),
@@ -206,28 +206,13 @@ export const showroomStores = sqliteTable("showroom_stores", {
    */
   ratingContextMarkdown: text("rating_context_markdown"),
 
-  // ── Social & brand media ──────────────────────────────────────────────
-  /**
-   * Public Instagram profile URL for this showroom location.
-   * Example: "https://www.instagram.com/studiobelmontbath/"
-   */
-  instagramUrl: text("instagram_url"),
-
-  /**
-   * Public Facebook page URL for this showroom location.
-   * Example: "https://www.facebook.com/davincimarble/"
-   */
-  facebookUrl: text("facebook_url"),
-
-  /**
-   * Public Pinterest profile URL for this showroom location.
-   * Example: "https://www.pinterest.com/davincimarble/"
-   */
-  pinterestUrl: text("pinterest_url"),
+  // ── Brand media ───────────────────────────────────────────────────────
+  // Website / Instagram / Facebook / Pinterest URLs now live in the
+  // showroom_store_links table (one row per link, typed).
 
   /**
    * Cloudflare Images delivery URL of the showroom's scraped favicon / brand icon.
-   * Auto-populated by the favicon worker whenever `websiteUrl` is set or changed.
+   * Auto-populated by the favicon worker whenever the WEBSITE link is set/changed.
    * Example: "https://imagedelivery.net/<accountHash>/<imageId>/public"
    */
   iconCfImagesUrl: text("icon_cf_images_url"),

@@ -25,10 +25,12 @@ import { getAgentByName } from "agents";
 import {
   showroomStores,
   showroomStoreHours,
+  showroomStoreLinks,
   showroomPhotosMapping,
   showroomStoreCategoryMapping,
 } from "@backend/db/schema/showroom/index";
 import { GoogleMapsService } from "@backend/services/google/maps";
+import { getStoreWebsiteUrl } from "@backend/utils/showroom-links";
 import {
   deriveIsOpenWeekends,
   hoursJsonSchema,
@@ -136,7 +138,6 @@ showroomBackfillRouter.openapi(
         name: showroomStores.name,
         locationAddress: showroomStores.locationAddress,
         phoneNumber: showroomStores.phoneNumber,
-        websiteUrl: showroomStores.websiteUrl,
         placeId: showroomStores.placeId,
         googleRating: showroomStores.googleRating,
         hoursJson: showroomStores.hoursJson,
@@ -148,15 +149,20 @@ showroomBackfillRouter.openapi(
       })
       .from(showroomStores);
 
-    // Aggregate presence of one-to-many enrichment across all stores in 3 reads.
-    const [hoursRows, photoRows, categoryRows] = await Promise.all([
+    // Aggregate presence of one-to-many enrichment across all stores in 4 reads.
+    const [hoursRows, photoRows, categoryRows, websiteRows] = await Promise.all([
       db.selectDistinct({ id: showroomStoreHours.showroomId }).from(showroomStoreHours),
       db.selectDistinct({ id: showroomPhotosMapping.showroomId }).from(showroomPhotosMapping),
       db.selectDistinct({ id: showroomStoreCategoryMapping.storeId }).from(showroomStoreCategoryMapping),
+      db
+        .selectDistinct({ id: showroomStoreLinks.storeId })
+        .from(showroomStoreLinks)
+        .where(eq(showroomStoreLinks.type, "WEBSITE")),
     ]);
     const hasHours = new Set(hoursRows.map((r) => r.id));
     const hasPhotos = new Set(photoRows.map((r) => r.id));
     const hasCategories = new Set(categoryRows.map((r) => r.id));
+    const hasWebsite = new Set(websiteRows.map((r) => r.id));
 
     const showrooms = stores
       .map((s) => {
@@ -166,7 +172,7 @@ showroomBackfillRouter.openapi(
         if (!s.placeId) add("place_id");
         if (!s.locationAddress) add("address");
         if (!s.phoneNumber) add("phone");
-        if (!s.websiteUrl) add("website");
+        if (!hasWebsite.has(s.id)) add("website");
         // Hours exist when normalized rows are present OR the store still
         // carries a pre-normalization hoursJson blob (reconciled on backfill).
         if (!hasHours.has(s.id) && s.hoursJson == null) add("hours");
@@ -176,8 +182,8 @@ showroomBackfillRouter.openapi(
         if (s.reviewAiInsight == null) add("ai_insight");
         if (!hasCategories.has(s.id)) add("categories");
         // Non-gating, website-dependent context badges.
-        if (s.websiteUrl && !s.iconCfImagesUrl) add("icon");
-        if (s.websiteUrl && s.scrapeStatus !== "complete") add("scrape");
+        if (hasWebsite.has(s.id) && !s.iconCfImagesUrl) add("icon");
+        if (hasWebsite.has(s.id) && s.scrapeStatus !== "complete") add("scrape");
 
         return {
           id: s.id,
@@ -457,7 +463,18 @@ showroomBackfillRouter.openapi(
       // Fill-blanks: only write a column that is currently null/empty.
       if (!store.locationAddress && f.locationAddress) update.locationAddress = f.locationAddress;
       if (!store.phoneNumber && f.phoneNumber) update.phoneNumber = f.phoneNumber;
-      if (!store.websiteUrl && f.websiteUrl) update.websiteUrl = f.websiteUrl;
+      // Website lives in showroom_store_links now — add a WEBSITE link only when
+      // the store has none yet (fill-blanks).
+      if (f.websiteUrl) {
+        const existingWebsite = await getStoreWebsiteUrl(db, item.showroomId);
+        if (!existingWebsite) {
+          await db.insert(showroomStoreLinks).values({
+            storeId: item.showroomId,
+            url: f.websiteUrl.trim(),
+            type: "WEBSITE",
+          });
+        }
+      }
       if (store.googleRating == null && typeof f.googleRating === "number")
         update.googleRating = f.googleRating;
       if (store.userRatingCount == null && typeof f.userRatingCount === "number")

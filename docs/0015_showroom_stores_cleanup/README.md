@@ -70,15 +70,36 @@ Add `location_street_number`, `location_street_name`, `location_city`,
   have `place_id`; 3 (ids 14/16/17) are manual. Fill-blanks + Maps quota guard.
 - API create/update accept the granular fields; place-import auto-fills them.
 
-## Phase 3 — Links table (planned)
+## Phase 3 — Links table (DONE, pending prod apply)
 
 New `showroom_store_links` (`id`, `store_id` FK, `url`, `type` enum
-WEBSITE/INSTAGRAM/PINTEREST/FACEBOOK/OTHER, `url_notes`).
+WEBSITE/INSTAGRAM/PINTEREST/FACEBOOK/OTHER, `url_notes`) = the URL source of
+truth. Full rewire chosen (drop all 4 URL columns).
 
-- Backfill `website_url` / `instagram_url` / `facebook_url` / `pinterest_url` → rows.
-- **Rewire favicon** (keys off `website_url`) to read the WEBSITE link, THEN drop
-  the 4 URL columns (separate migration).
-- API + MCP CRUD; frontend `SocialLinks` + Website button read the links table.
+- Create table (migration `0085`); drop `website_url`/`instagram_url`/
+  `facebook_url`/`pinterest_url` (migration `0086`).
+- Backfill columns → link rows (`scripts/0085-backfill-store-links.mjs`,
+  idempotent) — runs after 0085, before 0086.
+- `utils/showroom-links.ts` helpers; API GET responses **derive** the legacy flat
+  `websiteUrl`/`instagramUrl`/… fields from links, so frontend + read consumers
+  keep working with no change. Create/update accept a `links[]` payload
+  (replace-all); granular CRUD at `/:id/links` (+ `/:id/links/:linkId`).
+- Favicon + scrape triggers now source the website from the WEBSITE link.
+  Pipeline consumers (research agent, deep-sweep, prompt-context, chat-tools,
+  scrape-workflow) rewired to read via `getStoreWebsiteUrl`; the scrape's
+  extracted Instagram is written as an INSTAGRAM link.
+
+### Prod apply order (Phase 3)
+
+```
+1. pnpm run migrate:remote          # through 0085 (create links table)
+2. node scripts/0085-backfill-store-links.mjs --remote --dry-run   # inspect
+   node scripts/0085-backfill-store-links.mjs --remote             # write rows
+3. pnpm run migrate:remote          # applies 0086 (drops URL columns)
+```
+
+Watch the first prod scrape/research run after deploy — those pipelines can't be
+exercised locally.
 
 ## Phase 4 — Contacts + business cards (planned)
 

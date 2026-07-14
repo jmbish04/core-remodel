@@ -39,6 +39,7 @@ import {
   browserRunPages,
   showroomPhotosMapping,
   showroomStoreHours,
+  showroomStoreLinks,
 } from "@backend/db/schema/showroom/index";
 import {
   brands,
@@ -54,6 +55,15 @@ import {
   deriveIsOpenWeekends,
   hoursJsonToRows,
 } from "@backend/utils/showroom-hours";
+import {
+  SHOWROOM_LINK_TYPES,
+  getStoreLinks,
+  getStoreLinksMap,
+  getStoreWebsiteUrl,
+  linksToLegacyUrls,
+  replaceStoreLinks,
+  type StoreLinkInput,
+} from "@backend/utils/showroom-links";
 import {
   generateProductDraftPrompt,
 } from "@backend/ai/agents/ShowroomResearchAgent/methods";
@@ -113,6 +123,13 @@ const hoursJsonSchema = z
 // a private copy — hoursJson is the write source of truth; the util derives the
 // normalized showroom_store_hours rows and the isOpenWeekends flag.
 
+/** One external link in a create/update `links` payload. */
+const linkInputSchema = z.object({
+  url: z.string().min(1),
+  type: z.enum(SHOWROOM_LINK_TYPES as [string, ...string[]]),
+  urlNotes: z.string().optional().nullable(),
+});
+
 const createStoreSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional().nullable(),
@@ -128,7 +145,6 @@ const createStoreSchema = z.object({
   locationZipCode: z.string().optional().nullable(),
   phoneNumber: z.string().optional().nullable(),
   emailAddress: z.string().optional().nullable(),
-  websiteUrl: z.string().optional().nullable(),
   zipCode: z.string().optional().nullable(),
   googleMapsLink: z.string().optional().nullable(),
   /**
@@ -187,12 +203,13 @@ const createStoreSchema = z.object({
   distanceFromSfTime: z.string().optional().nullable(),
   distanceFromSfMiles: z.string().optional().nullable(),
   locationNotes: z.string().optional().nullable(),
-  /** Public Instagram profile URL for this showroom location. */
-  instagramUrl: z.string().optional().nullable(),
-  /** Public Facebook page URL for this showroom location. */
-  facebookUrl: z.string().optional().nullable(),
-  /** Public Pinterest profile URL for this showroom location. */
-  pinterestUrl: z.string().optional().nullable(),
+  /**
+   * External URLs (website + socials + misc) written to `showroom_store_links`.
+   * Replaces the old flat websiteUrl / instagramUrl / facebookUrl / pinterestUrl
+   * fields. Sending `links` REPLACES the store's entire link set. Omit to leave
+   * links unchanged (on update); omit on create for a store with no links.
+   */
+  links: z.array(linkInputSchema).optional(),
   /**
    * Cloudflare Images delivery URL for the showroom's icon (favicon / logo).
    * Normally set by the FaviconService, but can be manually overridden here.
@@ -1116,8 +1133,13 @@ showroomStoresRouter.get("/", async (c) => {
         ),
   ]);
 
+  // External links (website + socials + misc) for every store in the list,
+  // plus the derived legacy flat URL fields for back-compat with card UIs.
+  const linksMap = await getStoreLinksMap(db, storeIds);
+
   return c.json({
     stores: rows.map((r) => {
+      const links = linksMap.get(r.store.id) ?? [];
       const base = {
         ...r.store,
         cityName: r.cityName,
@@ -1125,6 +1147,9 @@ showroomStoresRouter.get("/", async (c) => {
         hubName: r.hubName,
         // Normalized per-day hours (only open days; absent day = closed).
         hours: hoursMap.get(r.store.id) ?? [],
+        // Links table is the URL source of truth; derive legacy flat fields too.
+        links,
+        ...linksToLegacyUrls(links),
       };
 
       if (includes.has("categories")) {
@@ -1300,12 +1325,17 @@ showroomStoresRouter.get("/:id", async (c) => {
     .from(showroomStoreHours)
     .where(eq(showroomStoreHours.showroomId, storeId));
 
+  // External links (URL source of truth) + derived legacy flat URL fields.
+  const links = await getStoreLinks(db, storeId);
+
   return c.json({
     ...store.store,
     cityName: store.cityName,
     hubRoute: store.hubRoute,
     hubName: store.hubName,
     hours,
+    links,
+    ...linksToLegacyUrls(links),
     products,
     categories: categories.map((r) => ({
       ...r.mapping,
@@ -1342,7 +1372,11 @@ showroomStoresRouter.post("/", async (c) => {
   // `categoryIds` and `photos` are not columns on `showroom_stores`.
   // `reviewAiInsight` IS a column but its .$type<> is tighter than z.passthrough(),
   // so we pull it out, cast it, and re-attach below.
-  const { categoryIds, photos, reviewAiInsight, ...storeValues } = data;
+  const { categoryIds, photos, reviewAiInsight, links, ...storeValues } = data;
+
+  // The website URL now lives in showroom_store_links; derive it from the
+  // incoming links payload for favicon + scrape triggers below.
+  const websiteUrl = links?.find((l) => l.type === "WEBSITE")?.url ?? null;
 
   // hoursJson is the write source of truth — derive isOpenWeekends from it.
   // A client-supplied isOpenWeekends is intentionally overwritten. The
@@ -1455,6 +1489,11 @@ showroomStoresRouter.post("/", async (c) => {
     }
   }
 
+  // External links → showroom_store_links (website + socials + misc).
+  if (links && links.length > 0) {
+    await replaceStoreLinks(db, inserted.id, links as StoreLinkInput[]);
+  }
+
   // Fire background work: AI research + favicon hydration (if websiteUrl present).
   c.executionCtx.waitUntil(
     (async () => {
@@ -1467,9 +1506,9 @@ showroomStoresRouter.post("/", async (c) => {
     })(),
   );
 
-  if (data.websiteUrl && data.websiteUrl.length > 0) {
+  if (websiteUrl && websiteUrl.length > 0) {
     c.executionCtx.waitUntil(
-      faviconService.hydrateShowroomIcon(c.env, inserted.id, data.websiteUrl),
+      faviconService.hydrateShowroomIcon(c.env, inserted.id, websiteUrl),
     );
 
     // Post-submit website SCRAPE workflow: mint a RAG UUID, mark the store
@@ -1487,7 +1526,7 @@ showroomStoresRouter.post("/", async (c) => {
           await c.env.SHOWROOM_SCRAPE_WORKFLOW.create({
             params: {
               showroomId: inserted.id,
-              websiteUrl: data.websiteUrl as string,
+              websiteUrl,
               ragUuid,
             },
           });
@@ -1737,15 +1776,17 @@ showroomStoresRouter.post("/:id/scrape", async (c) => {
   }
 
   const [store] = await db
-    .select({ websiteUrl: showroomStores.websiteUrl })
+    .select({ id: showroomStores.id })
     .from(showroomStores)
     .where(eq(showroomStores.id, storeId))
     .limit(1);
 
   if (!store) return c.json({ success: false, error: "Store not found" }, 404);
-  if (!store.websiteUrl || store.websiteUrl.length === 0) {
+
+  const websiteUrl = await getStoreWebsiteUrl(db, storeId);
+  if (!websiteUrl || websiteUrl.length === 0) {
     return c.json(
-      { success: false, error: "Store has no websiteUrl to scrape" },
+      { success: false, error: "Store has no website link to scrape" },
       400,
     );
   }
@@ -1757,7 +1798,7 @@ showroomStoresRouter.post("/:id/scrape", async (c) => {
     .where(eq(showroomStores.id, storeId));
 
   await c.env.SHOWROOM_SCRAPE_WORKFLOW.create({
-    params: { showroomId: storeId, websiteUrl: store.websiteUrl, ragUuid },
+    params: { showroomId: storeId, websiteUrl, ragUuid },
   });
 
   return c.json({ success: true, ragUuid, scrapeStatus: "pending" }, 202);
@@ -1776,14 +1817,17 @@ showroomStoresRouter.put("/:id", async (c) => {
   const body = await c.req.json();
   const data = createStoreSchema.partial().parse(body);
 
-  // Fetch existing row so we can compare websiteUrl + icon before updating.
+  // Fetch existing icon + the current website link so we can decide whether to
+  // re-hydrate the favicon after the update.
   const [existing] = await db
-    .select({ websiteUrl: showroomStores.websiteUrl, iconCfImagesUrl: showroomStores.iconCfImagesUrl })
+    .select({ iconCfImagesUrl: showroomStores.iconCfImagesUrl })
     .from(showroomStores)
     .where(eq(showroomStores.id, storeId))
     .limit(1);
 
   if (!existing) return c.json({ error: "Store not found" }, 404);
+
+  const existingWebsiteUrl = await getStoreWebsiteUrl(db, storeId);
 
   // hoursJson is the write source of truth — derive isOpenWeekends from it.
   // A client-supplied isOpenWeekends is intentionally overwritten. The
@@ -1794,7 +1838,8 @@ showroomStoresRouter.put("/:id", async (c) => {
 
   // Strip virtual / specially-cast fields before the update spread.
   // reviewAiInsight needs a manual cast to match the column's .$type<> shape.
-  const { categoryIds: _catIds, photos: _photos, reviewAiInsight: putInsight, ...putValues } = data;
+  // `links` is written to showroom_store_links, not a column.
+  const { categoryIds: _catIds, photos: _photos, reviewAiInsight: putInsight, links: putLinks, ...putValues } = data;
 
   const [updated] = await db
     .update(showroomStores)
@@ -1825,12 +1870,20 @@ showroomStoresRouter.put("/:id", async (c) => {
     }
   }
 
-  // Trigger favicon refresh when websiteUrl changed or icon is missing.
-  const incomingUrl = data.websiteUrl ?? null;
+  // Replace the store's link set when the caller sent `links` (replace-all).
+  if (putLinks !== undefined) {
+    await replaceStoreLinks(db, storeId, putLinks as StoreLinkInput[]);
+  }
+
+  // Trigger favicon refresh when the website link changed or the icon is missing.
+  const incomingUrl =
+    putLinks !== undefined
+      ? putLinks.find((l) => l.type === "WEBSITE")?.url ?? null
+      : existingWebsiteUrl;
   const shouldRefreshIcon =
-    incomingUrl &&
+    !!incomingUrl &&
     incomingUrl.length > 0 &&
-    (incomingUrl !== existing.websiteUrl || !existing.iconCfImagesUrl);
+    (incomingUrl !== existingWebsiteUrl || !existing.iconCfImagesUrl);
 
   if (shouldRefreshIcon) {
     c.executionCtx.waitUntil(
@@ -1905,6 +1958,76 @@ showroomStoresRouter.delete("/:id", async (c) => {
 
   await db.delete(showroomStores).where(eq(showroomStores.id, storeId));
 
+  return c.json({ success: true });
+});
+
+// ─── LINKS CRUD ───────────────────────────────────────────────────────────────
+// showroom_store_links: the URL source of truth (website + socials + misc).
+// Bulk replace also happens via the store create/update `links` payload; these
+// endpoints manage individual links from the viewport.
+
+/** GET /:id/links — list a store's links (WEBSITE-first, then socials, OTHER). */
+showroomStoresRouter.get("/:id/links", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId)) return c.json({ error: "Invalid store id" }, 400);
+  return c.json({ links: await getStoreLinks(db, storeId) });
+});
+
+/** POST /:id/links — add one link. */
+showroomStoresRouter.post("/:id/links", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId)) return c.json({ error: "Invalid store id" }, 400);
+  const parsed = linkInputSchema.safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
+  const [link] = await db
+    .insert(showroomStoreLinks)
+    .values({
+      storeId,
+      url: parsed.data.url.trim(),
+      type: parsed.data.type as StoreLinkInput["type"],
+      urlNotes: parsed.data.urlNotes?.trim() || null,
+    })
+    .returning();
+  return c.json({ link }, 201);
+});
+
+/** PUT /:id/links/:linkId — edit one link. */
+showroomStoresRouter.put("/:id/links/:linkId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const linkId = Number(c.req.param("linkId"));
+  if (!Number.isInteger(storeId) || !Number.isInteger(linkId)) {
+    return c.json({ error: "Invalid id" }, 400);
+  }
+  const parsed = linkInputSchema.partial().safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
+  const [link] = await db
+    .update(showroomStoreLinks)
+    .set({
+      ...(parsed.data.url !== undefined ? { url: parsed.data.url.trim() } : {}),
+      ...(parsed.data.type !== undefined ? { type: parsed.data.type as StoreLinkInput["type"] } : {}),
+      ...(parsed.data.urlNotes !== undefined ? { urlNotes: parsed.data.urlNotes?.trim() || null } : {}),
+      updatedAt: new Date(),
+    })
+    .where(and(eq(showroomStoreLinks.id, linkId), eq(showroomStoreLinks.storeId, storeId)))
+    .returning();
+  if (!link) return c.json({ error: "Link not found" }, 404);
+  return c.json({ link });
+});
+
+/** DELETE /:id/links/:linkId — remove one link. */
+showroomStoresRouter.delete("/:id/links/:linkId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const linkId = Number(c.req.param("linkId"));
+  if (!Number.isInteger(storeId) || !Number.isInteger(linkId)) {
+    return c.json({ error: "Invalid id" }, 400);
+  }
+  await db
+    .delete(showroomStoreLinks)
+    .where(and(eq(showroomStoreLinks.id, linkId), eq(showroomStoreLinks.storeId, storeId)));
   return c.json({ success: true });
 });
 
