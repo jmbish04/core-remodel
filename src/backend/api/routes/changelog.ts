@@ -34,7 +34,9 @@ const entrySchema = z.object({
   summary: z.string().min(1),
   status: z.enum(["shipped", "staged"]).optional(),
   date: z.string().min(1),
-  changes: z.array(z.object({ kind: z.string(), text: z.string() })).optional(),
+  changes: z
+    .array(z.object({ kind: z.enum(["added", "changed", "removed", "migration", "fixed"]), text: z.string() }))
+    .optional(),
   migrations: z.array(z.string()).optional(),
   detail: z.record(z.string(), z.unknown()).optional().nullable(),
 });
@@ -144,38 +146,51 @@ changelogRouter.post("/entries", async (c) => {
  */
 changelogRouter.post("/seed", async (c) => {
   const db = drizzle(c.env.DB);
-  for (const b of BRANCHES) {
-    await db
-      .insert(changelogBranches)
-      .values({
-        branch: b.branch,
-        title: b.title,
-        summary: b.summary ?? null,
-        date: b.date,
-        status: b.status,
-        prNumber: b.prNumber ?? null,
-        prUrl: b.prUrl ?? null,
-      })
-      .onConflictDoNothing();
+
+  // Build all inserts, then run them chunked through db.batch() — one query per
+  // row keeps us well under D1's 100-bound-param limit while avoiding a slow
+  // sequential await-per-row that could hit Worker execution limits.
+  const stmts = [
+    ...BRANCHES.map((b) =>
+      db
+        .insert(changelogBranches)
+        .values({
+          branch: b.branch,
+          title: b.title,
+          summary: b.summary ?? null,
+          date: b.date,
+          status: b.status,
+          prNumber: b.prNumber ?? null,
+          prUrl: b.prUrl ?? null,
+        })
+        .onConflictDoNothing(),
+    ),
+    ...CHANGELOG.map((e) =>
+      db
+        .insert(changelogEntries)
+        .values({
+          slug: e.id,
+          branch: e.branch,
+          tag: e.tag ?? null,
+          area: e.area,
+          title: e.title,
+          summary: e.summary,
+          status: e.status,
+          date: e.date,
+          changesJson: e.changes,
+          migrationsJson: e.migrations ?? [],
+          detailJson: (CHANGELOG_DETAIL[e.id] as unknown as Record<string, unknown>) ?? null,
+        })
+        .onConflictDoNothing(),
+    ),
+  ];
+
+  const BATCH = 50;
+  for (let i = 0; i < stmts.length; i += BATCH) {
+    const chunk = stmts.slice(i, i + BATCH) as [(typeof stmts)[number], ...(typeof stmts)[number][]];
+    await db.batch(chunk);
   }
-  for (const e of CHANGELOG) {
-    await db
-      .insert(changelogEntries)
-      .values({
-        slug: e.id,
-        branch: e.branch,
-        tag: e.tag ?? null,
-        area: e.area,
-        title: e.title,
-        summary: e.summary,
-        status: e.status,
-        date: e.date,
-        changesJson: e.changes,
-        migrationsJson: e.migrations ?? [],
-        detailJson: (CHANGELOG_DETAIL[e.id] as unknown as Record<string, unknown>) ?? null,
-      })
-      .onConflictDoNothing();
-  }
+
   const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(changelogEntries);
   return c.json({ seeded: true, entries: n }, 201);
 });

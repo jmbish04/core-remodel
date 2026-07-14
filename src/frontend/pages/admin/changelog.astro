@@ -98,14 +98,17 @@ const groups = branchList.map((b) => ({ branch: b, entries: entryList.filter((e)
                   </div>
                   <p class="mt-1 text-sm leading-relaxed text-muted-foreground">{entry.summary}</p>
                   <ul class="mt-2.5 space-y-1.5">
-                    {entry.changes.map((ch) => (
-                      <li class="flex items-start gap-2.5 text-sm">
-                        <span class={`mt-0.5 inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${KIND[ch.kind].cls}`}>
-                          <span class={`inline-block size-1.5 rounded-full ${KIND[ch.kind].dot}`} />{KIND[ch.kind].label}
-                        </span>
-                        <span class="text-foreground/90">{ch.text}</span>
-                      </li>
-                    ))}
+                    {entry.changes.map((ch) => {
+                      const k = KIND[ch.kind] ?? KIND.changed;
+                      return (
+                        <li class="flex items-start gap-2.5 text-sm">
+                          <span class={`mt-0.5 inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${k.cls}`}>
+                            <span class={`inline-block size-1.5 rounded-full ${k.dot}`} />{k.label}
+                          </span>
+                          <span class="text-foreground/90">{ch.text}</span>
+                        </li>
+                      );
+                    })}
                   </ul>
                   {entry.migrations.length > 0 && (
                     <div class="mt-2.5 flex flex-wrap items-center gap-1.5">
