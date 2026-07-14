@@ -24,12 +24,15 @@
  */
 import { showroomHours, showroomPocs, showroomStores, storeNotes } from "@backend/db";
 import { GoogleMapsService } from "@backend/services/google/maps";
+import { faviconService } from "@backend/services/favicon";
 import {
   computeStoreGeoPatch,
   hoursJsonToRows,
   mapPlaceDetailsToStoreInput,
+  runPhotoPipeline,
   scheduleShowroomEnrichment,
   type MappedPlaceStore,
+  type PlacePhotoRef,
 } from "@backend/services/showroom/onboarding";
 import type { GooglePlaceDetails } from "@frontend/components/showroom/intake/places-mapper";
 import type { RemodelDb } from "../types";
@@ -1044,6 +1047,118 @@ export const showroomTools: RemodelTool[] = [
         processed: batch.length,
         regionsSet,
         coordinatesSet,
+        remaining: Math.max(0, candidates.length - batch.length),
+      };
+    },
+  }),
+
+  defineTool({
+    name: "backfill_showroom_media",
+    category: "showrooms",
+    title: "Backfill showroom icons + hero images",
+    description:
+      "One-time maintenance so the directory cards show a logo and a hero banner for every showroom. For each store " +
+      "missing its icon it hydrates the favicon/logo from the stored `websiteUrl` (NO Google quota — fetched from the " +
+      "site itself). For each store missing its hero image, when `fetchHeroes` is enabled, it fetches the store's " +
+      "Google Places photos by `placeId` (quota-metered Places Photo calls, up to 5 per store) and runs the Cloudflare " +
+      "Images pipeline, setting the hero from the first photo. Processes up to `limit` stores per call (default 25) so " +
+      "you can pace spend — re-run until `remaining` is 0. Idempotent: stores that already have an icon/hero are " +
+      "skipped. Icons run by default; heroes are opt-in because they cost Places Photo quota.",
+    inputShape: {
+      limit: z
+        .number()
+        .int()
+        .min(1)
+        .max(50)
+        .optional()
+        .describe("Max stores to process this run (default 25)"),
+      fetchIcons: z
+        .boolean()
+        .optional()
+        .describe(
+          "Hydrate missing favicons/logos from each store's website (default true, no Google quota).",
+        ),
+      fetchHeroes: z
+        .boolean()
+        .optional()
+        .describe(
+          "Fetch missing hero images from Google Places photos by placeId (default FALSE — " +
+            "quota-metered Places Photo calls, up to 5 per store).",
+        ),
+    },
+    annotations: WRITE_IDEMPOTENT,
+    outputShape: {
+      processed: z.number().int(),
+      iconsSet: z.number().int(),
+      heroesSet: z.number().int(),
+      remaining: z.number().int(),
+    },
+    examples: [
+      { title: "Icons only (free)", args: {} },
+      { title: "Icons + heroes, 10/run", args: { fetchHeroes: true, limit: 10 } },
+    ],
+    handler: async ({ env, db }, input) => {
+      const limit = input.limit ?? 25;
+      const doIcons = input.fetchIcons ?? true;
+      const doHeroes = input.fetchHeroes ?? false;
+
+      const all = await db.select().from(showroomStores).all();
+      const candidates = all.filter(
+        (s) =>
+          (doIcons && !s.iconCfImagesUrl && !!s.websiteUrl) ||
+          (doHeroes && !s.heroImageCfImagesUrl && !!s.placeId),
+      );
+      const batch = candidates.slice(0, limit);
+
+      const maps = new GoogleMapsService(env);
+      for (const s of batch) {
+        if (doIcons && !s.iconCfImagesUrl && s.websiteUrl) {
+          // hydrateShowroomIcon updates the row itself and swallows its own
+          // errors (a site with no discoverable favicon is a no-op, not a fault).
+          await faviconService.hydrateShowroomIcon(env, s.id, s.websiteUrl);
+        }
+        if (doHeroes && !s.heroImageCfImagesUrl && s.placeId) {
+          try {
+            const details = await maps.placeDetails(s.placeId, undefined, { skipAi: true });
+            const photos = ((details.photos as PlacePhotoRef[] | undefined) ?? []).slice(0, 5);
+            if (photos.length > 0) await runPhotoPipeline(env, s.id, photos);
+          } catch (err) {
+            // Tolerate quota / lookup / upload failures — other stores still run.
+            console.error(`[backfill_showroom_media] hero failed for store ${s.id}:`, err);
+          }
+        }
+      }
+
+      // Re-read the batch (≤50 ids, within D1's parameter limit) to count what
+      // actually landed — the favicon + photo pipelines can legitimately no-op
+      // when a site has no favicon or a place has no photos.
+      const ids = batch.map((s) => s.id);
+      const after =
+        ids.length > 0
+          ? await db
+              .select({
+                id: showroomStores.id,
+                icon: showroomStores.iconCfImagesUrl,
+                hero: showroomStores.heroImageCfImagesUrl,
+              })
+              .from(showroomStores)
+              .where(inArray(showroomStores.id, ids))
+              .all()
+          : [];
+      const beforeById = new Map(batch.map((s) => [s.id, s]));
+      let iconsSet = 0;
+      let heroesSet = 0;
+      for (const row of after) {
+        const before = beforeById.get(row.id);
+        if (!before) continue;
+        if (doIcons && !before.iconCfImagesUrl && row.icon) iconsSet++;
+        if (doHeroes && !before.heroImageCfImagesUrl && row.hero) heroesSet++;
+      }
+
+      return {
+        processed: batch.length,
+        iconsSet,
+        heroesSet,
         remaining: Math.max(0, candidates.length - batch.length),
       };
     },
