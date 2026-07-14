@@ -8,3 +8,9 @@ export { CategoryChipsEditor, type StoreCategoryChip } from "./CategoryChipsEdit
 export { SocialLinks } from "./SocialLinks";
 export { HoursMiniCard } from "./HoursMiniCard";
 export { HoursContactModal, type HoursContactStore } from "./HoursContactModal";
+export {
+  EditHoursModal,
+  EditAddressModal,
+  ManageLinksModal,
+  type EditableAddress,
+} from "./StoreEditModals";

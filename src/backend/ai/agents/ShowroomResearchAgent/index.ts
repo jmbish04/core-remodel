@@ -35,6 +35,7 @@ import {
   type BackfillEnrichPayload,
 } from "./methods";
 import { faviconService } from "@backend/services/favicon";
+import { getStoreWebsiteUrl } from "@backend/utils/showroom-links";
 import type {
   DeepSweepCategoryInput,
   DeepSweepProductInput,
@@ -391,7 +392,12 @@ export class ShowroomResearchAgent extends AIChatAgent<
     }
 
     // 3 + 4. Favicon + website scrape (fill-blanks guarded inside helpers).
-    const websiteUrl = store.websiteUrl ?? "";
+    let websiteUrl = "";
+    try {
+      websiteUrl = (await getStoreWebsiteUrl(db, showroomId)) ?? "";
+    } catch (err) {
+      console.error(`[ShowroomResearchAgent] website lookup failed for store ${showroomId}:`, err);
+    }
     if (websiteUrl) {
       if (!store.iconCfImagesUrl) {
         try {

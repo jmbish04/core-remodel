@@ -9,11 +9,17 @@
  */
 
 import { showroomStores } from "../schema/showroom/stores";
+import { showroomStoreLinks } from "../schema/showroom/links";
 import { storeBayareaCities } from "../schema/showroom/bay_area_cities";
 import { eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 type StoreRow = typeof showroomStores.$inferInsert;
+// `websiteUrl` is not a showroom_stores column anymore (moved to
+// showroom_store_links); kept here as seed-only input, split off before insert.
+type SeedStoreRow = Omit<StoreRow, "id" | "createdAt" | "updatedAt" | "bayAreaCityId"> & {
+  websiteUrl?: string;
+};
 
 /**
  * Resolve a city name to its ID, returning null if not found.
@@ -37,7 +43,7 @@ async function cityId(
  *
  * Fields left null will be populated by the ShowroomResearchAgent on first run.
  */
-function getStoreData(): Omit<StoreRow, "id" | "createdAt" | "updatedAt" | "bayAreaCityId">[] {
+function getStoreData(): SeedStoreRow[] {
   return [
     // ── Hub C: Peninsula ──────────────────────────────────────────────
     {
@@ -430,10 +436,22 @@ export async function seedShowroomStores(db: DrizzleD1Database) {
       cityNameMap[cityName] = await cityId(db, cityName);
     }
 
-    await db.insert(showroomStores).values({
-      ...store,
-      bayAreaCityId: cityNameMap[cityName],
-    });
+    const { websiteUrl, ...storeFields } = store;
+    const [inserted] = await db
+      .insert(showroomStores)
+      .values({
+        ...storeFields,
+        bayAreaCityId: cityNameMap[cityName],
+      })
+      .returning({ id: showroomStores.id });
+
+    if (websiteUrl && inserted) {
+      await db.insert(showroomStoreLinks).values({
+        storeId: inserted.id,
+        url: websiteUrl,
+        type: "WEBSITE",
+      });
+    }
   }
 
   console.log("✅ Showroom stores seeded.");

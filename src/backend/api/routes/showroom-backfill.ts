@@ -19,21 +19,22 @@
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, and, ne, inArray } from "drizzle-orm";
+import { eq, and, ne, inArray, isNull, isNotNull, count } from "drizzle-orm";
 import { getAgentByName } from "agents";
 
 import {
   showroomStores,
-  showroomHours,
+  showroomStoreHours,
+  showroomStoreLinks,
   showroomPhotosMapping,
   showroomStoreCategoryMapping,
 } from "@backend/db/schema/showroom/index";
 import { GoogleMapsService } from "@backend/services/google/maps";
+import { getStoreWebsiteUrl } from "@backend/utils/showroom-links";
 import {
-  deriveHoursSummary,
+  deriveIsOpenWeekends,
   hoursJsonSchema,
   hoursJsonToRows,
-  normalizeHoursJson,
 } from "@backend/utils/showroom-hours";
 import type { ShowroomResearchAgent } from "@backend/ai/agents/ShowroomResearchAgent";
 import type { BackfillPhotoRef } from "@backend/ai/agents/ShowroomResearchAgent/methods";
@@ -136,10 +137,8 @@ showroomBackfillRouter.openapi(
         name: showroomStores.name,
         locationAddress: showroomStores.locationAddress,
         phoneNumber: showroomStores.phoneNumber,
-        websiteUrl: showroomStores.websiteUrl,
         placeId: showroomStores.placeId,
         googleRating: showroomStores.googleRating,
-        hoursJson: showroomStores.hoursJson,
         heroImageCfImagesUrl: showroomStores.heroImageCfImagesUrl,
         reviewSummary: showroomStores.reviewSummary,
         reviewAiInsight: showroomStores.reviewAiInsight,
@@ -148,15 +147,20 @@ showroomBackfillRouter.openapi(
       })
       .from(showroomStores);
 
-    // Aggregate presence of one-to-many enrichment across all stores in 3 reads.
-    const [hoursRows, photoRows, categoryRows] = await Promise.all([
-      db.selectDistinct({ id: showroomHours.showroomId }).from(showroomHours),
+    // Aggregate presence of one-to-many enrichment across all stores in 4 reads.
+    const [hoursRows, photoRows, categoryRows, websiteRows] = await Promise.all([
+      db.selectDistinct({ id: showroomStoreHours.showroomId }).from(showroomStoreHours),
       db.selectDistinct({ id: showroomPhotosMapping.showroomId }).from(showroomPhotosMapping),
       db.selectDistinct({ id: showroomStoreCategoryMapping.storeId }).from(showroomStoreCategoryMapping),
+      db
+        .selectDistinct({ id: showroomStoreLinks.storeId })
+        .from(showroomStoreLinks)
+        .where(eq(showroomStoreLinks.type, "WEBSITE")),
     ]);
     const hasHours = new Set(hoursRows.map((r) => r.id));
     const hasPhotos = new Set(photoRows.map((r) => r.id));
     const hasCategories = new Set(categoryRows.map((r) => r.id));
+    const hasWebsite = new Set(websiteRows.map((r) => r.id));
 
     const showrooms = stores
       .map((s) => {
@@ -166,18 +170,18 @@ showroomBackfillRouter.openapi(
         if (!s.placeId) add("place_id");
         if (!s.locationAddress) add("address");
         if (!s.phoneNumber) add("phone");
-        if (!s.websiteUrl) add("website");
+        if (!hasWebsite.has(s.id)) add("website");
         // Hours exist when normalized rows are present OR the store still
-        // carries a pre-normalization hoursJson blob (reconciled on backfill).
-        if (!hasHours.has(s.id) && s.hoursJson == null) add("hours");
+        // present (showroom_store_hours is the sole store of truth now).
+        if (!hasHours.has(s.id)) add("hours");
         if (s.googleRating == null) add("google_rating");
         if (!s.heroImageCfImagesUrl && !hasPhotos.has(s.id)) add("photo");
         if (!s.reviewSummary) add("review_summary");
         if (s.reviewAiInsight == null) add("ai_insight");
         if (!hasCategories.has(s.id)) add("categories");
         // Non-gating, website-dependent context badges.
-        if (s.websiteUrl && !s.iconCfImagesUrl) add("icon");
-        if (s.websiteUrl && s.scrapeStatus !== "complete") add("scrape");
+        if (hasWebsite.has(s.id) && !s.iconCfImagesUrl) add("icon");
+        if (hasWebsite.has(s.id) && s.scrapeStatus !== "complete") add("scrape");
 
         return {
           id: s.id,
@@ -457,7 +461,18 @@ showroomBackfillRouter.openapi(
       // Fill-blanks: only write a column that is currently null/empty.
       if (!store.locationAddress && f.locationAddress) update.locationAddress = f.locationAddress;
       if (!store.phoneNumber && f.phoneNumber) update.phoneNumber = f.phoneNumber;
-      if (!store.websiteUrl && f.websiteUrl) update.websiteUrl = f.websiteUrl;
+      // Website lives in showroom_store_links now — add a WEBSITE link only when
+      // the store has none yet (fill-blanks).
+      if (f.websiteUrl) {
+        const existingWebsite = await getStoreWebsiteUrl(db, item.showroomId);
+        if (!existingWebsite) {
+          await db.insert(showroomStoreLinks).values({
+            storeId: item.showroomId,
+            url: f.websiteUrl.trim(),
+            type: "WEBSITE",
+          });
+        }
+      }
       if (store.googleRating == null && typeof f.googleRating === "number")
         update.googleRating = f.googleRating;
       if (store.userRatingCount == null && typeof f.userRatingCount === "number")
@@ -465,15 +480,11 @@ showroomBackfillRouter.openapi(
       if (!store.reviewSummary && f.reviewSummary) update.reviewSummary = f.reviewSummary;
       if (!store.pricePoint && f.pricePoint) update.pricePoint = f.pricePoint;
 
-      // Structured hours — fill-blanks the store's hoursJson blob plus the
-      // derived display/filter fields (weekdayHours / weekendHours /
-      // isOpenWeekends), mirroring what the intake create handler derives.
-      if (f.hoursJson && store.hoursJson == null) {
-        const derived = deriveHoursSummary(f.hoursJson);
-        update.hoursJson = normalizeHoursJson(f.hoursJson);
-        update.weekdayHours = derived.weekdayHours;
-        update.weekendHours = derived.weekendHours;
-        update.isOpenWeekends = derived.isOpenWeekends;
+      // Structured hours — derive the isOpenWeekends flag from the payload.
+      // (The normalized showroom_store_hours rows are written below; there is no
+      // hours_json column any more.)
+      if (f.hoursJson) {
+        update.isOpenWeekends = deriveIsOpenWeekends(f.hoursJson);
       }
 
       // Link the confirmed place_id — only when the store has none AND no other
@@ -502,19 +513,18 @@ showroomBackfillRouter.openapi(
       }
 
       // Normalized hours — fill-blanks: only when the store has NO hours rows
-      // yet. Falls back to the store's own hoursJson so pre-normalization rows
-      // (created before showroom_hours existed) get reconciled on backfill.
-      const effectiveHours = f.hoursJson ?? store.hoursJson ?? null;
+      // yet, from the submitted hoursJson payload.
+      const effectiveHours = f.hoursJson ?? null;
       if (effectiveHours) {
         const [existingHours] = await db
-          .select({ id: showroomHours.id })
-          .from(showroomHours)
-          .where(eq(showroomHours.showroomId, item.showroomId))
+          .select({ id: showroomStoreHours.id })
+          .from(showroomStoreHours)
+          .where(eq(showroomStoreHours.showroomId, item.showroomId))
           .limit(1);
         if (!existingHours) {
           const rows = hoursJsonToRows(item.showroomId, effectiveHours);
           if (rows.length > 0) {
-            await db.insert(showroomHours).values(
+            await db.insert(showroomStoreHours).values(
               rows as [(typeof rows)[number], ...(typeof rows)[number][]],
             );
           }
@@ -543,3 +553,113 @@ showroomBackfillRouter.openapi(
     return c.json({ updated, queued, skipped }, 200);
   },
 );
+
+// ─── POST /backfill/addresses ────────────────────────────────────────────────
+//
+// One-shot maintenance: split each place-linked store's address into the
+// granular location_* columns and refresh location_address + google_maps_link
+// from Google Places (authoritative — overwrites city-only stubs like
+// "San Carlos, CA"). Targets stores that have a place_id but no
+// location_street_number yet, so re-runs skip completed rows.
+//
+// Dry-run by default; pass ?apply=true to write. ?limit=N caps the batch
+// (default 25, hard max 50). Each Places lookup is a billable external call;
+// running hundreds sequentially in one Worker request blows the CPU/time
+// budget, so we cap low and run small concurrent batches. The candidate filter
+// (place_id set AND location_street_number NULL) naturally pages: once ?apply
+// writes the granular parts, those rows drop out, so re-invoking advances until
+// `remaining` reaches 0.
+const ADDR_BACKFILL_BATCH = 6; // ponytail: 6 concurrent Places calls/req; raise if quota+time allow
+showroomBackfillRouter.post("/backfill/addresses", async (c) => {
+  const apply = c.req.query("apply") === "true" || c.req.query("apply") === "1";
+  const limit = Math.min(Math.max(parseInt(c.req.query("limit") ?? "25", 10) || 25, 1), 50);
+  const db = drizzle(c.env.DB);
+  const maps = new GoogleMapsService(c.env);
+
+  if (!(await maps.canUseGoogleMaps())) {
+    return c.json({ error: "Google Maps monthly free tier exceeded" }, 429);
+  }
+
+  // Total still-incomplete so the caller knows how many re-invokes remain.
+  const [{ total } = { total: 0 }] = await db
+    .select({ total: count() })
+    .from(showroomStores)
+    .where(
+      and(
+        isNotNull(showroomStores.placeId),
+        isNull(showroomStores.locationStreetNumber),
+      ),
+    );
+
+  const candidates = await db
+    .select({
+      id: showroomStores.id,
+      placeId: showroomStores.placeId,
+      locationAddress: showroomStores.locationAddress,
+    })
+    .from(showroomStores)
+    .where(
+      and(
+        isNotNull(showroomStores.placeId),
+        isNull(showroomStores.locationStreetNumber),
+      ),
+    )
+    .limit(limit);
+
+  let updated = 0;
+  const errors: Array<{ id: number; error: string }> = [];
+  const preview: Array<{ id: number; formattedAddress: string | null; city: string | null; zip: string | null }> = [];
+
+  const processOne = async (store: (typeof candidates)[number]) => {
+    if (!store.placeId) return;
+    try {
+      const parsed = await maps.placeAddressComponents(store.placeId);
+      if (!parsed) {
+        errors.push({ id: store.id, error: "no address components" });
+        return;
+      }
+      preview.push({ id: store.id, formattedAddress: parsed.formattedAddress, city: parsed.city, zip: parsed.zipCode });
+      if (!apply) return;
+
+      await db
+        .update(showroomStores)
+        .set({
+          // Places is authoritative — overwrite the granular parts + the
+          // formatted address + maps link + zip. Only writes non-null values so
+          // a partial Google response never nulls out existing good data.
+          ...(parsed.streetNumber ? { locationStreetNumber: parsed.streetNumber } : {}),
+          ...(parsed.streetName ? { locationStreetName: parsed.streetName } : {}),
+          ...(parsed.city ? { locationCity: parsed.city } : {}),
+          ...(parsed.state ? { locationState: parsed.state } : {}),
+          ...(parsed.zipCode ? { locationZipCode: parsed.zipCode, zipCode: parsed.zipCode } : {}),
+          ...(parsed.formattedAddress ? { locationAddress: parsed.formattedAddress } : {}),
+          ...(parsed.googleMapsUri ? { googleMapsLink: parsed.googleMapsUri } : {}),
+          updatedAt: new Date(),
+        })
+        .where(eq(showroomStores.id, store.id));
+      updated++;
+    } catch (err) {
+      errors.push({ id: store.id, error: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
+  // Bounded concurrency: process the capped candidate set in small batches so
+  // one request never fans out hundreds of Places calls.
+  for (let i = 0; i < candidates.length; i += ADDR_BACKFILL_BATCH) {
+    await Promise.all(candidates.slice(i, i + ADDR_BACKFILL_BATCH).map(processOne));
+  }
+
+  return c.json(
+    {
+      apply,
+      candidates: candidates.length,
+      updated,
+      // Rows still needing a backfill AFTER this batch (only decremented on apply).
+      remaining: apply ? Math.max(total - updated, 0) : total,
+      errorCount: errors.length,
+      errors: errors.slice(0, 25),
+      preview: apply ? undefined : preview.slice(0, 25),
+    },
+    200,
+  );
+});

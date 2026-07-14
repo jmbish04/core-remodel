@@ -52,12 +52,9 @@ export const showroomIntakeSchema = z.object({
   // blank on auto-fill and is entered by hand.
   instagramUrl: z.string().optional(),
   googleMapsLink: z.string().optional(),
-  weekdayHours: z.string().optional(),
-  weekendHours: z.string().optional(),
-  // Structured weekly hours (source of truth going forward). The server derives
-  // isOpenWeekends/weekdayHours/weekendHours from this when present, so the client
-  // must NOT also send those. A permissive `z.custom` is fine here — this is the
-  // form validator, not the server one.
+  // Structured weekly hours (source of truth). The server derives isOpenWeekends
+  // from this when present, so the client must NOT also send that. A permissive
+  // `z.custom` is fine here — this is the form validator, not the server one.
   hoursJson: z.custom<HoursJson>().optional(),
   isOpenWeekends: z.boolean().optional(),
   isAppointmentOnly: z.boolean().optional(),
@@ -586,49 +583,6 @@ function extractReviewSummary(place: GooglePlaceDetails): string | undefined {
   return extractSummary(place);
 }
 
-// ─── formatOpeningHours ───────────────────────────────────────────────────────
-
-const WEEKDAY_PREFIXES = ["monday", "tuesday", "wednesday", "thursday", "friday"];
-const WEEKEND_PREFIXES = ["saturday", "sunday"];
-
-/**
- * Turn Google `regularOpeningHours.weekdayDescriptions` (an array of 7 strings
- * like "Monday: 9 AM–5 PM", "Saturday: Closed") into the two free-text hour
- * fields our store schema stores plus an `isOpenWeekends` flag.
- *
- * - weekdayHours: Mon–Fri rows joined with "\n" (one row per line).
- * - weekendHours: Sat/Sun rows joined with "\n".
- * - isOpenWeekends: true when EITHER Sat or Sun is present and not "Closed".
- *
- * Robust to any ordering and to missing days — we match by the day-name prefix
- * rather than array index. Returns empty strings when nothing is available.
- */
-export function formatOpeningHours(
-  regularOpeningHours?: OpeningHours | null,
-): { weekdayHours: string; weekendHours: string; isOpenWeekends: boolean } {
-  const descriptions = regularOpeningHours?.weekdayDescriptions ?? [];
-  const weekdayRows: string[] = [];
-  const weekendRows: string[] = [];
-  let isOpenWeekends = false;
-
-  for (const row of descriptions) {
-    const lower = row.toLowerCase();
-    if (WEEKDAY_PREFIXES.some((d) => lower.startsWith(d))) {
-      weekdayRows.push(row);
-    } else if (WEEKEND_PREFIXES.some((d) => lower.startsWith(d))) {
-      weekendRows.push(row);
-      // "Closed" in any casing means that weekend day is not open.
-      if (!/closed/i.test(row)) isOpenWeekends = true;
-    }
-  }
-
-  return {
-    weekdayHours: weekdayRows.join("\n"),
-    weekendHours: weekendRows.join("\n"),
-    isOpenWeekends,
-  };
-}
-
 // ─── inferCategoryLabels ──────────────────────────────────────────────────────
 
 /**
@@ -764,9 +718,8 @@ function formatGoogleTime(point: GooglePeriodPoint): string {
  * Any day with no period is left `null` (closed). A 24-hour venue (Google emits
  * a single open with no close) maps to `00:00`–`23:59`.
  *
- * Returns `null` when `periods` is missing/empty — the caller then falls back to
- * the free-text `weekdayDescriptions` path (`formatOpeningHours`), which is
- * handled elsewhere.
+ * Returns `null` when `periods` is missing/empty — the caller then leaves hours
+ * unset (there is no free-text fallback; structured hours are the source of truth).
  *
  * @param regularOpeningHours The raw `place.regularOpeningHours` (typed `unknown`
  *   because callers pass it straight off a permissive payload).

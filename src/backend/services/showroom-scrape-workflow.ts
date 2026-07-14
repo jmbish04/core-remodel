@@ -29,6 +29,7 @@ import { z } from "zod";
 
 import {
   browserRunPages,
+  showroomStoreLinks,
   showroomStores,
 } from "@backend/db/schema/showroom/index";
 import { brands, showroomBrandMappings } from "@backend/db/schema/brands/index";
@@ -590,20 +591,26 @@ async function aggregate(
 ): Promise<void> {
   const db = drizzle(env.DB);
 
-  // ── Instagram: first non-null, only set when currently null. ────────────
+  // ── Instagram: first non-null, only insert when no INSTAGRAM link exists yet. ──
   const instagramUrl =
     extractions.map((e) => e.instagramUrl).find((v) => !!v) ?? null;
   if (instagramUrl) {
-    const [current] = await db
-      .select({ instagramUrl: showroomStores.instagramUrl })
-      .from(showroomStores)
-      .where(eq(showroomStores.id, showroomId))
+    const [existingInstagram] = await db
+      .select({ id: showroomStoreLinks.id })
+      .from(showroomStoreLinks)
+      .where(
+        and(
+          eq(showroomStoreLinks.storeId, showroomId),
+          eq(showroomStoreLinks.type, "INSTAGRAM"),
+        ),
+      )
       .limit(1);
-    if (current && !current.instagramUrl) {
-      await db
-        .update(showroomStores)
-        .set({ instagramUrl, updatedAt: new Date() })
-        .where(eq(showroomStores.id, showroomId));
+    if (!existingInstagram) {
+      await db.insert(showroomStoreLinks).values({
+        storeId: showroomId,
+        url: instagramUrl,
+        type: "INSTAGRAM",
+      });
     }
   }
 

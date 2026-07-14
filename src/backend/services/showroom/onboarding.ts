@@ -29,7 +29,7 @@ import { getAgentByName } from "agents";
 
 import {
   showroomStores,
-  showroomHours,
+  showroomStoreHours,
   showroomPhotosMapping,
   type ShowroomStore,
   type ShowroomStoreInsert,
@@ -162,12 +162,12 @@ function parseHhmm(hhmm: string): { hour: number; minute: number } {
   };
 }
 
-/** Convert structured hours to `showroom_hours` insert rows — one per OPEN day. */
+/** Convert structured hours to `showroom_store_hours` insert rows — one per OPEN day. */
 export function hoursJsonToRows(
   showroomId: number,
   hours: StructuredHours,
-): Array<typeof showroomHours.$inferInsert> {
-  const rows: Array<typeof showroomHours.$inferInsert> = [];
+): Array<typeof showroomStoreHours.$inferInsert> {
+  const rows: Array<typeof showroomStoreHours.$inferInsert> = [];
   for (const [key, day] of Object.entries(DAY_KEY_TO_ENUM)) {
     const slot = hours[key as keyof StructuredHours];
     if (!slot) continue;

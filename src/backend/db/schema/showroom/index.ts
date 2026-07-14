@@ -21,6 +21,8 @@ export * from "./product_material_mappings";
 export * from "./browser_run_pages";
 export * from "./photos_mapping";
 export * from "./hours";
+export * from "./links";
+export * from "./contacts";
 export * from "./product_intel";
 export * from "./product_photos";
 export * from "./product_photo_buckets";

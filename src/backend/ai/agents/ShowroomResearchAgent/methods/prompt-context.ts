@@ -12,6 +12,7 @@ import {
   storeRating,
 } from "@backend/db/schema/showroom/index";
 import type { ProductPromptContext } from "../types";
+import { getStoreWebsiteUrl } from "@backend/utils/showroom-links";
 
 const DRAFT_PROMPT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast" as const;
 
@@ -148,6 +149,8 @@ export async function loadProductPromptContext(
     .limit(1)
     .then((rows) => rows.map((r) => r.store));
 
+  const storeWebsiteUrl = store ? await getStoreWebsiteUrl(db, store.id) : null;
+
   const [
     activeProductRatings,
     activeStoreRatings,
@@ -245,7 +248,7 @@ export async function loadProductPromptContext(
           id: store.id,
           name: store.name,
           description: store.description,
-          websiteUrl: store.websiteUrl,
+          websiteUrl: storeWebsiteUrl,
           locationAddress: store.locationAddress,
           inventoryFocus: store.inventoryFocus,
           targetDemographic: store.targetDemographic,

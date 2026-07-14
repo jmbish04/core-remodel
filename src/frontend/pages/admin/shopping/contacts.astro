@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ContactsPhonebookApp } from "@/components/showroom/contacts/ContactsPhonebookApp";
+---
+
+<BaseLayout
+  title="Contacts — The Monolith"
+  description="Phonebook of showroom reps: call or email in one tap, alphabetically indexed, with bulk business-card import."
+>
+  <ContactsPhonebookApp client:load />
+</BaseLayout>

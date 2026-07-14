@@ -32,10 +32,38 @@ export const showroomStores = sqliteTable("showroom_stores", {
     () => storeBayareaCities.id,
     { onDelete: "set null" }
   ),
+  /** Full formatted address (Google `formattedAddress`) — display source. */
   locationAddress: text("location_address"),
+
+  // ── Granular address parts ────────────────────────────────────────────
+  // Parsed from Google Places `addressComponents` (or a submitted address
+  // payload); callers may send a whole address and the worker fields it out.
+  /** Street number, e.g. "1049". */
+  locationStreetNumber: text("location_street_number"),
+  /** Street / route name, e.g. "El Camino Real". */
+  locationStreetName: text("location_street_name"),
+  /** City / locality, e.g. "San Carlos". */
+  locationCity: text("location_city"),
+  /** State (2-letter), e.g. "CA". */
+  locationState: text("location_state"),
+  /** ZIP / postal code, e.g. "94070". Canonical granular zip. */
+  locationZipCode: text("location_zip_code"),
+
   phoneNumber: text("phone_number"),
   emailAddress: text("email_address"),
+  // Website + social URLs now live in the showroom_store_links table. The
+  // columns below are DEPRECATED: retained only so the one-time links backfill
+  // (legacyUrlsToLinks) can read them on prod. Dropped in a follow-up migration
+  // once that backfill is confirmed. New code never reads/writes them.
+  /** @deprecated moved to showroom_store_links — backfill source only. */
   websiteUrl: text("website_url"),
+  /** @deprecated moved to showroom_store_links — backfill source only. */
+  instagramUrl: text("instagram_url"),
+  /** @deprecated moved to showroom_store_links — backfill source only. */
+  facebookUrl: text("facebook_url"),
+  /** @deprecated moved to showroom_store_links — backfill source only. */
+  pinterestUrl: text("pinterest_url"),
+  /** Legacy zip — kept in sync with `locationZipCode`; slated for removal. */
   zipCode: text("zip_code"),
   googleMapsLink: text("google_maps_link"),
 
@@ -62,27 +90,13 @@ export const showroomStores = sqliteTable("showroom_stores", {
   hubName: text("hub_name"),
 
   // ── Hours & access ────────────────────────────────────────────────────
-  /**
-   * Structured opening hours — source of truth for the hours UI.
-   *
-   * Shape (all 7 keys always present; value is `null` when closed that day):
-   * ```json
-   * {
-   *   "mon": { "open": "09:00", "close": "17:00" },
-   *   "tue": { "open": "09:00", "close": "17:00" },
-   *   "wed": { "open": "09:00", "close": "17:00" },
-   *   "thu": { "open": "09:00", "close": "17:00" },
-   *   "fri": { "open": "09:00", "close": "17:00" },
-   *   "sat": { "open": "10:00", "close": "15:00" },
-   *   "sun": null
-   * }
-   * ```
-   * Times are 24-hour `"HH:MM"` strings in local showroom time (no timezone offset stored).
-   *
-   * `weekdayHours` and `weekendHours` are retained as derived human-readable summaries
-   * for backward-compat display.  `isOpenWeekends` is derived from whether `sat`/`sun`
-   * are non-null.
-   */
+  // Opening hours live in the normalized `showroom_store_hours` table (one row
+  // per open day) — the source of truth. The API/MCP accept a structured
+  // hoursJson payload on write and derive both the rows and `is_open_weekends`;
+  // responses rebuild hoursJson from the rows. The three columns below are
+  // DEPRECATED: retained only so the one-time hours backfill can read them on
+  // prod, dropped in a follow-up migration once backfill is confirmed.
+  /** @deprecated superseded by showroom_store_hours — backfill source only. */
   hoursJson: text("hours_json", { mode: "json" }).$type<{
     mon: { open: string; close: string } | null;
     tue: { open: string; close: string } | null;
@@ -92,8 +106,9 @@ export const showroomStores = sqliteTable("showroom_stores", {
     sat: { open: string; close: string } | null;
     sun: { open: string; close: string } | null;
   }>(),
-
+  /** @deprecated superseded by showroom_store_hours — backfill source only. */
   weekdayHours: text("weekday_hours"),
+  /** @deprecated superseded by showroom_store_hours — backfill source only. */
   weekendHours: text("weekend_hours"),
   isOpenWeekends: integer("is_open_weekends", { mode: "boolean" }).default(
     false
@@ -212,28 +227,13 @@ export const showroomStores = sqliteTable("showroom_stores", {
    */
   ratingContextMarkdown: text("rating_context_markdown"),
 
-  // ── Social & brand media ──────────────────────────────────────────────
-  /**
-   * Public Instagram profile URL for this showroom location.
-   * Example: "https://www.instagram.com/studiobelmontbath/"
-   */
-  instagramUrl: text("instagram_url"),
-
-  /**
-   * Public Facebook page URL for this showroom location.
-   * Example: "https://www.facebook.com/davincimarble/"
-   */
-  facebookUrl: text("facebook_url"),
-
-  /**
-   * Public Pinterest profile URL for this showroom location.
-   * Example: "https://www.pinterest.com/davincimarble/"
-   */
-  pinterestUrl: text("pinterest_url"),
+  // ── Brand media ───────────────────────────────────────────────────────
+  // Website / Instagram / Facebook / Pinterest URLs now live in the
+  // showroom_store_links table (one row per link, typed).
 
   /**
    * Cloudflare Images delivery URL of the showroom's scraped favicon / brand icon.
-   * Auto-populated by the favicon worker whenever `websiteUrl` is set or changed.
+   * Auto-populated by the favicon worker whenever the WEBSITE link is set/changed.
    * Example: "https://imagedelivery.net/<accountHash>/<imageId>/public"
    */
   iconCfImagesUrl: text("icon_cf_images_url"),

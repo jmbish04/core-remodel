@@ -57,6 +57,13 @@
       "when": 1784028954609,
       "tag": "0107_ordinary_hawkeye",
       "breakpoints": true
+    },
+    {
+      "idx": 108,
+      "version": "6",
+      "when": 1784037631940,
+      "tag": "0108_long_sleeper",
+      "breakpoints": true
     }
   ]
 }

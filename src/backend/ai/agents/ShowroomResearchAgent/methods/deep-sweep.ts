@@ -28,6 +28,11 @@ import {
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import {
+  getStoreLinksMap,
+  getStoreWebsiteUrl,
+  linksToLegacyUrls,
+} from "@backend/utils/showroom-links";
+import {
   beginStep,
   completeJob,
   completeStep,
@@ -1115,11 +1120,12 @@ async function persistEngineStoreResearch(
 async function runEngineStoreResearch(
   env: Env,
   store: typeof showroomStores.$inferSelect,
+  websiteUrl: string | null,
   negativeConstraints: string[],
   result: ShowroomSweepResult,
   jobId: number | null,
 ): Promise<{ sourceCount: number }> {
-  const topic = `Reputation and review research for the showroom/store "${store.name}"${store.locationAddress ? ` located at ${store.locationAddress}` : ""} (website: ${store.websiteUrl ?? "unknown"}), on behalf of a homeowner running a high-end San Francisco home remodel. Research homeowner-relevant reputation and review evidence across Google reviews, Reddit, Yelp, and Houzz: product quality, brands and product lines carried, customer experience, pricing posture, warranty and service policies, delivery and lead times, and whether this store is worth visiting or buying from.`;
+  const topic = `Reputation and review research for the showroom/store "${store.name}"${store.locationAddress ? ` located at ${store.locationAddress}` : ""} (website: ${websiteUrl ?? "unknown"}), on behalf of a homeowner running a high-end San Francisco home remodel. Research homeowner-relevant reputation and review evidence across Google reviews, Reddit, Yelp, and Houzz: product quality, brands and product lines carried, customer experience, pricing posture, warranty and service policies, delivery and lead times, and whether this store is worth visiting or buying from.`;
 
   const guidance = `Extraction goals for this showroom sweep (surface concrete, source-backed evidence for each):
 - Reputation and review sentiment across Google, Reddit, Yelp, and Houzz, with specific examples.
@@ -1179,6 +1185,7 @@ export async function deepSweepStore(
     .where(eq(showroomStores.id, input.storeId))
     .limit(1);
   if (!store) throw new Error(`Showroom store ${input.storeId} not found`);
+  const websiteUrl = await getStoreWebsiteUrl(db, store.id);
 
   // Research-console job for the sweep: 7 deep-research engine phases +
   // persist-findings + legacy-sweep. createResearchJob never throws — a null
@@ -1204,6 +1211,7 @@ export async function deepSweepStore(
     const engine = await runEngineStoreResearch(
       env,
       store,
+      websiteUrl,
       input.negativeConstraints ?? [],
       result,
       jobId,
@@ -1225,7 +1233,7 @@ export async function deepSweepStore(
     `Research this showroom/store for a high-end San Francisco remodel.
 
 Store: ${store.name}
-Website: ${store.websiteUrl ?? "none"}
+Website: ${websiteUrl ?? "none"}
 Address: ${store.locationAddress ?? "none"}
 Description: ${store.description ?? "none"}
 Inventory focus: ${store.inventoryFocus ?? "none"}
@@ -1249,7 +1257,7 @@ ${bulletList(input.negativeConstraints ?? [])}`;
     const plan = await discoverCitationPlan(
       env,
       prompt,
-      [...(input.seedCitationUrls ?? []), ...(store.websiteUrl ? [store.websiteUrl] : [])],
+      [...(input.seedCitationUrls ?? []), ...(websiteUrl ? [websiteUrl] : [])],
       input.negativeConstraints ?? [],
       clampMaxSources(input.maxSources),
       {
@@ -1339,7 +1347,6 @@ export async function deepSweepCategory(
     .select({
       storeId: showroomStores.id,
       name: showroomStores.name,
-      websiteUrl: showroomStores.websiteUrl,
       rating: storeRating.rating,
       ratingNotes: storeRating.ratingNotes,
     })
@@ -1358,12 +1365,15 @@ export async function deepSweepCategory(
     .where(eq(showroomStoreCategoryMapping.categoryId, input.categoryId))
     .orderBy(desc(showroomStores.createdAt));
 
+  const storeLinksMap = await getStoreLinksMap(db, mappedStores.map((row) => row.storeId));
+
   const fallbackUrls: string[] = [...(input.seedCitationUrls ?? [])];
   const storeContext: string[] = [];
   const rejectionConstraints = [...(input.negativeConstraints ?? [])];
   for (const row of mappedStores) {
-    if (row.websiteUrl) fallbackUrls.push(row.websiteUrl);
-    storeContext.push(`${row.name} (${row.websiteUrl ?? "no website"}) rating=${row.rating ?? "none"} notes=${row.ratingNotes ?? "none"}`);
+    const websiteUrl = linksToLegacyUrls(storeLinksMap.get(row.storeId) ?? []).websiteUrl;
+    if (websiteUrl) fallbackUrls.push(websiteUrl);
+    storeContext.push(`${row.name} (${websiteUrl ?? "no website"}) rating=${row.rating ?? "none"} notes=${row.ratingNotes ?? "none"}`);
     if ((row.rating ?? 5) <= 1 && row.ratingNotes?.trim()) {
       rejectionConstraints.push(row.ratingNotes.trim());
     }

@@ -84,8 +84,14 @@ import {
 import { HoursEditor } from "./intake/HoursEditor";
 import { FlagsEditor } from "./intake/FlagsEditor";
 import { OverviewNoteEditor } from "./OverviewNoteEditor";
-import { DEFAULT_HOURS, type HoursJson } from "./intake/hours-types";
 import {
+  DEFAULT_HOURS,
+  type DayKey,
+  type HoursJson,
+  weekdayWeekendLines,
+} from "./intake/hours-types";
+import {
+  computeShowroomStatus,
   isOpenNow as isOpenNowStructured,
   type HourRow,
 } from "./hours-status";
@@ -113,8 +119,8 @@ interface Store {
   userRating: number | null;
   isAppointmentOnly: boolean;
   isFlagshipLocation: boolean;
-  weekdayHours: string | null;
-  weekendHours: string | null;
+  /** Structured weekly hours (7-key {open,close}|null); source of truth for hours display. */
+  hoursJson: HoursJson | null;
   isOpenWeekends: boolean;
   websiteUrl: string | null;
   phoneNumber: string | null;
@@ -291,48 +297,6 @@ const DAY_INDEX: Record<string, number> = {
   sat: 6,
 };
 
-const STANDARD_CLOSE_MIN = 17 * 60; // 5:00 PM — anything later counts as "open late".
-
-function parseTimeToMinutes(tok: string): number | null {
-  const m = tok.match(/(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\.?/i);
-  if (!m) return null;
-  let h = parseInt(m[1], 10);
-  const min = m[2] ? parseInt(m[2], 10) : 0;
-  const mer = m[3].toLowerCase();
-  if (mer === "p" && h !== 12) h += 12;
-  if (mer === "a" && h === 12) h = 0;
-  return h * 60 + min;
-}
-
-function parseHoursRange(text: string | null): { open: number; close: number } | null {
-  if (!text) return null;
-  const matches = text.match(/\d{1,2}(?::\d{2})?\s*[ap]\.?m\.?/gi);
-  if (!matches || matches.length < 2) return null;
-  const open = parseTimeToMinutes(matches[0]);
-  const close = parseTimeToMinutes(matches[matches.length - 1]);
-  if (open === null || close === null) return null;
-  return { open, close };
-}
-
-type HoursState = "open" | "closing" | "closed" | "unknown";
-
-function hoursColumnStatus(
-  text: string | null,
-  appliesToday: boolean,
-  nowMin: number,
-): { range: { open: number; close: number } | null; openLate: boolean; state: HoursState } {
-  const range = parseHoursRange(text);
-  const openLate = range ? range.close > STANDARD_CLOSE_MIN : false;
-  let state: HoursState = "unknown";
-  if (range && appliesToday) {
-    if (nowMin >= range.close) state = "closed";
-    else if (nowMin >= range.close - 60) state = "closing";
-    else if (nowMin >= range.open) state = "open";
-    else state = "unknown"; // before opening — no live badge
-  }
-  return { range, openLate, state };
-}
-
 interface PstNow {
   day: number; // 0 = Sun … 6 = Sat
   minutes: number; // minutes since midnight, PST
@@ -363,33 +327,6 @@ function computePst(): PstNow {
   const minute = parseInt(get("minute"), 10) || 0;
   const minutes = hour * 60 + minute;
   return { day: DAY_INDEX[wd] ?? 0, minutes, label: fmt12(minutes) };
-}
-
-/**
- * Whether a weekend-hours string applies on the given PST day. "Sat 10AM-4PM"
- * applies only Saturday, "Sun …" only Sunday; a range naming both days, saying
- * "weekend"/"wknd", or naming no day at all applies to both. (Weekday hours are
- * assumed to apply on all weekdays — this guard is weekend-only.)
- */
-function weekendHoursApplyToday(text: string | null, day: number): boolean {
-  if (!text) return false;
-  const t = text.toLowerCase();
-  const sat = t.includes("sat");
-  const sun = t.includes("sun");
-  if (t.includes("weekend") || t.includes("wknd") || (sat && sun) || (!sat && !sun)) return true;
-  if (day === 6) return sat; // Saturday
-  if (day === 0) return sun; // Sunday
-  return false;
-}
-
-function isOpenNow(store: Store, pst: PstNow): boolean {
-  if (store.isAppointmentOnly) return false;
-  const isWeekday = pst.day >= 1 && pst.day <= 5;
-  const text = isWeekday ? store.weekdayHours : store.weekendHours;
-  if (!isWeekday && !weekendHoursApplyToday(text, pst.day)) return false;
-  const range = parseHoursRange(text);
-  if (!range) return false;
-  return pst.minutes >= range.open && pst.minutes < range.close;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -502,21 +439,26 @@ function RatingRow({ store }: { store: Store }) {
   );
 }
 
+const WEEKDAY_DAY_KEYS: DayKey[] = ["mon", "tue", "wed", "thu", "fri"];
+const WEEKEND_DAY_KEYS: DayKey[] = ["sat", "sun"];
+
+/** Live open/closed chip for a column: derived from computeShowroomStatus. */
+type ColumnState = "open" | "closing" | "closed" | null;
+
 /** A single hours column (weekday / weekend). */
 function HoursColumn({
   label,
   text,
-  appliesToday,
-  nowMin,
+  openLate,
+  state,
   emptyBadge,
 }: {
   label: string;
   text: string | null;
-  appliesToday: boolean;
-  nowMin: number;
+  openLate: boolean;
+  state: ColumnState;
   emptyBadge?: string;
 }) {
-  const { range, openLate, state } = hoursColumnStatus(text, appliesToday, nowMin);
   return (
     <div className="min-w-0">
       <div className="text-[8px] uppercase tracking-wider text-muted-foreground/60">{label}</div>
@@ -532,22 +474,22 @@ function HoursColumn({
           {openLate && (
             <Moon
               className="size-2.5 shrink-0 text-sky-400"
-              aria-label="Open past 5 PM"
+              aria-label="Open past 6 PM"
             />
           )}
         </div>
       )}
-      {state === "closing" && (
+      {text && state === "closing" && (
         <span className="mt-0.5 inline-block rounded bg-amber-500/15 px-1 text-[8px] font-medium text-amber-300">
           Closing soon
         </span>
       )}
-      {state === "closed" && (
+      {text && state === "closed" && (
         <span className="mt-0.5 inline-block rounded bg-rose-500/15 px-1 text-[8px] font-medium text-rose-300">
           Closed
         </span>
       )}
-      {state === "open" && (
+      {text && state === "open" && (
         <span className="mt-0.5 inline-block rounded bg-emerald-500/15 px-1 text-[8px] font-medium text-emerald-300">
           Open
         </span>
@@ -557,21 +499,39 @@ function HoursColumn({
 }
 
 function HoursFooter({ store, pst, className }: { store: Store; pst: PstNow; className?: string }) {
+  const hj = store.hoursJson;
+  const lines = hj ? weekdayWeekendLines(hj) : null;
+
+  // Text lines come from structured hours; an empty column (no open days that
+  // group) shows the em-dash / emptyBadge instead of a summary.
+  const hasWeekday = WEEKDAY_DAY_KEYS.some((k) => hj?.[k] != null);
+  const hasWeekend = WEEKEND_DAY_KEYS.some((k) => hj?.[k] != null);
+  const weekdayText = hasWeekday ? lines?.weekday ?? null : null;
+  const weekendText = hasWeekend ? lines?.weekend ?? null : null;
+
+  // "Open late" (Moon): any day in the column closes at/after 6 PM.
+  const weekdayLate = WEEKDAY_DAY_KEYS.some((k) => (hj?.[k]?.close ?? "") >= "18:00");
+  const weekendLate = WEEKEND_DAY_KEYS.some((k) => (hj?.[k]?.close ?? "") >= "18:00");
+
+  // Live status for TODAY's actual row; shown only on the applicable column.
   const isWeekday = pst.day >= 1 && pst.day <= 5;
-  const weekendAppliesToday = !isWeekday && weekendHoursApplyToday(store.weekendHours, pst.day);
+  const isWeekend = pst.day === 0 || pst.day === 6;
+  const status = computeShowroomStatus(store.hours, pst)?.status ?? null;
+  const chip: ColumnState = status === "closing-soon" ? "closing" : status;
+
   return (
     <div className={`grid grid-cols-3 gap-2 ${className ?? ""}`}>
       <HoursColumn
         label="Mon–Fri"
-        text={store.weekdayHours}
-        appliesToday={isWeekday}
-        nowMin={pst.minutes}
+        text={weekdayText}
+        openLate={weekdayLate}
+        state={isWeekday ? chip : null}
       />
       <HoursColumn
         label="Weekend"
-        text={store.weekendHours}
-        appliesToday={weekendAppliesToday}
-        nowMin={pst.minutes}
+        text={weekendText}
+        openLate={weekendLate}
+        state={isWeekend ? chip : null}
         emptyBadge="No weekend hours"
       />
       <div className="flex items-start justify-end">
@@ -958,9 +918,6 @@ function CardGrid({ stores, pst }: { stores: Store[]; pst: PstNow }) {
 
 // ─── Map View (map on top, cards stacked below — mobile friendly) ──────────────
 
-/** Zoom at/above which the map swaps region clusters for individual showrooms. */
-const ZOOM_INDIVIDUAL = 10.5;
-
 /** A pin for a single showroom, positioned by its captured coordinates. */
 function ShowroomMarker({ store }: { store: Store }) {
   return (
@@ -989,6 +946,57 @@ function ShowroomMarker({ store }: { store: Store }) {
   );
 }
 
+/** "You are here" marker — a pulsing blue dot from the device's geolocation. */
+function UserLocationMarker({ lng, lat }: { lng: number; lat: number }) {
+  return (
+    <MapMarker longitude={lng} latitude={lat}>
+      <MarkerContent className="z-20">
+        <span className="relative flex size-4 items-center justify-center">
+          <span className="absolute inline-flex size-4 animate-ping rounded-full bg-sky-400/60" />
+          <span className="relative inline-flex size-3 rounded-full bg-sky-500 ring-2 ring-white shadow" />
+        </span>
+      </MarkerContent>
+      <MarkerPopup closeButton className="max-w-48">
+        <p className="text-xs font-medium">Your location</p>
+      </MarkerPopup>
+    </MapMarker>
+  );
+}
+
+const BAY_AREA_DEFAULT_VIEW: { center: [number, number]; zoom: number } = {
+  center: [-122.27, 37.72],
+  zoom: 8.2,
+};
+
+/**
+ * Frame a set of lng/lat points: centroid + a zoom derived from the bounding-box
+ * span. Keeps every showroom marker (and the user's dot, when present) on screen
+ * without needing an imperative fitBounds against the controlled viewport.
+ */
+function viewportForPoints(pts: Array<[number, number]>): {
+  center: [number, number];
+  zoom: number;
+} {
+  if (pts.length === 0) return BAY_AREA_DEFAULT_VIEW;
+  let minLng = Infinity;
+  let maxLng = -Infinity;
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  for (const [lng, lat] of pts) {
+    minLng = Math.min(minLng, lng);
+    maxLng = Math.max(maxLng, lng);
+    minLat = Math.min(minLat, lat);
+    maxLat = Math.max(maxLat, lat);
+  }
+  const center: [number, number] = [(minLng + maxLng) / 2, (minLat + maxLat) / 2];
+  if (pts.length === 1) return { center, zoom: 12 };
+  // Weight latitude span (narrower per-degree at this latitude) so tall, thin
+  // spreads still fit. Clamp so a single-cluster area doesn't over-zoom.
+  const span = Math.max(maxLng - minLng, (maxLat - minLat) * 1.4, 1e-4);
+  const zoom = Math.max(3, Math.min(12.5, Math.log2(360 / span) - 0.65));
+  return { center, zoom };
+}
+
 function MapView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
   const byHub = useMemo(() => {
     const map = new Map<string, Store[]>();
@@ -1003,79 +1011,108 @@ function MapView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
   const hubKeys = useMemo(() => hubEntries.map(([route]) => route), [hubEntries]);
   const { openKey, toggle } = useAccordionGroup(hubKeys);
 
-  // Stores with captured coordinates get an individual pin when zoomed in.
+  // Stores with captured coordinates get an individual pin.
   const geoStores = useMemo(
     () => stores.filter((s) => s.latitude != null && s.longitude != null),
     [stores],
   );
+  const noGeoCount = stores.length - geoStores.length;
 
-  // Controlled viewport so we can react to the zoom level (cluster ↔ pins) while
-  // still allowing free pan/zoom — onViewportChange feeds our own state back.
-  const [viewport, setViewport] = useState<Partial<MapViewport>>({
-    center: [-122.27, 37.72],
-    zoom: 8.2,
-  });
-  const zoom = viewport.zoom ?? 8.2;
-  const showIndividual = zoom >= ZOOM_INDIVIDUAL;
+  // The device's geolocation ("you are here"), when granted. Works on phones
+  // and the in-car (Tesla) browser via the standard Geolocation API.
+  const [userLoc, setUserLoc] = useState<{ lng: number; lat: number } | null>(null);
+
+  const requestLocation = useCallback(() => {
+    if (typeof navigator === "undefined" || !("geolocation" in navigator)) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setUserLoc({ lng: pos.coords.longitude, lat: pos.coords.latitude }),
+      () => {
+        /* denied / unavailable — the map simply won't show a location dot */
+      },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300_000 },
+    );
+  }, []);
+
+  // Best-effort location on mount (a permission prompt the first time). The
+  // locate button in MapControls re-requests + flies to the dot on demand.
+  useEffect(() => {
+    requestLocation();
+  }, [requestLocation]);
+
+  // Frame the map around the showrooms currently in view, so markers are
+  // visible without hunting. Recomputes when the filtered set changes; free
+  // pan/zoom in between via onViewportChange.
+  //
+  // Deliberately excludes the user's location: the "find my location" control
+  // already flies to the user's dot on demand, and folding a possibly-distant
+  // location into the bounding box would either over-zoom the map out or fight
+  // that flyTo animation the moment it updates userLoc.
+  const framePoints = useMemo<Array<[number, number]>>(
+    () => geoStores.map((s) => [s.longitude as number, s.latitude as number]),
+    [geoStores],
+  );
+
+  const frameKey = useMemo(
+    () => framePoints.map(([lng, lat]) => `${lng.toFixed(4)},${lat.toFixed(4)}`).join("|"),
+    [framePoints],
+  );
+
+  const [viewport, setViewport] = useState<Partial<MapViewport>>(() =>
+    viewportForPoints(framePoints),
+  );
+
+  useEffect(() => {
+    setViewport(viewportForPoints(framePoints));
+    // frameKey is the stable identity of framePoints — reframe only when it
+    // actually changes, not on every render (avoids fighting user pan/zoom).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frameKey]);
 
   return (
     <div className="space-y-4">
-      <Card className="overflow-hidden">
+      <Card className="relative overflow-hidden">
         <GeoMap
-          className="h-[320px] w-full sm:h-[420px]"
+          className="h-[320px] w-full sm:h-[460px]"
           theme="dark"
           viewport={viewport}
           onViewportChange={setViewport}
         >
-          <MapControls showZoom />
+          <MapControls
+            showZoom
+            showLocate
+            onLocate={(c) => setUserLoc({ lng: c.longitude, lat: c.latitude })}
+          />
 
-          {/* Zoomed out → one labeled marker per region hub. Click to zoom in. */}
-          {!showIndividual &&
-            hubEntries.map(([route, hubStores]) => {
-              const hub = HUBS[route];
-              return (
-                <MapMarker
-                  key={route}
-                  longitude={hub.lng}
-                  latitude={hub.lat}
-                  onClick={() =>
-                    setViewport((v) => ({ ...v, center: [hub.lng, hub.lat], zoom: 12 }))
-                  }
-                >
-                  <MarkerContent className="z-20">
-                    <div className="flex items-center gap-1.5 rounded-full bg-sky-500/90 px-2.5 py-1 text-xs font-semibold text-white shadow-lg transition-transform hover:scale-105">
-                      <MapPin className="size-3.5" /> {HUB_LABEL[route]} · {hubStores.length}
-                    </div>
-                  </MarkerContent>
-                  <MarkerPopup closeButton className="max-w-72">
-                    <div className="space-y-1.5">
-                      <p className="text-sm font-semibold">{HUB_LABEL[route]}</p>
-                      <ul className="space-y-1 text-xs text-muted-foreground">
-                        {hubStores.slice(0, 8).map((s) => (
-                          <li key={s.id} className="flex items-center gap-1 truncate">
-                            <span className="truncate">{s.name}</span>
-                            {s.onlineRating !== null && (
-                              <span className="ml-auto shrink-0 text-[10px] text-amber-400">
-                                {s.onlineRating}★
-                              </span>
-                            )}
-                          </li>
-                        ))}
-                        {hubStores.length > 8 && <li>+{hubStores.length - 8} more</li>}
-                      </ul>
-                      <p className="text-[10px] text-muted-foreground/60">
-                        Click the pin to zoom in and see each showroom.
-                      </p>
-                    </div>
-                  </MarkerPopup>
-                </MapMarker>
-              );
-            })}
+          {/* One marker per showroom that has captured coordinates. */}
+          {geoStores.map((s) => (
+            <ShowroomMarker key={s.id} store={s} />
+          ))}
 
-          {/* Zoomed in → an individual marker for each showroom with coordinates. */}
-          {showIndividual && geoStores.map((s) => <ShowroomMarker key={s.id} store={s} />)}
+          {/* The device's own location, when granted. */}
+          {userLoc && <UserLocationMarker lng={userLoc.lng} lat={userLoc.lat} />}
         </GeoMap>
+
+        {/* Overlay when nothing can be plotted — the coordinates are missing,
+            not the showrooms. Keeps the map honest instead of showing an empty
+            ocean with no explanation. */}
+        {geoStores.length === 0 && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-background/95 to-transparent p-4 text-center">
+            <p className="text-xs text-muted-foreground">
+              {stores.length === 0
+                ? "No showrooms match your filters."
+                : `None of these ${stores.length} showroom${stores.length === 1 ? "" : "s"} have mapped coordinates yet — see the list below.`}
+            </p>
+          </div>
+        )}
       </Card>
+
+      {/* Count of in-view showrooms still missing coordinates (can't be pinned). */}
+      {geoStores.length > 0 && noGeoCount > 0 && (
+        <p className="text-[11px] text-muted-foreground">
+          {geoStores.length} of {stores.length} shown on the map · {noGeoCount} without
+          coordinates yet (listed below).
+        </p>
+      )}
 
       {stores.length === 0 ? (
         <EmptyState />
@@ -2334,6 +2371,7 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
           isAppointmentOnly: s.isAppointmentOnly ?? false,
           isFlagshipLocation: s.isFlagshipLocation ?? false,
           isOpenWeekends: s.isOpenWeekends ?? false,
+          hoursJson: s.hoursJson ?? null,
           hours: s.hours ?? [],
           heroImageCfImagesUrl: s.heroImageCfImagesUrl ?? null,
           latitude: s.latitude ?? null,

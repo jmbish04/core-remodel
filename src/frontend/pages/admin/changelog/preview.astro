@@ -1,0 +1,65 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { Changelog19, changelog19Demo } from "../../../../components/beste/block/changelog19";
+import { Changelog3, changelog3Demo } from "../../../../components/beste/block/changelog3";
+import { Changelog21, changelog21Demo } from "../../../../components/beste/block/changelog21";
+import { Changelog24, changelog24Demo } from "../../../../components/beste/block/changelog24";
+
+// Preview of every installed changelog block (beste registry) with its demo
+// data, so we can pick the layout for /admin/changelog. changelog24 is live.
+const variants = [
+  { id: "changelog24", label: "changelog24 — release highlights (LIVE)", live: true },
+  { id: "changelog19", label: "changelog19 — versioned with code blocks", live: false },
+  { id: "changelog3", label: "changelog3 — compact list", live: false },
+  { id: "changelog21", label: "changelog21 — column board", live: false },
+];
+---
+
+<BaseLayout
+  title="Changelog components — preview"
+  description="Preview of the installed changelog block variants to choose the release-notes layout."
+>
+  <main class="container mx-auto max-w-5xl px-4 py-10">
+    <header class="mb-8">
+      <h1 class="text-2xl font-semibold tracking-tight">Changelog components</h1>
+      <p class="mt-1 text-sm text-muted-foreground">
+        The four installed beste blocks, each with demo data. The live changelog at
+        <a href="/admin/changelog" class="underline underline-offset-4">/admin/changelog</a>
+        uses <code class="font-mono text-xs">changelog24</code>.
+      </p>
+      <nav class="mt-4 flex flex-wrap gap-2">
+        {
+          variants.map((v) => (
+            <a
+              href={`#${v.id}`}
+              class="rounded-md bg-card px-3 py-1 text-xs text-muted-foreground ring-1 ring-border/40 hover:bg-muted/40"
+            >
+              {v.id}
+              {v.live ? <span class="ml-1 text-emerald-400">● live</span> : null}
+            </a>
+          ))
+        }
+      </nav>
+    </header>
+
+    <section id="changelog24" class="scroll-mt-8">
+      <h2 class="border-t border-border/40 pt-6 font-mono text-xs uppercase tracking-widest text-muted-foreground">changelog24 · LIVE</h2>
+      <Changelog24 {...changelog24Demo} />
+    </section>
+
+    <section id="changelog19" class="scroll-mt-8">
+      <h2 class="border-t border-border/40 pt-6 font-mono text-xs uppercase tracking-widest text-muted-foreground">changelog19</h2>
+      <Changelog19 {...changelog19Demo} />
+    </section>
+
+    <section id="changelog3" class="scroll-mt-8">
+      <h2 class="border-t border-border/40 pt-6 font-mono text-xs uppercase tracking-widest text-muted-foreground">changelog3</h2>
+      <Changelog3 {...changelog3Demo} />
+    </section>
+
+    <section id="changelog21" class="scroll-mt-8">
+      <h2 class="border-t border-border/40 pt-6 font-mono text-xs uppercase tracking-widest text-muted-foreground">changelog21</h2>
+      <Changelog21 {...changelog21Demo} />
+    </section>
+  </main>
+</BaseLayout>

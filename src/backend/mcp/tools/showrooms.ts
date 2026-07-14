@@ -22,7 +22,7 @@
  * updates the denormalized snapshot AND appends a `store_notes` row so the visit
  * is both instantly displayable and durably logged.
  */
-import { showroomHours, showroomPocs, showroomStores, storeNotes } from "@backend/db";
+import { showroomStoreHours, showroomPocs, showroomStores, storeNotes } from "@backend/db";
 import { GoogleMapsService } from "@backend/services/google/maps";
 import {
   computeStoreGeoPatch,
@@ -118,7 +118,7 @@ async function persistPlaceShowroom(
     const rows = hoursJsonToRows(created.id, mapped.hoursJson);
     if (rows.length > 0) {
       await db
-        .insert(showroomHours)
+        .insert(showroomStoreHours)
         .values(rows as [(typeof rows)[number], ...(typeof rows)[number][]]);
     }
   }
@@ -231,8 +231,8 @@ export const showroomTools: RemodelTool[] = [
 
       const hours = await db
         .select()
-        .from(showroomHours)
-        .where(eq(showroomHours.showroomId, input.id))
+        .from(showroomStoreHours)
+        .where(eq(showroomStoreHours.showroomId, input.id))
         .all();
 
       const notes = await db
@@ -667,16 +667,16 @@ export const showroomTools: RemodelTool[] = [
       }
       // Replace-if-present: delete any existing (showroom, day) window, then insert.
       await db
-        .delete(showroomHours)
+        .delete(showroomStoreHours)
         .where(
           and(
-            eq(showroomHours.showroomId, input.showroomId),
-            eq(showroomHours.day, input.day),
+            eq(showroomStoreHours.showroomId, input.showroomId),
+            eq(showroomStoreHours.day, input.day),
           ),
         )
         .run();
       const [created] = await db
-        .insert(showroomHours)
+        .insert(showroomStoreHours)
         .values({
           showroomId: input.showroomId,
           day: input.day,

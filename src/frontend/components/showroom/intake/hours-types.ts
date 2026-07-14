@@ -13,9 +13,9 @@
  *     - DayHours      { open: "HH:MM", close: "HH:MM" } in 24-hour time
  *     - null          the store is CLOSED that day
  *
- * The free-text `weekdayHours`/`weekendHours` legacy fields (parsed elsewhere in
- * ShowroomsDirectoryApp) are a SEPARATE representation; this module does not
- * touch them.
+ * This structured model is the SINGLE source of truth for hours across the
+ * intake editors and the directory cards; the old free-text weekday/weekend
+ * hour fields have been removed.
  */
 
 // ─── Day keys & labels ────────────────────────────────────────────────────────
@@ -227,6 +227,25 @@ export function summarizeHours(h: HoursJson): { label: string; weekdaysUniform: 
     return { label: "Hours not set", weekdaysUniform: false };
   }
   return { label: formatHoursSummary(src), weekdaysUniform: false };
+}
+
+/**
+ * Split a `summarizeHours()` label into weekday + weekend display lines. Returns
+ * `null` when no hours are set at all. Shared by HoursMiniCard (hero) and the
+ * directory card's HoursFooter so both derive the same two lines from structured
+ * hours. `weekend` falls back to "Sat–Sun Closed" when the summary has no weekend
+ * segment (callers that show an empty-state badge check the hoursJson directly).
+ */
+export function weekdayWeekendLines(
+  h: HoursJson,
+): { weekday: string; weekend: string } | null {
+  const { label } = summarizeHours(h);
+  if (label === "Hours not set") return null;
+  const parts = label.split(" · ");
+  return {
+    weekday: parts[0] ?? label,
+    weekend: parts.slice(1).join(" · ") || "Sat–Sun Closed",
+  };
 }
 
 // ─── Curated option lists (for the standard-hours Selects) ────────────────────

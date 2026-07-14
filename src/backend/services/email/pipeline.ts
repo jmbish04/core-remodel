@@ -29,6 +29,7 @@ import { workerEmailStagedCompanies } from "@backend/db/schema/emails/worker_ema
 import { companies } from "@backend/db/schema/directory/companies";
 import { parsePdfToMarkdown } from "@backend/services/documents/liteparse";
 import { analyzeWithGemini, type AiAnalysis } from "./classify";
+import { registerShowroomContactFromEmail } from "./showroom-contact-autopopulate";
 import { ROUTE_OVERRIDE_CONFIDENCE_FLOOR } from "./routes";
 import type { RouteDecision } from "./types";
 
@@ -495,6 +496,24 @@ export async function processEmail(args: ProcessEmailArgs): Promise<void> {
   }
 
   updatePayload.aiReviewerFlags = JSON.stringify(flags);
+
+  // ── Showroom contact auto-population ─────────────────────────────────────
+  // Only when the sender did NOT match a directory company: register a showroom
+  // contact from the signature — mapped to a showroom by domain/name, else saved
+  // as a draft for the HITL inbox to map. Never breaks classification.
+  if (!companyMatch.companyId) {
+    try {
+      await registerShowroomContactFromEmail(
+        realSenderEmail,
+        analysis.senderCompanyName || realSenderName,
+        analysis.senderPhone,
+        analysis.senderWebsite,
+        env,
+      );
+    } catch (err) {
+      console.error("[email-pipeline] showroom contact auto-populate failed:", err);
+    }
+  }
 
   await db
     .update(workerEmails)

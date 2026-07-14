@@ -38,7 +38,8 @@ import {
   showroomProductMappings,
   browserRunPages,
   showroomPhotosMapping,
-  showroomHours,
+  showroomStoreHours,
+  showroomStoreLinks,
   productPriceObservations,
   productShowroomPhotos,
 } from "@backend/db/schema/showroom/index";
@@ -47,6 +48,7 @@ import {
   showroomBrandMappings,
 } from "@backend/db/schema/brands/index";
 import { classifyBayAreaRegion } from "@backend/lib/bay-area-region";
+import { GoogleMapsService } from "@backend/services/google/maps";
 import {
   computeStoreGeoPatch,
   scheduleShowroomEnrichment,
@@ -55,6 +57,20 @@ import { businessCardService } from "@backend/services/business-card";
 import { ImageProcessorService, type PhotoMetadata } from "@backend/services/image-processor";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { faviconService } from "@backend/services/favicon";
+import {
+  deriveIsOpenWeekends,
+  hoursJsonToRows,
+  rowsToHoursJson,
+} from "@backend/utils/showroom-hours";
+import {
+  SHOWROOM_LINK_TYPES,
+  getStoreLinks,
+  getStoreLinksMap,
+  getStoreWebsiteUrl,
+  linksToLegacyUrls,
+  replaceStoreLinks,
+  type StoreLinkInput,
+} from "@backend/utils/showroom-links";
 import {
   generateProductDraftPrompt,
 } from "@backend/ai/agents/ShowroomResearchAgent/methods";
@@ -109,187 +125,17 @@ const hoursJsonSchema = z
   .optional()
   .nullable();
 
-// ─── Hours Derivation Helper ──────────────────────────────────────────────────
+// Hours conversion (hoursJsonToRows) + isOpenWeekends derivation live in
+// `@backend/utils/showroom-hours` (imported above). This route no longer keeps
+// a private copy — hoursJson is the write source of truth; the util derives the
+// normalized showroom_store_hours rows and the isOpenWeekends flag.
 
-/**
- * Day abbreviation labels used for human-readable summary strings.
- */
-const DAY_LABELS: Record<
-  "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun",
-  string
-> = {
-  mon: "Mon",
-  tue: "Tue",
-  wed: "Wed",
-  thu: "Thu",
-  fri: "Fri",
-  sat: "Sat",
-  sun: "Sun",
-};
-
-/**
- * Convert a 24-hour "HH:MM" string to a 12-hour "h:MM AM/PM" display string.
- *
- * @example
- * to12h("09:00") // "9:00 AM"
- * to12h("13:30") // "1:30 PM"
- * to12h("00:00") // "12:00 AM"
- * to12h("12:00") // "12:00 PM"
- */
-function to12h(time: string): string {
-  const [hStr, mStr] = time.split(":");
-  const h = parseInt(hStr, 10);
-  const m = mStr ?? "00";
-  const period = h < 12 ? "AM" : "PM";
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12}:${m} ${period}`;
-}
-
-/**
- * Collapse a list of same-hours consecutive days into range strings.
- *
- * For example, if Mon–Fri all share "9:00 AM–5:00 PM", this returns a single
- * "Mon–Fri 9:00 AM–5:00 PM" entry rather than five separate lines.
- * Days with different hours are listed individually.
- * Closed days (null slot) are omitted.
- *
- * @param days - Ordered list of day keys to collapse.
- * @param hoursJson - The full hoursJson object (source of truth).
- * @returns Array of human-readable strings, one per group of same-hours days.
- */
-function collapseHoursGroups(
-  days: Array<"mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun">,
-  hoursJson: NonNullable<NonNullable<z.infer<typeof hoursJsonSchema>>>,
-): string[] {
-  // Filter to open days only.
-  const openDays = days.filter((d) => hoursJson[d] !== null);
-  if (openDays.length === 0) return [];
-
-  const groups: Array<{
-    label: string;
-    open: string;
-    close: string;
-    startDay: string;
-    endDay: string;
-  }> = [];
-
-  for (const day of openDays) {
-    const slot = hoursJson[day]!;
-    const last = groups[groups.length - 1];
-
-    if (last && last.open === slot.open && last.close === slot.close) {
-      // Extend the current range to include this day.
-      last.endDay = DAY_LABELS[day];
-    } else {
-      // Start a new group.
-      groups.push({
-        label: DAY_LABELS[day],
-        open: slot.open,
-        close: slot.close,
-        startDay: DAY_LABELS[day],
-        endDay: DAY_LABELS[day],
-      });
-    }
-  }
-
-  return groups.map((g) => {
-    const dayRange =
-      g.startDay === g.endDay ? g.startDay : `${g.startDay}–${g.endDay}`;
-    return `${dayRange} ${to12h(g.open)}–${to12h(g.close)}`;
-  });
-}
-
-/**
- * Derive the three back-compat / filter fields from a structured `hoursJson`.
- *
- * **Derivation rules:**
- *
- * - `isOpenWeekends` — `true` when either `sat` or `sun` is non-null.
- *
- * - `weekdayHours` — A human-readable summary of Mon–Fri.  Consecutive days
- *   that share the same opening and closing time are collapsed into a range
- *   (e.g. "Mon–Fri 9:00 AM–5:00 PM").  Days with different hours are listed
- *   separately.  Closed weekdays are omitted.  Example output:
- *   `"Mon–Thu 9:00 AM–5:00 PM, Fri 9:00 AM–3:00 PM"`
- *
- * - `weekendHours` — Same treatment for Sat and Sun.  When both are closed the
- *   string is `"Closed"`.  Example: `"Sat 10:00 AM–4:00 PM"`.
- *
- * Times in `hoursJson` are 24-hour `"HH:MM"` strings; the derived summaries
- * render them as 12-hour `"h:MM AM/PM"` strings for display.
- *
- * @param hoursJson - Source-of-truth hours object with all 7 day keys.
- * @returns Object with `weekdayHours`, `weekendHours`, and `isOpenWeekends`.
- */
-function deriveHoursSummary(
-  hoursJson: NonNullable<NonNullable<z.infer<typeof hoursJsonSchema>>>,
-): {
-  weekdayHours: string;
-  weekendHours: string;
-  isOpenWeekends: boolean;
-} {
-  const weekdayGroups = collapseHoursGroups(
-    ["mon", "tue", "wed", "thu", "fri"],
-    hoursJson,
-  );
-  const weekendGroups = collapseHoursGroups(["sat", "sun"], hoursJson);
-
-  const weekdayHours =
-    weekdayGroups.length > 0 ? weekdayGroups.join(", ") : "Closed";
-  const weekendHours =
-    weekendGroups.length > 0 ? weekendGroups.join(", ") : "Closed";
-  const isOpenWeekends = Boolean(hoursJson.sat || hoursJson.sun);
-
-  return { weekdayHours, weekendHours, isOpenWeekends };
-}
-
-/** hoursJson day-key ("mon"…"sun") → showroom_hours.day enum. */
-const DAY_KEY_TO_ENUM = {
-  mon: "MONDAY",
-  tue: "TUESDAY",
-  wed: "WEDNESDAY",
-  thu: "THURSDAY",
-  fri: "FRIDAY",
-  sat: "SATURDAY",
-  sun: "SUNDAY",
-} as const;
-
-/** Parse a 24-hour "HH:MM" string into integer hour/minute (clamped, safe). */
-function parseHhmm(hhmm: string): { hour: number; minute: number } {
-  const m = /^(\d{1,2}):(\d{2})$/.exec((hhmm ?? "").trim());
-  if (!m) return { hour: 0, minute: 0 };
-  const hour = Math.min(Math.max(parseInt(m[1], 10) || 0, 0), 23);
-  const minute = Math.min(Math.max(parseInt(m[2], 10) || 0, 0), 59);
-  return { hour, minute };
-}
-
-/**
- * Convert a structured `hoursJson` (7-key `{open,close}|null`) into normalized
- * `showroom_hours` insert rows — ONE ROW PER OPEN DAY (closed days are omitted).
- * This is how intake writes populate the relational hours table that the API
- * serves and the frontend uses for status/filtering.
- */
-function hoursJsonToRows(
-  showroomId: number,
-  hoursJson: NonNullable<NonNullable<z.infer<typeof hoursJsonSchema>>>,
-): Array<typeof showroomHours.$inferInsert> {
-  const rows: Array<typeof showroomHours.$inferInsert> = [];
-  for (const [key, day] of Object.entries(DAY_KEY_TO_ENUM)) {
-    const slot = hoursJson[key as keyof typeof hoursJson];
-    if (!slot) continue; // null / absent → closed that day
-    const open = parseHhmm(slot.open);
-    const close = parseHhmm(slot.close);
-    rows.push({
-      showroomId,
-      day,
-      openHour: open.hour,
-      openMinute: open.minute,
-      closeHour: close.hour,
-      closeMinute: close.minute,
-    });
-  }
-  return rows;
-}
+/** One external link in a create/update `links` payload. */
+const linkInputSchema = z.object({
+  url: z.string().min(1),
+  type: z.enum(SHOWROOM_LINK_TYPES as [string, ...string[]]),
+  urlNotes: z.string().optional().nullable(),
+});
 
 const createStoreSchema = z.object({
   name: z.string().min(1),
@@ -297,9 +143,15 @@ const createStoreSchema = z.object({
   pricePoint: z.enum(["$", "$$", "$$$", "$$$$"]).optional().nullable(),
   bayAreaCityId: z.number().optional().nullable(),
   locationAddress: z.string().optional().nullable(),
+  // Granular address parts — usually filled by the place-import / address
+  // backfill from Google Places, but accepted directly here too.
+  locationStreetNumber: z.string().optional().nullable(),
+  locationStreetName: z.string().optional().nullable(),
+  locationCity: z.string().optional().nullable(),
+  locationState: z.string().optional().nullable(),
+  locationZipCode: z.string().optional().nullable(),
   phoneNumber: z.string().optional().nullable(),
   emailAddress: z.string().optional().nullable(),
-  websiteUrl: z.string().optional().nullable(),
   zipCode: z.string().optional().nullable(),
   googleMapsLink: z.string().optional().nullable(),
   /**
@@ -316,16 +168,13 @@ const createStoreSchema = z.object({
    */
   placeId: z.string().optional().nullable(),
   /**
-   * Structured opening hours — source of truth when provided.
-   *
-   * When present on create or update, the server derives and overwrites
-   * `weekdayHours`, `weekendHours`, and `isOpenWeekends` server-side.
-   * Client-supplied values for those three fields are ignored whenever
-   * `hoursJson` is also present.
+   * Structured opening hours — the single write source of truth. When present
+   * on create or update the worker derives everything else from it: the
+   * normalized `showroom_store_hours` rows and the `isOpenWeekends` flag.
+   * Callers send only this blob; a client-supplied `isOpenWeekends` is ignored
+   * whenever `hoursJson` is present.
    */
   hoursJson: hoursJsonSchema,
-  weekdayHours: z.string().optional().nullable(),
-  weekendHours: z.string().optional().nullable(),
   isOpenWeekends: z.boolean().optional().default(false),
   isAppointmentOnly: z.boolean().optional().default(false),
   isFlagshipLocation: z.boolean().optional().default(false),
@@ -368,12 +217,13 @@ const createStoreSchema = z.object({
   distanceFromSfTime: z.string().optional().nullable(),
   distanceFromSfMiles: z.string().optional().nullable(),
   locationNotes: z.string().optional().nullable(),
-  /** Public Instagram profile URL for this showroom location. */
-  instagramUrl: z.string().optional().nullable(),
-  /** Public Facebook page URL for this showroom location. */
-  facebookUrl: z.string().optional().nullable(),
-  /** Public Pinterest profile URL for this showroom location. */
-  pinterestUrl: z.string().optional().nullable(),
+  /**
+   * External URLs (website + socials + misc) written to `showroom_store_links`.
+   * Replaces the old flat websiteUrl / instagramUrl / facebookUrl / pinterestUrl
+   * fields. Sending `links` REPLACES the store's entire link set. Omit to leave
+   * links unchanged (on update); omit on create for a store with no links.
+   */
+  links: z.array(linkInputSchema).optional(),
   /**
    * Cloudflare Images delivery URL for the showroom's icon (favicon / logo).
    * Normally set by the FaviconService, but can be manually overridden here.
@@ -1174,6 +1024,27 @@ showroomStoresRouter.post("/research/sweep-sessions/:sid/request-changes", async
  *   - "categories" → each store gets `categories: string[]`
  *   - "ratings"    → each store gets `avgRating: number | null`, `ratingCount: number`
  */
+/**
+ * Run an `inArray(col, ids)` select in chunks and concatenate the rows.
+ *
+ * Cloudflare D1 caps a query at 100 bound parameters. The showroom directory
+ * holds well over 100 rows, so passing the full id list to a single `inArray`
+ * blows the limit and fails the whole query at runtime (a prime cause of the
+ * listing 500s). Chunk at 90 to leave headroom for other bound params.
+ */
+const D1_IN_CHUNK = 90;
+async function chunkedByIds<T>(
+  ids: number[],
+  run: (chunk: number[]) => Promise<T[]>,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += D1_IN_CHUNK) {
+    const rows = await run(ids.slice(i, i + D1_IN_CHUNK));
+    for (const row of rows) out.push(row);
+  }
+  return out;
+}
+
 showroomStoresRouter.get("/", async (c) => {
   const db = drizzle(c.env.DB);
   const cityFilter = c.req.query("city");
@@ -1218,7 +1089,16 @@ showroomStoresRouter.get("/", async (c) => {
     query = query.where(and(...conditions));
   }
 
-  const rows = await query;
+  let rows: Awaited<typeof query>;
+  try {
+    rows = await query;
+  } catch (err) {
+    // The core list query is the one thing that must succeed; if it fails,
+    // return a controlled JSON error instead of an unhandled 500 (a broken page
+    // rather than a retryable state).
+    console.error("[showroom-stores] list query failed", err);
+    return c.json({ stores: [], error: "Failed to load showrooms" }, 500);
+  }
   const storeIds = rows.map((r) => r.store.id);
 
   // Parallel enrichment queries (only when requested and stores exist).
@@ -1228,17 +1108,19 @@ showroomStoresRouter.get("/", async (c) => {
   //   - onlineRatingMap → aggregated external platform ratings (showroom_store_ratings)
   const [categoryMap, userRatingMap, onlineRatingMap, hoursMap] = await Promise.all([
     includes.has("categories") && storeIds.length > 0
-      ? db
-          .select({
-            storeId: showroomStoreCategoryMapping.storeId,
-            categoryName: showroomStoreCategory.name,
-          })
-          .from(showroomStoreCategoryMapping)
-          .innerJoin(
-            showroomStoreCategory,
-            eq(showroomStoreCategoryMapping.categoryId, showroomStoreCategory.id)
-          )
-          .where(inArray(showroomStoreCategoryMapping.storeId, storeIds))
+      ? chunkedByIds(storeIds, (chunk) =>
+          db
+            .select({
+              storeId: showroomStoreCategoryMapping.storeId,
+              categoryName: showroomStoreCategory.name,
+            })
+            .from(showroomStoreCategoryMapping)
+            .innerJoin(
+              showroomStoreCategory,
+              eq(showroomStoreCategoryMapping.categoryId, showroomStoreCategory.id)
+            )
+            .where(inArray(showroomStoreCategoryMapping.storeId, chunk)),
+        )
           .then((catRows) => {
             const map = new Map<number, string[]>();
             for (const r of catRows) {
@@ -1248,30 +1130,36 @@ showroomStoresRouter.get("/", async (c) => {
             }
             return map;
           })
+          .catch(() => new Map<number, string[]>())
       : Promise.resolve(new Map<number, string[]>()),
     includes.has("ratings") && storeIds.length > 0
-      ? db
-          .select({
-            storeId: storeRating.storeId,
-            rating: storeRating.rating,
-          })
-          .from(storeRating)
-          .where(and(eq(storeRating.isActive, true), inArray(storeRating.storeId, storeIds)))
+      ? chunkedByIds(storeIds, (chunk) =>
+          db
+            .select({
+              storeId: storeRating.storeId,
+              rating: storeRating.rating,
+            })
+            .from(storeRating)
+            .where(and(eq(storeRating.isActive, true), inArray(storeRating.storeId, chunk))),
+        )
           .then((rRows) => {
             // At most one active rating per store — last write wins.
             const map = new Map<number, number>();
             for (const r of rRows) map.set(r.storeId, r.rating);
             return map;
           })
+          .catch(() => new Map<number, number>())
       : Promise.resolve(new Map<number, number>()),
     includes.has("ratings") && storeIds.length > 0
-      ? db
-          .select({
-            storeId: showroomStoreRatings.storeId,
-            rating: showroomStoreRatings.rating,
-          })
-          .from(showroomStoreRatings)
-          .where(inArray(showroomStoreRatings.storeId, storeIds))
+      ? chunkedByIds(storeIds, (chunk) =>
+          db
+            .select({
+              storeId: showroomStoreRatings.storeId,
+              rating: showroomStoreRatings.rating,
+            })
+            .from(showroomStoreRatings)
+            .where(inArray(showroomStoreRatings.storeId, chunk)),
+        )
           .then((rRows) => {
             const map = new Map<number, { sum: number; count: number }>();
             for (const r of rRows) {
@@ -1282,21 +1170,24 @@ showroomStoresRouter.get("/", async (c) => {
             }
             return map;
           })
+          .catch(() => new Map<number, { sum: number; count: number }>())
       : Promise.resolve(new Map<number, { sum: number; count: number }>()),
     // Normalized per-day hours for every store in the list (cards always need
     // them for open/closed status + weekend cues). One query, grouped by store.
     storeIds.length > 0
-      ? db
-          .select({
-            showroomId: showroomHours.showroomId,
-            day: showroomHours.day,
-            openHour: showroomHours.openHour,
-            openMinute: showroomHours.openMinute,
-            closeHour: showroomHours.closeHour,
-            closeMinute: showroomHours.closeMinute,
-          })
-          .from(showroomHours)
-          .where(inArray(showroomHours.showroomId, storeIds))
+      ? chunkedByIds(storeIds, (chunk) =>
+          db
+            .select({
+              showroomId: showroomStoreHours.showroomId,
+              day: showroomStoreHours.day,
+              openHour: showroomStoreHours.openHour,
+              openMinute: showroomStoreHours.openMinute,
+              closeHour: showroomStoreHours.closeHour,
+              closeMinute: showroomStoreHours.closeMinute,
+            })
+            .from(showroomStoreHours)
+            .where(inArray(showroomStoreHours.showroomId, chunk)),
+        )
           .then((hRows) => {
             const map = new Map<number, Array<Omit<(typeof hRows)[number], "showroomId">>>();
             for (const h of hRows) {
@@ -1307,6 +1198,19 @@ showroomStoresRouter.get("/", async (c) => {
             }
             return map;
           })
+          .catch(
+            () =>
+              new Map<
+                number,
+                Array<{
+                  day: string;
+                  openHour: number;
+                  openMinute: number;
+                  closeHour: number;
+                  closeMinute: number;
+                }>
+              >(),
+          )
       : Promise.resolve(
           new Map<
             number,
@@ -1321,13 +1225,17 @@ showroomStoresRouter.get("/", async (c) => {
         ),
   ]);
 
+  // External links (website + socials + misc) for every store in the list,
+  // plus the derived legacy flat URL fields for back-compat with card UIs.
+  const linksMap = await getStoreLinksMap(db, storeIds);
+
   return c.json({
     stores: rows.map((r) => {
+      const links = linksMap.get(r.store.id) ?? [];
+      const storeHours = hoursMap.get(r.store.id) ?? [];
       // Effective region — captured store hub wins; otherwise derive it at read
       // time from the store's own coordinates / address / ZIP (cheap, no Places
-      // call); finally fall back to the legacy city-derived hub. This is what
-      // makes the East Bay / North Bay filters accurate for rows added via MCP
-      // or imported without a matched Bay Area city.
+      // call); finally fall back to the legacy city-derived hub.
       const derived =
         r.store.hubRoute == null
           ? classifyBayAreaRegion({
@@ -1347,8 +1255,12 @@ showroomStoresRouter.get("/", async (c) => {
         hubName: effectiveHubName,
         latitude: r.store.latitude,
         longitude: r.store.longitude,
-        // Normalized per-day hours (only open days; absent day = closed).
-        hours: hoursMap.get(r.store.id) ?? [],
+        // Normalized per-day hours (sole source of truth); hoursJson rebuilt from them.
+        hours: storeHours,
+        hoursJson: rowsToHoursJson(storeHours),
+        // Links table is the URL source of truth; derive legacy flat fields too.
+        links,
+        ...linksToLegacyUrls(links),
       };
 
       if (includes.has("categories")) {
@@ -1522,14 +1434,17 @@ showroomStoresRouter.get("/:id", async (c) => {
   // Normalized per-day hours (only open days; absent day = closed).
   const hours = await db
     .select({
-      day: showroomHours.day,
-      openHour: showroomHours.openHour,
-      openMinute: showroomHours.openMinute,
-      closeHour: showroomHours.closeHour,
-      closeMinute: showroomHours.closeMinute,
+      day: showroomStoreHours.day,
+      openHour: showroomStoreHours.openHour,
+      openMinute: showroomStoreHours.openMinute,
+      closeHour: showroomStoreHours.closeHour,
+      closeMinute: showroomStoreHours.closeMinute,
     })
-    .from(showroomHours)
-    .where(eq(showroomHours.showroomId, storeId));
+    .from(showroomStoreHours)
+    .where(eq(showroomStoreHours.showroomId, storeId));
+
+  // External links (URL source of truth) + derived legacy flat URL fields.
+  const links = await getStoreLinks(db, storeId);
 
   const detailDerived =
     store.store.hubRoute == null
@@ -1547,6 +1462,9 @@ showroomStoresRouter.get("/:id", async (c) => {
     hubRoute: store.store.hubRoute ?? detailDerived?.route ?? store.hubRoute,
     hubName: store.store.hubName ?? detailDerived?.name ?? store.hubName,
     hours,
+    hoursJson: rowsToHoursJson(hours),
+    links,
+    ...linksToLegacyUrls(links),
     products,
     categories: categories.map((r) => ({
       ...r.mapping,
@@ -1580,20 +1498,49 @@ showroomStoresRouter.post("/", async (c) => {
   const data = createStoreSchema.parse(body);
 
   // Strip virtual fields before inserting into showroom_stores.
-  // `categoryIds` and `photos` are not columns on `showroom_stores`.
+  // `categoryIds`/`photos`/`links`/`hoursJson` are NOT columns on the table —
+  // hoursJson is a write payload that becomes showroom_store_hours rows below.
   // `reviewAiInsight` IS a column but its .$type<> is tighter than z.passthrough(),
   // so we pull it out, cast it, and re-attach below.
-  const { categoryIds, photos, reviewAiInsight, ...storeValues } = data;
+  const { categoryIds, photos, reviewAiInsight, links, hoursJson, ...storeValues } = data;
 
-  // When hoursJson is provided, derive the back-compat display fields
-  // server-side so filters and legacy display remain correct.
-  // Client-supplied weekdayHours / weekendHours / isOpenWeekends are
-  // intentionally overwritten — do NOT trust them when hoursJson is present.
-  if (storeValues.hoursJson != null) {
-    const derived = deriveHoursSummary(storeValues.hoursJson);
-    storeValues.weekdayHours = derived.weekdayHours;
-    storeValues.weekendHours = derived.weekendHours;
-    storeValues.isOpenWeekends = derived.isOpenWeekends;
+  // The website URL now lives in showroom_store_links; derive it from the
+  // incoming links payload for favicon + scrape triggers below.
+  const websiteUrl = links?.find((l) => l.type === "WEBSITE")?.url ?? null;
+
+  // hoursJson is the write payload — derive isOpenWeekends from it (a
+  // client-supplied isOpenWeekends is intentionally overwritten). The
+  // normalized showroom_store_hours rows are written after insert below.
+  if (hoursJson != null) {
+    storeValues.isOpenWeekends = deriveIsOpenWeekends(hoursJson);
+  }
+
+  // Guarantee coordinates whenever a Google Place was selected. Some callers
+  // (the intake form) send a `placeId` but not lat/lng; without coordinates the
+  // showroom can never be pinned on the map. If they're missing, resolve them
+  // server-side from the placeId here — the same source the MCP onboarding tools
+  // and the backfill use — so EVERY placeId-backed create is map-ready. One
+  // Places lookup, only when coordinates are actually absent (skipAi keeps it cheap).
+  if (
+    typeof data.placeId === "string" &&
+    data.placeId.length > 0 &&
+    (storeValues.latitude == null || storeValues.longitude == null)
+  ) {
+    try {
+      const details = await new GoogleMapsService(c.env).placeDetails(
+        data.placeId,
+        undefined,
+        { skipAi: true },
+      );
+      const loc = (details as { location?: { latitude?: number; longitude?: number } })
+        .location;
+      if (typeof loc?.latitude === "number") storeValues.latitude = loc.latitude;
+      if (typeof loc?.longitude === "number") storeValues.longitude = loc.longitude;
+    } catch (err) {
+      // Non-fatal: fall through to address/ZIP-derived region below. The store
+      // is still created; it just won't have a precise pin until a backfill runs.
+      console.error("[showroom-stores] POST / coordinate lookup failed:", err);
+    }
   }
 
   // Capture geo columns: pass through Places coordinates and derive the region
@@ -1701,16 +1648,21 @@ showroomStoresRouter.post("/", async (c) => {
     }
   }
 
-  // Normalized per-day hours: one row per OPEN day in showroom_hours (the table
-  // the API serves + the frontend uses for status/filtering). Derived from the
-  // same structured hoursJson the intake editors already send.
-  if (storeValues.hoursJson != null) {
-    const hourRows = hoursJsonToRows(inserted.id, storeValues.hoursJson);
+  // Normalized per-day hours: one row per OPEN day in showroom_store_hours (the
+  // sole store of truth the API serves + the frontend uses for status/filtering).
+  // Derived from the structured hoursJson payload the intake editors send.
+  if (hoursJson != null) {
+    const hourRows = hoursJsonToRows(inserted.id, hoursJson);
     if (hourRows.length > 0) {
-      await db.insert(showroomHours).values(
+      await db.insert(showroomStoreHours).values(
         hourRows as [(typeof hourRows)[number], ...(typeof hourRows)[number][]],
       );
     }
+  }
+
+  // External links → showroom_store_links (website + socials + misc).
+  if (links && links.length > 0) {
+    await replaceStoreLinks(db, inserted.id, links as StoreLinkInput[]);
   }
 
   // Fire the full background enrichment pipeline — AI research, favicon +
@@ -1721,7 +1673,7 @@ showroomStoresRouter.post("/", async (c) => {
     c.env,
     inserted,
     {
-      websiteUrl: data.websiteUrl,
+      websiteUrl,
       photos,
       brands: (
         data.reviewAiInsight as
@@ -1793,15 +1745,17 @@ showroomStoresRouter.post("/:id/scrape", async (c) => {
   }
 
   const [store] = await db
-    .select({ websiteUrl: showroomStores.websiteUrl })
+    .select({ id: showroomStores.id })
     .from(showroomStores)
     .where(eq(showroomStores.id, storeId))
     .limit(1);
 
   if (!store) return c.json({ success: false, error: "Store not found" }, 404);
-  if (!store.websiteUrl || store.websiteUrl.length === 0) {
+
+  const websiteUrl = await getStoreWebsiteUrl(db, storeId);
+  if (!websiteUrl || websiteUrl.length === 0) {
     return c.json(
-      { success: false, error: "Store has no websiteUrl to scrape" },
+      { success: false, error: "Store has no website link to scrape" },
       400,
     );
   }
@@ -1813,7 +1767,7 @@ showroomStoresRouter.post("/:id/scrape", async (c) => {
     .where(eq(showroomStores.id, storeId));
 
   await c.env.SHOWROOM_SCRAPE_WORKFLOW.create({
-    params: { showroomId: storeId, websiteUrl: store.websiteUrl, ragUuid },
+    params: { showroomId: storeId, websiteUrl, ragUuid },
   });
 
   return c.json({ success: true, ragUuid, scrapeStatus: "pending" }, 202);
@@ -1832,29 +1786,30 @@ showroomStoresRouter.put("/:id", async (c) => {
   const body = await c.req.json();
   const data = createStoreSchema.partial().parse(body);
 
-  // Fetch existing row so we can compare websiteUrl + icon before updating.
+  // Fetch existing icon + the current website link so we can decide whether to
+  // re-hydrate the favicon after the update.
   const [existing] = await db
-    .select({ websiteUrl: showroomStores.websiteUrl, iconCfImagesUrl: showroomStores.iconCfImagesUrl })
+    .select({ iconCfImagesUrl: showroomStores.iconCfImagesUrl })
     .from(showroomStores)
     .where(eq(showroomStores.id, storeId))
     .limit(1);
 
   if (!existing) return c.json({ error: "Store not found" }, 404);
 
-  // When hoursJson is provided in a PUT, derive the back-compat display fields
-  // server-side so filters and legacy display remain correct.
-  // Client-supplied weekdayHours / weekendHours / isOpenWeekends are
-  // intentionally overwritten — do NOT trust them when hoursJson is present.
+  const existingWebsiteUrl = await getStoreWebsiteUrl(db, storeId);
+
+  // hoursJson is the write payload — derive isOpenWeekends from it (a
+  // client-supplied isOpenWeekends is intentionally overwritten). The normalized
+  // showroom_store_hours rows are replaced after the update below.
   if (data.hoursJson != null) {
-    const derived = deriveHoursSummary(data.hoursJson);
-    data.weekdayHours = derived.weekdayHours;
-    data.weekendHours = derived.weekendHours;
-    data.isOpenWeekends = derived.isOpenWeekends;
+    data.isOpenWeekends = deriveIsOpenWeekends(data.hoursJson);
   }
 
   // Strip virtual / specially-cast fields before the update spread.
   // reviewAiInsight needs a manual cast to match the column's .$type<> shape.
-  const { categoryIds: _catIds, photos: _photos, reviewAiInsight: putInsight, ...putValues } = data;
+  // `links` → showroom_store_links, `hoursJson` → showroom_store_hours (neither
+  // is a column on showroom_stores).
+  const { categoryIds: _catIds, photos: _photos, reviewAiInsight: putInsight, links: putLinks, hoursJson: _putHours, ...putValues } = data;
 
   const [updated] = await db
     .update(showroomStores)
@@ -1876,21 +1831,29 @@ showroomStoresRouter.put("/:id", async (c) => {
   // drop this store's rows and re-insert one per open day. Only runs when the
   // caller actually sent hoursJson, so other PUTs leave hours untouched.
   if (data.hoursJson != null) {
-    await db.delete(showroomHours).where(eq(showroomHours.showroomId, storeId));
+    await db.delete(showroomStoreHours).where(eq(showroomStoreHours.showroomId, storeId));
     const hourRows = hoursJsonToRows(storeId, data.hoursJson);
     if (hourRows.length > 0) {
-      await db.insert(showroomHours).values(
+      await db.insert(showroomStoreHours).values(
         hourRows as [(typeof hourRows)[number], ...(typeof hourRows)[number][]],
       );
     }
   }
 
-  // Trigger favicon refresh when websiteUrl changed or icon is missing.
-  const incomingUrl = data.websiteUrl ?? null;
+  // Replace the store's link set when the caller sent `links` (replace-all).
+  if (putLinks !== undefined) {
+    await replaceStoreLinks(db, storeId, putLinks as StoreLinkInput[]);
+  }
+
+  // Trigger favicon refresh when the website link changed or the icon is missing.
+  const incomingUrl =
+    putLinks !== undefined
+      ? putLinks.find((l) => l.type === "WEBSITE")?.url ?? null
+      : existingWebsiteUrl;
   const shouldRefreshIcon =
-    incomingUrl &&
+    !!incomingUrl &&
     incomingUrl.length > 0 &&
-    (incomingUrl !== existing.websiteUrl || !existing.iconCfImagesUrl);
+    (incomingUrl !== existingWebsiteUrl || !existing.iconCfImagesUrl);
 
   if (shouldRefreshIcon) {
     c.executionCtx.waitUntil(
@@ -1965,6 +1928,157 @@ showroomStoresRouter.delete("/:id", async (c) => {
 
   await db.delete(showroomStores).where(eq(showroomStores.id, storeId));
 
+  return c.json({ success: true });
+});
+
+// ─── HOURS ────────────────────────────────────────────────────────────────────
+
+/**
+ * PUT /:id/hours — set/correct a store's opening hours from a hoursJson payload.
+ * Replaces the showroom_store_hours rows + derives is_open_weekends. For when
+ * intake couldn't fill hours, or they need correcting.
+ */
+showroomStoresRouter.put("/:id/hours", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId)) return c.json({ error: "Invalid store id" }, 400);
+  const parsed = z.object({ hoursJson: hoursJsonSchema }).safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
+  const hoursJson = parsed.data.hoursJson;
+  if (hoursJson == null) return c.json({ error: "hoursJson required" }, 400);
+
+  await db.delete(showroomStoreHours).where(eq(showroomStoreHours.showroomId, storeId));
+  const rows = hoursJsonToRows(storeId, hoursJson);
+  if (rows.length > 0) {
+    await db.insert(showroomStoreHours).values(rows as [(typeof rows)[number], ...(typeof rows)[number][]]);
+  }
+  await db
+    .update(showroomStores)
+    .set({ isOpenWeekends: deriveIsOpenWeekends(hoursJson), updatedAt: new Date() })
+    .where(eq(showroomStores.id, storeId));
+
+  const written = await db
+    .select({
+      day: showroomStoreHours.day, openHour: showroomStoreHours.openHour, openMinute: showroomStoreHours.openMinute,
+      closeHour: showroomStoreHours.closeHour, closeMinute: showroomStoreHours.closeMinute,
+    })
+    .from(showroomStoreHours)
+    .where(eq(showroomStoreHours.showroomId, storeId));
+  return c.json({ success: true, hours: written, hoursJson: rowsToHoursJson(written) });
+});
+
+// ─── ADDRESS ──────────────────────────────────────────────────────────────────
+
+const addressUpdateSchema = z.object({
+  locationAddress: z.string().optional().nullable(),
+  locationStreetNumber: z.string().optional().nullable(),
+  locationStreetName: z.string().optional().nullable(),
+  locationCity: z.string().optional().nullable(),
+  locationState: z.string().optional().nullable(),
+  locationZipCode: z.string().optional().nullable(),
+  zipCode: z.string().optional().nullable(),
+  googleMapsLink: z.string().optional().nullable(),
+});
+
+/**
+ * PUT /:id/address — set/correct a store's address (granular parts + formatted +
+ * maps link). For when Places is wrong, the store moved, or intake missed it.
+ * Only the fields sent are updated.
+ */
+showroomStoresRouter.put("/:id/address", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId)) return c.json({ error: "Invalid store id" }, 400);
+  const parsed = addressUpdateSchema.safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
+  const d = parsed.data;
+  // Keep the two zip columns in sync when either is sent.
+  const zip = d.locationZipCode ?? d.zipCode;
+  const [row] = await db
+    .update(showroomStores)
+    .set({
+      ...(d.locationAddress !== undefined ? { locationAddress: d.locationAddress } : {}),
+      ...(d.locationStreetNumber !== undefined ? { locationStreetNumber: d.locationStreetNumber } : {}),
+      ...(d.locationStreetName !== undefined ? { locationStreetName: d.locationStreetName } : {}),
+      ...(d.locationCity !== undefined ? { locationCity: d.locationCity } : {}),
+      ...(d.locationState !== undefined ? { locationState: d.locationState } : {}),
+      ...(zip !== undefined ? { locationZipCode: zip, zipCode: zip } : {}),
+      ...(d.googleMapsLink !== undefined ? { googleMapsLink: d.googleMapsLink } : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(showroomStores.id, storeId))
+    .returning();
+  if (!row) return c.json({ error: "Store not found" }, 404);
+  return c.json({ success: true, store: row });
+});
+
+// ─── LINKS CRUD ───────────────────────────────────────────────────────────────
+// showroom_store_links: the URL source of truth (website + socials + misc).
+// Bulk replace also happens via the store create/update `links` payload; these
+// endpoints manage individual links from the viewport.
+
+/** GET /:id/links — list a store's links (WEBSITE-first, then socials, OTHER). */
+showroomStoresRouter.get("/:id/links", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId)) return c.json({ error: "Invalid store id" }, 400);
+  return c.json({ links: await getStoreLinks(db, storeId) });
+});
+
+/** POST /:id/links — add one link. */
+showroomStoresRouter.post("/:id/links", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId)) return c.json({ error: "Invalid store id" }, 400);
+  const parsed = linkInputSchema.safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
+  const [link] = await db
+    .insert(showroomStoreLinks)
+    .values({
+      storeId,
+      url: parsed.data.url.trim(),
+      type: parsed.data.type as StoreLinkInput["type"],
+      urlNotes: parsed.data.urlNotes?.trim() || null,
+    })
+    .returning();
+  return c.json({ link }, 201);
+});
+
+/** PUT /:id/links/:linkId — edit one link. */
+showroomStoresRouter.put("/:id/links/:linkId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const linkId = Number(c.req.param("linkId"));
+  if (!Number.isInteger(storeId) || !Number.isInteger(linkId)) {
+    return c.json({ error: "Invalid id" }, 400);
+  }
+  const parsed = linkInputSchema.partial().safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
+  const [link] = await db
+    .update(showroomStoreLinks)
+    .set({
+      ...(parsed.data.url !== undefined ? { url: parsed.data.url.trim() } : {}),
+      ...(parsed.data.type !== undefined ? { type: parsed.data.type as StoreLinkInput["type"] } : {}),
+      ...(parsed.data.urlNotes !== undefined ? { urlNotes: parsed.data.urlNotes?.trim() || null } : {}),
+      updatedAt: new Date(),
+    })
+    .where(and(eq(showroomStoreLinks.id, linkId), eq(showroomStoreLinks.storeId, storeId)))
+    .returning();
+  if (!link) return c.json({ error: "Link not found" }, 404);
+  return c.json({ link });
+});
+
+/** DELETE /:id/links/:linkId — remove one link. */
+showroomStoresRouter.delete("/:id/links/:linkId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const linkId = Number(c.req.param("linkId"));
+  if (!Number.isInteger(storeId) || !Number.isInteger(linkId)) {
+    return c.json({ error: "Invalid id" }, 400);
+  }
+  await db
+    .delete(showroomStoreLinks)
+    .where(and(eq(showroomStoreLinks.id, linkId), eq(showroomStoreLinks.storeId, storeId)));
   return c.json({ success: true });
 });
 

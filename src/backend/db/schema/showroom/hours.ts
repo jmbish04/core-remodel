@@ -9,12 +9,16 @@ import {
 import { showroomStores } from "./stores";
 
 /**
- * Showroom Hours — normalized per-day opening hours.
+ * Showroom Store Hours — normalized per-day opening hours.
  *
- * ONE ROW PER OPEN DAY. A day with no row is CLOSED. This replaces the old
- * free-text `weekdayHours`/`weekendHours` summaries (and the `hoursJson` blob)
- * as the source of truth the API serves and the frontend uses to compute
+ * ONE ROW PER OPEN DAY. A day with no row is CLOSED. These rows are the
+ * QUERYABLE/DERIVED form the API serves and the frontend uses to compute
  * open/closed status, "closes 5pm", weekend availability, and filtering.
+ *
+ * The WRITE source of truth is `showroom_stores.hours_json` — callers of the
+ * API / MCP tools send only that structured blob; the worker derives these
+ * rows (and `is_open_weekends`) from it automatically. The old free-text
+ * `weekday_hours` / `weekend_hours` columns have been removed.
  *
  * Times are stored as 24-HOUR integers (`openHour` 0–23, `openMinute` 0–59,
  * etc.) so all status/filter math is trivial; the frontend formats to 12-hour
@@ -23,8 +27,8 @@ import { showroomStores } from "./stores";
  * midnight are not modeled (no showroom in scope operates past midnight), and
  * the status helpers intentionally do not handle wrapping.
  */
-export const showroomHours = sqliteTable(
-  "showroom_hours",
+export const showroomStoreHours = sqliteTable(
+  "showroom_store_hours",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
 

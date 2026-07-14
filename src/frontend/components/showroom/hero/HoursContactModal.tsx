@@ -10,8 +10,9 @@
  *      "Open in Google Maps" link (prefers the stored place-id deep link).
  */
 
-import { Clock, ExternalLink, Globe, Mail, MapPin, Phone } from "lucide-react";
+import { Clock, ExternalLink, Globe, Mail, MapPin, Pencil, Phone } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -27,8 +28,6 @@ import { DAY_KEYS, DAY_LABELS, to12h } from "../intake/hours-types";
 export interface HoursContactStore {
   name: string;
   hoursJson: HoursJson | null;
-  weekdayHours: string | null;
-  weekendHours: string | null;
   phoneNumber: string | null;
   emailAddress: string | null;
   websiteUrl: string | null;
@@ -87,14 +86,35 @@ function formatPhone(raw: string): string {
   return `(${ten.slice(0, 3)}) ${ten.slice(3, 6)} - ${ten.slice(6)}`;
 }
 
+/** Small inline "Edit" affordance rendered beside a section heading. */
+function EditLink({ onClick, label }: { onClick: () => void; label: string }) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      onClick={onClick}
+      className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
+    >
+      <Pencil className="size-3" /> {label}
+    </Button>
+  );
+}
+
 export function HoursContactModal({
   store,
   open,
   onOpenChange,
+  onEditHours,
+  onEditAddress,
 }: {
   store: HoursContactStore;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** When set, an "Edit" affordance appears by the Hours heading (closes this modal first). */
+  onEditHours?: () => void;
+  /** When set, an "Edit" affordance appears by the Contact/address block. */
+  onEditAddress?: () => void;
 }) {
   // Keyless Maps embed: query by address (or name + city as a fallback).
   const mapQuery =
@@ -122,17 +142,23 @@ export function HoursContactModal({
         <div className="max-h-[70vh] space-y-5 overflow-y-auto pr-1">
           {/* ── Weekly hours ── */}
           <section>
-            <h3 className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-              Hours
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                Hours
+              </h3>
+              {onEditHours ? (
+                <EditLink
+                  label="Edit hours"
+                  onClick={() => {
+                    onOpenChange(false);
+                    onEditHours();
+                  }}
+                />
+              ) : null}
+            </div>
             {store.hoursJson ? (
               <div className="mt-1.5">
                 <WeeklyHoursTable hoursJson={store.hoursJson} />
-              </div>
-            ) : store.weekdayHours || store.weekendHours ? (
-              <div className="mt-1.5 space-y-1 text-sm text-muted-foreground">
-                {store.weekdayHours ? <p>{store.weekdayHours}</p> : null}
-                {store.weekendHours ? <p>{store.weekendHours}</p> : null}
               </div>
             ) : (
               <p className="mt-1.5 text-sm text-muted-foreground/70">
@@ -144,9 +170,20 @@ export function HoursContactModal({
 
           {/* ── Contact ── */}
           <section>
-            <h3 className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-              Contact
-            </h3>
+            <div className="flex items-center justify-between">
+              <h3 className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                Contact
+              </h3>
+              {onEditAddress ? (
+                <EditLink
+                  label="Edit address"
+                  onClick={() => {
+                    onOpenChange(false);
+                    onEditAddress();
+                  }}
+                />
+              ) : null}
+            </div>
             <div className="mt-1.5 space-y-1.5 text-sm">
               {store.phoneNumber ? (
                 <a
