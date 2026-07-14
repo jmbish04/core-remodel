@@ -388,12 +388,12 @@ export function parsePhoneField(raw): LabeledPhones {
       {
         caption: "Inbound email → signature extraction → fielded showroom contact (mapped or draft).",
         code: `flowchart TD
-  A["Inbound email\\n(worker email)"] --> B{Matches a\\ndirectory company?}
-  B -- yes --> C[Company CRM]
-  B -- no --> D[matchShowroomStore\\n(domain / email / name)]
-  D -- matched --> E[showroom_store_contacts\\n(mapped)]
-  D -- no match --> F[showroom_store_contacts\\n(is_draft = true)]
-  F --> G[Phonebook triage]`,
+  A["Inbound email (worker email)"] --> B{"Matches a directory company?"}
+  B -- yes --> C["Company CRM"]
+  B -- no --> D["matchShowroomStore (domain / email / name)"]
+  D -- matched --> E["showroom_store_contacts (mapped)"]
+  D -- no match --> F["showroom_store_contacts (is_draft = true)"]
+  F --> G["Phonebook triage"]`,
       },
     ],
   },

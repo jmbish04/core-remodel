@@ -49,6 +49,8 @@ async function matchStore(
     placeId?: string | null;
     website?: string | null;
     phone?: string | null;
+    email?: string | null;
+    address?: string | null;
     name?: string | null;
   },
 ): Promise<number | null> {
@@ -92,6 +94,27 @@ async function matchStore(
         .limit(1);
       if (s) return s.id;
     }
+  }
+
+  if (hints.email) {
+    const domain = hints.email.split("@")[1]?.toLowerCase();
+    if (domain) {
+      const [s] = await db
+        .select({ id: showroomStores.id })
+        .from(showroomStores)
+        .where(like(showroomStores.emailAddress, `%@${domain}`))
+        .limit(1);
+      if (s) return s.id;
+    }
+  }
+
+  if (hints.address && hints.address.trim().length >= 6) {
+    const [s] = await db
+      .select({ id: showroomStores.id })
+      .from(showroomStores)
+      .where(like(showroomStores.locationAddress, `%${hints.address.trim()}%`))
+      .limit(1);
+    if (s) return s.id;
   }
 
   if (hints.name && hints.name.trim().length >= 3) {
@@ -195,6 +218,8 @@ const personSchema = z.object({
   isTextingOk: z.boolean().optional(),
   bestContactTimesJson: z.record(z.string(), z.unknown()).optional().nullable(),
   notes: z.string().optional().nullable(),
+}).refine((p) => Boolean(p.firstName?.trim() || p.fullName?.trim()), {
+  message: "A person contact requires a first name (or a full name to split).",
 });
 
 const createContactsSchema = z.object({
@@ -225,6 +250,26 @@ const createContactsSchema = z.object({
     .optional(),
   /** Office address → filled onto the store row when blank. */
   address: z.string().optional().nullable(),
+  /**
+   * Generic SHOWROOM details that a business card carries but that belong to the
+   * store, not the person (name, address, website + socials, phone, email). When
+   * present these are used to fuzzy-match the store AND to fill any missing
+   * store fields (fill-blanks: never overwrite existing data): address → the
+   * store row, website/socials → the links table, phone/email → the store row +
+   * the GENERAL_CONTACT. Optional — most contacts won't carry them.
+   */
+  showroom: z
+    .object({
+      name: z.string().optional().nullable(),
+      address: z.string().optional().nullable(),
+      website: z.string().optional().nullable(),
+      phone: z.string().optional().nullable(),
+      email: z.string().optional().nullable(),
+      instagram: z.string().optional().nullable(),
+      facebook: z.string().optional().nullable(),
+      pinterest: z.string().optional().nullable(),
+    })
+    .optional(),
   /**
    * Optional business-card images (base64 `data:` URLs). Front and/or back —
    * either may be omitted. Uploaded to Cloudflare Images and attached to the
@@ -264,13 +309,18 @@ export async function fieldOutContacts(
   generalUpserted: boolean;
   businessCardId: number | null;
 }> {
-  // 1. Resolve the store.
+  const sr = data.showroom;
+
+  // 1. Resolve the store — explicit id, then hints, then the generic showroom
+  //    details a business card carries (name / address / website / phone / email).
   const storeId = await matchStore(db, {
     storeId: data.storeId ?? null,
     placeId: data.match?.placeId ?? null,
-    website: data.match?.website ?? data.urls?.find((u) => u.type === "WEBSITE")?.url ?? null,
-    phone: data.match?.phone ?? data.general?.officePhoneNumber ?? null,
-    name: data.match?.name ?? null,
+    website: data.match?.website ?? sr?.website ?? data.urls?.find((u) => u.type === "WEBSITE")?.url ?? null,
+    phone: data.match?.phone ?? sr?.phone ?? data.general?.officePhoneNumber ?? null,
+    email: sr?.email ?? data.general?.emailAddress ?? null,
+    address: sr?.address ?? data.address ?? null,
+    name: data.match?.name ?? sr?.name ?? null,
   });
   const isDraft = storeId === null;
   const draftNotes = isDraft
@@ -325,15 +375,26 @@ export async function fieldOutContacts(
     contactIds.push(row.id);
   }
 
-  // 4. Upsert the store's GENERAL_CONTACT (only when we have a store).
+  // 4. Upsert the store's GENERAL_CONTACT (only when we have a store). A generic
+  //    showroom phone/email from a business card fills the general line too.
+  if (sr?.phone && !general.officePhoneNumber) general.officePhoneNumber = sr.phone;
+  if (sr?.email && !general.emailAddress) general.emailAddress = sr.email;
   let generalUpserted = false;
   if (storeId !== null) {
     const before = Object.values(general).some((v) => v && String(v).trim());
     await upsertGeneralContact(db, storeId, general);
     generalUpserted = before;
 
-    // 5. URLs → links table (insert; skip dups by url+type).
-    for (const u of data.urls ?? []) {
+    // 5. URLs → links table. Merge the explicit urls[] with any generic showroom
+    //    links a business card carries (website + socials). Insert; skip dups.
+    const effectiveUrls = [
+      ...(data.urls ?? []),
+      ...(sr?.website ? [{ url: sr.website, type: "WEBSITE", urlNotes: null }] : []),
+      ...(sr?.instagram ? [{ url: sr.instagram, type: "INSTAGRAM", urlNotes: null }] : []),
+      ...(sr?.facebook ? [{ url: sr.facebook, type: "FACEBOOK", urlNotes: null }] : []),
+      ...(sr?.pinterest ? [{ url: sr.pinterest, type: "PINTEREST", urlNotes: null }] : []),
+    ];
+    for (const u of effectiveUrls) {
       const url = u.url.trim();
       if (!url) continue;
       const type = ["WEBSITE", "INSTAGRAM", "PINTEREST", "FACEBOOK", "OTHER"].includes(u.type)
@@ -349,17 +410,27 @@ export async function fieldOutContacts(
       }
     }
 
-    // 6. Address → store row when blank.
-    if (data.address?.trim()) {
-      const [s] = await db
-        .select({ locationAddress: showroomStores.locationAddress })
-        .from(showroomStores)
-        .where(eq(showroomStores.id, storeId))
-        .limit(1);
-      if (s && !s.locationAddress) {
+    // 6. Fill-blanks the store row from the address + generic showroom fields
+    //    (address / phone / email) — never overwrites an existing value.
+    const [s] = await db
+      .select({
+        locationAddress: showroomStores.locationAddress,
+        phoneNumber: showroomStores.phoneNumber,
+        emailAddress: showroomStores.emailAddress,
+      })
+      .from(showroomStores)
+      .where(eq(showroomStores.id, storeId))
+      .limit(1);
+    if (s) {
+      const patch: Record<string, string> = {};
+      const address = data.address?.trim() || sr?.address?.trim();
+      if (!s.locationAddress && address) patch.locationAddress = address;
+      if (!s.phoneNumber && sr?.phone?.trim()) patch.phoneNumber = sr.phone.trim();
+      if (!s.emailAddress && sr?.email?.trim()) patch.emailAddress = sr.email.trim();
+      if (Object.keys(patch).length > 0) {
         await db
           .update(showroomStores)
-          .set({ locationAddress: data.address.trim(), updatedAt: new Date() })
+          .set({ ...patch, updatedAt: new Date() })
           .where(eq(showroomStores.id, storeId));
       }
     }

@@ -1968,6 +1968,87 @@ showroomStoresRouter.delete("/:id", async (c) => {
   return c.json({ success: true });
 });
 
+// ─── HOURS ────────────────────────────────────────────────────────────────────
+
+/**
+ * PUT /:id/hours — set/correct a store's opening hours from a hoursJson payload.
+ * Replaces the showroom_store_hours rows + derives is_open_weekends. For when
+ * intake couldn't fill hours, or they need correcting.
+ */
+showroomStoresRouter.put("/:id/hours", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId)) return c.json({ error: "Invalid store id" }, 400);
+  const parsed = z.object({ hoursJson: hoursJsonSchema }).safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
+  const hoursJson = parsed.data.hoursJson;
+  if (hoursJson == null) return c.json({ error: "hoursJson required" }, 400);
+
+  await db.delete(showroomStoreHours).where(eq(showroomStoreHours.showroomId, storeId));
+  const rows = hoursJsonToRows(storeId, hoursJson);
+  if (rows.length > 0) {
+    await db.insert(showroomStoreHours).values(rows as [(typeof rows)[number], ...(typeof rows)[number][]]);
+  }
+  await db
+    .update(showroomStores)
+    .set({ isOpenWeekends: deriveIsOpenWeekends(hoursJson), updatedAt: new Date() })
+    .where(eq(showroomStores.id, storeId));
+
+  const written = await db
+    .select({
+      day: showroomStoreHours.day, openHour: showroomStoreHours.openHour, openMinute: showroomStoreHours.openMinute,
+      closeHour: showroomStoreHours.closeHour, closeMinute: showroomStoreHours.closeMinute,
+    })
+    .from(showroomStoreHours)
+    .where(eq(showroomStoreHours.showroomId, storeId));
+  return c.json({ success: true, hours: written, hoursJson: rowsToHoursJson(written) });
+});
+
+// ─── ADDRESS ──────────────────────────────────────────────────────────────────
+
+const addressUpdateSchema = z.object({
+  locationAddress: z.string().optional().nullable(),
+  locationStreetNumber: z.string().optional().nullable(),
+  locationStreetName: z.string().optional().nullable(),
+  locationCity: z.string().optional().nullable(),
+  locationState: z.string().optional().nullable(),
+  locationZipCode: z.string().optional().nullable(),
+  zipCode: z.string().optional().nullable(),
+  googleMapsLink: z.string().optional().nullable(),
+});
+
+/**
+ * PUT /:id/address — set/correct a store's address (granular parts + formatted +
+ * maps link). For when Places is wrong, the store moved, or intake missed it.
+ * Only the fields sent are updated.
+ */
+showroomStoresRouter.put("/:id/address", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId)) return c.json({ error: "Invalid store id" }, 400);
+  const parsed = addressUpdateSchema.safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
+  const d = parsed.data;
+  // Keep the two zip columns in sync when either is sent.
+  const zip = d.locationZipCode ?? d.zipCode;
+  const [row] = await db
+    .update(showroomStores)
+    .set({
+      ...(d.locationAddress !== undefined ? { locationAddress: d.locationAddress } : {}),
+      ...(d.locationStreetNumber !== undefined ? { locationStreetNumber: d.locationStreetNumber } : {}),
+      ...(d.locationStreetName !== undefined ? { locationStreetName: d.locationStreetName } : {}),
+      ...(d.locationCity !== undefined ? { locationCity: d.locationCity } : {}),
+      ...(d.locationState !== undefined ? { locationState: d.locationState } : {}),
+      ...(zip !== undefined ? { locationZipCode: zip, zipCode: zip } : {}),
+      ...(d.googleMapsLink !== undefined ? { googleMapsLink: d.googleMapsLink } : {}),
+      updatedAt: new Date(),
+    })
+    .where(eq(showroomStores.id, storeId))
+    .returning();
+  if (!row) return c.json({ error: "Store not found" }, 404);
+  return c.json({ success: true, store: row });
+});
+
 // ─── LINKS CRUD ───────────────────────────────────────────────────────────────
 // showroom_store_links: the URL source of truth (website + socials + misc).
 // Bulk replace also happens via the store create/update `links` payload; these
