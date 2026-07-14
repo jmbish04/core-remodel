@@ -4,7 +4,84 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 import { cn } from "@/lib/utils"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
-const Select = SelectPrimitive.Root
+/**
+ * Recursively concatenate the text content of a React node. Used to derive a
+ * plain-string label from a `<SelectItem>`'s children (e.g. an icon + text item
+ * yields just the text). Non-text nodes (icons, spacers) contribute nothing.
+ */
+function extractItemText(node: React.ReactNode): string {
+  if (node == null || typeof node === "boolean") return ""
+  if (typeof node === "string" || typeof node === "number") return String(node)
+  if (Array.isArray(node)) return node.map(extractItemText).join("")
+  if (React.isValidElement(node)) {
+    return extractItemText((node.props as { children?: React.ReactNode }).children)
+  }
+  return ""
+}
+
+/**
+ * Walk a children tree and collect every `<SelectItem>`'s `{ value, label }`.
+ * Recurses through wrappers (`SelectContent`, `SelectGroup`, fragments, and the
+ * arrays produced by `.map(...)`), so both static and dynamically-mapped item
+ * lists are captured. `value` is kept raw (not coerced) so base-ui's strict
+ * `item.value === selectedValue` comparison keeps working for any value type.
+ */
+function collectSelectItems(
+  children: React.ReactNode,
+  acc: Array<SelectOption<unknown>>,
+): void {
+  React.Children.forEach(children, (child) => {
+    if (!React.isValidElement(child)) return
+    if (child.type === SelectItem) {
+      const props = child.props as {
+        value?: unknown
+        children?: React.ReactNode
+      }
+      if (props.value !== undefined) {
+        acc.push({
+          value: props.value,
+          label: extractItemText(props.children).trim(),
+        })
+      }
+      return
+    }
+    const nested = (child.props as { children?: React.ReactNode }).children
+    if (nested != null) collectSelectItems(nested, acc)
+  })
+}
+
+/**
+ * App-standard Select root. A thin wrapper over base-ui's `Select.Root` that
+ * auto-derives the `items` label map from the `<SelectItem>` children when the
+ * caller didn't supply one explicitly.
+ *
+ * WHY: base-ui's `<Select.Value>` renders the raw selected *value* unless the
+ * Root was given an `items` map — so every bare `<Select>…<SelectValue/></Select>`
+ * leaked ids/codes into the trigger (e.g. "like" instead of "I like this"). By
+ * harvesting the labels the items already declare, the trigger shows the human
+ * label everywhere with no per-call-site changes. Pass `items` yourself to opt
+ * out (e.g. when labels aren't plain text).
+ */
+function Select<Value>({
+  items,
+  children,
+  ...props
+}: SelectPrimitive.Root.Props<Value>) {
+  const derivedItems = React.useMemo(() => {
+    if (items != null) return items
+    const collected: Array<SelectOption<unknown>> = []
+    collectSelectItems(children, collected)
+    return collected.length > 0
+      ? (collected as unknown as SelectPrimitive.Root.Props<Value>["items"])
+      : undefined
+  }, [items, children])
+
+  return (
+    <SelectPrimitive.Root items={derivedItems} {...props}>
+      {children}
+    </SelectPrimitive.Root>
+  )
+}
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   return (
@@ -190,7 +267,7 @@ function SelectTrigger({
       data-slot="select-trigger"
       data-size={size}
       className={cn(
-        "flex w-fit items-center justify-between gap-1.5 rounded-lg border border-input bg-transparent py-2 pr-2 pl-2.5 text-sm whitespace-nowrap transition-colors outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-placeholder:text-muted-foreground data-[size=default]:h-8 data-[size=sm]:h-7 data-[size=sm]:rounded-[min(var(--radius-md),10px)] *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "flex w-fit min-w-[8rem] max-w-[70vw] sm:max-w-[20rem] lg:max-w-[24rem] items-center justify-between gap-1.5 rounded-lg border border-input bg-transparent py-2 pr-2 pl-2.5 text-sm whitespace-nowrap transition-colors outline-none select-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 data-placeholder:text-muted-foreground data-[size=default]:h-8 data-[size=sm]:h-7 data-[size=sm]:rounded-[min(var(--radius-md),10px)] *:data-[slot=select-value]:line-clamp-1 *:data-[slot=select-value]:flex *:data-[slot=select-value]:items-center *:data-[slot=select-value]:gap-1.5 dark:bg-input/30 dark:hover:bg-input/50 dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className
       )}
       {...props}
