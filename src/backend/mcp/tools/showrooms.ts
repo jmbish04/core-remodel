@@ -1285,7 +1285,13 @@ export const showroomTools: RemodelTool[] = [
 
         // ── Icon: scrape the favicon/logo from the website (self-updates the row).
         if (doIcons && !s.iconCfImagesUrl && website) {
-          await faviconService.hydrateShowroomIcon(env, s.id, website);
+          try {
+            await faviconService.hydrateShowroomIcon(env, s.id, website);
+          } catch (err) {
+            // hydrateShowroomIcon is meant to swallow its own errors, but guard
+            // the loop anyway so one bad site can't abort the whole batch.
+            console.error(`[backfill_showroom_media] icon failed for store ${s.id}:`, err);
+          }
         }
 
         // ── Hero: Google Places photos → Cloudflare Images pipeline.

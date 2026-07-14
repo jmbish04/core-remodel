@@ -55,7 +55,9 @@ function windowLabel(open: string, close: string): string {
 const JS_DAY_TO_KEY: DayKey[] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
 
 function WeeklyHoursTable({ hoursJson }: { hoursJson: HoursJson }) {
-  const todayKey = JS_DAY_TO_KEY[new Date().getDay()];
+  // Highlight the PST "today" so it matches the PST-based status badge (a
+  // browser in another timezone would otherwise highlight the wrong row).
+  const todayKey = JS_DAY_TO_KEY[computePst().day];
   return (
     <ul className="space-y-0.5">
       {DAY_KEYS.map((key) => {
