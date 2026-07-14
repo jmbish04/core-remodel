@@ -1846,7 +1846,7 @@ export function PhotoLibraryApp(props: PhotoLibraryAppProps) {
                         value={highlightMode}
                         onValueChange={(next) => setHighlightMode(next as HighlightType)}
                       >
-                        <SelectTrigger className="h-8 w-[9rem] text-xs">
+                        <SelectTrigger className="h-8 text-xs">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>

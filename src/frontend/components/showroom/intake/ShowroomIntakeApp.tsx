@@ -1105,7 +1105,7 @@ export function ShowroomIntakeApp() {
                       if (Number.isFinite(id) && id > 0) addCategory(id);
                     }}
                   >
-                    <SelectTrigger className="w-full sm:w-64">
+                    <SelectTrigger className="w-full">
                       <span className="flex items-center gap-1.5 text-muted-foreground">
                         <Plus className="size-3.5" /> Add category
                       </span>
@@ -1277,7 +1277,7 @@ export function ShowroomIntakeApp() {
                       )
                     }
                   >
-                    <SelectTrigger id="pricePoint" className="w-full sm:w-64">
+                    <SelectTrigger id="pricePoint" className="w-full">
                       <SelectValue placeholder="Select price level" />
                     </SelectTrigger>
                     <SelectContent>

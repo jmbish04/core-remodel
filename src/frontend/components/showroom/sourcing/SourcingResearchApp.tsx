@@ -238,7 +238,7 @@ export function SourcingResearchApp() {
                   value={targetValue}
                   onValueChange={(value) => setTargetValue(value ?? STORE_TARGET)}
                 >
-                  <SelectTrigger className="h-8 w-64">
+                  <SelectTrigger className="h-8">
                     <SelectValue placeholder="Whole showroom" />
                   </SelectTrigger>
                   <SelectContent>
