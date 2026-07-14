@@ -14,7 +14,9 @@ import { AlertCircle, ChevronRight, Loader2, MapPinned, Route } from "lucide-rea
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { DriveMapThumb, type LatLng } from "./DriveMapThumb";
 
 type DriveListSummary = {
   id: number;
@@ -25,7 +27,13 @@ type DriveListSummary = {
   stopCount: number;
   visitedCount: number;
   createdAt: string | number | null;
+  markers: LatLng[];
 };
+
+/** Archived tab = archived or completed drives; Active = everything else. */
+function isArchived(status: string): boolean {
+  return status === "archived" || status === "completed";
+}
 
 function fmtDate(t: string | number | null): string {
   if (t === null || t === "") return "";
@@ -136,14 +144,33 @@ export function DriveListsApp() {
     );
   }
 
-  return (
-    <div>
-      {header}
+  const active = drives.filter((d) => !isArchived(d.status));
+  const archived = drives.filter((d) => isArchived(d.status));
+
+  const grid = (list: DriveListSummary[], emptyLabel: string) =>
+    list.length === 0 ? (
+      <p className="py-12 text-center text-sm text-muted-foreground">{emptyLabel}</p>
+    ) : (
       <div className="grid gap-4 sm:grid-cols-2">
-        {drives.map((d) => (
+        {list.map((d) => (
           <DriveCard key={d.id} drive={d} />
         ))}
       </div>
+    );
+
+  return (
+    <div>
+      {header}
+      <Tabs defaultValue="active">
+        <TabsList className="mb-6">
+          <TabsTrigger value="active">Active ({active.length})</TabsTrigger>
+          <TabsTrigger value="archived">Archived ({archived.length})</TabsTrigger>
+        </TabsList>
+        <TabsContent value="active">{grid(active, "No active drives.")}</TabsContent>
+        <TabsContent value="archived">
+          {grid(archived, "No archived drives yet — a drive archives when every stop is visited.")}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
@@ -161,8 +188,10 @@ function DriveCard({ drive }: { drive: DriveListSummary }) {
       href={`/admin/shopping/drives/${drive.slug}`}
       className="group block rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
     >
-      <Card className="h-full transition-colors group-hover:bg-card/80">
+      <Card className="h-full overflow-hidden transition-colors group-hover:bg-card/80">
         <CardContent className="flex h-full flex-col gap-3 p-5">
+          <DriveMapThumb markers={drive.markers} />
+
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <h2 className="truncate text-xl font-semibold">{drive.title}</h2>
