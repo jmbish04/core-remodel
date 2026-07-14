@@ -1,7 +1,7 @@
 "use client";
 
-import { Badge } from "src/frontend/components/ui/badge";
-import { cn } from "src/frontend/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 interface CodeBlock {
   title?: string;
