@@ -10,6 +10,7 @@ import { runPermitSync } from "./backend/services/dbi/permits-sync.js";
 import { dispatchDueWorkflows } from "./backend/services/workflow-dispatcher";
 import { autoHealImageUploads } from "./backend/services/image-processor/auto-heal";
 import { monitorShowroomSourcingCoverage } from "./backend/services/showroom-sourcing-monitor";
+import { backfillShowroomPlacesData } from "./backend/services/showroom/places-backfill";
 import { ingestCompanyEmails } from "./backend/services/gmail/ingestion";
 import {
   getDeviceIdFromRequest,
@@ -252,6 +253,20 @@ const legacyHandler: ExportedHandler<Env> = {
       // errors (or whose workflow never started) without manual reprocessing.
       ctx.waitUntil(autoHealImageUploads(env));
       ctx.waitUntil(monitorShowroomSourcingCoverage(env));
+      // One-shot re-enrichment of showroom website/hours/address from Google
+      // Places (0108/0109 dropped the legacy columns before backfill). Processes
+      // a small batch per tick and no-ops once every place_id store is done.
+      ctx.waitUntil(
+        backfillShowroomPlacesData(env)
+          .then((r) => {
+            if (r.processed > 0) {
+              console.log(
+                `[scheduled] showroom places backfill: processed=${r.processed} remaining=${r.remaining}`,
+              );
+            }
+          })
+          .catch((err) => console.error("[scheduled] showroom places backfill failed:", err)),
+      );
       return;
     }
     if (event.cron === "15 */4 * * *") {
