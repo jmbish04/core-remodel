@@ -115,3 +115,5 @@ export * from "./gmail/gmail_messages";
 
 // worker emails (Cloudflare Email Routing inbound)
 export * from "./emails/index";
+
+export * from "./changelog/changelog";

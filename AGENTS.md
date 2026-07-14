@@ -16,11 +16,23 @@ Every non-trivial change ships a changelog entry AND a full "scorched-earth"
 detail page. Shallow one-liners are not enough — the detail is the developer
 record of the work.
 
+**The changelog is PERSISTENT (D1) and every branch/PR MUST register one.** The
+record lives in the `changelog_branches` + `changelog_entries` D1 tables so it
+accumulates across all branches (no static-file merge conflicts). When you open
+a branch of work, register it and each shipped change:
+
+- **MCP**: call `create_changelog_entry` (upserts the branch + one entry; accepts
+  the full scorched-earth `detail`). This is the preferred, agent-driven path.
+- **API**: `POST /api/changelog/branches` then `POST /api/changelog/entries`.
+- **Seed** (one-time bootstrap of the bundled static data): `POST /api/changelog/seed`.
+
 - **Overview** (`/admin/changelog`, `src/frontend/pages/admin/changelog.astro`)
-  groups changes by **branch / PR**; each phase entry links to its detail page.
-- **Data**: add a `ChangelogEntry` (with `branch`) in
-  `src/frontend/data/changelog.ts`, and a `PhaseDetail` keyed by the entry `id`
-  in `src/frontend/data/changelog-detail.ts`.
+  reads D1 (SSR) and groups by **branch / PR**; each entry links to its detail
+  page. It falls back to the bundled `src/frontend/data/changelog*.ts` when D1 is
+  empty/unavailable, so the same data also seeds new environments.
+- **Static mirror** (fallback + seed source): keep a `ChangelogEntry` (with
+  `branch`) in `src/frontend/data/changelog.ts` + a `PhaseDetail` keyed by the
+  entry `id` in `src/frontend/data/changelog-detail.ts`.
 - **Every detail page MUST cover**: the problem, the approach, the exact **API**
   endpoints and **MCP tools** touched, the files, the **migration SQL**,
   representative **code cards** (`ts` / `tsx` / `sql` / `json` / `bash`), and a
