@@ -141,13 +141,14 @@ export const CHANGELOG: ChangelogEntry[] = [
     area: "Showrooms",
     title: "Hours untangled to a single source",
     summary:
-      "Opening hours were stored three different ways. Now there is one: a structured hours_json you write, from which the queryable per-day rows and the open-weekends flag are derived automatically.",
+      "Opening hours were stored three different ways. Now there is ONE: the normalized showroom_store_hours rows. You write a structured hoursJson payload; the worker turns it into rows + the open-weekends flag, and responses rebuild the payload from the rows.",
     status: "staged",
-    migrations: ["0082", "0083"],
+    migrations: ["0082", "0083", "0089"],
     changes: [
-      { kind: "changed", text: "hours_json is the single write source of truth; the worker derives the per-day rows + is_open_weekends." },
+      { kind: "removed", text: "The hours_json blob column is GONE — showroom_store_hours rows are the sole source of truth (migration 0089; blobs backfilled to rows first)." },
       { kind: "changed", text: "Renamed the normalized table showroom_hours → showroom_store_hours." },
-      { kind: "removed", text: "Redundant free-text weekday_hours / weekend_hours columns (backfilled into hours_json first)." },
+      { kind: "removed", text: "Redundant free-text weekday_hours / weekend_hours columns." },
+      { kind: "added", text: "API create/update accept a hoursJson payload → rows; GET responses derive hoursJson from the rows. New MCP tool set_showroom_hours." },
       { kind: "fixed", text: "Deduplicated the hours parser (two copies) onto one shared util." },
     ],
   },
