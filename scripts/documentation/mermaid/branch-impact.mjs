@@ -70,8 +70,11 @@ function getGitDiff(baseRef) {
     // 3. Get focused content diff for schemas, routes, and services
     let codeDiff = '';
     try {
+      // Exclude generated Drizzle meta snapshots (huge JSON that drowns the
+      // 20k-char budget and gives the model no real signal). Keep migration
+      // .sql + source.
       codeDiff = execSync(
-        `git diff ${baseRef}...HEAD -- "src/backend/" "drizzle/" "scripts/"`,
+        `git diff ${baseRef}...HEAD -- "src/backend/" "drizzle/" "scripts/" ":(exclude)drizzle/meta/**"`,
         execOptions
       ).trim();
     } catch (diffErr) {
@@ -239,13 +242,18 @@ async function main() {
 Analyze the following git diff and output a single Mermaid diagram visualizing the logical or architectural changes.
 
 Rules:
-1. If database tables, API routes, or backend services were added/modified, output an Architecture diagram using 'architecture-beta'.
-   - Architecture syntax:
-     architecture-beta
-         group group_id(icon)[Label]
-         service service_id(icon)[Label] in group_id
-         left_id:R -- L:right_id
-2. If only logic flow, sequence of operations, or data flow changed, output a Flowchart using 'flowchart LR' or 'flowchart TD'.
+1. Output a Mermaid 'flowchart LR' (for architecture / dependencies) or
+   'flowchart TD' (for a process / data flow). Do NOT use 'architecture-beta'.
+   - Group related pieces with subgraphs; nodes = services / tables / routes.
+   - Flowchart syntax:
+     flowchart LR
+       subgraph API
+         R_contacts["POST /api/showroom-contacts"]
+       end
+       R_contacts --> D_contacts[("showroom_store_contacts")]
+2. EVERY node label MUST be wrapped in a shape with quotes, e.g. A["Label"],
+   B[("db_table")], C{"decision?"}. Never leave a multi-word label unquoted.
+   Node ids are single tokens (letters, digits, underscore) — no spaces.
 3. Output ONLY the raw Mermaid diagram block wrapped in \`\`\`mermaid and \`\`\`. No other text.
 
 Git Diff Summary:
