@@ -1218,7 +1218,16 @@ showroomStoresRouter.get("/", async (c) => {
     query = query.where(and(...conditions));
   }
 
-  const rows = await query;
+  let rows: Awaited<typeof query>;
+  try {
+    rows = await query;
+  } catch (err) {
+    // The core list query is the one thing that must succeed; if D1 is
+    // unavailable return a controlled JSON error instead of an unhandled 500
+    // (which would surface as a broken page rather than a retryable state).
+    console.error("[showroom-stores] list query failed", err);
+    return c.json({ stores: [], error: "Failed to load showrooms" }, 500);
+  }
   const storeIds = rows.map((r) => r.store.id);
 
   // Parallel enrichment queries (only when requested and stores exist).
@@ -1248,6 +1257,7 @@ showroomStoresRouter.get("/", async (c) => {
             }
             return map;
           })
+          .catch(() => new Map<number, string[]>())
       : Promise.resolve(new Map<number, string[]>()),
     includes.has("ratings") && storeIds.length > 0
       ? db
@@ -1263,6 +1273,7 @@ showroomStoresRouter.get("/", async (c) => {
             for (const r of rRows) map.set(r.storeId, r.rating);
             return map;
           })
+          .catch(() => new Map<number, number>())
       : Promise.resolve(new Map<number, number>()),
     includes.has("ratings") && storeIds.length > 0
       ? db
@@ -1282,6 +1293,7 @@ showroomStoresRouter.get("/", async (c) => {
             }
             return map;
           })
+          .catch(() => new Map<number, { sum: number; count: number }>())
       : Promise.resolve(new Map<number, { sum: number; count: number }>()),
     // Normalized per-day hours for every store in the list (cards always need
     // them for open/closed status + weekend cues). One query, grouped by store.
@@ -1307,6 +1319,19 @@ showroomStoresRouter.get("/", async (c) => {
             }
             return map;
           })
+          .catch(
+            () =>
+              new Map<
+                number,
+                Array<{
+                  day: string;
+                  openHour: number;
+                  openMinute: number;
+                  closeHour: number;
+                  closeMinute: number;
+                }>
+              >(),
+          )
       : Promise.resolve(
           new Map<
             number,

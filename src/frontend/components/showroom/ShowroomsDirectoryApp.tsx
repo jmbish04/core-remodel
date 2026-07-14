@@ -958,9 +958,6 @@ function CardGrid({ stores, pst }: { stores: Store[]; pst: PstNow }) {
 
 // ─── Map View (map on top, cards stacked below — mobile friendly) ──────────────
 
-/** Zoom at/above which the map swaps region clusters for individual showrooms. */
-const ZOOM_INDIVIDUAL = 10.5;
-
 /** A pin for a single showroom, positioned by its captured coordinates. */
 function ShowroomMarker({ store }: { store: Store }) {
   return (
@@ -989,6 +986,57 @@ function ShowroomMarker({ store }: { store: Store }) {
   );
 }
 
+/** "You are here" marker — a pulsing blue dot from the device's geolocation. */
+function UserLocationMarker({ lng, lat }: { lng: number; lat: number }) {
+  return (
+    <MapMarker longitude={lng} latitude={lat}>
+      <MarkerContent className="z-20">
+        <span className="relative flex size-4 items-center justify-center">
+          <span className="absolute inline-flex size-4 animate-ping rounded-full bg-sky-400/60" />
+          <span className="relative inline-flex size-3 rounded-full bg-sky-500 ring-2 ring-white shadow" />
+        </span>
+      </MarkerContent>
+      <MarkerPopup closeButton className="max-w-48">
+        <p className="text-xs font-medium">Your location</p>
+      </MarkerPopup>
+    </MapMarker>
+  );
+}
+
+const BAY_AREA_DEFAULT_VIEW: { center: [number, number]; zoom: number } = {
+  center: [-122.27, 37.72],
+  zoom: 8.2,
+};
+
+/**
+ * Frame a set of lng/lat points: centroid + a zoom derived from the bounding-box
+ * span. Keeps every showroom marker (and the user's dot, when present) on screen
+ * without needing an imperative fitBounds against the controlled viewport.
+ */
+function viewportForPoints(pts: Array<[number, number]>): {
+  center: [number, number];
+  zoom: number;
+} {
+  if (pts.length === 0) return BAY_AREA_DEFAULT_VIEW;
+  let minLng = Infinity;
+  let maxLng = -Infinity;
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  for (const [lng, lat] of pts) {
+    minLng = Math.min(minLng, lng);
+    maxLng = Math.max(maxLng, lng);
+    minLat = Math.min(minLat, lat);
+    maxLat = Math.max(maxLat, lat);
+  }
+  const center: [number, number] = [(minLng + maxLng) / 2, (minLat + maxLat) / 2];
+  if (pts.length === 1) return { center, zoom: 12 };
+  // Weight latitude span (narrower per-degree at this latitude) so tall, thin
+  // spreads still fit. Clamp so a single-cluster area doesn't over-zoom.
+  const span = Math.max(maxLng - minLng, (maxLat - minLat) * 1.4, 1e-4);
+  const zoom = Math.max(3, Math.min(12.5, Math.log2(360 / span) - 0.65));
+  return { center, zoom };
+}
+
 function MapView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
   const byHub = useMemo(() => {
     const map = new Map<string, Store[]>();
@@ -1003,79 +1051,110 @@ function MapView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
   const hubKeys = useMemo(() => hubEntries.map(([route]) => route), [hubEntries]);
   const { openKey, toggle } = useAccordionGroup(hubKeys);
 
-  // Stores with captured coordinates get an individual pin when zoomed in.
+  // Stores with captured coordinates get an individual pin.
   const geoStores = useMemo(
     () => stores.filter((s) => s.latitude != null && s.longitude != null),
     [stores],
   );
+  const noGeoCount = stores.length - geoStores.length;
 
-  // Controlled viewport so we can react to the zoom level (cluster ↔ pins) while
-  // still allowing free pan/zoom — onViewportChange feeds our own state back.
-  const [viewport, setViewport] = useState<Partial<MapViewport>>({
-    center: [-122.27, 37.72],
-    zoom: 8.2,
-  });
-  const zoom = viewport.zoom ?? 8.2;
-  const showIndividual = zoom >= ZOOM_INDIVIDUAL;
+  // The device's geolocation ("you are here"), when granted. Works on phones
+  // and the in-car (Tesla) browser via the standard Geolocation API.
+  const [userLoc, setUserLoc] = useState<{ lng: number; lat: number } | null>(null);
+
+  const requestLocation = useCallback(() => {
+    if (typeof navigator === "undefined" || !("geolocation" in navigator)) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => setUserLoc({ lng: pos.coords.longitude, lat: pos.coords.latitude }),
+      () => {
+        /* denied / unavailable — the map simply won't show a location dot */
+      },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300_000 },
+    );
+  }, []);
+
+  // Best-effort location on mount (a permission prompt the first time). The
+  // locate button in MapControls re-requests + flies to the dot on demand.
+  useEffect(() => {
+    requestLocation();
+  }, [requestLocation]);
+
+  // Frame the map around the showrooms currently in view (plus the user's dot),
+  // so markers are visible without hunting. Recomputes when the filtered set or
+  // the user's location changes; free pan/zoom in between via onViewportChange.
+  const framePoints = useMemo<Array<[number, number]>>(() => {
+    const pts: Array<[number, number]> = geoStores.map((s) => [
+      s.longitude as number,
+      s.latitude as number,
+    ]);
+    if (userLoc) pts.push([userLoc.lng, userLoc.lat]);
+    return pts;
+  }, [geoStores, userLoc]);
+
+  const frameKey = useMemo(
+    () =>
+      framePoints
+        .map(([lng, lat]) => `${lng.toFixed(4)},${lat.toFixed(4)}`)
+        .join("|"),
+    [framePoints],
+  );
+
+  const [viewport, setViewport] = useState<Partial<MapViewport>>(() =>
+    viewportForPoints(framePoints),
+  );
+
+  useEffect(() => {
+    setViewport(viewportForPoints(framePoints));
+    // frameKey is the stable identity of framePoints — reframe only when it
+    // actually changes, not on every render (avoids fighting user pan/zoom).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frameKey]);
 
   return (
     <div className="space-y-4">
-      <Card className="overflow-hidden">
+      <Card className="relative overflow-hidden">
         <GeoMap
-          className="h-[320px] w-full sm:h-[420px]"
+          className="h-[320px] w-full sm:h-[460px]"
           theme="dark"
           viewport={viewport}
           onViewportChange={setViewport}
         >
-          <MapControls showZoom />
+          <MapControls
+            showZoom
+            showLocate
+            onLocate={(c) => setUserLoc({ lng: c.longitude, lat: c.latitude })}
+          />
 
-          {/* Zoomed out → one labeled marker per region hub. Click to zoom in. */}
-          {!showIndividual &&
-            hubEntries.map(([route, hubStores]) => {
-              const hub = HUBS[route];
-              return (
-                <MapMarker
-                  key={route}
-                  longitude={hub.lng}
-                  latitude={hub.lat}
-                  onClick={() =>
-                    setViewport((v) => ({ ...v, center: [hub.lng, hub.lat], zoom: 12 }))
-                  }
-                >
-                  <MarkerContent className="z-20">
-                    <div className="flex items-center gap-1.5 rounded-full bg-sky-500/90 px-2.5 py-1 text-xs font-semibold text-white shadow-lg transition-transform hover:scale-105">
-                      <MapPin className="size-3.5" /> {HUB_LABEL[route]} · {hubStores.length}
-                    </div>
-                  </MarkerContent>
-                  <MarkerPopup closeButton className="max-w-72">
-                    <div className="space-y-1.5">
-                      <p className="text-sm font-semibold">{HUB_LABEL[route]}</p>
-                      <ul className="space-y-1 text-xs text-muted-foreground">
-                        {hubStores.slice(0, 8).map((s) => (
-                          <li key={s.id} className="flex items-center gap-1 truncate">
-                            <span className="truncate">{s.name}</span>
-                            {s.onlineRating !== null && (
-                              <span className="ml-auto shrink-0 text-[10px] text-amber-400">
-                                {s.onlineRating}★
-                              </span>
-                            )}
-                          </li>
-                        ))}
-                        {hubStores.length > 8 && <li>+{hubStores.length - 8} more</li>}
-                      </ul>
-                      <p className="text-[10px] text-muted-foreground/60">
-                        Click the pin to zoom in and see each showroom.
-                      </p>
-                    </div>
-                  </MarkerPopup>
-                </MapMarker>
-              );
-            })}
+          {/* One marker per showroom that has captured coordinates. */}
+          {geoStores.map((s) => (
+            <ShowroomMarker key={s.id} store={s} />
+          ))}
 
-          {/* Zoomed in → an individual marker for each showroom with coordinates. */}
-          {showIndividual && geoStores.map((s) => <ShowroomMarker key={s.id} store={s} />)}
+          {/* The device's own location, when granted. */}
+          {userLoc && <UserLocationMarker lng={userLoc.lng} lat={userLoc.lat} />}
         </GeoMap>
+
+        {/* Overlay when nothing can be plotted — the coordinates are missing,
+            not the showrooms. Keeps the map honest instead of showing an empty
+            ocean with no explanation. */}
+        {geoStores.length === 0 && (
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 z-10 bg-gradient-to-t from-background/95 to-transparent p-4 text-center">
+            <p className="text-xs text-muted-foreground">
+              {stores.length === 0
+                ? "No showrooms match your filters."
+                : `None of these ${stores.length} showroom${stores.length === 1 ? "" : "s"} have mapped coordinates yet — see the list below.`}
+            </p>
+          </div>
+        )}
       </Card>
+
+      {/* Count of in-view showrooms still missing coordinates (can't be pinned). */}
+      {geoStores.length > 0 && noGeoCount > 0 && (
+        <p className="text-[11px] text-muted-foreground">
+          {geoStores.length} of {stores.length} shown on the map · {noGeoCount} without
+          coordinates yet (listed below).
+        </p>
+      )}
 
       {stores.length === 0 ? (
         <EmptyState />
