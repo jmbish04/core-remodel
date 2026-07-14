@@ -14,6 +14,7 @@
 
 import { createGeminiAiGatewayClient } from "@backend/services/render/providers/gemini-stage-provider";
 import { stripJsonFence } from "@backend/utils/ai-json";
+import { ANALYSIS_RESPONSE_SCHEMA } from "./extraction-schema";
 import type { HandlingProfile } from "./types";
 
 /** Structured result of the AI analysis stage. */
@@ -32,14 +33,27 @@ export interface AiAnalysis {
   }>;
   invoiceData: {
     vendorName: string | null;
+    /** retailer | contractor | supplier | marketplace | utility | service | other */
+    merchantType?: string | null;
     invoiceNumber: string | null;
+    /** Order/confirmation number (distinct from an invoice number). */
+    orderNumber?: string | null;
     invoiceDate: string | null;
     dueDate: string | null;
+    /** Free text ok, e.g. "Friday, July 24". */
+    estimatedDeliveryDate?: string | null;
     subtotal: number | null;
+    /** Order-level discount total (positive). */
+    discount?: number | null;
+    shipping?: number | null;
     tax: number | null;
     total: number | null;
+    currency?: string | null;
     lineItems: Array<{
       description: string;
+      brand?: string | null;
+      modelNumber?: string | null;
+      variant?: string | null;
       qty: number;
       unitPrice: number;
       total: number;
@@ -178,14 +192,20 @@ Respond with ONLY valid JSON matching this schema:
     }
   ],
   "invoiceData": null or {
-    "vendorName": "string",
+    "vendorName": "string (store / supplier / laborer)",
+    "merchantType": "retailer | contractor | supplier | marketplace | utility | service | other",
     "invoiceNumber": "string",
+    "orderNumber": "string (order/confirmation number, if distinct)",
     "invoiceDate": "YYYY-MM-DD",
     "dueDate": "YYYY-MM-DD or null",
+    "estimatedDeliveryDate": "string or null (free text ok)",
     "subtotal": number,
+    "discount": number (order-level discount total, positive),
+    "shipping": number,
     "tax": number,
     "total": number,
-    "lineItems": [{"description": "string", "qty": number, "unitPrice": number, "total": number}]
+    "currency": "string",
+    "lineItems": [{"description": "string", "brand": "string or null", "modelNumber": "string or null", "variant": "string or null", "qty": number, "unitPrice": number, "total": number}]
   },
   ${contractSection(profile)}
 }
@@ -193,9 +213,14 @@ Respond with ONLY valid JSON matching this schema:
 IMPORTANT — populate "invoiceData" for BOTH invoices AND receipts (a receipt is a
 completed purchase, e.g. a store order confirmation). For a receipt, set
 "invoiceNumber" to the order/receipt number, "dueDate" to null, and include EVERY
-purchased product as its own entry in "lineItems" (this is how the homeowner links
-each purchased item back to their materials schedule). Extract all line items —
-do not summarize or omit any.
+purchased product as its own entry in "lineItems" with its brand + model number +
+variant where shown (this is how the homeowner links each purchased item back to
+their materials schedule). Extract all line items — do not summarize or omit any.
+Read the order summary and copy the EXACT amounts printed: subtotal, discount,
+shipping, tax, and total. These are almost always shown on the email — do NOT
+claim a total is unknown or tell the reviewer to "check their payment method" if a
+Total / Order Total is present; only emit a "payment" flag about a missing amount
+if the total is truly not printed anywhere.
 
 EMAIL CONTENT:
 Subject: ${subject || "No Subject"}
@@ -205,6 +230,21 @@ Body:
 ${(bodyText || "").slice(0, 8000)}
 
 ${attachmentText ? `ATTACHMENT CONTENT (extracted text):\n${attachmentText.slice(0, 16000)}` : ""}`;
+}
+
+/**
+ * The model occasionally emits a "we can't see the total, check your payment
+ * method" flag even when the total is printed on the email. If a total was
+ * extracted, drop those self-contradicting payment flags. Mutates in place.
+ */
+function dropContradictoryPaymentFlags(analysis: AiAnalysis): void {
+  if (typeof analysis.invoiceData?.total !== "number") return;
+  analysis.reviewerFlags = (analysis.reviewerFlags || []).filter((f) => {
+    if (f.category !== "payment") return true;
+    return !/(not (explicitly |clearly )?(state|list|show|specif|includ|mention)|check your payment method|final charge|unclear|unknown)/i.test(
+      f.message,
+    );
+  });
 }
 
 /**
@@ -234,6 +274,7 @@ export async function analyzeWithGemini(
     contents: [{ role: "user", parts: [{ text: prompt }] }],
     config: {
       responseMimeType: "application/json",
+      responseSchema: ANALYSIS_RESPONSE_SCHEMA,
       temperature: 0.1,
     },
   });
@@ -242,7 +283,9 @@ export async function analyzeWithGemini(
 
   try {
     const cleaned = stripJsonFence(rawText);
-    return JSON.parse(cleaned) as AiAnalysis;
+    const analysis = JSON.parse(cleaned) as AiAnalysis;
+    dropContradictoryPaymentFlags(analysis);
+    return analysis;
   } catch (err) {
     console.error(
       "[email-classify] Failed to parse Gemini response:",

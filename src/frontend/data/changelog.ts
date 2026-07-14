@@ -43,6 +43,14 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/email-structured-extraction",
+    title: "Structured email extraction (fix the phantom 'total not stated')",
+    summary:
+      "Inbound-email classification now uses a native Gemini responseSchema instead of a prompt-embedded schema, so receipts/invoices extract every printed field and the model stops hallucinating 'the total is not stated — check your payment method' on receipts whose total is printed.",
+    date: "2026-07-14",
+    status: "staged",
+  },
+  {
     branch: "claude/worker-inbox-hitl-v2",
     title: "Persistent append-only changelog",
     summary:
@@ -56,6 +64,22 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "email-structured-extraction",
+    branch: "claude/email-structured-extraction",
+    date: "2026-07-14",
+    area: "Inbox",
+    title: "Structured email extraction via responseSchema",
+    summary:
+      "Gemini email analysis now emits structured output against a native responseSchema, capturing merchant type, order number, delivery date, discount, shipping, and per-item brand/model/variant — and a guard drops the phantom 'total not stated' payment flag when a total was actually extracted.",
+    changes: [
+      { kind: "fixed", text: "Phantom 'total is not stated — check your payment method' flag on receipts whose total is printed (e.g. the Costco order)." },
+      { kind: "changed", text: "classify.ts now passes config.responseSchema (native structured output) instead of a prompt-embedded JSON schema." },
+      { kind: "added", text: "Richer extraction: merchantType, orderNumber, estimatedDeliveryDate, discount, shipping, currency + per-line brand/modelNumber/variant (persisted in extracted_raw_json)." },
+      { kind: "added", text: "extraction-schema.ts — the native @google/genai Schema for the full analysis." },
+    ],
+    status: "staged",
+  },
   {
     id: "changelog-persistent-d1",
     branch: "claude/worker-inbox-hitl-v2",
