@@ -1,6 +1,7 @@
 import { Building2, CheckCircle2, Crop, Loader2, Upload, XCircle } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { GooglePhotosButton } from "@/components/google-photos/GooglePhotosButton";
 import { Cropper, CropperArea, CropperImage, type CropperAreaData } from "@/components/ui/cropper";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -312,6 +313,30 @@ export function GlobalUploadWidget() {
           : `Queued ${acceptedFiles.length} files`,
     });
   }, []);
+
+  /**
+   * Merge photos picked from Google Photos into the same `files` queue the
+   * manual picker feeds, then run the standard accept bookkeeping so they upload
+   * through the existing `/api/images/upload` path unchanged (category, listing,
+   * room, crop, dedup, staging all apply).
+   */
+  const handleGooglePhotosFiles = useCallback(
+    (incoming: File[]) => {
+      if (incoming.length === 0) return;
+      const seen = new Set(files.map((f) => getFileKey(f)));
+      const added: File[] = [];
+      for (const file of incoming) {
+        const key = getFileKey(file);
+        if (seen.has(key) || files.length + added.length >= MAX_FILES) continue;
+        seen.add(key);
+        added.push(file);
+      }
+      if (added.length === 0) return;
+      setFiles((current) => [...current, ...added]);
+      onFilesAccepted(added);
+    },
+    [files, onFilesAccepted],
+  );
 
   const openCropModal = useCallback((file: File) => {
     setCropTargetFile(file);
@@ -671,12 +696,17 @@ export function GlobalUploadWidget() {
                   <p className="text-xs text-muted-foreground">
                     Any number of files, max 10MB each
                   </p>
-                  <div className="mt-3">
+                  <div className="mt-3 flex items-center justify-center gap-2">
                     <FileUploadTrigger asChild>
                       <Button size="sm" variant="secondary">
                         Browse Files
                       </Button>
                     </FileUploadTrigger>
+                    <GooglePhotosButton
+                      variant="secondary"
+                      disabled={uploading}
+                      onFiles={handleGooglePhotosFiles}
+                    />
                   </div>
                 </FileUploadDropzone>
 

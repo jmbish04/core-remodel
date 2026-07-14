@@ -1,0 +1,15 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ConfigDefinitionPage } from "@/components/config";
+---
+
+<BaseLayout title="Photo Colors — Configuration" description="Manage the color vocabulary with hex swatches.">
+  <ConfigDefinitionPage
+    client:only="react"
+    activeHref="/admin/config/photo/colors"
+    title="Photo Colors"
+    description="Named colors (with hex swatch) used to tag products and photos."
+    endpoint="/api/config/colors"
+    columns={["name", "hex", "description"]}
+  />
+</BaseLayout>

@@ -23,6 +23,8 @@ export const showroomGaps = sqliteTable(
     /** Stable identity for dedupe + never-resurface (e.g. "material:closet lighting"). */
     gapKey: text("gap_key").notNull(),
 
+    /** Canonical room this gap targets (AI-disambiguated by floor). roomName is a display cache. */
+    roomId: integer("room_id"),
     roomName: text("room_name"),
     name: text("name").notNull(),
     description: text("description"),

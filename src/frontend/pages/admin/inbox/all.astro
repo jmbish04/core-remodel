@@ -1,0 +1,19 @@
+---
+import { MultiInboxApp } from "@/components/inbox/MultiInboxApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="All Inboxes - 126 Colby Remodel Mission Control"
+  description="Every email integration in one place — worker email + Gmail."
+>
+  <main class="container mx-auto px-4 py-8">
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold tracking-tight">All Inboxes</h1>
+      <p class="mt-2 text-sm text-muted-foreground">
+        Worker email (invoices / contracts / receipts) and Gmail comms in one place.
+      </p>
+    </div>
+    <MultiInboxApp client:only="react" />
+  </main>
+</BaseLayout>

@@ -3,6 +3,7 @@ import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core
 
 import { workerEmails } from "./worker_emails";
 import { workerEmailAttachments } from "./worker_email_attachments";
+import { services } from "../services/services";
 
 /**
  * Worker Email Contracts — structured contract data extracted by AI from
@@ -47,6 +48,11 @@ export const workerEmailContracts = sqliteTable(
     /** ISO date strings. */
     effectiveDate: text("effective_date"),
     completionDate: text("completion_date"),
+
+    /** Optional FK to the services catalog this contract is for. */
+    serviceId: integer("service_id").references(() => services.id, {
+      onDelete: "set null",
+    }),
 
     /**
      * JSON array of key clauses extracted:
@@ -110,6 +116,7 @@ export const workerEmailContracts = sqliteTable(
   (table) => ({
     emailIdx: index("worker_email_contracts_email_idx").on(table.emailId),
     statusIdx: index("worker_email_contracts_status_idx").on(table.status),
+    serviceIdx: index("worker_email_contracts_service_idx").on(table.serviceId),
   }),
 );
 

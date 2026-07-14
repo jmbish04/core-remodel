@@ -1,0 +1,20 @@
+---
+import { ServicesApp } from "@/components/services";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Services - 126 Colby Remodel Mission Control"
+  description="Manage the reusable catalog of contractor services tied to estimates, invoices, and contracts."
+>
+  <main class="container mx-auto px-4 py-8">
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold tracking-tight">Services</h1>
+      <p class="mt-2 text-sm text-muted-foreground">
+        The shared catalog of contractor services. Tie line items and contracts to these entries for
+        consistent cost tracking across estimates, invoices, and agreements.
+      </p>
+    </div>
+    <ServicesApp client:only="react" />
+  </main>
+</BaseLayout>

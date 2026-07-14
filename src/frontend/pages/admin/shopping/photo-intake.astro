@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { IntakeWizardApp } from "@/components/intake";
+---
+
+<BaseLayout
+  title="Showroom Photo Intake — The Monolith"
+  description="Showroom-visit photo intake: select showrooms, upload photos to Cloudflare Images, group burst shots into product buckets, then run AI extraction per bucket."
+>
+  <IntakeWizardApp client:only="react" />
+</BaseLayout>

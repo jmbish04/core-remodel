@@ -9,8 +9,30 @@ import { workerEmailInvoiceLineItems } from "@backend/db/schema/emails/worker_em
 import { workerEmailStagedCompanies } from "@backend/db/schema/emails/worker_email_staged_companies";
 import { workerEmailContracts } from "@backend/db/schema/emails/worker_email_contracts";
 import { companies } from "@backend/db/schema/directory/companies";
+import { materialScheduleItems } from "@backend/db/schema/materials/schedule_item";
+import { attachServiceNames } from "@backend/services/service-names";
 
 export const workerEmailsRouter = new Hono<{ Bindings: Env }>();
+
+/** Build a human-readable purchase note recorded on a linked material. */
+function buildPurchaseNote(
+  invoice: { vendorName?: string | null; invoiceDate?: string | null } | undefined,
+  lineItem: { lineTotal?: number | null },
+): string {
+  const vendor = invoice?.vendorName || "unknown vendor";
+  const date = invoice?.invoiceDate || "";
+  const price =
+    typeof lineItem?.lineTotal === "number" ? `$${lineItem.lineTotal.toFixed(2)}` : "";
+  const parts = [`Purchased from ${vendor}`];
+  if (price) parts.push(price);
+  if (date) parts.push(`on ${date}`);
+  return `${parts.join(" ")} (via email receipt).`;
+}
+
+/** Append a note line to an existing (possibly null) notes field. */
+function appendNote(existing: string | null | undefined, addition: string): string {
+  return existing && existing.trim() ? `${existing}\n${addition}` : addition;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Email CRUD
@@ -64,14 +86,14 @@ workerEmailsRouter.get("/:id", async (c) => {
         .select()
         .from(workerEmailInvoiceLineItems)
         .where(eq(workerEmailInvoiceLineItems.invoiceId, invoice.id));
-      return { ...invoice, lineItems };
+      return { ...invoice, lineItems: await attachServiceNames(db, lineItems) };
     }),
   );
 
-  const contracts = await db
-    .select()
-    .from(workerEmailContracts)
-    .where(eq(workerEmailContracts.emailId, id));
+  const contracts = await attachServiceNames(
+    db,
+    await db.select().from(workerEmailContracts).where(eq(workerEmailContracts.emailId, id)),
+  );
 
   const [stagedCompany] = await db
     .select()
@@ -214,13 +236,233 @@ workerEmailsRouter.post("/:id/invoices/:invoiceId/reject", async (c) => {
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
+// Line Items → Material Schedule linking (HITL)
+//
+// Each invoice/receipt line item is materialized as an `unmatched` row at
+// ingest. The reviewer resolves it to the materials schedule one of three ways:
+//   link            → attach to an EXISTING material_schedule_item
+//   create-material → create a NEW material from the line item, then attach
+//   skip            → dismiss (not a trackable material)
+// Linking a receipt line item marks the material as purchased and records the
+// vendor / price / date in the material's notes.
+// ═══════════════════════════════════════════════════════════════════════════
+
+/** Link a line item to an existing material schedule item + mark it purchased. */
+workerEmailsRouter.patch(
+  "/:id/invoices/:invoiceId/line-items/:lineItemId/link",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const lineItemId = parseInt(c.req.param("lineItemId"), 10);
+    if (Number.isNaN(lineItemId)) {
+      return c.json({ error: "Invalid lineItemId" }, 400);
+    }
+    const body = await c.req.json().catch(() => ({}));
+    const materialId = Number(body.materialScheduleItemId);
+    // Reject null/""/0 too — Number(null|"") === 0 which is a valid integer but
+    // never a valid id, so guard on a positive integer.
+    if (!Number.isInteger(materialId) || materialId <= 0) {
+      return c.json({ error: "materialScheduleItemId (positive integer) is required" }, 400);
+    }
+
+    const [lineItem] = await db
+      .select()
+      .from(workerEmailInvoiceLineItems)
+      .where(eq(workerEmailInvoiceLineItems.id, lineItemId))
+      .limit(1);
+    if (!lineItem) return c.json({ error: "Line item not found" }, 404);
+
+    const [invoice] = await db
+      .select()
+      .from(workerEmailInvoices)
+      .where(eq(workerEmailInvoices.id, lineItem.invoiceId))
+      .limit(1);
+
+    const [material] = await db
+      .select()
+      .from(materialScheduleItems)
+      .where(eq(materialScheduleItems.id, materialId))
+      .limit(1);
+    if (!material) return c.json({ error: "Material schedule item not found" }, 404);
+
+    // Atomic: link the line item AND mark the material purchased together, so a
+    // failure can't leave the line "matched" while the material stays un-purchased.
+    const [updatedLine] = await db.transaction(async (tx) => {
+      const [line] = await tx
+        .update(workerEmailInvoiceLineItems)
+        .set({
+          materialScheduleItemId: materialId,
+          matchStatus: "matched",
+          updatedAt: new Date(),
+        })
+        .where(eq(workerEmailInvoiceLineItems.id, lineItemId))
+        .returning();
+
+      await tx
+        .update(materialScheduleItems)
+        .set({
+          isPurchased: true,
+          notes: appendNote(material.notes, buildPurchaseNote(invoice, lineItem)),
+          updatedAt: new Date(),
+        })
+        .where(eq(materialScheduleItems.id, materialId));
+
+      return [line];
+    });
+
+    return c.json({ lineItem: updatedLine, materialId });
+  },
+);
+
+/** Create a new material schedule item from a line item, then link it. */
+workerEmailsRouter.post(
+  "/:id/invoices/:invoiceId/line-items/:lineItemId/create-material",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const lineItemId = parseInt(c.req.param("lineItemId"), 10);
+    if (Number.isNaN(lineItemId)) {
+      return c.json({ error: "Invalid lineItemId" }, 400);
+    }
+    const body = await c.req.json().catch(() => ({}));
+
+    const [lineItem] = await db
+      .select()
+      .from(workerEmailInvoiceLineItems)
+      .where(eq(workerEmailInvoiceLineItems.id, lineItemId))
+      .limit(1);
+    if (!lineItem) return c.json({ error: "Line item not found" }, 404);
+
+    const [invoice] = await db
+      .select()
+      .from(workerEmailInvoices)
+      .where(eq(workerEmailInvoices.id, lineItem.invoiceId))
+      .limit(1);
+
+    const title = String(body.title || lineItem.description || "Untitled material").slice(0, 200);
+
+    // Atomic: create the material AND link the line item together, so a failure
+    // can't orphan a new material with the line item left unmatched.
+    const { material, updatedLine } = await db.transaction(async (tx) => {
+      const [newMaterial] = await tx
+        .insert(materialScheduleItems)
+        .values({
+          title,
+          roomName: body.roomName || null,
+          isPurchased: true,
+          notes: buildPurchaseNote(invoice, lineItem),
+        })
+        .returning();
+
+      const [line] = await tx
+        .update(workerEmailInvoiceLineItems)
+        .set({
+          materialScheduleItemId: newMaterial.id,
+          matchStatus: "created",
+          updatedAt: new Date(),
+        })
+        .where(eq(workerEmailInvoiceLineItems.id, lineItemId))
+        .returning();
+
+      return { material: newMaterial, updatedLine: line };
+    });
+
+    return c.json({ lineItem: updatedLine, material });
+  },
+);
+
+/**
+ * Set (or clear) the services-catalog tie on an invoice line item.
+ *
+ * Body: `{ serviceId: number | null }`. A positive integer attaches the line
+ * item to that `services` catalog row and — mirroring the material `/link`
+ * endpoint above — flips `matchStatus` to `"matched"` since the reviewer has
+ * now resolved this line to something trackable. Passing `null` clears the
+ * tie (and leaves `matchStatus` alone; the reviewer may still want to link a
+ * material separately, or may be intentionally un-resolving the row).
+ */
+workerEmailsRouter.patch(
+  "/:id/invoices/:invoiceId/line-items/:lineItemId/service",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const lineItemId = parseInt(c.req.param("lineItemId"), 10);
+    if (Number.isNaN(lineItemId)) {
+      return c.json({ error: "Invalid lineItemId" }, 400);
+    }
+    const body = await c.req.json().catch(() => ({}));
+
+    // serviceId must be either `null` (clear the tie) or a positive integer.
+    let serviceId: number | null;
+    if (body.serviceId === null) {
+      serviceId = null;
+    } else {
+      if (typeof body.serviceId !== "number" || !Number.isInteger(body.serviceId) || body.serviceId <= 0) {
+        return c.json({ error: "serviceId must be a positive integer or null" }, 400);
+      }
+      serviceId = body.serviceId;
+    }
+
+    const [updatedLine] = await db
+      .update(workerEmailInvoiceLineItems)
+      .set({
+        serviceId,
+        ...(serviceId !== null ? { matchStatus: "matched" } : {}),
+        updatedAt: new Date(),
+      })
+      .where(eq(workerEmailInvoiceLineItems.id, lineItemId))
+      .returning();
+    if (!updatedLine) return c.json({ error: "Line item not found" }, 404);
+
+    return c.json({ lineItem: updatedLine });
+  },
+);
+
+/** Skip a line item (not a trackable material). */
+workerEmailsRouter.post(
+  "/:id/invoices/:invoiceId/line-items/:lineItemId/skip",
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const lineItemId = parseInt(c.req.param("lineItemId"), 10);
+    if (Number.isNaN(lineItemId)) {
+      return c.json({ error: "Invalid lineItemId" }, 400);
+    }
+
+    const [updatedLine] = await db
+      .update(workerEmailInvoiceLineItems)
+      .set({ matchStatus: "skipped", updatedAt: new Date() })
+      .where(eq(workerEmailInvoiceLineItems.id, lineItemId))
+      .returning();
+    if (!updatedLine) return c.json({ error: "Line item not found" }, 404);
+
+    return c.json({ lineItem: updatedLine });
+  },
+);
+
+// ═══════════════════════════════════════════════════════════════════════════
 // Contracts (HITL)
 // ═══════════════════════════════════════════════════════════════════════════
 
+/**
+ * Update a reviewed contract. Also accepts `serviceId` (number | null) to
+ * tie the contract to a `services` catalog row — `null` clears the tie,
+ * omitting the field leaves it untouched (undefined is a no-op for Drizzle
+ * `.set()`), a positive integer attaches it. No matchStatus side effect here
+ * since contracts don't carry a match-status column.
+ */
 workerEmailsRouter.patch("/:id/contracts/:contractId", async (c) => {
   const db = drizzle(c.env.DB);
   const contractId = parseInt(c.req.param("contractId"));
   const updates = await c.req.json();
+
+  let serviceId: number | null | undefined;
+  if (updates.serviceId === undefined) {
+    serviceId = undefined;
+  } else if (updates.serviceId === null) {
+    serviceId = null;
+  } else {
+    if (typeof updates.serviceId !== "number" || !Number.isInteger(updates.serviceId) || updates.serviceId <= 0) {
+      return c.json({ error: "serviceId must be a positive integer or null" }, 400);
+    }
+    serviceId = updates.serviceId;
+  }
 
   const [updated] = await db
     .update(workerEmailContracts)
@@ -232,6 +474,7 @@ workerEmailsRouter.patch("/:id/contracts/:contractId", async (c) => {
       effectiveDate: updates.effectiveDate,
       completionDate: updates.completionDate,
       notes: updates.notes,
+      ...(serviceId !== undefined ? { serviceId } : {}),
       updatedAt: new Date(),
     })
     .where(eq(workerEmailContracts.id, contractId))

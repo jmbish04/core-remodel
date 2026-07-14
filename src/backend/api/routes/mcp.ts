@@ -44,6 +44,7 @@ import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
+import { logInvocation, principalLabel } from "../../mcp/logging";
 import { generateMoodBoard } from "../../services/render/mood-board";
 import { runStage } from "../../services/render/stage-runner";
 import type { StageType } from "../../services/render/types";
@@ -53,6 +54,23 @@ const mcpRouter = new Hono<{ Bindings: Env }>();
 
 const SERVER_INFO = { name: "renovation-studio", version: "1.0.0" };
 const PROTOCOL_VERSION = "2024-11-05";
+
+/**
+ * If `text` is a JSON OBJECT (not an array or primitive), parse and return it so
+ * it can be surfaced as MCP `structuredContent`. Returns `null` for arrays,
+ * primitives, or unparseable prose — callers then fall back to text-only.
+ */
+function parseJsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    /* not JSON — prose result, stays text-only */
+  }
+  return null;
+}
 
 interface McpTool {
   name: string;
@@ -694,6 +712,15 @@ mcpRouter.post("/", async (c) => {
 
   const body = (await c.req.json().catch(() => null)) as any;
 
+  // The legacy transport has no MCP session concept, so synthesize one id per
+  // HTTP request (a JSON-RPC batch shares it) tagged "legacy" for grouping in
+  // the ops transcript. See 0017 §3A / open-question #5.
+  const legacySessionId = `legacy:${crypto.randomUUID()}`;
+  const legacyPrincipal = principalLabel({
+    kind: auth.kind,
+    userId: auth.kind === "research" ? "research-token" : "worker",
+  });
+
   const handle = async (msg: any) => {
     const id = msg?.id ?? null;
     const method = msg?.method;
@@ -715,8 +742,47 @@ mcpRouter.post("/", async (c) => {
         return { jsonrpc: "2.0", id, result: { tools } };
       }
       if (method === "tools/call") {
-        const text = await callTool(c.env, auth, params?.name, params?.arguments ?? {});
-        return { jsonrpc: "2.0", id, result: { content: [{ type: "text", text }] } };
+        const toolName = String(params?.name ?? "unknown");
+        const toolArgs = params?.arguments ?? {};
+        const startedAt = Date.now();
+        try {
+          const text = await callTool(c.env, auth, params?.name, toolArgs);
+          c.executionCtx.waitUntil(
+            logInvocation(c.env, {
+              sessionId: legacySessionId,
+              transport: "legacy",
+              principal: legacyPrincipal,
+              toolName,
+              args: toolArgs,
+              ok: true,
+              result: text,
+              durationMs: Date.now() - startedAt,
+            }),
+          );
+          // When a tool's text result is itself a JSON object, also hand it
+          // back as `structuredContent` so JSON-RPC clients get a parsed shape
+          // without re-parsing the text block (mirrors the registry transport).
+          // Prose results stay text-only.
+          const structuredContent = parseJsonObject(text);
+          const result = structuredContent
+            ? { content: [{ type: "text", text }], structuredContent }
+            : { content: [{ type: "text", text }] };
+          return { jsonrpc: "2.0", id, result };
+        } catch (err) {
+          c.executionCtx.waitUntil(
+            logInvocation(c.env, {
+              sessionId: legacySessionId,
+              transport: "legacy",
+              principal: legacyPrincipal,
+              toolName,
+              args: toolArgs,
+              ok: false,
+              error: String((err as Error)?.message ?? err),
+              durationMs: Date.now() - startedAt,
+            }),
+          );
+          throw err;
+        }
       }
       if (method === "ping") {
         return { jsonrpc: "2.0", id, result: {} };

@@ -44,6 +44,10 @@ import { photoViewerNotesRouter } from "./routes/photo-viewer-notes";
 import renderRouter from "./routes/render";
 import moodBoardRouter from "./routes/mood-board";
 import mcpRouter from "./routes/mcp";
+import mcpCatalogRouter from "./routes/mcp-catalog";
+import mcpOpsRouter from "./routes/mcp-ops";
+import studioRouter from "./routes/studio";
+import driveListsRouter from "./routes/drive-lists";
 import { portalRouter } from "./routes/portal";
 import { planningRouter } from "./routes/planning";
 import { planningExtendedRouter } from "./routes/planning-extended";
@@ -64,9 +68,17 @@ import { adminConfigRouter } from "./routes/admin-config";
 import { dialerRouter } from "./routes/dialer";
 import { showroomStoresRouter } from "./routes/showroom-stores";
 import { showroomProductsRouter } from "./routes/showroom-products";
+import { productsCatalogRouter } from "./routes/products-catalog";
+import { productPhotosRouter } from "./routes/product-photos";
+import { intakeRouter } from "./routes/intake";
+import { configRouter } from "./routes/config";
+import { googlePhotosRouter } from "./routes/google-photos";
 import { brandsRouter } from "./routes/brands";
 import { showroomSeedRouter } from "./routes/showroom-seed";
 import { materialsRouter } from "./routes/materials";
+import { servicesRouter } from "./routes/services";
+import { wishlistRouter } from "./routes/wishlist";
+import { workerEmailsRouter } from "./routes/worker-emails";
 import { showroomGapsRouter } from "./routes/showroom-gaps";
 import { showroomCatalogRouter } from "./routes/showroom-catalog";
 import { showroomScanRouter } from "./routes/showroom-scan";
@@ -117,14 +129,36 @@ app.use("/api/shopping-journal", requireAccessAuth);
 app.use("/api/shopping-journal/*", requireAccessAuth);
 app.use("/api/showroom-stores", requireAccessAuth);
 app.use("/api/showroom-stores/*", requireAccessAuth);
+// Google Photos Picker (0019) — admin-only. The OAuth callback is a top-level
+// browser redirect from Google that carries the visitor cookie, so it passes
+// this same guard.
+app.use("/api/google-photos", requireAccessAuth);
+app.use("/api/google-photos/*", requireAccessAuth);
 app.use("/api/research-jobs", requireAccessAuth);
 app.use("/api/research-jobs/*", requireAccessAuth);
 app.use("/api/showroom-products", requireAccessAuth);
 app.use("/api/showroom-products/*", requireAccessAuth);
+app.use("/api/product-photos", requireAccessAuth);
+app.use("/api/product-photos/*", requireAccessAuth);
+app.use("/api/intake", requireAccessAuth);
+app.use("/api/intake/*", requireAccessAuth);
+// Products catalog page (0020 subsystem B) — same admin-only posture as
+// showroom-products, which this mirrors.
+app.use("/api/products", requireAccessAuth);
+app.use("/api/products/*", requireAccessAuth);
+// Config-driven vocabularies (0020-C2: categories/subcategories/colors + mappings).
+app.use("/api/config", requireAccessAuth);
+app.use("/api/config/*", requireAccessAuth);
 app.use("/api/brands", requireAccessAuth);
 app.use("/api/brands/*", requireAccessAuth);
 app.use("/api/materials", requireAccessAuth);
 app.use("/api/materials/*", requireAccessAuth);
+app.use("/api/services", requireAccessAuth);
+app.use("/api/services/*", requireAccessAuth);
+app.use("/api/wishlist", requireAccessAuth);
+app.use("/api/wishlist/*", requireAccessAuth);
+app.use("/api/worker-emails", requireAccessAuth);
+app.use("/api/worker-emails/*", requireAccessAuth);
 app.use("/api/places", requireAccessAuth);
 app.use("/api/places/*", requireAccessAuth);
 // Company CRM (notes + todos, 0013 roadmap P3-03/P3-04) — admin-only, no public read.
@@ -167,6 +201,7 @@ app.route("/api/notifications", notificationsRouter);
 app.route("/api/ai", aiRouter);
 app.route("/api/documents", documentsRouter);
 app.route("/api/images", imagesRouter);
+app.route("/api/google-photos", googlePhotosRouter);
 app.route("/api/moodboards", moodBoardsRouter);
 app.route("/api/listing-photos", listingPhotosRouter);
 app.route("/api/photo-reviews", photoReviewsRouter);
@@ -175,6 +210,11 @@ app.route("/api/photo-edits", photoEditsRouter);
 app.route("/api/render", renderRouter);
 app.route("/api/mood-board", moodBoardRouter);
 app.route("/api/mcp", mcpRouter);
+// Public MCP tool catalog (no auth) — feeds the /mcp/tools docs page.
+app.route("/api/mcp-docs", mcpCatalogRouter);
+app.route("/api/mcp-ops", mcpOpsRouter);
+app.route("/api/studio", studioRouter);
+app.route("/api/drive-lists", driveListsRouter);
 app.route("/api/portal", portalRouter);
 app.route("/api/planning", planningRouter);
 app.route("/api/planning", planningExtendedRouter);
@@ -214,6 +254,10 @@ app.route("/api/truth-table", truthTableRouter);
 app.route("/api/shopping-journal", shoppingJournalRouter);
 app.route("/api/showroom-stores", showroomStoresRouter);
 app.route("/api/showroom-products", showroomProductsRouter);
+app.route("/api/product-photos", productPhotosRouter);
+app.route("/api/intake", intakeRouter);
+app.route("/api/products", productsCatalogRouter);
+app.route("/api/config", configRouter);
 app.route("/api/brands", brandsRouter);
 app.route("/api/showroom-stores", showroomSeedRouter);
 app.route("/api/showroom-stores", showroomGapsRouter);
@@ -222,6 +266,11 @@ app.route("/api/showroom-stores", showroomScanRouter);
 app.route("/api/showroom-stores", showroomBackfillRouter);
 app.route("/api/research-jobs", researchJobsRouter);
 app.route("/api/materials", materialsRouter);
+app.route("/api/services", servicesRouter);
+app.route("/api/wishlist", wishlistRouter);
+// Worker-email HITL inbox API (invoices / contracts / receipts / staged
+// companies). Mounting this is what makes /admin/inbox show emails.
+app.route("/api/worker-emails", workerEmailsRouter);
 app.route("/api/places", placesRouter);
 // adminIntegrationsRouter mounts under /api/admin/integrations — already covered
 // by the /api/admin/* requireAccessAuth middleware above.

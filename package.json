@@ -3,6 +3,7 @@
   "version": "26.02.24",
   "description": "core-remodel moodboard and project management on cloudflare workers running Astro, Tailwind CSS, and shadcn/ui.",
   "license": "MIT",
+  "packageManager": "pnpm@10.33.2",
   "author": {
     "name": "126colby",
     "url": "https://github.com/126colby"
@@ -23,9 +24,11 @@
     "db:seed": "npx wrangler@latest d1 execute DB --remote --file=seed.sql",
     "migrate:local": "pnpm run db:generate && node scripts/d1-migrate.mjs --local",
     "migrate:remote": "node scripts/d1-migrate.mjs --remote",
+    "mcp:issues": "node scripts/mcp-issues.mjs",
     "deploy": "pnpm run build && cp .assetsignore dist/.assetsignore && pnpm run migrate:remote && npx wrangler@latest deploy",
     "deploy:preview": "pnpm run build && cp .assetsignore dist/.assetsignore && node scripts/deploy-preview.mjs",
     "cf-typegen": "wrangler types --include-runtime false",
+    "secrets:google-photos": "node scripts/google-photos-secrets.mjs",
     "test:throttle": "node scripts/tests/test_throttled_pipeline.mjs",
     "py:batch-ai-photo-edits": "proofs/tight/jason_20260615/upper_level/kitchen/ai_renders/.venv/bin/python scripts/batch_image_edit.py"
   },
@@ -38,6 +41,7 @@
     "@astrojs/react": "^4.4.2",
     "@base-ui/react": "^1.4.1",
     "@cloudflare/ai-chat": "0.7.1",
+    "@cloudflare/workers-oauth-provider": "^0.8.1",
     "@cloudflare/workers-types": "^4.20260503.1",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/modifiers": "^9.0.0",
@@ -48,6 +52,7 @@
     "@hono/zod-validator": "^0.7.6",
     "@hookform/resolvers": "^5.4.0",
     "@llamaindex/liteparse-wasm": "^2.4.2",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "@number-flow/react": "^0.6.0",
     "@platejs/basic-nodes": "53.0.0",
     "@platejs/list": "53.1.3",
@@ -80,6 +85,7 @@
     "date-fns": "^4.4.0",
     "drizzle-orm": "^0.33.0",
     "drizzle-zod": "^0.8.3",
+    "exifr": "^7.1.3",
     "frappe-gantt": "^1.2.2",
     "gsap": "^3.15.0",
     "hono": "^4.12.16",
@@ -110,6 +116,7 @@
     "slate-history": "^0.113.1",
     "slate-react": "^0.124.0",
     "sonner": "^2.0.7",
+    "sucrase": "^3.35.0",
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.4",
     "three": "^0.184.0",
@@ -130,11 +137,5 @@
     "typescript": "^5.9.3",
     "vite": "^8.0.13",
     "wrangler": "^4.100.0"
-  },
-  "pnpm": {
-    "overrides": {
-      "@cloudflare/workers-types": "^4.20260503.1",
-      "hono": "^4.12.16"
-    }
   }
 }

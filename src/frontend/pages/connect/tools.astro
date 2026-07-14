@@ -1,0 +1,136 @@
+---
+/**
+ * `/connect/tools` — auto-generated MCP tool catalog.
+ *
+ * Renders one card per registered tool, grouped by category. It reads the tool
+ * registry DIRECTLY via `describeTools()` — this runs only in Astro frontmatter
+ * (server-side during SSR, inside the Worker), and esbuild dedupes the registry
+ * module (already in the Worker bundle via the MCP agent), so there's no extra
+ * client bundle. Adding a tool to `src/backend/mcp/tools/*` makes it appear
+ * here with zero manual doc edits — the anti-drift guarantee from the 0015 plan.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { describeTools, getAllTools, type ToolMeta } from "@backend/mcp/registry";
+import { Wrench, ShieldCheck, Pencil, Trash2, ArrowLeft } from "lucide-react";
+
+let tools: ToolMeta[] = [];
+let toolCount = 0;
+let loadError: string | null = null;
+try {
+  tools = describeTools();
+  toolCount = getAllTools().length;
+} catch (err) {
+  loadError = err instanceof Error ? err.message : "Failed to load the tool catalog.";
+}
+
+// Group tools by category, preserving registry order within each group.
+const CATEGORY_LABELS: Record<string, string> = {
+  rooms: "Rooms",
+  budget: "Budget",
+  materials: "Materials",
+  showrooms: "Showrooms",
+  brands: "Brands",
+  products: "Products",
+  links: "Links",
+  workflow: "Workflows",
+  render: "Render & mood boards",
+  measurements: "Measurements",
+  research: "Deep research",
+};
+const grouped = new Map<string, ToolMeta[]>();
+for (const t of tools) {
+  const arr = grouped.get(t.category) ?? [];
+  arr.push(t);
+  grouped.set(t.category, arr);
+}
+const categoryOrder = Object.keys(CATEGORY_LABELS).filter((c) => grouped.has(c));
+for (const c of grouped.keys()) if (!categoryOrder.includes(c)) categoryOrder.push(c);
+---
+
+<BaseLayout
+  title="MCP Tools — 126 Colby Remodel"
+  description="Every tool exposed by the 126 Colby remodel MCP connector, grouped by domain."
+>
+  <main class="mx-auto w-full max-w-4xl px-4 py-10 pb-16">
+    <header class="mb-8">
+      <a href="/connect" class="mb-4 inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+        <ArrowLeft className="size-3.5" /> Connect guide
+      </a>
+      <div class="flex items-center gap-2">
+        <Wrench className="size-5 text-primary" />
+        <h1 class="text-2xl font-semibold tracking-tight sm:text-3xl">MCP tools</h1>
+      </div>
+      <p class="mt-2 text-sm text-muted-foreground">
+        {toolCount} tool{toolCount === 1 ? "" : "s"} exposed by the remodel connector, grouped by domain.
+        This list is generated from the live registry.
+      </p>
+    </header>
+
+    {loadError && (
+      <div class="rounded-xl bg-card p-5 text-sm text-destructive ring-1 ring-destructive/30">
+        Could not load the tool catalog: {loadError}
+      </div>
+    )}
+
+    {categoryOrder.map((cat) => (
+      <section class="mb-10">
+        <h2 class="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          {CATEGORY_LABELS[cat] ?? cat}
+        </h2>
+        <div class="space-y-3">
+          {(grouped.get(cat) ?? []).map((tool) => (
+            <article class="rounded-xl bg-card p-5 ring-1 ring-border/40">
+              <div class="flex flex-wrap items-center gap-2">
+                <code class="font-mono text-sm font-semibold text-foreground">{tool.name}</code>
+                {tool.annotations.readOnlyHint && (
+                  <span class="inline-flex items-center gap-1 rounded-md bg-background px-2 py-0.5 text-[11px] text-muted-foreground ring-1 ring-border/40">
+                    <ShieldCheck className="size-3" /> read-only
+                  </span>
+                )}
+                {!tool.annotations.readOnlyHint && !tool.annotations.destructiveHint && (
+                  <span class="inline-flex items-center gap-1 rounded-md bg-background px-2 py-0.5 text-[11px] text-primary ring-1 ring-border/40">
+                    <Pencil className="size-3" /> writes
+                  </span>
+                )}
+                {tool.annotations.destructiveHint && (
+                  <span class="inline-flex items-center gap-1 rounded-md bg-background px-2 py-0.5 text-[11px] text-destructive ring-1 ring-destructive/30">
+                    <Trash2 className="size-3" /> destructive
+                  </span>
+                )}
+              </div>
+              <p class="mt-2 text-sm leading-relaxed text-muted-foreground">{tool.description}</p>
+              {tool.inputFields.length > 0 && (
+                <div class="mt-3">
+                  <div class="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">Parameters</div>
+                  <ul class="space-y-1">
+                    {tool.inputFields.map((f) => (
+                      <li class="flex flex-wrap items-baseline gap-x-2 text-xs">
+                        <code class="font-mono text-foreground">{f.name}</code>
+                        <span class="text-muted-foreground/60">{f.type}{f.optional ? "?" : ""}</span>
+                        {f.description && <span class="text-muted-foreground">— {f.description}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {tool.outputFields.length > 0 && (
+                <div class="mt-3">
+                  <div class="mb-1 text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">Returns</div>
+                  <ul class="space-y-1">
+                    {tool.outputFields.map((f) => (
+                      <li class="flex flex-wrap items-baseline gap-x-2 text-xs">
+                        <code class="font-mono text-foreground">{f.name}</code>
+                        <span class="text-muted-foreground/60">{f.type}{f.optional ? "?" : ""}</span>
+                        {f.description && <span class="text-muted-foreground">— {f.description}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </article>
+          ))}
+        </div>
+      </section>
+    ))}
+  </main>
+</BaseLayout>

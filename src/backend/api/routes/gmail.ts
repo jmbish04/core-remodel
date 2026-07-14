@@ -4,12 +4,15 @@
  * Mounted at `/api/gmail` (see src/backend/api/index.ts), gated end-to-end by
  * `requireAccessAuth` — this is admin-only CRM data, no public read surface.
  *
- *   GET    /api/gmail/companies/:companyId/threads       Threads for a company (newest first)
- *   GET    /api/gmail/threads/:threadId                  One thread + its messages
- *   POST   /api/gmail/threads/:threadId/reply            Reply-all in a thread (sends via Gmail API)
- *   POST   /api/gmail/compose                             Plain send, no thread
- *   POST   /api/gmail/ingest                              Manually trigger ingestion (fire-and-forget)
- *   POST   /api/gmail/draft-assist                         Workers-AI reply draft, grounded via Vectorize
+ *   GET    /api/gmail/threads                             GLOBAL inbox — every thread, newest first, optional search
+ *   GET    /api/gmail/companies/:companyId/threads         Threads for a company (by companyId FK, newest first)
+ *   GET    /api/gmail/companies/:companyId/threads-by-domain  Threads matched by ANY of a company's contact emails (private domain OR exact public-provider address, indexed)
+ *   GET    /api/gmail/threads/:threadId                    One thread + its messages
+ *   POST   /api/gmail/threads/:threadId/reply              Reply-all in a thread (sends via Gmail API)
+ *   POST   /api/gmail/compose                               Plain send, no thread
+ *   POST   /api/gmail/ingest                                Manually trigger ingestion (fire-and-forget)
+ *   POST   /api/gmail/draft-assist                          Workers-AI reply draft, grounded via Vectorize
+ *   POST   /api/gmail/backfill-participants                 Backfill gmail_message_participants from existing gmail_messages (idempotent, cursor-paged)
  *
  * Conventions:
  *   - Hand-written Zod v4 schemas (drizzle-zod is banned — breaks pnpm run build).
@@ -20,15 +23,21 @@
  */
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
-import { desc, eq, inArray } from "drizzle-orm";
+import { desc, eq, inArray, like, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { gmailMessages, gmailThreads } from "@backend/db";
+import { companies, companyContacts, contacts, gmailMessages, gmailThreads } from "@backend/db";
 import type { GmailMessage, GmailMessageInsert, GmailThread } from "@backend/db";
 
 import { getGmailAccessToken } from "@backend/services/gmail/auth";
 import { buildComposeRaw, buildReplyAllRaw, sendMessage } from "@backend/services/gmail/client";
 import { ingestCompanyEmails } from "@backend/services/gmail/ingestion";
+import {
+  buildParticipantRows,
+  findThreadIdsByParticipants,
+  insertParticipants,
+  splitCandidateEmails,
+} from "@backend/services/gmail/participants";
 
 export const gmailRouter = new OpenAPIHono<{ Bindings: Env }>();
 
@@ -55,6 +64,38 @@ const companyIdParamSchema = z.object({
 
 const threadIdParamSchema = z.object({
   threadId: z.string().min(1),
+});
+
+/** Default/max page size for the global inbox list. */
+const INBOX_LIST_DEFAULT_LIMIT = 50;
+const INBOX_LIST_MAX_LIMIT = 100;
+
+/**
+ * Query params for `GET /threads` (global inbox list). Hand-validated (rather
+ * than relying on zod-openapi's coercion alone) so we can 400 with a precise
+ * message on NaN/out-of-range input instead of silently clamping.
+ */
+const inboxListQuerySchema = z.object({
+  limit: z.string().optional(),
+  offset: z.string().optional(),
+  q: z.string().min(1).optional(),
+});
+
+/** Default/max per-call page size for the participants backfill sweep. */
+const BACKFILL_DEFAULT_LIMIT = 500;
+const BACKFILL_MAX_LIMIT = 1000;
+
+/**
+ * Query params for `POST /backfill-participants`. `afterId` is a plain
+ * `gmail_messages.id` cursor (not a Gmail-native id) — pass the
+ * `nextAfterId` from the previous call's response to resume; omit (or pass
+ * `0`) to start from the beginning. Hand-validated (NaN-guard, range-clamp)
+ * for the same reason as `inboxListQuerySchema` above: a precise 400 beats
+ * silent coercion.
+ */
+const backfillParticipantsQuerySchema = z.object({
+  limit: z.string().optional(),
+  afterId: z.string().optional(),
 });
 
 // ─── Request body schemas ─────────────────────────────────────────────────────
@@ -112,6 +153,28 @@ const threadDetailSchema = z.object({
   companyId: z.number().nullable(),
 });
 
+/** The most recent message on a thread, as summarized in list views. */
+const lastMessageSchema = z.object({
+  from: z.string(),
+  subject: z.string().nullable(),
+  snippet: z.string(),
+  date: z.union([z.date(), z.number()]).nullable(),
+});
+
+/**
+ * Shared item shape for both `GET /threads` (global inbox) and
+ * `GET /companies/:companyId/threads-by-domain` (domain-matched company
+ * threads) — same fields, different population strategy per route.
+ */
+const inboxThreadItemSchema = z.object({
+  threadId: z.string(),
+  subject: z.string().nullable(),
+  companyId: z.number().nullable(),
+  companyName: z.string().nullable(),
+  lastMessage: lastMessageSchema.nullable(),
+  messageCount: z.number().int(),
+});
+
 // ─── Serialization helpers ─────────────────────────────────────────────────────
 
 function parseToRecipients(json: string): string[] {
@@ -147,6 +210,241 @@ function serializeThread(row: GmailThread) {
     companyId: row.companyId,
   };
 }
+
+/** Strip newlines and truncate to `SNIPPET_CHARS`, preferring `aiSummary` over raw `body`. */
+function buildSnippet(msg: Pick<GmailMessage, "aiSummary" | "body"> | undefined): string {
+  if (!msg) return "";
+  const source = msg.aiSummary || msg.body || "";
+  return source.replace(/\s+/g, " ").trim().slice(0, SNIPPET_CHARS);
+}
+
+/**
+ * Build the shared `{ threadId, subject, companyId, companyName, lastMessage,
+ * messageCount }` list-item shape used by both `GET /threads` and
+ * `GET /companies/:companyId/threads-by-domain`, given a thread row, its
+ * resolved company name (if any), and the pre-fetched messages for that
+ * thread (any order — the newest is selected here by `timestamp`).
+ */
+function buildInboxThreadItem(
+  thread: Pick<GmailThread, "threadId" | "subject" | "companyId">,
+  companyName: string | null,
+  msgsForThread: GmailMessage[],
+) {
+  const sorted = [...msgsForThread].sort((a, b) => {
+    const at = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+    const bt = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+    return bt - at;
+  });
+  const latest = sorted[0];
+
+  return {
+    threadId: thread.threadId,
+    subject: thread.subject,
+    companyId: thread.companyId,
+    companyName,
+    lastMessage: latest
+      ? {
+          from: latest.fromRecipient,
+          subject: latest.subject,
+          snippet: buildSnippet(latest),
+          date: latest.timestamp,
+        }
+      : null,
+    messageCount: sorted.length,
+  };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// GET /threads — GLOBAL inbox list (every thread, any company, newest first)
+// ════════════════════════════════════════════════════════════════════════════
+
+gmailRouter.openapi(
+  createRoute({
+    method: "get",
+    path: "/threads",
+    operationId: "listGmailInbox",
+    tags: ["Gmail"],
+    summary: "Global Gmail inbox — every thread across all companies, newest first, optional search",
+    request: {
+      query: inboxListQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Global inbox page",
+        content: {
+          "application/json": {
+            schema: z.object({
+              success: z.literal(true),
+              threads: z.array(inboxThreadItemSchema),
+              limit: z.number().int(),
+              offset: z.number().int(),
+            }),
+          },
+        },
+      },
+      400: {
+        description: "Validation error (bad limit/offset)",
+        content: { "application/json": { schema: errorSchema } },
+      },
+      500: {
+        description: "Server error",
+        content: { "application/json": { schema: errorSchema } },
+      },
+    },
+  }),
+  async (c) => {
+    const { limit: limitRaw, offset: offsetRaw, q } = c.req.valid("query");
+
+    // Hand-validate limit/offset: NaN-guard + range-clamp with a 400, rather
+    // than silently coercing bad input into a default.
+    const limit = limitRaw === undefined ? INBOX_LIST_DEFAULT_LIMIT : Number(limitRaw);
+    const offset = offsetRaw === undefined ? 0 : Number(offsetRaw);
+
+    if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit < 1 || limit > INBOX_LIST_MAX_LIMIT) {
+      return c.json(
+        { error: `limit must be an integer between 1 and ${INBOX_LIST_MAX_LIMIT}` },
+        400,
+      );
+    }
+    if (!Number.isFinite(offset) || !Number.isInteger(offset) || offset < 0) {
+      return c.json({ error: "offset must be a non-negative integer" }, 400);
+    }
+
+    const db = drizzle(c.env.DB);
+
+    try {
+      // Search filter: thread.subject OR any message from/subject/body on
+      // that thread. Resolved as a subquery of matching threadIds so the page
+      // query itself stays a simple, indexable thread scan.
+      let matchingThreadIdsFilter: string[] | null = null;
+      if (q) {
+        const likeTerm = `%${q}%`;
+        const subjectMatches = await db
+          .select({ threadId: gmailThreads.threadId })
+          .from(gmailThreads)
+          .where(like(gmailThreads.subject, likeTerm))
+          .all();
+        const messageMatches = await db
+          .select({ threadId: gmailMessages.threadId })
+          .from(gmailMessages)
+          .where(
+            or(
+              like(gmailMessages.fromRecipient, likeTerm),
+              like(gmailMessages.subject, likeTerm),
+              like(gmailMessages.body, likeTerm),
+            ),
+          )
+          .all();
+        matchingThreadIdsFilter = Array.from(
+          new Set([
+            ...subjectMatches.map((r) => r.threadId),
+            ...messageMatches.map((r) => r.threadId),
+          ]),
+        );
+
+        if (matchingThreadIdsFilter.length === 0) {
+          return c.json({ success: true as const, threads: [], limit, offset }, 200);
+        }
+      }
+
+      // Page over threads, newest `timestampSent` first, nulls last, then by
+      // id desc as a stable tiebreaker.
+      const orderExpr = sql`CASE WHEN ${gmailThreads.timestampSent} IS NULL THEN 1 ELSE 0 END, ${gmailThreads.timestampSent} DESC, ${gmailThreads.id} DESC`;
+
+      let pageRows: GmailThread[] = [];
+      if (matchingThreadIdsFilter) {
+        if (matchingThreadIdsFilter.length <= D1_MAX_BOUND_PARAMS) {
+          // Fits in one statement (D1's bound-param limit is per statement).
+          pageRows = await db
+            .select()
+            .from(gmailThreads)
+            .where(inArray(gmailThreads.threadId, matchingThreadIdsFilter))
+            .orderBy(orderExpr)
+            .limit(limit)
+            .offset(offset);
+        } else {
+          // Large match set: fetch matching threads across chunks, sort
+          // in-memory, then slice the requested page. Search result sets
+          // large enough to hit this path are rare in this mailbox.
+          const all: GmailThread[] = [];
+          for (let i = 0; i < matchingThreadIdsFilter.length; i += D1_MAX_BOUND_PARAMS) {
+            const slice = matchingThreadIdsFilter.slice(i, i + D1_MAX_BOUND_PARAMS);
+            const rows = await db
+              .select()
+              .from(gmailThreads)
+              .where(inArray(gmailThreads.threadId, slice))
+              .all();
+            all.push(...rows);
+          }
+          all.sort((a, b) => {
+            const at = a.timestampSent ? new Date(a.timestampSent).getTime() : -1;
+            const bt = b.timestampSent ? new Date(b.timestampSent).getTime() : -1;
+            if (bt !== at) return bt - at;
+            return b.id - a.id;
+          });
+          pageRows = all.slice(offset, offset + limit);
+        }
+      } else {
+        pageRows = await db
+          .select()
+          .from(gmailThreads)
+          .orderBy(orderExpr)
+          .limit(limit)
+          .offset(offset);
+      }
+
+      if (pageRows.length === 0) {
+        return c.json({ success: true as const, threads: [], limit, offset }, 200);
+      }
+
+      // Resolve company names for this page's threads in one lookup.
+      const companyIds = Array.from(
+        new Set(pageRows.map((t) => t.companyId).filter((id): id is number => id !== null)),
+      );
+      const companyNameById = new Map<number, string>();
+      if (companyIds.length > 0) {
+        const companyRows = await db
+          .select({ id: companies.id, name: companies.name })
+          .from(companies)
+          .where(inArray(companies.id, companyIds))
+          .all();
+        for (const row of companyRows) companyNameById.set(row.id, row.name);
+      }
+
+      // Batch-fetch every message for this page's threads (bounded to
+      // `limit`, so this is a single chunked query, never N+1 across the
+      // whole table).
+      const threadIds = pageRows.map((t) => t.threadId);
+      const msgsByThread = new Map<string, GmailMessage[]>();
+      for (let i = 0; i < threadIds.length; i += D1_MAX_BOUND_PARAMS) {
+        const idsChunk = threadIds.slice(i, i + D1_MAX_BOUND_PARAMS);
+        const chunkMsgs = await db
+          .select()
+          .from(gmailMessages)
+          .where(inArray(gmailMessages.threadId, idsChunk))
+          .all();
+        for (const msg of chunkMsgs) {
+          const list = msgsByThread.get(msg.threadId) ?? [];
+          list.push(msg);
+          msgsByThread.set(msg.threadId, list);
+        }
+      }
+
+      const result = pageRows.map((thread) =>
+        buildInboxThreadItem(
+          thread,
+          thread.companyId !== null ? (companyNameById.get(thread.companyId) ?? null) : null,
+          msgsByThread.get(thread.threadId) ?? [],
+        ),
+      );
+
+      return c.json({ success: true as const, threads: result, limit, offset }, 200);
+    } catch (err) {
+      console.error("[gmail] GET /threads error:", err);
+      return c.json({ error: "Failed to list inbox" }, 500);
+    }
+  },
+);
 
 // ════════════════════════════════════════════════════════════════════════════
 // GET /companies/:companyId/threads
@@ -229,6 +527,171 @@ gmailRouter.openapi(
     } catch (err) {
       console.error("[gmail] GET /companies/:companyId/threads error:", err);
       return c.json({ error: "Failed to list company threads" }, 500);
+    }
+  },
+);
+
+// ════════════════════════════════════════════════════════════════════════════
+// GET /companies/:companyId/threads-by-domain
+// ════════════════════════════════════════════════════════════════════════════
+
+gmailRouter.openapi(
+  createRoute({
+    method: "get",
+    path: "/companies/{companyId}/threads-by-domain",
+    operationId: "listCompanyGmailThreadsByDomain",
+    tags: ["Gmail"],
+    summary:
+      "List Gmail threads matched by ANY of a company's contact emails — private domains matched by domain, public-provider (gmail/yahoo/hotmail/etc) addresses matched exactly — via the indexed gmail_message_participants table",
+    request: {
+      params: companyIdParamSchema,
+    },
+    responses: {
+      200: {
+        description: "Participant-matched company Gmail threads",
+        content: {
+          "application/json": {
+            schema: z.object({
+              success: z.literal(true),
+              domains: z.array(z.string()),
+              emails: z.array(z.string()),
+              threads: z.array(inboxThreadItemSchema),
+            }),
+          },
+        },
+      },
+      404: {
+        description: "Company not found",
+        content: { "application/json": { schema: errorSchema } },
+      },
+      500: {
+        description: "Server error",
+        content: { "application/json": { schema: errorSchema } },
+      },
+    },
+  }),
+  async (c) => {
+    const { companyId } = c.req.valid("param");
+    const db = drizzle(c.env.DB);
+    const companyIdNum = Number(companyId);
+
+    try {
+      const [company] = await db
+        .select({ id: companies.id, name: companies.name, email: companies.email })
+        .from(companies)
+        .where(eq(companies.id, companyIdNum))
+        .limit(1);
+
+      if (!company) return c.json({ error: "Company not found" }, 404);
+
+      // Gather every candidate contact email for this company: companies.email
+      // + every company_contacts contact's email. `splitCandidateEmails`
+      // (src/backend/services/gmail/participants.ts) parses + normalizes each
+      // one and buckets it: a PRIVATE domain (e.g. "acmeplumbing.com") is
+      // matched by domain (catches every POC at that company, even ones we've
+      // never recorded as a contact); a PUBLIC provider address (gmail.com,
+      // yahoo.com, hotmail.com, etc — see PUBLIC_EMAIL_DOMAINS) is matched by
+      // the exact address instead, since domain-matching a public provider
+      // would fan out to unrelated mailboxes. A company can have contacts
+      // spanning both private and public domains simultaneously — matching is
+      // a UNION across every bucketed value.
+      const contactEmailRows = await db
+        .select({ email: contacts.email })
+        .from(companyContacts)
+        .innerJoin(contacts, eq(companyContacts.contactId, contacts.id))
+        .where(eq(companyContacts.companyId, companyIdNum))
+        .all();
+
+      const candidateEmails = [
+        company.email,
+        ...contactEmailRows.map((r) => r.email),
+      ].filter((e): e is string => Boolean(e && e.trim()));
+
+      const { privateDomains, publicEmails } = splitCandidateEmails(candidateEmails);
+
+      // Threads already FK-tagged to this company by ingestion — always
+      // included regardless of participant match (e.g. contacts changed since
+      // ingestion ran).
+      const fkTaggedThreads = await db
+        .select()
+        .from(gmailThreads)
+        .where(eq(gmailThreads.companyId, companyIdNum))
+        .all();
+
+      // Indexed lookup against gmail_message_participants.domain /.email —
+      // no LIKE scan. Either bucket may be empty; both empty just means we
+      // fall back to the FK-tagged threads below.
+      const participantThreadIds =
+        privateDomains.length > 0 || publicEmails.length > 0
+          ? await findThreadIdsByParticipants(db, { privateDomains, publicEmails })
+          : [];
+
+      // UNION: FK-tagged threads + participant-matched threads (dedupe by threadId).
+      const allThreadIdsSet = new Set<string>([
+        ...fkTaggedThreads.map((t) => t.threadId),
+        ...participantThreadIds,
+      ]);
+
+      const threadsByThreadId = new Map<string, GmailThread>();
+      for (const t of fkTaggedThreads) threadsByThreadId.set(t.threadId, t);
+
+      const missingThreadIds = Array.from(allThreadIdsSet).filter(
+        (id) => !threadsByThreadId.has(id),
+      );
+      for (let i = 0; i < missingThreadIds.length; i += D1_MAX_BOUND_PARAMS) {
+        const idsChunk = missingThreadIds.slice(i, i + D1_MAX_BOUND_PARAMS);
+        const rows = await db
+          .select()
+          .from(gmailThreads)
+          .where(inArray(gmailThreads.threadId, idsChunk))
+          .all();
+        for (const row of rows) threadsByThreadId.set(row.threadId, row);
+      }
+
+      const allThreads = Array.from(threadsByThreadId.values());
+
+      if (allThreads.length === 0) {
+        return c.json(
+          { success: true as const, domains: privateDomains, emails: publicEmails, threads: [] },
+          200,
+        );
+      }
+
+      // Batch-fetch every message for these threads, chunked.
+      const allThreadIds = allThreads.map((t) => t.threadId);
+      const msgsByThread = new Map<string, GmailMessage[]>();
+      for (let i = 0; i < allThreadIds.length; i += D1_MAX_BOUND_PARAMS) {
+        const idsChunk = allThreadIds.slice(i, i + D1_MAX_BOUND_PARAMS);
+        const chunkMsgs = await db
+          .select()
+          .from(gmailMessages)
+          .where(inArray(gmailMessages.threadId, idsChunk))
+          .all();
+        for (const msg of chunkMsgs) {
+          const list = msgsByThread.get(msg.threadId) ?? [];
+          list.push(msg);
+          msgsByThread.set(msg.threadId, list);
+        }
+      }
+
+      const items = allThreads.map((thread) =>
+        buildInboxThreadItem(thread, company.name, msgsByThread.get(thread.threadId) ?? []),
+      );
+
+      // Newest-first: by the resolved lastMessage.date, nulls last.
+      items.sort((a, b) => {
+        const at = a.lastMessage?.date ? new Date(a.lastMessage.date).getTime() : -1;
+        const bt = b.lastMessage?.date ? new Date(b.lastMessage.date).getTime() : -1;
+        return bt - at;
+      });
+
+      return c.json(
+        { success: true as const, domains: privateDomains, emails: publicEmails, threads: items },
+        200,
+      );
+    } catch (err) {
+      console.error("[gmail] GET /companies/:companyId/threads-by-domain error:", err);
+      return c.json({ error: "Failed to list participant-matched company threads" }, 500);
     }
   },
 );
@@ -557,7 +1020,8 @@ gmailRouter.openapi(
       try {
         const embedResult = (await c.env.AI.run("@cf/baai/bge-large-en-v1.5", {
           text: [latest.body ?? latest.subject ?? ""],
-        })) as { data: number[][] };
+          gateway: { id: c.env.AI_GATEWAY_ID },
+        } as Parameters<typeof c.env.AI.run>[1])) as { data: number[][] };
         const vector = embedResult.data?.[0];
         if (vector) {
           const matches = await c.env.VECTOR_INDEX.query(vector, {
@@ -616,6 +1080,7 @@ gmailRouter.openapi(
           { role: "user", content: userContent },
         ],
         max_tokens: 1024,
+        gateway: { id: c.env.AI_GATEWAY_ID },
       } as Parameters<typeof c.env.AI.run>[1])) as { response?: string };
 
       const draft = raw?.response?.trim() ?? "";
@@ -625,6 +1090,124 @@ gmailRouter.openapi(
     } catch (err) {
       console.error("[gmail] POST /draft-assist error:", err);
       return c.json({ error: "Failed to generate draft" }, 500);
+    }
+  },
+);
+
+// ════════════════════════════════════════════════════════════════════════════
+// POST /backfill-participants
+// ════════════════════════════════════════════════════════════════════════════
+
+gmailRouter.openapi(
+  createRoute({
+    method: "post",
+    path: "/backfill-participants",
+    operationId: "backfillGmailParticipants",
+    tags: ["Gmail"],
+    summary:
+      "Backfill gmail_message_participants for existing gmail_messages rows (idempotent, cursor-paged — safe to re-run)",
+    request: {
+      query: backfillParticipantsQuerySchema,
+    },
+    responses: {
+      200: {
+        description: "Backfill page processed",
+        content: {
+          "application/json": {
+            schema: z.object({
+              success: z.literal(true),
+              processedMessages: z.number().int(),
+              insertedApprox: z.number().int(),
+              nextAfterId: z.number().int().nullable(),
+            }),
+          },
+        },
+      },
+      400: {
+        description: "Validation error (bad limit/afterId)",
+        content: { "application/json": { schema: errorSchema } },
+      },
+      500: {
+        description: "Server error",
+        content: { "application/json": { schema: errorSchema } },
+      },
+    },
+  }),
+  async (c) => {
+    const { limit: limitRaw, afterId: afterIdRaw } = c.req.valid("query");
+
+    const limit = limitRaw === undefined ? BACKFILL_DEFAULT_LIMIT : Number(limitRaw);
+    const afterId = afterIdRaw === undefined ? 0 : Number(afterIdRaw);
+
+    if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit < 1 || limit > BACKFILL_MAX_LIMIT) {
+      return c.json(
+        { error: `limit must be an integer between 1 and ${BACKFILL_MAX_LIMIT}` },
+        400,
+      );
+    }
+    if (!Number.isFinite(afterId) || !Number.isInteger(afterId) || afterId < 0) {
+      return c.json({ error: "afterId must be a non-negative integer" }, 400);
+    }
+
+    const db = drizzle(c.env.DB);
+
+    try {
+      // Walk gmail_messages in ascending-id pages of `limit`, starting after
+      // `afterId`. Each message's fromRecipient/toRecipientsJson is parsed
+      // into gmail_message_participants rows via the same
+      // buildParticipantRows() ingestion uses, then written with
+      // insertParticipants()'s onConflictDoNothing() chunked insert — so
+      // re-running this endpoint (with the same or overlapping cursor ranges)
+      // never creates duplicate rows.
+      const page = await db
+        .select({
+          id: gmailMessages.id,
+          threadId: gmailMessages.threadId,
+          fromRecipient: gmailMessages.fromRecipient,
+          toRecipientsJson: gmailMessages.toRecipientsJson,
+        })
+        .from(gmailMessages)
+        .where(sql`${gmailMessages.id} > ${afterId}`)
+        .orderBy(gmailMessages.id)
+        .limit(limit)
+        .all();
+
+      if (page.length === 0) {
+        return c.json(
+          { success: true as const, processedMessages: 0, insertedApprox: 0, nextAfterId: null },
+          200,
+        );
+      }
+
+      // Accumulate every message's participant rows, then insert once (the
+      // insert itself batches) — one chunked write per page, not one per
+      // message (a 500-message page would otherwise be 500 round-trips).
+      const allRows = page.flatMap((msg) =>
+        buildParticipantRows({
+          messageId: msg.id,
+          threadId: msg.threadId,
+          from: msg.fromRecipient,
+          toRecipients: parseToRecipients(msg.toRecipientsJson),
+        }),
+      );
+      await insertParticipants(db, allRows);
+      const insertedApprox = allRows.length;
+
+      const lastId = page[page.length - 1]?.id ?? null;
+      const nextAfterId = page.length === limit ? lastId : null;
+
+      return c.json(
+        {
+          success: true as const,
+          processedMessages: page.length,
+          insertedApprox,
+          nextAfterId,
+        },
+        200,
+      );
+    } catch (err) {
+      console.error("[gmail] POST /backfill-participants error:", err);
+      return c.json({ error: "Failed to backfill participants" }, 500);
     }
   },
 );

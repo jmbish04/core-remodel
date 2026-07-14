@@ -119,6 +119,7 @@ Rules:
           },
         ],
         max_tokens: 32,
+        gateway: { id: env.AI_GATEWAY_ID },
       } as Parameters<typeof env.AI.run>[1],
     );
 
@@ -995,6 +996,10 @@ imagesRouter.post("/upload", async (c) => {
           continue;
         }
 
+        // Extract EXIF/dimensions from the ORIGINAL bytes before upload
+        // (upload may transcode HEIC→JPEG and strip EXIF).
+        const photoMetadata = await processor.extractPhotoMetadata(file);
+
         const uploadResponse = await processor.uploadToCloudflareImages(
           file,
           undefined,
@@ -1019,6 +1024,7 @@ imagesRouter.post("/upload", async (c) => {
           deliveryToken,
           processingStatus: "queued",
           uploadFingerprint,
+          photo: photoMetadata,
         });
 
         let insertedImage: typeof images.$inferSelect | undefined;

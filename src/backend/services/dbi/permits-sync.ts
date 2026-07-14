@@ -158,6 +158,25 @@ function parseStreetAddress(value: string): {
   return { streetNumber, streetName: streetName || match[2].trim() };
 }
 
+/**
+ * Expand a single block/lot number into the formatting variants SF DBI datasets
+ * use interchangeably (bare, zero-stripped, and zero-padded to 3/4 digits). The
+ * UI stores ONE value per field (no comma lists); the pipeline derives the match
+ * set here. e.g. lot "5" → ["5","005","0005"]; block "5934" → ["5934"].
+ */
+export function expandBlockLotVariants(value: string): string[] {
+  const v = value.trim();
+  if (!v) return [];
+  const variants = new Set<string>([v]);
+  const stripped = v.replace(/^0+/, "") || "0";
+  variants.add(stripped);
+  if (/^\d+$/.test(stripped)) {
+    variants.add(stripped.padStart(3, "0"));
+    variants.add(stripped.padStart(4, "0"));
+  }
+  return [...variants];
+}
+
 export async function getPermitsConfig(env: Env): Promise<PermitsConfig> {
   const db = drizzle(env.DB);
   const vars = await db.select().from(projectSystemVariables).all();
@@ -167,6 +186,12 @@ export async function getPermitsConfig(env: Env): Promise<PermitsConfig> {
   const targetAddress = getValue("permits_target_address", "126 Colby Street");
   const parsedStreet = parseStreetAddress(targetAddress);
 
+  // Single block/lot inputs (`permits_block`/`permits_lot`); fall back to the
+  // legacy comma `*_variants` keys (first value) so pre-migration configs still
+  // resolve. The pipeline consumes the expanded variant set, not the raw comma.
+  const block = getValue("permits_block", getValue("permits_block_variants", "5934").split(",")[0] || "5934");
+  const lot = getValue("permits_lot", getValue("permits_lot_variants", "005").split(",")[0] || "005");
+
   return {
     targetAddress,
     targetZip: getValue("permits_target_zip", "94134"),
@@ -175,14 +200,52 @@ export async function getPermitsConfig(env: Env): Promise<PermitsConfig> {
     // matchers. Explicit system variables override the parsed values.
     targetStreetNumber: getValue("permits_street_number", parsedStreet.streetNumber ?? ""),
     targetStreetName: getValue("permits_street_name", parsedStreet.streetName ?? ""),
-    targetBlockVariants: getValue("permits_block_variants", "5934")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean),
-    targetLotVariants: getValue("permits_lot_variants", "005,5")
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean),
+    targetBlockVariants: expandBlockLotVariants(block),
+    targetLotVariants: expandBlockLotVariants(lot),
+  };
+}
+
+/**
+ * Read-only probe for the config UI's "Test SODA" button: run the same property
+ * query the sync uses, per permit dataset, and return the confirmed match count
+ * — WITHOUT persisting anything. Confirms the configured address/block/lot
+ * actually resolves to records before the next scheduled sync.
+ */
+export async function probePropertyRecords(env: Env): Promise<{
+  targetAddress: string;
+  block: string[];
+  lot: string[];
+  datasets: { label: string; matched: number }[];
+  totalMatched: number;
+}> {
+  const config = await getPermitsConfig(env);
+  const datasets: { label: string; matched: number }[] = [];
+  let totalMatched = 0;
+
+  for (const trade of TRADES) {
+    const dataset = PERMIT_DATASETS[trade];
+    try {
+      const metadata = await fetchDatasetMetadata(dataset.id);
+      const rows = await queryPropertyRows(dataset.id, config);
+      const matched = rows
+        .map((row) => extractPermitRow(trade, row, metadata))
+        .filter((row) => isTargetPropertyMatch(row, config)).length;
+      datasets.push({ label: dataset.label, matched });
+      totalMatched += matched;
+    } catch (error) {
+      datasets.push({
+        label: `${dataset.label} (error: ${error instanceof Error ? error.message : "failed"})`,
+        matched: 0,
+      });
+    }
+  }
+
+  return {
+    targetAddress: config.targetAddress,
+    block: config.targetBlockVariants,
+    lot: config.targetLotVariants,
+    datasets,
+    totalMatched,
   };
 }
 

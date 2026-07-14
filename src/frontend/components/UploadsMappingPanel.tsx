@@ -71,6 +71,8 @@ interface PendingImage {
 interface UploadsMappingPanelProps {
   refreshToken?: number;
   onSummaryChange?: (summary: MappingSummary) => void;
+  category?: MappingCategory;
+  onCategoryChange?: (category: MappingCategory) => void;
 }
 
 function resolveImageUrl(image: PendingImage): string | null {
@@ -91,10 +93,16 @@ function resolveImageUrl(image: PendingImage): string | null {
 }
 
 export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
-  const { refreshToken = 0, onSummaryChange } = props;
+  const { refreshToken = 0, onSummaryChange, category, onCategoryChange } = props;
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState<string>("");
-  const [activeCategory, setActiveCategory] = useState<MappingCategory>("inspirational");
+  const [localCategory, setLocalCategory] = useState<MappingCategory>("inspirational");
+  const activeCategory = category ?? localCategory;
+
+  const handleCategoryChange = useCallback((newCategory: MappingCategory) => {
+    setLocalCategory(newCategory);
+    onCategoryChange?.(newCategory);
+  }, [onCategoryChange]);
   const [summary, setSummary] = useState<MappingSummary>({
     listing: 0,
     inspirational: 0,
@@ -765,30 +773,30 @@ export function UploadsMappingPanel(props: UploadsMappingPanelProps) {
             type="button"
             className={cn(
               "rounded-lg border px-3 py-2 text-left transition",
-              activeCategory === "listing"
+              activeCategory === "inspirational"
                 ? "border-primary bg-primary/10"
                 : "border-border/60 hover:bg-muted/30",
             )}
-            onClick={() => setActiveCategory("listing")}
+            onClick={() => handleCategoryChange("inspirational")}
           >
-            <p className="text-sm font-semibold">Listing Mapping</p>
+            <p className="text-sm font-semibold">Inspiration Mapping</p>
             <p className="text-xs text-muted-foreground">
-              {summary.listing} listing photo(s) pending
+              {summary.inspirational} inspiration photo(s) pending
             </p>
           </button>
           <button
             type="button"
             className={cn(
               "rounded-lg border px-3 py-2 text-left transition",
-              activeCategory === "inspirational"
+              activeCategory === "listing"
                 ? "border-primary bg-primary/10"
                 : "border-border/60 hover:bg-muted/30",
             )}
-            onClick={() => setActiveCategory("inspirational")}
+            onClick={() => handleCategoryChange("listing")}
           >
-            <p className="text-sm font-semibold">Inspiration Mapping</p>
+            <p className="text-sm font-semibold">Listing Mapping</p>
             <p className="text-xs text-muted-foreground">
-              {summary.inspirational} inspiration photo(s) pending
+              {summary.listing} listing photo(s) pending
             </p>
           </button>
         </div>

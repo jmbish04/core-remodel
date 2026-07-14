@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from "@/components/ui/card";
+import { Empty, EmptyHeader, EmptyTitle, EmptyDescription } from "@/components/ui/empty";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -150,9 +151,15 @@ export function InboxApp() {
                 </div>
               ))}
               {emails.length === 0 && !loading && (
-                <div className="p-8 text-center text-muted-foreground text-sm">
-                  No emails found.
-                </div>
+                <Empty className="py-12">
+                  <EmptyHeader>
+                    <EmptyTitle>No emails yet</EmptyTitle>
+                    <EmptyDescription>
+                      Invoices, contracts, and receipts emailed to remodel@hacolby.app are
+                      AI-classified and appear here once received.
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
               )}
             </div>
           </ScrollArea>

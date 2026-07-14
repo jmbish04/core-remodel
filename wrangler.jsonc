@@ -45,7 +45,11 @@
   // routing via the email() handler (routing rule set up in Dashboard).
   "send_email": [{ "name": "EMAIL", "remote": true }],
   "vars": {
-    "AI_GATEWAY_ID": "default-gateway",
+    // Public origin of the deployed Worker. Used to build ABSOLUTE, clickable
+    // page URLs in MCP tool responses (e.g. the exact bug/budget/showroom page
+    // to open) instead of bare paths. No trailing slash.
+    "WORKER_URL": "https://core-remodel.hacolby.workers.dev",
+    "AI_GATEWAY_ID": "core-remodel",
     "CLICKUP_LIST_ID": "901714811766",
     // TODO(justin): fill in a Google Programmable Search Engine "cx" id
     // (https://programmablesearchengine.google.com/) to enable Custom Search
@@ -138,6 +142,23 @@
       "id": "af8ca150b4a7480d923be0ed30baae73",
       "remote": true,
     },
+    {
+      // MCP connector OAuth (0015): @cloudflare/workers-oauth-provider stores
+      // clients / grants / access+refresh tokens here. Binding MUST be named
+      // OAUTH_KV (the library looks it up by that exact name).
+      "binding": "OAUTH_KV",
+      "id": "859ea6b96deb4140831a1d09a70ffcd4",
+      "remote": true,
+    },
+    // Ad-hoc agent memories from any endpoint including mcp tools
+    // this is intended to provide agents a place to park memories, 
+    // notes, works in progress that either don't have a place in d1 yet,
+    // d1 is blocked for some reason or outage, etc.
+    {
+      "binding": "AGENT_ADHOC_MEMORY_KV",
+      "id": "d2c2b93046e742b88c24915e63c7f0ad",
+      "remote": true,
+    }
   ],
   "d1_databases": [
     {
@@ -279,6 +300,20 @@
       "secret_name": "GOOGLE_CREDS_SA_CLIENT_EMAIL",
       "remote": true
     },
+    {
+      // Google Photos Picker API (0019): 3-legged OAuth client. Populate via
+      // `pnpm run secrets:google-photos` (parses the downloaded client-secret JSON).
+      "binding": "GOOGLE_PHOTOS_CLIENT_ID",
+      "store_id": "8c42fa70938644e0a8a109744467375f",
+      "secret_name": "GOOGLE_PHOTOS_CLIENT_ID",
+      "remote": true
+    },
+    {
+      "binding": "GOOGLE_PHOTOS_CLIENT_SECRET",
+      "store_id": "8c42fa70938644e0a8a109744467375f",
+      "secret_name": "GOOGLE_PHOTOS_CLIENT_SECRET",
+      "remote": true
+    },
   ],
   "durable_objects": {
     "bindings": [
@@ -333,6 +368,13 @@
         // General-purpose admin chat assistant (Workers AI, multi-model).
         "name": "ADMIN_CHAT_AGENT",
         "class_name": "AdminChatAgent",
+      },
+      {
+        // 0015 MCP connector: McpAgent (agents/mcp) DO backing the OAuth-gated
+        // Model Context Protocol server at /api/mcp (+ /mcp/sse). One DO
+        // instance per MCP session; tools registered from src/backend/mcp.
+        "name": "REMODEL_MCP",
+        "class_name": "RemodelMcpAgent",
       },
     ],
   },
@@ -393,6 +435,11 @@
     {
       "tag": "v13",
       "new_sqlite_classes": ["AdminChatAgent"],
+    },
+    {
+      // 0015 MCP connector DO (agents/mcp McpAgent).
+      "tag": "v14",
+      "new_sqlite_classes": ["RemodelMcpAgent"],
     },
   ],
   "worker_loaders": [

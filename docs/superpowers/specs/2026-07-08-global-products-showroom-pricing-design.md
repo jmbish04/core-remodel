@@ -32,6 +32,10 @@ manufacturer's MSRP).
 - **Prices are observations** tied to a source (showroom / online retailer /
   manufacturer), each optionally backed by the photo it was read from, and each
   HITL-reviewable.
+- **Every money/discount value is stored as a text + numeric pair** — the free-text
+  field preserves what was seen ("$1,299", "call for pricing", "15% + floor model")
+  and the numeric field (money = integer cents; discount = percent as real) makes
+  prices actually comparable and sortable across showrooms.
 - The revamped products experience (B) and the showroom-photo AI+HITL pipeline (C)
   build on top of this model.
 
@@ -55,6 +59,22 @@ Three subsystems with a dependency order:
 
 Decision: **build A first, then B + C in parallel** (separate worktrees / swarm).
 
+## Money & discount convention (applies everywhere below)
+
+Every price/discount is a **pair**:
+
+- **Money** → a display text column (e.g. `price`) **plus** an integer-cents column
+  (e.g. `priceCents`). Cents matches the budget domain and avoids float drift.
+  Free text that isn't a number ("call for pricing") stores text with a `NULL`
+  numeric.
+- **Discount** → a display text column (e.g. `discountInfo`) **plus** a numeric
+  percent column (`discountPct`, real, 0–100). A dollars-off markdown is captured in
+  the text; the comparable percent goes in the numeric when derivable.
+
+Numeric values are derived app-side from the text via `parsePriceCents()` /
+`parseDiscountPct()` (see A6) and can be overridden explicitly. They are
+best-effort and HITL-correctable.
+
 ---
 
 ## Subsystem A — Design
@@ -76,8 +96,8 @@ Changes:
   whitespace/dashes stripped) maintained in app code; the field the unique index
   uses. Kept as a persisted column rather than a SQL expression index for
   drizzle-kit portability.
-- **Add `msrp`** (text, nullable) — manufacturer core/list price. Display string to
-  preserve formatting, consistent with existing `price` convention.
+- **Add MSRP as a text + numeric pair** — `msrp` (text, display, nullable) plus
+  `msrpCents` (integer cents, nullable) — manufacturer core/list price, comparable.
 - The old global pricing columns (`price`, `possibleDiscounts`, `tradeDiscount`,
   `leadTime`) stop being the source of truth for price. They are **migrated down
   into observations** (see A5) and then left nullable/deprecated on the product row
@@ -151,7 +171,8 @@ so the two stores stay joinable without storing the embedding in D1.
 
 ### A4. Price observations (`product_price_observations`, new table)
 
-The "different prices found across showrooms" source of truth.
+The "different prices found across showrooms" source of truth. Per the money &
+discount convention, every price/discount is a text + numeric pair.
 
 Columns:
 
@@ -162,7 +183,9 @@ Columns:
   showroom`), set-null delete
 - `retailerName` (text, nullable), `retailerUrl` (text, nullable) — set when
   `sourceType = online_retailer`
-- `price` (text), `salePrice` (text, nullable), `discountInfo` (text, nullable)
+- `price` (text) **+ `priceCents`** (integer cents, nullable)
+- `salePrice` (text, nullable) **+ `salePriceCents`** (integer cents, nullable)
+- `discountInfo` (text, nullable) **+ `discountPct`** (real percent 0–100, nullable)
 - `condition` (enum: `new` | `floor_model` | `clearance` | `as_is`, nullable)
 - `leadTime` (text, nullable), `notes` (text, nullable)
 - `observedAt` (timestamp) — visit / capture / scrape date
@@ -176,9 +199,13 @@ Columns:
 
 Notes:
 
-- MSRP is stored **both** as `msrp` on the product (the canonical manufacturer
-  price) and, when captured as a dated observation, as a `sourceType=manufacturer`
-  row. The product `msrp` is the display default; observations are history.
+- MSRP is stored **both** as `msrp`/`msrpCents` on the product (the canonical
+  manufacturer price) and, when captured as a dated observation, as a
+  `sourceType=manufacturer` row. The product MSRP is the display default;
+  observations are history.
+- `priceCents` / `salePriceCents` / `discountPct` are the comparison keys B sorts
+  and range-filters on. They are derived from the text via `parsePriceCents()` /
+  `parseDiscountPct()` at write time (overridable).
 - Product-level *reference/market* pricing (AI retail/wholesale/negotiated + range)
   continues to come from the existing
   [`store_product_intel`](../../../src/backend/db/schema/showroom/product_intel.ts)
@@ -189,14 +216,15 @@ Notes:
 Ordered, best-effort, HITL-cleanupable:
 
 1. Create `product_showroom_photos` and `product_price_observations`; add
-   `modelNumber`, `modelKey`, `msrp` to `showroom_store_products`.
+   `modelNumber`, `modelKey`, `msrp`, `msrpCents` to `showroom_store_products`.
 2. **Backfill `modelNumber`/`modelKey`** from existing `sku`/`jsonDetails` where a
    model # is recoverable; leave null otherwise (those stay un-deduped, flagged).
 3. **Backfill observations:** for each existing product with a non-null `price`,
    insert one `product_price_observations` row (`sourceType=showroom`,
    `showroomId = old storeId`, `price`/`possibleDiscounts→discountInfo`/
    `tradeDiscount`/`leadTime` copied, `observedAt = updatedAt`,
-   `reviewStatus=approved`).
+   `reviewStatus=approved`), then **derive `priceCents`** from the text price
+   (strip `$`/commas, cast, ×100) for the numeric comparison column.
 4. **Backfill mappings:** ensure every product's old `storeId` exists as a
    `showroom_product_mappings` row (idempotent upsert).
 5. **Dedup by `(brandId, modelKey)`:** where duplicates exist (same brand+model
@@ -215,15 +243,20 @@ same discipline.
 
 - `create_product` / `ensure_product` (`src/backend/mcp/tools/products.ts`):
   **remove `storeId` requirement.** `ensure_product` dedups on `(brandId,
-  modelKey)` first, then falls back to `(brandId, itemName)`. Accept `modelNumber`
-  and `msrp`.
+  modelKey)` first, then falls back to `(brandId, itemName)`. Accept `modelNumber`,
+  `msrp` (and derive `msrpCents` via `parsePriceCents`).
+- **New money helpers** (`src/backend/lib/money.ts`): `parsePriceCents(text)` →
+  integer cents | null; `parseDiscountPct(text)` → real percent | null. Used by the
+  tools and the backfill's app-side equivalents.
 - `link_product_to_showroom`: unchanged (stays a bare link).
 - **New:** `record_price_observation` MCP tool + `POST` route — create an
-  observation (showroom or online) for a product; optional `sourcePhotoId`.
+  observation (showroom / online / manufacturer) for a product; accepts text
+  price/salePrice/discount and derives the numeric pair (or takes explicit
+  `priceCents`/`salePriceCents`/`discountPct`); optional `sourcePhotoId`.
 - **New:** `list_price_observations` (or fold into `get_product`) so B can render
   "prices across showrooms."
-- `get_product` response gains: `msrp`, `modelNumber`, `priceObservations[]`
-  (grouped by source), `photos[]`.
+- `get_product` response gains: `msrp`/`msrpCents`, `modelNumber`,
+  `priceObservations[]` (grouped by source, with numeric fields), `photos[]`.
 - `mark_material_purchased.purchasedShowroomProductId` — still valid; product ids
   are preserved through dedup (survivor id).
 
@@ -233,6 +266,8 @@ same discipline.
   HITL merge queue.
 - **Model # typos across visits** create false distinct products → `modelKey`
   normalization reduces but won't eliminate; HITL merge covers the rest.
+- **Unparseable prices** ("call for pricing") → text stored, numeric `NULL`; never
+  block the write on a failed parse.
 - **Dedup re-pointing** must move *all* child FKs (materials, images, specs, intel,
   research, ratings, notes, docs, wishlist links) — enumerate exhaustively in the
   migration script and assert zero orphans after.
@@ -243,9 +278,11 @@ same discipline.
 
 - Migration test on a copy of prod-shaped data: assert row counts before/after,
   zero orphaned child rows, no unique-index violations, `storeId` gone.
-- Unit: `modelKey` normalization; `ensure_product` dedup precedence.
+- Unit: `modelKey` normalization; `parsePriceCents` / `parseDiscountPct`;
+  `ensure_product` dedup precedence.
 - Route/MCP: create product without storeId; record observations from all three
-  source types; `get_product` returns grouped observations + photos.
+  source types with text→numeric derivation; `get_product` returns grouped
+  observations (with numeric fields) + photos.
 - Vectorize↔D1 pairing: a `ragUuid` written to `PHOTO_INDEX` metadata resolves to
   exactly one `product_showroom_photos` row and back; `attributes` JSON round-trips.
 
@@ -258,15 +295,17 @@ same discipline.
   needing a registered product** (a material with no linked *purchased* product).
 - After a browse selection: product listing + **dynamic filter sidebar** (the
   `ecommerce27` shadcn component + provided `FilterSidebar`), facets derived from
-  the underlying products (brand, color/quality, price range, product type,
-  showroom, plus **purchased** and **wishlisted** toggles).
+  the underlying products (brand, color/quality, **price range** — driven by the
+  numeric `priceCents`, product type, showroom, plus **purchased** and
+  **wishlisted** toggles).
 - Product cards show **purchased** and **wishlisted** attributes (from
   `mark_material_purchased` / wishlist tables).
 - Clicking a product opens the existing
   [ProductViewportApp](../../../src/frontend/components/showroom/ProductViewportApp.tsx)
   PDP, extended to list **showrooms where it was registered + the different prices
-  across them** (from `product_price_observations`) and **similar products** (from
-  Vectorize visual-quality search, provided by C). Add-to-wishlist from this view.
+  across them** (from `product_price_observations`, sorted by `priceCents`) and
+  **similar products** (from Vectorize visual-quality search, provided by C).
+  Add-to-wishlist from this view.
 
 ## Subsystem C — Showroom-photo AI + HITL + vectorized qualities (outline, own spec)
 
@@ -281,6 +320,8 @@ same discipline.
   response in `attributes` JSON. Similar-products/quality search queries Vectorize,
   then joins returned `ragUuid`s back to D1 for attributes + status. This mirrors the
   existing `browser_run_pages.ragUuid` pattern.
+- Extracted prices/discounts flow into `product_price_observations` as the text +
+  numeric pair (numeric derived by the same helpers).
 - New/unmatched extractions **auto-create the global product** (from A) and queue it
   for **HITL review**; observations and photos land `pending`.
 - HITL review surface (extend `/admin/prepare/review` patterns) **and an MCP tool**

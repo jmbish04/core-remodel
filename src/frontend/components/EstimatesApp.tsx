@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ServicePicker } from "@/components/services";
 
 interface EstimateCompany {
   id: number;
@@ -47,6 +48,8 @@ interface RevisionDetail {
     unitCostCents: number | null;
     qty: number | null;
     uom: string | null;
+    serviceId?: number | null;
+    serviceName?: string | null;
   }>;
   documents: Array<{
     id: number;
@@ -142,13 +145,15 @@ export function EstimatesApp() {
     }
   }, []);
 
-  useEffect(() => {
-    if (!activeEstimateId || !selectedRevisionId) {
-      setRevisionDetail(null);
-      return;
-    }
-    const loadDetail = async () => {
-      setLoadingRevisionDetail(true);
+  // Extracted so a service-link write can silently refetch the same revision
+  // detail after persisting (see the ServicePicker onPick below).
+  const loadRevisionDetail = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!activeEstimateId || !selectedRevisionId) {
+        setRevisionDetail(null);
+        return;
+      }
+      if (!opts?.silent) setLoadingRevisionDetail(true);
       try {
         const response = await fetch(
           `/api/estimates/${activeEstimateId}/revisions/${selectedRevisionId}`,
@@ -161,11 +166,15 @@ export function EstimatesApp() {
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Failed to load revision detail");
       } finally {
-        setLoadingRevisionDetail(false);
+        if (!opts?.silent) setLoadingRevisionDetail(false);
       }
-    };
-    loadDetail();
-  }, [activeEstimateId, selectedRevisionId]);
+    },
+    [activeEstimateId, selectedRevisionId],
+  );
+
+  useEffect(() => {
+    void loadRevisionDetail();
+  }, [loadRevisionDetail]);
 
   useEffect(() => {
     const protocol = window.location.protocol === "https:" ? "wss" : "ws";
@@ -420,6 +429,32 @@ export function EstimatesApp() {
                               {lineItem.qty || "—"} {lineItem.uom || ""} ·{" "}
                               {formatCurrency(lineItem.lineTotalCents)}
                             </p>
+                            <div className="mt-1.5">
+                              <ServicePicker
+                                serviceId={lineItem.serviceId ?? null}
+                                serviceName={lineItem.serviceName ?? null}
+                                onPick={async (serviceId) => {
+                                  const res = await fetch(
+                                    `/api/estimates/line-items/${lineItem.id}`,
+                                    {
+                                      method: "PATCH",
+                                      headers: { "Content-Type": "application/json" },
+                                      body: JSON.stringify({ serviceId }),
+                                      credentials: "include",
+                                    },
+                                  );
+                                  if (!res.ok) {
+                                    const j = (await res
+                                      .json()
+                                      .catch(() => ({}))) as { error?: string };
+                                    throw new Error(
+                                      j.error ?? `Failed to link service (${res.status})`,
+                                    );
+                                  }
+                                  await loadRevisionDetail({ silent: true });
+                                }}
+                              />
+                            </div>
                           </div>
                         ))
                       )}

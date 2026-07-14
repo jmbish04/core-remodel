@@ -37,8 +37,12 @@ export const NAV_GROUPS: NavGroupDef[] = [
     label: "Contractors",
     admin: true,
     items: [
+      { href: "/admin/inbox/all", label: "All Inboxes" },
+      { href: "/admin/inbox", label: "Email Inbox" },
+      { href: "/admin/inbox/gmail", label: "Gmail Inbox" },
       { href: "/admin/companies", label: "Companies" },
       { href: "/admin/estimates", label: "Estimates" },
+      { href: "/admin/services", label: "Services" },
       { href: "/admin/contracts", label: "Contracts" },
       { href: "/admin/bids", label: "Bid Portfolios" },
       { href: "/admin/pmo/schedule/contractor", label: "Schedule" },
@@ -54,8 +58,12 @@ export const NAV_GROUPS: NavGroupDef[] = [
     items: [
       { href: "/admin/shopping", label: "Sourcing & Shopping tools" },
       { href: "/admin/shopping/showrooms", label: "Showrooms" },
+      { href: "/admin/shopping/drives", label: "Showroom Drives" },
       { href: "/admin/shopping/schedule", label: "Materials Schedule" },
       { href: "/admin/shopping/products", label: "Products" },
+      { href: "/admin/shopping/photo-intake", label: "Showroom Intake" },
+      { href: "/admin/shopping/photo-review", label: "Price-Card Review" },
+      { href: "/admin/shopping/wishlist", label: "Wishlist" },
       { href: "/admin/shopping/journal", label: "Shopping Journal" },
       { href: "/admin/shopping/research", label: "Deep Research" },
     ],
@@ -91,8 +99,11 @@ export const NAV_GROUPS: NavGroupDef[] = [
     items: [
       { href: "/admin", label: "Analytics" },
       { href: "/admin/plans", label: "Plans" },
+      { href: "/admin/studio", label: "Studio" },
+      { href: "/admin/mcp-ops", label: "MCP Ops" },
       { href: "/admin/integrations/usage", label: "Integrations Usage" },
-      { href: "/admin/config", label: "Config" },
+      // Config is reached via the cog wheel in the top header (opens /admin/config
+      // in its own tab with the dedicated config sidebar) — not a sidebar item.
     ],
   },
   {

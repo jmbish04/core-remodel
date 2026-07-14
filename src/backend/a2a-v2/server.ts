@@ -287,7 +287,8 @@ class AIAgentExecutor implements AgentExecutor {
         { role: "user", content: userText || "Provide a short status update." },
       ],
       stream: false,
-    });
+      gateway: { id: this.env.AI_GATEWAY_ID },
+    } as Parameters<typeof this.env.AI.run>[1]);
 
     const text = coerceAssistantText(response).trim();
     if (text) {
