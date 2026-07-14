@@ -24,13 +24,13 @@ import { getAgentByName } from "agents";
 
 import {
   showroomStores,
-  showroomHours,
+  showroomStoreHours,
   showroomPhotosMapping,
   showroomStoreCategoryMapping,
 } from "@backend/db/schema/showroom/index";
 import { GoogleMapsService } from "@backend/services/google/maps";
 import {
-  deriveHoursSummary,
+  deriveIsOpenWeekends,
   hoursJsonSchema,
   hoursJsonToRows,
   normalizeHoursJson,
@@ -150,7 +150,7 @@ showroomBackfillRouter.openapi(
 
     // Aggregate presence of one-to-many enrichment across all stores in 3 reads.
     const [hoursRows, photoRows, categoryRows] = await Promise.all([
-      db.selectDistinct({ id: showroomHours.showroomId }).from(showroomHours),
+      db.selectDistinct({ id: showroomStoreHours.showroomId }).from(showroomStoreHours),
       db.selectDistinct({ id: showroomPhotosMapping.showroomId }).from(showroomPhotosMapping),
       db.selectDistinct({ id: showroomStoreCategoryMapping.storeId }).from(showroomStoreCategoryMapping),
     ]);
@@ -466,14 +466,11 @@ showroomBackfillRouter.openapi(
       if (!store.pricePoint && f.pricePoint) update.pricePoint = f.pricePoint;
 
       // Structured hours — fill-blanks the store's hoursJson blob plus the
-      // derived display/filter fields (weekdayHours / weekendHours /
-      // isOpenWeekends), mirroring what the intake create handler derives.
+      // derived isOpenWeekends flag, mirroring what the intake create handler
+      // derives. (The normalized showroom_store_hours rows are written below.)
       if (f.hoursJson && store.hoursJson == null) {
-        const derived = deriveHoursSummary(f.hoursJson);
         update.hoursJson = normalizeHoursJson(f.hoursJson);
-        update.weekdayHours = derived.weekdayHours;
-        update.weekendHours = derived.weekendHours;
-        update.isOpenWeekends = derived.isOpenWeekends;
+        update.isOpenWeekends = deriveIsOpenWeekends(f.hoursJson);
       }
 
       // Link the confirmed place_id — only when the store has none AND no other
@@ -507,14 +504,14 @@ showroomBackfillRouter.openapi(
       const effectiveHours = f.hoursJson ?? store.hoursJson ?? null;
       if (effectiveHours) {
         const [existingHours] = await db
-          .select({ id: showroomHours.id })
-          .from(showroomHours)
-          .where(eq(showroomHours.showroomId, item.showroomId))
+          .select({ id: showroomStoreHours.id })
+          .from(showroomStoreHours)
+          .where(eq(showroomStoreHours.showroomId, item.showroomId))
           .limit(1);
         if (!existingHours) {
           const rows = hoursJsonToRows(item.showroomId, effectiveHours);
           if (rows.length > 0) {
-            await db.insert(showroomHours).values(
+            await db.insert(showroomStoreHours).values(
               rows as [(typeof rows)[number], ...(typeof rows)[number][]],
             );
           }

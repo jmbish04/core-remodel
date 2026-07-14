@@ -83,8 +83,14 @@ import {
 import { HoursEditor } from "./intake/HoursEditor";
 import { FlagsEditor } from "./intake/FlagsEditor";
 import { OverviewNoteEditor } from "./OverviewNoteEditor";
-import { DEFAULT_HOURS, type HoursJson } from "./intake/hours-types";
 import {
+  DEFAULT_HOURS,
+  type DayKey,
+  type HoursJson,
+  weekdayWeekendLines,
+} from "./intake/hours-types";
+import {
+  computeShowroomStatus,
   isOpenNow as isOpenNowStructured,
   type HourRow,
 } from "./hours-status";
@@ -109,8 +115,8 @@ interface Store {
   userRating: number | null;
   isAppointmentOnly: boolean;
   isFlagshipLocation: boolean;
-  weekdayHours: string | null;
-  weekendHours: string | null;
+  /** Structured weekly hours (7-key {open,close}|null); source of truth for hours display. */
+  hoursJson: HoursJson | null;
   isOpenWeekends: boolean;
   websiteUrl: string | null;
   phoneNumber: string | null;
@@ -287,48 +293,6 @@ const DAY_INDEX: Record<string, number> = {
   sat: 6,
 };
 
-const STANDARD_CLOSE_MIN = 17 * 60; // 5:00 PM — anything later counts as "open late".
-
-function parseTimeToMinutes(tok: string): number | null {
-  const m = tok.match(/(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\.?/i);
-  if (!m) return null;
-  let h = parseInt(m[1], 10);
-  const min = m[2] ? parseInt(m[2], 10) : 0;
-  const mer = m[3].toLowerCase();
-  if (mer === "p" && h !== 12) h += 12;
-  if (mer === "a" && h === 12) h = 0;
-  return h * 60 + min;
-}
-
-function parseHoursRange(text: string | null): { open: number; close: number } | null {
-  if (!text) return null;
-  const matches = text.match(/\d{1,2}(?::\d{2})?\s*[ap]\.?m\.?/gi);
-  if (!matches || matches.length < 2) return null;
-  const open = parseTimeToMinutes(matches[0]);
-  const close = parseTimeToMinutes(matches[matches.length - 1]);
-  if (open === null || close === null) return null;
-  return { open, close };
-}
-
-type HoursState = "open" | "closing" | "closed" | "unknown";
-
-function hoursColumnStatus(
-  text: string | null,
-  appliesToday: boolean,
-  nowMin: number,
-): { range: { open: number; close: number } | null; openLate: boolean; state: HoursState } {
-  const range = parseHoursRange(text);
-  const openLate = range ? range.close > STANDARD_CLOSE_MIN : false;
-  let state: HoursState = "unknown";
-  if (range && appliesToday) {
-    if (nowMin >= range.close) state = "closed";
-    else if (nowMin >= range.close - 60) state = "closing";
-    else if (nowMin >= range.open) state = "open";
-    else state = "unknown"; // before opening — no live badge
-  }
-  return { range, openLate, state };
-}
-
 interface PstNow {
   day: number; // 0 = Sun … 6 = Sat
   minutes: number; // minutes since midnight, PST
@@ -359,33 +323,6 @@ function computePst(): PstNow {
   const minute = parseInt(get("minute"), 10) || 0;
   const minutes = hour * 60 + minute;
   return { day: DAY_INDEX[wd] ?? 0, minutes, label: fmt12(minutes) };
-}
-
-/**
- * Whether a weekend-hours string applies on the given PST day. "Sat 10AM-4PM"
- * applies only Saturday, "Sun …" only Sunday; a range naming both days, saying
- * "weekend"/"wknd", or naming no day at all applies to both. (Weekday hours are
- * assumed to apply on all weekdays — this guard is weekend-only.)
- */
-function weekendHoursApplyToday(text: string | null, day: number): boolean {
-  if (!text) return false;
-  const t = text.toLowerCase();
-  const sat = t.includes("sat");
-  const sun = t.includes("sun");
-  if (t.includes("weekend") || t.includes("wknd") || (sat && sun) || (!sat && !sun)) return true;
-  if (day === 6) return sat; // Saturday
-  if (day === 0) return sun; // Sunday
-  return false;
-}
-
-function isOpenNow(store: Store, pst: PstNow): boolean {
-  if (store.isAppointmentOnly) return false;
-  const isWeekday = pst.day >= 1 && pst.day <= 5;
-  const text = isWeekday ? store.weekdayHours : store.weekendHours;
-  if (!isWeekday && !weekendHoursApplyToday(text, pst.day)) return false;
-  const range = parseHoursRange(text);
-  if (!range) return false;
-  return pst.minutes >= range.open && pst.minutes < range.close;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -498,21 +435,26 @@ function RatingRow({ store }: { store: Store }) {
   );
 }
 
+const WEEKDAY_DAY_KEYS: DayKey[] = ["mon", "tue", "wed", "thu", "fri"];
+const WEEKEND_DAY_KEYS: DayKey[] = ["sat", "sun"];
+
+/** Live open/closed chip for a column: derived from computeShowroomStatus. */
+type ColumnState = "open" | "closing" | "closed" | null;
+
 /** A single hours column (weekday / weekend). */
 function HoursColumn({
   label,
   text,
-  appliesToday,
-  nowMin,
+  openLate,
+  state,
   emptyBadge,
 }: {
   label: string;
   text: string | null;
-  appliesToday: boolean;
-  nowMin: number;
+  openLate: boolean;
+  state: ColumnState;
   emptyBadge?: string;
 }) {
-  const { range, openLate, state } = hoursColumnStatus(text, appliesToday, nowMin);
   return (
     <div className="min-w-0">
       <div className="text-[8px] uppercase tracking-wider text-muted-foreground/60">{label}</div>
@@ -528,22 +470,22 @@ function HoursColumn({
           {openLate && (
             <Moon
               className="size-2.5 shrink-0 text-sky-400"
-              aria-label="Open past 5 PM"
+              aria-label="Open past 6 PM"
             />
           )}
         </div>
       )}
-      {state === "closing" && (
+      {text && state === "closing" && (
         <span className="mt-0.5 inline-block rounded bg-amber-500/15 px-1 text-[8px] font-medium text-amber-300">
           Closing soon
         </span>
       )}
-      {state === "closed" && (
+      {text && state === "closed" && (
         <span className="mt-0.5 inline-block rounded bg-rose-500/15 px-1 text-[8px] font-medium text-rose-300">
           Closed
         </span>
       )}
-      {state === "open" && (
+      {text && state === "open" && (
         <span className="mt-0.5 inline-block rounded bg-emerald-500/15 px-1 text-[8px] font-medium text-emerald-300">
           Open
         </span>
@@ -553,21 +495,39 @@ function HoursColumn({
 }
 
 function HoursFooter({ store, pst, className }: { store: Store; pst: PstNow; className?: string }) {
+  const hj = store.hoursJson;
+  const lines = hj ? weekdayWeekendLines(hj) : null;
+
+  // Text lines come from structured hours; an empty column (no open days that
+  // group) shows the em-dash / emptyBadge instead of a summary.
+  const hasWeekday = WEEKDAY_DAY_KEYS.some((k) => hj?.[k] != null);
+  const hasWeekend = WEEKEND_DAY_KEYS.some((k) => hj?.[k] != null);
+  const weekdayText = hasWeekday ? lines?.weekday ?? null : null;
+  const weekendText = hasWeekend ? lines?.weekend ?? null : null;
+
+  // "Open late" (Moon): any day in the column closes at/after 6 PM.
+  const weekdayLate = WEEKDAY_DAY_KEYS.some((k) => (hj?.[k]?.close ?? "") >= "18:00");
+  const weekendLate = WEEKEND_DAY_KEYS.some((k) => (hj?.[k]?.close ?? "") >= "18:00");
+
+  // Live status for TODAY's actual row; shown only on the applicable column.
   const isWeekday = pst.day >= 1 && pst.day <= 5;
-  const weekendAppliesToday = !isWeekday && weekendHoursApplyToday(store.weekendHours, pst.day);
+  const isWeekend = pst.day === 0 || pst.day === 6;
+  const status = computeShowroomStatus(store.hours, pst)?.status ?? null;
+  const chip: ColumnState = status === "closing-soon" ? "closing" : status;
+
   return (
     <div className={`grid grid-cols-3 gap-2 ${className ?? ""}`}>
       <HoursColumn
         label="Mon–Fri"
-        text={store.weekdayHours}
-        appliesToday={isWeekday}
-        nowMin={pst.minutes}
+        text={weekdayText}
+        openLate={weekdayLate}
+        state={isWeekday ? chip : null}
       />
       <HoursColumn
         label="Weekend"
-        text={store.weekendHours}
-        appliesToday={weekendAppliesToday}
-        nowMin={pst.minutes}
+        text={weekendText}
+        openLate={weekendLate}
+        state={isWeekend ? chip : null}
         emptyBadge="No weekend hours"
       />
       <div className="flex items-start justify-end">
@@ -2260,6 +2220,7 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
           isAppointmentOnly: s.isAppointmentOnly ?? false,
           isFlagshipLocation: s.isFlagshipLocation ?? false,
           isOpenWeekends: s.isOpenWeekends ?? false,
+          hoursJson: s.hoursJson ?? null,
           hours: s.hours ?? [],
           heroImageCfImagesUrl: s.heroImageCfImagesUrl ?? null,
           googleRating: s.googleRating ?? null,

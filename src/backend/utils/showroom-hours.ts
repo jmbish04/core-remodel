@@ -13,7 +13,7 @@
 
 import { z } from "@hono/zod-openapi";
 
-import { showroomHours, showroomStores } from "@backend/db/schema/showroom/index";
+import { showroomStoreHours, showroomStores } from "@backend/db/schema/showroom/index";
 
 /** Zod schema for a single day's window (24-hour "HH:MM"), or null when closed. */
 const dayWindowSchema = z
@@ -68,8 +68,8 @@ function parseHhmm(hhmm: string): { hour: number; minute: number } {
 export function hoursJsonToRows(
   showroomId: number,
   hoursJson: NonNullable<HoursJson>,
-): Array<typeof showroomHours.$inferInsert> {
-  const rows: Array<typeof showroomHours.$inferInsert> = [];
+): Array<typeof showroomStoreHours.$inferInsert> {
+  const rows: Array<typeof showroomStoreHours.$inferInsert> = [];
   for (const [key, day] of Object.entries(DAY_KEY_TO_ENUM)) {
     const slot = hoursJson[key as keyof typeof hoursJson];
     if (!slot) continue; // null / absent → closed that day
@@ -108,85 +108,86 @@ export function normalizeHoursJson(hoursJson: NonNullable<HoursJson>): HoursJson
   };
 }
 
-// ─── Display-summary derivation ───────────────────────────────────────────────
+// ─── Derived flags ────────────────────────────────────────────────────────────
 
-/** Day abbreviation labels used for human-readable summary strings. */
-const DAY_LABELS: Record<"mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun", string> = {
-  mon: "Mon",
-  tue: "Tue",
-  wed: "Wed",
-  thu: "Thu",
-  fri: "Fri",
-  sat: "Sat",
-  sun: "Sun",
+/** True when the store is open Saturday or Sunday. Derived from `hoursJson`. */
+export function deriveIsOpenWeekends(hoursJson: NonNullable<HoursJson>): boolean {
+  return Boolean(hoursJson.sat || hoursJson.sun);
+}
+
+// ─── Legacy free-text → structured hoursJson (one-time backfill) ───────────────
+
+/** Full day-name (lowercased) → hoursJson day-key. */
+const DAY_NAME_TO_KEY: Record<string, keyof HoursJsonColumn> = {
+  monday: "mon",
+  tuesday: "tue",
+  wednesday: "wed",
+  thursday: "thu",
+  friday: "fri",
+  saturday: "sat",
+  sunday: "sun",
 };
 
-/** Convert a 24-hour "HH:MM" string to a 12-hour "h:MM AM/PM" display string. */
-function to12h(time: string): string {
-  const [hStr, mStr] = time.split(":");
-  const h = parseInt(hStr, 10);
-  const m = mStr ?? "00";
-  const period = h < 12 ? "AM" : "PM";
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return `${h12}:${m} ${period}`;
+/**
+ * Parse a single "8:00 AM" / "8 AM" / "12:30 PM" token into 24-hour "HH:MM".
+ * Returns null when the token can't be parsed.
+ */
+function parse12hToHhmm(token: string): string | null {
+  const m = /^(\d{1,2})(?::(\d{2}))?\s*([AaPp])\.?[Mm]\.?$/.exec(token.trim());
+  if (!m) return null;
+  let hour = parseInt(m[1], 10);
+  const minute = m[2] ? parseInt(m[2], 10) : 0;
+  if (hour < 1 || hour > 12 || minute > 59) return null;
+  const isPm = m[3].toLowerCase() === "p";
+  if (hour === 12) hour = 0;
+  if (isPm) hour += 12;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 /**
- * Collapse a list of same-hours consecutive days into range strings — e.g.
- * Mon–Fri sharing "9:00 AM–5:00 PM" collapses to one "Mon–Fri 9:00 AM–5:00 PM"
- * entry. Closed (null) days are omitted.
+ * Parse the legacy free-text `weekday_hours` column — a full-week block like:
+ *
+ *   Monday: 8:00 AM – 4:30 PM
+ *   Tuesday: 8:00 AM – 4:30 PM
+ *   ...
+ *   Saturday: 8:30 AM – 3:30 PM
+ *   Sunday: Closed
+ *
+ * into the structured `hoursJson` shape. Days that are absent or "Closed" map
+ * to null. Returns null when NO day line could be parsed (nothing to migrate).
+ *
+ * One-time use for the weekday/weekend → hoursJson backfill; new writes never
+ * touch free-text hours.
  */
-function collapseHoursGroups(
-  days: Array<"mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun">,
-  hoursJson: NonNullable<HoursJson>,
-): string[] {
-  const openDays = days.filter((d) => hoursJson[d] != null);
-  if (openDays.length === 0) return [];
+export function parseLegacyHoursText(text: string | null | undefined): HoursJsonColumn | null {
+  if (!text) return null;
+  const out: HoursJsonColumn = {
+    mon: null, tue: null, wed: null, thu: null, fri: null, sat: null, sun: null,
+  };
+  let parsedAny = false;
 
-  const groups: Array<{
-    open: string;
-    close: string;
-    startDay: string;
-    endDay: string;
-  }> = [];
-
-  for (const day of openDays) {
-    const slot = hoursJson[day]!;
-    const last = groups[groups.length - 1];
-    if (last && last.open === slot.open && last.close === slot.close) {
-      last.endDay = DAY_LABELS[day];
-    } else {
-      groups.push({
-        open: slot.open,
-        close: slot.close,
-        startDay: DAY_LABELS[day],
-        endDay: DAY_LABELS[day],
-      });
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    const dm = /^([A-Za-z]+)\s*:\s*(.+)$/.exec(line);
+    if (!dm) continue;
+    const key = DAY_NAME_TO_KEY[dm[1].toLowerCase()];
+    if (!key) continue;
+    const value = dm[2].trim();
+    if (/^closed$/i.test(value)) {
+      out[key] = null;
+      parsedAny = true;
+      continue;
     }
+    // Split on any dash variant (-, –, —) with optional surrounding spaces.
+    const parts = value.split(/\s*[–—-]\s*/);
+    if (parts.length < 2) continue;
+    const open = parse12hToHhmm(parts[0]);
+    const close = parse12hToHhmm(parts[1]);
+    if (!open || !close) continue;
+    out[key] = { open, close };
+    parsedAny = true;
   }
 
-  return groups.map((g) => {
-    const dayRange = g.startDay === g.endDay ? g.startDay : `${g.startDay}–${g.endDay}`;
-    return `${dayRange} ${to12h(g.open)}–${to12h(g.close)}`;
-  });
-}
-
-/**
- * Derive the three back-compat / filter fields from a structured `hoursJson`:
- * `weekdayHours` (Mon–Fri summary), `weekendHours` (Sat/Sun summary, "Closed"
- * when both closed), and `isOpenWeekends`. Mirrors the private copy in
- * `showroom-stores.ts` so backfill writes stay in lockstep with intake writes.
- */
-export function deriveHoursSummary(hoursJson: NonNullable<HoursJson>): {
-  weekdayHours: string;
-  weekendHours: string;
-  isOpenWeekends: boolean;
-} {
-  const weekdayGroups = collapseHoursGroups(["mon", "tue", "wed", "thu", "fri"], hoursJson);
-  const weekendGroups = collapseHoursGroups(["sat", "sun"], hoursJson);
-  return {
-    weekdayHours: weekdayGroups.length > 0 ? weekdayGroups.join(", ") : "Closed",
-    weekendHours: weekendGroups.length > 0 ? weekendGroups.join(", ") : "Closed",
-    isOpenWeekends: Boolean(hoursJson.sat || hoursJson.sun),
-  };
+  return parsedAny ? out : null;
 }

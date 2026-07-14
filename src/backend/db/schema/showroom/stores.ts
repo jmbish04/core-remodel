@@ -57,9 +57,10 @@ export const showroomStores = sqliteTable("showroom_stores", {
    * ```
    * Times are 24-hour `"HH:MM"` strings in local showroom time (no timezone offset stored).
    *
-   * `weekdayHours` and `weekendHours` are retained as derived human-readable summaries
-   * for backward-compat display.  `isOpenWeekends` is derived from whether `sat`/`sun`
-   * are non-null.
+   * This blob is the WRITE source of truth. The worker derives the normalized
+   * `showroom_store_hours` rows (queryable, one per open day) and the
+   * `isOpenWeekends` flag from it. The old free-text `weekday_hours` /
+   * `weekend_hours` summary columns have been removed.
    */
   hoursJson: text("hours_json", { mode: "json" }).$type<{
     mon: { open: string; close: string } | null;
@@ -71,8 +72,6 @@ export const showroomStores = sqliteTable("showroom_stores", {
     sun: { open: string; close: string } | null;
   }>(),
 
-  weekdayHours: text("weekday_hours"),
-  weekendHours: text("weekend_hours"),
   isOpenWeekends: integer("is_open_weekends", { mode: "boolean" }).default(
     false
   ),

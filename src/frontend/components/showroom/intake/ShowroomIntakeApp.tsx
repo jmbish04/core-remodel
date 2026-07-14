@@ -130,8 +130,6 @@ const EMPTY_VALUES: ShowroomIntakeInput = {
   websiteUrl: "",
   instagramUrl: "",
   googleMapsLink: "",
-  weekdayHours: "",
-  weekendHours: "",
   hoursJson: DEFAULT_HOURS,
   isOpenWeekends: false,
   isAppointmentOnly: false,

@@ -575,6 +575,20 @@
       "when": 1783488280680,
       "tag": "0081_ancient_molecule_man",
       "breakpoints": true
+    },
+    {
+      "idx": 82,
+      "version": "6",
+      "when": 1784003673924,
+      "tag": "0082_lucky_xavin",
+      "breakpoints": true
+    },
+    {
+      "idx": 83,
+      "version": "6",
+      "when": 1784003702125,
+      "tag": "0083_lean_gateway",
+      "breakpoints": true
     }
   ]
 }

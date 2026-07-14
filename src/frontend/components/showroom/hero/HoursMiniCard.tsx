@@ -3,45 +3,26 @@
  *
  * Two summary lines (weekday + weekend) under a Clock heading, styled as a
  * Monolith mini-card (bg-card + ring, no 1px borders). The whole card is a
- * button — clicking opens the full hours/contact/map modal. Prefers the
- * structured `hoursJson` for the summary lines; falls back to the legacy
- * `weekdayHours` / `weekendHours` strings for pre-normalization rows.
- * Renders a subtle "Hours unknown" card when no hour data exists at all so the
- * modal (contact + map) stays reachable.
+ * button — clicking opens the full hours/contact/map modal. Summary lines are
+ * derived from the structured `hoursJson`. Renders a subtle "Hours unknown"
+ * card when no hour data exists so the modal (contact + map) stays reachable.
  */
 
 import { ChevronRight, Clock } from "lucide-react";
 
 import type { HoursJson } from "../intake/hours-types";
-import { summarizeHours } from "../intake/hours-types";
-
-/** Split a summarizeHours() label into weekday + weekend display lines. */
-function linesFromHoursJson(hoursJson: HoursJson): { weekday: string; weekend: string } | null {
-  const { label } = summarizeHours(hoursJson);
-  if (label === "Hours not set") return null;
-  const parts = label.split(" · ");
-  // summarizeHours emits "Mon–Fri … · Sat… · Sun…" — first segment is the
-  // weekday line, everything after is the weekend summary.
-  return {
-    weekday: parts[0] ?? label,
-    weekend: parts.slice(1).join(" · ") || "Sat–Sun Closed",
-  };
-}
+import { weekdayWeekendLines } from "../intake/hours-types";
 
 export function HoursMiniCard({
   hoursJson,
-  weekdayHours,
-  weekendHours,
   onClick,
 }: {
   hoursJson: HoursJson | null | undefined;
-  weekdayHours: string | null | undefined;
-  weekendHours: string | null | undefined;
   onClick: () => void;
 }) {
-  const structured = hoursJson ? linesFromHoursJson(hoursJson) : null;
-  const weekday = structured?.weekday ?? weekdayHours ?? null;
-  const weekend = structured?.weekend ?? weekendHours ?? null;
+  const structured = hoursJson ? weekdayWeekendLines(hoursJson) : null;
+  const weekday = structured?.weekday ?? null;
+  const weekend = structured?.weekend ?? null;
   const hasHours = Boolean(weekday || weekend);
 
   return (

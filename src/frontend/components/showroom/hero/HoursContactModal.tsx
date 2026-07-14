@@ -27,8 +27,6 @@ import { DAY_KEYS, DAY_LABELS, to12h } from "../intake/hours-types";
 export interface HoursContactStore {
   name: string;
   hoursJson: HoursJson | null;
-  weekdayHours: string | null;
-  weekendHours: string | null;
   phoneNumber: string | null;
   emailAddress: string | null;
   websiteUrl: string | null;
@@ -128,11 +126,6 @@ export function HoursContactModal({
             {store.hoursJson ? (
               <div className="mt-1.5">
                 <WeeklyHoursTable hoursJson={store.hoursJson} />
-              </div>
-            ) : store.weekdayHours || store.weekendHours ? (
-              <div className="mt-1.5 space-y-1 text-sm text-muted-foreground">
-                {store.weekdayHours ? <p>{store.weekdayHours}</p> : null}
-                {store.weekendHours ? <p>{store.weekendHours}</p> : null}
               </div>
             ) : (
               <p className="mt-1.5 text-sm text-muted-foreground/70">

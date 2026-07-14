@@ -134,8 +134,6 @@ interface StoreDetail {
   ratingContextHtml: string | null;
   ratingContextMarkdown: string | null;
   hoursJson: HoursJson | null;
-  weekdayHours: string | null;
-  weekendHours: string | null;
   locationAddress: string | null;
   googleMapsLink: string | null;
   googleRating: number | null;
@@ -996,8 +994,6 @@ export function StoreViewportApp({
           <div className="shrink-0 sm:w-60">
             <HoursMiniCard
               hoursJson={store.hoursJson}
-              weekdayHours={store.weekdayHours}
-              weekendHours={store.weekendHours}
               onClick={() => setHoursModalOpen(true)}
             />
           </div>
@@ -1202,8 +1198,6 @@ export function StoreViewportApp({
         store={{
           name: store.name,
           hoursJson: store.hoursJson,
-          weekdayHours: store.weekdayHours,
-          weekendHours: store.weekendHours,
           phoneNumber: store.phoneNumber,
           emailAddress: store.emailAddress,
           websiteUrl: store.websiteUrl,
