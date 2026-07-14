@@ -24,6 +24,7 @@ export * from "./home/remodel_scenarios";
 export * from "./home/scenario_room_plans";
 export * from "./home/room_action_items";
 export * from "./home/budget_tracker_items";
+export * from "./home/budget_item_material_mappings";
 export * from "./home/truth_table_activities";
 export * from "./home/shopping_journal";
 export * from "./home/room_ai_summaries";
@@ -59,6 +60,8 @@ export * from "./images/inspirational_image_rooms";
 export * from "./images/listing_photos";
 export * from "./images/ai_edits";
 export * from "./images/image_reviews";
+
+export * from "./integrations/index";
 export * from "./images/mood_boards";
 export * from "./images/saved_image_searches";
 export * from "./images/image_edit_sessions";
@@ -95,6 +98,7 @@ export * from "./bid-portfolios/bid_portfolio_comments";
 export * from "./bid-portfolios/bid_portfolio_chat_messages";
 export * from "./bid-portfolios/bid_portfolio_selected_photos";
 export * from "./system/google-maps-usage";
+export * from "./system/gemini-usage";
 
 export * from "./dialer/prospects";
 export * from "./dialer/state";
@@ -103,17 +107,35 @@ export * from "./materials/index";
 
 export * from "./showroom/index";
 
+export * from "./wishlist/index";
+
 export * from "./brands/index";
 
 export * from "./research/index";
 
 export * from "./scrum/index";
 
+export * from "./services/index";
+
 // gmail
 export * from "./gmail/gmail_threads";
 export * from "./gmail/gmail_messages";
+export * from "./gmail/gmail_message_participants";
 
 // worker emails (Cloudflare Email Routing inbound)
 export * from "./emails/index";
 
-export * from "./changelog/changelog";
+// MCP ops/observability (0017) + artifact studio (0016)
+export * from "./mcp/index";
+export * from "./artifacts/index";
+
+// Showroom drive lists (planned showroom-visit route sheets)
+export * from "./drives/index";
+
+// Config-driven multi-select vocabularies (0020-C2): categories, subcategories,
+// colors + generic object<->definition mappings (AGENTS.md "Multi-select &
+// config-driven definitions").
+export * from "./config/index";
+
+// Persistent append-only changelog (branches + entries)
+export * from "./changelog/index";

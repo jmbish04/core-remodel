@@ -33,6 +33,7 @@ import {
 import { showroomStores } from "@backend/db/schema/showroom/stores";
 import { showroomStoreLinks } from "@backend/db/schema/showroom/links";
 import { showroomStoreProducts } from "@backend/db/schema/showroom/store_products";
+import { showroomProductMappings } from "@backend/db/schema/showroom/product_mappings";
 import { brands } from "@backend/db/schema/brands/brands";
 import { GoogleMapsService } from "@backend/services/google/maps";
 import { enrichNewBrand } from "@backend/services/showroom/brand-enrichment";
@@ -640,10 +641,11 @@ researchJobsRouter.openapi(
           }
         }
 
+        // Products are global (no owning store) — insert the row, then
+        // upsert a showroom_product_mappings link to the target showroom.
         const [product] = await db
           .insert(showroomStoreProducts)
           .values({
-            storeId,
             itemName: candidate.name,
             description: candidate.summary ?? null,
             productType: candidate.category ?? null,
@@ -651,6 +653,11 @@ researchJobsRouter.openapi(
           })
           .returning({ id: showroomStoreProducts.id });
         entityId = product.id;
+
+        await db
+          .insert(showroomProductMappings)
+          .values({ showroomId: storeId, productId: product.id })
+          .onConflictDoNothing();
 
         try {
           await c.env.PRODUCT_RESEARCH_WORKFLOW.create({

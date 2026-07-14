@@ -1,1 +1,0 @@
-ALTER TABLE `showroom_store_contact_business_cards` ADD `cf_image_url_back` text;

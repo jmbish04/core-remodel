@@ -19,14 +19,10 @@ import {
   FileUploadTrigger,
 } from "@/components/ui/file-upload";
 import {
-  buildImageStatusUrl,
   createTrackedUploadStateFromResult,
   getTrackedUploadLabel,
   getTrackedUploadMessage,
-  hasTrackedUploadsInFlight,
-  mergeTrackedUploadState,
   type TrackedUploadState,
-  type UploadApiImageRecord,
   type UploadApiResponse,
 } from "@/lib/image-upload-tracking";
 import { cn } from "@/lib/utils";
@@ -188,7 +184,7 @@ export function UniversalUploadApp() {
           }),
         );
       }
-    } catch (e) {
+    } catch {
       setUrlImportStatus(e instanceof Error ? e.message : "URL import failed");
     } finally {
       setUrlImporting(false);
@@ -436,10 +432,10 @@ export function UniversalUploadApp() {
         const text = await response.text();
         try {
           payload = JSON.parse(text) as UploadApiResponse;
-        } catch (e) {
+        } catch {
           throw new Error(`Server returned non-JSON response (${response.status}): ${text.slice(0, 150)}`);
         }
-      } catch (e) {
+      } catch {
         throw e instanceof Error ? e : new Error(String(e));
       }
 
@@ -844,6 +840,8 @@ export function UniversalUploadApp() {
       <UploadsMappingPanel
         refreshToken={mappingRefreshToken}
         onSummaryChange={(nextSummary) => setMappingSummary(nextSummary)}
+        category={target}
+        onCategoryChange={setTarget}
       />
 
       <Card className="ring-1 ring-border/40">

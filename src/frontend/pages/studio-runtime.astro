@@ -1,0 +1,88 @@
+---
+/**
+ * @fileoverview 0016 — Studio runtime page (NOT in nav).
+ *
+ * Loaded ONLY inside a sandboxed <iframe> from the Studio viewer. It gives the
+ * `<StudioRuntime />` island a minimal chrome-free shell (no navbar/sidebar/
+ * footer) while still loading the Monolith theme tokens so the shadcn
+ * components an artifact composes look native.
+ *
+ * SOURCE DELIVERY — why SSR-inline, not client-fetch:
+ * the viewer embeds this page with `sandbox="allow-scripts"` (no
+ * allow-same-origin), so the loaded document has an OPAQUE origin. A credentialed
+ * `fetch()` from that context to our own `/api/*` is cross-origin, so the
+ * SameSite=Lax admin cookie is NOT sent → the gated source endpoint would 401.
+ * The iframe NAVIGATION to this page, however, is same-site, so it DOES carry
+ * the cookie. We therefore read the artifact source server-side here (auth-
+ * checked) and inline it as a prop — the island never fetches source.
+ *
+ * `slug` + `revision` come from the query string.
+ */
+import { artifactRevisions, artifacts } from "@backend/db";
+import { isRequestAuthenticated } from "@backend/utils/access";
+import { desc, eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+
+import { StudioRuntime } from "@/components/StudioRuntime";
+import "@/styles/global.css";
+
+const { env } = Astro.locals.runtime;
+
+const url = Astro.url;
+const slug = url.searchParams.get("slug") ?? "";
+const revisionParam = url.searchParams.get("revision");
+const revision =
+  revisionParam && Number.isFinite(Number(revisionParam)) ? Number(revisionParam) : null;
+
+/**
+ * Resolve the artifact source server-side. Returns either the TSX to run or an
+ * actionable error string the island renders as a Monolith alert.
+ */
+async function resolveSource(): Promise<{ sourceTsx: string | null; loadError: string | null }> {
+  if (!slug) return { sourceTsx: null, loadError: "No artifact slug provided." };
+  if (!(await isRequestAuthenticated(Astro.request, env))) {
+    return { sourceTsx: null, loadError: "Admin sign-in required to load this artifact." };
+  }
+  const db = drizzle(env.DB);
+  const [artifact] = await db.select().from(artifacts).where(eq(artifacts.slug, slug)).limit(1);
+  if (!artifact) return { sourceTsx: null, loadError: "Artifact not found." };
+
+  const revisions = await db
+    .select()
+    .from(artifactRevisions)
+    .where(eq(artifactRevisions.artifactId, artifact.id))
+    .orderBy(desc(artifactRevisions.revisionNumber))
+    .all();
+  const chosen =
+    revision != null
+      ? revisions.find((r) => r.revisionNumber === revision)
+      : (revisions.find((r) => r.id === artifact.currentRevisionId) ?? revisions[0]);
+
+  if (!chosen?.sourceTsx) {
+    return { sourceTsx: null, loadError: "This revision has no source code." };
+  }
+  return { sourceTsx: chosen.sourceTsx, loadError: null };
+}
+
+const { sourceTsx, loadError } = await resolveSource();
+---
+
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Studio Runtime</title>
+    <script is:inline>
+      (() => {
+        try {
+          document.documentElement.classList.add("dark");
+        } catch {}
+      })();
+    </script>
+  </head>
+  <body class="overscroll-none antialiased bg-background text-foreground">
+    <StudioRuntime client:only="react" sourceTsx={sourceTsx} loadError={loadError} />
+  </body>
+</html>

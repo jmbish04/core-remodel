@@ -6,6 +6,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { AddToWishlistButton } from "@/components/products/AddToWishlistButton";
 import { GapPanel } from "@/components/showroom/GapPanel";
 
 interface CatalogProduct {
@@ -137,6 +138,9 @@ export function ProductsCatalogApp() {
                     ) : null}
                   </div>
                   {p.sku ? <p className="font-mono text-[11px] text-muted-foreground">SKU {p.sku}</p> : null}
+                  <div className="flex justify-end pt-1">
+                    <AddToWishlistButton productId={p.id} />
+                  </div>
                 </CardContent>
               </Card>
             </a>

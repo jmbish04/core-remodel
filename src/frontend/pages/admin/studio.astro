@@ -1,0 +1,49 @@
+---
+/**
+ * @fileoverview 0016 — Artifact Studio gallery page.
+ *
+ * Thin Astro shell mounting the `<StudioGalleryApp />` island, which lists the
+ * chat-built TSX mini-apps stored on the Worker (created via MCP tools, not the
+ * UI). Each card links to `/admin/studio/<slug>`.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { StudioGalleryApp } from "@/components/StudioGalleryApp";
+---
+
+<BaseLayout
+  title="Artifact Studio - 126 Colby - Remodel Mission Control"
+  description="Gallery of chat-built TSX artifacts — reports, apps, and dashboards rendered live on the Worker."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 flex items-center gap-2 text-3xl font-bold tracking-tight">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="size-6 text-muted-foreground"
+          aria-hidden="true"
+        >
+          <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .962 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.582a.5.5 0 0 1 0 .962L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.962 0z"></path>
+          <path d="M20 3v4"></path>
+          <path d="M22 5h-4"></path>
+          <path d="M4 17v2"></path>
+          <path d="M6 18H2"></path>
+        </svg>
+        Artifact Studio
+      </h1>
+      <p class="text-muted-foreground">
+        Chat-built mini-apps — reports, apps, and dashboards — rendered live in
+        a sandboxed runtime on the Monolith theme.
+      </p>
+    </div>
+
+    <StudioGalleryApp client:only="react" />
+  </main>
+</BaseLayout>

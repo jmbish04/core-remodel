@@ -1,11 +1,12 @@
 /**
- * Project changelog — rendered at /admin/changelog as an overview grouped by
- * BRANCH / PR. Each branch of work is one `ChangelogBranch`; the individual
- * changes shipped on it (the "phases") are `ChangelogEntry` rows tagged with the
- * branch id. Newest branch first; newest entry first within a branch.
+ * Project changelog — the bundled seed/fallback for the persistent D1 store.
  *
- * `status` is "shipped" once live on prod, "staged" while merged/committed but
- * the prod migrations + backfills haven't been applied yet.
+ * The source of truth is D1 (`changelog_branches` + `changelog_entries`), which
+ * accumulates across every branch/PR and is never overwritten. This file is
+ * (1) the one-time seed for a fresh DB (POST /api/changelog/seed) and (2) the
+ * SSR fallback the overview renders when D1 is empty. Each new branch appends a
+ * `ChangelogBranch` + its `ChangelogEntry` rows here, then registers them into
+ * D1 (POST /api/changelog/branches + /entries) so the record persists forever.
  */
 
 export type ChangeKind = "added" | "changed" | "removed" | "migration" | "fixed";
@@ -15,311 +16,87 @@ export interface ChangelogChange {
   text: string;
 }
 
-/** A branch / PR — the top-level grouping in the overview. */
 export interface ChangelogBranch {
-  /** Git branch name — the join key for entries. */
   branch: string;
-  /** Human title for the body of work. */
   title: string;
-  /** One-line description of the branch. */
   summary?: string;
-  /** ISO date the branch was opened / last updated. */
+  /** ISO date (YYYY-MM-DD). */
   date: string;
   status: "shipped" | "staged" | "open";
-  /** GitHub PR number, once opened. */
   prNumber?: number;
-  /** Full URL to the PR. */
   prUrl?: string;
-  /** Branch-level Mermaid diagrams (architecture ER, build timeline). */
-  diagrams?: { caption: string; code: string }[];
 }
 
 export interface ChangelogEntry {
   id: string;
-  /** Branch this change belongs to — matches a ChangelogBranch.branch. */
   branch: string;
-  /** ISO date (YYYY-MM-DD). */
   date: string;
-  /** Optional phase/version tag, e.g. "Phase 1". */
   tag?: string;
-  /** Product area, e.g. "Showrooms". */
   area: string;
   title: string;
   summary: string;
   changes: ChangelogChange[];
-  /** drizzle migration tags applied by this entry. */
   migrations?: string[];
   status: "shipped" | "staged";
 }
 
-/** Branches / PRs, newest first. The overview lists these; entries nest under. */
+/** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
-    branch: "claude/showroom-stores-cleanup-775bb5",
-    title: "Showroom stores cleanup",
+    branch: "claude/email-structured-extraction",
+    title: "Structured email extraction (fix the phantom 'total not stated')",
     summary:
-      "Untangled the overgrown showroom_stores table into normalized child tables and a single-payload write model — hours, address, links, contacts + business-card vision, and email auto-population.",
-    date: "2026-07-13",
+      "Inbound-email classification now uses a native Gemini responseSchema instead of a prompt-embedded schema, so receipts/invoices extract every printed field and the model stops hallucinating 'the total is not stated — check your payment method' on receipts whose total is printed.",
+    date: "2026-07-14",
     status: "staged",
-    prNumber: 128,
-    prUrl: "https://github.com/jmbish04/core-remodel/pull/128",
-    diagrams: [
-      {
-        caption:
-          "System architecture — auto-generated from the branch diff by `pnpm run mermaid:branch-impact` (Gemini via the CF AI Gateway), then validated.",
-        code: `flowchart TD
-  subgraph Frontend Applications
-    FE_AdminContacts["Admin Shopping Contacts Page"]
-    FE_ContactsApp["Contacts Phonebook App"]
-    FE_ShowroomsDir["Showrooms Directory App"]
-    FE_StoreViewport["Store Viewport App"]
-  end
-
-  subgraph Backend API Routes
-    API_Contacts["POST/GET /api/showroom-contacts"]
-    API_Stores["GET/PUT /api/showroom-stores"]
-    API_Backfill["POST /api/showroom-backfill"]
-  end
-
-  subgraph Backend Services and Utilities
-    S_GoogleMaps["Google Maps Service (Geocoding)"]
-    S_EmailHandler["Email Handler Service"]
-    U_ContactIntake["Contact Intake Utility"]
-    U_ShowroomHours["Showroom Hours Utility (Parse/Format)"]
-    U_ShowroomLinks["Showroom Links Utility"]
-    S_ScrapeWorkflow["Showroom Scrape Workflow"]
-  end
-
-  subgraph AI Agents
-    AI_ResearchAgent["Showroom Research Agent"]
-  end
-
-  subgraph Database Migration and Backfill Scripts
-    S_BackfillHours[("0083-Backfill Legacy Hours")]
-    S_BackfillLinks[("0085-Backfill Store Links")]
-    S_BackfillHoursJson[("0089-Backfill Hours JSON to Rows")]
-  end
-
-  subgraph Database Schema
-    D_Stores[("showroom_stores")]
-    D_Hours[("showroom_store_hours")]
-    D_Links[("showroom_store_links")]
-    D_Contacts[("showroom_store_contacts")]
-    D_ContactLogs[("showroom_store_contact_log")]
-    D_ContactCards[("showroom_store_contact_business_cards")]
-  end
-
-  FE_AdminContacts --> FE_ContactsApp
-  FE_ContactsApp --> API_Contacts
-  FE_ShowroomsDir --> API_Stores
-  FE_StoreViewport --> API_Stores
-
-  API_Contacts -- Manages --> U_ContactIntake
-  API_Stores -- Uses --> U_ShowroomHours
-  API_Stores -- Uses --> U_ShowroomLinks
-  API_Stores -- Updates Location via --> S_GoogleMaps
-
-  U_ContactIntake -- Creates/Updates --> D_Contacts
-  U_ContactIntake -- Triggers --> S_EmailHandler
-  S_GoogleMaps -- Updates --> D_Stores
-  S_ScrapeWorkflow -- Updates --> D_Stores
-  S_ScrapeWorkflow -- Uses --> U_ShowroomHours
-  S_ScrapeWorkflow -- Uses --> U_ShowroomLinks
-
-  API_Contacts -- CRUD --> D_Contacts
-  API_Contacts -- Logs to --> D_ContactLogs
-  API_Contacts -- Manages --> D_ContactCards
-  API_Stores -- Reads/Updates --> D_Stores
-  API_Stores -- Reads/Updates --> D_Hours
-  API_Stores -- Reads/Updates --> D_Links
-
-  API_Backfill --> S_BackfillHours
-  API_Backfill --> S_BackfillLinks
-  API_Backfill --> S_BackfillHoursJson
-  S_BackfillHours -- Reads old columns from --> D_Stores
-  S_BackfillHours -- Writes structured data to --> D_Hours
-  S_BackfillLinks -- Reads old columns from --> D_Stores
-  S_BackfillLinks -- Writes structured data to --> D_Links
-  S_BackfillHoursJson -- Reads JSON from --> D_Stores
-  S_BackfillHoursJson -- Writes structured data to --> D_Hours
-
-  AI_ResearchAgent -- Reads from --> D_Stores
-  AI_ResearchAgent -- Calls --> API_Stores
-
-  D_Stores -- "1:N (has)" --> D_Hours
-  D_Stores -- "1:N (has)" --> D_Links
-  D_Stores -- "1:N (has)" --> D_Contacts
-  D_Contacts -- "1:N (logs)" --> D_ContactLogs
-  D_Contacts -- "1:N (cards)" --> D_ContactCards`,
-      },
-      {
-        caption: "Data model (after) — showroom_stores shed its inline columns into typed child tables.",
-        code: `erDiagram
-  showroom_stores ||--o{ showroom_store_hours : "hours"
-  showroom_stores ||--o{ showroom_store_links : "urls"
-  showroom_stores ||--o{ showroom_store_contacts : "people"
-  showroom_store_contacts ||--o{ showroom_store_contact_log : "interactions"
-  showroom_store_contacts ||--o{ showroom_store_contact_business_cards : "cards"
-  showroom_stores {
-    integer id PK
-    text name
-    text location_city
-    text location_state
-    integer is_open_weekends
-  }
-  showroom_store_hours {
-    integer id PK
-    integer showroom_id FK
-    text day
-    integer open_hour
-    integer close_hour
-  }
-  showroom_store_links {
-    integer id PK
-    integer store_id FK
-    text url
-    text type
-  }
-  showroom_store_contacts {
-    integer id PK
-    integer store_id FK
-    text type
-    text first_name
-    text last_name
-    text email_address
-    integer is_draft
-  }
-  showroom_store_contact_log {
-    integer id PK
-    integer store_contact_id FK
-    text outcome_of_conversation
-  }
-  showroom_store_contact_business_cards {
-    integer id PK
-    integer contact_id FK
-    text status
-    text cf_image_url
-  }`,
-      },
-      {
-        caption: "Build timeline — the five phases on this branch.",
-        code: `gitGraph
-  commit id: "Phase 1 hours"
-  commit id: "Phase 2 address"
-  commit id: "Phase 3 links"
-  commit id: "Phase 4 contacts"
-  commit id: "Phase 5 email"
-  commit id: "changelog + docs"`,
-      },
-    ],
+    prNumber: 129,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/129",
+  },
+  {
+    branch: "claude/worker-inbox-hitl-v2",
+    title: "Persistent append-only changelog",
+    summary:
+      "A durable, D1-backed changelog that accumulates across every branch/PR and is never overwritten by a static file — with a full detail page per entry and an agent-facing standard for keeping it current.",
+    date: "2026-07-14",
+    status: "staged",
+    prNumber: 127,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/127",
   },
 ];
 
+/** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    id: "showroom-editing",
-    branch: "claude/showroom-stores-cleanup-775bb5",
+    id: "email-structured-extraction",
+    branch: "claude/email-structured-extraction",
     date: "2026-07-14",
-    tag: "Phase 6",
-    area: "Showrooms",
-    title: "Edit hours, address & links — and smarter contact intake",
+    area: "Inbox",
+    title: "Structured email extraction via responseSchema",
     summary:
-      "Everything the cleanup normalized can now be corrected after intake — hours, address, and links — from the API, an MCP tool, or the showroom page. And a business card that carries store details now fills the showroom in automatically.",
-    status: "staged",
+      "Gemini email analysis now emits structured output against a native responseSchema, capturing merchant type, order number, delivery date, discount, shipping, and per-item brand/model/variant — and a guard drops the phantom 'total not stated' payment flag when a total was actually extracted.",
     changes: [
-      { kind: "added", text: "Correct a showroom's hours / address / links after intake — PUT /:id/hours, PUT /:id/address, /:id/links CRUD, plus a Contacts-style editor on the showroom page." },
-      { kind: "added", text: "MCP tools set_showroom_address + set_showroom_links (with set_showroom_hours) so an AI or a script can bulk-fill or fix these." },
-      { kind: "changed", text: "Creating a contact now requires a name and optionally accepts the generic showroom details a business card carries (name/address/website/socials/phone/email) — the worker matches the store and fills any missing store info." },
-      { kind: "added", text: "The intake form collects links; the store viewport lets you add/edit/delete them." },
-      { kind: "fixed", text: "The email-to-contacts flow diagram was malformed — rewritten + validated." },
+      { kind: "fixed", text: "Phantom 'total is not stated — check your payment method' flag on receipts whose total is printed (e.g. the Costco order)." },
+      { kind: "changed", text: "classify.ts now passes config.responseSchema (native structured output) instead of a prompt-embedded JSON schema." },
+      { kind: "added", text: "Richer extraction: merchantType, orderNumber, estimatedDeliveryDate, discount, shipping, currency + per-line brand/modelNumber/variant (persisted in extracted_raw_json)." },
+      { kind: "added", text: "extraction-schema.ts — the native @google/genai Schema for the full analysis." },
     ],
+    status: "staged",
   },
   {
-    id: "showroom-email-contacts",
-    branch: "claude/showroom-stores-cleanup-775bb5",
-    date: "2026-07-13",
-    tag: "Phase 5",
-    area: "Showrooms",
-    title: "Emails become contacts automatically",
+    id: "changelog-persistent-d1",
+    branch: "claude/worker-inbox-hitl-v2",
+    date: "2026-07-14",
+    area: "Platform",
+    title: "Persistent append-only changelog",
     summary:
-      "When a showroom emails you, the platform reads the signature and files the sender into the phonebook — mapped to the right showroom by email domain or name. Senders it can’t place are saved as drafts for a quick one-tap map.",
-    status: "staged",
+      "D1-backed changelog (changelog_branches + changelog_entries) surfaced at /admin/changelog, with a full detail page per entry and a mandatory agent workflow in AGENTS.md.",
     changes: [
-      { kind: "added", text: "Inbound worker email (remodel@hacolby.app) auto-registers a showroom contact from the sender’s signature (name, email, phone, website)." },
-      { kind: "added", text: "Domain/name matching maps the contact to the right showroom; unmatched senders are saved as draft contacts for triage in the phonebook." },
-      { kind: "changed", text: "Only runs when the sender isn’t already a known contractor company (those stay in the CRM), and de-duplicates on the sender email." },
+      { kind: "added", text: "changelog_branches + changelog_entries tables (upsert by branch / slug — append-only, never overwritten)." },
+      { kind: "added", text: "/api/changelog write API (POST /branches, /entries, /seed) + read (GET /, /:slug)." },
+      { kind: "added", text: "/admin/changelog reads D1 at SSR, falls back to bundled seed data when empty; /admin/changelog/:slug detail pages." },
+      { kind: "added", text: "AGENTS.md 'Changelog discipline (MANDATORY)': agents log entries every code turn + before every PR." },
     ],
-  },
-  {
-    id: "showroom-contacts",
-    branch: "claude/showroom-stores-cleanup-775bb5",
-    date: "2026-07-13",
-    tag: "Phase 4",
-    area: "Showrooms",
-    title: "Contacts phonebook + business-card scanning",
-    summary:
-      "A real contact system for showroom reps: a searchable phonebook you can tap to call or email, a store-level general line, and bulk business-card import that reads the card with vision and files the details into the right place.",
+    migrations: ["0107_ordinary_hawkeye"],
     status: "staged",
-    migrations: ["0087"],
-    changes: [
-      { kind: "added", text: "Contacts phonebook at Shopping → Contacts: search, type filter, A–Z quick-jump rail, and tap-to-dial / tap-to-email numbers for phone and Tesla screens." },
-      { kind: "added", text: "A Contacts tab on each showroom, showing that store’s general line + people." },
-      { kind: "added", text: "Bulk business-card import: drop in photos, a vision model extracts each card and creates the contact; cards it can’t read are flagged for a quick manual entry." },
-      { kind: "added", text: "Smart intake splits a person’s cell/direct/office numbers, promotes the office line to the store’s general contact, and routes the website + address to the right tables — you just send the raw details." },
-      { kind: "added", text: "Interaction log per contact (what was said, when, follow-ups) + MCP tools so an AI can add contacts and resolve failed cards." },
-    ],
-  },
-  {
-    id: "showroom-links",
-    branch: "claude/showroom-stores-cleanup-775bb5",
-    date: "2026-07-13",
-    tag: "Phase 3",
-    area: "Showrooms",
-    title: "Links table — one home for every showroom URL",
-    summary:
-      "Website + social URLs moved off the store row into a typed showroom_store_links table. The store viewport, directory, and API keep working unchanged — responses derive the old flat fields from the links.",
-    status: "staged",
-    migrations: ["0085", "0086"],
-    changes: [
-      { kind: "added", text: "showroom_store_links table: one row per link, typed WEBSITE / INSTAGRAM / PINTEREST / FACEBOOK / OTHER with url_notes." },
-      { kind: "added", text: "Send a links[] payload on create/update (replace-all), or manage them one at a time via /:id/links CRUD." },
-      { kind: "changed", text: "Favicon + website scrape now source the site from the WEBSITE link; the scrape writes any Instagram it finds as an INSTAGRAM link." },
-      { kind: "removed", text: "Flat website_url / instagram_url / facebook_url / pinterest_url columns on showroom_stores." },
-    ],
-  },
-  {
-    id: "showroom-address",
-    branch: "claude/showroom-stores-cleanup-775bb5",
-    date: "2026-07-13",
-    tag: "Phase 2",
-    area: "Showrooms",
-    title: "Addresses split into real parts",
-    summary:
-      "City-only stubs like “San Carlos, CA” are replaced with full Google-verified addresses, broken into street number, street, city, state, and ZIP — plus a filled-in Google Maps link.",
-    status: "staged",
-    migrations: ["0084"],
-    changes: [
-      { kind: "added", text: "Granular location_street_number / _street_name / _city / _state / _zip_code columns." },
-      { kind: "added", text: "Address backfill from Google Places (dry-run by default) that overwrites city-only stubs with the full formatted address + maps link." },
-    ],
-  },
-  {
-    id: "showroom-hours",
-    branch: "claude/showroom-stores-cleanup-775bb5",
-    date: "2026-07-13",
-    tag: "Phase 1",
-    area: "Showrooms",
-    title: "Hours untangled to a single source",
-    summary:
-      "Opening hours were stored three different ways. Now there is ONE: the normalized showroom_store_hours rows. You write a structured hoursJson payload; the worker turns it into rows + the open-weekends flag, and responses rebuild the payload from the rows.",
-    status: "staged",
-    migrations: ["0082", "0083", "0089"],
-    changes: [
-      { kind: "removed", text: "The hours_json blob column is GONE — showroom_store_hours rows are the sole source of truth (migration 0089; blobs backfilled to rows first)." },
-      { kind: "changed", text: "Renamed the normalized table showroom_hours → showroom_store_hours." },
-      { kind: "removed", text: "Redundant free-text weekday_hours / weekend_hours columns." },
-      { kind: "added", text: "API create/update accept a hoursJson payload → rows; GET responses derive hoursJson from the rows. New MCP tool set_showroom_hours." },
-      { kind: "fixed", text: "Deduplicated the hours parser (two copies) onto one shared util." },
-    ],
   },
 ];

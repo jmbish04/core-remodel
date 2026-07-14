@@ -1,0 +1,23 @@
+---
+/**
+ * @fileoverview 0016 — Artifact Studio viewer page.
+ *
+ * Dynamic route mounting `<StudioViewerApp slug={…} />`. The island renders the
+ * running artifact inside a sandboxed iframe (pointing at `/studio-runtime`)
+ * plus a side panel with metadata, a revision selector, a read-only source
+ * viewer, and admin actions (rename / set-status / delete).
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { StudioViewerApp } from "@/components/StudioViewerApp";
+
+const { slug } = Astro.params;
+---
+
+<BaseLayout
+  title="Artifact — Studio - 126 Colby - Remodel Mission Control"
+  description="Live-rendered chat-built artifact with revisions, source, and admin actions."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <StudioViewerApp client:only="react" slug={slug} />
+  </main>
+</BaseLayout>

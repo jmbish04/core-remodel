@@ -51,16 +51,65 @@ export const showroomStores = sqliteTable("showroom_stores", {
 
   phoneNumber: text("phone_number"),
   emailAddress: text("email_address"),
-  // Website + social URLs moved to the showroom_store_links table.
+  // Website + social URLs now live in the showroom_store_links table. The
+  // columns below are DEPRECATED: retained only so the one-time links backfill
+  // (legacyUrlsToLinks) can read them on prod. Dropped in a follow-up migration
+  // once that backfill is confirmed. New code never reads/writes them.
+  /** @deprecated moved to showroom_store_links — backfill source only. */
+  websiteUrl: text("website_url"),
+  /** @deprecated moved to showroom_store_links — backfill source only. */
+  instagramUrl: text("instagram_url"),
+  /** @deprecated moved to showroom_store_links — backfill source only. */
+  facebookUrl: text("facebook_url"),
+  /** @deprecated moved to showroom_store_links — backfill source only. */
+  pinterestUrl: text("pinterest_url"),
   /** Legacy zip — kept in sync with `locationZipCode`; slated for removal. */
   zipCode: text("zip_code"),
   googleMapsLink: text("google_maps_link"),
 
+  /**
+   * Geographic coordinates for this location, captured at intake (from the
+   * Google Places `location` field). Source of truth for individual map
+   * markers and for deriving the region hub below. Nullable — legacy /
+   * manual rows may not have coordinates until backfilled.
+   */
+  latitude: real("latitude"),
+  longitude: real("longitude"),
+
+  /**
+   * Region hub CAPTURED for this specific location, derived from its address /
+   * coordinates at intake (see `classifyBayAreaRegion`). Denormalized onto the
+   * store so the directory filter and map are region-accurate WITHOUT joining
+   * the legacy `store_bayarea_cities` table or calling the Places API on load.
+   *
+   * `hubRoute` is the A–E route letter; `hubName` the human-readable hub name
+   * ("East Bay", "North Bay", …). Nullable — falls back to the city-derived hub
+   * at read time when unset.
+   */
+  hubRoute: text("hub_route"),
+  hubName: text("hub_name"),
+
   // ── Hours & access ────────────────────────────────────────────────────
-  // Opening hours live SOLELY in the normalized `showroom_store_hours` table
-  // (one row per open day) — the `hours_json` blob column has been removed. The
-  // API/MCP accept a structured hoursJson payload on write and derive both the
-  // rows and `is_open_weekends`; responses rebuild hoursJson from the rows.
+  // Opening hours live in the normalized `showroom_store_hours` table (one row
+  // per open day) — the source of truth. The API/MCP accept a structured
+  // hoursJson payload on write and derive both the rows and `is_open_weekends`;
+  // responses rebuild hoursJson from the rows. The three columns below are
+  // DEPRECATED: retained only so the one-time hours backfill can read them on
+  // prod, dropped in a follow-up migration once backfill is confirmed.
+  /** @deprecated superseded by showroom_store_hours — backfill source only. */
+  hoursJson: text("hours_json", { mode: "json" }).$type<{
+    mon: { open: string; close: string } | null;
+    tue: { open: string; close: string } | null;
+    wed: { open: string; close: string } | null;
+    thu: { open: string; close: string } | null;
+    fri: { open: string; close: string } | null;
+    sat: { open: string; close: string } | null;
+    sun: { open: string; close: string } | null;
+  }>(),
+  /** @deprecated superseded by showroom_store_hours — backfill source only. */
+  weekdayHours: text("weekday_hours"),
+  /** @deprecated superseded by showroom_store_hours — backfill source only. */
+  weekendHours: text("weekend_hours"),
   isOpenWeekends: integer("is_open_weekends", { mode: "boolean" }).default(
     false
   ),

@@ -39,6 +39,18 @@ export const workerEmails = sqliteTable(
     /** True if the email was detected as a forward from the homeowner's inbox. */
     isForwarded: integer("is_forwarded", { mode: "boolean" }).notNull().default(false),
 
+    // ── Routing ──────────────────────────────────────────────────────────
+
+    /**
+     * The route the email-router resolved this message to, from the recipient
+     * address / sub-address (see src/backend/services/email/routes.ts):
+     *   "invoices" | "contracts" | "general" (extensible).
+     * Null only for rows ingested before routing was introduced.
+     */
+    route: text("route"),
+    /** Human-readable reason the route was chosen (audit / HITL display). */
+    routeReason: text("route_reason"),
+
     /** The real sender's email (extracted from forward body/headers). */
     originalFromAddress: text("original_from_address"),
     /** Display name of the real sender. */
@@ -110,6 +122,7 @@ export const workerEmails = sqliteTable(
     messageIdIdx: uniqueIndex("worker_emails_message_id_idx").on(table.messageId),
     statusIdx: index("worker_emails_status_idx").on(table.status),
     classificationIdx: index("worker_emails_classification_idx").on(table.classification),
+    routeIdx: index("worker_emails_route_idx").on(table.route),
     createdAtIdx: index("worker_emails_created_at_idx").on(table.createdAt),
     companyIdx: index("worker_emails_company_idx").on(table.matchedCompanyId),
   }),

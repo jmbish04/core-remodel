@@ -102,6 +102,37 @@ export async function getGoogleSearchApiKey(env: Env): Promise<string> {
 }
 
 /**
+ * Helper to fetch the Google Photos OAuth 2.0 client credentials.
+ *
+ * These back the 3-legged OAuth flow used by the Google Photos Picker API
+ * (see `src/backend/services/google-photos/`). Populate the underlying
+ * Secrets Store secrets with `pnpm run secrets:google-photos`, which parses the
+ * client-secret JSON downloaded from the Google Cloud Console.
+ *
+ * Maps to GOOGLE_PHOTOS_CLIENT_ID / GOOGLE_PHOTOS_CLIENT_SECRET in the worker's
+ * Secrets Store bindings.
+ *
+ * @throws if either secret is missing/empty.
+ */
+export async function getGooglePhotosOAuthClient(
+  env: Env,
+): Promise<{ clientId: string; clientSecret: string }> {
+  const [clientId, clientSecret] = await Promise.all([
+    readSecretValue(env.GOOGLE_PHOTOS_CLIENT_ID),
+    readSecretValue(env.GOOGLE_PHOTOS_CLIENT_SECRET),
+  ]);
+
+  if (!clientId || !clientSecret) {
+    throw new Error(
+      "Google Photos OAuth client not configured. Expected GOOGLE_PHOTOS_CLIENT_ID and " +
+        "GOOGLE_PHOTOS_CLIENT_SECRET secret bindings (run `pnpm run secrets:google-photos`).",
+    );
+  }
+
+  return { clientId, clientSecret };
+}
+
+/**
  * Helper to fetch the Fal AI API key.
  * Used as the `Authorization: Key <token>` credential for Fal models routed through
  * Cloudflare AI Gateway's native `/fal` provider path. Maps to FAL_API_KEY in this

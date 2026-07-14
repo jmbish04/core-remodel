@@ -27,6 +27,15 @@ export const workerEmailInvoices = sqliteTable(
       { onDelete: "set null" },
     ),
 
+    /**
+     * Document kind this extraction represents:
+     *   "invoice" → a bill to pay (has a due date / payment terms)
+     *   "receipt" → proof of a completed purchase (materials already bought)
+     * Both share this table + the line-items → material-schedule linking flow;
+     * `kind` lets the HITL UI label + treat them appropriately.
+     */
+    kind: text("kind").notNull().default("invoice"),
+
     // ── Extracted fields ─────────────────────────────────────────────────
 
     vendorName: text("vendor_name"),

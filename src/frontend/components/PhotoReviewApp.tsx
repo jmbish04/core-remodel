@@ -40,13 +40,7 @@ import {
   MultipleSelector,
   type MultipleSelectorOption,
 } from "@/components/ui/multiple-selector";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Dropdown } from "@/components/ui/dropdown";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -804,7 +798,7 @@ function PhotoCodingWorkspace() {
               </div>
 
               {/* Coding fields — stacked below the image */}
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="grid grid-cols-1 gap-4">
                 <div className="space-y-1.5">
                   <label
                     htmlFor="review-title"
@@ -876,22 +870,16 @@ function PhotoCodingWorkspace() {
                   <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     Highlights
                   </span>
-                  <Select
+                  <Dropdown<HighlightType>
                     value={highlightMode}
-                    onValueChange={(next) =>
-                      setHighlightMode(next as HighlightType)
-                    }
-                  >
-                    <SelectTrigger className="h-8 w-[9rem] text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="like">I like this</SelectItem>
-                      <SelectItem value="dislike">
-                        I do not like this
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
+                    onValueChange={setHighlightMode}
+                    size="sm"
+                    className="h-8 text-xs"
+                    options={[
+                      { value: "like", label: "I like this" },
+                      { value: "dislike", label: "I do not like this" },
+                    ]}
+                  />
                 </div>
                 {panelHighlights.length === 0 ? (
                   <p className="text-xs text-muted-foreground">
@@ -899,7 +887,7 @@ function PhotoCodingWorkspace() {
                     {highlightMode === "like" ? "liked" : "disliked"} region.
                   </p>
                 ) : (
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-2">
                     {panelHighlights.map((highlight, index) => (
                       <div
                         key={`highlight-editor-${index}`}

@@ -5,12 +5,11 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
 import { CHANGELOG, type ChangeKind } from "@/data/changelog";
 import { CHANGELOG_DETAIL, type PhaseDetail } from "@/data/changelog-detail";
 import { changelogEntries } from "@backend/db/schema/changelog/changelog";
-import { MermaidCn } from "@/components/mermaidcn/MermaidCn";
+import { MermaidDiagram } from "@/components/docs/MermaidDiagram";
 
 const slug = Astro.params.slug as string;
 
-// Read the entry + its detail from D1 (persistent); fall back to the bundled
-// static data on any error (table not migrated yet) or when there is no row.
+// Source of truth is D1; fall back to bundled data when the row/table is absent.
 let row: typeof changelogEntries.$inferSelect | undefined;
 try {
   const db = drizzle(Astro.locals.runtime.env.DB);
@@ -20,16 +19,11 @@ try {
 }
 
 let detail: PhaseDetail | undefined;
-let entry:
-  | { id: string; branch: string; tag: string | null; area: string; title: string; summary: string; changes: Array<{ kind: ChangeKind; text: string }> }
-  | undefined;
+let entry: { id: string; branch: string; tag: string | null; area: string; title: string; summary: string; changes: Array<{ kind: ChangeKind; text: string }> } | undefined;
 
 if (row && row.detailJson) {
   detail = row.detailJson as unknown as PhaseDetail;
-  entry = {
-    id: row.slug, branch: row.branch, tag: row.tag, area: row.area, title: row.title,
-    summary: row.summary, changes: (row.changesJson as Array<{ kind: ChangeKind; text: string }>) ?? [],
-  };
+  entry = { id: row.slug, branch: row.branch, tag: row.tag, area: row.area, title: row.title, summary: row.summary, changes: (row.changesJson as Array<{ kind: ChangeKind; text: string }>) ?? [] };
 } else {
   const staticDetail = CHANGELOG_DETAIL[slug];
   const staticEntry = CHANGELOG.find((e) => e.id === slug);
@@ -39,10 +33,7 @@ if (row && row.detailJson) {
   }
 }
 
-// Unknown slug → 404.
-if (!detail || !entry) {
-  return new Response(null, { status: 404 });
-}
+if (!detail || !entry) return new Response(null, { status: 404 });
 
 const KIND: Record<ChangeKind, { label: string; cls: string; dot: string }> = {
   added: { label: "Added", cls: "bg-emerald-500/12 text-emerald-300", dot: "bg-emerald-400" },
@@ -51,7 +42,6 @@ const KIND: Record<ChangeKind, { label: string; cls: string; dot: string }> = {
   migration: { label: "Migration", cls: "bg-violet-500/12 text-violet-300", dot: "bg-violet-400" },
   fixed: { label: "Fixed", cls: "bg-amber-500/12 text-amber-300", dot: "bg-amber-400" },
 };
-
 const LANG: Record<string, string> = { ts: "TypeScript", tsx: "TSX", sql: "SQL", json: "JSON", bash: "Shell" };
 ---
 
@@ -61,9 +51,7 @@ const LANG: Record<string, string> = { ts: "TypeScript", tsx: "TSX", sql: "SQL",
 
     <header class="mt-3">
       <div class="flex flex-wrap items-center gap-2">
-        {entry.tag && (
-          <span class="rounded-md bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">{entry.tag}</span>
-        )}
+        {entry.tag && <span class="rounded-md bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">{entry.tag}</span>}
         <span class="rounded-md bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{entry.area}</span>
         <span class="rounded bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground/70">{entry.branch}</span>
       </div>
@@ -71,68 +59,57 @@ const LANG: Record<string, string> = { ts: "TypeScript", tsx: "TSX", sql: "SQL",
       <p class="mt-1 text-sm leading-relaxed text-muted-foreground">{entry.summary}</p>
     </header>
 
-    {/* ── Problem / approach ── */}
     <section class="mt-8 grid gap-4 sm:grid-cols-2">
       <div class="rounded-xl bg-card p-4 ring-1 ring-rose-500/20">
         <h2 class="font-mono text-[10px] uppercase tracking-widest text-rose-300/80">The problem</h2>
-        <p class="mt-1.5 text-sm leading-relaxed text-foreground/90" set:html={detail.problem} />
+        <p class="mt-1.5 text-sm leading-relaxed text-foreground/90">{detail.problem}</p>
       </div>
       <div class="rounded-xl bg-card p-4 ring-1 ring-emerald-500/20">
         <h2 class="font-mono text-[10px] uppercase tracking-widest text-emerald-300/80">The approach</h2>
-        <p class="mt-1.5 text-sm leading-relaxed text-foreground/90" set:html={detail.approach} />
+        <p class="mt-1.5 text-sm leading-relaxed text-foreground/90">{detail.approach}</p>
       </div>
     </section>
 
-    {/* ── Change chips ── */}
     <section class="mt-6">
       <ul class="space-y-1.5">
-        {entry.changes.map((ch) => (
-          <li class="flex items-start gap-2.5 text-sm">
-            <span class={`mt-0.5 inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${KIND[ch.kind].cls}`}>
-              <span class={`inline-block size-1.5 rounded-full ${KIND[ch.kind].dot}`} />
-              {KIND[ch.kind].label}
-            </span>
-            <span class="text-foreground/90">{ch.text}</span>
-          </li>
-        ))}
+        {entry.changes.map((ch) => {
+          const k = KIND[ch.kind] ?? KIND.changed;
+          return (
+            <li class="flex items-start gap-2.5 text-sm">
+              <span class={`mt-0.5 inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${k.cls}`}>
+                <span class={`inline-block size-1.5 rounded-full ${k.dot}`} />{k.label}
+              </span>
+              <span class="text-foreground/90">{ch.text}</span>
+            </li>
+          );
+        })}
       </ul>
     </section>
 
-    {/* ── API + MCP surface ── */}
-    <section class="mt-8 grid gap-4 md:grid-cols-2">
-      <div class="rounded-xl bg-card p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
+    {detail.apiChanges.length > 0 && (
+      <section class="mt-8 rounded-xl bg-card p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
         <h2 class="font-mono text-[10px] uppercase tracking-widest text-sky-300/80">API</h2>
         <ul class="mt-2 space-y-1.5 text-[13px] text-foreground/85">
           {detail.apiChanges.map((a) => (
             <li class="flex gap-2"><span class="text-sky-400/60">▹</span><code class="font-mono text-xs leading-relaxed">{a}</code></li>
           ))}
         </ul>
-      </div>
-      <div class="rounded-xl bg-card p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
-        <h2 class="font-mono text-[10px] uppercase tracking-widest text-violet-300/80">MCP tools</h2>
-        <ul class="mt-2 space-y-1.5 text-[13px] text-foreground/85">
-          {detail.mcpChanges.map((m) => (
-            <li class="flex gap-2"><span class="text-violet-400/60">▹</span><code class="font-mono text-xs leading-relaxed">{m}</code></li>
-          ))}
-        </ul>
-      </div>
-    </section>
+      </section>
+    )}
 
-    {/* ── D1 diagrams ── */}
     {detail.diagrams.length > 0 && (
       <section class="mt-8">
-        <h2 class="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">D1 relationships</h2>
+        <h2 class="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">Diagrams</h2>
         <div class="mt-3 space-y-5">
           {detail.diagrams.map((d) => (
             <div class="overflow-x-auto rounded-xl bg-card p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)]">
-              <MermaidCn code={d.code} caption={d.caption} client:visible />
+              <MermaidDiagram code={d.code} caption={d.caption} client:visible />
             </div>
           ))}
         </div>
       </section>
     )}
 
-    {/* ── Migration SQL ── */}
     {detail.migrations.length > 0 && (
       <section class="mt-8">
         <h2 class="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">Migrations</h2>
@@ -150,7 +127,6 @@ const LANG: Record<string, string> = { ts: "TypeScript", tsx: "TSX", sql: "SQL",
       </section>
     )}
 
-    {/* ── Code cards ── */}
     {detail.code.length > 0 && (
       <section class="mt-8">
         <h2 class="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">Code</h2>
@@ -168,7 +144,6 @@ const LANG: Record<string, string> = { ts: "TypeScript", tsx: "TSX", sql: "SQL",
       </section>
     )}
 
-    {/* ── Files ── */}
     <section class="mt-8">
       <h2 class="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">Files touched</h2>
       <ul class="mt-2 flex flex-wrap gap-1.5">

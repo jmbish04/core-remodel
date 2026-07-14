@@ -40,16 +40,21 @@ import {
   showroomPhotosMapping,
   showroomStoreHours,
   showroomStoreLinks,
+  productPriceObservations,
+  productShowroomPhotos,
 } from "@backend/db/schema/showroom/index";
 import {
   brands,
-  brandTypesDef,
-  brandTypeMappings,
   showroomBrandMappings,
 } from "@backend/db/schema/brands/index";
+import { classifyBayAreaRegion } from "@backend/lib/bay-area-region";
+import {
+  computeStoreGeoPatch,
+  scheduleShowroomEnrichment,
+} from "@backend/services/showroom/onboarding";
 import { businessCardService } from "@backend/services/business-card";
-import { ImageProcessorService } from "@backend/services/image-processor";
-import { resolveCloudflareImagesCredentials, getGoogleMapsApiKey } from "@backend/utils/secrets";
+import { ImageProcessorService, type PhotoMetadata } from "@backend/services/image-processor";
+import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { faviconService } from "@backend/services/favicon";
 import {
   deriveIsOpenWeekends,
@@ -148,6 +153,13 @@ const createStoreSchema = z.object({
   emailAddress: z.string().optional().nullable(),
   zipCode: z.string().optional().nullable(),
   googleMapsLink: z.string().optional().nullable(),
+  /**
+   * Geographic coordinates (from Google Places `location`). Captured on the row
+   * for individual map markers + region derivation. Optional/nullable — manual
+   * entries may omit them, in which case the region is derived from address/ZIP.
+   */
+  latitude: z.number().optional().nullable(),
+  longitude: z.number().optional().nullable(),
   /**
    * Google Places API `place_id` for this showroom. Used to prevent
    * duplicate showroom creation from the same Places selection — see
@@ -276,7 +288,6 @@ const createStoreSchema = z.object({
 });
 
 const createProductSchema = z.object({
-  storeId: z.number(),
   itemName: z.string().min(1),
   description: z.string().optional().nullable(),
   colors: z.string().optional().nullable(),
@@ -609,8 +620,17 @@ showroomStoresRouter.get("/products/:pid/research/context", async (c) => {
     return c.json({ success: false, error: "Product not found" }, 404);
   }
 
-  const [findings, images, specs, ratings, intelRows, storeRows, brandRows] =
-    await Promise.all([
+  const [
+    findings,
+    images,
+    specs,
+    ratings,
+    intelRows,
+    storeRows,
+    brandRows,
+    priceObservationRows,
+    photos,
+  ] = await Promise.all([
       db
         .select()
         .from(storeProductResearch)
@@ -640,11 +660,13 @@ showroomStoresRouter.get("/products/:pid/research/context", async (c) => {
         .from(storeProductIntel)
         .where(eq(storeProductIntel.storeProductId, productId))
         .limit(1),
+      // A product has no owning store — resolve carrying showrooms via the
+      // showroom_product_mappings join instead.
       db
         .select({ id: showroomStores.id, name: showroomStores.name })
-        .from(showroomStores)
-        .where(eq(showroomStores.id, product.storeId))
-        .limit(1),
+        .from(showroomProductMappings)
+        .innerJoin(showroomStores, eq(showroomProductMappings.showroomId, showroomStores.id))
+        .where(eq(showroomProductMappings.productId, productId)),
       product.brandId != null
         ? db
             .select({ id: brands.id, name: brands.name })
@@ -652,6 +674,17 @@ showroomStoresRouter.get("/products/:pid/research/context", async (c) => {
             .where(eq(brands.id, product.brandId))
             .limit(1)
         : Promise.resolve([] as Array<{ id: number; name: string }>),
+      // Every price seen for this product (showroom / online retailer /
+      // manufacturer), with the showroom name resolved when present.
+      db
+        .select({ obs: productPriceObservations, showroomName: showroomStores.name })
+        .from(productPriceObservations)
+        .leftJoin(showroomStores, eq(showroomStores.id, productPriceObservations.showroomId))
+        .where(eq(productPriceObservations.productId, productId)),
+      db
+        .select()
+        .from(productShowroomPhotos)
+        .where(eq(productShowroomPhotos.productId, productId)),
     ]);
 
   return c.json({
@@ -659,11 +692,13 @@ showroomStoresRouter.get("/products/:pid/research/context", async (c) => {
     product: {
       ...product,
       brandName: brandRows[0]?.name ?? null,
-      storeName: storeRows[0]?.name ?? null,
+      showrooms: storeRows,
     },
     findings,
     images,
     specs,
+    priceObservations: priceObservationRows.map((r) => ({ ...r.obs, showroomName: r.showroomName })),
+    photos,
     rating: ratings[0] ?? null,
     intel: intelRows[0] ?? null,
   });
@@ -765,12 +800,12 @@ showroomStoresRouter.patch("/research/findings/:id", async (c) => {
   }
   const { scope, reviewStatus, reviewReason } = parsed.data;
 
-  // ── Ownership check ───────────────────────────────────────────────────────
-  // Resolve the owning storeId from the finding row so we can confirm it
-  // belongs to a real store, guarding against ID-guessing across entities.
+  // ── Existence check ────────────────────────────────────────────────────────
+  // Confirm the finding row joins to a real product, guarding against
+  // ID-guessing across entities. Products have no owning store to resolve.
   if (scope === "product") {
     const [row] = await db
-      .select({ storeId: showroomStoreProducts.storeId })
+      .select({ productId: showroomStoreProducts.id })
       .from(storeProductResearch)
       .innerJoin(
         showroomStoreProducts,
@@ -835,12 +870,13 @@ showroomStoresRouter.patch("/research/images/:id", async (c) => {
   }
   const { scope, reviewStatus, reviewReason } = parsed.data;
 
-  // ── Ownership check ───────────────────────────────────────────────────────
-  // Resolve the owning storeId from the image row to guard against
-  // cross-entity ID guessing before applying the patch.
+  // ── Existence check ────────────────────────────────────────────────────────
+  // Confirm the image row joins to a real product, guarding against
+  // cross-entity ID guessing before applying the patch. Products have no
+  // owning store to resolve.
   if (scope === "product") {
     const [row] = await db
-      .select({ storeId: showroomStoreProducts.storeId })
+      .select({ productId: showroomStoreProducts.id })
       .from(productImages)
       .innerJoin(
         showroomStoreProducts,
@@ -1142,13 +1178,29 @@ showroomStoresRouter.get("/", async (c) => {
     stores: rows.map((r) => {
       const links = linksMap.get(r.store.id) ?? [];
       const storeHours = hoursMap.get(r.store.id) ?? [];
+      // Effective region — captured store hub wins; otherwise derive it at read
+      // time from the store's own coordinates / address / ZIP (cheap, no Places
+      // call); finally fall back to the legacy city-derived hub.
+      const derived =
+        r.store.hubRoute == null
+          ? classifyBayAreaRegion({
+              latitude: r.store.latitude,
+              longitude: r.store.longitude,
+              zipCode: r.store.zipCode,
+              address: r.store.locationAddress,
+            })
+          : null;
+      const effectiveHubRoute = r.store.hubRoute ?? derived?.route ?? r.hubRoute;
+      const effectiveHubName = r.store.hubName ?? derived?.name ?? r.hubName;
+
       const base = {
         ...r.store,
         cityName: r.cityName,
-        hubRoute: r.hubRoute,
-        hubName: r.hubName,
-        // Normalized per-day hours (only open days; absent day = closed) — the
-        // sole store of truth; hoursJson is rebuilt from them for back-compat.
+        hubRoute: effectiveHubRoute,
+        hubName: effectiveHubName,
+        latitude: r.store.latitude,
+        longitude: r.store.longitude,
+        // Normalized per-day hours (sole source of truth); hoursJson rebuilt from them.
         hours: storeHours,
         hoursJson: rowsToHoursJson(storeHours),
         // Links table is the URL source of truth; derive legacy flat fields too.
@@ -1205,11 +1257,18 @@ showroomStoresRouter.get("/:id", async (c) => {
   // Parallel data loads
   const [products, categories, notes, ratings, externalRatings, research, tags, directBrands, productBrands] =
     await Promise.all([
+      // A product has no owning store — products "for" this store are those
+      // carried via showroom_product_mappings.
       db
-        .select()
-        .from(showroomStoreProducts)
-        .where(eq(showroomStoreProducts.storeId, storeId))
-        .orderBy(desc(showroomStoreProducts.createdAt)),
+        .select({ product: showroomStoreProducts })
+        .from(showroomProductMappings)
+        .innerJoin(
+          showroomStoreProducts,
+          eq(showroomProductMappings.productId, showroomStoreProducts.id)
+        )
+        .where(eq(showroomProductMappings.showroomId, storeId))
+        .orderBy(desc(showroomStoreProducts.createdAt))
+        .then((rows) => rows.map((r) => r.product)),
       db
         .select({
           mapping: showroomStoreCategoryMapping,
@@ -1332,11 +1391,21 @@ showroomStoresRouter.get("/:id", async (c) => {
   // External links (URL source of truth) + derived legacy flat URL fields.
   const links = await getStoreLinks(db, storeId);
 
+  const detailDerived =
+    store.store.hubRoute == null
+      ? classifyBayAreaRegion({
+          latitude: store.store.latitude,
+          longitude: store.store.longitude,
+          zipCode: store.store.zipCode,
+          address: store.store.locationAddress,
+        })
+      : null;
+
   return c.json({
     ...store.store,
     cityName: store.cityName,
-    hubRoute: store.hubRoute,
-    hubName: store.hubName,
+    hubRoute: store.store.hubRoute ?? detailDerived?.route ?? store.hubRoute,
+    hubName: store.store.hubName ?? detailDerived?.name ?? store.hubName,
     hours,
     hoursJson: rowsToHoursJson(hours),
     links,
@@ -1390,6 +1459,19 @@ showroomStoresRouter.post("/", async (c) => {
   if (hoursJson != null) {
     storeValues.isOpenWeekends = deriveIsOpenWeekends(hoursJson);
   }
+
+  // Capture geo columns: pass through Places coordinates and derive the region
+  // hub (A–E) from coordinates / address / ZIP so the row is filter- and
+  // map-ready without a Places call on load.
+  Object.assign(
+    storeValues,
+    computeStoreGeoPatch({
+      latitude: storeValues.latitude,
+      longitude: storeValues.longitude,
+      zipCode: storeValues.zipCode,
+      locationAddress: storeValues.locationAddress,
+    }),
+  );
 
   // ── Duplicate prevention by Google Places place_id ──────────────────────
   // Pre-check before inserting: if a showroom already exists for this
@@ -1500,227 +1582,25 @@ showroomStoresRouter.post("/", async (c) => {
     await replaceStoreLinks(db, inserted.id, links as StoreLinkInput[]);
   }
 
-  // Fire background work: AI research + favicon hydration (if websiteUrl present).
-  c.executionCtx.waitUntil(
-    (async () => {
-      try {
-        const agent = await getShowroomResearchAgent(c.env);
-        await agent.researchStore(inserted.id);
-      } catch (error) {
-        console.error(`ShowroomResearchAgent store research failed for ${inserted.id}:`, error);
-      }
-    })(),
+  // Fire the full background enrichment pipeline — AI research, favicon +
+  // website scrape, the Places-photo → CF Images pipeline, and brand
+  // create/map — via the shared onboarding service so this matches exactly what
+  // the MCP onboarding tools run. Detached through executionCtx.waitUntil.
+  scheduleShowroomEnrichment(
+    c.env,
+    inserted,
+    {
+      websiteUrl,
+      photos,
+      brands: (
+        data.reviewAiInsight as
+          | { brands?: Array<{ name?: string; type?: string; websiteUrl?: string }> }
+          | null
+          | undefined
+      )?.brands,
+    },
+    (p) => c.executionCtx.waitUntil(p),
   );
-
-  if (websiteUrl && websiteUrl.length > 0) {
-    c.executionCtx.waitUntil(
-      faviconService.hydrateShowroomIcon(c.env, inserted.id, websiteUrl),
-    );
-
-    // Post-submit website SCRAPE workflow: mint a RAG UUID, mark the store
-    // "pending", then kick the ShowroomScrapeWorkflow. The workflow crawls the
-    // site, archives markdown to R2, screenshots to CF Images, embeds into
-    // Vectorize, extracts brands/Instagram/hours/hero, and hydrates the store.
-    const ragUuid = crypto.randomUUID();
-    c.executionCtx.waitUntil(
-      (async () => {
-        try {
-          await db
-            .update(showroomStores)
-            .set({ ragUuid, scrapeStatus: "pending", updatedAt: new Date() })
-            .where(eq(showroomStores.id, inserted.id));
-          await c.env.SHOWROOM_SCRAPE_WORKFLOW.create({
-            params: {
-              showroomId: inserted.id,
-              websiteUrl,
-              ragUuid,
-            },
-          });
-        } catch (error) {
-          console.error(
-            `showroom scrape workflow trigger failed for ${inserted.id}:`,
-            error,
-          );
-        }
-      })(),
-    );
-  }
-
-  // Fire background photo pipeline: fetch each Places photo media URL, upload
-  // to Cloudflare Images, store a showroom_photos_mapping row, and set the hero
-  // image from photo[0]. Error-guarded — never throws out of waitUntil.
-  if (photos && photos.length > 0) {
-    const storeId = inserted.id;
-    c.executionCtx.waitUntil(
-      (async () => {
-        try {
-          const { accountId, apiTokens } = await resolveCloudflareImagesCredentials(c.env);
-          if (!accountId || apiTokens.length === 0) {
-            console.error(`[showroom-stores] photos pipeline: CF Images credentials missing for store ${storeId}`);
-            return;
-          }
-          const [primaryToken, ...fallbackApiTokens] = apiTokens;
-          const processor = new ImageProcessorService(c.env, accountId, primaryToken, { fallbackApiTokens });
-
-          const mapsKey = await getGoogleMapsApiKey(c.env).catch(() => null);
-          if (!mapsKey) {
-            console.error(`[showroom-stores] photos pipeline: Google Maps API key missing for store ${storeId}`);
-            return;
-          }
-
-          const db = drizzle(c.env.DB);
-          const capped = photos.slice(0, 5);
-
-          for (let i = 0; i < capped.length; i++) {
-            const photo = capped[i];
-            try {
-              // Fetch the Places photo media bytes. The endpoint 302-redirects to
-              // the actual image; fetch follows the redirect automatically.
-              const mediaUrl = `https://places.googleapis.com/v1/${photo.name}/media?maxWidthPx=1600&key=${mapsKey}`;
-              const res = await fetch(mediaUrl, { signal: AbortSignal.timeout(8000) });
-              if (!res.ok) {
-                console.warn(`[showroom-stores] photos pipeline: non-ok response ${res.status} for photo ${i} of store ${storeId}`);
-                continue;
-              }
-              const blob = await res.blob();
-
-              // Upload to Cloudflare Images.
-              const customId = `showroom-photo-${storeId}-${i}`;
-              const filename = `showroom-${storeId}-${i}.jpg`;
-              const uploadResp = await processor.uploadToCloudflareImages(blob, customId, filename);
-              const url = processor.getDeliveryUrl(uploadResp, customId);
-
-              // Store the mapping row.
-              await db.insert(showroomPhotosMapping).values({
-                showroomId: storeId,
-                cfImagesPhotoUrl: url,
-                photoName: photo.name,
-                photoWidthPx: photo.widthPx ?? null,
-                photoHeightPx: photo.heightPx ?? null,
-                authorAttributes: photo.authorAttributions ?? null,
-                flagContentUri: photo.flagContentUri ?? null,
-                googleMapsUri: photo.googleMapsUri ?? null,
-                sortOrder: i,
-              } as typeof showroomPhotosMapping.$inferInsert);
-
-              // Set the hero image from the first photo.
-              if (i === 0) {
-                await db
-                  .update(showroomStores)
-                  .set({ heroImageCfImagesUrl: url, updatedAt: new Date() } as Partial<typeof showroomStores.$inferInsert>)
-                  .where(eq(showroomStores.id, storeId));
-              }
-            } catch (photoErr) {
-              console.error(`[showroom-stores] photos pipeline: error on photo ${i} for store ${storeId}:`, photoErr);
-              // Continue to the next photo — one failure must not abort the pipeline.
-            }
-          }
-        } catch (pipelineErr) {
-          console.error(`[showroom-stores] photos pipeline: outer error for store ${inserted.id}:`, pipelineErr);
-        }
-      })(),
-    );
-  }
-
-  // Brand create / map / type pipeline from reviewAiInsight.brands.
-  // Runs entirely in the background — never throws out of waitUntil.
-  // Cap at 15 entries; dedupe by trimmed lowercase name before processing.
-  const insightBrands = data.reviewAiInsight?.brands;
-  if (Array.isArray(insightBrands) && insightBrands.length > 0) {
-    const showroomIdForBrands = inserted.id;
-    c.executionCtx.waitUntil(
-      (async () => {
-        try {
-          const db2 = drizzle(c.env.DB);
-          // Dedupe: keep first occurrence of each lowercase-trimmed name.
-          const seen = new Set<string>();
-          const uniqueBrands: Array<{ name: string; type: string; websiteUrl: string }> = [];
-          for (const b of insightBrands) {
-            if (!b || typeof b.name !== "string") continue;
-            const key = b.name.trim().toLowerCase();
-            if (!key || seen.has(key)) continue;
-            seen.add(key);
-            uniqueBrands.push({
-              name: b.name.trim(),
-              type: typeof b.type === "string" ? b.type.trim() : "",
-              websiteUrl: typeof b.websiteUrl === "string" ? b.websiteUrl.trim() : "",
-            });
-            if (uniqueBrands.length >= 15) break;
-          }
-
-          for (const { name, type, websiteUrl } of uniqueBrands) {
-            try {
-              // 1. Find or create the brand row.
-              let brandId: number;
-              const [existingBrand] = await db2
-                .select({ id: brands.id })
-                .from(brands)
-                .where(sql`lower(${brands.name}) = lower(${name})`)
-                .limit(1);
-
-              if (existingBrand) {
-                brandId = existingBrand.id;
-              } else {
-                const [newBrand] = await db2
-                  .insert(brands)
-                  .values({
-                    name,
-                    websiteUrl: websiteUrl || null,
-                  } as typeof brands.$inferInsert)
-                  .returning({ id: brands.id });
-                brandId = newBrand.id;
-              }
-
-              // 2. Map the brand to this showroom (ignore duplicate).
-              await db2
-                .insert(showroomBrandMappings)
-                .values({
-                  showroomId: showroomIdForBrands,
-                  brandId,
-                } as typeof showroomBrandMappings.$inferInsert)
-                .onConflictDoNothing();
-
-              // 3. Find or create the type row and create the brand→type mapping.
-              if (type) {
-                let typeId: number;
-                const [existingType] = await db2
-                  .select({ id: brandTypesDef.id })
-                  .from(brandTypesDef)
-                  .where(sql`lower(${brandTypesDef.name}) = lower(${type})`)
-                  .limit(1);
-
-                if (existingType) {
-                  typeId = existingType.id;
-                } else {
-                  const [newType] = await db2
-                    .insert(brandTypesDef)
-                    .values({
-                      name: type,
-                      isActive: true,
-                    } as typeof brandTypesDef.$inferInsert)
-                    .returning({ id: brandTypesDef.id });
-                  typeId = newType.id;
-                }
-
-                await db2
-                  .insert(brandTypeMappings)
-                  .values({
-                    brandId,
-                    typeId,
-                  } as typeof brandTypeMappings.$inferInsert)
-                  .onConflictDoNothing();
-              }
-            } catch (brandErr) {
-              console.error(`[showroom-stores] brand pipeline: error processing brand "${name}" for store ${showroomIdForBrands}:`, brandErr);
-              // Continue — one brand failure must not abort the rest.
-            }
-          }
-        } catch (outerErr) {
-          console.error(`[showroom-stores] brand pipeline: outer error for store ${inserted.id}:`, outerErr);
-        }
-      })(),
-    );
-  }
 
   return c.json({ store: inserted }, 201);
 });
@@ -2123,33 +2003,48 @@ showroomStoresRouter.delete("/:id/links/:linkId", async (c) => {
 
 /**
  * GET /:id/products — List products for a store.
+ *
+ * A product has no owning store — this returns products carried by the
+ * store via `showroom_product_mappings`.
  */
 showroomStoresRouter.get("/:id/products", async (c) => {
   const db = drizzle(c.env.DB);
   const storeId = Number(c.req.param("id"));
 
-  const products = await db
-    .select()
-    .from(showroomStoreProducts)
-    .where(eq(showroomStoreProducts.storeId, storeId))
+  const rows = await db
+    .select({ product: showroomStoreProducts })
+    .from(showroomProductMappings)
+    .innerJoin(
+      showroomStoreProducts,
+      eq(showroomProductMappings.productId, showroomStoreProducts.id)
+    )
+    .where(eq(showroomProductMappings.showroomId, storeId))
     .orderBy(desc(showroomStoreProducts.createdAt));
 
-  return c.json({ products });
+  return c.json({ products: rows.map((r) => r.product) });
 });
 
 /**
  * POST /:id/products — Add a product to a store.
+ *
+ * A product is global (no owning store); this endpoint creates the row and
+ * then upserts a `showroom_product_mappings` link so the store carries it.
  */
 showroomStoresRouter.post("/:id/products", async (c) => {
   const db = drizzle(c.env.DB);
   const storeId = Number(c.req.param("id"));
   const body = await c.req.json();
-  const data = createProductSchema.parse({ ...body, storeId });
+  const data = createProductSchema.parse(body);
 
   const [inserted] = await db
     .insert(showroomStoreProducts)
     .values(data)
     .returning();
+
+  await db
+    .insert(showroomProductMappings)
+    .values({ showroomId: storeId, productId: inserted.id })
+    .onConflictDoNothing();
 
   c.executionCtx.waitUntil(
     (async () => {
@@ -2483,12 +2378,12 @@ showroomStoresRouter.post("/scan", async (c) => {
           extractionStatus = "success";
           aiRationale = `VLM extracted product: ${parsed.product_name ?? "unknown"}`;
 
-          // Auto-create product if we have a store context
+          // Auto-create product (global catalog) if we have a store context,
+          // then link it to that showroom via showroom_product_mappings.
           if (body.storeId && parsed.product_name) {
             const [created] = await db
               .insert(showroomStoreProducts)
               .values({
-                storeId: body.storeId,
                 itemName: parsed.product_name,
                 description: parsed.description,
                 colors: parsed.color_finish,
@@ -2499,6 +2394,11 @@ showroomStoresRouter.post("/scan", async (c) => {
               .returning();
 
             autoCreatedProductId = created.id;
+
+            await db
+              .insert(showroomProductMappings)
+              .values({ showroomId: body.storeId, productId: created.id })
+              .onConflictDoNothing();
           }
         } catch {
           extractionStatus = "partial";
@@ -3627,6 +3527,9 @@ showroomStoresRouter.post("/:id/photos", async (c) => {
   // Upload to Cloudflare Images.
   let deliveryUrl: string;
   let cfImageId: string | null = null;
+  let photoMeta: PhotoMetadata = {};
+  // MIME of the STORED image: HEIC/HEIF get transcoded to JPEG on upload.
+  let storedMimeType: string | null = null;
   try {
     const { accountId, apiTokens } = await resolveCloudflareImagesCredentials(c.env);
     if (!accountId || apiTokens.length === 0) {
@@ -3644,10 +3547,14 @@ showroomStoresRouter.post("/:id/photos", async (c) => {
       return c.json({ success: false, error: "Invalid image data URL" }, 400);
     }
     const [, mime, b64] = match;
+    storedMimeType = /heic|heif/i.test(mime) ? "image/jpeg" : mime;
     const binary = atob(b64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     const blob = new Blob([bytes], { type: mime });
+
+    // EXIF/dimensions from the ORIGINAL bytes (before any HEIC→JPEG transcode).
+    photoMeta = await processor.extractPhotoMetadata(blob);
 
     const customId = `showroom-visit-${storeId}-${crypto.randomUUID()}`;
     const uploadResponse = await processor.uploadToCloudflareImages(
@@ -3669,6 +3576,10 @@ showroomStoresRouter.post("/:id/photos", async (c) => {
     cfImageId,
     altText: parsed.data.altText ?? null,
     imageKind: "visit" as const,
+    width: photoMeta.width ?? null,
+    height: photoMeta.height ?? null,
+    mimeType: storedMimeType,
+    metadataJson: Object.keys(photoMeta).length ? JSON.stringify(photoMeta) : null,
   };
 
   const [inserted] = await db

@@ -199,7 +199,76 @@ export function ProductViewportApp({ id }: { id: number }) {
       <div className="mt-8">
         <EntityDocumentsPanel entityType="product" entityId={String(id)} />
       </div>
+
+      {/* Visually-similar products (Vectorize) — hidden when none */}
+      <SimilarProducts productId={id} />
     </main>
+  );
+}
+
+interface SimilarProduct {
+  id: number;
+  itemName: string | null;
+  brandName: string | null;
+  imageUrl: string | null;
+}
+
+/**
+ * Fetches `GET /api/product-photos/:productId/similar` and renders a horizontal
+ * row of product cards. Renders nothing while loading, on error, or when empty
+ * so it never disturbs the PDP layout.
+ */
+function SimilarProducts({ productId }: { productId: number }) {
+  const [items, setItems] = useState<SimilarProduct[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api<{ products: SimilarProduct[] }>(`/api/product-photos/${productId}/similar`)
+      .then((res) => {
+        if (!cancelled) setItems(res.products ?? []);
+      })
+      .catch((e) => {
+        // Non-critical enrichment — surface but don't disrupt the page.
+        toast.error(e instanceof Error ? e.message : "Failed to load similar products");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [productId]);
+
+  if (items.length === 0) return null;
+
+  return (
+    <section className="mt-10">
+      <h2 className="mb-4 text-sm font-medium text-muted-foreground">Similar products</h2>
+      <div className="flex gap-4 overflow-x-auto pb-2">
+        {items.map((p) => (
+          <a
+            key={p.id}
+            href={`/admin/products/${p.id}`}
+            className="flex w-40 shrink-0 flex-col gap-2 rounded-xl bg-card p-3 ring-1 ring-border/40 transition-colors hover:ring-border/70"
+          >
+            {p.imageUrl ? (
+              <img
+                src={p.imageUrl}
+                alt={p.itemName ?? "Product"}
+                className="aspect-square w-full rounded-lg object-cover ring-1 ring-border/40"
+              />
+            ) : (
+              <div className="flex aspect-square w-full items-center justify-center rounded-lg bg-muted/30 text-xs text-muted-foreground">
+                No image
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">{p.itemName ?? `Product #${p.id}`}</p>
+              {p.brandName && (
+                <p className="truncate text-xs text-muted-foreground">{p.brandName}</p>
+              )}
+            </div>
+          </a>
+        ))}
+      </div>
+    </section>
   );
 }
 

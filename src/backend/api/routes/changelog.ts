@@ -1,10 +1,11 @@
 /**
- * @fileoverview Persistent changelog API — writes + seed. The overview + detail
- * pages READ D1 directly (Astro SSR); this router handles the WRITE side so
- * every branch/PR can register its changelog into D1 (via the CLI, an MCP tool,
- * or CI) where it accumulates forever.
+ * @fileoverview Persistent changelog API — the WRITE side. The overview page
+ * READS D1 directly (Astro SSR); this router lets every branch/PR register its
+ * changelog into D1 (via CLI, an MCP tool, or CI) where it accumulates forever
+ * and is never overwritten. Upserts are keyed by branch name / entry slug.
  */
-import { OpenAPIHono, z } from "@hono/zod-openapi";
+import { Hono } from "hono";
+import { z } from "zod";
 import { drizzle } from "drizzle-orm/d1";
 import { desc, eq, sql } from "drizzle-orm";
 
@@ -12,7 +13,7 @@ import { changelogBranches, changelogEntries } from "@backend/db/schema/changelo
 import { BRANCHES, CHANGELOG } from "@/data/changelog";
 import { CHANGELOG_DETAIL } from "@/data/changelog-detail";
 
-export const changelogRouter = new OpenAPIHono<{ Bindings: Env }>();
+export const changelogRouter = new Hono<{ Bindings: Env }>();
 
 const branchSchema = z.object({
   branch: z.string().min(1),
@@ -22,7 +23,6 @@ const branchSchema = z.object({
   status: z.enum(["shipped", "staged", "open"]).optional(),
   prNumber: z.number().int().optional().nullable(),
   prUrl: z.string().optional().nullable(),
-  diagrams: z.array(z.object({ caption: z.string(), code: z.string() })).optional().nullable(),
 });
 
 const entrySchema = z.object({
@@ -34,12 +34,14 @@ const entrySchema = z.object({
   summary: z.string().min(1),
   status: z.enum(["shipped", "staged"]).optional(),
   date: z.string().min(1),
-  changes: z.array(z.object({ kind: z.string(), text: z.string() })).optional(),
+  changes: z
+    .array(z.object({ kind: z.enum(["added", "changed", "removed", "migration", "fixed"]), text: z.string() }))
+    .optional(),
   migrations: z.array(z.string()).optional(),
   detail: z.record(z.string(), z.unknown()).optional().nullable(),
 });
 
-/** GET / — branches (newest first) each with their entries (for external use). */
+/** GET / — branches (newest first) each with their entries. */
 changelogRouter.get("/", async (c) => {
   const db = drizzle(c.env.DB);
   const [branches, entries] = await Promise.all([
@@ -54,7 +56,7 @@ changelogRouter.get("/", async (c) => {
   });
 });
 
-/** GET /:slug — one entry with its detail. */
+/** GET /:slug — one entry. */
 changelogRouter.get("/:slug", async (c) => {
   const db = drizzle(c.env.DB);
   const [entry] = await db
@@ -69,7 +71,7 @@ changelogRouter.get("/:slug", async (c) => {
 /** POST /branches — upsert a branch by name. */
 changelogRouter.post("/branches", async (c) => {
   const db = drizzle(c.env.DB);
-  const parsed = branchSchema.safeParse(await c.req.json());
+  const parsed = branchSchema.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
   const d = parsed.data;
   await db
@@ -82,7 +84,6 @@ changelogRouter.post("/branches", async (c) => {
       status: d.status ?? "open",
       prNumber: d.prNumber ?? null,
       prUrl: d.prUrl ?? null,
-      diagramsJson: d.diagrams ?? null,
     })
     .onConflictDoUpdate({
       target: changelogBranches.branch,
@@ -93,17 +94,16 @@ changelogRouter.post("/branches", async (c) => {
         status: d.status ?? "open",
         prNumber: d.prNumber ?? null,
         prUrl: d.prUrl ?? null,
-        diagramsJson: d.diagrams ?? null,
         updatedAt: new Date(),
       },
     });
   return c.json({ success: true, branch: d.branch }, 201);
 });
 
-/** POST /entries — upsert an entry by slug. */
+/** POST /entries — upsert an entry by slug (append-only across branches). */
 changelogRouter.post("/entries", async (c) => {
   const db = drizzle(c.env.DB);
-  const parsed = entrySchema.safeParse(await c.req.json());
+  const parsed = entrySchema.safeParse(await c.req.json().catch(() => null));
   if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
   const d = parsed.data;
   await db
@@ -141,40 +141,56 @@ changelogRouter.post("/entries", async (c) => {
 });
 
 /**
- * POST /seed — one-time idempotent seed of the current static changelog data
- * into D1. Only inserts when the tables are empty, so re-runs are safe.
+ * POST /seed — idempotent seed of the bundled static changelog into D1. Inserts
+ * are onConflictDoNothing so re-runs never overwrite entries edited in D1.
  */
 changelogRouter.post("/seed", async (c) => {
   const db = drizzle(c.env.DB);
-  const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(changelogEntries);
-  if (n > 0) return c.json({ seeded: false, reason: "already has entries", count: n }, 200);
 
-  for (const b of BRANCHES) {
-    await db.insert(changelogBranches).values({
-      branch: b.branch,
-      title: b.title,
-      summary: b.summary ?? null,
-      date: b.date,
-      status: b.status,
-      prNumber: b.prNumber ?? null,
-      prUrl: b.prUrl ?? null,
-      diagramsJson: b.diagrams ?? null,
-    }).onConflictDoNothing();
+  // Build all inserts, then run them chunked through db.batch() — one query per
+  // row keeps us well under D1's 100-bound-param limit while avoiding a slow
+  // sequential await-per-row that could hit Worker execution limits.
+  const stmts = [
+    ...BRANCHES.map((b) =>
+      db
+        .insert(changelogBranches)
+        .values({
+          branch: b.branch,
+          title: b.title,
+          summary: b.summary ?? null,
+          date: b.date,
+          status: b.status,
+          prNumber: b.prNumber ?? null,
+          prUrl: b.prUrl ?? null,
+        })
+        .onConflictDoNothing(),
+    ),
+    ...CHANGELOG.map((e) =>
+      db
+        .insert(changelogEntries)
+        .values({
+          slug: e.id,
+          branch: e.branch,
+          tag: e.tag ?? null,
+          area: e.area,
+          title: e.title,
+          summary: e.summary,
+          status: e.status,
+          date: e.date,
+          changesJson: e.changes,
+          migrationsJson: e.migrations ?? [],
+          detailJson: (CHANGELOG_DETAIL[e.id] as unknown as Record<string, unknown>) ?? null,
+        })
+        .onConflictDoNothing(),
+    ),
+  ];
+
+  const BATCH = 50;
+  for (let i = 0; i < stmts.length; i += BATCH) {
+    const chunk = stmts.slice(i, i + BATCH) as [(typeof stmts)[number], ...(typeof stmts)[number][]];
+    await db.batch(chunk);
   }
-  for (const e of CHANGELOG) {
-    await db.insert(changelogEntries).values({
-      slug: e.id,
-      branch: e.branch,
-      tag: e.tag ?? null,
-      area: e.area,
-      title: e.title,
-      summary: e.summary,
-      status: e.status,
-      date: e.date,
-      changesJson: e.changes,
-      migrationsJson: e.migrations ?? [],
-      detailJson: (CHANGELOG_DETAIL[e.id] as unknown as Record<string, unknown>) ?? null,
-    }).onConflictDoNothing();
-  }
-  return c.json({ seeded: true, branches: BRANCHES.length, entries: CHANGELOG.length }, 201);
+
+  const [{ n }] = await db.select({ n: sql<number>`count(*)` }).from(changelogEntries);
+  return c.json({ seeded: true, entries: n }, 201);
 });

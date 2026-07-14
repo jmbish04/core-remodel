@@ -32,6 +32,7 @@ import { eq } from "drizzle-orm";
 import {
   productImages,
   productSpecs,
+  showroomProductMappings,
   showroomStores,
   showroomStoreProducts,
   storeProductIntel,
@@ -109,9 +110,16 @@ function researchSourceUrls(research: DeepResearchResult): string[] {
     .filter((u): u is string => !!u);
 }
 
-/** Product + brand + store context loaded in mark-running. */
+/**
+ * Product + brand + (representative) store context loaded in mark-running.
+ *
+ * A product has no owning store — it is global and may be carried by zero
+ * or more showrooms via `showroom_product_mappings`. `storeId`/`storeName`
+ * here are a representative carrying showroom (first mapping row, if any),
+ * used only to ground the research prompt with real-world context.
+ */
 interface ProductContext {
-  storeId: number;
+  storeId: number | null;
   storeName: string;
   itemName: string;
   sku: string | null;
@@ -491,10 +499,13 @@ async function markRunning(
       set: { researchStatus: "running", updatedAt: new Date() },
     });
 
+  // A product has no owning store — resolve one representative carrying
+  // showroom (if any) via showroom_product_mappings for prompt grounding.
   const [store] = await db
-    .select({ name: showroomStores.name })
-    .from(showroomStores)
-    .where(eq(showroomStores.id, product.storeId))
+    .select({ id: showroomStores.id, name: showroomStores.name })
+    .from(showroomProductMappings)
+    .innerJoin(showroomStores, eq(showroomProductMappings.showroomId, showroomStores.id))
+    .where(eq(showroomProductMappings.productId, storeProductId))
     .limit(1);
 
   let brandName: string | null = null;
@@ -510,7 +521,7 @@ async function markRunning(
   }
 
   return {
-    storeId: product.storeId,
+    storeId: store?.id ?? null,
     storeName: store?.name ?? "an unknown showroom",
     itemName: product.itemName,
     sku: product.sku ?? null,

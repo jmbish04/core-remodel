@@ -1,4 +1,4 @@
-import { ArrowLeft, Home, LogOut, Menu } from "lucide-react";
+import { ArrowLeft, Home, LogOut, Menu, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Icons } from "@/components/Icons";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -241,6 +241,19 @@ export function AdminSidebar({ currentPath: currentPathProp }: { currentPath?: s
 
         <a href="/admin" className="truncate text-sm font-semibold">
           {siteConfig.name}
+        </a>
+
+        <a
+          href="/admin/config"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Configuration"
+          className={cn(
+            buttonVariants({ variant: "ghost", size: "icon-sm" }),
+            "ml-auto shrink-0",
+          )}
+        >
+          <Settings className="size-4" />
         </a>
       </div>
 

@@ -493,7 +493,7 @@ function FilterSelect({
 }) {
   return (
     <Select value={value} onValueChange={(next) => onValueChange((next as string | null) ?? ALL)}>
-      <SelectTrigger className="min-w-[10rem] capitalize">
+      <SelectTrigger className="capitalize">
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent>

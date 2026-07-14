@@ -1,1 +1,0 @@
-ALTER TABLE `mood_board_generations` ADD `is_shared` integer DEFAULT false NOT NULL;

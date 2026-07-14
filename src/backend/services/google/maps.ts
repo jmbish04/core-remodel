@@ -1054,6 +1054,144 @@ Rules for each field:
     return parseGoogleAddressComponents(data);
   }
 
+  // ─── Places API (New) — Text Search (many candidates, discovery) ──────────
+
+  /**
+   * Multi-result Places Text Search for showroom DISCOVERY.
+   *
+   * Where {@link placesTextSearch} is hardwired to `maxResultCount: 1` (built to
+   * backfill a `place_id` onto a store the caller already knows), this returns a
+   * ranked LIST of candidate places so an agent can surface options during a
+   * chat ("stone slab showrooms near San Francisco") and let the user pick which
+   * ones to persist. It is the read-side of the 0018 showroom-search flow.
+   *
+   * Cost/quota discipline is identical to every other Places call: gated behind
+   * {@link isUnderMonthlyQuota} (throws `MAPS_QUOTA_EXCEEDED`) and logged to
+   * `google_maps_usage_log` via {@link logUsage} for cost attribution. It never
+   * runs the (slow, billable) Gemini review analysis — this is a cheap, wide net.
+   *
+   * `near` handling (deliberately simple for v1): a `"lat,lng"` string becomes a
+   * 50 km `locationBias` circle; any other free-text value (e.g. "San Francisco,
+   * CA") is folded into the text query so Places biases by text. Richer
+   * geocoded/`locationRestriction` handling is a documented follow-up.
+   *
+   * @param query  Free-text search (e.g. "European kitchen cabinetry showroom").
+   * @param opts   `maxResults` (default 10, hard cap 20), `near`, `includedType`.
+   * @returns Array of compact candidate cards (empty when Google finds nothing).
+   * @throws Error('MAPS_QUOTA_EXCEEDED') when the monthly free-tier limit is reached.
+   * @throws Error('PLACES_TEXT_SEARCH_ERROR: <message>') on upstream failure.
+   */
+  async placesTextSearchMany(
+    query: string,
+    opts?: { maxResults?: number; near?: string; includedType?: string },
+  ): Promise<
+    Array<{
+      placeId: string;
+      displayName: string | null;
+      formattedAddress: string | null;
+      rating: number | null;
+      userRatingCount: number | null;
+      nationalPhoneNumber: string | null;
+      websiteUri: string | null;
+      primaryType: string | null;
+      types: string[];
+      location: { latitude: number; longitude: number } | null;
+    }>
+  > {
+    if (!(await this.isUnderMonthlyQuota())) {
+      throw new Error("MAPS_QUOTA_EXCEEDED");
+    }
+
+    const gmapKey = await getGoogleMapsApiKey(this.env);
+
+    // Clamp result count to the free-tier-friendly window (1..20, default 10).
+    const maxResultCount = Math.min(Math.max(opts?.maxResults ?? 10, 1), 20);
+
+    // Fold `near` into the request: a "lat,lng" pair drives a locationBias
+    // circle; any other text is appended to the query so Places biases by text.
+    let textQuery = query.trim();
+    let locationBias: Record<string, unknown> | undefined;
+    const near = opts?.near?.trim();
+    if (near) {
+      const latLng = near.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+      if (latLng) {
+        locationBias = {
+          circle: {
+            center: { latitude: Number(latLng[1]), longitude: Number(latLng[2]) },
+            radius: 50_000,
+          },
+        };
+      } else {
+        textQuery = `${textQuery} near ${near}`;
+      }
+    }
+
+    const requestBody: Record<string, unknown> = { textQuery, maxResultCount };
+    if (locationBias) requestBody.locationBias = locationBias;
+    if (opts?.includedType) requestBody.includedType = opts.includedType;
+
+    const res = await fetch("https://places.googleapis.com/v1/places:searchText", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": gmapKey,
+        "X-Goog-FieldMask":
+          "places.id,places.displayName,places.formattedAddress,places.rating," +
+          "places.userRatingCount,places.nationalPhoneNumber,places.websiteUri," +
+          "places.location,places.primaryType,places.types",
+      },
+      body: JSON.stringify(requestBody),
+      signal: AbortSignal.timeout(5000),
+    });
+
+    const data = (await res.json()) as {
+      places?: Array<{
+        id?: string;
+        displayName?: { text?: string };
+        formattedAddress?: string;
+        rating?: number;
+        userRatingCount?: number;
+        nationalPhoneNumber?: string;
+        websiteUri?: string;
+        primaryType?: string;
+        types?: string[];
+        location?: { latitude?: number; longitude?: number };
+      }>;
+      error?: { message?: string };
+    };
+
+    await this.logUsage(
+      "places:searchText",
+      requestBody,
+      { resultCount: data.places?.length ?? 0, statusCode: res.status },
+      { endpoint: "textSearch:discovery", statusCode: res.status },
+    );
+
+    if (!res.ok) {
+      const errMsg = data.error?.message ?? `HTTP ${res.status}`;
+      throw new Error(`PLACES_TEXT_SEARCH_ERROR: ${errMsg}`);
+    }
+
+    return (data.places ?? [])
+      .filter((p): p is typeof p & { id: string } => Boolean(p.id))
+      .map((p) => ({
+        placeId: p.id,
+        displayName: p.displayName?.text ?? null,
+        formattedAddress: p.formattedAddress ?? null,
+        rating: typeof p.rating === "number" ? p.rating : null,
+        userRatingCount:
+          typeof p.userRatingCount === "number" ? p.userRatingCount : null,
+        nationalPhoneNumber: p.nationalPhoneNumber ?? null,
+        websiteUri: p.websiteUri ?? null,
+        primaryType: p.primaryType ?? null,
+        types: Array.isArray(p.types) ? p.types : [],
+        location:
+          p.location?.latitude != null && p.location?.longitude != null
+            ? { latitude: p.location.latitude, longitude: p.location.longitude }
+            : null,
+      }));
+  }
+
   async computeCommute(
     homeAddress: string,
     searchQuery: string,

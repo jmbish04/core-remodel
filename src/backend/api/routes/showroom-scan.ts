@@ -15,7 +15,11 @@ import { drizzle } from "drizzle-orm/d1";
 import { getAgentByName } from "agents";
 import { z } from "zod";
 
-import { showroomStoreProducts, showroomScanLog } from "@backend/db/schema/showroom/index";
+import {
+  showroomStoreProducts,
+  showroomScanLog,
+  showroomProductMappings,
+} from "@backend/db/schema/showroom/index";
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import type { ShowroomResearchAgent } from "@backend/ai/agents/ShowroomResearchAgent";
@@ -91,15 +95,21 @@ showroomScanRouter.post("/scan/batch-sync", async (c) => {
     const storeId = (card.storeId ?? parsed.data.storeId) as number;
     const itemName = (card.label?.trim() || card.barcode?.trim() || "Field capture").slice(0, 200);
 
+    // Products are global (no owning store) — insert the row, then upsert a
+    // showroom_product_mappings link to the showroom this card was captured at.
     const [product] = await db
       .insert(showroomStoreProducts)
       .values({
-        storeId,
         itemName,
         sku: card.barcode?.trim() || null,
         notes: card.notes?.trim() || null,
       })
       .returning();
+
+    await db
+      .insert(showroomProductMappings)
+      .values({ showroomId: storeId, productId: product.id })
+      .onConflictDoNothing();
 
     const jsonExtractedData = JSON.stringify({
       notes: card.notes ?? null,

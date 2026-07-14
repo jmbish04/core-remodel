@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
+import { rooms } from "../home/rooms";
+
 /**
  * Material Schedule Items — the master list of materials/components to source
  * for the renovation (e.g. "Induction cooktop", "Primary closet system").
@@ -15,7 +17,15 @@ export const materialScheduleItems = sqliteTable("material_schedule_items", {
     .default(sql`(unixepoch())`),
 
   title: text("title").notNull(),
-  roomName: text("room_name"),
+  /**
+   * Canonical room this material belongs to. HARD relationship: every material
+   * is per-room ("Toilet — Primary Bath"), so `roomId` is a required M:1 FK.
+   * The display name is derived by joining `rooms` — never stored (no
+   * denormalized `room_name`).
+   */
+  roomId: integer("room_id")
+    .notNull()
+    .references(() => rooms.id, { onDelete: "cascade" }),
   brand: text("brand"),
   model: text("model"),
   notes: text("notes"),

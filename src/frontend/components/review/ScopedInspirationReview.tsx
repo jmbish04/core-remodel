@@ -235,7 +235,7 @@ export function ScopedInspirationReview({
                     setInternalScope(next as BroadScope);
                   }}
                 >
-                  <SelectTrigger size="sm" className="w-[8.5rem]">
+                  <SelectTrigger size="sm">
                     <SelectValue
                       getLabel={(value) =>
                         value === "level" ? "Whole level" : "Whole home"
@@ -255,7 +255,7 @@ export function ScopedInspirationReview({
                       setInternalFloorId(next ? Number(next) : null)
                     }
                   >
-                    <SelectTrigger size="sm" className="w-[10rem]">
+                    <SelectTrigger size="sm">
                       <SelectValue
                         items={levelFloors.map((floor) => ({
                           value: String(floor.id),
