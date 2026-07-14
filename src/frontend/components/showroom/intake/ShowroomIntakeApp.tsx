@@ -74,6 +74,7 @@ import { OverviewNoteEditor } from "../OverviewNoteEditor";
 
 import { HoursEditor } from "./HoursEditor";
 import { FlagsEditor, type ShowroomFlags } from "./FlagsEditor";
+import { LinksField, type IntakeLink } from "./LinksField";
 import { DEFAULT_HOURS, type HoursJson } from "./hours-types";
 
 import {
@@ -467,6 +468,9 @@ export function ShowroomIntakeApp() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [cities, setCities] = useState<City[]>([]);
   const [bayAreaCityId, setBayAreaCityId] = useState<string>("");
+  // Web/social links (component-local — not a react-hook-form field). Seeded from
+  // any Places-surfaced website/instagram, sent verbatim as `links` on create.
+  const [links, setLinks] = useState<IntakeLink[]>([]);
   const [loadingPlace, setLoadingPlace] = useState(false);
   // Controlled tab: default "search"; the "enter manually" escape jumps to
   // "location", and a place selection surfaces the form on "search".
@@ -713,6 +717,15 @@ export function ShowroomIntakeApp() {
         // prior selection so a fresh place starts unassigned.
         setBayAreaCityId("");
 
+        // Pre-populate the links section from any Places-surfaced website /
+        // instagram so the user can confirm rather than retype them.
+        const seededLinks: IntakeLink[] = [];
+        if (mapped.websiteUrl?.trim())
+          seededLinks.push({ url: mapped.websiteUrl.trim(), type: "WEBSITE" });
+        if (mapped.instagramUrl?.trim())
+          seededLinks.push({ url: mapped.instagramUrl.trim(), type: "INSTAGRAM" });
+        setLinks(seededLinks);
+
         setContext({
           businessStatus: mapped._businessStatus,
           rating: mapped._rating,
@@ -846,6 +859,12 @@ export function ShowroomIntakeApp() {
     body.reviewAiInsight = reviewAiInsight;
     // Selected Google Place ID → lets the server dedupe on the canonical id.
     if (placeId) body.placeId = placeId;
+    // Web/social links — trimmed, empty-url rows dropped. Server accepts a
+    // `links: [{url,type}]` array on create.
+    const cleanLinks = links
+      .map((l) => ({ url: l.url.trim(), type: l.type }))
+      .filter((l) => l.url);
+    if (cleanLinks.length > 0) body.links = cleanLinks;
 
     try {
       const res = await fetch("/api/showroom-stores", {
@@ -897,6 +916,7 @@ export function ShowroomIntakeApp() {
       setReviewAiInsight(null);
       setPlaceId(null);
       setDupWarning(null);
+      setLinks([]);
       sessionTokenRef.current = crypto.randomUUID();
       setSessionEpoch((n) => n + 1);
     } catch (err) {
@@ -1186,6 +1206,17 @@ export function ShowroomIntakeApp() {
                 </div>
               </Card>
 
+              {/* Links — website, socials, or anything else worth keeping. */}
+              <Card className="space-y-3 p-4 sm:p-5">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium">Links</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    Website, social, or other
+                  </span>
+                </div>
+                <LinksField value={links} onChange={setLinks} />
+              </Card>
+
               {/* Overview / visit note */}
               <Card className="space-y-4 p-4 sm:p-5">
                 <span className="text-sm font-medium">Overview note</span>
@@ -1461,6 +1492,7 @@ export function ShowroomIntakeApp() {
                 setReviewAiInsight(null);
                 setPlaceId(null);
                 setDupWarning(null);
+                setLinks([]);
                 sessionTokenRef.current = crypto.randomUUID();
                 setSessionEpoch((n) => n + 1);
               }}

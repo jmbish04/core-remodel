@@ -21,8 +21,10 @@ import {
   ArrowRight,
   CalendarPlus,
   CheckCircle2,
+  Clock,
   Globe,
   ImagePlus,
+  Link2,
   Loader2,
   Mail,
   MapPin,
@@ -71,8 +73,11 @@ import { EditStoreModal, type EditableStore } from "./EditStoreModal";
 import { ContactCard, formatPhone as fmtPhone, telHref, type ContactRow } from "./contacts/ContactCard";
 import {
   CategoryChipsEditor,
+  EditAddressModal,
+  EditHoursModal,
   HoursContactModal,
   HoursMiniCard,
+  ManageLinksModal,
   SocialLinks,
   type StoreCategoryChip,
 } from "./hero";
@@ -138,6 +143,11 @@ interface StoreDetail {
   ratingContextMarkdown: string | null;
   hoursJson: HoursJson | null;
   locationAddress: string | null;
+  locationStreetNumber: string | null;
+  locationStreetName: string | null;
+  locationCity: string | null;
+  locationState: string | null;
+  locationZipCode: string | null;
   googleMapsLink: string | null;
   googleRating: number | null;
   userRatingCount: number | null;
@@ -404,6 +414,9 @@ export function StoreViewportApp({
   const [productsOpen, setProductsOpen] = useState(false);
   const [scrapeResultsOpen, setScrapeResultsOpen] = useState(false);
   const [hoursModalOpen, setHoursModalOpen] = useState(false);
+  const [editHoursOpen, setEditHoursOpen] = useState(false);
+  const [editAddressOpen, setEditAddressOpen] = useState(false);
+  const [manageLinksOpen, setManageLinksOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
 
   // Note delete (inline; create/edit now navigate to the full-page editor).
@@ -1016,12 +1029,40 @@ export function StoreViewportApp({
             </div>
           </div>
 
-          {/* Office-hours mini-card — click for full hours + contact + map. */}
-          <div className="shrink-0 sm:w-60">
+          {/* Office-hours mini-card — click for full hours + contact + map —
+              plus the correction affordances (hours / address / links) for when
+              intake got a field wrong, left it blank, or the store moved. */}
+          <div className="shrink-0 space-y-2 sm:w-60">
             <HoursMiniCard
               hoursJson={store.hoursJson}
               onClick={() => setHoursModalOpen(true)}
             />
+            <div className="flex flex-wrap gap-1.5">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 gap-1 px-2 text-[11px]"
+                onClick={() => setEditHoursOpen(true)}
+              >
+                <Clock className="size-3" /> Edit hours
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 gap-1 px-2 text-[11px]"
+                onClick={() => setEditAddressOpen(true)}
+              >
+                <MapPin className="size-3" /> Edit address
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 gap-1 px-2 text-[11px]"
+                onClick={() => setManageLinksOpen(true)}
+              >
+                <Link2 className="size-3" /> Links
+              </Button>
+            </div>
           </div>
           </div>
 
@@ -1235,6 +1276,36 @@ export function StoreViewportApp({
         }}
         open={hoursModalOpen}
         onOpenChange={setHoursModalOpen}
+        onEditHours={() => setEditHoursOpen(true)}
+        onEditAddress={() => setEditAddressOpen(true)}
+      />
+      <EditHoursModal
+        storeId={id}
+        hoursJson={store.hoursJson}
+        open={editHoursOpen}
+        onOpenChange={setEditHoursOpen}
+        onSaved={loadStore}
+      />
+      <EditAddressModal
+        storeId={id}
+        address={{
+          locationStreetNumber: store.locationStreetNumber,
+          locationStreetName: store.locationStreetName,
+          locationCity: store.locationCity,
+          locationState: store.locationState,
+          locationZipCode: store.locationZipCode,
+          locationAddress: store.locationAddress,
+          googleMapsLink: store.googleMapsLink,
+        }}
+        open={editAddressOpen}
+        onOpenChange={setEditAddressOpen}
+        onSaved={loadStore}
+      />
+      <ManageLinksModal
+        storeId={id}
+        open={manageLinksOpen}
+        onOpenChange={setManageLinksOpen}
+        onChanged={loadStore}
       />
       <EditStoreModal
         store={store as unknown as EditableStore}
