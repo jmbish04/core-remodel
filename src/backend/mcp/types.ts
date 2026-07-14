@@ -10,8 +10,10 @@
  *   3. The `/mcp` + `/mcp/tools` docs site and `/context`, which render the
  *      catalog from this same metadata so the docs can never silently drift.
  *
- * To add a tool: append a `defineTool({...})` entry to the relevant
- * `tools/<domain>.ts` file. It is picked up everywhere automatically.
+ * To add a tool: create `tools/<domain>/<tool_name>.ts` exporting a
+ * `defineTool({...})`, then add it to `tools/<domain>/index.ts`. One file per tool;
+ * domain-shared helpers live in `tools/<domain>/_shared.ts`. Picked up everywhere
+ * automatically via the `tools/index.ts` barrel.
  */
 import { drizzle } from "drizzle-orm/d1";
 import type { z, ZodRawShape } from "zod";

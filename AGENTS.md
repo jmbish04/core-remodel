@@ -65,17 +65,26 @@ or Claude Code) can manage the remodel by chat. Plan: `docs/0015_mcp_server/IMPL
 - **Scope**: a single `remodel` full-parity scope (anything the app can do).
 
 **The tool registry is the single source of truth**: `src/backend/mcp/registry.ts`
-concatenates the per-domain arrays in `src/backend/mcp/tools/*.ts`. It feeds the
-MCP server, the public catalog endpoint `GET /api/mcp-docs`, and the docs pages.
+concatenates the per-domain arrays. Each domain is a FOLDER — `tools/<domain>/`
+with **one file per tool** (`tools/<domain>/<tool_name>.ts`, filename == the tool's
+`name`), a `tools/<domain>/_shared.ts` for helpers used by 2+ tools in that domain,
+and `tools/<domain>/index.ts` that re-exports the domain's `RemodelTool[]` array.
+`tools/index.ts` barrels the 14 domain arrays into `ALL_TOOL_GROUPS`. To count tools
+authoritatively: `find src/backend/mcp/tools -mindepth 2 -name '*.ts' ! -name index.ts
+! -name _shared.ts | wc -l` (currently 79). It feeds the MCP server, the public
+catalog endpoint `GET /api/mcp-docs`, and the docs pages. NOTE: the SEPARATE legacy
+JSON-RPC shim at `src/backend/api/routes/mcp.ts` (`/api/mcp`) is a small back-compat
+surface — NOT this registry; do not confuse the two.
 
 **To ADD or CHANGE a tool (do this every time):**
-1. Add/edit a `defineTool({...})` entry in the relevant
-   `src/backend/mcp/tools/<domain>.ts` (name = bare snake_case verb, NO prefix;
-   hand-written Zod v4 `inputShape` — never import drizzle-zod; correct
+1. Add a new `src/backend/mcp/tools/<domain>/<tool_name>.ts` exporting
+   `export const <camelName> = defineTool({...})` (name = bare snake_case verb, NO
+   prefix; hand-written Zod v4 `inputShape` — never import drizzle-zod; correct
    annotations from `types.ts`: `READ_ONLY` / `WRITE` / `WRITE_IDEMPOTENT` /
-   `DESTRUCTIVE`; ≥1 `example`; money in cents).
-2. New domain file → import its array into `src/backend/mcp/tools/index.ts`
-   (`ALL_TOOL_GROUPS`, order = docs order).
+   `DESTRUCTIVE`; ≥1 `example`; money in cents). Helpers shared across the domain go
+   in `tools/<domain>/_shared.ts`. Then add the export to `tools/<domain>/index.ts`.
+2. New domain → new `tools/<domain>/` folder + its `index.ts`, then import its array
+   into `src/backend/mcp/tools/index.ts` (`ALL_TOOL_GROUPS`, order = docs order).
 3. **Maintain the frontend docs**: the `/connect/tools` catalog page
    auto-renders from the registry (via `/api/mcp-docs`), so a well-described
    tool needs no manual doc edit — but VERIFY the card looks right, and update
