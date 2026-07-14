@@ -51,18 +51,9 @@ export const showroomStores = sqliteTable("showroom_stores", {
 
   phoneNumber: text("phone_number"),
   emailAddress: text("email_address"),
-  // Website + social URLs now live in the showroom_store_links table. The
-  // columns below are DEPRECATED: retained only so the one-time links backfill
-  // (legacyUrlsToLinks) can read them on prod. Dropped in a follow-up migration
-  // once that backfill is confirmed. New code never reads/writes them.
-  /** @deprecated moved to showroom_store_links — backfill source only. */
-  websiteUrl: text("website_url"),
-  /** @deprecated moved to showroom_store_links — backfill source only. */
-  instagramUrl: text("instagram_url"),
-  /** @deprecated moved to showroom_store_links — backfill source only. */
-  facebookUrl: text("facebook_url"),
-  /** @deprecated moved to showroom_store_links — backfill source only. */
-  pinterestUrl: text("pinterest_url"),
+  // Website + social URLs live in the showroom_store_links table. The flat
+  // website_url/instagram_url/facebook_url/pinterest_url columns were removed
+  // after the one-time links backfill (migration 0109).
   /** Legacy zip — kept in sync with `locationZipCode`; slated for removal. */
   zipCode: text("zip_code"),
   googleMapsLink: text("google_maps_link"),
@@ -90,26 +81,11 @@ export const showroomStores = sqliteTable("showroom_stores", {
   hubName: text("hub_name"),
 
   // ── Hours & access ────────────────────────────────────────────────────
-  // Opening hours live in the normalized `showroom_store_hours` table (one row
-  // per open day) — the source of truth. The API/MCP accept a structured
-  // hoursJson payload on write and derive both the rows and `is_open_weekends`;
-  // responses rebuild hoursJson from the rows. The three columns below are
-  // DEPRECATED: retained only so the one-time hours backfill can read them on
-  // prod, dropped in a follow-up migration once backfill is confirmed.
-  /** @deprecated superseded by showroom_store_hours — backfill source only. */
-  hoursJson: text("hours_json", { mode: "json" }).$type<{
-    mon: { open: string; close: string } | null;
-    tue: { open: string; close: string } | null;
-    wed: { open: string; close: string } | null;
-    thu: { open: string; close: string } | null;
-    fri: { open: string; close: string } | null;
-    sat: { open: string; close: string } | null;
-    sun: { open: string; close: string } | null;
-  }>(),
-  /** @deprecated superseded by showroom_store_hours — backfill source only. */
-  weekdayHours: text("weekday_hours"),
-  /** @deprecated superseded by showroom_store_hours — backfill source only. */
-  weekendHours: text("weekend_hours"),
+  // Opening hours live SOLELY in the normalized `showroom_store_hours` table
+  // (one row per open day). The API/MCP accept a structured hoursJson payload on
+  // write and derive both the rows and `is_open_weekends`; responses rebuild
+  // hoursJson from the rows. The legacy hours_json / weekday_hours /
+  // weekend_hours columns were removed after backfill (migration 0109).
   isOpenWeekends: integer("is_open_weekends", { mode: "boolean" }).default(
     false
   ),
