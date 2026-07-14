@@ -13,6 +13,9 @@
  *   GET  /review-queue          — Phase-3: every 'processed' bucket, all showrooms.
  *   POST /buckets/:id/review    — Phase-3: approve (finalize product+mappings+price)
  *                                 or reject (with reason) a bucket.
+ *   POST /buckets/:id/regions   — Phase-4: mask a `multi` bucket's wide source
+ *                                 photo into N per-product crops, each its own
+ *                                 new `single` bucket.
  *
  * Mounts at /api/intake (wired in api/index.ts), behind requireAccessAuth.
  * Reuses the same vocab/brand/category/color/product-ensure helpers as
@@ -35,6 +38,7 @@ import {
   showroomStoreProducts,
 } from "@backend/db";
 import { ImageProcessorService } from "@backend/services/image-processor";
+import { cropAndUploadCfImage } from "@backend/services/render/cf-images";
 import { extractShowroomProductFromDescriptions } from "@backend/services/image-processor/product-extraction";
 import {
   dataUrlToBlob,
@@ -724,4 +728,144 @@ intakeRouter.post("/buckets/:id/review", async (c) => {
       500,
     );
   }
+});
+
+// ─── POST /buckets/:id/regions ──────────────────────────────────────────────
+
+const NormalizedBboxSchema = z
+  .object({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    // width/height must be > 0 — a zero-area crop is a client error, not a valid region.
+    width: z.number().gt(0).max(1),
+    height: z.number().gt(0).max(1),
+  })
+  // The box must fit inside the image — otherwise the crop trim would run past
+  // the source bounds. x+width and y+height must both stay within [0,1].
+  .refine((b) => b.x + b.width <= 1 && b.y + b.height <= 1, {
+    message: "bbox must fit within the image (x+width and y+height ≤ 1)",
+  });
+
+const RegionsBodySchema = z.object({
+  sourcePhotoId: z.number().int().positive(),
+  regions: z
+    .array(z.object({ bbox: NormalizedBboxSchema, label: z.string().min(1).optional() }))
+    .min(1),
+});
+
+/**
+ * POST /api/intake/buckets/:id/regions — Phase 4 "multiple products" masking.
+ * Body: `{ sourcePhotoId, regions: [{ bbox: {x,y,width,height} (0..1), label? }] }`.
+ *
+ * The source bucket (`:id`) is a `multi`-kind bucket whose wide shot depicts
+ * several products; `sourcePhotoId` must be one of its own photos. For each
+ * region: crop the source image to the normalized bbox via the shared
+ * `cropAndUploadCfImage` primitive (re-uploads a NEW CF Images asset — never
+ * mutates the original), spin up a fresh `single` bucket, and insert ONE
+ * crop-child photo row (`parentPhotoId` + `cropRegion` linking back to the
+ * source) into it. Each new bucket then flows through the existing
+ * `/buckets/:id/process` + review path unchanged — no changes needed there.
+ *
+ * Regions are cropped sequentially (few regions per photo; not worth the
+ * concurrency complexity) and independently try/caught — one bad region
+ * (e.g. a transient CF Images failure) doesn't lose the others. The source
+ * bucket is only flipped to `status='processed'` (masked) if AT LEAST ONE
+ * crop succeeded; if every region fails, nothing is mutated and a 500 with
+ * per-region error details is returned.
+ */
+intakeRouter.post("/buckets/:id/regions", async (c) => {
+  const bucketIdParsed = z.coerce.number().int().positive().safeParse(c.req.param("id"));
+  if (!bucketIdParsed.success) return c.json({ error: "Invalid bucket id" }, 400);
+  const bucketId = bucketIdParsed.data;
+
+  const bodyParsed = RegionsBodySchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!bodyParsed.success) {
+    return c.json({ error: "Invalid regions body", details: bodyParsed.error.flatten() }, 400);
+  }
+  const { sourcePhotoId, regions } = bodyParsed.data;
+
+  const db = drizzle(c.env.DB);
+  const [bucket] = await db.select().from(productPhotoBuckets).where(eq(productPhotoBuckets.id, bucketId)).limit(1);
+  if (!bucket) return c.json({ error: "Bucket not found" }, 404);
+
+  const [sourcePhoto] = await db
+    .select()
+    .from(productShowroomPhotos)
+    .where(eq(productShowroomPhotos.id, sourcePhotoId))
+    .limit(1);
+  if (!sourcePhoto || sourcePhoto.bucketId !== bucketId) {
+    return c.json({ error: "sourcePhotoId does not belong to this bucket" }, 400);
+  }
+  if (!sourcePhoto.imageUrl) return c.json({ error: "Source photo has no imageUrl to crop" }, 400);
+
+  const sourceBase = (sourcePhoto.fileName ?? "photo").replace(/\.[^./]+$/, "");
+
+  const newBuckets: {
+    id: number;
+    kind: string;
+    label: string | null;
+    status: string;
+    photos: { id: number; imageUrl: string | null; fileName: string | null }[];
+  }[] = [];
+  const errors: { index: number; message: string }[] = [];
+
+  for (let i = 0; i < regions.length; i++) {
+    const region = regions[i];
+    try {
+      const cropped = await cropAndUploadCfImage(
+        c.env,
+        sourcePhoto.imageUrl,
+        region.bbox,
+        `${sourceBase}-crop-${i}.jpg`,
+      );
+
+      const [newBucket] = await db
+        .insert(productPhotoBuckets)
+        .values({
+          kind: "single",
+          showroomId: sourcePhoto.showroomId,
+          label: region.label ?? null,
+          status: "draft",
+        })
+        .returning();
+
+      const [childPhoto] = await db
+        .insert(productShowroomPhotos)
+        .values({
+          ragUuid: crypto.randomUUID(),
+          productId: null,
+          showroomId: sourcePhoto.showroomId,
+          bucketId: newBucket.id,
+          parentPhotoId: sourcePhotoId,
+          cropRegion: region.bbox,
+          fileName: region.label || `${sourceBase}-crop-${i}`,
+          sortOrder: 0,
+          imageUrl: cropped.deliveryUrl,
+          cfImageId: cropped.imageId,
+          status: "uploaded",
+        })
+        .returning();
+
+      newBuckets.push({
+        id: newBucket.id,
+        kind: newBucket.kind,
+        label: newBucket.label,
+        status: newBucket.status,
+        photos: [{ id: childPhoto.id, imageUrl: childPhoto.imageUrl, fileName: childPhoto.fileName }],
+      });
+    } catch (error) {
+      console.error(`Region ${i} crop failed for bucket ${bucketId}:`, error);
+      errors.push({ index: i, message: error instanceof Error ? error.message : "Unknown error" });
+    }
+  }
+
+  if (newBuckets.length === 0) {
+    return c.json({ error: "All region crops failed", details: errors }, 500);
+  }
+
+  // At least one crop succeeded — the source (multi) bucket is now masked;
+  // its crops carry the products forward through the normal process/review path.
+  await db.update(productPhotoBuckets).set({ status: "processed" }).where(eq(productPhotoBuckets.id, bucketId)).run();
+
+  return c.json({ buckets: newBuckets, ...(errors.length > 0 ? { errors } : {}) });
 });

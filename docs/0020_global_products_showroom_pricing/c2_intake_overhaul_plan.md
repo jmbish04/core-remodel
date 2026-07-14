@@ -35,4 +35,12 @@ Multi-step tabbed wizard for a showroom visit's photos.
 Photo-left click-zoom, 1-col form: category multiselect(+subcategory), brand autoselect (category-filtered, stone-optional), N/A model button, style autocomplete, colors multi-select w/ hex, `CurrencyInput` price/sale, discount toggle, reject = red button → modal (common-reason multi-select buttons + conditional-required reason). Bucket collage applies form to all its photos.
 
 ## Phase 4 — multiple-products masking
-Wide shot with several products → mask each (like inspiration mapping) → CF Images crop linked to original → each crop its own product; bucket stays grouped.
+Wide shot with several products → draw a box per product → CF Images crop linked to original → each crop its own product.
+
+**Reuses the Workshop clippings pipeline** (the wheel exists): `InspirationCanvas` (draws a source-px box) → normalize to 0..1 → `cropAndUploadCfImage(env, url, bbox)` (`services/render/cf-images.ts`, uses `env.IMAGES.input().transform({trim}).output()`, re-uploads a new CF asset) → linked DB row. Mirror of `POST /api/workshop/clippings/extract`.
+
+**Design:** masking a `multi` bucket SPAWNS one `single` bucket per crop — each crop child then flows through the existing process + review path unchanged (no changes to process/review). The original wide photo stays as the multi bucket's parent.
+
+- **DB (0104):** add nullable `parent_photo_id` (self-FK) + `crop_region` (json) to `product_showroom_photos`. Additive ADD COLUMN (no rebuild).
+- **API:** `POST /api/intake/buckets/:id/regions` `{ sourcePhotoId, regions:[{bbox:{x,y,width,height} 0..1, label?}] }` → per region: `cropAndUploadCfImage` → new `single` bucket + one crop-child photo (`parentPhotoId`, `cropRegion`, same showroom). Returns the new buckets. Mark the multi bucket masked.
+- **Frontend:** `MultiProductMasker` — fork `InspirationCanvas` to accumulate N labeled boxes over the wide photo; wired into the intake wizard for `multi`-kind buckets. Mirror `ExtractClippingDialog`.
