@@ -219,7 +219,7 @@ function formatGoogleTime(point: { hour?: number | null; minute?: number | null 
  * Returns null when there are no usable periods (caller leaves hours unset).
  * Mirrors the intake form's `mapPlaceToHoursJson`.
  */
-function placeToStructuredHours(regularOpeningHours: unknown): StructuredHours | null {
+export function placeToStructuredHours(regularOpeningHours: unknown): StructuredHours | null {
   const roh = regularOpeningHours as { periods?: unknown } | null | undefined;
   const periods = roh?.periods;
   if (!Array.isArray(periods) || periods.length === 0) return null;
