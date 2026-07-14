@@ -17,7 +17,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -33,9 +33,13 @@ function sanitizeBranchName(name) {
 function getGitHistory(limit) {
   // Format: short_hash | short_parents | decorations | subject
   // e.g. 2a3b4c | 1a2b3c 4a5b6c | (HEAD -> main, tag: v1.0.0) | initial commit
-  const cmd = `git log --format="%h|%p|%d|%s" --topo-order -n ${limit}`;
   try {
-    const stdout = execSync(cmd, { encoding: 'utf8' });
+    // Array args (no shell) — limit is passed literally, no injection.
+    const stdout = execFileSync(
+      'git',
+      ['log', '--format=%h|%p|%d|%s', '--topo-order', '-n', String(limit)],
+      { encoding: 'utf8' }
+    );
     return stdout.trim().split('\n').filter(Boolean);
   } catch (err) {
     console.error(`❌ Failed to read git history: ${err.message}`);
@@ -177,7 +181,8 @@ function main() {
 
   const validatorPath = path.join(__dirname, 'validate.mjs');
   try {
-    execSync(`node ${validatorPath} ${outputPath}`, { stdio: 'inherit' });
+    // Array args (no shell) — avoids injection via outputPath.
+    execFileSync('node', [validatorPath, outputPath], { stdio: 'inherit' });
     console.error(`✅ GitGraph generated and validated: ${outputPath}`);
   } catch (err) {
     console.error(`❌ Validation failed for the GitGraph.`);

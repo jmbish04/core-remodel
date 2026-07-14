@@ -150,7 +150,11 @@ function useMermaid({
           fontFamily: parsedConfig.fontFamily ?? "Inter, sans-serif",
           fontSize: parsedConfig.fontSize ?? 14,
           logLevel: parsedConfig.logLevel ?? "error",
-          securityLevel: "loose",
+          // Diagram sources are trusted/authored (changelog-detail.ts), but
+          // "strict" sanitizes output + disables click/HTML-label injection so a
+          // future dynamic source can't XSS. Our diagrams use quoted text labels
+          // and crow's-foot ER only — no click directives — so strict renders fine.
+          securityLevel: "strict",
         });
 
         // Ensure we have a DOM node for calculation

@@ -20,7 +20,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { GoogleGenAI } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -54,8 +54,9 @@ function loadEnv() {
 function getGitDiff(baseRef) {
   const execOptions = { encoding: 'utf8', maxBuffer: 10 * 1024 * 1024 }; // 10MB buffer to prevent ENOBUFS
   try {
+    // Array args (no shell) — baseRef is passed literally, no injection.
     // 1. Get changed files
-    const files = execSync(`git diff ${baseRef}...HEAD --name-only`, execOptions)
+    const files = execFileSync('git', ['diff', `${baseRef}...HEAD`, '--name-only'], execOptions)
       .trim()
       .split('\n')
       .filter(Boolean);
@@ -65,7 +66,7 @@ function getGitDiff(baseRef) {
     }
 
     // 2. Get diff stat summary
-    const stat = execSync(`git diff ${baseRef}...HEAD --stat`, execOptions).trim();
+    const stat = execFileSync('git', ['diff', `${baseRef}...HEAD`, '--stat'], execOptions).trim();
 
     // 3. Get focused content diff for schemas, routes, and services
     let codeDiff = '';
@@ -73,8 +74,9 @@ function getGitDiff(baseRef) {
       // Exclude generated Drizzle meta snapshots (huge JSON that drowns the
       // 20k-char budget and gives the model no real signal). Keep migration
       // .sql + source.
-      codeDiff = execSync(
-        `git diff ${baseRef}...HEAD -- "src/backend/" "drizzle/" "scripts/" ":(exclude)drizzle/meta/**"`,
+      codeDiff = execFileSync(
+        'git',
+        ['diff', `${baseRef}...HEAD`, '--', 'src/backend/', 'drizzle/', 'scripts/', ':(exclude)drizzle/meta/**'],
         execOptions
       ).trim();
     } catch (diffErr) {
@@ -100,7 +102,8 @@ function getGitDiff(baseRef) {
  */
 function getSecretFromTokens(name) {
   try {
-    return execSync(`tokens show ${name} --value-only`, {
+    // Array args (no shell) — name is passed literally.
+    return execFileSync('tokens', ['show', name, '--value-only'], {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'ignore']
     }).trim();
@@ -201,7 +204,8 @@ function validateDiagram(code, tempFilePath) {
   fs.writeFileSync(tempFilePath, `\`\`\`mermaid\n${code}\n\`\`\`\n`);
   const validatorPath = path.join(__dirname, 'validate.mjs');
   try {
-    execSync(`node ${validatorPath} ${tempFilePath}`, { stdio: 'pipe' });
+    // Array args (no shell) — avoids injection via tempFilePath.
+    execFileSync('node', [validatorPath, tempFilePath], { stdio: 'pipe' });
     return { valid: true };
   } catch (err) {
     return {

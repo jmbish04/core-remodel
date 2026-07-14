@@ -16,7 +16,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,12 +52,14 @@ function matchGlob(str, pattern) {
  */
 function runWranglerQuery(dbBinding, query, isRemote) {
   const envFlag = isRemote ? '--remote' : '--local';
-  // Escape double quotes inside query for CLI execution
-  const escapedQuery = query.replace(/"/g, '\\"');
-  const cmd = `npx wrangler d1 execute ${dbBinding} ${envFlag} --command="${escapedQuery}" --json`;
 
   try {
-    const stdout = execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    // Array args (no shell) — dbBinding/query are passed literally, no injection.
+    const stdout = execFileSync(
+      'npx',
+      ['wrangler', 'd1', 'execute', dbBinding, envFlag, `--command=${query}`, '--json'],
+      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+    );
     // Locate the JSON array block — wrangler wraps results in [{...}]
     const jsonMatch = stdout.match(/(\[\s*\{[\s\S]*?\}\s*\])/);
     if (!jsonMatch) {
@@ -565,7 +567,8 @@ function main() {
   // Validate the generated diagram
   const validatorPath = path.join(__dirname, 'validate.mjs');
   try {
-    execSync(`node ${validatorPath} ${outputFile}`, { stdio: 'inherit' });
+    // Array args (no shell) — avoids injection via outputFile.
+    execFileSync('node', [validatorPath, outputFile], { stdio: 'inherit' });
     console.error(`✅ Diagram generated and validated: ${outputFile}`);
   } catch (err) {
     console.error(`❌ Validation failed for the generated diagram.`);

@@ -19,7 +19,7 @@
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, and, ne, inArray, isNull, isNotNull } from "drizzle-orm";
+import { eq, and, ne, inArray, isNull, isNotNull, count } from "drizzle-orm";
 import { getAgentByName } from "agents";
 
 import {
@@ -562,16 +562,34 @@ showroomBackfillRouter.openapi(
 // "San Carlos, CA"). Targets stores that have a place_id but no
 // location_street_number yet, so re-runs skip completed rows.
 //
-// Dry-run by default; pass ?apply=true to write. ?limit=N caps the batch.
+// Dry-run by default; pass ?apply=true to write. ?limit=N caps the batch
+// (default 25, hard max 50). Each Places lookup is a billable external call;
+// running hundreds sequentially in one Worker request blows the CPU/time
+// budget, so we cap low and run small concurrent batches. The candidate filter
+// (place_id set AND location_street_number NULL) naturally pages: once ?apply
+// writes the granular parts, those rows drop out, so re-invoking advances until
+// `remaining` reaches 0.
+const ADDR_BACKFILL_BATCH = 6; // ponytail: 6 concurrent Places calls/req; raise if quota+time allow
 showroomBackfillRouter.post("/backfill/addresses", async (c) => {
   const apply = c.req.query("apply") === "true" || c.req.query("apply") === "1";
-  const limit = Math.min(Math.max(parseInt(c.req.query("limit") ?? "200", 10) || 200, 1), 500);
+  const limit = Math.min(Math.max(parseInt(c.req.query("limit") ?? "25", 10) || 25, 1), 50);
   const db = drizzle(c.env.DB);
   const maps = new GoogleMapsService(c.env);
 
   if (!(await maps.canUseGoogleMaps())) {
     return c.json({ error: "Google Maps monthly free tier exceeded" }, 429);
   }
+
+  // Total still-incomplete so the caller knows how many re-invokes remain.
+  const [{ total } = { total: 0 }] = await db
+    .select({ total: count() })
+    .from(showroomStores)
+    .where(
+      and(
+        isNotNull(showroomStores.placeId),
+        isNull(showroomStores.locationStreetNumber),
+      ),
+    );
 
   const candidates = await db
     .select({
@@ -592,16 +610,16 @@ showroomBackfillRouter.post("/backfill/addresses", async (c) => {
   const errors: Array<{ id: number; error: string }> = [];
   const preview: Array<{ id: number; formattedAddress: string | null; city: string | null; zip: string | null }> = [];
 
-  for (const store of candidates) {
-    if (!store.placeId) continue;
+  const processOne = async (store: (typeof candidates)[number]) => {
+    if (!store.placeId) return;
     try {
       const parsed = await maps.placeAddressComponents(store.placeId);
       if (!parsed) {
         errors.push({ id: store.id, error: "no address components" });
-        continue;
+        return;
       }
       preview.push({ id: store.id, formattedAddress: parsed.formattedAddress, city: parsed.city, zip: parsed.zipCode });
-      if (!apply) continue;
+      if (!apply) return;
 
       await db
         .update(showroomStores)
@@ -623,6 +641,12 @@ showroomBackfillRouter.post("/backfill/addresses", async (c) => {
     } catch (err) {
       errors.push({ id: store.id, error: err instanceof Error ? err.message : String(err) });
     }
+  };
+
+  // Bounded concurrency: process the capped candidate set in small batches so
+  // one request never fans out hundreds of Places calls.
+  for (let i = 0; i < candidates.length; i += ADDR_BACKFILL_BATCH) {
+    await Promise.all(candidates.slice(i, i + ADDR_BACKFILL_BATCH).map(processOne));
   }
 
   return c.json(
@@ -630,6 +654,8 @@ showroomBackfillRouter.post("/backfill/addresses", async (c) => {
       apply,
       candidates: candidates.length,
       updated,
+      // Rows still needing a backfill AFTER this batch (only decremented on apply).
+      remaining: apply ? Math.max(total - updated, 0) : total,
       errorCount: errors.length,
       errors: errors.slice(0, 25),
       preview: apply ? undefined : preview.slice(0, 25),

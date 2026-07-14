@@ -56,6 +56,9 @@ export interface LegacyStoreUrls {
 // Broad db type so any `drizzle(env.DB)` instance is accepted.
 type Db = DrizzleD1Database<Record<string, unknown>>;
 
+// D1 rejects a query with >100 bound params; chunk `inArray` id lists below it.
+const D1_IN_CHUNK = 90;
+
 /** First URL of a given type in a link set, or null. */
 function firstOfType(links: StoreLinkRow[], type: ShowroomLinkType): string | null {
   return links.find((l) => l.type === type)?.url ?? null;
@@ -106,22 +109,27 @@ export async function getStoreLinksMap(
   for (const id of storeIds) map.set(id, []);
   if (storeIds.length === 0) return map;
 
-  const rows = await db
-    .select({
-      id: showroomStoreLinks.id,
-      storeId: showroomStoreLinks.storeId,
-      url: showroomStoreLinks.url,
-      type: showroomStoreLinks.type,
-      urlNotes: showroomStoreLinks.urlNotes,
-    })
-    .from(showroomStoreLinks)
-    .where(inArray(showroomStoreLinks.storeId, storeIds));
+  // D1 caps a query at 100 bound params — chunk the id list so a directory of
+  // 120+ stores doesn't blow the limit. inArray([]) is invalid SQL, but the
+  // empty case already returned above.
+  for (let i = 0; i < storeIds.length; i += D1_IN_CHUNK) {
+    const rows = await db
+      .select({
+        id: showroomStoreLinks.id,
+        storeId: showroomStoreLinks.storeId,
+        url: showroomStoreLinks.url,
+        type: showroomStoreLinks.type,
+        urlNotes: showroomStoreLinks.urlNotes,
+      })
+      .from(showroomStoreLinks)
+      .where(inArray(showroomStoreLinks.storeId, storeIds.slice(i, i + D1_IN_CHUNK)));
 
-  for (const r of rows) {
-    const list = map.get(r.storeId);
-    const link: StoreLinkRow = { id: r.id, url: r.url, type: r.type, urlNotes: r.urlNotes };
-    if (list) list.push(link);
-    else map.set(r.storeId, [link]);
+    for (const r of rows) {
+      const list = map.get(r.storeId);
+      const link: StoreLinkRow = { id: r.id, url: r.url, type: r.type, urlNotes: r.urlNotes };
+      if (list) list.push(link);
+      else map.set(r.storeId, [link]);
+    }
   }
   for (const [id, list] of map) map.set(id, sortLinks(list));
   return map;

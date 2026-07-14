@@ -14,7 +14,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -112,7 +112,8 @@ function main() {
 
   const validatorPath = path.join(__dirname, 'validate.mjs');
   try {
-    execSync(`node ${validatorPath} ${outputPath}`, { stdio: 'inherit' });
+    // Array args (no shell) — avoids injection via outputPath.
+    execFileSync('node', [validatorPath, outputPath], { stdio: 'inherit' });
     console.error(`✅ Architecture diagram generated and validated: ${outputPath}`);
   } catch (err) {
     console.error(`❌ Validation failed for the architecture diagram.`);

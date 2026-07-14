@@ -48,6 +48,7 @@ import {
   showroomBrandMappings,
 } from "@backend/db/schema/brands/index";
 import { classifyBayAreaRegion } from "@backend/lib/bay-area-region";
+import { GoogleMapsService } from "@backend/services/google/maps";
 import {
   computeStoreGeoPatch,
   scheduleShowroomEnrichment,
@@ -1023,6 +1024,27 @@ showroomStoresRouter.post("/research/sweep-sessions/:sid/request-changes", async
  *   - "categories" → each store gets `categories: string[]`
  *   - "ratings"    → each store gets `avgRating: number | null`, `ratingCount: number`
  */
+/**
+ * Run an `inArray(col, ids)` select in chunks and concatenate the rows.
+ *
+ * Cloudflare D1 caps a query at 100 bound parameters. The showroom directory
+ * holds well over 100 rows, so passing the full id list to a single `inArray`
+ * blows the limit and fails the whole query at runtime (a prime cause of the
+ * listing 500s). Chunk at 90 to leave headroom for other bound params.
+ */
+const D1_IN_CHUNK = 90;
+async function chunkedByIds<T>(
+  ids: number[],
+  run: (chunk: number[]) => Promise<T[]>,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += D1_IN_CHUNK) {
+    const rows = await run(ids.slice(i, i + D1_IN_CHUNK));
+    for (const row of rows) out.push(row);
+  }
+  return out;
+}
+
 showroomStoresRouter.get("/", async (c) => {
   const db = drizzle(c.env.DB);
   const cityFilter = c.req.query("city");
@@ -1067,7 +1089,16 @@ showroomStoresRouter.get("/", async (c) => {
     query = query.where(and(...conditions));
   }
 
-  const rows = await query;
+  let rows: Awaited<typeof query>;
+  try {
+    rows = await query;
+  } catch (err) {
+    // The core list query is the one thing that must succeed; if it fails,
+    // return a controlled JSON error instead of an unhandled 500 (a broken page
+    // rather than a retryable state).
+    console.error("[showroom-stores] list query failed", err);
+    return c.json({ stores: [], error: "Failed to load showrooms" }, 500);
+  }
   const storeIds = rows.map((r) => r.store.id);
 
   // Parallel enrichment queries (only when requested and stores exist).
@@ -1077,17 +1108,19 @@ showroomStoresRouter.get("/", async (c) => {
   //   - onlineRatingMap → aggregated external platform ratings (showroom_store_ratings)
   const [categoryMap, userRatingMap, onlineRatingMap, hoursMap] = await Promise.all([
     includes.has("categories") && storeIds.length > 0
-      ? db
-          .select({
-            storeId: showroomStoreCategoryMapping.storeId,
-            categoryName: showroomStoreCategory.name,
-          })
-          .from(showroomStoreCategoryMapping)
-          .innerJoin(
-            showroomStoreCategory,
-            eq(showroomStoreCategoryMapping.categoryId, showroomStoreCategory.id)
-          )
-          .where(inArray(showroomStoreCategoryMapping.storeId, storeIds))
+      ? chunkedByIds(storeIds, (chunk) =>
+          db
+            .select({
+              storeId: showroomStoreCategoryMapping.storeId,
+              categoryName: showroomStoreCategory.name,
+            })
+            .from(showroomStoreCategoryMapping)
+            .innerJoin(
+              showroomStoreCategory,
+              eq(showroomStoreCategoryMapping.categoryId, showroomStoreCategory.id)
+            )
+            .where(inArray(showroomStoreCategoryMapping.storeId, chunk)),
+        )
           .then((catRows) => {
             const map = new Map<number, string[]>();
             for (const r of catRows) {
@@ -1097,30 +1130,36 @@ showroomStoresRouter.get("/", async (c) => {
             }
             return map;
           })
+          .catch(() => new Map<number, string[]>())
       : Promise.resolve(new Map<number, string[]>()),
     includes.has("ratings") && storeIds.length > 0
-      ? db
-          .select({
-            storeId: storeRating.storeId,
-            rating: storeRating.rating,
-          })
-          .from(storeRating)
-          .where(and(eq(storeRating.isActive, true), inArray(storeRating.storeId, storeIds)))
+      ? chunkedByIds(storeIds, (chunk) =>
+          db
+            .select({
+              storeId: storeRating.storeId,
+              rating: storeRating.rating,
+            })
+            .from(storeRating)
+            .where(and(eq(storeRating.isActive, true), inArray(storeRating.storeId, chunk))),
+        )
           .then((rRows) => {
             // At most one active rating per store — last write wins.
             const map = new Map<number, number>();
             for (const r of rRows) map.set(r.storeId, r.rating);
             return map;
           })
+          .catch(() => new Map<number, number>())
       : Promise.resolve(new Map<number, number>()),
     includes.has("ratings") && storeIds.length > 0
-      ? db
-          .select({
-            storeId: showroomStoreRatings.storeId,
-            rating: showroomStoreRatings.rating,
-          })
-          .from(showroomStoreRatings)
-          .where(inArray(showroomStoreRatings.storeId, storeIds))
+      ? chunkedByIds(storeIds, (chunk) =>
+          db
+            .select({
+              storeId: showroomStoreRatings.storeId,
+              rating: showroomStoreRatings.rating,
+            })
+            .from(showroomStoreRatings)
+            .where(inArray(showroomStoreRatings.storeId, chunk)),
+        )
           .then((rRows) => {
             const map = new Map<number, { sum: number; count: number }>();
             for (const r of rRows) {
@@ -1131,21 +1170,24 @@ showroomStoresRouter.get("/", async (c) => {
             }
             return map;
           })
+          .catch(() => new Map<number, { sum: number; count: number }>())
       : Promise.resolve(new Map<number, { sum: number; count: number }>()),
     // Normalized per-day hours for every store in the list (cards always need
     // them for open/closed status + weekend cues). One query, grouped by store.
     storeIds.length > 0
-      ? db
-          .select({
-            showroomId: showroomStoreHours.showroomId,
-            day: showroomStoreHours.day,
-            openHour: showroomStoreHours.openHour,
-            openMinute: showroomStoreHours.openMinute,
-            closeHour: showroomStoreHours.closeHour,
-            closeMinute: showroomStoreHours.closeMinute,
-          })
-          .from(showroomStoreHours)
-          .where(inArray(showroomStoreHours.showroomId, storeIds))
+      ? chunkedByIds(storeIds, (chunk) =>
+          db
+            .select({
+              showroomId: showroomStoreHours.showroomId,
+              day: showroomStoreHours.day,
+              openHour: showroomStoreHours.openHour,
+              openMinute: showroomStoreHours.openMinute,
+              closeHour: showroomStoreHours.closeHour,
+              closeMinute: showroomStoreHours.closeMinute,
+            })
+            .from(showroomStoreHours)
+            .where(inArray(showroomStoreHours.showroomId, chunk)),
+        )
           .then((hRows) => {
             const map = new Map<number, Array<Omit<(typeof hRows)[number], "showroomId">>>();
             for (const h of hRows) {
@@ -1156,6 +1198,19 @@ showroomStoresRouter.get("/", async (c) => {
             }
             return map;
           })
+          .catch(
+            () =>
+              new Map<
+                number,
+                Array<{
+                  day: string;
+                  openHour: number;
+                  openMinute: number;
+                  closeHour: number;
+                  closeMinute: number;
+                }>
+              >(),
+          )
       : Promise.resolve(
           new Map<
             number,
@@ -1458,6 +1513,34 @@ showroomStoresRouter.post("/", async (c) => {
   // normalized showroom_store_hours rows are written after insert below.
   if (hoursJson != null) {
     storeValues.isOpenWeekends = deriveIsOpenWeekends(hoursJson);
+  }
+
+  // Guarantee coordinates whenever a Google Place was selected. Some callers
+  // (the intake form) send a `placeId` but not lat/lng; without coordinates the
+  // showroom can never be pinned on the map. If they're missing, resolve them
+  // server-side from the placeId here — the same source the MCP onboarding tools
+  // and the backfill use — so EVERY placeId-backed create is map-ready. One
+  // Places lookup, only when coordinates are actually absent (skipAi keeps it cheap).
+  if (
+    typeof data.placeId === "string" &&
+    data.placeId.length > 0 &&
+    (storeValues.latitude == null || storeValues.longitude == null)
+  ) {
+    try {
+      const details = await new GoogleMapsService(c.env).placeDetails(
+        data.placeId,
+        undefined,
+        { skipAi: true },
+      );
+      const loc = (details as { location?: { latitude?: number; longitude?: number } })
+        .location;
+      if (typeof loc?.latitude === "number") storeValues.latitude = loc.latitude;
+      if (typeof loc?.longitude === "number") storeValues.longitude = loc.longitude;
+    } catch (err) {
+      // Non-fatal: fall through to address/ZIP-derived region below. The store
+      // is still created; it just won't have a precise pin until a backfill runs.
+      console.error("[showroom-stores] POST / coordinate lookup failed:", err);
+    }
   }
 
   // Capture geo columns: pass through Places coordinates and derive the region

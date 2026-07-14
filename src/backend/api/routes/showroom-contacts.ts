@@ -33,6 +33,9 @@ import { businessCardService } from "@backend/services/business-card";
 
 type Db = ReturnType<typeof drizzle>;
 
+// D1 rejects a query with >100 bound params; chunk `inArray` id lists below it.
+const D1_IN_CHUNK = 90;
+
 export const showroomContactsRouter = new OpenAPIHono<{ Bindings: Env }>();
 
 // ─── Fuzzy store matching ─────────────────────────────────────────────────────
@@ -87,10 +90,16 @@ async function matchStore(
   if (hints.phone) {
     const tail = digitsTail(hints.phone, 7);
     if (tail) {
+      // Stored numbers may carry formatting like "(415) 555-0100", so a plain
+      // `%5550100%` never matches. Put a `%` between each tail digit so any
+      // non-digit separators between them are tolerated.
+      // ponytail: over-matches across the string (digits non-contiguous), fine
+      // for a 7-digit fuzzy tail; tighten with a normalized column if it misfires.
+      const pattern = `%${tail.split("").join("%")}%`;
       const [s] = await db
         .select({ id: showroomStores.id })
         .from(showroomStores)
-        .where(like(showroomStores.phoneNumber, `%${tail}%`))
+        .where(like(showroomStores.phoneNumber, pattern))
         .limit(1);
       if (s) return s.id;
     }
@@ -521,19 +530,23 @@ async function businessCardImageMap(
   const map = new Map<number, { front: string | null; back: string | null }>();
   const ids = contactIds.filter((id): id is number => Number.isInteger(id));
   if (ids.length === 0) return map;
-  const cards = await db
-    .select({
-      contactId: showroomStoreContactBusinessCards.contactId,
-      front: showroomStoreContactBusinessCards.cfImageUrl,
-      back: showroomStoreContactBusinessCards.cfImageUrlBack,
-    })
-    .from(showroomStoreContactBusinessCards)
-    .where(inArray(showroomStoreContactBusinessCards.contactId, ids));
-  for (const card of cards) {
-    if (card.contactId == null) continue;
-    if (!card.front && !card.back) continue;
-    // Keep the first card that has an image for this contact.
-    if (!map.has(card.contactId)) map.set(card.contactId, { front: card.front, back: card.back });
+  // D1 caps a query at 100 bound params — chunk the id list so a large phonebook
+  // page doesn't blow the limit. inArray([]) is invalid SQL, guarded above.
+  for (let i = 0; i < ids.length; i += D1_IN_CHUNK) {
+    const cards = await db
+      .select({
+        contactId: showroomStoreContactBusinessCards.contactId,
+        front: showroomStoreContactBusinessCards.cfImageUrl,
+        back: showroomStoreContactBusinessCards.cfImageUrlBack,
+      })
+      .from(showroomStoreContactBusinessCards)
+      .where(inArray(showroomStoreContactBusinessCards.contactId, ids.slice(i, i + D1_IN_CHUNK)));
+    for (const card of cards) {
+      if (card.contactId == null) continue;
+      if (!card.front && !card.back) continue;
+      // Keep the first card that has an image for this contact.
+      if (!map.has(card.contactId)) map.set(card.contactId, { front: card.front, back: card.back });
+    }
   }
   return map;
 }
