@@ -202,7 +202,7 @@ flowchart TD
     API_Backfill["POST /api/showroom-backfill"]
   end
 
-  subgraph Backend Services & Utilities
+  subgraph Backend Services and Utilities
     S_GoogleMaps["Google Maps Service (Geocoding)"]
     S_EmailHandler["Email Handler Service"]
     U_ContactIntake["Contact Intake Utility"]
@@ -215,10 +215,10 @@ flowchart TD
     AI_ResearchAgent["Showroom Research Agent"]
   end
 
-  subgraph Database Migration & Backfill Scripts
-    S_BackfillHours[( "0083-Backfill Legacy Hours" )]
-    S_BackfillLinks[( "0085-Backfill Store Links" )]
-    S_BackfillHoursJson[( "0089-Backfill Hours JSON to Rows" )]
+  subgraph Database Migration and Backfill Scripts
+    S_BackfillHours[("0083-Backfill Legacy Hours")]
+    S_BackfillLinks[("0085-Backfill Store Links")]
+    S_BackfillHoursJson[("0089-Backfill Hours JSON to Rows")]
   end
 
   subgraph Database Schema
