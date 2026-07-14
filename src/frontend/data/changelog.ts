@@ -35,6 +35,21 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "showroom-email-contacts",
+    date: "2026-07-13",
+    tag: "Phase 5",
+    area: "Showrooms",
+    title: "Emails become contacts automatically",
+    summary:
+      "When a showroom emails you, the platform reads the signature and files the sender into the phonebook — mapped to the right showroom by email domain or name. Senders it can’t place are saved as drafts for a quick one-tap map.",
+    status: "staged",
+    changes: [
+      { kind: "added", text: "Inbound worker email (remodel@hacolby.app) auto-registers a showroom contact from the sender’s signature (name, email, phone, website)." },
+      { kind: "added", text: "Domain/name matching maps the contact to the right showroom; unmatched senders are saved as draft contacts for triage in the phonebook." },
+      { kind: "changed", text: "Only runs when the sender isn’t already a known contractor company (those stay in the CRM), and de-duplicates on the sender email." },
+    ],
+  },
+  {
     id: "showroom-contacts",
     date: "2026-07-13",
     tag: "Phase 4",
