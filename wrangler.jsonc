@@ -32,18 +32,18 @@
   },
   "ai": {
     "binding": "AI",
-    "remote": true,
+
   },
   // Cloudflare Images transform binding (env.IMAGES) — used by the Workshop's
   // clipping-extraction crop (docs/0014_ai_photo_workshop) via
   // src/backend/services/render/cf-images.ts. NO sharp/libvips: `.input().transform().output()`.
   "images": {
     "binding": "IMAGES",
-    "remote": true,
+
   },
   // Cloudflare Email Service — outbound send via env.EMAIL.send() and inbound
   // routing via the email() handler (routing rule set up in Dashboard).
-  "send_email": [{ "name": "EMAIL", "remote": true }],
+  "send_email": [{ "name": "EMAIL",  }],
   "vars": {
     // Public origin of the deployed Worker. Used to build ABSOLUTE, clickable
     // page URLs in MCP tool responses (e.g. the exact bug/budget/showroom page
@@ -60,23 +60,7 @@
   // DO NOT DELETE COMMENTS
   //  wrangler vectorize create core-remodel-research --preset @cf/baai/bge-large-en-v1.5
   // wrangler vectorize create core-remodel-photos --dimensions=1536 --metric=cosine
-  "vectorize": [
-    {
-      "binding": "VECTOR_INDEX",
-      "index_name": "remodel-embeddings",
-      "remote": true,
-    },
-    {
-      "binding": "RESEARCH_INDEX",
-      "index_name": "core-remodel-research",
-      "remote": true,
-    },
-    {
-      "binding": "PHOTO_INDEX",
-      "index_name": "core-remodel-photos",
-      "remote": true,
-    },    
-  ],
+  "vectorize": [],
   "workflows": [
     {
       "name": "image-processing-workflow",
@@ -135,12 +119,12 @@
     {
       "binding": "CACHE",
       "id": "93a212c747b849b19a72e4cca1e0e8bc",
-      "remote": true,
+
     },
     {
       "binding": "SESSIONS",
       "id": "af8ca150b4a7480d923be0ed30baae73",
-      "remote": true,
+
     },
     {
       // MCP connector OAuth (0015): @cloudflare/workers-oauth-provider stores
@@ -148,7 +132,7 @@
       // OAUTH_KV (the library looks it up by that exact name).
       "binding": "OAUTH_KV",
       "id": "859ea6b96deb4140831a1d09a70ffcd4",
-      "remote": true,
+
     },
     // Ad-hoc agent memories from any endpoint including mcp tools
     // this is intended to provide agents a place to park memories, 
@@ -157,7 +141,7 @@
     {
       "binding": "AGENT_ADHOC_MEMORY_KV",
       "id": "d2c2b93046e742b88c24915e63c7f0ad",
-      "remote": true,
+
     }
   ],
   "d1_databases": [
@@ -166,14 +150,14 @@
       "database_name": "core-remodel",
       "database_id": "4811af1e-202d-4b96-99e2-d98dc45c597e",
       "migrations_dir": "drizzle",
-      "remote": true,
+
     },
   ],
   "r2_buckets": [
     {
       "binding": "ARTIFACTS_BUCKET",
       "bucket_name": "core-remodel-artifacts",
-      "remote": true,
+
     },
   ],
   "secrets_store_secrets": [
@@ -181,104 +165,104 @@
       "binding": "GITHUB_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "GH_TOKEN",
-      "remote": true
+
     },
     {
       "binding": "CLOUDFLARE_ACCOUNT_ID",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "CLOUDFLARE_ACCOUNT_ID",
-      "remote": true
+
     },
     {
       "binding": "CLOUDFLARE_IMAGES_STREAM_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "CLOUDFLARE_IMAGES_STREAM_TOKEN",
-      "remote": true
+
     },
     {
       "binding": "CF_IMAGES_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "CLOUDFLARE_IMAGES_STREAM_TOKEN",
-      "remote": true
+
     },
     {
       "binding": "CLOUDFLARE_WRANGLER_API_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "CLOUDFLARE_WRANGLER_API_TOKEN",
-      "remote": true
+
     },
     {
       "binding": "WORKER_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "WORKER_API_KEY",
-      "remote": true
+
     },
     {
       "binding": "AI_GATEWAY_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "CLOUDFLARE_AI_GATEWAY_TOKEN",
-      "remote": true
+
     },
     {
       "binding": "CF_BROWSER_RENDER_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "CLOUDFLARE_BROWSER_RENDER_TOKEN",
-      "remote": true
+
     },
     {
       "binding": "JULES_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "JULES_API_KEY",
-      "remote": true
+
     },
     {
       "binding": "GEMINI_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "GOOGLE_API_KEY",
-      "remote": true
+
     },
     {
       "binding": "ANTHROPIC_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "ANTHROPIC_API_KEY",
-      "remote": true
+
     },
     {
       "binding": "FAL_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "FAL_API_KEY",
-      "remote": true
+
     },
     {
       "binding": "REPLICATE_API_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "REPLICATE_API_TOKEN",
-      "remote": true
+
     },
     {
       "binding": "GOOGLE_MAPS_API",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "GOOGLE_MAPS_API",
-      "remote": true
+
     },
     {
       "binding": "GOOGLE_SEARCH_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "GOOGLE_SEARCH_API_KEY",
-      "remote": true
+
     },
     {
       // ClickUp task mirror (0009): consumed by RemodelOrchestrator + /api/clickup.
       "binding": "CLICKUP_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "CLICKUP_TOKEN",
-      "remote": true
+
     },
     {
       "binding": "CLICKUP_TEAM_ID",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "CLICKUP_TEAM_ID",
-      "remote": true
+
     },
     {
       // Gmail comms hub (P3-07): service-account DWD. The private key exceeds
@@ -286,19 +270,19 @@
       "binding": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1",
-      "remote": true
+
     },
     {
       "binding": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2",
-      "remote": true
+
     },
     {
       "binding": "GOOGLE_CREDS_SA_CLIENT_EMAIL",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "GOOGLE_CREDS_SA_CLIENT_EMAIL",
-      "remote": true
+
     },
     {
       // Google Photos Picker API (0019): 3-legged OAuth client. Populate via
@@ -306,13 +290,13 @@
       "binding": "GOOGLE_PHOTOS_CLIENT_ID",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "GOOGLE_PHOTOS_CLIENT_ID",
-      "remote": true
+
     },
     {
       "binding": "GOOGLE_PHOTOS_CLIENT_SECRET",
       "store_id": "8c42fa70938644e0a8a109744467375f",
       "secret_name": "GOOGLE_PHOTOS_CLIENT_SECRET",
-      "remote": true
+
     },
   ],
   "durable_objects": {

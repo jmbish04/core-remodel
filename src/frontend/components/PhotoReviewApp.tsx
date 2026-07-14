@@ -804,7 +804,7 @@ function PhotoCodingWorkspace() {
               </div>
 
               {/* Coding fields — stacked below the image */}
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="flex flex-col gap-4">
                 <div className="space-y-1.5">
                   <label
                     htmlFor="review-title"
@@ -883,7 +883,7 @@ function PhotoCodingWorkspace() {
                     }
                   >
                     <SelectTrigger className="h-8 w-[9rem] text-xs">
-                      <SelectValue />
+                      <SelectValue getLabel={(val) => val === "like" ? "I like this" : val === "dislike" ? "I do not like this" : undefined} />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="like">I like this</SelectItem>

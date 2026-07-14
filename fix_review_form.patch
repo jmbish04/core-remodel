@@ -1,0 +1,45 @@
+--- src/frontend/components/PhotoReviewApp.tsx
++++ src/frontend/components/PhotoReviewApp.tsx
+@@ -804,22 +804,22 @@
+               </div>
+
+               {/* Coding fields — stacked below the image */}
+-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
++              <div className="flex flex-col gap-4">
+                 <div className="space-y-1.5">
+                   <label
+                     htmlFor="review-title"
+                     className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                   >
+                     Title
+                   </label>
+                   <Input
+                     id="review-title"
+                     value={panelTitle}
+                     onChange={(event) => setPanelTitle(event.target.value)}
+                     placeholder="Kitchen sink wall concept"
+                   />
+                 </div>
+
+                 <div className="space-y-1.5">
+                   <label
+                     htmlFor="review-description"
+@@ -881,11 +881,19 @@
+                     onValueChange={(next) =>
+                       setHighlightMode(next as HighlightType)
+                     }
+                   >
+                     <SelectTrigger className="h-8 w-[9rem] text-xs">
+-                      <SelectValue />
++                      <SelectValue
++                        getLabel={(value) => {
++                          if (value === "like") return "I like this";
++                          if (value === "dislike") return "I do not like this";
++                          return undefined;
++                        }}
++                      />
+                     </SelectTrigger>
+                     <SelectContent>
+                       <SelectItem value="like">I like this</SelectItem>
+                       <SelectItem value="dislike">
+                         I do not like this

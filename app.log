@@ -1,0 +1,93 @@
+
+> core-remodel@26.02.24 preview /app
+> wrangler dev --port 4321
+
+
+ ⛅️ wrangler 4.100.0 (update available 4.110.0)
+───────────────────────────────────────────────
+Your Worker has access to the following bindings:
+Binding                                                                                                       Resource                  Mode
+env.RENOVATION_AGENT (RenovationAgent)                                                                        Durable Object            local
+env.BUDGET_AGENT (BudgetAgent)                                                                                Durable Object            local
+env.ESTIMATE_COLLAB (EstimateCollabHub)                                                                       Durable Object            local
+env.A2A_V2 (GAS_A2A)                                                                                          Durable Object            local
+env.BID_PORTFOLIO_AGENT (BidPortfolioAgent)                                                                   Durable Object            local
+env.RESEARCH_AGENT (ResearchAgent)                                                                            Durable Object            local
+env.PERMIT_INTELLIGENCE_AGENT (PermitIntelligenceAgent)                                                       Durable Object            local
+env.SHOWROOM_RESEARCH_AGENT (ShowroomResearchAgent)                                                           Durable Object            local
+env.FLOORPLAN_SESSION (FloorplanSessionDO)                                                                    Durable Object            local
+env.DEEP_RESEARCH_AGENT (DeepResearchAgent)                                                                   Durable Object            local
+env.REMODEL_ORCHESTRATOR (RemodelOrchestrator)                                                                Durable Object            local
+env.ADMIN_CHAT_AGENT (AdminChatAgent)                                                                         Durable Object            local
+env.REMODEL_MCP (RemodelMcpAgent)                                                                             Durable Object            local
+env.IMAGE_PROCESSING_WORKFLOW (ImageProcessingWorkflow)                                                       Workflow                  local
+env.CHECKLIST_RATIONALE_WORKFLOW (ChecklistRationaleWorkflow)                                                 Workflow                  local
+env.IMAGE_BATCH_WORKFLOW (ImageBatchProcessingWorkflow)                                                       Workflow                  local
+env.SHOWROOM_SCRAPE_WORKFLOW (ShowroomScrapeWorkflow)                                                         Workflow                  local
+env.BRAND_RESEARCH_WORKFLOW (BrandResearchWorkflow)                                                           Workflow                  local
+env.PRODUCT_RESEARCH_WORKFLOW (ProductResearchWorkflow)                                                       Workflow                  local
+env.DEEP_RESEARCH_JOB_WORKFLOW (DeepResearchJobWorkflow)                                                      Workflow                  local
+env.BLANK_CANVAS_WORKFLOW (BlankCanvasBatchWorkflow)                                                          Workflow                  local
+env.CACHE (93a212c747b849b19a72e4cca1e0e8bc)                                                                  KV Namespace              local
+env.SESSIONS (af8ca150b4a7480d923be0ed30baae73)                                                               KV Namespace              local
+env.OAUTH_KV (859ea6b96deb4140831a1d09a70ffcd4)                                                               KV Namespace              local
+env.AGENT_ADHOC_MEMORY_KV (d2c2b93046e742b88c24915e63c7f0ad)                                                  KV Namespace              local
+env.EMAIL (unrestricted)                                                                                      Send Email                local
+env.DB (core-remodel)                                                                                         D1 Database               local
+env.ARTIFACTS_BUCKET (core-remodel-artifacts)                                                                 R2 Bucket                 local
+env.GITHUB_TOKEN (8c42fa70938644e0a8a109744467375f/GH_TOKEN)                                                  Secrets Store Secret      local
+env.CLOUDFLARE_ACCOUNT_ID (8c42fa70938644e0a8a109744467375f/CLOUDFLARE_ACCOUNT_ID)                            Secrets Store Secret      local
+env.CLOUDFLARE_IMAGES_STREAM_TOKEN (8c42fa70938644e0a8a109744467375f/CLOUDFLARE_IMAGES_STREAM_TOKEN)          Secrets Store Secret      local
+env.CF_IMAGES_TOKEN (8c42fa70938644e0a8a109744467375f/CLOUDFLARE_IMAGES_STREAM_TOKEN)                         Secrets Store Secret      local
+env.CLOUDFLARE_WRANGLER_API_TOKEN (8c42fa70938644e0a8a109744467375f/CLOUDFLARE_WRANGLER_API_TOKEN)            Secrets Store Secret      local
+env.WORKER_API_KEY (8c42fa70938644e0a8a109744467375f/WORKER_API_KEY)                                          Secrets Store Secret      local
+env.AI_GATEWAY_TOKEN (8c42fa70938644e0a8a109744467375f/CLOUDFLARE_AI_GATEWAY_TOKEN)                           Secrets Store Secret      local
+env.CF_BROWSER_RENDER_TOKEN (8c42fa70938644e0a8a109744467375f/CLOUDFLARE_BROWSER_RENDER_TOKEN)                Secrets Store Secret      local
+env.JULES_API_KEY (8c42fa70938644e0a8a109744467375f/JULES_API_KEY)                                            Secrets Store Secret      local
+env.GEMINI_API_KEY (8c42fa70938644e0a8a109744467375f/GOOGLE_API_KEY)                                          Secrets Store Secret      local
+env.ANTHROPIC_API_KEY (8c42fa70938644e0a8a109744467375f/ANTHROPIC_API_KEY)                                    Secrets Store Secret      local
+env.FAL_API_KEY (8c42fa70938644e0a8a109744467375f/FAL_API_KEY)                                                Secrets Store Secret      local
+env.REPLICATE_API_TOKEN (8c42fa70938644e0a8a109744467375f/REPLICATE_API_TOKEN)                                Secrets Store Secret      local
+env.GOOGLE_MAPS_API (8c42fa70938644e0a8a109744467375f/GOOGLE_MAPS_API)                                        Secrets Store Secret      local
+env.GOOGLE_SEARCH_API_KEY (8c42fa70938644e0a8a109744467375f/GOOGLE_SEARCH_API_KEY)                            Secrets Store Secret      local
+env.CLICKUP_TOKEN (8c42fa70938644e0a8a109744467375f/CLICKUP_TOKEN)                                            Secrets Store Secret      local
+env.CLICKUP_TEAM_ID (8c42fa70938644e0a8a109744467375f/CLICKUP_TEAM_ID)                                        Secrets Store Secret      local
+env.GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1 (8c42fa70938644e0a8a109744467375f/GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1)      Secrets Store Secret      local
+env.GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2 (8c42fa70938644e0a8a109744467375f/GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2)      Secrets Store Secret      local
+env.GOOGLE_CREDS_SA_CLIENT_EMAIL (8c42fa70938644e0a8a109744467375f/GOOGLE_CREDS_SA_CLIENT_EMAIL)              Secrets Store Secret      local
+env.GOOGLE_PHOTOS_CLIENT_ID (8c42fa70938644e0a8a109744467375f/GOOGLE_PHOTOS_CLIENT_ID)                        Secrets Store Secret      local
+env.GOOGLE_PHOTOS_CLIENT_SECRET (8c42fa70938644e0a8a109744467375f/GOOGLE_PHOTOS_CLIENT_SECRET)                Secrets Store Secret      local
+env.IMAGES                                                                                                    Images                    local
+env.AI                                                                                                        AI                        remote
+env.ASSETS                                                                                                    Assets                    local
+env.WORKER_URL ("https://core-remodel.hacolby.workers....")                                                   Environment Variable      local
+env.AI_GATEWAY_ID ("core-remodel")                                                                            Environment Variable      local
+env.CLICKUP_LIST_ID ("901714811766")                                                                          Environment Variable      local
+env.GOOGLE_SEARCH_CX ("")                                                                                     Environment Variable      local
+env.LOADER                                                                                                    Worker Loader             local
+
+❓ Your types might be out of date. Re-run `wrangler types` to ensure your types are correct.
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mScheduled Workers are not automatically triggered during local development.[0m
+
+  To manually trigger a scheduled event, run:
+    curl "http://localhost:4321/cdn-cgi/handler/scheduled"
+  For more details, see [4mhttps://developers.cloudflare.com/workers/configuration/cron-triggers/#test-cron-triggers-locally[0m
+
+
+⎔ Establishing remote connection...
+
+[31m✘ [41;31m[[41;97mERROR[41;31m][0m [1mFailed to start the remote proxy session, see the error details below:[0m
+
+
+  Could not start remote dev session. No credentials found, and the environment is non-interactive so browser login cannot be started.
+  Either:
+   - Set a CLOUDFLARE_API_TOKEN environment variable
+   - Run `wrangler login` in an interactive terminal first
+
+  You can run `wrangler whoami` to check your current authentication status.
+
+
+[32mIf you think this is a bug then please create an issue at https://github.com/cloudflare/workers-sdk/issues/new/choose[0m
+Note that there is a newer version of Wrangler available (4.110.0). Consider checking whether upgrading resolves this error.
+🪵  Logs were written to "/home/jules/.config/.wrangler/logs/wrangler-2026-07-14_02-46-34_479.log"
+ ELIFECYCLE  Command failed with exit code 1.
