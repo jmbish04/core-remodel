@@ -1,0 +1,74 @@
+/**
+ * Project changelog — the bundled seed/fallback for the persistent D1 store.
+ *
+ * The source of truth is D1 (`changelog_branches` + `changelog_entries`), which
+ * accumulates across every branch/PR and is never overwritten. This file is
+ * (1) the one-time seed for a fresh DB (POST /api/changelog/seed) and (2) the
+ * SSR fallback the overview renders when D1 is empty. Each new branch appends a
+ * `ChangelogBranch` + its `ChangelogEntry` rows here, then registers them into
+ * D1 (POST /api/changelog/branches + /entries) so the record persists forever.
+ */
+
+export type ChangeKind = "added" | "changed" | "removed" | "migration" | "fixed";
+
+export interface ChangelogChange {
+  kind: ChangeKind;
+  text: string;
+}
+
+export interface ChangelogBranch {
+  branch: string;
+  title: string;
+  summary?: string;
+  /** ISO date (YYYY-MM-DD). */
+  date: string;
+  status: "shipped" | "staged" | "open";
+  prNumber?: number;
+  prUrl?: string;
+}
+
+export interface ChangelogEntry {
+  id: string;
+  branch: string;
+  date: string;
+  tag?: string;
+  area: string;
+  title: string;
+  summary: string;
+  changes: ChangelogChange[];
+  migrations?: string[];
+  status: "shipped" | "staged";
+}
+
+/** Branches / PRs, newest first. */
+export const BRANCHES: ChangelogBranch[] = [
+  {
+    branch: "claude/worker-inbox-hitl-v2",
+    title: "Persistent append-only changelog",
+    summary:
+      "A durable, D1-backed changelog that accumulates across every branch/PR and is never overwritten by a static file — with a full detail page per entry and an agent-facing standard for keeping it current.",
+    date: "2026-07-14",
+    status: "staged",
+  },
+];
+
+/** Entries, newest first within a branch. */
+export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "changelog-persistent-d1",
+    branch: "claude/worker-inbox-hitl-v2",
+    date: "2026-07-14",
+    area: "Platform",
+    title: "Persistent append-only changelog",
+    summary:
+      "D1-backed changelog (changelog_branches + changelog_entries) surfaced at /admin/changelog, with a full detail page per entry and a mandatory agent workflow in AGENTS.md.",
+    changes: [
+      { kind: "added", text: "changelog_branches + changelog_entries tables (upsert by branch / slug — append-only, never overwritten)." },
+      { kind: "added", text: "/api/changelog write API (POST /branches, /entries, /seed) + read (GET /, /:slug)." },
+      { kind: "added", text: "/admin/changelog reads D1 at SSR, falls back to bundled seed data when empty; /admin/changelog/:slug detail pages." },
+      { kind: "added", text: "AGENTS.md 'Changelog discipline (MANDATORY)': agents log entries every code turn + before every PR." },
+    ],
+    migrations: ["0107_ordinary_hawkeye"],
+    status: "staged",
+  },
+];
