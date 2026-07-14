@@ -54,6 +54,7 @@ import { faviconService } from "@backend/services/favicon";
 import {
   deriveIsOpenWeekends,
   hoursJsonToRows,
+  rowsToHoursJson,
 } from "@backend/utils/showroom-hours";
 import {
   SHOWROOM_LINK_TYPES,
@@ -1140,13 +1141,16 @@ showroomStoresRouter.get("/", async (c) => {
   return c.json({
     stores: rows.map((r) => {
       const links = linksMap.get(r.store.id) ?? [];
+      const storeHours = hoursMap.get(r.store.id) ?? [];
       const base = {
         ...r.store,
         cityName: r.cityName,
         hubRoute: r.hubRoute,
         hubName: r.hubName,
-        // Normalized per-day hours (only open days; absent day = closed).
-        hours: hoursMap.get(r.store.id) ?? [],
+        // Normalized per-day hours (only open days; absent day = closed) — the
+        // sole store of truth; hoursJson is rebuilt from them for back-compat.
+        hours: storeHours,
+        hoursJson: rowsToHoursJson(storeHours),
         // Links table is the URL source of truth; derive legacy flat fields too.
         links,
         ...linksToLegacyUrls(links),
@@ -1334,6 +1338,7 @@ showroomStoresRouter.get("/:id", async (c) => {
     hubRoute: store.hubRoute,
     hubName: store.hubName,
     hours,
+    hoursJson: rowsToHoursJson(hours),
     links,
     ...linksToLegacyUrls(links),
     products,
@@ -1369,20 +1374,21 @@ showroomStoresRouter.post("/", async (c) => {
   const data = createStoreSchema.parse(body);
 
   // Strip virtual fields before inserting into showroom_stores.
-  // `categoryIds` and `photos` are not columns on `showroom_stores`.
+  // `categoryIds`/`photos`/`links`/`hoursJson` are NOT columns on the table —
+  // hoursJson is a write payload that becomes showroom_store_hours rows below.
   // `reviewAiInsight` IS a column but its .$type<> is tighter than z.passthrough(),
   // so we pull it out, cast it, and re-attach below.
-  const { categoryIds, photos, reviewAiInsight, links, ...storeValues } = data;
+  const { categoryIds, photos, reviewAiInsight, links, hoursJson, ...storeValues } = data;
 
   // The website URL now lives in showroom_store_links; derive it from the
   // incoming links payload for favicon + scrape triggers below.
   const websiteUrl = links?.find((l) => l.type === "WEBSITE")?.url ?? null;
 
-  // hoursJson is the write source of truth — derive isOpenWeekends from it.
-  // A client-supplied isOpenWeekends is intentionally overwritten. The
+  // hoursJson is the write payload — derive isOpenWeekends from it (a
+  // client-supplied isOpenWeekends is intentionally overwritten). The
   // normalized showroom_store_hours rows are written after insert below.
-  if (storeValues.hoursJson != null) {
-    storeValues.isOpenWeekends = deriveIsOpenWeekends(storeValues.hoursJson);
+  if (hoursJson != null) {
+    storeValues.isOpenWeekends = deriveIsOpenWeekends(hoursJson);
   }
 
   // ── Duplicate prevention by Google Places place_id ──────────────────────
@@ -1477,11 +1483,11 @@ showroomStoresRouter.post("/", async (c) => {
     }
   }
 
-  // Normalized per-day hours: one row per OPEN day in showroom_hours (the table
-  // the API serves + the frontend uses for status/filtering). Derived from the
-  // same structured hoursJson the intake editors already send.
-  if (storeValues.hoursJson != null) {
-    const hourRows = hoursJsonToRows(inserted.id, storeValues.hoursJson);
+  // Normalized per-day hours: one row per OPEN day in showroom_store_hours (the
+  // sole store of truth the API serves + the frontend uses for status/filtering).
+  // Derived from the structured hoursJson payload the intake editors send.
+  if (hoursJson != null) {
+    const hourRows = hoursJsonToRows(inserted.id, hoursJson);
     if (hourRows.length > 0) {
       await db.insert(showroomStoreHours).values(
         hourRows as [(typeof hourRows)[number], ...(typeof hourRows)[number][]],
@@ -1829,17 +1835,18 @@ showroomStoresRouter.put("/:id", async (c) => {
 
   const existingWebsiteUrl = await getStoreWebsiteUrl(db, storeId);
 
-  // hoursJson is the write source of truth — derive isOpenWeekends from it.
-  // A client-supplied isOpenWeekends is intentionally overwritten. The
-  // normalized showroom_store_hours rows are replaced after the update below.
+  // hoursJson is the write payload — derive isOpenWeekends from it (a
+  // client-supplied isOpenWeekends is intentionally overwritten). The normalized
+  // showroom_store_hours rows are replaced after the update below.
   if (data.hoursJson != null) {
     data.isOpenWeekends = deriveIsOpenWeekends(data.hoursJson);
   }
 
   // Strip virtual / specially-cast fields before the update spread.
   // reviewAiInsight needs a manual cast to match the column's .$type<> shape.
-  // `links` is written to showroom_store_links, not a column.
-  const { categoryIds: _catIds, photos: _photos, reviewAiInsight: putInsight, links: putLinks, ...putValues } = data;
+  // `links` → showroom_store_links, `hoursJson` → showroom_store_hours (neither
+  // is a column on showroom_stores).
+  const { categoryIds: _catIds, photos: _photos, reviewAiInsight: putInsight, links: putLinks, hoursJson: _putHours, ...putValues } = data;
 
   const [updated] = await db
     .update(showroomStores)

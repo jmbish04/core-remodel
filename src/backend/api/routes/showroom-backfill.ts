@@ -35,7 +35,6 @@ import {
   deriveIsOpenWeekends,
   hoursJsonSchema,
   hoursJsonToRows,
-  normalizeHoursJson,
 } from "@backend/utils/showroom-hours";
 import type { ShowroomResearchAgent } from "@backend/ai/agents/ShowroomResearchAgent";
 import type { BackfillPhotoRef } from "@backend/ai/agents/ShowroomResearchAgent/methods";
@@ -140,7 +139,6 @@ showroomBackfillRouter.openapi(
         phoneNumber: showroomStores.phoneNumber,
         placeId: showroomStores.placeId,
         googleRating: showroomStores.googleRating,
-        hoursJson: showroomStores.hoursJson,
         heroImageCfImagesUrl: showroomStores.heroImageCfImagesUrl,
         reviewSummary: showroomStores.reviewSummary,
         reviewAiInsight: showroomStores.reviewAiInsight,
@@ -174,8 +172,8 @@ showroomBackfillRouter.openapi(
         if (!s.phoneNumber) add("phone");
         if (!hasWebsite.has(s.id)) add("website");
         // Hours exist when normalized rows are present OR the store still
-        // carries a pre-normalization hoursJson blob (reconciled on backfill).
-        if (!hasHours.has(s.id) && s.hoursJson == null) add("hours");
+        // present (showroom_store_hours is the sole store of truth now).
+        if (!hasHours.has(s.id)) add("hours");
         if (s.googleRating == null) add("google_rating");
         if (!s.heroImageCfImagesUrl && !hasPhotos.has(s.id)) add("photo");
         if (!s.reviewSummary) add("review_summary");
@@ -482,11 +480,10 @@ showroomBackfillRouter.openapi(
       if (!store.reviewSummary && f.reviewSummary) update.reviewSummary = f.reviewSummary;
       if (!store.pricePoint && f.pricePoint) update.pricePoint = f.pricePoint;
 
-      // Structured hours — fill-blanks the store's hoursJson blob plus the
-      // derived isOpenWeekends flag, mirroring what the intake create handler
-      // derives. (The normalized showroom_store_hours rows are written below.)
-      if (f.hoursJson && store.hoursJson == null) {
-        update.hoursJson = normalizeHoursJson(f.hoursJson);
+      // Structured hours — derive the isOpenWeekends flag from the payload.
+      // (The normalized showroom_store_hours rows are written below; there is no
+      // hours_json column any more.)
+      if (f.hoursJson) {
         update.isOpenWeekends = deriveIsOpenWeekends(f.hoursJson);
       }
 
@@ -516,9 +513,8 @@ showroomBackfillRouter.openapi(
       }
 
       // Normalized hours — fill-blanks: only when the store has NO hours rows
-      // yet. Falls back to the store's own hoursJson so pre-normalization rows
-      // (created before showroom_hours existed) get reconciled on backfill.
-      const effectiveHours = f.hoursJson ?? store.hoursJson ?? null;
+      // yet, from the submitted hoursJson payload.
+      const effectiveHours = f.hoursJson ?? null;
       if (effectiveHours) {
         const [existingHours] = await db
           .select({ id: showroomStoreHours.id })

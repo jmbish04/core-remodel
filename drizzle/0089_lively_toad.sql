@@ -1,0 +1,1 @@
+ALTER TABLE `showroom_stores` DROP COLUMN `hours_json`;

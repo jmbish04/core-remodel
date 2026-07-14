@@ -57,38 +57,10 @@ export const showroomStores = sqliteTable("showroom_stores", {
   googleMapsLink: text("google_maps_link"),
 
   // ── Hours & access ────────────────────────────────────────────────────
-  /**
-   * Structured opening hours — source of truth for the hours UI.
-   *
-   * Shape (all 7 keys always present; value is `null` when closed that day):
-   * ```json
-   * {
-   *   "mon": { "open": "09:00", "close": "17:00" },
-   *   "tue": { "open": "09:00", "close": "17:00" },
-   *   "wed": { "open": "09:00", "close": "17:00" },
-   *   "thu": { "open": "09:00", "close": "17:00" },
-   *   "fri": { "open": "09:00", "close": "17:00" },
-   *   "sat": { "open": "10:00", "close": "15:00" },
-   *   "sun": null
-   * }
-   * ```
-   * Times are 24-hour `"HH:MM"` strings in local showroom time (no timezone offset stored).
-   *
-   * This blob is the WRITE source of truth. The worker derives the normalized
-   * `showroom_store_hours` rows (queryable, one per open day) and the
-   * `isOpenWeekends` flag from it. The old free-text `weekday_hours` /
-   * `weekend_hours` summary columns have been removed.
-   */
-  hoursJson: text("hours_json", { mode: "json" }).$type<{
-    mon: { open: string; close: string } | null;
-    tue: { open: string; close: string } | null;
-    wed: { open: string; close: string } | null;
-    thu: { open: string; close: string } | null;
-    fri: { open: string; close: string } | null;
-    sat: { open: string; close: string } | null;
-    sun: { open: string; close: string } | null;
-  }>(),
-
+  // Opening hours live SOLELY in the normalized `showroom_store_hours` table
+  // (one row per open day) — the `hours_json` blob column has been removed. The
+  // API/MCP accept a structured hoursJson payload on write and derive both the
+  // rows and `is_open_weekends`; responses rebuild hoursJson from the rows.
   isOpenWeekends: integer("is_open_weekends", { mode: "boolean" }).default(
     false
   ),

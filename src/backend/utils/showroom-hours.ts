@@ -87,10 +87,58 @@ export function hoursJsonToRows(
   return rows;
 }
 
-/** The full 7-key hours shape stored on `showroom_stores.hours_json`. */
-export type HoursJsonColumn = NonNullable<
-  typeof showroomStores.$inferSelect["hoursJson"]
->;
+/**
+ * The full 7-key hours shape. Formerly stored on `showroom_stores.hours_json`;
+ * that column has been removed — `showroom_store_hours` rows are now the sole
+ * store of truth. This shape survives as the API/MCP write PAYLOAD and the
+ * derived READ shape (`rowsToHoursJson`).
+ */
+export type HoursJsonColumn = {
+  mon: { open: string; close: string } | null;
+  tue: { open: string; close: string } | null;
+  wed: { open: string; close: string } | null;
+  thu: { open: string; close: string } | null;
+  fri: { open: string; close: string } | null;
+  sat: { open: string; close: string } | null;
+  sun: { open: string; close: string } | null;
+};
+
+/** enum day → hoursJson key. */
+const ENUM_TO_DAY_KEY: Record<string, keyof HoursJsonColumn> = {
+  MONDAY: "mon", TUESDAY: "tue", WEDNESDAY: "wed", THURSDAY: "thu",
+  FRIDAY: "fri", SATURDAY: "sat", SUNDAY: "sun",
+};
+
+/** Pad an integer to a 2-digit "HH"/"MM". */
+function pad2(n: number): string {
+  return String(Math.max(0, Math.min(59, n | 0))).padStart(2, "0");
+}
+
+/**
+ * Convert normalized `showroom_store_hours` rows (one per open day) back into the
+ * structured `hoursJson` shape for API responses — so the frontend keeps its
+ * single hours model even though the blob column is gone. Days with no row are
+ * null (closed).
+ */
+export function rowsToHoursJson(
+  rows: Array<{
+    day: string;
+    openHour: number;
+    openMinute: number;
+    closeHour: number;
+    closeMinute: number;
+  }>,
+): HoursJsonColumn {
+  const out: HoursJsonColumn = {
+    mon: null, tue: null, wed: null, thu: null, fri: null, sat: null, sun: null,
+  };
+  for (const r of rows) {
+    const key = ENUM_TO_DAY_KEY[r.day];
+    if (!key) continue;
+    out[key] = { open: `${pad2(r.openHour)}:${pad2(r.openMinute)}`, close: `${pad2(r.closeHour)}:${pad2(r.closeMinute)}` };
+  }
+  return out;
+}
 
 /**
  * Normalize a permissive `hoursJson` payload (absent key === closed) into the
