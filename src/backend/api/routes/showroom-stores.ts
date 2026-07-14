@@ -47,6 +47,7 @@ import {
   showroomBrandMappings,
 } from "@backend/db/schema/brands/index";
 import { classifyBayAreaRegion } from "@backend/lib/bay-area-region";
+import { GoogleMapsService } from "@backend/services/google/maps";
 import {
   computeStoreGeoPatch,
   scheduleShowroomEnrichment,
@@ -1619,6 +1620,34 @@ showroomStoresRouter.post("/", async (c) => {
     storeValues.weekdayHours = derived.weekdayHours;
     storeValues.weekendHours = derived.weekendHours;
     storeValues.isOpenWeekends = derived.isOpenWeekends;
+  }
+
+  // Guarantee coordinates whenever a Google Place was selected. Some callers
+  // (the intake form) send a `placeId` but not lat/lng; without coordinates the
+  // showroom can never be pinned on the map. If they're missing, resolve them
+  // server-side from the placeId here — the same source the MCP onboarding tools
+  // and the backfill use — so EVERY placeId-backed create is map-ready. One
+  // Places lookup, only when coordinates are actually absent (skipAi keeps it cheap).
+  if (
+    typeof data.placeId === "string" &&
+    data.placeId.length > 0 &&
+    (storeValues.latitude == null || storeValues.longitude == null)
+  ) {
+    try {
+      const details = await new GoogleMapsService(c.env).placeDetails(
+        data.placeId,
+        undefined,
+        { skipAi: true },
+      );
+      const loc = (details as { location?: { latitude?: number; longitude?: number } })
+        .location;
+      if (typeof loc?.latitude === "number") storeValues.latitude = loc.latitude;
+      if (typeof loc?.longitude === "number") storeValues.longitude = loc.longitude;
+    } catch (err) {
+      // Non-fatal: fall through to address/ZIP-derived region below. The store
+      // is still created; it just won't have a precise pin until a backfill runs.
+      console.error("[showroom-stores] POST / coordinate lookup failed:", err);
+    }
   }
 
   // Capture geo columns: pass through Places coordinates and derive the region
