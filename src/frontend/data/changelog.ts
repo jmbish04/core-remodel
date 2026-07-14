@@ -61,7 +61,8 @@ export const BRANCHES: ChangelogBranch[] = [
       "Untangled the overgrown showroom_stores table into normalized child tables and a single-payload write model — hours, address, links, contacts + business-card vision, and email auto-population.",
     date: "2026-07-13",
     status: "staged",
-    // prNumber / prUrl set once the PR is opened.
+    prNumber: 128,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/128",
     diagrams: [
       {
         caption:
