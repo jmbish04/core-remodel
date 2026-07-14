@@ -9,10 +9,10 @@
  *
  * Mounted at `/api/drive-lists`.
  */
-import { driveListStops, driveLists } from "@backend/db";
+import { driveListStops, driveLists, showroomStores } from "@backend/db";
 import { createDriveList, parseDriveNotes } from "@backend/services/drive-lists";
 import { isRequestAuthenticated } from "@backend/utils/access";
-import { asc, desc, eq, sql } from "drizzle-orm";
+import { asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -56,7 +56,8 @@ driveListsRouter.use("*", async (c, next) => {
   await next();
 });
 
-/** GET /api/drive-lists — landing list, newest-first, with completion counts. */
+/** GET /api/drive-lists — landing list, newest-first, with completion counts,
+ * per-drive map marker coords, and lazy auto-archive of fully-visited drives. */
 driveListsRouter.get("/", async (c) => {
   const db = drizzle(c.env.DB);
   const rows = await db
@@ -77,12 +78,54 @@ driveListsRouter.get("/", async (c) => {
     .orderBy(desc(driveLists.createdAt))
     .all();
 
+  // Map markers: a stop's own coords, else its linked showroom's coords.
+  const markerRows = await db
+    .select({
+      driveListId: driveListStops.driveListId,
+      lat: sql<number | null>`coalesce(${driveListStops.latitude}, ${showroomStores.latitude})`,
+      lng: sql<number | null>`coalesce(${driveListStops.longitude}, ${showroomStores.longitude})`,
+    })
+    .from(driveListStops)
+    .leftJoin(showroomStores, eq(driveListStops.showroomStoreId, showroomStores.id))
+    .orderBy(asc(driveListStops.driveListId), asc(driveListStops.sortOrder))
+    .all();
+  const markersByDrive = new Map<number, { lat: number; lng: number }[]>();
+  for (const m of markerRows) {
+    if (m.lat == null || m.lng == null) continue;
+    const list = markersByDrive.get(m.driveListId) ?? [];
+    list.push({ lat: m.lat, lng: m.lng });
+    markersByDrive.set(m.driveListId, list);
+  }
+
+  // Auto-archive: any drive whose every stop is visited (and isn't already
+  // archived/completed) moves to the Archived tab. Persist so it stays there.
+  const toArchive = rows
+    .filter(
+      (r) =>
+        Number(r.stopCount) > 0 &&
+        Number(r.visitedCount) === Number(r.stopCount) &&
+        r.status !== "archived" &&
+        r.status !== "completed",
+    )
+    .map((r) => r.id);
+  // Chunk the id list so `inArray` never exceeds D1's 100-bound-param limit.
+  for (let i = 0; i < toArchive.length; i += 90) {
+    await db
+      .update(driveLists)
+      .set({ status: "archived", updatedAt: new Date() })
+      .where(inArray(driveLists.id, toArchive.slice(i, i + 90)))
+      .run();
+  }
+  const archivedNow = new Set(toArchive);
+
   return c.json({
     count: rows.length,
     driveLists: rows.map((r) => ({
       ...r,
+      status: archivedNow.has(r.id) ? "archived" : r.status,
       stopCount: Number(r.stopCount),
       visitedCount: Number(r.visitedCount),
+      markers: markersByDrive.get(r.id) ?? [],
     })),
   });
 });
@@ -149,13 +192,34 @@ driveListsRouter.patch("/:slug/stops/:stopId", async (c) => {
     .set({ visited: body.visited, visitedAt: body.visited ? new Date() : null })
     .where(eq(driveListStops.id, stopId))
     .run();
+
+  // Recompute completion and auto-archive / un-archive: all stops visited →
+  // archived; re-opening a stop on an archived drive brings it back to active.
+  const [counts] = await db
+    .select({
+      total: sql<number>`count(${driveListStops.id})`,
+      visited: sql<number>`coalesce(sum(${driveListStops.visited}), 0)`,
+    })
+    .from(driveListStops)
+    .where(eq(driveListStops.driveListId, drive.id));
+  const [current] = await db
+    .select({ status: driveLists.status })
+    .from(driveLists)
+    .where(eq(driveLists.id, drive.id))
+    .limit(1);
+  const total = Number(counts?.total ?? 0);
+  const visited = Number(counts?.visited ?? 0);
+  let status = current?.status;
+  if (total > 0 && visited === total) status = "archived";
+  else if (current?.status === "archived") status = "active";
+
   await db
     .update(driveLists)
-    .set({ updatedAt: new Date() })
+    .set({ status, updatedAt: new Date() })
     .where(eq(driveLists.id, drive.id))
     .run();
 
-  return c.json({ ok: true, visited: body.visited });
+  return c.json({ ok: true, visited: body.visited, status });
 });
 
 export default driveListsRouter;
