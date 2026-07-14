@@ -10,6 +10,35 @@ You are an elite Senior Engineer operating within the Google Antigravity IDE fra
 - **Data Persistence:** Drizzle ORM + D1 Serverless SQL Storage Core
 - **Cognitive Orchestration:** @cloudflare/agents SDK Layer
 
+## Page styling — consistent shell for EVERY page (MANDATORY)
+
+Every admin/app page is a **thin Astro shell** mounting one React island, wrapped
+in `<BaseLayout>`, and MUST follow this exact structure. The canonical example is
+`src/frontend/pages/admin/studio.astro`. A page that jams content into the top-left
+with an unstyled header is almost always breaking rule (1) below.
+
+1. **In `.astro` files, use `class`, NEVER `className`.** Astro only applies `class`.
+   A `className` on a native element (`<main>`, `<div>`, `<h1>`) renders as a dead
+   attribute — Tailwind classes never apply, so the container/padding/typography
+   silently vanish and the page collapses to the top-left. (Inside `.tsx` islands,
+   `className` is correct — this rule is about `.astro` shells only.)
+2. **Container:** the page body is `<main class="container mx-auto px-4 py-8 pb-12">`.
+3. **Header block** directly inside `<main>`:
+   ```astro
+   <div class="mb-8">
+     <h1 class="mb-2 flex items-center gap-2 text-3xl font-bold tracking-tight">
+       <!-- a 24px lucide/inline SVG icon, class="size-6 text-muted-foreground" aria-hidden -->
+       Page Title
+     </h1>
+     <p class="text-muted-foreground">One-line description of the page.</p>
+   </div>
+   ```
+   The icon is REQUIRED — pick one that matches the page (e.g. a cog for config).
+4. The island mounts below the header: `<TheApp client:only="react" />`.
+
+When you touch or create a page that violates this (no icon, wrong/`className`
+header, content flush to the top-left), fix it to match `studio.astro`.
+
 ## Active design specs (read-only references for agents)
 
 - `build-vision/` (project root) — **Design spec, not production code.** Prototype for the Build-Vision feature (vendor-facing remodel brief). Includes `data.jsx`, `app.jsx`, `admin-app.jsx`, `sections.jsx`, `budget.jsx`, `comments.jsx`, `selection-toolbar.jsx`, `comment-rail.jsx`, `sidebar.jsx`, `lightbox.jsx`, `pdf-preview.jsx`, `styles.css`, `_tokens.css`. Treat these as the source-of-truth for visual + interaction parity. Production code lives in `src/frontend/components/build-vision/`, `src/backend/api/routes/build-vision.ts` and `admin-build-vision.ts`, and `src/backend/db/schema/build-vision/`. Implementation plan: `docs/plans/2026-05-27-build-vision.md`.
@@ -128,9 +157,11 @@ registry — there is always one).
 - if the definition has `hex_code`, show a color swatch in the option (`[▧] Name`) and a color picker when creating "Other"
 - show the option **display name**, never the option id
 
-**Config pages:** every config vocabulary gets a `/config/<group>/<name>` page (e.g.
-`/config/photo/colors`) to manage its definitions. `/config` opens in a new tab with
-its own dedicated sidebar, grouped. One page per vocabulary; all share the config sidebar.
+**Config pages:** every config vocabulary gets an **admin-gated** `/admin/config/<group>/<name>`
+page (e.g. `/admin/config/photo/colors`) to manage its definitions. Config is NEVER served
+under the public `/config/*` prefix — it must live under `/admin/*` so the auth gate covers it.
+The cog wheel in the top header opens `/admin/config` in a new tab; that config area has its own
+dedicated sidebar (ConfigShell / CONFIG_NAV), grouped. One page per vocabulary; all share it.
 
 **Categories:** a shared `categories` definition table + `subcategories` (each with a
 `category_id` FK to its parent). Objects (photos, brands, products) map to categories via a
@@ -157,11 +188,11 @@ category with no subcategory.
 `onCreateOption` (wire to the definition-table create API) and hex swatches (pass `hexCode`).
 NEVER a native `<select>` when "Other" creation is expected; NEVER comma-separated multi-values.
 
-**Config pages** → every definition vocabulary gets a `/config/<group>/<name>` page
-(e.g. `/config/photo/colors`) built on the reusable **`ConfigShell`** scaffold
+**Config pages** → every definition vocabulary gets an admin-gated `/admin/config/<group>/<name>`
+page (e.g. `/admin/config/photo/colors`) built on the reusable **`ConfigShell`** scaffold
 (`@/components/config/ConfigShell` — shared config sidebar + a definition-table CRUD panel:
 list active rows, add, edit, soft-deactivate; color picker when the definition has `hex_code`).
-`/config` opens in its own tab with the grouped config sidebar. One page per vocabulary.
+The header cog opens `/admin/config` in its own tab with the grouped config sidebar. One page per vocabulary.
 
 ## MANDATORY planning-phase compliance scan
 

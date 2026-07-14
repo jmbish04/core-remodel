@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e8c4bc9a-3f39-4876-b07d-be2f13af80cf",
-  "prevId": "c6c69472-607c-4f30-b02a-cb5845a1b29f",
+  "id": "5ab42fb3-4c04-4108-986a-445317e8a240",
+  "prevId": "e8c4bc9a-3f39-4876-b07d-be2f13af80cf",
   "tables": {
     "users": {
       "name": "users",
@@ -18236,6 +18236,20 @@
           "notNull": false,
           "autoincrement": false
         },
+        "parent_photo_id": {
+          "name": "parent_photo_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "crop_region": {
+          "name": "crop_region",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "file_name": {
           "name": "file_name",
           "type": "text",
@@ -18354,6 +18368,13 @@
             "bucket_id"
           ],
           "isUnique": false
+        },
+        "product_showroom_photos_parent_idx": {
+          "name": "product_showroom_photos_parent_idx",
+          "columns": [
+            "parent_photo_id"
+          ],
+          "isUnique": false
         }
       },
       "foreignKeys": {
@@ -18389,6 +18410,19 @@
           "tableTo": "product_photo_buckets",
           "columnsFrom": [
             "bucket_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "product_showroom_photos_parent_photo_id_product_showroom_photos_id_fk": {
+          "name": "product_showroom_photos_parent_photo_id_product_showroom_photos_id_fk",
+          "tableFrom": "product_showroom_photos",
+          "tableTo": "product_showroom_photos",
+          "columnsFrom": [
+            "parent_photo_id"
           ],
           "columnsTo": [
             "id"

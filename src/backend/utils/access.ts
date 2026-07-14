@@ -6,16 +6,17 @@ export const ACCESS_COOKIE_NAME = "remodel_access";
 export const VISITOR_COOKIE_NAME = "remodel_visitor";
 
 /**
- * Device-scoped landing preference. Holds the internal path an authed device
- * should be redirected to when it hits the app root (`/`) — set per device from
- * `/admin/config/preferences`, so a Tesla can land on the drive list while a
- * phone lands on the showroom directory. Not sensitive: it only controls this
- * device's own redirect, so it is a plain (JS-writable) cookie.
+ * Per-device identity. The app has no accounts, so a device (this cookie's uuid)
+ * IS the unit of preference. Set from `/admin/config/device`; read by the Worker
+ * at the app root to look up that device's default landing page in D1
+ * (`device_preferences`), so each device routes independently (Tesla → drives,
+ * phone → showrooms). Not sensitive — just a random opaque id.
  */
-export const LANDING_PREF_COOKIE_NAME = "remodel_landing";
+export const DEVICE_COOKIE_NAME = "remodel_device";
 
 const ACCESS_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 const VISITOR_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
+const DEVICE_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 
 function getCookieValueFromHeader(cookieHeader: string | null, name: string): string | null {
   if (!cookieHeader) {
@@ -78,8 +79,8 @@ export function getVisitorCookieFromRequest(request: Request): string | null {
   return getCookieValueFromHeader(request.headers.get("cookie"), VISITOR_COOKIE_NAME);
 }
 
-export function getLandingPrefFromRequest(request: Request): string | null {
-  return getCookieValueFromHeader(request.headers.get("cookie"), LANDING_PREF_COOKIE_NAME);
+export function getDeviceIdFromRequest(request: Request): string | null {
+  return getCookieValueFromHeader(request.headers.get("cookie"), DEVICE_COOKIE_NAME);
 }
 
 /**
@@ -154,6 +155,17 @@ export function setVisitorCookie(c: Context<{ Bindings: Env }>, visitorId: strin
     sameSite: "Lax",
     path: "/",
     maxAge: VISITOR_COOKIE_MAX_AGE_SECONDS,
+  });
+}
+
+export function setDeviceCookie(c: Context<{ Bindings: Env }>, deviceId: string): void {
+  const secure = c.req.url.startsWith("https://");
+  setCookie(c, DEVICE_COOKIE_NAME, deviceId, {
+    httpOnly: true,
+    secure,
+    sameSite: "Lax",
+    path: "/",
+    maxAge: DEVICE_COOKIE_MAX_AGE_SECONDS,
   });
 }
 

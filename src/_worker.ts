@@ -12,10 +12,11 @@ import { autoHealImageUploads } from "./backend/services/image-processor/auto-he
 import { monitorShowroomSourcingCoverage } from "./backend/services/showroom-sourcing-monitor";
 import { ingestCompanyEmails } from "./backend/services/gmail/ingestion";
 import {
-  getLandingPrefFromRequest,
+  getDeviceIdFromRequest,
   isRequestAuthenticated,
   isSafeInternalPath,
 } from "./backend/utils/access";
+import { getDeviceLandingPath } from "./backend/services/device-preferences";
 import { handleOAuthAuthorize } from "./backend/mcp/oauth-ui";
 import { RemodelMcpAgent } from "./backend/mcp/agent";
 import { routeAgentRequest } from "agents";
@@ -92,6 +93,12 @@ const LEGACY_REDIRECTS: ReadonlyArray<readonly [string, string]> = [
   ["/admin/planning/decision-room", "/admin/designs/decision-room"],
   ["/admin/planning/moodboards", "/admin/designs/moodboards"],
   ["/admin/brands/types", "/admin/config/brands/types"],
+  // Config moved under the admin auth gate — the public `/config/*` prefix should
+  // never have served config. 301 old links (incl. /config/photo/*) to /admin/config.
+  ["/config", "/admin/config"],
+  // #118 shipped device landing prefs at /admin/config/preferences; it now lives
+  // at /admin/config/device (D1-backed cards). Redirect the old path.
+  ["/admin/config/preferences", "/admin/config/device"],
   // Brands live under the shopping suite (SITEMAP target). Registered AFTER the
   // /admin/brands/types entry above so the prefix loop resolves types first.
   ["/admin/brands", "/admin/shopping/brands"],
@@ -133,20 +140,18 @@ const legacyHandler: ExportedHandler<Env> = {
     }
 
     // Device-scoped landing preference: an authed device that has chosen a
-    // default landing page (from /admin/config/preferences) is redirected there
-    // when it hits the app root exactly. The choice lives in a per-device cookie,
-    // so each device routes independently (Tesla → drives, phone → showrooms).
-    // Only fires for authed devices; unauthed root hits fall through to the
-    // normal home/login. Path is validated to block open-redirects.
+    // default landing page (from /admin/config/device) is redirected there when
+    // it hits the app root exactly. The choice lives in D1 keyed by the device's
+    // cookie id, so each device routes independently (Tesla → drives, phone →
+    // showrooms). Only fires for authed devices; unauthed root hits fall through
+    // to the normal home/login. Path is validated to block open-redirects.
     if (url.pathname === "/") {
-      const landing = getLandingPrefFromRequest(request);
-      if (
-        landing &&
-        landing !== "/" &&
-        isSafeInternalPath(landing) &&
-        (await isRequestAuthenticated(request, env))
-      ) {
-        return Response.redirect(`${url.origin}${landing}`, 302);
+      const deviceId = getDeviceIdFromRequest(request);
+      if (deviceId && (await isRequestAuthenticated(request, env))) {
+        const landing = await getDeviceLandingPath(env, deviceId);
+        if (landing && landing !== "/" && isSafeInternalPath(landing)) {
+          return Response.redirect(`${url.origin}${landing}`, 302);
+        }
       }
     }
 

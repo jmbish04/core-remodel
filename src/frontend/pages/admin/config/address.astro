@@ -1,0 +1,15 @@
+---
+/**
+ * @fileoverview Property Address config page — `/admin/config/address`.
+ * Thin shell mounting `<PropertyAddressConfigApp>` (ConfigShell inside).
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { PropertyAddressConfigApp } from "@/components/config/PropertyAddressConfigApp";
+---
+
+<BaseLayout
+  title="Property Address — Configuration"
+  description="Target property address, ZIP, block and lot for the permit pipeline."
+>
+  <PropertyAddressConfigApp client:only="react" />
+</BaseLayout>

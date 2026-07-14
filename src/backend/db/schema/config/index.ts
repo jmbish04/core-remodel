@@ -6,3 +6,4 @@ export * from "./photo_subcategories";
 export * from "./photo_colors";
 export * from "./brand_categories";
 export * from "./product_categories";
+export * from "./device_preferences";

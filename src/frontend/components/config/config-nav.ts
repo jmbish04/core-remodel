@@ -16,12 +16,22 @@ export interface ConfigNavGroup {
 
 export const CONFIG_NAV: ConfigNavGroup[] = [
   {
+    id: "property",
+    label: "Property",
+    items: [{ href: "/admin/config/address", label: "Property Address" }],
+  },
+  {
+    id: "device",
+    label: "This Device",
+    items: [{ href: "/admin/config/device", label: "Device" }],
+  },
+  {
     id: "photo",
     label: "Photo & Products",
     items: [
-      { href: "/config/photo/categories", label: "Categories" },
-      { href: "/config/photo/subcategories", label: "Sub-categories" },
-      { href: "/config/photo/colors", label: "Colors" },
+      { href: "/admin/config/photo/categories", label: "Categories" },
+      { href: "/admin/config/photo/subcategories", label: "Sub-categories" },
+      { href: "/admin/config/photo/colors", label: "Colors" },
     ],
   },
 ];
