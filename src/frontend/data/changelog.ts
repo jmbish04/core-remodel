@@ -49,6 +49,8 @@ export const BRANCHES: ChangelogBranch[] = [
       "A durable, D1-backed changelog that accumulates across every branch/PR and is never overwritten by a static file — with a full detail page per entry and an agent-facing standard for keeping it current.",
     date: "2026-07-14",
     status: "staged",
+    prNumber: 127,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/127",
   },
 ];
 
