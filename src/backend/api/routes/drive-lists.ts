@@ -108,11 +108,12 @@ driveListsRouter.get("/", async (c) => {
         r.status !== "completed",
     )
     .map((r) => r.id);
-  if (toArchive.length > 0) {
+  // Chunk the id list so `inArray` never exceeds D1's 100-bound-param limit.
+  for (let i = 0; i < toArchive.length; i += 90) {
     await db
       .update(driveLists)
       .set({ status: "archived", updatedAt: new Date() })
-      .where(inArray(driveLists.id, toArchive))
+      .where(inArray(driveLists.id, toArchive.slice(i, i + 90)))
       .run();
   }
   const archivedNow = new Set(toArchive);

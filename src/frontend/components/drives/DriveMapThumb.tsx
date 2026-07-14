@@ -23,6 +23,9 @@ export function DriveMapThumb({ markers }: { markers: LatLng[] }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreGL.Map | null>(null);
   const [visible, setVisible] = useState(false);
+  // Stable identity for the coords — keeps the map effect from rebuilding on a
+  // new-but-equal `markers` array reference.
+  const markersKey = markers.map((m) => `${m.lat},${m.lng}`).join(";");
 
   // Only build the map once the card scrolls into view.
   useEffect(() => {
@@ -107,7 +110,10 @@ export function DriveMapThumb({ markers }: { markers: LatLng[] }) {
       map.remove();
       mapRef.current = null;
     };
-  }, [visible, markers]);
+    // Depend on a stable key, not the array ref — a fresh `markers` array with
+    // identical coords must not tear down and rebuild the WebGL map each render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, markersKey]);
 
   if (markers.length === 0) {
     return (
