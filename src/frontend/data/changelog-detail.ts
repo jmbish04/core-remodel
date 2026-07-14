@@ -31,6 +31,39 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "email-structured-extraction": {
+    slug: "email-structured-extraction",
+    problem:
+      "The inbound-email classifier called Gemini with responseMimeType=application/json but the schema lived only in the prompt text, so the model free-wrote its JSON. On a Costco order that printed the total ($5,105.33), tax, shipping, and discount, it still flagged 'The email does not explicitly state the total… check your payment method for the final charge.' It also captured only description/qty/unitPrice/total per line — no brand, model, discount, shipping, or merchant metadata.",
+    approach:
+      "Pass a native @google/genai responseSchema (config.responseSchema) so the model must emit exactly the shape we ask for — every total/tax/shipping/discount and per-item brand/model/variant is a first-class property. Enrich the prompt + AiAnalysis interface to match. Add a guard that drops any 'amount unknown / check your payment method' payment flag once a total was actually extracted. The richer fields persist in extracted_raw_json (no migration), ready to surface in the HITL panel later.",
+    apiChanges: [
+      "No HTTP surface change — internal to the email pipeline (services/email/classify.ts).",
+    ],
+    filesTouched: [
+      "src/backend/services/email/extraction-schema.ts (NEW — native responseSchema)",
+      "src/backend/services/email/classify.ts (responseSchema + enriched interface/prompt + flag guard)",
+    ],
+    migrations: [],
+    code: [
+      {
+        title: "Structured output, not prompt-embedded JSON",
+        lang: "ts",
+        code: `const response = await ai.models.generateContent({
+  model: "gemini-2.5-flash",
+  contents: [{ role: "user", parts: [{ text: prompt }] }],
+  config: {
+    responseMimeType: "application/json",
+    responseSchema: ANALYSIS_RESPONSE_SCHEMA, // <- forces every field
+    temperature: 0.1,
+  },
+});
+const analysis = JSON.parse(stripJsonFence(response.text || "")) as AiAnalysis;
+dropContradictoryPaymentFlags(analysis); // no phantom "total unknown"`,
+      },
+    ],
+    diagrams: [],
+  },
   "changelog-persistent-d1": {
     slug: "changelog-persistent-d1",
     problem:
