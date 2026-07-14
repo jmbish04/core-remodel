@@ -1175,6 +1175,27 @@ showroomStoresRouter.post("/research/sweep-sessions/:sid/request-changes", async
  *   - "categories" → each store gets `categories: string[]`
  *   - "ratings"    → each store gets `avgRating: number | null`, `ratingCount: number`
  */
+/**
+ * Run an `inArray(col, ids)` select in chunks and concatenate the rows.
+ *
+ * Cloudflare D1 caps a query at 100 bound parameters. The showroom directory
+ * can hold well over 100 rows (currently ~119), so passing the full id list to
+ * a single `inArray` blows the limit and fails the whole query at runtime. We
+ * chunk at 90 to leave headroom for any other bound params in the statement.
+ */
+const D1_IN_CHUNK = 90;
+async function chunkedByIds<T>(
+  ids: number[],
+  run: (chunk: number[]) => Promise<T[]>,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += D1_IN_CHUNK) {
+    const rows = await run(ids.slice(i, i + D1_IN_CHUNK));
+    for (const row of rows) out.push(row);
+  }
+  return out;
+}
+
 showroomStoresRouter.get("/", async (c) => {
   const db = drizzle(c.env.DB);
   const cityFilter = c.req.query("city");
@@ -1238,17 +1259,19 @@ showroomStoresRouter.get("/", async (c) => {
   //   - onlineRatingMap → aggregated external platform ratings (showroom_store_ratings)
   const [categoryMap, userRatingMap, onlineRatingMap, hoursMap] = await Promise.all([
     includes.has("categories") && storeIds.length > 0
-      ? db
-          .select({
-            storeId: showroomStoreCategoryMapping.storeId,
-            categoryName: showroomStoreCategory.name,
-          })
-          .from(showroomStoreCategoryMapping)
-          .innerJoin(
-            showroomStoreCategory,
-            eq(showroomStoreCategoryMapping.categoryId, showroomStoreCategory.id)
-          )
-          .where(inArray(showroomStoreCategoryMapping.storeId, storeIds))
+      ? chunkedByIds(storeIds, (chunk) =>
+          db
+            .select({
+              storeId: showroomStoreCategoryMapping.storeId,
+              categoryName: showroomStoreCategory.name,
+            })
+            .from(showroomStoreCategoryMapping)
+            .innerJoin(
+              showroomStoreCategory,
+              eq(showroomStoreCategoryMapping.categoryId, showroomStoreCategory.id)
+            )
+            .where(inArray(showroomStoreCategoryMapping.storeId, chunk)),
+        )
           .then((catRows) => {
             const map = new Map<number, string[]>();
             for (const r of catRows) {
@@ -1261,13 +1284,15 @@ showroomStoresRouter.get("/", async (c) => {
           .catch(() => new Map<number, string[]>())
       : Promise.resolve(new Map<number, string[]>()),
     includes.has("ratings") && storeIds.length > 0
-      ? db
-          .select({
-            storeId: storeRating.storeId,
-            rating: storeRating.rating,
-          })
-          .from(storeRating)
-          .where(and(eq(storeRating.isActive, true), inArray(storeRating.storeId, storeIds)))
+      ? chunkedByIds(storeIds, (chunk) =>
+          db
+            .select({
+              storeId: storeRating.storeId,
+              rating: storeRating.rating,
+            })
+            .from(storeRating)
+            .where(and(eq(storeRating.isActive, true), inArray(storeRating.storeId, chunk))),
+        )
           .then((rRows) => {
             // At most one active rating per store — last write wins.
             const map = new Map<number, number>();
@@ -1277,13 +1302,15 @@ showroomStoresRouter.get("/", async (c) => {
           .catch(() => new Map<number, number>())
       : Promise.resolve(new Map<number, number>()),
     includes.has("ratings") && storeIds.length > 0
-      ? db
-          .select({
-            storeId: showroomStoreRatings.storeId,
-            rating: showroomStoreRatings.rating,
-          })
-          .from(showroomStoreRatings)
-          .where(inArray(showroomStoreRatings.storeId, storeIds))
+      ? chunkedByIds(storeIds, (chunk) =>
+          db
+            .select({
+              storeId: showroomStoreRatings.storeId,
+              rating: showroomStoreRatings.rating,
+            })
+            .from(showroomStoreRatings)
+            .where(inArray(showroomStoreRatings.storeId, chunk)),
+        )
           .then((rRows) => {
             const map = new Map<number, { sum: number; count: number }>();
             for (const r of rRows) {
@@ -1299,17 +1326,19 @@ showroomStoresRouter.get("/", async (c) => {
     // Normalized per-day hours for every store in the list (cards always need
     // them for open/closed status + weekend cues). One query, grouped by store.
     storeIds.length > 0
-      ? db
-          .select({
-            showroomId: showroomHours.showroomId,
-            day: showroomHours.day,
-            openHour: showroomHours.openHour,
-            openMinute: showroomHours.openMinute,
-            closeHour: showroomHours.closeHour,
-            closeMinute: showroomHours.closeMinute,
-          })
-          .from(showroomHours)
-          .where(inArray(showroomHours.showroomId, storeIds))
+      ? chunkedByIds(storeIds, (chunk) =>
+          db
+            .select({
+              showroomId: showroomHours.showroomId,
+              day: showroomHours.day,
+              openHour: showroomHours.openHour,
+              openMinute: showroomHours.openMinute,
+              closeHour: showroomHours.closeHour,
+              closeMinute: showroomHours.closeMinute,
+            })
+            .from(showroomHours)
+            .where(inArray(showroomHours.showroomId, chunk)),
+        )
           .then((hRows) => {
             const map = new Map<number, Array<Omit<(typeof hRows)[number], "showroomId">>>();
             for (const h of hRows) {

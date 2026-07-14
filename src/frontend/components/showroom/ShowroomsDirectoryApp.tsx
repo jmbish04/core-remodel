@@ -1079,17 +1079,19 @@ function MapView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
     requestLocation();
   }, [requestLocation]);
 
-  // Frame the map around the showrooms currently in view (plus the user's dot),
-  // so markers are visible without hunting. Recomputes when the filtered set or
-  // the user's location changes; free pan/zoom in between via onViewportChange.
-  const framePoints = useMemo<Array<[number, number]>>(() => {
-    const pts: Array<[number, number]> = geoStores.map((s) => [
-      s.longitude as number,
-      s.latitude as number,
-    ]);
-    if (userLoc) pts.push([userLoc.lng, userLoc.lat]);
-    return pts;
-  }, [geoStores, userLoc]);
+  // Frame the map around the showrooms currently in view, so markers are
+  // visible without hunting. Recomputes when the filtered set changes; free
+  // pan/zoom in between via onViewportChange.
+  //
+  // Deliberately excludes the user's location: the "find my location" control
+  // already flies to the user's dot on demand, and folding a possibly-distant
+  // location into the bounding box would either over-zoom the map out or fight
+  // that flyTo animation the moment it updates userLoc.
+  const framePoints = useMemo<Array<[number, number]>>(
+    () =>
+      geoStores.map((s) => [s.longitude as number, s.latitude as number]),
+    [geoStores],
+  );
 
   const frameKey = useMemo(
     () =>
