@@ -55,7 +55,9 @@ const invoiceData: Schema = {
     currency: s(),
     lineItems: { type: Type.ARRAY, items: lineItem },
   },
-  required: ["vendorName", "lineItems"],
+  // All non-optional AiAnalysis.invoiceData fields — required (but nullable) so
+  // the model always emits the key (as null when absent) rather than omitting it.
+  required: ["vendorName", "invoiceNumber", "invoiceDate", "dueDate", "subtotal", "tax", "total", "lineItems"],
 };
 
 const clause: Schema = {
@@ -107,7 +109,18 @@ const contractData: Schema = {
     paymentMilestones: { type: Type.ARRAY, items: milestone },
     recommendations: { type: Type.ARRAY, items: recommendation },
   },
-  required: [],
+  required: [
+    "contractType",
+    "partyName",
+    "counterpartyName",
+    "scopeSummary",
+    "totalValue",
+    "effectiveDate",
+    "completionDate",
+    "clauses",
+    "paymentMilestones",
+    "recommendations",
+  ],
 };
 
 const flag: Schema = {
@@ -149,5 +162,18 @@ export const ANALYSIS_RESPONSE_SCHEMA: Schema = {
     invoiceData,
     contractData,
   },
-  required: ["classification", "classificationConfidence", "reviewerFlags"],
+  // invoiceData/contractData are nullable but required — the model must emit
+  // them explicitly as null when not applicable, matching the AiAnalysis shape.
+  required: [
+    "classification",
+    "classificationConfidence",
+    "senderCompanyName",
+    "senderBusinessType",
+    "senderPhone",
+    "senderWebsite",
+    "senderLicenseNumber",
+    "reviewerFlags",
+    "invoiceData",
+    "contractData",
+  ],
 };

@@ -238,6 +238,7 @@ ${attachmentText ? `ATTACHMENT CONTENT (extracted text):\n${attachmentText.slice
  * extracted, drop those self-contradicting payment flags. Mutates in place.
  */
 function dropContradictoryPaymentFlags(analysis: AiAnalysis): void {
+  if (!analysis || typeof analysis !== "object") return;
   if (typeof analysis.invoiceData?.total !== "number") return;
   analysis.reviewerFlags = (analysis.reviewerFlags || []).filter((f) => {
     if (f.category !== "payment") return true;
