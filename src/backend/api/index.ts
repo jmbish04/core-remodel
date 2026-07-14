@@ -79,6 +79,7 @@ import { materialsRouter } from "./routes/materials";
 import { servicesRouter } from "./routes/services";
 import { wishlistRouter } from "./routes/wishlist";
 import { workerEmailsRouter } from "./routes/worker-emails";
+import { changelogRouter } from "./routes/changelog";
 import { showroomGapsRouter } from "./routes/showroom-gaps";
 import { showroomCatalogRouter } from "./routes/showroom-catalog";
 import { showroomScanRouter } from "./routes/showroom-scan";
@@ -271,6 +272,7 @@ app.route("/api/wishlist", wishlistRouter);
 // Worker-email HITL inbox API (invoices / contracts / receipts / staged
 // companies). Mounting this is what makes /admin/inbox show emails.
 app.route("/api/worker-emails", workerEmailsRouter);
+app.route("/api/changelog", changelogRouter);
 app.route("/api/places", placesRouter);
 // adminIntegrationsRouter mounts under /api/admin/integrations — already covered
 // by the /api/admin/* requireAccessAuth middleware above.

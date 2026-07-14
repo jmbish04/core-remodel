@@ -136,3 +136,6 @@ export * from "./drives/index";
 // colors + generic object<->definition mappings (AGENTS.md "Multi-select &
 // config-driven definitions").
 export * from "./config/index";
+
+// Persistent append-only changelog (branches + entries)
+export * from "./changelog/index";

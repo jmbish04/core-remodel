@@ -203,3 +203,28 @@ multi-select = definition + mapping tables), and API (list options / create-Othe
 list-mappings / filter-by-mapping) — **FLAG it to the user** and ask, per instance, whether
 it should **stay as-is** or be **brought into compliance**. Do not silently leave a
 comma-separated multi-value or a text-only currency field; surface it.
+
+## Changelog discipline (MANDATORY)
+
+The changelog is a **persistent, append-only** record in D1 (`changelog_branches` +
+`changelog_entries`), surfaced at `/admin/changelog`. It is NOT a static markdown file —
+never create or edit a `CHANGELOG.md`.
+
+**Every turn that changes code, and always before opening a PR, you MUST update the changelog:**
+
+1. **Your branch** → one row in `BRANCHES` in `src/frontend/data/changelog.ts` (keyed by git
+   branch name). `status: "staged"` until it ships to prod, then `"shipped"`. Add
+   `prNumber`/`prUrl` once the PR exists.
+2. **Each non-trivial change** → one `ChangelogEntry` in `CHANGELOG` (unique `id` = the detail
+   slug), tagged with your `branch`. `changes[]` `kind` ∈ `added|changed|removed|migration|fixed`.
+   List every drizzle migration tag in `migrations[]`.
+3. **Full detail page** → a matching `PhaseDetail` in `src/frontend/data/changelog-detail.ts`
+   keyed by the same `id`: `problem`, `approach`, `apiChanges[]`, `filesTouched[]`,
+   `migrations[{tag, sql}]`, `code[]`, and a Mermaid `diagrams[]` where a table/flow is involved.
+   Renders at `/admin/changelog/:id`.
+
+This bundled data is the seed + SSR fallback. The source of truth is D1: after deploy run
+`POST /api/changelog/seed` once (idempotent), or push entries live with
+`POST /api/changelog/entries` (upsert by slug — never overwrites another branch's rows). Because
+D1 accumulates across branches, the static file's only job is to carry *your* branch's additions;
+do not delete another branch's entries to resolve a merge conflict — append yours.

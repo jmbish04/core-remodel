@@ -99,6 +99,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     items: [
       { href: "/admin", label: "Analytics" },
       { href: "/admin/plans", label: "Plans" },
+      { href: "/admin/changelog", label: "Changelog" },
       { href: "/admin/studio", label: "Studio" },
       { href: "/admin/mcp-ops", label: "MCP Ops" },
       { href: "/admin/integrations/usage", label: "Integrations Usage" },
