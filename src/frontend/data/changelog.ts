@@ -1,9 +1,11 @@
 /**
- * Project changelog — release notes rendered at /admin/changelog.
+ * Project changelog — rendered at /admin/changelog as an overview grouped by
+ * BRANCH / PR. Each branch of work is one `ChangelogBranch`; the individual
+ * changes shipped on it (the "phases") are `ChangelogEntry` rows tagged with the
+ * branch id. Newest branch first; newest entry first within a branch.
  *
- * Newest entry first. Each phase of a build appends one entry. `status` is
- * "shipped" once live on prod, "staged" while the code is merged/committed but
- * the prod migrations + backfills have not been applied yet.
+ * `status` is "shipped" once live on prod, "staged" while merged/committed but
+ * the prod migrations + backfills haven't been applied yet.
  */
 
 export type ChangeKind = "added" | "changed" | "removed" | "migration" | "fixed";
@@ -13,8 +15,27 @@ export interface ChangelogChange {
   text: string;
 }
 
+/** A branch / PR — the top-level grouping in the overview. */
+export interface ChangelogBranch {
+  /** Git branch name — the join key for entries. */
+  branch: string;
+  /** Human title for the body of work. */
+  title: string;
+  /** One-line description of the branch. */
+  summary?: string;
+  /** ISO date the branch was opened / last updated. */
+  date: string;
+  status: "shipped" | "staged" | "open";
+  /** GitHub PR number, once opened. */
+  prNumber?: number;
+  /** Full URL to the PR. */
+  prUrl?: string;
+}
+
 export interface ChangelogEntry {
   id: string;
+  /** Branch this change belongs to — matches a ChangelogBranch.branch. */
+  branch: string;
   /** ISO date (YYYY-MM-DD). */
   date: string;
   /** Optional phase/version tag, e.g. "Phase 1". */
@@ -27,15 +48,25 @@ export interface ChangelogEntry {
   /** drizzle migration tags applied by this entry. */
   migrations?: string[];
   status: "shipped" | "staged";
-  /** GitHub PR number this entry shipped in (once opened). */
-  prNumber?: number;
-  /** Full URL to the PR. */
-  prUrl?: string;
 }
+
+/** Branches / PRs, newest first. The overview lists these; entries nest under. */
+export const BRANCHES: ChangelogBranch[] = [
+  {
+    branch: "claude/showroom-stores-cleanup-775bb5",
+    title: "Showroom stores cleanup",
+    summary:
+      "Untangled the overgrown showroom_stores table into normalized child tables and a single-payload write model — hours, address, links, contacts + business-card vision, and email auto-population.",
+    date: "2026-07-13",
+    status: "staged",
+    // prNumber / prUrl set once the PR is opened.
+  },
+];
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
     id: "showroom-email-contacts",
+    branch: "claude/showroom-stores-cleanup-775bb5",
     date: "2026-07-13",
     tag: "Phase 5",
     area: "Showrooms",
@@ -51,6 +82,7 @@ export const CHANGELOG: ChangelogEntry[] = [
   },
   {
     id: "showroom-contacts",
+    branch: "claude/showroom-stores-cleanup-775bb5",
     date: "2026-07-13",
     tag: "Phase 4",
     area: "Showrooms",
@@ -69,6 +101,7 @@ export const CHANGELOG: ChangelogEntry[] = [
   },
   {
     id: "showroom-links",
+    branch: "claude/showroom-stores-cleanup-775bb5",
     date: "2026-07-13",
     tag: "Phase 3",
     area: "Showrooms",
@@ -86,6 +119,7 @@ export const CHANGELOG: ChangelogEntry[] = [
   },
   {
     id: "showroom-address",
+    branch: "claude/showroom-stores-cleanup-775bb5",
     date: "2026-07-13",
     tag: "Phase 2",
     area: "Showrooms",
@@ -101,6 +135,7 @@ export const CHANGELOG: ChangelogEntry[] = [
   },
   {
     id: "showroom-hours",
+    branch: "claude/showroom-stores-cleanup-775bb5",
     date: "2026-07-13",
     tag: "Phase 1",
     area: "Showrooms",
