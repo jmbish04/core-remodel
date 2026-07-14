@@ -10,6 +10,7 @@ import { setShowroomHours } from "./set_showroom_hours";
 import { recordShowroomVisit } from "./record_showroom_visit";
 import { searchShowrooms } from "./search_showrooms";
 import { importShowroomFromPlace } from "./import_showroom_from_place";
+import { checkShowroomIntakeStatus } from "./check_showroom_intake_status";
 import { backfillShowroomGeo } from "./backfill_showroom_geo";
 
 export const showroomTools: RemodelTool[] = [
@@ -23,5 +24,6 @@ export const showroomTools: RemodelTool[] = [
   recordShowroomVisit,
   searchShowrooms,
   importShowroomFromPlace,
+  checkShowroomIntakeStatus,
   backfillShowroomGeo,
 ];

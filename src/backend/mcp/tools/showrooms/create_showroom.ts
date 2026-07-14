@@ -3,7 +3,6 @@ import { GoogleMapsService } from "@backend/services/google/maps";
 import {
   computeStoreGeoPatch,
   mapPlaceDetailsToStoreInput,
-  scheduleShowroomEnrichment,
 } from "@backend/services/showroom/onboarding";
 import type { GooglePlaceDetails } from "@frontend/components/showroom/intake/places-mapper";
 import { eq } from "drizzle-orm";
@@ -21,13 +20,14 @@ export const createShowroom = defineTool({
   title: "Create showroom",
   description:
     "Intake a new showroom store location. STRONGLY PREFER passing a Google `placeId` (from search_showrooms): " +
-    "with a placeId this runs the exact same FULL onboarding as import_showroom_from_place — Places Details + AI " +
+    "with a placeId this kicks the exact same FULL onboarding as import_showroom_from_place — Places Details + AI " +
     "review analysis, coordinates + region-hub capture, photos, brands, favicon + website scrape, and AI research " +
     "— and any explicit fields you also pass (e.g. pricePoint) override the Google-derived values. Without a " +
-    "placeId it creates a manual row from the fields you provide; only `name` is required. Either way the region " +
-    "hub (East Bay / South Bay / …) is captured from the coordinates/address/ZIP so the store shows under the " +
-    "correct directory filter, and AI research + a website scrape (when a websiteUrl is present) run in the " +
-    "background. Idempotent on `placeId` (an existing placeId returns the existing store unchanged).",
+    "placeId it creates a manual row from the fields you provide; only `name` is required. The region hub (East " +
+    "Bay / South Bay / …) is captured immediately, but ONBOARDING RUNS IN THE BACKGROUND: this tool returns " +
+    "right away with `status:\"processing\"` and the bare store row — do NOT wait on it. Poll " +
+    "`check_showroom_intake_status` (by showroomId or placeId) to watch enrichment finish (photos, brands, hours, " +
+    "access level). Idempotent on `placeId` (an existing placeId returns the existing store unchanged, `created:false`).",
   inputShape: {
     name: z.string().optional().describe("Store / location name (required unless a placeId is given)"),
     placeId: z
@@ -61,6 +61,7 @@ export const createShowroom = defineTool({
   ],
   outputShape: {
     created: z.boolean(),
+    status: z.string(),
     store: looseObject({ id: z.number().int(), name: z.string().nullable() }),
     region: z.string().nullable(),
     url: urlField,
@@ -77,6 +78,7 @@ export const createShowroom = defineTool({
       if (existing) {
         return {
           created: false,
+          status: "exists",
           store: existing,
           region: existing.hubName ?? null,
           url: showroomUrl(env, existing.id),
@@ -107,13 +109,14 @@ export const createShowroom = defineTool({
       const created = await persistPlaceShowroom(env, db, mapped);
       return {
         created: true,
+        status: "processing",
         store: created,
         region: created.hubName ?? null,
         url: showroomUrl(env, created.id),
       };
     }
 
-    // ── Manual path: name + provided fields, region + enrichment captured ──
+    // ── Manual path: name + provided fields, region captured, enrichment queued ──
     const name = input.name?.trim();
     if (!name) toolError("`name` is required and cannot be empty (or pass a placeId).");
 
@@ -136,23 +139,24 @@ export const createShowroom = defineTool({
         zipCode: input.zipCode,
         pricePoint: input.pricePoint,
         isAppointmentOnly: input.isAppointmentOnly,
+        scrapeStatus: "pending",
         ...geo,
       })
       .returning();
 
-    // Fire + await background enrichment (research always; favicon + scrape
-    // when a website is known). No waitUntil in MCP, so await it.
-    const tasks: Promise<unknown>[] = [];
-    scheduleShowroomEnrichment(
-      env,
-      created,
-      { websiteUrl: input.websiteUrl },
-      (p) => tasks.push(p),
-    );
-    await Promise.allSettled(tasks);
+    // Kick background enrichment durably (research always; favicon + scrape when a
+    // website is known) and return immediately — MCP has no waitUntil, so the
+    // ShowroomOnboardingWorkflow keeps the work alive. Poll check_showroom_intake_status.
+    await env.SHOWROOM_ONBOARDING_WORKFLOW.create({
+      params: {
+        showroomId: created.id,
+        enrichment: { websiteUrl: input.websiteUrl },
+      },
+    });
 
     return {
       created: true,
+      status: "processing",
       store: created,
       region: created.hubName ?? null,
       url: showroomUrl(env, created.id),

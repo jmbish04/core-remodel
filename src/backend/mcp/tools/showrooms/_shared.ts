@@ -5,7 +5,6 @@ import { showroomStoreHours, showroomStores } from "@backend/db";
 import {
   computeStoreGeoPatch,
   hoursJsonToRows,
-  scheduleShowroomEnrichment,
   type MappedPlaceStore,
 } from "@backend/services/showroom/onboarding";
 import type { RemodelDb } from "../../types";
@@ -29,12 +28,17 @@ export function rethrowMapsError(err: unknown): never {
 }
 
 /**
- * Persist a mapped Google Place as a showroom row and run the SAME enrichment
- * the intake form fires: Places-photo → CF Images, brand create/map, favicon +
- * website scrape, AI research, and category inference. Because MCP tool handlers
- * have no `executionCtx.waitUntil`, the enrichment promises are collected and
- * awaited here so the tool returns only once onboarding has actually run (work
- * left un-awaited would be cancelled when the request isolate finishes).
+ * Persist a mapped Google Place as a showroom row and KICK the same enrichment
+ * the intake form fires (Places-photo → CF Images, brand create/map, favicon +
+ * website scrape, AI research, category inference) as a durable background
+ * workflow — then return immediately.
+ *
+ * Enrichment used to be awaited inline here, but it takes ~25s+ and routinely
+ * outran the MCP client/transport timeout (the tool errored while the work
+ * completed server-side). Now the row is inserted with `scrapeStatus: "pending"`
+ * and {@link ShowroomOnboardingWorkflow} runs the enrichment durably; callers
+ * poll `check_showroom_intake_status`. The returned row is the freshly-inserted
+ * one (before enrichment), so hero image / brands / research populate afterward.
  */
 export async function persistPlaceShowroom(
   env: Env,
@@ -50,7 +54,7 @@ export async function persistPlaceShowroom(
 
   const [created] = await db
     .insert(showroomStores)
-    .values({ ...mapped.values, ...geo })
+    .values({ ...mapped.values, ...geo, scrapeStatus: "pending" })
     .returning();
 
   if (mapped.hoursJson) {
@@ -62,20 +66,18 @@ export async function persistPlaceShowroom(
     }
   }
 
-  const tasks: Promise<unknown>[] = [];
-  scheduleShowroomEnrichment(
-    env,
-    created,
-    {
-      websiteUrl: mapped.values.websiteUrl,
-      photos: mapped.photos,
-      brands: mapped.brands,
-      categoryTokens: mapped.categoryTokens,
-      categoryRationale: "Inferred from Google Places at MCP import",
+  await env.SHOWROOM_ONBOARDING_WORKFLOW.create({
+    params: {
+      showroomId: created.id,
+      enrichment: {
+        websiteUrl: mapped.values.websiteUrl,
+        photos: mapped.photos,
+        brands: mapped.brands,
+        categoryTokens: mapped.categoryTokens,
+        categoryRationale: "Inferred from Google Places at MCP import",
+      },
     },
-    (p) => tasks.push(p),
-  );
-  await Promise.allSettled(tasks);
+  });
 
   return created;
 }

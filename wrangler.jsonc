@@ -99,6 +99,11 @@
       "class_name": "ShowroomScrapeWorkflow",
     },
     {
+      "name": "showroom-onboarding-workflow",
+      "binding": "SHOWROOM_ONBOARDING_WORKFLOW",
+      "class_name": "ShowroomOnboardingWorkflow",
+    },
+    {
       "name": "brand-research-workflow",
       "binding": "BRAND_RESEARCH_WORKFLOW",
       "class_name": "BrandResearchWorkflow",

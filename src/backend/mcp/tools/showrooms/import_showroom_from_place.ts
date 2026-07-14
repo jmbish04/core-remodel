@@ -16,16 +16,18 @@ export const importShowroomFromPlace = defineTool({
   category: "showrooms",
   title: "Import a showroom from a Google Place",
   description:
-    "One-step, FULL onboarding of a showroom from a Google `placeId` (typically one returned by search_showrooms) — " +
+    "One-step FULL onboarding of a showroom from a Google `placeId` (typically one returned by search_showrooms) — " +
     "the same flow the front-end intake form runs. Fetches Places Details WITH the Gemini review analysis to " +
     "populate name, description, address, coordinates, phone, website, structured hours, Google rating/review " +
     "count, an AI review summary, the inferred price tier, and the appointment/flagship/large-selection/bespoke/" +
-    "trade-rep flags. It captures the Bay Area region hub (from coordinates/address) so the store shows under the " +
-    "right East Bay / South Bay / etc. filter, then runs enrichment in the background: Google photos → Cloudflare " +
-    "Images (+ hero), detected-brand create/map, favicon + full website scrape, AI renovation-fit research, and " +
-    "category inference. Idempotent by `placeId`: an existing store is returned unchanged (`created:false`); " +
-    "otherwise a new row is inserted (`created:true`). Prefer this over create_showroom whenever you have a " +
-    "placeId. Quota-metered (Places + Gemini) — surfaces MAPS_QUOTA_EXCEEDED clearly.",
+    "trade-rep flags, and captures the Bay Area region hub — then KICKS the rest of enrichment in the background: " +
+    "Google photos → Cloudflare Images (+ hero), detected-brand create/map, favicon + full website scrape, AI " +
+    "renovation-fit research, and category inference. Returns IMMEDIATELY with `status:\"processing\"` and the " +
+    "freshly-created row (do NOT wait on it, and do NOT retry on a timeout — the work is durable); poll " +
+    "`check_showroom_intake_status` by showroomId or placeId to see enrichment finish. Idempotent by `placeId`: an " +
+    "existing store is returned unchanged (`created:false`, `status:\"exists\"`); otherwise a new row is inserted " +
+    "(`created:true`). Prefer this over create_showroom whenever you have a placeId. Quota-metered (Places + " +
+    "Gemini) — surfaces MAPS_QUOTA_EXCEEDED clearly.",
   inputShape: {
     placeId: z
       .string()
@@ -35,6 +37,7 @@ export const importShowroomFromPlace = defineTool({
   annotations: WRITE_IDEMPOTENT,
   outputShape: {
     created: z.boolean(),
+    status: z.string(),
     showroomId: z.number().int(),
     url: urlField,
     region: z.string().nullable(),
@@ -54,6 +57,7 @@ export const importShowroomFromPlace = defineTool({
     if (existing) {
       return {
         created: false,
+        status: "exists",
         showroomId: existing.id,
         url: showroomUrl(env, existing.id),
         region: existing.hubName ?? null,
@@ -81,6 +85,7 @@ export const importShowroomFromPlace = defineTool({
 
     return {
       created: true,
+      status: "processing",
       showroomId: created.id,
       url: showroomUrl(env, created.id),
       region: created.hubName ?? null,
