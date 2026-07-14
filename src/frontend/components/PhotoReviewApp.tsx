@@ -887,7 +887,7 @@ function PhotoCodingWorkspace() {
                     {highlightMode === "like" ? "liked" : "disliked"} region.
                   </p>
                 ) : (
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-2">
                     {panelHighlights.map((highlight, index) => (
                       <div
                         key={`highlight-editor-${index}`}
