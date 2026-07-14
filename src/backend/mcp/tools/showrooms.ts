@@ -22,8 +22,9 @@
  * updates the denormalized snapshot AND appends a `store_notes` row so the visit
  * is both instantly displayable and durably logged.
  */
-import { showroomStoreHours, showroomPocs, showroomStores, storeNotes } from "@backend/db";
+import { showroomStoreHours, showroomStoreLinks, showroomPocs, showroomStores, storeNotes } from "@backend/db";
 import { GoogleMapsService } from "@backend/services/google/maps";
+import { getStoreLinksMap, linksToLegacyUrls } from "@backend/utils/showroom-links";
 import {
   computeStoreGeoPatch,
   hoursJsonToRows,
@@ -74,8 +75,13 @@ const DAY_ENUM = z.enum([
   "SUNDAY",
 ]);
 
-/** Shape a store row into a compact list row for `list_showrooms`. */
-function storeListDto(s: typeof showroomStores.$inferSelect) {
+/** Shape a store row into a compact list row for `list_showrooms`. The website
+ *  is derived from the store's WEBSITE link (URLs live in showroom_store_links,
+ *  no longer on the store row). */
+function storeListDto(
+  s: typeof showroomStores.$inferSelect,
+  website: string | null,
+) {
   return {
     id: s.id,
     name: s.name,
@@ -83,7 +89,7 @@ function storeListDto(s: typeof showroomStores.$inferSelect) {
     address: s.locationAddress,
     zipCode: s.zipCode,
     phone: s.phoneNumber,
-    website: s.websiteUrl,
+    website,
     rating: s.rating,
     isAppointmentOnly: s.isAppointmentOnly,
   };
@@ -123,12 +129,22 @@ async function persistPlaceShowroom(
     }
   }
 
+  // Website → showroom_store_links (WEBSITE). URLs live in the links table now,
+  // not on the store row.
+  if (mapped.websiteUrl) {
+    await db.insert(showroomStoreLinks).values({
+      storeId: created.id,
+      url: mapped.websiteUrl,
+      type: "WEBSITE",
+    } as typeof showroomStoreLinks.$inferInsert);
+  }
+
   const tasks: Promise<unknown>[] = [];
   scheduleShowroomEnrichment(
     env,
     created,
     {
-      websiteUrl: mapped.values.websiteUrl,
+      websiteUrl: mapped.websiteUrl,
       photos: mapped.photos,
       brands: mapped.brands,
       categoryTokens: mapped.categoryTokens,
@@ -192,7 +208,14 @@ export const showroomTools: RemodelTool[] = [
         }
         return true;
       });
-      return paginate(filtered.map(storeListDto), input.limit ?? 50, input.offset ?? 0);
+      const linksMap = await getStoreLinksMap(db, filtered.map((s) => s.id));
+      return paginate(
+        filtered.map((s) =>
+          storeListDto(s, linksToLegacyUrls(linksMap.get(s.id) ?? []).websiteUrl),
+        ),
+        input.limit ?? 50,
+        input.offset ?? 0,
+      );
     },
   }),
 
@@ -358,7 +381,7 @@ export const showroomTools: RemodelTool[] = [
         if (input.pricePoint) mapped.values.pricePoint = input.pricePoint;
         if (input.phoneNumber) mapped.values.phoneNumber = input.phoneNumber;
         if (input.emailAddress) mapped.values.emailAddress = input.emailAddress;
-        if (input.websiteUrl) mapped.values.websiteUrl = input.websiteUrl;
+        if (input.websiteUrl) mapped.websiteUrl = input.websiteUrl;
         if (input.isAppointmentOnly != null) {
           mapped.values.isAppointmentOnly = input.isAppointmentOnly;
         }
@@ -391,13 +414,21 @@ export const showroomTools: RemodelTool[] = [
           locationAddress: input.locationAddress,
           phoneNumber: input.phoneNumber,
           emailAddress: input.emailAddress,
-          websiteUrl: input.websiteUrl,
           zipCode: input.zipCode,
           pricePoint: input.pricePoint,
           isAppointmentOnly: input.isAppointmentOnly,
           ...geo,
         })
         .returning();
+
+      // Website → showroom_store_links (WEBSITE), not a store column.
+      if (input.websiteUrl) {
+        await db.insert(showroomStoreLinks).values({
+          storeId: created.id,
+          url: input.websiteUrl,
+          type: "WEBSITE",
+        } as typeof showroomStoreLinks.$inferInsert);
+      }
 
       // Fire + await background enrichment (research always; favicon + scrape
       // when a website is known). No waitUntil in MCP, so await it.
@@ -424,7 +455,7 @@ export const showroomTools: RemodelTool[] = [
     category: "showrooms",
     title: "Update showroom details",
     description:
-      "Patch any known columns on a showroom store (fill-in-missing-details). Only the fields you pass are changed; everything else is left untouched. The `id` cannot be changed. Great for enriching a store after research: address, contact, hours summaries, social links, POC, rating context, access level, notes.",
+      "Patch any known columns on a showroom store (fill-in-missing-details). Only the fields you pass are changed; everything else is left untouched. The `id` cannot be changed. Great for enriching a store after research: address, contact, POC, rating context, access level, notes. For website/social URLs use set_showroom_links; for opening hours use set_showroom_hours.",
     inputShape: {
       id: z.number().int().positive().describe("Showroom store id (from list_showrooms)"),
       name: z.string().optional(),
@@ -433,11 +464,8 @@ export const showroomTools: RemodelTool[] = [
       locationAddress: z.string().optional(),
       phoneNumber: z.string().optional(),
       emailAddress: z.string().optional(),
-      websiteUrl: z.string().optional(),
       zipCode: z.string().optional(),
       googleMapsLink: z.string().optional(),
-      weekdayHours: z.string().optional().describe("Human-readable weekday hours summary"),
-      weekendHours: z.string().optional().describe("Human-readable weekend hours summary"),
       isAppointmentOnly: z.boolean().optional(),
       mainPocFullname: z.string().optional(),
       mainPocPhoneNumber: z.string().optional(),
@@ -445,9 +473,6 @@ export const showroomTools: RemodelTool[] = [
       rating: z.number().int().min(1).max(5).optional().describe("Latest-visit star rating 1-5"),
       ratingContextHtml: z.string().optional(),
       ratingContextMarkdown: z.string().optional(),
-      instagramUrl: z.string().optional(),
-      facebookUrl: z.string().optional(),
-      pinterestUrl: z.string().optional(),
       overviewNoteHtml: z.string().optional(),
       overviewNoteMarkdown: z.string().optional(),
       accessLevel: z
@@ -467,11 +492,11 @@ export const showroomTools: RemodelTool[] = [
     examples: [
       { title: "Add a phone number", args: { id: 4, phoneNumber: "(415) 555-0142" } },
       {
-        title: "Enrich socials + access",
+        title: "Set access + rating",
         args: {
           id: 4,
-          instagramUrl: "https://instagram.com/studiobelmontbath",
           accessLevel: "PUBLIC_UNRESTRICTED",
+          rating: 5,
         },
       },
     ],
