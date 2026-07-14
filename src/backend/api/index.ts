@@ -48,6 +48,7 @@ import mcpCatalogRouter from "./routes/mcp-catalog";
 import mcpOpsRouter from "./routes/mcp-ops";
 import studioRouter from "./routes/studio";
 import driveListsRouter from "./routes/drive-lists";
+import teslaRouter from "./routes/tesla";
 import { portalRouter } from "./routes/portal";
 import { planningRouter } from "./routes/planning";
 import { planningExtendedRouter } from "./routes/planning-extended";
@@ -217,6 +218,9 @@ app.route("/api/mcp-docs", mcpCatalogRouter);
 app.route("/api/mcp-ops", mcpOpsRouter);
 app.route("/api/studio", studioRouter);
 app.route("/api/drive-lists", driveListsRouter);
+// Tesla/Tessie: /status + /navigate are admin-gated inside the router; /webhook
+// is public but secret-verified (Tessie can't send the admin cookie).
+app.route("/api/tesla", teslaRouter);
 app.route("/api/portal", portalRouter);
 app.route("/api/planning", planningRouter);
 app.route("/api/planning", planningExtendedRouter);
