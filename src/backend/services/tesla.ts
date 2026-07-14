@@ -26,23 +26,30 @@
 
 const TESSIE_BASE = "https://api.tessie.com";
 
-/** Read a secret binding to a trimmed string, or "" when unset/errored. */
-async function readSecret(secret: SecretsStoreSecret | undefined | null): Promise<string> {
+/**
+ * A Tesla/Tessie credential, however it happens to be provided. These are NOT
+ * declared in `wrangler.jsonc` (see the note there) so they aren't in the typed
+ * `Env` — they may arrive as a plain Worker secret (`string`, from
+ * `wrangler secret put`) or, if later added to the Secrets Store, as a
+ * `SecretsStoreSecret`. The reader handles both.
+ */
+type MaybeSecret = string | SecretsStoreSecret | undefined | null;
+
+/** The three optional binding names, pulled off `env` without static typing. */
+function pickSecret(env: Env, key: "TESSIE_TOKEN" | "TESSIE_VIN" | "TESLA_WEBHOOK_SECRET"): MaybeSecret {
+  return (env as unknown as Record<string, MaybeSecret>)[key];
+}
+
+/** Read a credential to a trimmed string, or "" when unset/errored. */
+async function readSecret(secret: MaybeSecret): Promise<string> {
   if (!secret) return "";
+  if (typeof secret === "string") return secret.trim();
   try {
     return (await secret.get())?.trim() || "";
   } catch {
     return "";
   }
 }
-
-/** Env shape with the (optional) Tesla/Tessie secret bindings. */
-type TeslaEnv = Env &
-  Partial<{
-    TESSIE_TOKEN: SecretsStoreSecret;
-    TESSIE_VIN: SecretsStoreSecret;
-    TESLA_WEBHOOK_SECRET: SecretsStoreSecret;
-  }>;
 
 export interface TessieConfig {
   token: string;
@@ -51,8 +58,10 @@ export interface TessieConfig {
 
 /** Resolve `{token, vin}` if BOTH are configured, else `null`. */
 export async function getTessieConfig(env: Env): Promise<TessieConfig | null> {
-  const e = env as TeslaEnv;
-  const [token, vin] = await Promise.all([readSecret(e.TESSIE_TOKEN), readSecret(e.TESSIE_VIN)]);
+  const [token, vin] = await Promise.all([
+    readSecret(pickSecret(env, "TESSIE_TOKEN")),
+    readSecret(pickSecret(env, "TESSIE_VIN")),
+  ]);
   return token && vin ? { token, vin } : null;
 }
 
@@ -71,7 +80,7 @@ export async function tessieConfigured(env: Env): Promise<boolean> {
  * unconfigured deploy can't be poked.
  */
 export async function verifyWebhookSecret(request: Request, env: Env): Promise<boolean> {
-  const expected = await readSecret((env as TeslaEnv).TESLA_WEBHOOK_SECRET);
+  const expected = await readSecret(pickSecret(env, "TESLA_WEBHOOK_SECRET"));
   if (!expected) return false;
   const url = new URL(request.url);
   const provided = request.headers.get("x-webhook-secret") ?? url.searchParams.get("secret") ?? "";
