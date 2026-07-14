@@ -39,7 +39,8 @@ export type ToolCategory =
   | "measurements"
   | "research"
   | "ops"
-  | "artifacts";
+  | "artifacts"
+  | "memory";
 
 /**
  * Identity + authorization context resolved by whichever transport invoked the

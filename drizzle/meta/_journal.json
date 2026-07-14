@@ -64,6 +64,13 @@
       "when": 1784037631940,
       "tag": "0108_long_sleeper",
       "breakpoints": true
+    },
+    {
+      "idx": 109,
+      "version": "6",
+      "when": 1784050838991,
+      "tag": "0109_black_mauler",
+      "breakpoints": true
     }
   ]
 }
