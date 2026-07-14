@@ -1035,7 +1035,7 @@ export function StoreViewportApp({
             </div>
           </div>
 
-          {/* Office-hours mini-card — click for full hours + contact + map. */}
+          {/* Showroom-hours mini-card — click for full hours + contact + map. */}
           <div className="shrink-0 sm:w-60">
             <HoursMiniCard
               hoursJson={store.hoursJson}
