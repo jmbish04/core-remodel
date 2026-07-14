@@ -27,9 +27,31 @@ export interface ChangelogEntry {
   /** drizzle migration tags applied by this entry. */
   migrations?: string[];
   status: "shipped" | "staged";
+  /** GitHub PR number this entry shipped in (once opened). */
+  prNumber?: number;
+  /** Full URL to the PR. */
+  prUrl?: string;
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "showroom-contacts",
+    date: "2026-07-13",
+    tag: "Phase 4",
+    area: "Showrooms",
+    title: "Contacts phonebook + business-card scanning",
+    summary:
+      "A real contact system for showroom reps: a searchable phonebook you can tap to call or email, a store-level general line, and bulk business-card import that reads the card with vision and files the details into the right place.",
+    status: "staged",
+    migrations: ["0087"],
+    changes: [
+      { kind: "added", text: "Contacts phonebook at Shopping → Contacts: search, type filter, A–Z quick-jump rail, and tap-to-dial / tap-to-email numbers for phone and Tesla screens." },
+      { kind: "added", text: "A Contacts tab on each showroom, showing that store’s general line + people." },
+      { kind: "added", text: "Bulk business-card import: drop in photos, a vision model extracts each card and creates the contact; cards it can’t read are flagged for a quick manual entry." },
+      { kind: "added", text: "Smart intake splits a person’s cell/direct/office numbers, promotes the office line to the store’s general contact, and routes the website + address to the right tables — you just send the raw details." },
+      { kind: "added", text: "Interaction log per contact (what was said, when, follow-ups) + MCP tools so an AI can add contacts and resolve failed cards." },
+    ],
+  },
   {
     id: "showroom-links",
     date: "2026-07-13",

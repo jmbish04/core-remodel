@@ -54,6 +54,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     items: [
       { href: "/admin/shopping", label: "Sourcing & Shopping tools" },
       { href: "/admin/shopping/showrooms", label: "Showrooms" },
+      { href: "/admin/shopping/contacts", label: "Contacts" },
       { href: "/admin/shopping/schedule", label: "Materials Schedule" },
       { href: "/admin/shopping/products", label: "Products" },
       { href: "/admin/shopping/journal", label: "Shopping Journal" },

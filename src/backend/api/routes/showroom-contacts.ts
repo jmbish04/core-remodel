@@ -12,7 +12,7 @@
 
 import { OpenAPIHono, z } from "@hono/zod-openapi";
 import { drizzle } from "drizzle-orm/d1";
-import { and, desc, eq, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, like, or, sql } from "drizzle-orm";
 
 import {
   showroomStores,
@@ -225,6 +225,14 @@ const createContactsSchema = z.object({
     .optional(),
   /** Office address → filled onto the store row when blank. */
   address: z.string().optional().nullable(),
+  /**
+   * Optional business-card images (base64 `data:` URLs). Front and/or back —
+   * either may be omitted. Uploaded to Cloudflare Images and attached to the
+   * first created person contact as a business_cards row. Lets a Python script
+   * or an MCP client bulk-import contacts WITH their card photos.
+   */
+  businessCardFront: z.string().optional().nullable(),
+  businessCardBack: z.string().optional().nullable(),
 });
 
 // ─── Create (smart field-out) ─────────────────────────────────────────────────
@@ -235,7 +243,7 @@ showroomContactsRouter.post("/", async (c) => {
   if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
   const data = parsed.data;
 
-  const result = await fieldOutContacts(db, data);
+  const result = await fieldOutContacts(db, data, c.env);
   return c.json(result, 201);
 });
 
@@ -248,11 +256,13 @@ showroomContactsRouter.post("/", async (c) => {
 export async function fieldOutContacts(
   db: Db,
   data: z.infer<typeof createContactsSchema>,
+  env?: Env,
 ): Promise<{
   storeId: number | null;
   isDraft: boolean;
   contactIds: number[];
   generalUpserted: boolean;
+  businessCardId: number | null;
 }> {
   // 1. Resolve the store.
   const storeId = await matchStore(db, {
@@ -355,7 +365,33 @@ export async function fieldOutContacts(
     }
   }
 
-  return { storeId, isDraft, contactIds, generalUpserted };
+  // 7. Business-card images (optional) → CF Images + a business_cards row linked
+  //    to the first created contact. Front and/or back; either may be omitted.
+  let businessCardId: number | null = null;
+  if (env && (data.businessCardFront || data.businessCardBack)) {
+    const front = data.businessCardFront
+      ? await businessCardService.uploadCard(env, "front", data.businessCardFront)
+      : null;
+    const back = data.businessCardBack
+      ? await businessCardService.uploadCard(env, "back", data.businessCardBack)
+      : null;
+    if (front || back) {
+      const [card] = await db
+        .insert(showroomStoreContactBusinessCards)
+        .values({
+          storeId,
+          contactId: contactIds[0] ?? null,
+          status: "done",
+          isDraft,
+          cfImageUrl: front,
+          cfImageUrlBack: back,
+        })
+        .returning({ id: showroomStoreContactBusinessCards.id });
+      businessCardId = card.id;
+    }
+  }
+
+  return { storeId, isDraft, contactIds, generalUpserted, businessCardId };
 }
 
 // ─── List (phonebook) ─────────────────────────────────────────────────────────
@@ -391,10 +427,44 @@ showroomContactsRouter.get("/", async (c) => {
     .where(conds.length ? and(...conds) : undefined)
     .orderBy(showroomStoreContacts.lastName, showroomStoreContacts.firstName, showroomStoreContacts.id);
 
+  const cardMap = await businessCardImageMap(db, rows.map((r) => r.contact.id));
+
   return c.json({
-    contacts: rows.map((r) => ({ ...r.contact, storeName: r.storeName })),
+    contacts: rows.map((r) => ({
+      ...r.contact,
+      storeName: r.storeName,
+      businessCard: cardMap.get(r.contact.id) ?? null,
+    })),
   });
 });
+
+/**
+ * Map contactId → the card's front/back CF Images URLs (latest card per
+ * contact). Lets the phonebook / viewport show a card image when one exists.
+ */
+async function businessCardImageMap(
+  db: Db,
+  contactIds: number[],
+): Promise<Map<number, { front: string | null; back: string | null }>> {
+  const map = new Map<number, { front: string | null; back: string | null }>();
+  const ids = contactIds.filter((id): id is number => Number.isInteger(id));
+  if (ids.length === 0) return map;
+  const cards = await db
+    .select({
+      contactId: showroomStoreContactBusinessCards.contactId,
+      front: showroomStoreContactBusinessCards.cfImageUrl,
+      back: showroomStoreContactBusinessCards.cfImageUrlBack,
+    })
+    .from(showroomStoreContactBusinessCards)
+    .where(inArray(showroomStoreContactBusinessCards.contactId, ids));
+  for (const card of cards) {
+    if (card.contactId == null) continue;
+    if (!card.front && !card.back) continue;
+    // Keep the first card that has an image for this contact.
+    if (!map.has(card.contactId)) map.set(card.contactId, { front: card.front, back: card.back });
+  }
+  return map;
+}
 
 // ─── Get / Update / Delete ────────────────────────────────────────────────────
 

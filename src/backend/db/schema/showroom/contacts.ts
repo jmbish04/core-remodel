@@ -202,8 +202,10 @@ export const showroomStoreContactBusinessCards = sqliteTable(
     /** Rationale when the card is a draft / failed. */
     draftNotes: text("draft_notes"),
 
-    /** Cloudflare Images delivery URL of the card image. */
+    /** Cloudflare Images delivery URL of the card FRONT image. */
     cfImageUrl: text("cf_image_url"),
+    /** Cloudflare Images delivery URL of the card BACK image (optional). */
+    cfImageUrlBack: text("cf_image_url_back"),
 
     /** The raw structured JSON returned by the vision model. */
     imageJson: text("image_json", { mode: "json" }).$type<Record<string, unknown>>(),

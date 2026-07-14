@@ -101,7 +101,31 @@ truth. Full rewire chosen (drop all 4 URL columns).
 Watch the first prod scrape/research run after deploy — those pipelines can't be
 exercised locally.
 
-## Phase 4 — Contacts + business cards (planned)
+## Phase 4 — Contacts + business cards (IN PROGRESS)
+
+Shipped (code, staged for deploy):
+- 3 tables (migration `0087`): `showroom_store_contacts`,
+  `showroom_store_contact_log`, `showroom_store_contact_business_cards`.
+- `utils/contact-intake.ts` (name split, labeled-phone parse, type inference).
+- `/api/showroom-contacts`: smart create (fields a payload into person rows +
+  an upserted GENERAL_CONTACT + links + store address; fuzzy store match;
+  is_draft fallback), list/get/update/delete, contact-log CRUD, business-card
+  bulk upload → CF Images + VLM extraction → fielded contact (background) +
+  failed-card list + resolve (closed loop), and a pocs backfill route.
+- In-repo `/mcp` tools: create_showroom_contact, list_showroom_contacts,
+  list_failed_business_cards, resolve_business_card.
+- Frontend: `/admin/shopping/contacts` phonebook (search, type filter, A–Z rail,
+  tel:/mailto: dial, bulk card upload) + a Contacts tab on the store viewport.
+
+Pending / follow-up (needs the gated prod backfill first — the backfill route
+reads the legacy tables, so they can only be dropped afterward):
+- Run `POST /api/showroom-contacts/backfill/from-pocs?apply=true` on prod.
+- Then drop `showroom_pocs` + the `main_poc_*` columns, remove the old
+  `/:id/pocs` endpoints + ManagePocsSection, in a cleanup migration.
+
+### Original spec
+
+
 
 New `showroom_store_contacts` (type enum GENERAL_CONTACT/SALES/ESTIMATOR/MANAGER/
 CUSTOMER_SERVICE/OTHER, first/last, office_phone + ext / mobile / fax, email,

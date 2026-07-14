@@ -24,9 +24,11 @@ import {
   Globe,
   ImagePlus,
   Loader2,
+  Mail,
   MapPin,
   NotebookPen,
   Package,
+  Printer,
   Pencil,
   Phone,
   RefreshCcw,
@@ -37,6 +39,7 @@ import {
   Tag,
   Trash2,
   Upload,
+  Users,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -65,7 +68,7 @@ import { ShowroomBento, type ShowroomBentoSection } from "./bento/ShowroomBento"
 import { PhotoStack } from "./PhotoStack";
 import { ShowroomGalleryModal, type GalleryPhoto } from "./ShowroomGalleryModal";
 import { EditStoreModal, type EditableStore } from "./EditStoreModal";
-import { ManagePocsSection } from "./ManagePocsSection";
+import { ContactCard, formatPhone as fmtPhone, telHref, type ContactRow } from "./contacts/ContactCard";
 import {
   CategoryChipsEditor,
   HoursContactModal,
@@ -77,9 +80,9 @@ import type { HoursJson } from "./intake/hours-types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type SectionKey = "brands-products" | "notes" | "photos";
+export type SectionKey = "brands-products" | "contacts" | "notes" | "photos";
 
-const VALID_SECTIONS: SectionKey[] = ["brands-products", "notes", "photos"];
+const VALID_SECTIONS: SectionKey[] = ["brands-products", "contacts", "notes", "photos"];
 
 function isSectionKey(v: string | undefined | null): v is SectionKey {
   return v != null && (VALID_SECTIONS as string[]).includes(v);
@@ -145,6 +148,8 @@ interface StoreDetail {
   categories: StoreCategoryChip[];
   brands: StoreBrand[];
   products: StoreProduct[];
+  /** Store web/social links (GET /:id now returns these). */
+  links: Array<{ id: number; url: string; type: string; urlNotes: string | null }>;
 }
 
 interface MappedProduct {
@@ -384,6 +389,7 @@ export function StoreViewportApp({
   const [mappedProducts, setMappedProducts] = useState<MappedProduct[]>([]);
   const [notes, setNotes] = useState<NoteRow[]>([]);
   const [photos, setPhotos] = useState<ShowroomPhoto[]>([]);
+  const [contacts, setContacts] = useState<ContactRow[]>([]);
 
   // Google Places gallery photos (hero banner source + the Photos section's
   // "From Google Places" collection + theater lightbox). Distinct from the
@@ -466,6 +472,18 @@ export function StoreViewportApp({
     }
   }, [id]);
 
+  const loadContacts = useCallback(async () => {
+    try {
+      const data = await api<{ contacts: ContactRow[] }>(
+        `/api/showroom-contacts?storeId=${id}&includeDrafts=true`,
+      );
+      setContacts(data.contacts ?? []);
+    } catch (e) {
+      console.error("[store/contacts]", e);
+      toast.error(e instanceof Error ? e.message : "Failed to load contacts");
+    }
+  }, [id]);
+
   const loadGalleryPhotos = useCallback(async () => {
     try {
       const data = await api<{ photos: GalleryPhoto[] }>(
@@ -516,8 +534,9 @@ export function StoreViewportApp({
     void loadMappedProducts();
     void loadNotes();
     void loadPhotos();
+    void loadContacts();
     void loadGalleryPhotos();
-  }, [loadStore, loadMappedProducts, loadNotes, loadPhotos, loadGalleryPhotos]);
+  }, [loadStore, loadMappedProducts, loadNotes, loadPhotos, loadContacts, loadGalleryPhotos]);
 
   // ── Scrape status: mount fetch + poll while in-flight ─────────────────────
   //
@@ -804,6 +823,12 @@ export function StoreViewportApp({
         preview: <BrandsTilePreview brands={brandsWithCounts} />,
       },
       {
+        key: "contacts",
+        title: "Contacts",
+        description: `${contacts.length} contact${contacts.length === 1 ? "" : "s"} · call or email`,
+        icon: <Users className="size-5" />,
+      },
+      {
         key: "notes",
         title: "Showroom notes",
         description: `${notes.length} note${notes.length === 1 ? "" : "s"}`,
@@ -834,6 +859,7 @@ export function StoreViewportApp({
       store?.brands.length,
       mappedProducts.length,
       notes.length,
+      contacts.length,
       photos,
       galleryPhotos,
       brandsWithCounts,
@@ -1058,10 +1084,6 @@ export function StoreViewportApp({
           </Button>
         </div>
 
-        {/* ── Points of Contact ─────────────────────────────────────────────── */}
-        <div className="mt-5 border-t border-border/30 pt-5">
-          <ManagePocsSection storeId={store.id} />
-        </div>
         </div>
       </section>
 
@@ -1086,6 +1108,12 @@ export function StoreViewportApp({
             onRemoveProduct={removeMappedProduct}
             onAssociateBrands={() => setBrandsOpen(true)}
             onAssociateProducts={() => setProductsOpen(true)}
+          />
+        ) : section === "contacts" ? (
+          <ContactsSection
+            contacts={contacts}
+            websiteUrl={store.websiteUrl}
+            links={store.links ?? []}
           />
         ) : section === "notes" ? (
           <NotesSection
@@ -1562,6 +1590,133 @@ function BrandsProductsSection({
               </li>
             ))}
           </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Section: Contacts ──────────────────────────────────────────────────────────
+
+/**
+ * Contacts tab — the store's GENERAL_CONTACT front-desk line up top (office /
+ * email / fax as tel:/mailto:), then each person via the shared ContactCard,
+ * then the store's website + any other links. Replaces the old inline
+ * ManagePocsSection.
+ */
+function ContactsSection({
+  contacts,
+  websiteUrl,
+  links,
+}: {
+  contacts: ContactRow[];
+  websiteUrl: string | null;
+  links: Array<{ id: number; url: string; type: string; urlNotes: string | null }>;
+}) {
+  const general = contacts.find((c) => c.type === "GENERAL_CONTACT") ?? null;
+  const people = contacts.filter((c) => c.type !== "GENERAL_CONTACT");
+  // Dedupe the website out of the extra-links list (it already gets its own row).
+  const extraLinks = links.filter((l) => l.url && l.url !== websiteUrl);
+
+  return (
+    <div className="space-y-6">
+      {/* General store contact — prominent. */}
+      <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
+        <h2 className="text-base font-semibold">Store contact</h2>
+        {general ? (
+          <div className="mt-3 flex flex-col gap-2 text-sm">
+            {general.officePhoneNumber ? (
+              <a
+                href={`tel:${telHref(general.officePhoneNumber, general.officePhoneExtension)}`}
+                className="inline-flex items-center gap-2 font-medium text-sky-400 hover:text-sky-300"
+              >
+                <Phone className="size-4" />
+                <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                  Office
+                </span>
+                <span className="tabular-nums">
+                  {fmtPhone(general.officePhoneNumber)}
+                  {general.officePhoneExtension ? ` ext. ${general.officePhoneExtension}` : ""}
+                </span>
+              </a>
+            ) : null}
+            {general.faxPhoneNumber ? (
+              <a
+                href={`tel:${telHref(general.faxPhoneNumber)}`}
+                className="inline-flex items-center gap-2 font-medium text-sky-400 hover:text-sky-300"
+              >
+                <Printer className="size-4" />
+                <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                  Fax
+                </span>
+                <span className="tabular-nums">{fmtPhone(general.faxPhoneNumber)}</span>
+              </a>
+            ) : null}
+            {general.emailAddress ? (
+              <a
+                href={`mailto:${general.emailAddress}`}
+                className="inline-flex items-center gap-2 text-muted-foreground hover:text-foreground"
+              >
+                <Mail className="size-4" />
+                {general.emailAddress}
+              </a>
+            ) : null}
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-muted-foreground">
+            No general store line recorded yet.
+          </p>
+        )}
+
+        {/* Website + other links. */}
+        {(websiteUrl || extraLinks.length > 0) ? (
+          <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5 border-t border-border/30 pt-3 text-[13px]">
+            {websiteUrl ? (
+              <a
+                href={websiteUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
+              >
+                <Globe className="size-3.5" /> Website
+              </a>
+            ) : null}
+            {extraLinks.map((l) => (
+              <a
+                key={l.id}
+                href={l.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
+                title={l.urlNotes ?? undefined}
+              >
+                <Globe className="size-3.5" /> {l.urlNotes?.trim() || l.type || "Link"}
+              </a>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
+      {/* People. */}
+      <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
+        <div className="flex items-center gap-2">
+          <Users className="size-4 text-muted-foreground" />
+          <h2 className="text-base font-semibold">Reps &amp; people ({people.length})</h2>
+        </div>
+        {people.length === 0 ? (
+          <p className="mt-3 text-sm text-muted-foreground">
+            No named contacts yet. Add reps from the{" "}
+            <a href="/admin/shopping/contacts" className="text-sky-400 hover:text-sky-300">
+              Contacts phonebook
+            </a>
+            .
+          </p>
+        ) : (
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {people.map((c) => (
+              <ContactCard key={c.id} contact={c} showStoreLink={false} />
+            ))}
+          </div>
         )}
       </div>
     </div>

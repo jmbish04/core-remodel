@@ -22,11 +22,14 @@ import {
 import { researchSessions } from "@backend/db/schema/admin/research_sessions";
 import {
   showroomStoreCategory,
+  showroomStoreContacts,
+  showroomStoreContactBusinessCards,
   showroomStoreProducts,
   showroomStores,
   storeProductResearch,
   storeResearch,
 } from "@backend/db/schema/showroom/index";
+import { fieldOutContacts } from "@backend/api/routes/showroom-contacts";
 import { loadProductPromptContext } from "@backend/ai/agents/ShowroomResearchAgent/methods/prompt-context";
 import {
   researchMcpTokenKey,
@@ -40,7 +43,7 @@ import {
   listMeasurements,
 } from "@backend/services/measurements";
 import { isRequestAuthenticated } from "@backend/utils/access";
-import { and, eq } from "drizzle-orm";
+import { and, eq, like, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
@@ -224,6 +227,113 @@ const TOOLS: McpTool[] = [
         sentiment: { type: "string", enum: ["good", "bad", "neutral"] },
       },
       required: ["url"],
+    },
+  },
+  {
+    name: "create_showroom_contact",
+    description:
+      "Add one or more contacts for a showroom. Send people plus any general office number/email/fax and URLs; the worker files it out into person rows + the store's single GENERAL_CONTACT (fill-missing) + the links table. Provide storeId if known, or match hints (placeId, website, phone, name) for a fuzzy lookup; unmatched contacts are saved as drafts. You do NOT need to know the DB layout.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        storeId: { type: "number", description: "Showroom store id, if known." },
+        match: {
+          type: "object",
+          description: "Fuzzy-match hints used when storeId is absent.",
+          properties: {
+            placeId: { type: "string" },
+            website: { type: "string" },
+            phone: { type: "string" },
+            name: { type: "string" },
+          },
+        },
+        people: {
+          type: "array",
+          description: "Person contacts to create.",
+          items: {
+            type: "object",
+            properties: {
+              firstName: { type: "string" },
+              lastName: { type: "string" },
+              fullName: { type: "string", description: "Split into first/last when first/last absent." },
+              title: { type: "string", description: "Used to infer the contact type." },
+              type: { type: "string", enum: ["GENERAL_CONTACT", "SALES", "ESTIMATOR", "MANAGER", "CUSTOMER_SERVICE", "OTHER"] },
+              phone: { type: "string", description: "Raw phone string; a labeled office/general number is routed to the store GENERAL_CONTACT." },
+              mobilePhoneNumber: { type: "string" },
+              officePhoneNumber: { type: "string" },
+              officePhoneExtension: { type: "string" },
+              faxPhoneNumber: { type: "string" },
+              emailAddress: { type: "string" },
+              isTextingOk: { type: "boolean" },
+              notes: { type: "string" },
+            },
+          },
+        },
+        general: {
+          type: "object",
+          description: "Store-level general contact (office line / email / fax).",
+          properties: {
+            officePhoneNumber: { type: "string" },
+            officePhoneExtension: { type: "string" },
+            faxPhoneNumber: { type: "string" },
+            emailAddress: { type: "string" },
+          },
+        },
+        urls: {
+          type: "array",
+          description: "Store URLs → links table.",
+          items: {
+            type: "object",
+            properties: {
+              url: { type: "string" },
+              type: { type: "string", enum: ["WEBSITE", "INSTAGRAM", "PINTEREST", "FACEBOOK", "OTHER"] },
+              urlNotes: { type: "string" },
+            },
+            required: ["url", "type"],
+          },
+        },
+        address: { type: "string", description: "Office address → store row when blank." },
+        businessCardFront: { type: "string", description: "Optional base64 data: URL of the card FRONT — uploaded + attached to the created contact." },
+        businessCardBack: { type: "string", description: "Optional base64 data: URL of the card BACK." },
+      },
+    },
+  },
+  {
+    name: "list_showroom_contacts",
+    description:
+      "List showroom contacts (the phonebook). Filter by storeId, contact type, or a name/email query. Returns each contact with its store name and all phone numbers.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        storeId: { type: "number" },
+        type: { type: "string", enum: ["GENERAL_CONTACT", "SALES", "ESTIMATOR", "MANAGER", "CUSTOMER_SERVICE", "OTHER"] },
+        q: { type: "string", description: "Search name / email." },
+        includeDrafts: { type: "boolean" },
+      },
+    },
+  },
+  {
+    name: "list_failed_business_cards",
+    description:
+      "List business-card uploads whose vision extraction failed (status=failed) so an external model can re-read the image and resolve them. Returns id, cf_image_url, and draft_notes per card.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "resolve_business_card",
+    description:
+      "Close the loop on a failed business card: given a cardId and a contact payload (same shape as create_showroom_contact), field it out into a contact and link it back to the card.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        cardId: { type: "number" },
+        storeId: { type: "number" },
+        match: { type: "object" },
+        people: { type: "array", items: { type: "object" } },
+        general: { type: "object" },
+        urls: { type: "array", items: { type: "object" } },
+        address: { type: "string" },
+      },
+      required: ["cardId"],
     },
   },
 ];
@@ -679,6 +789,54 @@ async function callTool(env: Env, auth: McpAuthContext, name: string, args: Reco
     case "get_measurement_coverage": {
       const coverage = await getMeasurementCoverage(db);
       return JSON.stringify(coverage);
+    }
+    case "create_showroom_contact": {
+      const res = await fieldOutContacts(db, args as any, env);
+      return JSON.stringify(res);
+    }
+    case "list_showroom_contacts": {
+      const conds = [] as any[];
+      if (args.storeId != null) conds.push(eq(showroomStoreContacts.storeId, Number(args.storeId)));
+      if (typeof args.type === "string") conds.push(eq(showroomStoreContacts.type, args.type as any));
+      if (!args.includeDrafts) conds.push(eq(showroomStoreContacts.isDraft, false));
+      if (typeof args.q === "string" && args.q.trim()) {
+        const q = `%${args.q.trim()}%`;
+        conds.push(or(like(showroomStoreContacts.firstName, q), like(showroomStoreContacts.lastName, q), like(showroomStoreContacts.emailAddress, q)));
+      }
+      const rows = await db
+        .select({ contact: showroomStoreContacts, storeName: showroomStores.name })
+        .from(showroomStoreContacts)
+        .leftJoin(showroomStores, eq(showroomStoreContacts.storeId, showroomStores.id))
+        .where(conds.length ? and(...conds) : undefined)
+        .orderBy(showroomStoreContacts.lastName, showroomStoreContacts.firstName);
+      return JSON.stringify(rows.map((r) => ({ ...r.contact, storeName: r.storeName })));
+    }
+    case "list_failed_business_cards": {
+      const rows = await db
+        .select({
+          id: showroomStoreContactBusinessCards.id,
+          cfImageUrl: showroomStoreContactBusinessCards.cfImageUrl,
+          draftNotes: showroomStoreContactBusinessCards.draftNotes,
+          storeId: showroomStoreContactBusinessCards.storeId,
+        })
+        .from(showroomStoreContactBusinessCards)
+        .where(eq(showroomStoreContactBusinessCards.status, "failed"));
+      return JSON.stringify(rows);
+    }
+    case "resolve_business_card": {
+      const cardId = Number(args.cardId);
+      const res = await fieldOutContacts(db, args as any, env);
+      await db
+        .update(showroomStoreContactBusinessCards)
+        .set({
+          status: "done",
+          storeId: res.storeId,
+          contactId: res.contactIds[0] ?? null,
+          isDraft: res.isDraft,
+          updatedAt: new Date(),
+        })
+        .where(eq(showroomStoreContactBusinessCards.id, cardId));
+      return JSON.stringify({ cardId, ...res });
     }
     default:
       throw new Error(`Unknown tool: ${name}`);
