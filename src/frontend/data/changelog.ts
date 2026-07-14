@@ -49,6 +49,8 @@ export const BRANCHES: ChangelogBranch[] = [
       "Inbound-email classification now uses a native Gemini responseSchema instead of a prompt-embedded schema, so receipts/invoices extract every printed field and the model stops hallucinating 'the total is not stated — check your payment method' on receipts whose total is printed.",
     date: "2026-07-14",
     status: "staged",
+    prNumber: 129,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/129",
   },
   {
     branch: "claude/worker-inbox-hitl-v2",
