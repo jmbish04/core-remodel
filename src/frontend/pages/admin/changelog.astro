@@ -1,0 +1,106 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { CHANGELOG, type ChangeKind } from "@/data/changelog";
+
+// Kind → Monolith chip styling (colored ring-tint, no 1px borders).
+const KIND: Record<ChangeKind, { label: string; cls: string; dot: string }> = {
+  added: { label: "Added", cls: "bg-emerald-500/12 text-emerald-300", dot: "bg-emerald-400" },
+  changed: { label: "Changed", cls: "bg-sky-500/12 text-sky-300", dot: "bg-sky-400" },
+  removed: { label: "Removed", cls: "bg-rose-500/12 text-rose-300", dot: "bg-rose-400" },
+  migration: { label: "Migration", cls: "bg-violet-500/12 text-violet-300", dot: "bg-violet-400" },
+  fixed: { label: "Fixed", cls: "bg-amber-500/12 text-amber-300", dot: "bg-amber-400" },
+};
+
+const fmtDate = (iso: string) =>
+  new Date(iso + "T00:00:00").toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+---
+
+<BaseLayout
+  title="Changelog — The Monolith"
+  description="Release notes for the remodel platform: what shipped, what changed, and what is staged for deploy."
+>
+  <main class="container mx-auto max-w-3xl px-4 py-10">
+    <header class="mb-8">
+      <h1 class="text-2xl font-semibold tracking-tight">Changelog</h1>
+      <p class="mt-1 text-sm text-muted-foreground">
+        What changed on the platform, newest first.
+        <span class="ml-1 inline-flex items-center gap-1 align-middle">
+          <span class="inline-block size-1.5 rounded-full bg-amber-400"></span>
+          <span class="text-amber-300/90">Staged</span>
+          <span class="text-muted-foreground/60">= merged, not yet applied to prod.</span>
+        </span>
+      </p>
+    </header>
+
+    <ol class="relative space-y-5 border-l border-transparent pl-0">
+      {
+        CHANGELOG.map((entry) => (
+          <li class="group relative rounded-xl bg-card p-5 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] transition-colors hover:bg-muted/30">
+            <div class="flex flex-wrap items-center gap-2">
+              {entry.tag && (
+                <span class="rounded-md bg-primary/15 px-2 py-0.5 text-[11px] font-semibold tracking-wide text-primary">
+                  {entry.tag}
+                </span>
+              )}
+              <span class="rounded-md bg-muted/60 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                {entry.area}
+              </span>
+              {entry.status === "staged" ? (
+                <span class="inline-flex items-center gap-1 rounded-md bg-amber-500/12 px-2 py-0.5 text-[11px] font-medium text-amber-300">
+                  <span class="inline-block size-1.5 rounded-full bg-amber-400" />
+                  Staged
+                </span>
+              ) : (
+                <span class="inline-flex items-center gap-1 rounded-md bg-emerald-500/12 px-2 py-0.5 text-[11px] font-medium text-emerald-300">
+                  <span class="inline-block size-1.5 rounded-full bg-emerald-400" />
+                  Shipped
+                </span>
+              )}
+              <time class="ml-auto text-[11px] tabular-nums text-muted-foreground/70">
+                {fmtDate(entry.date)}
+              </time>
+            </div>
+
+            <h2 class="mt-3 text-lg font-semibold tracking-tight">{entry.title}</h2>
+            <p class="mt-1 text-sm leading-relaxed text-muted-foreground">{entry.summary}</p>
+
+            <ul class="mt-4 space-y-2">
+              {entry.changes.map((ch) => (
+                <li class="flex items-start gap-2.5 text-sm">
+                  <span
+                    class={`mt-0.5 inline-flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide ${KIND[ch.kind].cls}`}
+                  >
+                    <span class={`inline-block size-1.5 rounded-full ${KIND[ch.kind].dot}`} />
+                    {KIND[ch.kind].label}
+                  </span>
+                  <span class="text-foreground/90">{ch.text}</span>
+                </li>
+              ))}
+            </ul>
+
+            {entry.migrations && entry.migrations.length > 0 && (
+              <div class="mt-4 flex flex-wrap items-center gap-1.5">
+                <span class="text-[11px] text-muted-foreground/60">Migrations</span>
+                {entry.migrations.map((m) => (
+                  <code class="rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+                    {m}
+                  </code>
+                ))}
+              </div>
+            )}
+          </li>
+        ))
+      }
+    </ol>
+
+    {
+      CHANGELOG.length === 0 && (
+        <p class="text-sm text-muted-foreground">No changelog entries yet.</p>
+      )
+    }
+  </main>
+</BaseLayout>

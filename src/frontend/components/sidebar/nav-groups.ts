@@ -91,6 +91,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     items: [
       { href: "/admin", label: "Analytics" },
       { href: "/admin/plans", label: "Plans" },
+      { href: "/admin/changelog", label: "Changelog" },
       { href: "/admin/integrations/usage", label: "Integrations Usage" },
       { href: "/admin/config", label: "Config" },
     ],
