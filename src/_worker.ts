@@ -18,6 +18,7 @@ import {
   isSafeInternalPath,
 } from "./backend/utils/access";
 import { getDeviceLandingPath } from "./backend/services/device-preferences";
+import { getActiveDriveLandingPath } from "./backend/services/drive-lists";
 import { handleOAuthAuthorize } from "./backend/mcp/oauth-ui";
 import { RemodelMcpAgent } from "./backend/mcp/agent";
 import { routeAgentRequest } from "agents";
@@ -148,10 +149,23 @@ const legacyHandler: ExportedHandler<Env> = {
     // to the normal home/login. Path is validated to block open-redirects.
     if (url.pathname === "/") {
       const deviceId = getDeviceIdFromRequest(request);
-      if (deviceId && (await isRequestAuthenticated(request, env))) {
-        const landing = await getDeviceLandingPath(env, deviceId);
-        if (landing && landing !== "/" && isSafeInternalPath(landing)) {
-          return Response.redirect(`${url.origin}${landing}`, 302);
+      // Auth is always required — a device that was an admin in the past still
+      // must present a VALID admin cookie. An expired/absent cookie falls through
+      // to the normal home/login and never gets an auto-redirect.
+      if (await isRequestAuthenticated(request, env)) {
+        // Active-drive override: while ONE drive list is active, admin devices
+        // auto-land on it (temporary — reverts to the device's normal landing
+        // once no drive is active). Takes precedence over the device pref.
+        const drivePath = await getActiveDriveLandingPath(env);
+        if (drivePath) {
+          return Response.redirect(`${url.origin}${drivePath}`, 302);
+        }
+        // Otherwise fall back to the device's chosen landing page.
+        if (deviceId) {
+          const landing = await getDeviceLandingPath(env, deviceId);
+          if (landing && landing !== "/" && isSafeInternalPath(landing)) {
+            return Response.redirect(`${url.origin}${landing}`, 302);
+          }
         }
       }
     }

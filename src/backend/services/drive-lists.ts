@@ -10,7 +10,7 @@
  * drives also render as a stack of cards.
  */
 import { driveListStops, driveLists } from "@backend/db";
-import { eq } from "drizzle-orm";
+import { and, desc, eq, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 /** Drizzle D1 client (matches the MCP registry's `RemodelDb`). */
@@ -113,6 +113,7 @@ export async function createDriveList(
   input: DriveListCreateInput,
 ): Promise<{ id: number; slug: string; stopCount: number }> {
   const slug = await uniqueSlug(db, slugify(input.title));
+  const status = input.status ?? "active";
   const [drive] = await db
     .insert(driveLists)
     .values({
@@ -120,10 +121,15 @@ export async function createDriveList(
       title: input.title,
       description: input.description,
       notes: serializeDriveNotes(input.notes),
-      status: input.status ?? "active",
+      status,
       sourceConversation: input.sourceConversation,
     })
     .returning({ id: driveLists.id });
+
+  // Single-active invariant: a newly-active drive supersedes any other active
+  // one (only one drive is "the active drive" at a time — it's what admin
+  // devices auto-land on).
+  if (status === "active") await demoteOtherActiveDrives(db, drive.id);
 
   const stopValues = input.stops.map((s, i) => ({
     driveListId: drive.id,
@@ -154,4 +160,44 @@ export async function createDriveList(
   }
 
   return { id: drive.id, slug, stopCount: input.stops.length };
+}
+
+/**
+ * Enforce the single-active invariant: archive every OTHER drive currently in
+ * `active` status, keeping only `keepId`. Called whenever a drive becomes active
+ * (create, or re-open via the stops PATCH). Demoted drives go to `archived` (the
+ * same bucket the completion auto-archive uses), so they land in the Archived
+ * tab rather than vanishing.
+ */
+export async function demoteOtherActiveDrives(db: RemodelDb, keepId: number): Promise<void> {
+  await db
+    .update(driveLists)
+    .set({ status: "archived", updatedAt: new Date() })
+    .where(and(eq(driveLists.status, "active"), ne(driveLists.id, keepId)))
+    .run();
+}
+
+/**
+ * The slug of THE active drive (single-active invariant → at most one), newest
+ * first as a tiebreak in case the invariant was ever bypassed. `null` when no
+ * drive is active. Backs the admin-device auto-landing in `src/_worker.ts`.
+ */
+export async function getActiveDriveSlug(db: RemodelDb): Promise<string | null> {
+  const [row] = await db
+    .select({ slug: driveLists.slug })
+    .from(driveLists)
+    .where(eq(driveLists.status, "active"))
+    .orderBy(desc(driveLists.updatedAt))
+    .limit(1);
+  return row?.slug ?? null;
+}
+
+/**
+ * Convenience for the Worker fetch handler: the internal landing PATH of the
+ * active drive (`/admin/shopping/drives/<slug>`), or `null` when none is active.
+ * Constructs its own Drizzle client from `env.DB`.
+ */
+export async function getActiveDriveLandingPath(env: Env): Promise<string | null> {
+  const slug = await getActiveDriveSlug(drizzle(env.DB));
+  return slug ? `/admin/shopping/drives/${slug}` : null;
 }
