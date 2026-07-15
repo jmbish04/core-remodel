@@ -119,13 +119,12 @@ teslaRouter.post("/navigate", async (c) => {
 /**
  * POST /api/tesla/webhook — Tessie webhook (drive-state / park / etc.).
  *
- * Gated by `WORKER_API_KEY`. Persists the raw event to `TESLA_DB`, then — using
- * the coordinate in the payload (else a live location query) — matches it to the
- * nearest unvisited active-drive stop, marks it visited, and (if there's a next
- * stop) auto-navigates the car to it. Finally runs the automation hook.
- *
- * Tessie webhook payloads vary by firmware/event, so coordinate extraction is
- * intentionally forgiving.
+ * Gated by `WORKER_API_KEY`. Responds 200 FAST and does the real work in
+ * `waitUntil`, because the processing can include a slow `getLocation` call to
+ * Tessie and Tessie's own webhook sender times out (~5s) and RETRIES on a slow
+ * response — a retry would double-run `matchAndMarkVisited` and skip a stop. To
+ * defend against those retries we also dedupe on the event `id` via the `CACHE`
+ * KV (5-min TTL) before accepting.
  */
 teslaRouter.post("/webhook", async (c) => {
   if (!(await verifyWebhookSecret(c.req.raw, c.env))) {
@@ -133,66 +132,90 @@ teslaRouter.post("/webhook", async (c) => {
   }
 
   const payload = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
-  const teslaDb = drizzle(c.env.TESLA_DB);
-  const vin = typeof payload.vin === "string" ? payload.vin : null;
-  const eventType =
-    typeof payload.event_type === "string"
-      ? payload.event_type
-      : typeof payload.type === "string"
-        ? payload.type
-        : null;
 
-  const coord = extractCoord(payload) ?? (await getLocation(c.env));
-
-  // Drive auto-visit runs against the APP DB (drive stops live there).
-  let matched: { id: number; name: string; distanceM: number } | null = null;
-  let navigatedTo: string | null = null;
-  let matchReason = "no-location";
-  if (coord) {
-    const appDb = drizzle(c.env.DB);
-    const result = await matchAndMarkVisited(appDb, { lat: coord.latitude, lng: coord.longitude });
-    if (result.matched) {
-      matched = {
-        id: result.matched.id,
-        name: result.matched.name,
-        distanceM: result.matched.distanceM,
-      };
-      matchReason = "matched";
-      // Auto-advance: send the car to the next unvisited stop, if any.
-      if (result.next) {
-        const nav = await sendNavigation(c.env, `${result.next.lat},${result.next.lng}`);
-        if (nav.ok) navigatedTo = result.next.name;
-      }
-    } else {
-      matchReason = "no-stop-nearby";
+  // Idempotency: ignore a webhook we've already accepted (Tessie retries).
+  const eventId = typeof payload.id === "string" || typeof payload.id === "number" ? String(payload.id) : null;
+  if (eventId) {
+    const key = `tesla-webhook:${eventId}`;
+    if (await c.env.CACHE.get(key)) {
+      return c.json({ ok: true, reason: "duplicate-event" });
     }
+    await c.env.CACHE.put(key, "1", { expirationTtl: 300 });
   }
 
-  // Persist the event (with what the auto-visit did) to the telemetry DB.
-  await teslaDb
-    .insert(teslaWebhookEvents)
-    .values({
+  // Return immediately; process in the background so a slow getLocation / match
+  // / navigate chain never trips Tessie's send timeout.
+  c.executionCtx.waitUntil(processWebhookEvent(c.env, payload));
+  return c.json({ ok: true, accepted: true });
+});
+
+/**
+ * Background processing for a webhook event: resolve a coordinate (payload, else
+ * a live location query), match+mark the nearest active-drive stop, auto-advance
+ * to the next, persist the event to `TESLA_DB`, and run the automation hook.
+ * Runs inside `waitUntil` — errors are swallowed (logged) so they can't reject
+ * an already-sent response.
+ */
+async function processWebhookEvent(env: Env, payload: Record<string, unknown>): Promise<void> {
+  try {
+    const vin = typeof payload.vin === "string" ? payload.vin : null;
+    const eventType =
+      typeof payload.event_type === "string"
+        ? payload.event_type
+        : typeof payload.type === "string"
+          ? payload.type
+          : null;
+
+    const coord = extractCoord(payload) ?? (await getLocation(env));
+
+    // Drive auto-visit runs against the APP DB (drive stops live there).
+    let matched: { id: number; name: string; distanceM: number } | null = null;
+    let navigatedTo: string | null = null;
+    let matchReason = "no-location";
+    if (coord) {
+      const appDb = drizzle(env.DB);
+      const result = await matchAndMarkVisited(appDb, { lat: coord.latitude, lng: coord.longitude });
+      if (result.matched) {
+        matched = {
+          id: result.matched.id,
+          name: result.matched.name,
+          distanceM: result.matched.distanceM,
+        };
+        matchReason = "matched";
+        if (result.next) {
+          const nav = await sendNavigation(env, `${result.next.lat},${result.next.lng}`);
+          if (nav.ok) navigatedTo = result.next.name;
+        }
+      } else {
+        matchReason = "no-stop-nearby";
+      }
+    }
+
+    await drizzle(env.TESLA_DB)
+      .insert(teslaWebhookEvents)
+      .values({
+        vin,
+        eventType,
+        latitude: coord?.latitude ?? null,
+        longitude: coord?.longitude ?? null,
+        matchResult: JSON.stringify({ reason: matchReason, matched, navigatedTo }),
+        data: JSON.stringify(payload),
+      })
+      .run();
+
+    // IFTTT hook (placeholder — returns no actions yet).
+    await evaluateAutomations(env, {
+      source: "webhook",
       vin,
       eventType,
       latitude: coord?.latitude ?? null,
       longitude: coord?.longitude ?? null,
-      matchResult: JSON.stringify({ reason: matchReason, matched, navigatedTo }),
-      data: JSON.stringify(payload),
-    })
-    .run();
-
-  // IFTTT hook (placeholder — returns no actions yet).
-  await evaluateAutomations(c.env, {
-    source: "webhook",
-    vin,
-    eventType,
-    latitude: coord?.latitude ?? null,
-    longitude: coord?.longitude ?? null,
-    raw: payload,
-  });
-
-  return c.json({ ok: true, matched, navigatedTo, reason: matchReason });
-});
+      raw: payload,
+    });
+  } catch (e) {
+    console.error("tesla webhook processing failed", e);
+  }
+}
 
 /**
  * POST /api/tesla/telemetry — Tessie hosted Fleet Telemetry sink.
@@ -201,6 +224,12 @@ teslaRouter.post("/webhook", async (c) => {
  * each POST is persisted as one row in `TESLA_DB` with the common fields hoisted
  * out, then passed through the automation hook. Kept deliberately lightweight —
  * one insert — because of the frame rate.
+ *
+ * ponytail: we persist EVERY frame by design (the ask was "receive all"). At
+ * ~500ms that's ~170k rows/day/vehicle and real D1 write volume. If that becomes
+ * a cost/quota problem, add a per-VIN coalesce here (in-memory Map: skip writes
+ * within N seconds unless shiftState changes or the car moves >X m) — cuts writes
+ * ~95% while keeping state-change fidelity.
  */
 teslaRouter.post("/telemetry", async (c) => {
   if (!(await verifyWebhookSecret(c.req.raw, c.env))) {
@@ -302,10 +331,14 @@ function extractTelemetryFields(payload: Record<string, unknown>): TelemetryFiel
 
   const loc = (kv.Location ?? payload.location) as Record<string, unknown> | undefined;
   const tsRaw = payload.createdAt ?? payload.timestamp ?? kv.Timestamp;
-  const eventTs =
-    typeof tsRaw === "string" || typeof tsRaw === "number"
-      ? new Date(tsRaw)
-      : null;
+  // Normalize: a numeric timestamp under 1e10 is Unix SECONDS (Tesla/firmware
+  // often sends seconds) — `new Date(seconds)` would land in 1970, so ×1000.
+  let eventTs: Date | null = null;
+  if (typeof tsRaw === "number") {
+    eventTs = new Date(tsRaw < 1e10 ? tsRaw * 1000 : tsRaw);
+  } else if (typeof tsRaw === "string") {
+    eventTs = new Date(tsRaw);
+  }
 
   return {
     vin: str(payload.vin, kv.Vin),
