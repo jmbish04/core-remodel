@@ -174,8 +174,8 @@
       // Schema: src/backend/db/schema/tesla/*; migrations: drizzle-tesla/
       // (applied by `pnpm run migrate:tesla:remote`, wired into `deploy`).
       "binding": "TESLA_DB",
-      "database_name": "tesla-telemetry",
-      "database_id": "07a717cc-600a-41db-993b-cfdfc4e36c96",
+      "database_name": "core-remodel-tesla-telemetry",
+      "database_id": "1e291822-e19d-42b1-86b6-aa047934a3d7",
       "migrations_dir": "drizzle-tesla",
       "remote": true,
     },
