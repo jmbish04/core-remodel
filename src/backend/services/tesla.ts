@@ -24,44 +24,22 @@
  * through any vehicle API — see the PR description for the workaround.
  */
 
+import { getTessieToken, getTeslaVin, getWorkerApiKey } from "@backend/utils/secrets";
+
 const TESSIE_BASE = "https://api.tessie.com";
-
-/**
- * A Tesla/Tessie credential, however it happens to be provided. These are NOT
- * declared in `wrangler.jsonc` (see the note there) so they aren't in the typed
- * `Env` — they may arrive as a plain Worker secret (`string`, from
- * `wrangler secret put`) or, if later added to the Secrets Store, as a
- * `SecretsStoreSecret`. The reader handles both.
- */
-type MaybeSecret = string | SecretsStoreSecret | undefined | null;
-
-/** The three optional binding names, pulled off `env` without static typing. */
-function pickSecret(env: Env, key: "TESSIE_TOKEN" | "TESSIE_VIN" | "TESLA_WEBHOOK_SECRET"): MaybeSecret {
-  return (env as unknown as Record<string, MaybeSecret>)[key];
-}
-
-/** Read a credential to a trimmed string, or "" when unset/errored. */
-async function readSecret(secret: MaybeSecret): Promise<string> {
-  if (!secret) return "";
-  if (typeof secret === "string") return secret.trim();
-  try {
-    return (await secret.get())?.trim() || "";
-  } catch {
-    return "";
-  }
-}
 
 export interface TessieConfig {
   token: string;
   vin: string;
 }
 
-/** Resolve `{token, vin}` if BOTH are configured, else `null`. */
+/**
+ * Resolve `{token, vin}` if BOTH are configured, else `null`. Creds live in the
+ * Secrets Store (`TESSIE_API_TOKEN`, `TESLA_BETSY_VIN`) and are read through the
+ * dedicated getters in `utils/secrets.ts`.
+ */
 export async function getTessieConfig(env: Env): Promise<TessieConfig | null> {
-  const [token, vin] = await Promise.all([
-    readSecret(pickSecret(env, "TESSIE_TOKEN")),
-    readSecret(pickSecret(env, "TESSIE_VIN")),
-  ]);
+  const [token, vin] = await Promise.all([getTessieToken(env), getTeslaVin(env)]);
   return token && vin ? { token, vin } : null;
 }
 
@@ -71,21 +49,23 @@ export async function tessieConfigured(env: Env): Promise<boolean> {
 }
 
 /**
- * Verify an inbound webhook against `TESLA_WEBHOOK_SECRET`.
+ * Verify an inbound Tesla webhook / fleet-telemetry POST against the shared
+ * `WORKER_API_KEY` (no dedicated Tesla webhook secret).
  *
- * The car/Tessie can't send our admin cookie, so the webhook is gated by a
- * shared secret instead — accepted from either the `X-Webhook-Secret` header or
- * a `?secret=` query param (Tessie's dashboard lets you set either). When no
- * secret is configured the webhook is disabled (returns false) so an
- * unconfigured deploy can't be poked.
+ * The car/Tessie can't send our admin cookie, so these POSTs are gated by the
+ * shared key instead — accepted from the `X-Webhook-Secret` header, an
+ * `Authorization: Bearer <key>` header, or a `?secret=` query param (whichever
+ * Tessie's webhook config can send). When `WORKER_API_KEY` is unset the endpoint
+ * rejects everything.
  */
 export async function verifyWebhookSecret(request: Request, env: Env): Promise<boolean> {
-  const expected = await readSecret(pickSecret(env, "TESLA_WEBHOOK_SECRET"));
+  const expected = await getWorkerApiKey(env);
   if (!expected) return false;
   const url = new URL(request.url);
-  const provided = request.headers.get("x-webhook-secret") ?? url.searchParams.get("secret") ?? "";
-  // Constant-time-ish compare (lengths differ rarely; this is not a high-value
-  // secret, but avoid the trivial early-exit anyway).
+  const bearer = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+  const provided =
+    request.headers.get("x-webhook-secret") || bearer || url.searchParams.get("secret") || "";
+  // Constant-time-ish compare (avoid the trivial early-exit).
   if (provided.length !== expected.length) return false;
   let diff = 0;
   for (let i = 0; i < expected.length; i++) diff |= provided.charCodeAt(i) ^ expected.charCodeAt(i);

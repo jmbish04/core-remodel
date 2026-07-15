@@ -161,3 +161,54 @@ export async function getReplicateApiToken(env: Env): Promise<string> {
   }
   throw new Error("Missing env.REPLICATE_API_TOKEN in Worker Secret Bindings");
 }
+
+/**
+ * Generic reader for a Cloudflare Secrets Store binding.
+ *
+ * Resolves the named binding on `env` to its trimmed string value. Handles both
+ * the Secrets Store binding shape (`.get()`) and a plain-string Worker secret
+ * (so a binding can be migrated between the two without touching callers).
+ *
+ * @param env     Worker env.
+ * @param binding The binding name as declared in `wrangler.jsonc`.
+ * @returns The secret value, or `""` when the binding is absent/empty/errored.
+ *          Callers that require the value should check for empty and throw.
+ */
+export async function getSecretStoreBinding(
+  env: Env,
+  binding: keyof Env & string,
+): Promise<string> {
+  const value = (env as unknown as Record<string, unknown>)[binding];
+  if (!value) return "";
+  if (typeof value === "string") return value.trim();
+  try {
+    return (await (value as SecretsStoreSecret).get())?.trim() || "";
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Tessie hosted Fleet API bearer token (`TESSIE_API_TOKEN`).
+ * Empty string when unconfigured — the Tesla features stay dormant.
+ */
+export async function getTessieToken(env: Env): Promise<string> {
+  return getSecretStoreBinding(env, "TESSIE_API_TOKEN");
+}
+
+/**
+ * VIN of the vehicle ("Betsy") that Tessie commands/queries target
+ * (`TESLA_BETSY_VIN`). Empty string when unconfigured.
+ */
+export async function getTeslaVin(env: Env): Promise<string> {
+  return getSecretStoreBinding(env, "TESLA_BETSY_VIN");
+}
+
+/**
+ * Shared `WORKER_API_KEY` used to authenticate inbound Tesla webhook /
+ * fleet-telemetry POSTs (no dedicated Tesla webhook secret). Empty string when
+ * unconfigured — the webhook then rejects everything.
+ */
+export async function getWorkerApiKey(env: Env): Promise<string> {
+  return getSecretStoreBinding(env, "WORKER_API_KEY");
+}

@@ -1,7 +1,7 @@
 /**
  * @fileoverview Tesla / Tessie API surface for Showroom Drive Lists.
  *
- * Mounted at `/api/tesla`. Three routes:
+ * Mounted at `/api/tesla`. Routes:
  *
  *   GET  /status            (admin)  — is Tessie configured? drives whether the
  *                                      frontend shows the "Send to Tesla" button.
@@ -9,15 +9,22 @@
  *                                      Body: { slug, stopId } (looks up the
  *                                      stop's address/coords) OR a raw
  *                                      { destination } / { lat, lng }.
- *   POST /webhook           (secret) — Tessie park webhook. On a stop, marks the
- *                                      nearest active-drive stop visited and
- *                                      auto-navigates to the next one.
+ *   POST /webhook           (secret) — Tessie webhook (drive-state/park). Persists
+ *                                      the event to TESLA_DB, marks the nearest
+ *                                      active-drive stop visited, auto-navigates
+ *                                      to the next one, and runs the automation
+ *                                      hook.
+ *   POST /telemetry         (secret) — Tessie hosted Fleet Telemetry sink (~500ms
+ *                                      frames). Persists each frame to TESLA_DB
+ *                                      and runs the automation hook.
  *
- * `/status` and `/navigate` require the admin cookie/bearer; `/webhook` can't
- * carry that (it's called by Tessie), so it's gated by `TESLA_WEBHOOK_SECRET`
- * instead (see `verifyWebhookSecret`).
+ * `/status` and `/navigate` require the admin cookie/bearer. `/webhook` and
+ * `/telemetry` are called by Tessie (no admin cookie), so they're gated by the
+ * shared `WORKER_API_KEY` instead (see `verifyWebhookSecret`). Event rows land in
+ * the dedicated `TESLA_DB` D1, separate from the app DB read for drive matching.
  */
 import { driveListStops, driveLists, showroomStores } from "@backend/db";
+import { teslaTelemetryEvents, teslaWebhookEvents } from "@backend/db/schema/tesla";
 import { matchAndMarkVisited } from "@backend/services/drive-geo-match";
 import {
   getLocation,
@@ -25,6 +32,7 @@ import {
   tessieConfigured,
   verifyWebhookSecret,
 } from "@backend/services/tesla";
+import { evaluateAutomations } from "@backend/services/tesla-automations";
 import { isRequestAuthenticated } from "@backend/utils/access";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -32,9 +40,13 @@ import { Hono } from "hono";
 
 const teslaRouter = new Hono<{ Bindings: Env }>();
 
-/** Admin gate for everything EXCEPT the secret-verified webhook. */
+/** Paths Tessie POSTs to — gated by WORKER_API_KEY inside the handler, not the
+ * admin cookie. Kept exact so no future nested route silently bypasses admin. */
+const SECRET_GATED_PATHS = new Set(["/api/tesla/webhook", "/api/tesla/telemetry"]);
+
+/** Admin gate for everything EXCEPT the secret-verified Tessie endpoints. */
 teslaRouter.use("*", async (c, next) => {
-  if (c.req.path === "/api/tesla/webhook") return next();
+  if (SECRET_GATED_PATHS.has(c.req.path)) return next();
   if (!(await isRequestAuthenticated(c.req.raw, c.env))) {
     return c.json({ error: "Unauthorized" }, 401);
   }
@@ -105,12 +117,12 @@ teslaRouter.post("/navigate", async (c) => {
 });
 
 /**
- * POST /api/tesla/webhook — Tessie park webhook.
+ * POST /api/tesla/webhook — Tessie webhook (drive-state / park / etc.).
  *
- * Gated by `TESLA_WEBHOOK_SECRET` (header `X-Webhook-Secret` or `?secret=`).
- * Uses the coordinate in the payload if present, else queries the car's current
- * location, matches it to the nearest unvisited active-drive stop, marks it
- * visited, and (if there's a next stop) auto-navigates the car to it.
+ * Gated by `WORKER_API_KEY`. Persists the raw event to `TESLA_DB`, then — using
+ * the coordinate in the payload (else a live location query) — matches it to the
+ * nearest unvisited active-drive stop, marks it visited, and (if there's a next
+ * stop) auto-navigates the car to it. Finally runs the automation hook.
  *
  * Tessie webhook payloads vary by firmware/event, so coordinate extraction is
  * intentionally forgiving.
@@ -121,33 +133,110 @@ teslaRouter.post("/webhook", async (c) => {
   }
 
   const payload = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  const teslaDb = drizzle(c.env.TESLA_DB);
+  const vin = typeof payload.vin === "string" ? payload.vin : null;
+  const eventType =
+    typeof payload.event_type === "string"
+      ? payload.event_type
+      : typeof payload.type === "string"
+        ? payload.type
+        : null;
 
-  // Try to read a coordinate straight from the webhook body (several shapes),
-  // else fall back to a live location query.
   const coord = extractCoord(payload) ?? (await getLocation(c.env));
-  if (!coord) {
-    return c.json({ ok: true, matched: null, reason: "no-location" });
-  }
 
-  const db = drizzle(c.env.DB);
-  const result = await matchAndMarkVisited(db, { lat: coord.latitude, lng: coord.longitude });
-  if (!result.matched) {
-    return c.json({ ok: true, matched: null, reason: "no-stop-nearby" });
-  }
-
-  // Auto-advance: send the car to the next unvisited stop, if any.
+  // Drive auto-visit runs against the APP DB (drive stops live there).
+  let matched: { id: number; name: string; distanceM: number } | null = null;
   let navigatedTo: string | null = null;
-  if (result.next) {
-    const dest = `${result.next.lat},${result.next.lng}`;
-    const nav = await sendNavigation(c.env, dest);
-    if (nav.ok) navigatedTo = result.next.name;
+  let matchReason = "no-location";
+  if (coord) {
+    const appDb = drizzle(c.env.DB);
+    const result = await matchAndMarkVisited(appDb, { lat: coord.latitude, lng: coord.longitude });
+    if (result.matched) {
+      matched = {
+        id: result.matched.id,
+        name: result.matched.name,
+        distanceM: result.matched.distanceM,
+      };
+      matchReason = "matched";
+      // Auto-advance: send the car to the next unvisited stop, if any.
+      if (result.next) {
+        const nav = await sendNavigation(c.env, `${result.next.lat},${result.next.lng}`);
+        if (nav.ok) navigatedTo = result.next.name;
+      }
+    } else {
+      matchReason = "no-stop-nearby";
+    }
   }
 
-  return c.json({
-    ok: true,
-    matched: { id: result.matched.id, name: result.matched.name, distanceM: result.matched.distanceM },
-    navigatedTo,
+  // Persist the event (with what the auto-visit did) to the telemetry DB.
+  await teslaDb
+    .insert(teslaWebhookEvents)
+    .values({
+      vin,
+      eventType,
+      latitude: coord?.latitude ?? null,
+      longitude: coord?.longitude ?? null,
+      matchResult: JSON.stringify({ reason: matchReason, matched, navigatedTo }),
+      data: JSON.stringify(payload),
+    })
+    .run();
+
+  // IFTTT hook (placeholder — returns no actions yet).
+  await evaluateAutomations(c.env, {
+    source: "webhook",
+    vin,
+    eventType,
+    latitude: coord?.latitude ?? null,
+    longitude: coord?.longitude ?? null,
+    raw: payload,
   });
+
+  return c.json({ ok: true, matched, navigatedTo, reason: matchReason });
+});
+
+/**
+ * POST /api/tesla/telemetry — Tessie hosted Fleet Telemetry sink.
+ *
+ * Gated by `WORKER_API_KEY`. Tessie forwards Fleet Telemetry frames (~500ms);
+ * each POST is persisted as one row in `TESLA_DB` with the common fields hoisted
+ * out, then passed through the automation hook. Kept deliberately lightweight —
+ * one insert — because of the frame rate.
+ */
+teslaRouter.post("/telemetry", async (c) => {
+  if (!(await verifyWebhookSecret(c.req.raw, c.env))) {
+    return c.json({ error: "Forbidden" }, 403);
+  }
+
+  const payload = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  const f = extractTelemetryFields(payload);
+
+  await drizzle(c.env.TESLA_DB)
+    .insert(teslaTelemetryEvents)
+    .values({
+      vin: f.vin,
+      eventTs: f.eventTs,
+      latitude: f.latitude,
+      longitude: f.longitude,
+      speed: f.speed,
+      shiftState: f.shiftState,
+      batteryLevel: f.batteryLevel,
+      odometer: f.odometer,
+      data: JSON.stringify(payload),
+    })
+    .run();
+
+  await evaluateAutomations(c.env, {
+    source: "telemetry",
+    vin: f.vin,
+    latitude: f.latitude,
+    longitude: f.longitude,
+    speed: f.speed,
+    shiftState: f.shiftState,
+    batteryLevel: f.batteryLevel,
+    raw: payload,
+  });
+
+  return c.json({ ok: true });
 });
 
 /**
@@ -170,6 +259,64 @@ function extractCoord(payload: Record<string, unknown>): { latitude: number; lon
     if (typeof lat === "number" && typeof lng === "number") return { latitude: lat, longitude: lng };
   }
   return null;
+}
+
+/** Extracted, typed telemetry fields (all nullable). */
+interface TelemetryFields {
+  vin: string | null;
+  eventTs: Date | null;
+  latitude: number | null;
+  longitude: number | null;
+  speed: number | null;
+  shiftState: string | null;
+  batteryLevel: number | null;
+  odometer: number | null;
+}
+
+/**
+ * Hoist the common fields out of a Fleet Telemetry frame, forgiving of shape.
+ *
+ * Tessie hosted telemetry frames come either flat (`{ vin, latitude, speed, … }`)
+ * or as a `data: [{ key, value }]` array (Tesla Fleet Telemetry's native form).
+ * We flatten the key/value array into a lookup and read from it OR the top level.
+ * Anything absent stays null — this never throws on an unexpected frame.
+ */
+function extractTelemetryFields(payload: Record<string, unknown>): TelemetryFields {
+  // Flatten a `data: [{key,value}]` array into a plain object, if present.
+  const kv: Record<string, unknown> = {};
+  if (Array.isArray(payload.data)) {
+    for (const item of payload.data) {
+      if (item && typeof item === "object" && "key" in item) {
+        kv[String((item as { key: unknown }).key)] = (item as { value?: unknown }).value;
+      }
+    }
+  }
+  const num = (...vals: unknown[]): number | null => {
+    for (const v of vals) if (typeof v === "number" && Number.isFinite(v)) return v;
+    return null;
+  };
+  const str = (...vals: unknown[]): string | null => {
+    for (const v of vals) if (typeof v === "string" && v) return v;
+    return null;
+  };
+
+  const loc = (kv.Location ?? payload.location) as Record<string, unknown> | undefined;
+  const tsRaw = payload.createdAt ?? payload.timestamp ?? kv.Timestamp;
+  const eventTs =
+    typeof tsRaw === "string" || typeof tsRaw === "number"
+      ? new Date(tsRaw)
+      : null;
+
+  return {
+    vin: str(payload.vin, kv.Vin),
+    eventTs: eventTs && !Number.isNaN(eventTs.getTime()) ? eventTs : null,
+    latitude: num(payload.latitude, loc?.latitude, kv.Latitude),
+    longitude: num(payload.longitude, loc?.longitude, kv.Longitude),
+    speed: num(payload.speed, kv.VehicleSpeed),
+    shiftState: str(payload.shift_state, kv.Gear, kv.ShiftState),
+    batteryLevel: num(payload.battery_level, kv.BatteryLevel, kv.Soc),
+    odometer: num(payload.odometer, kv.Odometer),
+  };
 }
 
 export default teslaRouter;
