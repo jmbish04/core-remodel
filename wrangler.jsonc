@@ -168,6 +168,17 @@
       "migrations_dir": "drizzle",
       "remote": true,
     },
+    {
+      // Tesla/Tessie hosted Fleet API + Fleet Telemetry (~500ms) sink — isolated
+      // from the app DB so high-frequency telemetry writes don't contend with it.
+      // Schema: src/backend/db/schema/tesla/*; migrations: drizzle-tesla/
+      // (applied by `pnpm run migrate:tesla:remote`, wired into `deploy`).
+      "binding": "TESLA_DB",
+      "database_name": "tesla-telemetry",
+      "database_id": "07a717cc-600a-41db-993b-cfdfc4e36c96",
+      "migrations_dir": "drizzle-tesla",
+      "remote": true,
+    },
   ],
   "r2_buckets": [
     {
@@ -267,17 +278,23 @@
       "secret_name": "GOOGLE_SEARCH_API_KEY",
       "remote": true
     },
-    // NOTE: the Tesla/Tessie creds (TESSIE_TOKEN, TESSIE_VIN, TESLA_WEBHOOK_SECRET)
-    // are intentionally NOT declared here. Secrets Store bindings are validated at
-    // deploy time, so listing them before the secrets exist fails the deploy
-    // (error 10182). They are read as OPTIONAL plain Worker secrets instead (see
-    // src/backend/services/tesla.ts) — the drive app just hides the Tesla button /
-    // no-ops the webhook until they're set. To enable, set them with:
-    //   wrangler secret put TESSIE_TOKEN
-    //   wrangler secret put TESSIE_VIN
-    //   wrangler secret put TESLA_WEBHOOK_SECRET
-    // (or add them to the Secrets Store and re-add bindings here — the reader
-    // accepts either a plain string or a SecretsStoreSecret).
+    {
+      // Tessie hosted Fleet API bearer token. Read via getTessieToken().
+      "binding": "TESSIE_API_TOKEN",
+      "store_id": "8c42fa70938644e0a8a109744467375f",
+      "secret_name": "TESSIE_API_TOKEN",
+      "remote": true
+    },
+    {
+      // VIN of the vehicle ("Betsy") Tessie commands are addressed to.
+      // Read via getTeslaVin().
+      "binding": "TESLA_BETSY_VIN",
+      "store_id": "8c42fa70938644e0a8a109744467375f",
+      "secret_name": "TESLA_BETSY_VIN",
+      "remote": true
+    },
+    // Tesla webhook/telemetry auth reuses the existing WORKER_API_KEY binding
+    // (above) — no dedicated webhook secret.
     {
       // ClickUp task mirror (0009): consumed by RemodelOrchestrator + /api/clickup.
       "binding": "CLICKUP_TOKEN",
