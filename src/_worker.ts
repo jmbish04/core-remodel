@@ -157,7 +157,7 @@ const legacyHandler: ExportedHandler<Env> = {
         // auto-land on it (temporary — reverts to the device's normal landing
         // once no drive is active). Takes precedence over the device pref.
         const drivePath = await getActiveDriveLandingPath(env);
-        if (drivePath) {
+        if (drivePath && isSafeInternalPath(drivePath)) {
           return Response.redirect(`${url.origin}${drivePath}`, 302);
         }
         // Otherwise fall back to the device's chosen landing page.
