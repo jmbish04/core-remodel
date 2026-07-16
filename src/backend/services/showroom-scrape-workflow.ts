@@ -40,6 +40,7 @@ import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { parseStructuredResponse } from "@backend/utils/ai-json";
 import { faviconService } from "@backend/services/favicon";
 import { enrichNewBrand } from "@backend/services/showroom/brand-enrichment";
+import { collectSocialLinks } from "@backend/services/showroom/social-links";
 
 // ---------------------------------------------------------------------------
 // Params + constants
@@ -183,15 +184,19 @@ export class ShowroomScrapeWorkflow extends WorkflowEntrypoint<
       // aggregate can hydrate Instagram / hero / brands afterward.
       const extractions: PageExtraction[] = [];
       const pageTexts: ScrapedPageText[] = [];
+      // Every href seen across the crawl — the deterministic source for social
+      // profile links (header/footer icons). See services/showroom/social-links.
+      const allHrefs: string[] = [];
 
       for (let i = 0; i < pageUrls.length && i < MAX_PAGES; i++) {
         const pageUrl = pageUrls[i];
-        const { markdown, ...extraction } = await step.do(
+        const { markdown, hrefs, ...extraction } = await step.do(
           `scrape-${i}`,
           async () => scrapePage(env, showroomId, ragUuid, pageUrl),
         );
         extractions.push(extraction);
         pageTexts.push({ pageUrl, markdown });
+        allHrefs.push(...hrefs);
       }
 
       // ── 4. favicon ──────────────────────────────────────────────────────
@@ -201,7 +206,7 @@ export class ShowroomScrapeWorkflow extends WorkflowEntrypoint<
 
       // ── 5. aggregate ────────────────────────────────────────────────────
       await step.do("aggregate", async () =>
-        aggregate(env, showroomId, extractions),
+        aggregate(env, showroomId, extractions, allHrefs),
       );
 
       // ── 5b. classify-access-level ───────────────────────────────────────
@@ -322,10 +327,11 @@ async function scrapePage(
   showroomId: number,
   ragUuid: string,
   pageUrl: string,
-): Promise<PageExtraction & { markdown: string }> {
+): Promise<PageExtraction & { markdown: string; hrefs: string[] }> {
   const db = drizzle(env.DB);
   const scraped = await scrapeUrl(env, pageUrl);
   const markdown = scraped.markdown ?? scraped.text ?? "";
+  const hrefs = scraped.links.map((l) => l.href);
 
   // (a) Screenshot → Cloudflare Images (scrapeUrl already returns a CF Images
   //     delivery URL for the snapshot; if the source is a data URL or an http
@@ -372,7 +378,7 @@ async function scrapePage(
     >,
   });
 
-  return { ...extraction, markdown };
+  return { ...extraction, markdown, hrefs };
 }
 
 /**
@@ -588,29 +594,37 @@ async function aggregate(
   env: Env,
   showroomId: number,
   extractions: PageExtraction[],
+  hrefs: string[] = [],
 ): Promise<void> {
   const db = drizzle(env.DB);
 
-  // ── Instagram: first non-null, only insert when no INSTAGRAM link exists yet. ──
-  const instagramUrl =
-    extractions.map((e) => e.instagramUrl).find((v) => !!v) ?? null;
-  if (instagramUrl) {
-    const [existingInstagram] = await db
-      .select({ id: showroomStoreLinks.id })
+  // ── Social profiles ────────────────────────────────────────────────────
+  // Deterministic: classify every href the crawl saw (header/footer icons),
+  // filtering out share widgets. The AI's instagramUrl is folded in as a weak
+  // secondary signal — it historically missed 100% of the time, so it is never
+  // the primary source. Existing (type,url) rows are left alone.
+  const social = collectSocialLinks([...hrefs, ...extractions.map((e) => e.instagramUrl)]);
+  if (social.length > 0) {
+    const existing = await db
+      .select({ url: showroomStoreLinks.url, type: showroomStoreLinks.type })
       .from(showroomStoreLinks)
-      .where(
-        and(
-          eq(showroomStoreLinks.storeId, showroomId),
-          eq(showroomStoreLinks.type, "INSTAGRAM"),
-        ),
-      )
-      .limit(1);
-    if (!existingInstagram) {
-      await db.insert(showroomStoreLinks).values({
+      .where(eq(showroomStoreLinks.storeId, showroomId))
+      .all();
+    const have = new Set(existing.map((l) => `${l.type}:${l.url.toLowerCase()}`));
+
+    const rows = social
+      .filter((s) => !have.has(`${s.type}:${s.url.toLowerCase()}`))
+      .map((s) => ({
         storeId: showroomId,
-        url: instagramUrl,
-        type: "INSTAGRAM",
-      });
+        url: s.url,
+        type: s.type,
+        urlNotes: s.urlNotes,
+      }));
+
+    if (rows.length > 0) {
+      await db
+        .insert(showroomStoreLinks)
+        .values(rows as [(typeof rows)[number], ...(typeof rows)[number][]]);
     }
   }
 

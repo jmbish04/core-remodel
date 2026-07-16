@@ -7,6 +7,7 @@ import {
   hoursJsonToRows,
   type MappedPlaceStore,
 } from "@backend/services/showroom/onboarding";
+import { collectSocialLinks } from "@backend/services/showroom/social-links";
 import type { RemodelDb } from "../../types";
 
 import { toolError } from "../../format";
@@ -67,14 +68,26 @@ export async function persistPlaceShowroom(
     }
   }
 
-  // Website → showroom_store_links (WEBSITE). URLs live in the links table now,
-  // not on the store row.
+  // Website + socials → showroom_store_links. URLs live in the links table now,
+  // not on the store row. Socials come from the search-grounded Gemini analysis;
+  // they are re-classified by hostname (which also rejects share widgets) rather
+  // than trusting Gemini's own `type`. The website scrape adds any it finds later.
+  const linkRows: Array<typeof showroomStoreLinks.$inferInsert> = [];
   if (mapped.websiteUrl) {
-    await db.insert(showroomStoreLinks).values({
+    linkRows.push({ storeId: created.id, url: mapped.websiteUrl, type: "WEBSITE" });
+  }
+  for (const social of collectSocialLinks(mapped.socialUrls)) {
+    linkRows.push({
       storeId: created.id,
-      url: mapped.websiteUrl,
-      type: "WEBSITE",
+      url: social.url,
+      type: social.type,
+      urlNotes: social.urlNotes,
     });
+  }
+  if (linkRows.length > 0) {
+    await db
+      .insert(showroomStoreLinks)
+      .values(linkRows as [(typeof linkRows)[number], ...(typeof linkRows)[number][]]);
   }
 
   await env.SHOWROOM_ONBOARDING_WORKFLOW.create({

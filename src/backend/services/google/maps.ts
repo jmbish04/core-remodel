@@ -514,6 +514,9 @@ Output ONLY a single JSON object with this exact shape (no prose before or after
   },
   "brands": [
     { "name": "<brand name>", "type": "<category e.g. Plumbing|Tile|Slabs|Appliances>", "websiteUrl": "<URL or empty string>" }
+  ],
+  "socialLinks": [
+    { "type": "<one of: 'INSTAGRAM' | 'FACEBOOK' | 'PINTEREST' | 'YOUTUBE' | 'TIKTOK' | 'LINKEDIN' | 'HOUZZ' | 'YELP'>", "url": "<canonical profile URL>" }
   ]
 }
 
@@ -523,7 +526,8 @@ Rules for each field:
 - attributes.tradeRepRequired: true when reviews indicate homeowners are turned away or must bring a trade pro to visit or buy. "Trade-only" pricing games (hidden prices, contractor discounts) are a RED FLAG for homeowners. But if reviews say non-trade visitors were welcomed despite trade-only signage, set value=false and capture that nuance in the rationale.
 - attributes.bespokeCurated: true when reviews genuinely rave about unique/mold-breaking selection even without marketing language; false when reviews call the selection overpriced, stale, or generic.
 - reviewAuthenticity: USE your Google Search grounding to cross-check whether the Google reviews look genuine vs bought/bot. Look for corroborating discussion on Reddit (r/ subreddit threads like "best tile SF", "best plumber Bay Area") and other sources. Put any URLs you consulted in the sources array.
-- brands: extract every brand the showroom carries or affiliates with from reviews + your knowledge. Include websiteUrl as a real URL when known, or empty string.`;
+- brands: extract every brand the showroom carries or affiliates with from reviews + your knowledge. Include websiteUrl as a real URL when known, or empty string.
+- socialLinks: USE your Google Search grounding to find THIS business's OFFICIAL social profiles. Return [] when you find none — that is a valid answer. HARD RULES: (1) never guess or construct a URL from the business name — only report a profile you actually found; (2) the profile must demonstrably belong to THIS business at THIS address (check the bio/contact/location against the address and website domain above) — beware same-name businesses in other cities/states; (3) NEVER return share/intent endpoints (facebook.com/sharer, pinterest.com/pin/create, x.com/intent) — those are share widgets, not profiles; (4) return the canonical profile URL with no tracking params and no deep links to individual posts/reels; (5) for a branch of a multi-location chain, the brand-level account is acceptable.`;
 
         // ── System prompt ─────────────────────────────────────────────────────
         const systemPrompt =
@@ -649,6 +653,29 @@ Rules for each field:
                 required: ["name", "type", "websiteUrl"],
               },
             },
+            socialLinks: {
+              type: "ARRAY",
+              items: {
+                type: "OBJECT",
+                properties: {
+                  type: {
+                    type: "STRING",
+                    enum: [
+                      "INSTAGRAM",
+                      "FACEBOOK",
+                      "PINTEREST",
+                      "YOUTUBE",
+                      "TIKTOK",
+                      "LINKEDIN",
+                      "HOUZZ",
+                      "YELP",
+                    ],
+                  },
+                  url: { type: "STRING" },
+                },
+                required: ["type", "url"],
+              },
+            },
           },
           required: [
             "summary",
@@ -657,6 +684,7 @@ Rules for each field:
             "attributes",
             "reviewAuthenticity",
             "brands",
+            "socialLinks",
           ],
         };
 
@@ -684,6 +712,7 @@ Rules for each field:
             sources?: string[];
           };
           brands?: Array<{ name: string; type: string; websiteUrl: string }>;
+          socialLinks?: Array<{ type: string; url: string }>;
         };
 
         // ── Helper: extract raw JSON text from a Gemini response ──────────────
@@ -910,6 +939,7 @@ Rules for each field:
               sources: [],
             },
             brands: parsed.brands ?? [],
+            socialLinks: parsed.socialLinks ?? [],
             _meta: { engine: engineUsed, model: modelUsed, groundingUsed: usedGrounding },
           };
         }
