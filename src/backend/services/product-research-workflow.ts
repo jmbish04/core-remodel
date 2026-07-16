@@ -1201,7 +1201,6 @@ function hostOf(raw: string): string | null {
   }
 }
 
-/** Normalize a URL against a base, stripping the hash. Returns null on junk. */
 /**
  * Canonical crawl key — shared with the showroom/brand crawlers. This file's copy
  * was the best of the three (it alone had the http(s) guard, now folded into the

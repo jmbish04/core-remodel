@@ -315,7 +315,6 @@ async function discoverLinks(env: Env, websiteUrl: string): Promise<string[]> {
   return ordered.slice(0, MAX_PAGES);
 }
 
-/** Normalize a URL against a base, stripping the hash. Returns null on junk. */
 /**
  * Canonical crawl key — shared with brand/product research via
  * `normalizeCrawlUrl`. Previously a local copy that stripped the hash but NOT the
