@@ -124,10 +124,16 @@ export function classifySocialLink(rawUrl: string): ClassifiedLink | null {
  * Sale / clearance pages. Deliberately NARROW: a false positive here feeds the
  * sale-tracking pipeline a page that has no sale on it, and every retail site
  * has a "/specials" that is really a financing ad. Requires a whole path
- * segment, so `/personalise` cannot match `sale`.
+ * segment, so `/personalise` cannot match `sale` — and, for the same reason,
+ * `/wholesale`, `/salem-store` and `/sales-team` are all structurally excluded.
+ *
+ * The second line is the showroom-specific vocabulary: a stone/tile/fixture
+ * showroom's clearance is usually the ex-display piece or the offcut, and it is
+ * almost never filed under the word "sale" — "floor model", "remnant" and
+ * "scratch and dent" are the terms of art.
  */
 const CLEARANCE_PATH_RE =
-  /(^|\/)(clearance|sale|sales|on-sale|specials|closeout|close-out|outlet|discontinued|overstock|deals|promotions?)(\/|$)/i;
+  /(^|\/)(clearance|sale|sales|on-sale|specials|closeout|close-out|outlet|discontinued|overstock|deals|promotions?|markdowns?|liquidation|floor-?models?|floor-?samples?|ex-?display|remnants?|last-?chance|final-?sale|scratch-?(and|&)-?dent)(\/|$)/i;
 
 /**
  * Photo galleries OF the showroom. Also narrow — "gallery" on these sites is

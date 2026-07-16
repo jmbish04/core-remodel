@@ -54,7 +54,7 @@ export interface ClearanceDetails {
 /**
  * Showroom Store Sales — one row per DISTINCT clearance snapshot per page.
  *
- * The weekly cron re-scans every `SHOWROOM_SALE` / `WEBSITE_CLEARANCE` link. A
+ * The weekly cron re-scans every `WEBSITE_CLEARANCE` link. A
  * row is only written when `contentHash` differs from the newest existing row
  * for that link — an unchanged page produces no row, so the table is a history
  * of actual changes rather than a log of cron runs. The newest row per store is
@@ -71,8 +71,8 @@ export const showroomStoreSales = sqliteTable(
       .references(() => showroomStores.id, { onDelete: "cascade" }),
 
     /**
-     * FK → showroom_store_links.id — the page this clearance was found on
-     * (a `WEBSITE_CLEARANCE` or `SHOWROOM_SALE` link). Nullable + ON DELETE SET
+     * FK → showroom_store_links.id — the `WEBSITE_CLEARANCE` page this
+     * clearance was found on. Nullable + ON DELETE SET
      * NULL so re-classifying a store's links never destroys sale history.
      */
     clearanceWebsiteId: integer("clearance_website_id").references(

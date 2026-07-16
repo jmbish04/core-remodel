@@ -301,8 +301,8 @@ const legacyHandler: ExportedHandler<Env> = {
       return;
     }
     if (event.cron === "30 13 * * 1") {
-      // Weekly showroom sale/clearance sweep. Re-scans every SHOWROOM_SALE /
-      // WEBSITE_CLEARANCE link and records a showroom_store_sales snapshot ONLY
+      // Weekly showroom sale/clearance sweep. Re-scans every WEBSITE_CLEARANCE
+      // link and records a showroom_store_sales snapshot ONLY
       // when the page content actually changed vs the last scrape.
       ctx.waitUntil(
         sweepShowroomSales(env)

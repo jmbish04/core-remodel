@@ -4,16 +4,17 @@
  *
  * Flow (driven by the weekly cron in `_worker.ts`, and reusable ad hoc):
  *
- *   1. For each store, read its SHOWROOM_SALE / WEBSITE_CLEARANCE links.
+ *   1. For each store, read its WEBSITE_CLEARANCE links. Those are written by
+ *      the scrape's own-domain path classifier (services/showroom/social-links
+ *      `classifySiteLink`) — discovery is NOT this module's job.
  *   2. Scrape each page (Browser Rendering).
  *   3. Hash the extracted text. If the hash matches the newest existing row for
  *      that link, STOP — the page hasn't changed, so no row is written. This is
  *      the homeowner's "only record the sales content if the content is
  *      updated" requirement, and it's what keeps the table a history of real
  *      changes rather than a weekly cron log.
- *   4. Otherwise run a structured extraction into `ClearanceDetails`, write one
- *      `showroom_store_sales` row, and promote the link to WEBSITE_CLEARANCE
- *      when items were actually found.
+ *   4. Otherwise run a structured extraction into `ClearanceDetails` and write
+ *      one `showroom_store_sales` row.
  *   5. Embed the snapshot into Vectorize under a ragUuid that maps 1:1 back to
  *      the row, so /admin/shopping/sales can RAG over it.
  *
@@ -22,7 +23,7 @@
  */
 
 import { drizzle } from "drizzle-orm/d1";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -34,7 +35,7 @@ import {
 } from "@backend/db/schema/showroom/index";
 import { scrapeUrl } from "@backend/ai/tools/browser-rendering";
 import { parseStructuredResponse } from "@backend/utils/ai-json";
-import { SALE_LINK_TYPES } from "@backend/utils/showroom-links";
+
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -279,15 +280,6 @@ export async function sweepSalePage(
       timestamp: new Date(),
     });
 
-    // Promote the link to WEBSITE_CLEARANCE once we've CONFIRMED it lists
-    // discounted items — SHOWROOM_SALE is only ever a candidate.
-    if (items.length > 0) {
-      await db
-        .update(showroomStoreLinks)
-        .set({ type: "WEBSITE_CLEARANCE", updatedAt: new Date() })
-        .where(eq(showroomStoreLinks.id, link.id));
-    }
-
     // Embedding is a nice-to-have for RAG — never fail the sweep over it.
     try {
       await embedSaleSnapshot(env, { ragUuid, storeId, pageUrl: link.url, details: { ...details, items } });
@@ -455,7 +447,7 @@ export async function sweepShowroomSales(
     })
     .from(showroomStoreLinks)
     .innerJoin(showroomStores, eq(showroomStoreLinks.storeId, showroomStores.id))
-    .where(inArray(showroomStoreLinks.type, [...SALE_LINK_TYPES]))
+    .where(eq(showroomStoreLinks.type, "WEBSITE_CLEARANCE"))
     .orderBy(showroomStoreLinks.updatedAt)
     .limit(limit);
 
