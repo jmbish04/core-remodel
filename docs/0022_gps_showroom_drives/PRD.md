@@ -52,6 +52,30 @@ Two things this unlocks that matter beyond convenience:
 **Future buyer of the app (informs the model, not the 0022 UI).**
 - *When I read another user's showroom review, I want to know whether they actually went, so I can trust it.*
 
+### 3.1 The day in the life (user journey)
+Scores = how good the moment feels today (1 = painful). 0022 targets the low scores.
+
+```mermaid
+journey
+    title A sourcing day - today vs after 0022
+    section Morning - plan
+      Open the drive list on the Tesla screen: 4: Justin
+      Flip the list to active: 3: Justin
+      Send the whole route to the car: 1: Justin, Car
+    section On the road
+      Drive to stop 1 - car navigates: 4: Justin, Car
+      Park - system logs the arrival: 1: Car, Worker
+      Walk the showroom - talk to sales: 5: Justin
+      Drive away - dwell time captured: 1: Car, Worker
+      Dictate notes to Claude over Bluetooth: 2: Justin, Claude
+      Ask Claude what is nearby - kill time: 2: Justin, Claude
+      Park near an unmapped showroom: 1: Car, Worker
+    section Evening - finish
+      Park at home - drives auto pause: 1: Car, Worker
+      Open Visit Logs - finish staged entries: 2: Justin
+      Triage discovered showrooms: 2: Justin
+```
+
 ---
 
 ## 4. Current state (what already exists — do not rebuild)
@@ -82,6 +106,108 @@ Two things this unlocks that matter beyond convenience:
 
 > **PlateJS rule (applies to every note field below):** any user-authored rich text is captured with PlateJS and persisted as **both** `*_markdown` **and** `*_html` columns. Never store only one. See the AGENTS.md rule added in this plan.
 
+### 5.0 Map of the app-DB changes
+Legend — 🆕 new table · ✏️ existing table gaining columns · ⬜ existing, untouched (shown for context).
+
+```mermaid
+erDiagram
+    showroom_stores ||--o{ showroom_visit_log : "has many visits"
+    showroom_stores ||--o{ showroom_store_contact_log : "has many contacts"
+    showroom_stores ||--o{ store_rating : "rating history"
+    showroom_store_hitl_queue ||--o{ showroom_visit_log : "visit to unregistered place"
+    showroom_store_hitl_queue |o--o| showroom_stores : "approved becomes store"
+    drive_lists ||--o{ drive_list_stops : "ordered stops"
+    drive_lists ||--o{ showroom_visit_log : "drive context"
+    drive_list_stops |o--o| showroom_stores : "stop points at showroom"
+    drive_list_stops |o--o| showroom_store_hitl_queue : "detour points at discovery"
+    drive_list_stops ||--o{ showroom_visit_log : "stop check-off"
+    showroom_visit_log ||--o{ showroom_store_contact_log : "in-person contacts"
+    showroom_visit_log |o--o| showroom_visit_log : "staged row cites soft arrival"
+
+    showroom_visit_log {
+        int id PK "NEW TABLE"
+        int store_id FK "XOR hitl_queue_id - CHECK"
+        int hitl_queue_id FK "XOR store_id - CHECK"
+        int drive_list_id FK "optional"
+        int drive_list_stop_id FK "optional"
+        int timestamp_arrival "required"
+        int timestamp_departure "optional - gives dwell"
+        text status "TESLA_STAGED AI_STAGED DRAFT SUBMITTED"
+        text type "TESLA_SOFT_ARRIVAL WALK_IN APPOINTMENT etc"
+        int rating "CHECK 1..5"
+        text notes_markdown "PlateJS"
+        text notes_html "PlateJS"
+        real arrival_latitude "GPS provenance"
+        real arrival_longitude "GPS provenance"
+        real match_distance_m "attestation strength"
+        text gps_source "tessie_park manual ai"
+        text provenance_json "raw packet"
+        int soft_arrival_id FK "UNIQUE - 1 staged per soft arrival"
+    }
+
+    showroom_store_hitl_queue {
+        int id PK "NEW TABLE"
+        text name
+        text description "AI one-liner"
+        real latitude
+        real longitude
+        text place_id "optional"
+        int store_id FK "set on approve"
+        text user_decision "PROCESS DO_NOT_PROCESS TBD"
+        text user_decision_context
+        int drive_list_id FK "active drive at discovery"
+        text proximity_scan_json
+        text category_guess
+    }
+
+    showroom_stores {
+        int id PK "EXISTING - gains 2 cols"
+        text name
+        real latitude "existing"
+        real longitude "existing"
+        text place_id UK "existing"
+        int rating "existing - latest visit cache"
+        text rating_context_markdown "existing"
+        text rating_context_html "existing"
+        int is_identified_by_proximity_scan "ADDED"
+        text proximity_scan_json "ADDED"
+    }
+
+    showroom_store_contact_log {
+        int id PK "EXISTING - gains 2 cols"
+        int store_id FK
+        int store_contact_id FK
+        text notes
+        int showroom_visit_log_id FK "ADDED"
+        text type "ADDED - PHONE EMAIL SHOWROOM_IN_PERSON"
+    }
+
+    drive_lists {
+        int id PK "EXISTING - status enum widened"
+        text slug UK
+        text title
+        text status "draft active PAUSED completed archived"
+    }
+
+    drive_list_stops {
+        int id PK "EXISTING - gains 2 cols"
+        int drive_list_id FK
+        int showroom_store_id FK
+        int sort_order
+        int is_optional "existing - fork"
+        int visited "existing"
+        int visited_at "existing"
+        int is_detour "ADDED"
+        int hitl_queue_id FK "ADDED"
+    }
+
+    store_rating {
+        int id PK "EXISTING - untouched"
+        int store_id FK
+        int rating
+    }
+```
+
 ### 5.1 NEW — `showroom_visit_log`  (app `DB`)
 The receipts drawer. One row per visit (or staged/soft-arrival event).
 
@@ -109,6 +235,29 @@ The receipts drawer. One row per visit (or staged/soft-arrival event).
 Indexes: `store_id`, `hitl_queue_id`, `drive_list_id`, `status`, `type`, `timestamp_arrival`.
 **Unique index on `soft_arrival_id`** (partial / where not null) — each `TESLA_SOFT_ARRIVAL` gets at most **one** `TESLA_STAGED` follow-up (enforces the 1-to-1 at the DB level, not just in code).
 **XOR invariant — enforce at BOTH layers:** application validation AND a table **CHECK constraint** `((store_id IS NOT NULL) <> (hitl_queue_id IS NOT NULL))`, so a direct D1 write or an alternate API path can't create a row that is neither/both. (SQLite `<>` on the two `IS NOT NULL` booleans is a true XOR.)
+
+**Visit-log lifecycle** — how a row reaches `SUBMITTED` from each origin:
+
+```mermaid
+stateDiagram-v2
+    [*] --> TESLA_STAGED : car parked at a known stop (auto)
+    [*] --> AI_STAGED : model staged it from a voice note
+    [*] --> DRAFT : user tapped Record visit / New visit log
+    [*] --> SUBMITTED : record_showroom_visit (agent, complete)
+
+    TESLA_STAGED --> DRAFT : user opened it, saved without finishing
+    AI_STAGED --> DRAFT : user opened it, saved without finishing
+    TESLA_STAGED --> SUBMITTED : finalize (notes + type + rating)
+    AI_STAGED --> SUBMITTED : finalize
+    DRAFT --> SUBMITTED : submit
+    SUBMITTED --> DRAFT : reopen to edit
+    SUBMITTED --> [*] : counts in history + updates store snapshot
+
+    note right of TESLA_STAGED
+      Pending bucket = TESLA_STAGED + AI_STAGED + DRAFT
+      (what the Visit Logs Pending tab shows)
+    end note
+```
 
 ### 5.2 NEW — `showroom_store_hitl_queue`  (app `DB`)
 Staging area for showrooms discovered by proximity scan (or added by the AI) awaiting the user's approve/reject before normal intake.
@@ -147,6 +296,32 @@ Add support for in-person interactions logged against a visit.
   - Home/work park → all `active` drives become `paused`.
   - The drive viewport's **Active toggle** flips `active` ↔ `paused` (turning on demotes any other active drive to `paused`).
 
+**Drive-list lifecycle** (single-active is the invariant that makes the whole pipeline unambiguous):
+
+```mermaid
+stateDiagram-v2
+    [*] --> draft : created (status draft)
+    [*] --> active : created active (default)
+
+    draft --> active : Driving this list toggle ON
+    active --> paused : toggle OFF (resume tomorrow)
+    active --> paused : parked at HOME or WORK (auto - day done)
+    active --> paused : another drive made active (demoted)
+    paused --> active : toggle ON again
+    active --> archived : every stop visited (auto-archive)
+    archived --> active : a stop re-opened
+    active --> completed : manual close-out
+    completed --> [*]
+    archived --> [*]
+
+    note left of active
+      AT MOST ONE drive is active.
+      Making one active demotes the rest.
+      Only an ACTIVE drive triggers GPS processing
+      and admin-device auto-landing.
+    end note
+```
+
 ### 5.5b CHANGE — `drive_list_stops`  *(appended from external-PRD review)*
 The current schema has `is_optional`, `visited`, `visited_at`. To represent a discovery **detour** as a first-class stop on the active drive (rather than only rendering it), add:
 - **Add** `is_detour` int (boolean) default 0 — a stop the system inserted because the car parked at a discovered place, not a pre-planned stop.
@@ -157,8 +332,118 @@ This lets 1.d insert a real detour stop (checked-off, `is_detour=1`, `hitl_queue
 - `tesla_telemetry_events` (exists) — already stores raw frames + hoisted `latitude/longitude/speed/shift_state/battery_level/odometer`. **Add** `destination_name` (text, from field 163 when available) and a derived `is_parked` (bool) so the park pipeline can query cheaply. (Optional; can be computed instead — see TASKS.)
 - `tesla_webhook_events` (exists) — already stores webhook payloads + match result. No change required.
 
+**`TESLA_DB` (separate D1 — `core-remodel-tesla-telemetry`).** Physically isolated from the app DB, so there are no FKs across the boundary — the park pipeline reads here and writes visit rows over in the app DB.
+
+```mermaid
+erDiagram
+    tesla_telemetry_events {
+        int id PK "EXISTING - gains 2 cols"
+        text vin
+        int event_ts "from the car"
+        int received_at "indexed"
+        real latitude
+        real longitude
+        real speed
+        text shift_state "P R N D - drives transition detection"
+        int battery_level
+        real odometer
+        text data "raw frame json"
+        text destination_name "ADDED - field 163, fw 2024.26+"
+        int is_parked "ADDED - derived, cheap park queries"
+    }
+
+    tesla_webhook_events {
+        int id PK "EXISTING - untouched"
+        text vin
+        text event_type
+        real latitude
+        real longitude
+        text match_result "what auto-visit did"
+        text data "raw payload json"
+        int received_at
+    }
+```
+
+> Cross-DB note: `tesla_telemetry_events.vin` and the app DB's `showroom_visit_log.provenance_json` are the only linkage — deliberately loose, since D1 has no cross-database joins.
+
 ### 5.7 NEW — Discovery-search + exclusions  *(appended — real-time voice companion, §14)*
 The on-demand "find me showrooms near here" flow is **worker-orchestrated and D1-backed** (the AI only orchestrates; the worker does the scrape and owns the rendered result). Artifacts are TSX-only (confirmed), so this gets dedicated tables, not the artifacts system.
+
+```mermaid
+erDiagram
+    showroom_search ||--o{ showroom_search_revision : "numbered revisions"
+    showroom_search ||--o{ showroom_search_result : "current results"
+    showroom_search_revision ||--o{ showroom_search_result : "revision produced these"
+    showroom_exclusions |o--o{ showroom_search_result : "match hides a result"
+    showroom_stores |o--o{ showroom_search_result : "already in directory"
+    showroom_stores |o--o{ showroom_exclusions : "may reference a known store"
+
+    showroom_search {
+        int id PK "NEW TABLE"
+        text slug UK "the shareable page"
+        text title
+        text params_json "near radius query broad likeStoreId excludes usePlaces"
+        text status "running ready refining final error"
+        int current_revision
+        text summary
+        int result_count
+        text origin "mcp or ui"
+        text origin_conversation
+    }
+
+    showroom_search_revision {
+        int id PK "NEW TABLE"
+        int search_id FK
+        int revision_number "UNIQUE per search"
+        text params_json
+        text source "places ai mixed"
+        int used_places "false when quota hard-disabled"
+        text change_note
+    }
+
+    showroom_search_result {
+        int id PK "NEW TABLE"
+        int search_id FK
+        int revision_id FK
+        text place_id
+        text name
+        text full_address "click to copy"
+        real latitude
+        real longitude
+        text primary_type "type badge"
+        text category_guess
+        text phone "click to dial"
+        real google_rating "stars badge"
+        text opening_hours_json "open closing-soon closed badge"
+        text source "places or ai"
+        real ai_relevance
+        text ai_reasoning
+        real distance_m
+        int in_directory
+        int existing_store_id
+        int is_excluded "hidden but kept"
+        int matched_exclusion_id FK "why it was hidden"
+        int imported_at
+        int rank
+    }
+
+    showroom_exclusions {
+        int id PK "NEW TABLE"
+        text place_id "preferred match key"
+        text name
+        text location_street_number
+        text location_street_name
+        text location_city
+        text location_state
+        text location_zip_code
+        real latitude
+        real longitude
+        text reason_markdown "PlateJS optional"
+        text reason_html "PlateJS optional"
+        text category
+        text source "manual or ai"
+    }
+```
 
 **`showroom_search`** (app `DB`) — one orchestrated search (a slug the user can open while still talking to Claude).
 | column | type | notes |
@@ -243,6 +528,28 @@ Two independent decisions on every inbound Tesla event:
 
 > Logging is independent of processing: data is always logged when recording is on, even when there's nothing to process.
 
+```mermaid
+flowchart TD
+    A[Inbound Tesla event<br/>telemetry frame or webhook] --> B{RECORD?<br/>tesla_record_telemetry}
+    B -- false --> Z[Drop. No log, no processing.<br/>Master switch is OFF]
+    B -- true --> C[Log raw to TESLA_DB<br/>ALWAYS - unconditional]
+    C --> D{Shift-state TRANSITION?<br/>compare vs CACHE last-shift}
+    D -- no transition --> Z2[Done. 500ms frames stay cheap:<br/>one KV read + compare]
+    D -- "...to P" --> E{PROCESS?<br/>shouldProcessLocation}
+    D -- "P to D" --> F{PROCESS?}
+    E -- false --> Z2
+    F -- false --> Z2
+    E -- true --> G[Park pipeline - decision tree 6.2]
+    F -- true --> H[Drive-away step:<br/>close soft arrivals into TESLA_STAGED]
+
+    subgraph BOX["The PROCESS box - extensible OR of predicates"]
+      P1["0022 ships ONE predicate:<br/>a drive_list is ACTIVE"]
+      P2["future: event type, geofence, ...<br/>drop in without touching callers"]
+    end
+    E -.-> BOX
+    F -.-> BOX
+```
+
 ### 6.2 Park pipeline (decision tree)
 Triggered when a park is detected (webhook `drive_state`/shift→P, or telemetry `Gear` transition to `P`), **and** recording is on, **and** `shouldProcessLocation` is true. Uses the parked `{lat,lng}` (from the event, else `getLocation`). "Within range" = configurable `tesla_proximity_radius_m` (default 250 m; home/work uses `tesla_home_work_radius_m`, default 150 m). All distance checks reuse `haversineMeters` against stored `latitude`/`longitude`.
 
@@ -251,6 +558,26 @@ Triggered when a park is detected (webhook `drive_state`/shift→P, or telemetry
 - `P→D` (last `P`, now `D`) → **drive-away event** → run the departure step (close open `TESLA_SOFT_ARRIVAL` rows → `TESLA_STAGED` with `timestamp_departure`; see §6.2 drive-away).
 - No transition → just log the raw frame (when recording), do nothing else.
 This makes the raw 500 ms stream cheap (one KV read/write + compare) and confines all DB/Places/AI work to the two rare transition moments. Webhook `drive_state` events feed the same comparator, so either signal triggers it; dedupe on the event id via `CACHE` (existing `/webhook` pattern) so a webhook + its telemetry twin don't double-fire.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> Driving
+    Driving --> Parked : shift to P >> PARK EVENT
+    Parked --> Driving : shift to D >> DRIVE-AWAY EVENT
+    Parked --> Parked : more P frames (no-op, just logged)
+    Driving --> Driving : more D frames (no-op, just logged)
+
+    note right of Parked
+      PARK fires the decision tree (6.2):
+      home/work? active stop? any showroom? proximity scan?
+    end note
+    note right of Driving
+      DRIVE-AWAY closes open TESLA_SOFT_ARRIVAL rows:
+      sets timestamp_departure (dwell) and writes the
+      TESLA_STAGED row the user finalizes later.
+    end note
+```
 
 ```
 PARK EVENT (recording on, drive active)
@@ -288,6 +615,59 @@ PARK EVENT (recording on, drive active)
          → else: log the park, no visit row.
 ```
 
+```mermaid
+flowchart TD
+    P[PARK EVENT<br/>recording ON, a drive is ACTIVE] --> A{1.a Within home/work radius?<br/>default 150m}
+    A -- yes --> A1[All ACTIVE drives to PAUSED<br/>the day is done] --> AEND[Stop - no active drive left,<br/>processing halts]
+    A -- no --> B{1.b Within range of a stop<br/>on the ACTIVE drive? default 250m}
+    B -- yes --> B1[visit_log TESLA_SOFT_ARRIVAL<br/>store_id + drive + stop] --> B2[Check the stop off<br/>flag pending finalize] --> W[Wait for DRIVE-AWAY]
+    B -- no --> C{1.c Within range of ANY<br/>registered showroom?}
+    C -- yes --> C1[visit_log TESLA_SOFT_ARRIVAL<br/>store_id = matched showroom] --> W
+    C -- no --> D[1.d PROXIMITY SCAN<br/>proximityScan lat lng radius]
+    D --> D0{Remodel-related candidate?}
+    D0 -- no --> DEND[Log the park. No visit row.]
+    D0 -- yes --> D1[showroom_store_hitl_queue<br/>user_decision = TBD]
+    D1 --> D2[Insert DETOUR drive_list_stop<br/>is_detour, hitl_queue_id]
+    D2 --> D3[visit_log TESLA_SOFT_ARRIVAL<br/>hitl_queue_id] --> W
+    W --> X[DRIVE-AWAY: append TESLA_STAGED row<br/>arrival + departure + soft_arrival_id] --> XEND[Pending in Visit Logs,<br/>prefilled for the user]
+```
+
+**Park to next-stop, end to end** (who calls what):
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Car as Tesla / Tessie
+    participant W as Worker /api/tesla
+    participant KV as CACHE KV
+    participant TDB as TESLA_DB
+    participant DB as App D1
+    participant Auto as evaluateAutomations
+
+    Car->>W: telemetry frame / webhook (shift P)
+    W->>W: verify WORKER_API_KEY
+    W->>KV: dedupe event id
+    W-->>Car: 200 OK immediately (waitUntil the rest)
+    W->>TDB: insert raw frame (recording ON)
+    W->>KV: last-shift D -> P ? => PARK
+    W->>DB: is a drive ACTIVE ? (shouldProcessLocation)
+    alt no active drive
+        W-->>W: log only, stop
+    else active drive
+        W->>DB: haversine match vs stops / showrooms
+        alt matched a stop
+            W->>DB: insert visit_log TESLA_SOFT_ARRIVAL + check stop off
+            W->>Car: sendNavigation(next unvisited stop)
+        else nothing known nearby
+            W->>W: proximityScan (Places + Gemini, 10s timeouts)
+            W->>DB: hitl_queue + detour stop + soft arrival
+        end
+    end
+    W->>TDB: insert webhook_event with match_result
+    W->>Auto: evaluateAutomations(event)  %% IFTTT seam
+    Note over Car,W: Later - shift P -> D => DRIVE-AWAY<br/>append TESLA_STAGED row with departure
+```
+
 **Two-row model (per Justin's spec):** the `TESLA_SOFT_ARRIVAL` row asserts the *fact* the car parked there (even if the showroom was closed and he only peeked in the yard); the follow-up `TESLA_STAGED` row (created on drive-away, so it can carry a real departure time and thus a dwell duration) is the actionable entry the user finalizes. In the Visit Logs UI, the STAGED row is the pending item; the SOFT_ARRIVAL is its attached evidence.
 
 ### 6.3 `proximityScan` — normalized, reusable service
@@ -313,6 +693,134 @@ PARK EVENT (recording on, drive active)
 ---
 
 ## 7. API + MCP surface
+
+**Surface map** — every MCP tool has a REST twin (parity is a requirement); both go through one service layer to D1.
+
+```mermaid
+flowchart LR
+    subgraph Clients
+      VOICE[Claude real-time voice<br/>over Bluetooth]
+      CHAT[Claude chat]
+      UI[Admin UI - Astro + React]
+      CAR[Tesla / Tessie webhooks]
+    end
+
+    subgraph MCPS["MCP connector - /mcp + /mcp/sse"]
+      T1[find_showrooms]
+      T2[create/update/delete_visit_log]
+      T3[log_contact_interaction]
+      T4[get_current_vehicle_location]
+      T5[import_search_results<br/>exclude_search_result<br/>finalize_showroom_search]
+      T6[navigate_tesla<br/>map_drive_to_tesla<br/>set_drive_active]
+      T7[add/list/remove_showroom_exclusion]
+    end
+
+    subgraph REST["Hono REST - admin gated"]
+      R1["/api/showroom-searches"]
+      R2["/api/showroom-visit-logs"]
+      R3["/api/showroom-contact-log"]
+      R4["/api/showroom-exclusions"]
+      R5["/api/tesla/*"]
+      R6["/api/drive-lists/*"]
+      R7["/api/showroom-hitl-queue"]
+    end
+
+    subgraph SVC[Services]
+      S1[discovery-search.ts]
+      S2[proximity-scan.ts]
+      S3[drive-geo-match.ts]
+      S4[tesla.ts - Tessie client]
+      S5[drive-lists.ts]
+      S6[tesla-automations.ts - IFTTT seam]
+    end
+
+    subgraph DATA[Data]
+      D1[(App D1)]
+      D2[(TESLA_DB)]
+      KV[(CACHE KV)]
+      RT[Discovery DO<br/>WebSocket hub]
+    end
+
+    EXT[Google Places + Gemini]
+
+    VOICE --> MCPS
+    CHAT --> MCPS
+    UI --> REST
+    CAR --> R5
+    MCPS --> SVC
+    REST --> SVC
+    S1 --> EXT
+    S2 --> EXT
+    S1 --> D1
+    S2 --> D1
+    S3 --> D1
+    S5 --> D1
+    S4 --> CAR
+    R5 --> D2
+    R5 --> KV
+    R5 --> S6
+    S1 --> RT
+    R1 --> RT
+    RT -.realtime.-> UI
+```
+
+**MCP tool contracts** (the ones the voice loop leans on):
+
+```mermaid
+classDiagram
+    class find_showrooms {
+        <<MCP WRITE>>
+        +near : point | current-location
+        +radiusM : number
+        +query : string?
+        +broad : bool
+        +likeStoreId : number?
+        +excludeCategories : string[]
+        +excludeStoreIds : number[]
+        +usePlaces : bool
+        +aiResults : Candidate[]
+        +slug : string?
+        +returns slug, url, revision, count
+        +returns summary, results, excluded, serverTime
+        Worker merges AI + Places, excludes, ranks, writes a revision
+    }
+    class get_current_vehicle_location {
+        <<MCP READ_ONLY>>
+        +returns latitude, longitude, address
+        +returns capturedAt, ageSeconds, isStale
+        +returns serverTime, hint
+        Stale fix tells the model to ask the user
+    }
+    class create_visit_log {
+        <<MCP WRITE>>
+        +useActiveDrive : bool
+        +driveListId : number?
+        +storeId : number?
+        +showroomName : string?
+        +type, rating
+        +notesMarkdown, notesHtml
+        +timestampArrival, timestampDeparture
+        Cold or active-drive context
+    }
+    class slug_actions {
+        <<MCP - no re-search>>
+        +list_showroom_searches()
+        +get_showroom_search(slug)
+        +get_search_revisions(slug)
+        +finalize_showroom_search(slug)
+        +import_search_results(slug, ids)
+        +exclude_search_result(slug, id, reason)
+    }
+    class showroom_exclusions_tools {
+        <<MCP>>
+        +add_showroom_exclusion(placeId, name, reasonMarkdown)
+        +list_showroom_exclusions()
+        +remove_showroom_exclusion(id)
+    }
+    find_showrooms ..> get_current_vehicle_location : near = current-location
+    find_showrooms ..> showroom_exclusions_tools : auto-applies exclusions
+    slug_actions ..> find_showrooms : operates on the slug it produced
+```
 
 ### 7.1 REST (Hono, admin-gated unless noted)
 - `POST /api/showroom-visit-logs` — create (manual/new).
@@ -382,6 +890,33 @@ Backed by `project_system_variables` (category `tesla`), reusing `GET/POST /api/
 
 Each phase is independently shippable; P1 alone is useful. P7 is the highest-leverage for the daily driving workflow — can be pulled forward after P1/P2 if the voice loop is the priority.
 
+```mermaid
+flowchart LR
+    P0["P0 Foundation<br/>SHIPPED"]:::done
+    P1["P1 Visit log + workspace<br/>useful with GPS off"]:::next
+    P2["P2 Config + gating"]
+    P3["P3 Park pipeline"]
+    P4["P4 Discovery HITL<br/>proximity scan"]
+    P5["P5 Navigation<br/>+ waypoints spike"]
+    P6["P6 AI surface"]
+    P7["P7 Voice companion<br/>discovery + realtime + MCP keepalive"]:::hot
+
+    P0 --> P1 --> P2 --> P3 --> P4
+    P0 --> P5
+    P1 --> P6
+    P1 --> P7
+    P2 --> P7
+    P4 -. proximityScan reused .-> P7
+    P6 -. location tool enriched .-> P7
+    P5 -. Tesla nav button reused .-> P7
+
+    classDef done fill:#1f4d2e,stroke:#4ade80,color:#e8ffe8
+    classDef next fill:#3b2f0b,stroke:#fbbf24,color:#fff7e0
+    classDef hot fill:#4a1d2b,stroke:#fb7185,color:#ffe8ee
+```
+
+> Pull-forward path for the daily driving loop: **P0 → P1 → P2 → P7**. P3–P6 add automation depth but the voice + discovery loop works without them.
+
 ---
 
 ## 11. Acceptance criteria (headline)
@@ -442,6 +977,85 @@ Today `search_showrooms` returns a handful of Places text-search hits, unpersist
 - **Not-interested capture:** `add_showroom_exclusion` (place_id/name/address + optional PlateJS reason) — one call; auto-applied to all future sweeps. `list_showroom_exclusions` / `remove_showroom_exclusion` round out CRUD.
 - Cost: user-initiated (not per-frame); quota-gate + hard-disable as above; dedupe before AI classification. (Deep browser-rendering scrape via `ShowroomResearchAgent` is a **future** "go deep on these" second pass; 0022 discovery is Places+Gemini breadth.)
 
+**The voice loop, end to end** — note the model never holds the result list; it holds a slug.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor J as Justin (driving)
+    participant C as Claude (voice + MCP)
+    participant M as find_showrooms
+    participant W as Worker / discovery-search
+    participant EXT as Places + Gemini
+    participant DB as App D1
+    participant RT as Discovery DO (WS)
+    participant P as Discovery page (phone/car)
+
+    J->>C: "I'm near Livermore, 1pm, time to kill - find me anything remodel"
+    C->>M: get_current_vehicle_location
+    M-->>C: lat/lng + capturedAt + ageSeconds + isStale + serverTime
+    alt fix is stale
+        C->>J: "Your location is 5h old - where are you?"
+    else fix is fresh
+        C->>C: (may also search with its OWN web tools)
+        C->>M: find_showrooms(near=current-location, broad, usePlaces=true, aiResults=[...])
+        M->>W: orchestrate
+        W->>DB: create slug + revision 1 (status running)
+        W->>RT: search.created
+        RT-->>P: new slug row appears LIVE
+        alt Places free tier available
+            W->>EXT: nearby sweep (radius + paging, 10s timeout)
+        else quota exhausted
+            W-->>W: HARD-DISABLE Places, used_places=false, AI results only
+        end
+        W->>DB: exclude directory + not-interested (flag, don't delete)
+        W->>EXT: Gemini rank + classify survivors
+        W->>DB: write result rows + status ready (pending)
+        W->>RT: search.updated
+        RT-->>P: results + map markers render LIVE
+        M-->>C: {slug, url, revision, count, summary, results, excluded}
+        C->>J: "12 found, 3 hidden (you excluded them). It's on your Discovery page."
+    end
+
+    J->>C: "Drop the tile places, and exclude Foo Stone - I've been"
+    C->>M: find_showrooms(slug=same, excludeCategories=[tile])
+    M->>W: refine
+    W->>DB: append revision 2, swap results
+    W->>RT: search.updated
+    RT-->>P: table updates IN PLACE (no new page)
+    C->>M: exclude_search_result(slug, FooStone, reason)
+    W->>DB: showroom_exclusions + drop from slug
+    W->>RT: result.removed
+    RT-->>P: row disappears LIVE
+    J->>P: taps a card - dials, copies address, sends to Tesla nav
+    J->>C: "That's the list, mark it final"
+    C->>M: finalize_showroom_search(slug)
+    W->>RT: search.finalized
+    RT-->>P: badge flips pending -> final
+```
+
+**Discovery slug state machine:**
+
+```mermaid
+stateDiagram-v2
+    [*] --> running : find_showrooms (new slug, revision 1)
+    running --> ready : results written (badge = PENDING)
+    running --> error : sweep failed
+    ready --> refining : find_showrooms(slug) / UI refine
+    refining --> ready : revision N+1 swapped in
+    ready --> final : AI or user marks it final
+    final --> refining : refine again (new revision)
+    error --> refining : retry
+    final --> [*]
+
+    note right of ready
+      PENDING = ready but not final.
+      Slug actions (import / exclude / finalize)
+      never re-run a search.
+      Every change = a numbered revision.
+    end note
+```
+
 ### 14.3 Time + location grounding (models are bad at "now")
 Every location/discovery MCP tool returns `serverTime` (ISO) so the model is time-rooted on each call. Specifically:
 - **`get_current_vehicle_location`** returns `{ latitude, longitude, address, capturedAt, ageSeconds, isStale, serverTime }`. `ageSeconds` = `serverTime − capturedAt` computed by the worker; `isStale` = `ageSeconds > tesla_location_stale_seconds` (config, default ~300s). When stale, the payload says so explicitly (`isStale: true` + a `hint` string) so the model asks the user for their location instead of trusting an 18,000-seconds-ago fix.
@@ -457,6 +1071,29 @@ The discovery **list** and **slug viewport** are **live** — a search kicked of
 - Implement with a Durable Object broadcast hub (reuse the existing realtime pattern — `EstimateCollabHub` / `FloorplanSessionDO`; WebSocket route wired in `src/_worker.ts` like `/api/room/:name/ws`). Pages open a WS to a `discovery` room; every write path (`find_showrooms`, import, exclude, mark-final — whether from MCP, REST, or the UI) publishes a small event (`search.created`, `search.updated`, `result.added/removed`, `search.finalized`) that the hub fans out to subscribers.
 - Writes stay in D1 (source of truth); the WS carries only change notifications (client re-reads or patches). Fall back to polling if the socket drops.
 - Scope: the two discovery pages in 0022. (Other pages can adopt the same hub later.)
+
+```mermaid
+flowchart LR
+    subgraph WRITERS["Any write path"]
+      A[MCP tool<br/>voice / chat]
+      B[REST<br/>/api/showroom-searches]
+      C[Admin UI action<br/>import / exclude / refine]
+      D[Worker sweep<br/>find_showrooms waitUntil]
+    end
+    A --> DB[(App D1<br/>source of truth)]
+    B --> DB
+    C --> DB
+    D --> DB
+    A -- publish --> HUB
+    B -- publish --> HUB
+    C -- publish --> HUB
+    D -- publish --> HUB
+    HUB[["Discovery DO<br/>broadcast hub"]]
+    HUB -- "search.created<br/>search.updated<br/>result.added / removed<br/>search.finalized" --> S1[Discovery list page]
+    HUB --> S2["Discovery slug viewport<br/>(map + cards)"]
+    S1 -. "re-read on event<br/>(polling fallback)" .-> DB
+    S2 -.-> DB
+```
 
 ---
 
