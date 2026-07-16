@@ -15,6 +15,7 @@
  */
 import assert from "node:assert/strict";
 
+import { extractBrandFacets } from "../../src/backend/services/showroom/brand-facets.ts";
 import {
   classifySiteLink,
   classifySocialLink,
@@ -154,6 +155,144 @@ check("dedupes on (type, url)", () => {
     "https://instagram.com/foo?utm_source=x",
   ]);
   assert.equal(out.length, 1);
+});
+
+console.log("\nbrand facets — pattern 1 (same-domain shop sidebar)");
+
+const SHOP = `https://${SITE}/shop/`;
+const names = (page, links) => extractBrandFacets(page, links, SITE).map((b) => b.name).sort();
+
+check("reads brands off facet links across platform shapes", () => {
+  assert.deepEqual(
+    names(SHOP, [
+      { href: `https://${SITE}/shop?brand=thg-paris`, text: "THG Paris" }, // Magento/BigCommerce
+      { href: `https://${SITE}/shop?filter_brand=kohler`, text: "Kohler" }, // WooCommerce
+      { href: `https://${SITE}/c?filter.p.vendor=grohe`, text: "GROHE" }, // Shopify
+      { href: `https://${SITE}/brands/waterworks`, text: "Waterworks" }, // brand landing
+      { href: `https://${SITE}/manufacturer/toto`, text: "TOTO" },
+    ]),
+    ["GROHE", "Kohler", "THG Paris", "TOTO", "Waterworks"],
+  );
+});
+
+check("uses the anchor TEXT, not the slug", () => {
+  // "grohe-usa" would de-slugify to "Grohe Usa", which does NOT match the real
+  // "GROHE" and would mint a junk brand + a paid enrichNewBrand call.
+  assert.deepEqual(names(SHOP, [{ href: `https://${SITE}/shop?brand=grohe-usa`, text: "GROHE" }]), [
+    "GROHE",
+  ]);
+});
+
+check("strips the facet count off the label", () => {
+  assert.deepEqual(names(SHOP, [{ href: `https://${SITE}/shop?brand=k`, text: "Kohler (12)" }]), [
+    "Kohler",
+  ]);
+  assert.deepEqual(names(SHOP, [{ href: `https://${SITE}/shop?brand=t`, text: "TOTO 7" }]), ["TOTO"]);
+});
+
+check("rejects sidebar UI chrome", () => {
+  assert.deepEqual(
+    names(SHOP, [
+      { href: `https://${SITE}/shop?brand=a`, text: "All Brands" },
+      { href: `https://${SITE}/shop?brand=b`, text: "View All" },
+      { href: `https://${SITE}/shop?brand=c`, text: "Clear" },
+      { href: `https://${SITE}/shop?brand=kohler`, text: "Kohler" },
+    ]),
+    ["Kohler"],
+  );
+});
+
+check("ignores non-brand facets", () => {
+  assert.deepEqual(
+    names(SHOP, [
+      { href: `https://${SITE}/about`, text: "About Us" },
+      { href: `https://${SITE}/shop?color=blue`, text: "Blue" },
+      { href: `https://${SITE}/shop?brand=rohl`, text: "ROHL" },
+    ]),
+    ["ROHL"],
+  );
+});
+
+check("pattern 1 carries no website (the facet is our own site)", () => {
+  const [b] = extractBrandFacets(SHOP, [{ href: `https://${SITE}/shop?brand=k`, text: "Kohler" }], SITE);
+  assert.equal(b.websiteUrl, null);
+});
+
+console.log("\nbrand facets — pattern 2 (off-domain directory page)");
+
+const DIR = `https://${SITE}/manufacturers/`;
+
+check("harvests off-domain brand links ON a directory page", () => {
+  // Rubenstein's real shape: each brand links to the manufacturer's own site.
+  const out = extractBrandFacets(
+    DIR,
+    [
+      { href: "https://www.bobrick.com", text: "Bobrick" },
+      { href: "https://ipsplumbingproducts.com/brands/aba/", text: "AB&amp;A" },
+      { href: "http://www.bellgossett.com", text: "Bell &amp; Gossett" },
+    ],
+    SITE,
+  );
+  assert.deepEqual(out.map((b) => b.name).sort(), ["AB&A", "Bell & Gossett", "Bobrick"]);
+});
+
+check("captures the brand's website — origin only, not our affiliate path", () => {
+  const [b] = extractBrandFacets(
+    DIR,
+    [{ href: "https://ipsplumbingproducts.com/brands/aba/", text: "AB&amp;A" }],
+    SITE,
+  );
+  assert.equal(b.websiteUrl, "https://ipsplumbingproducts.com");
+});
+
+check("THE GATE: the same links on a non-directory page yield nothing", () => {
+  // Without this, every outbound link on the site becomes a fake brand — and
+  // each fake brand costs a junk row plus a paid enrichment call.
+  assert.deepEqual(
+    extractBrandFacets(`https://${SITE}/blog/`, [{ href: "https://bobrick.com", text: "Bobrick" }], SITE),
+    [],
+  );
+});
+
+check("rejects socials, tel: links and CTAs on the directory page", () => {
+  assert.deepEqual(
+    names(DIR, [
+      { href: "https://facebook.com/profile.php?id=1", text: "Facebook" },
+      { href: "https://x.com/rubenstein", text: "Follow us" },
+      { href: "tel:+15104446614", text: "(510) 444-6614" },
+      { href: "https://theshowroomatrubenstein.com/", text: "Visit Our Showroom Site" },
+      { href: "https://www.bobrick.com", text: "Bobrick" },
+    ]),
+    ["Bobrick"],
+  );
+});
+
+check("decodes HTML entities in brand names", () => {
+  assert.deepEqual(names(DIR, [{ href: "https://alsons.com", text: "Alson&#8217;s" }]), ["Alson\u2019s"]);
+});
+
+check("dedupes case-insensitively, prefers the entry with a website", () => {
+  const out = extractBrandFacets(
+    DIR,
+    [
+      { href: `https://${SITE}/shop?brand=kohler`, text: "Kohler" }, // no website
+      { href: "https://www.kohler.com", text: "KOHLER" }, // has website
+    ],
+    SITE,
+  );
+  assert.equal(out.length, 1);
+  assert.equal(out[0].websiteUrl, "https://www.kohler.com");
+});
+
+check("skips links with no usable label", () => {
+  assert.deepEqual(
+    names(DIR, [
+      { href: "https://bobrick.com" },
+      { href: "https://x.example.com", text: "  " },
+      { href: "https://y.example.com", text: "12" },
+    ]),
+    [],
+  );
 });
 
 console.log(

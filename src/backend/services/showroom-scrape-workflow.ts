@@ -41,6 +41,7 @@ import { parseStructuredResponse } from "@backend/utils/ai-json";
 import { faviconService } from "@backend/services/favicon";
 import { enrichNewBrand } from "@backend/services/showroom/brand-enrichment";
 import { collectSocialLinks } from "@backend/services/showroom/social-links";
+import { extractBrandFacets, type FacetBrand } from "@backend/services/showroom/brand-facets";
 
 // ---------------------------------------------------------------------------
 // Params + constants
@@ -64,8 +65,22 @@ const MAX_PAGES = 10;
 /** Link rows per db.batch — keeps each query under D1's 100-bound-parameter cap. */
 const LINK_INSERT_CHUNK = 50;
 
+/**
+ * Cap on how many NEWLY-DISCOVERED brands get `enrichNewBrand`'d per scrape.
+ *
+ * Deterministic facet extraction took store #132 from 6 brands to 137, which is
+ * the point — but enrichNewBrand costs ~2 AI calls + a search + an icon fetch
+ * EACH, so an uncapped run would fire ~260 paid calls for one store, times ~130
+ * stores in a backfill. The brands are all still recorded; the ones past the cap
+ * simply keep the name + websiteUrl we already scraped for free (which is most
+ * of what enrichment would have discovered anyway) and can be enriched later
+ * from a user-triggered surface. Whatever is skipped is logged, never silent.
+ */
+const MAX_BRAND_ENRICHMENTS_PER_SCRAPE = 8;
+
 /** Path fragments we prioritize when selecting pages to crawl. */
-const PRIORITY_PATH_RE = /about|brands|lines|location|contact|hours|showroom/i;
+const PRIORITY_PATH_RE =
+  /about|brands|lines|location|contact|hours|showroom|shop|store|products|catalog|collections|browse/i;
 
 /** Per-page structured extraction shape returned by Workers AI. */
 interface PageExtraction {
@@ -187,19 +202,25 @@ export class ShowroomScrapeWorkflow extends WorkflowEntrypoint<
       // aggregate can hydrate Instagram / hero / brands afterward.
       const extractions: PageExtraction[] = [];
       const pageTexts: ScrapedPageText[] = [];
-      // Every href seen across the crawl — the deterministic source for social
-      // profile links (header/footer icons). See services/showroom/social-links.
-      const allHrefs: string[] = [];
+      // Every link seen across the crawl. The href drives social-profile
+      // classification (header/footer icons); the anchor TEXT drives brand-facet
+      // extraction ("THG Paris" from <a href="/shop?brand=thg-paris">). The text
+      // used to be discarded here, which is why the shop sidebar went unread.
+      const allLinks: Array<{ href: string; text?: string }> = [];
+      // Brands recovered deterministically from each page's links.
+      const allFacetBrands: FacetBrand[] = [];
+      const siteHost = safeHost(websiteUrl);
 
       for (let i = 0; i < pageUrls.length && i < MAX_PAGES; i++) {
         const pageUrl = pageUrls[i];
-        const { markdown, hrefs, ...extraction } = await step.do(
+        const { markdown, links, facetBrands, ...extraction } = await step.do(
           `scrape-${i}`,
-          async () => scrapePage(env, showroomId, ragUuid, pageUrl),
+          async () => scrapePage(env, showroomId, ragUuid, pageUrl, siteHost),
         );
         extractions.push(extraction);
         pageTexts.push({ pageUrl, markdown });
-        allHrefs.push(...hrefs);
+        allLinks.push(...links);
+        allFacetBrands.push(...facetBrands);
       }
 
       // ── 4. favicon ──────────────────────────────────────────────────────
@@ -209,7 +230,7 @@ export class ShowroomScrapeWorkflow extends WorkflowEntrypoint<
 
       // ── 5. aggregate ────────────────────────────────────────────────────
       await step.do("aggregate", async () =>
-        aggregate(env, showroomId, extractions, allHrefs, websiteUrl),
+        aggregate(env, showroomId, extractions, allLinks, websiteUrl, allFacetBrands),
       );
 
       // ── 5b. classify-access-level ───────────────────────────────────────
@@ -332,11 +353,26 @@ async function scrapePage(
   showroomId: number,
   ragUuid: string,
   pageUrl: string,
-): Promise<PageExtraction & { markdown: string; hrefs: string[] }> {
+  /** The store's own website host — gates deterministic brand extraction. */
+  siteHost?: string,
+): Promise<
+  PageExtraction & {
+    markdown: string;
+    links: Array<{ href: string; text?: string }>;
+    facetBrands: FacetBrand[];
+  }
+> {
   const db = drizzle(env.DB);
   const scraped = await scrapeUrl(env, pageUrl);
   const markdown = scraped.markdown ?? scraped.text ?? "";
-  const hrefs = scraped.links.map((l) => l.href);
+  // Keep the anchor text — extractBrandFacets needs it. (This was
+  // `.map((l) => l.href)`, which threw away the brand list's labels.)
+  const links = scraped.links;
+
+  // Brands, deterministically, from THIS page's links. Done here rather than in
+  // aggregate() because pattern 2 is gated on the page's own path, and the
+  // aggregate flattens every page's links into one bag that loses that context.
+  const facetBrands = siteHost ? extractBrandFacets(pageUrl, links, siteHost) : [];
 
   // (a) Screenshot → Cloudflare Images (scrapeUrl already returns a CF Images
   //     delivery URL for the snapshot; if the source is a data URL or an http
@@ -383,7 +419,7 @@ async function scrapePage(
     >,
   });
 
-  return { ...extraction, markdown, hrefs };
+  return { ...extraction, markdown, links, facetBrands };
 }
 
 /**
@@ -625,11 +661,15 @@ async function aggregate(
   env: Env,
   showroomId: number,
   extractions: PageExtraction[],
-  hrefs: string[] = [],
-  /** The store's website — its host gates the own-domain link classifier. */
+  /** Every link the crawl saw: href for social classification, text for brands. */
+  links: Array<{ href: string; text?: string }> = [],
+  /** The store's website — its host gates the own-domain link matcher. */
   websiteUrl?: string,
+  /** Brands recovered deterministically per-page (see brand-facets). */
+  facetBrands: FacetBrand[] = [],
 ): Promise<void> {
   const db = drizzle(env.DB);
+  const hrefs = links.map((l) => l.href);
 
   // ── Social profiles + own-site pages ───────────────────────────────────
   // Deterministic: classify every href the crawl saw (header/footer icons),
@@ -713,6 +753,9 @@ async function aggregate(
   }
 
   // ── Brands: union + case-insensitive dedupe across pages. ───────────────
+  // The AI's per-page brandNames go in FIRST so its spelling wins the dedupe —
+  // it reads "THG Paris" off the page, while a facet label may be "Thg Paris".
+  // Both collapse to the same lower-case key, and first-write wins.
   const nameByLower = new Map<string, string>();
   for (const extraction of extractions) {
     for (const name of extraction.brandNames) {
@@ -723,12 +766,38 @@ async function aggregate(
     }
   }
 
-  for (const name of nameByLower.values()) {
+  // Then the deterministic facet/directory brands — the store's own brand list,
+  // structured data we already fetched. This is where the volume is: store #132
+  // yields 137 here against the AI's 6.
+  const siteByLower = new Map<string, string | null>();
+  for (const b of facetBrands) {
+    const key = b.name.toLowerCase();
+    if (!nameByLower.has(key)) nameByLower.set(key, b.name);
+    // Record the website even when the AI already supplied the name.
+    if (b.websiteUrl && !siteByLower.get(key)) siteByLower.set(key, b.websiteUrl);
+  }
+
+  let enrichBudget = MAX_BRAND_ENRICHMENTS_PER_SCRAPE;
+  let skippedEnrichment = 0;
+  for (const [key, name] of nameByLower) {
     try {
-      await upsertBrandMapping(env, showroomId, name);
+      const enriched = await upsertBrandMapping(env, showroomId, name, {
+        websiteUrl: siteByLower.get(key) ?? null,
+        mayEnrich: enrichBudget > 0,
+      });
+      if (enriched === "enriched") enrichBudget--;
+      else if (enriched === "enrich-skipped") skippedEnrichment++;
     } catch (err) {
       console.error(`showroom-scrape: brand upsert failed for "${name}"`, err);
     }
+  }
+  if (skippedEnrichment > 0) {
+    // Never silent: a truncated run must say so, or the data reads as complete.
+    console.warn(
+      `showroom-scrape: showroom ${showroomId} — recorded ${nameByLower.size} brands; ` +
+        `enrichment budget (${MAX_BRAND_ENRICHMENTS_PER_SCRAPE}) skipped ${skippedEnrichment} ` +
+        `new brand(s). They keep name + websiteUrl and can be enriched later.`,
+    );
   }
 }
 
@@ -766,37 +835,64 @@ async function uploadHeroImage(
  * body (bounded: ≤2 AI calls + ≤1 search + one icon fetch), so it is simply
  * awaited rather than fired-and-forgotten.
  */
+/** What upsertBrandMapping did about enrichment — drives the caller's budget. */
+type BrandUpsertOutcome = "existing" | "enriched" | "enrich-skipped";
+
 async function upsertBrandMapping(
   env: Env,
   showroomId: number,
   name: string,
-): Promise<void> {
+  opts: {
+    /** The brand's own site, when a directory link revealed it. */
+    websiteUrl?: string | null;
+    /** False once the scrape's enrichment budget is spent. */
+    mayEnrich?: boolean;
+  } = {},
+): Promise<BrandUpsertOutcome> {
   const db = drizzle(env.DB);
+  const { websiteUrl = null, mayEnrich = true } = opts;
 
   // Case-insensitive lookup on brands.name.
   const [existing] = await db
-    .select({ id: brands.id })
+    .select({ id: brands.id, websiteUrl: brands.websiteUrl })
     .from(brands)
     .where(sql`lower(${brands.name}) = lower(${name})`)
     .limit(1);
 
   let brandId: number;
+  let outcome: BrandUpsertOutcome;
   if (existing) {
     brandId = existing.id;
+    outcome = "existing";
+    // Backfill a website we scraped for free onto a brand that lacks one. Never
+    // overwrite — an existing value may have been set by enrichment or a human.
+    if (websiteUrl && !existing.websiteUrl) {
+      await db.update(brands).set({ websiteUrl }).where(eq(brands.id, brandId));
+    }
   } else {
     const [inserted] = await db
       .insert(brands)
-      .values({ name, websiteUrl: null })
+      // The directory link IS the brand's website — this used to be a hard null,
+      // so enrichment had to go discover what the page told us outright.
+      .values({ name, websiteUrl })
       .returning({ id: brands.id });
     brandId = inserted.id;
 
-    // Newly-discovered brand — enrich it (fill-blanks; never throws).
-    try {
-      await enrichNewBrand(env, brandId, name);
-    } catch (err) {
-      // Defensive — enrichNewBrand already never throws, but this keeps the
-      // brand mapping from failing if that contract is ever violated.
-      console.error(`showroom-scrape: brand enrichment failed for "${name}"`, err);
+    if (mayEnrich) {
+      // Newly-discovered brand — enrich it (fill-blanks; never throws).
+      try {
+        await enrichNewBrand(env, brandId, name);
+      } catch (err) {
+        // Defensive — enrichNewBrand already never throws, but this keeps the
+        // brand mapping from failing if that contract is ever violated.
+        console.error(`showroom-scrape: brand enrichment failed for "${name}"`, err);
+      }
+      outcome = "enriched";
+    } else {
+      // Budget spent. The row still carries name + websiteUrl, which is most of
+      // what enrichment discovers; the rest can be filled from a user-triggered
+      // backfill rather than by spending here, unattended, on every scrape.
+      outcome = "enrich-skipped";
     }
   }
 
@@ -818,6 +914,8 @@ async function upsertBrandMapping(
       .values({ showroomId, brandId })
       .onConflictDoNothing();
   }
+
+  return outcome;
 }
 
 // ---------------------------------------------------------------------------
