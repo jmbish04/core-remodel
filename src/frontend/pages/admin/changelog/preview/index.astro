@@ -1,0 +1,19 @@
+---
+/**
+ * @fileoverview Changelog PREVIEW — the presser, drafted in advance.
+ *
+ * Lists every `staged` changelog entry: what an open branch/PR *will* introduce,
+ * reviewable on the deployed worker BEFORE the change actually lands. Same blocks
+ * and same mappers as /admin/changelog (shared view) — only the stage differs, so
+ * what you approve here is exactly what ships.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import ChangelogListView from "@/components/changelog/ChangelogListView.astro";
+---
+
+<BaseLayout
+  title="Changelog preview - 126 Colby - Remodel Mission Control"
+  description="Proposed changes drafted in advance — review the release notes before anything deploys."
+>
+  <ChangelogListView stage="staged" />
+</BaseLayout>

@@ -1,0 +1,21 @@
+---
+/**
+ * @fileoverview Changelog PREVIEW viewport — one proposed change, in full.
+ *
+ * Identical template to the shipped viewport (/admin/changelog/[slug]) — diagrams
+ * (mermaidcn zoom/pan), changelog19 developer changelog + code, and the
+ * changelog21 Features/Fixes/Improvements recap — but for a `staged` entry, so
+ * stakeholders can sign off on exactly what the release will say before it ships.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import ChangelogEntryView from "@/components/changelog/ChangelogEntryView.astro";
+
+const slug = Astro.params.slug as string;
+---
+
+<BaseLayout
+  title={`Preview — ${slug} - 126 Colby - Remodel Mission Control`}
+  description="A proposed change, drafted as release notes before it deploys."
+>
+  <ChangelogEntryView slug={slug} stage="staged" />
+</BaseLayout>

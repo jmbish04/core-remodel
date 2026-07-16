@@ -31,6 +31,113 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "changelog-preview": {
+    slug: "changelog-preview",
+    problem:
+      "Two gaps. (1) The changelog pages were hand-rolled markup — the four installed `beste` blocks were only ever wired into a throwaway chooser page, so the spec'd layout (highlights + feed on the list; developer changelog + recap on the viewport) was never actually live. (2) There was no way to see what a PR WILL say before it deploys: the changelog only documents work after the fact, so stakeholders had no artifact to sign off on while a change was still proposed.",
+    approach:
+      "Treat the changelog and its preview as the same thing at two lifecycle stages, and render both through one shared view + one shared mapper — so what you approve in preview is literally the code that renders once it ships. `/admin/changelog` shows the full record; `/admin/changelog/preview` filters to `status: staged` (the drafted presser). The list renders changelog24 (highlights) + changelog3 (feed); the viewport renders diagrams, changelog19 (developer changelog + code), then changelog21 as the conclusion recap bucketed into Features / Fixes / Improvements. Diagrams use the shadcn-registry mermaid (mermaidcn) for zoom/pan, since a full architecture diagram is unreadable at fixed size.",
+    apiChanges: [
+      "No API change — reads the existing changelog_branches + changelog_entries tables",
+      "GET /admin/changelog — full record (status-badged)",
+      "GET /admin/changelog/[slug] — shipped viewport",
+      "GET /admin/changelog/preview — proposed (staged) entries only",
+      "GET /admin/changelog/preview/[slug] — proposal viewport",
+      "GET /admin/changelog/blocks — the block chooser, moved off /preview",
+    ],
+    filesTouched: [
+      "src/frontend/lib/changelog-blocks.ts",
+      "src/frontend/components/changelog/ChangelogListView.astro",
+      "src/frontend/components/changelog/ChangelogEntryView.astro",
+      "src/frontend/pages/admin/changelog.astro",
+      "src/frontend/pages/admin/changelog/[slug].astro",
+      "src/frontend/pages/admin/changelog/preview/index.astro",
+      "src/frontend/pages/admin/changelog/preview/[slug].astro",
+      "src/frontend/pages/admin/changelog/blocks.astro",
+      "src/frontend/components/sidebar/nav-groups.ts",
+      "src/frontend/components/sidebar/shared.tsx",
+    ],
+    migrations: [],
+    code: [
+      {
+        title: "One stage flag drives both pages",
+        lang: "ts",
+        code: `/**
+ * - shipped -> /admin/changelog          (full record, status-badged)
+ * - staged  -> /admin/changelog/preview  (the drafted presser)
+ */
+export type ChangelogStage = "shipped" | "staged";
+
+const entries = entryRows
+  // Preview = staged only; the changelog = the full record.
+  .filter((r) => (stage === "staged" ? r.status === "staged" : true))
+  .map(toEntry);`,
+      },
+      {
+        title: "Recap columns — Features / Fixes / Improvements",
+        lang: "ts",
+        code: `// changelog21's conclusion board. \`removed\` + \`migration\` still exist in the
+// data, so they get their own columns rather than being silently dropped;
+// empty columns are not rendered.
+const RECAP_COLUMNS = [
+  { label: "Features",     color: "bg-emerald-500", kinds: ["added"] },
+  { label: "Fixes",        color: "bg-blue-500",    kinds: ["fixed"] },
+  { label: "Improvements", color: "bg-amber-500",   kinds: ["changed"] },
+  { label: "Removed",      color: "bg-rose-500",    kinds: ["removed"] },
+  { label: "Migrations",   color: "bg-violet-500",  kinds: ["migration"] },
+];`,
+      },
+      {
+        title: "Sidebar: stop Changelog lighting up on its own child",
+        lang: "tsx",
+        code: `// Changelog and its Preview twin are BOTH sidebar items, and Preview lives
+// under /admin/changelog — so prefix-matching lit up both.
+if (href === "/admin/changelog") {
+  return (
+    (currentPath === href || currentPath.startsWith(\`\${href}/\`)) &&
+    !currentPath.startsWith("/admin/changelog/preview")
+  );
+}`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "One template, two lifecycle stages — the preview IS the changelog, pre-deploy",
+        code: `flowchart LR
+    D1[("changelog_entries<br/>status: staged / shipped")]
+    D1 --> L{stage}
+    L -- "staged" --> P["/admin/changelog/preview<br/>the drafted presser"]
+    L -- "shipped" --> C["/admin/changelog<br/>the full record"]
+    P --> V["ChangelogListView<br/>SHARED"]
+    C --> V
+    V --> B24[changelog24<br/>release highlights]
+    V --> B3[changelog3<br/>release feed]
+    P2["/preview/[slug]"] --> EV["ChangelogEntryView<br/>SHARED"]
+    C2["/changelog/[slug]"] --> EV
+    EV --> MM[mermaidcn<br/>zoom + pan]
+    EV --> B19[changelog19<br/>developer changelog + code]
+    EV --> B21[changelog21<br/>Features / Fixes / Improvements]`,
+      },
+      {
+        caption: "An entry's lifecycle — reviewed as a proposal, then kept as the record",
+        code: `stateDiagram-v2
+    [*] --> staged : branch registers its changelog rows
+    staged --> staged : refine the presser (review loop)
+    staged --> shipped : PR deploys to prod
+    shipped --> [*] : permanent record
+
+    note right of staged
+      Visible at /admin/changelog/preview
+      Sign off BEFORE it lands.
+    end note
+    note right of shipped
+      Visible at /admin/changelog
+      Same template, so the notes you
+      approved are the notes that ship.
+    end note`,
+      },
+    ],
+  },
   "showroom-editing": {
     slug: "showroom-editing",
     problem:

@@ -43,6 +43,14 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/changelog-preview",
+    title: "Changelog preview — the presser, drafted in advance",
+    summary:
+      "The changelog list + viewport now render through the four beste blocks they were always meant to use, and gain a /preview twin: every proposed change, reviewable on the deployed worker before it lands. Diagrams render with the shadcn-registry mermaid (zoom/pan).",
+    date: "2026-07-16",
+    status: "staged",
+  },
+  {
     branch: "claude/showroom-stores-cleanup-775bb5",
     title: "Showroom stores cleanup (Phases 1–6) + persistent changelog",
     summary:
@@ -76,6 +84,27 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "changelog-preview",
+    branch: "claude/changelog-preview",
+    date: "2026-07-16",
+    tag: "Changelog",
+    area: "Changelog",
+    title: "Changelog preview — review the release notes before they ship",
+    summary:
+      "A /admin/changelog/preview twin that lists every proposed (staged) change and renders it through the exact same template the shipped changelog uses — so the presser you sign off on is literally what deploys. The changelog itself now uses the four beste blocks it was specced for, and diagrams render with the shadcn-registry mermaid (zoom/pan).",
+    status: "staged",
+    changes: [
+      { kind: "added", text: "/admin/changelog/preview — every proposed change, drafted as release notes before deploy" },
+      { kind: "added", text: "/admin/changelog/preview/[slug] — full proposal viewport: diagrams, developer changelog, recap" },
+      { kind: "added", text: "Sidebar: Changelog Preview under System" },
+      { kind: "changed", text: "Changelog list now renders changelog24 (release highlights) + changelog3 (release feed)" },
+      { kind: "changed", text: "Changelog viewport now renders changelog19 (developer changelog + code) + changelog21 (Features/Fixes/Improvements recap)" },
+      { kind: "changed", text: "Diagrams switched to the shadcn-registry mermaid (mermaidcn) with zoom/pan" },
+      { kind: "changed", text: "Changelog + preview share one view + one mapper, so the two can never drift" },
+      { kind: "fixed", text: "Sidebar no longer lights up Changelog and Changelog Preview at the same time" },
+    ],
+  },
   {
     id: "showroom-editing",
     branch: "claude/showroom-stores-cleanup-775bb5",

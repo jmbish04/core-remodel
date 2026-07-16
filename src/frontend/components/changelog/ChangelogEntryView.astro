@@ -1,0 +1,219 @@
+---
+/**
+ * Changelog entry viewport — shared by /admin/changelog/[slug] (shipped) and
+ * /admin/changelog/preview/[slug] (staged/proposed).
+ *
+ * Page order per the product spec — one entry seen from multiple angles:
+ *   1. Header + problem/approach (why this exists)
+ *   2. Diagrams (mermaidcn, zoom/pan) — the visuals
+ *   3. changelog19 → Developer Changelog + code snippets (ts/sql/…)
+ *   4. changelog21 → conclusion recap: Features / Fixes / Improvements
+ *   5. Migrations + files touched (the receipts)
+ *
+ * The blocks render server-side (presentational); only the mermaid diagrams
+ * hydrate (`client:visible`) since they render in the browser.
+ */
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
+import { Changelog19 } from "../../../components/beste/block/changelog19";
+import { Changelog21 } from "../../../components/beste/block/changelog21";
+import { MermaidCn } from "@/components/mermaidcn/MermaidCn";
+import { changelogEntries } from "@backend/db/schema/changelog/changelog";
+import { CHANGELOG, type ChangelogEntry } from "@/data/changelog";
+import {
+  detailHref,
+  resolveDetail,
+  toDevChangelog,
+  toDiagrams,
+  toRecap,
+  type ChangelogStage,
+} from "@/lib/changelog-blocks";
+
+interface Props {
+  slug: string;
+  stage: ChangelogStage;
+}
+
+const { slug, stage } = Astro.props;
+const staged = stage === "staged";
+
+// Source of truth is D1; fall back to the bundled seed (AGENTS.md changelog rule).
+let entry: ChangelogEntry | undefined;
+let detailJson: unknown;
+try {
+  const db = drizzle(Astro.locals.runtime.env.DB);
+  const [row] = await db
+    .select()
+    .from(changelogEntries)
+    .where(eq(changelogEntries.slug, slug))
+    .limit(1);
+  if (row) {
+    entry = {
+      id: row.slug,
+      branch: row.branch,
+      date: row.date,
+      tag: row.tag ?? undefined,
+      area: row.area,
+      title: row.title,
+      summary: row.summary,
+      status: row.status as ChangelogEntry["status"],
+      changes: (row.changesJson as ChangelogEntry["changes"]) ?? [],
+      migrations: (row.migrationsJson as string[]) ?? [],
+    };
+    detailJson = row.detailJson;
+  }
+} catch {
+  entry = undefined;
+}
+if (!entry) entry = CHANGELOG.find((e) => e.id === slug);
+
+const detail = entry ? resolveDetail(slug, detailJson) : undefined;
+const notFound = !entry;
+
+const dev = entry ? toDevChangelog(entry, detail) : null;
+const recap = entry ? toRecap(entry, stage) : null;
+const diagrams = toDiagrams(detail);
+const backHref = staged ? "/admin/changelog/preview" : "/admin/changelog";
+// An entry viewed from the wrong stage (e.g. a shipped row under /preview) still
+// renders, but we link across so the reader lands on the canonical one.
+const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.status) : null;
+---
+
+{
+  notFound ? (
+    <main class="container mx-auto max-w-3xl px-4 py-16">
+      <a href={backHref} class="text-xs text-muted-foreground underline underline-offset-4">
+        ← Back
+      </a>
+      <div class="mt-6 rounded-xl bg-card px-6 py-12 text-center ring-1 ring-border/40">
+        <p class="text-sm font-medium">No changelog entry at this slug.</p>
+        <p class="mt-1 font-mono text-xs text-muted-foreground">{slug}</p>
+      </div>
+    </main>
+  ) : (
+    <main class="container mx-auto max-w-5xl px-4 py-10">
+      <a href={backHref} class="text-xs text-muted-foreground underline underline-offset-4">
+        ← {staged ? "All proposed changes" : "All releases"}
+      </a>
+
+      <header class="mt-4">
+        <div class="flex flex-wrap items-center gap-2">
+          <span
+            class={`rounded-md px-2 py-0.5 text-[11px] font-medium ${
+              entry!.status === "shipped"
+                ? "bg-emerald-500/12 text-emerald-300"
+                : "bg-amber-500/12 text-amber-300"
+            }`}
+          >
+            {entry!.status === "shipped" ? "Shipped" : "Proposed — not yet deployed"}
+          </span>
+          {entry!.tag ? (
+            <span class="rounded-md bg-card px-2 py-0.5 text-[11px] text-muted-foreground ring-1 ring-border/40">
+              {entry!.tag}
+            </span>
+          ) : null}
+          <span class="rounded-md bg-card px-2 py-0.5 font-mono text-[11px] text-muted-foreground ring-1 ring-border/40">
+            {entry!.branch}
+          </span>
+          <span class="text-[11px] text-muted-foreground">{entry!.date}</span>
+        </div>
+        <h1 class="mt-3 text-2xl font-semibold tracking-tight">{entry!.title}</h1>
+        <p class="mt-1 max-w-3xl text-sm text-muted-foreground">{entry!.summary}</p>
+        {crossHref ? (
+          <p class="mt-2 text-xs text-muted-foreground">
+            This entry is {entry!.status}.{" "}
+            <a href={crossHref} class="underline underline-offset-4">
+              View it in the {entry!.status === "shipped" ? "changelog" : "preview"} →
+            </a>
+          </p>
+        ) : null}
+      </header>
+
+      {detail?.problem || detail?.approach ? (
+        <section class="mt-6 grid gap-4 md:grid-cols-2">
+          {detail?.problem ? (
+            <div class="rounded-xl bg-card p-5 ring-1 ring-rose-500/20">
+              <h2 class="text-xs font-semibold uppercase tracking-widest text-rose-300">Problem</h2>
+              <p class="mt-2 text-sm leading-relaxed text-muted-foreground">{detail.problem}</p>
+            </div>
+          ) : null}
+          {detail?.approach ? (
+            <div class="rounded-xl bg-card p-5 ring-1 ring-emerald-500/20">
+              <h2 class="text-xs font-semibold uppercase tracking-widest text-emerald-300">Approach</h2>
+              <p class="mt-2 text-sm leading-relaxed text-muted-foreground">{detail.approach}</p>
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
+      {diagrams.length > 0 ? (
+        <section class="mt-8">
+          <h2 class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+            Diagrams
+          </h2>
+          <p class="mt-1 text-xs text-muted-foreground">Scroll to zoom, drag to pan.</p>
+          <div class="mt-4 space-y-6">
+            {
+              /*
+               * client:load (not client:visible) on purpose. The mermaidcn
+               * renderer's pre-hydration state renders the literal text
+               * "No diagram code provided" — which is FALSE here (the code is
+               * passed as a prop) and is what a reader would see for any diagram
+               * still below the fold. Diagrams are the whole point of this page,
+               * so we hydrate eagerly rather than flash a wrong message. These
+               * are low-traffic admin pages; mermaid's weight is an acceptable
+               * trade for not lying to the reader.
+               */
+            }
+            {diagrams.map((d) => (
+              <div class="rounded-xl bg-card p-4 ring-1 ring-border/40">
+                <MermaidCn code={d.code} caption={d.caption} client:load />
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      <section class="mt-8 border-t border-border/40 pt-4">
+        <Changelog19 {...dev!} />
+      </section>
+
+      {detail?.migrations && detail.migrations.length > 0 ? (
+        <section class="mt-8">
+          <h2 class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+            Migrations
+          </h2>
+          <div class="mt-4 space-y-4">
+            {detail.migrations.map((m) => (
+              <figure class="overflow-hidden rounded-xl bg-card ring-1 ring-border/40">
+                <figcaption class="bg-muted/30 px-4 py-2 font-mono text-[11px] text-muted-foreground">
+                  {m.tag}
+                </figcaption>
+                <pre class="overflow-x-auto px-4 py-3 text-xs leading-relaxed"><code>{m.sql}</code></pre>
+              </figure>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {detail?.filesTouched && detail.filesTouched.length > 0 ? (
+        <section class="mt-8">
+          <h2 class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+            Files touched
+          </h2>
+          <div class="mt-3 flex flex-wrap gap-2">
+            {detail.filesTouched.map((f) => (
+              <code class="rounded-md bg-card px-2 py-1 font-mono text-[11px] text-muted-foreground ring-1 ring-border/40">
+                {f}
+              </code>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      <section class="mt-8 border-t border-border/40 pt-4">
+        <Changelog21 {...recap!} />
+      </section>
+    </main>
+  )
+}
