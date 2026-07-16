@@ -204,8 +204,13 @@ export async function scrapeUrl(env: Env, url: string): Promise<ScrapedPage> {
     hasScreenshot: !!result?.screenshot,
     linksType: Array.isArray(result?.links) ? `array[${result.links.length}]` : typeof result?.links,
     htmlLen: html.length,
-    strippedLen: stripHtml(html).length,
-    extractedLinks: extractLinksFromHtml(html, url).length,
+    // Only compute these when they'd actually tell us something. Both are
+    // regex passes over the FULL html of a heavy retail page; running them on
+    // every scrape burns Worker CPU to log a number we already know. When
+    // `markdown`/`links` came back, the answer is "the API gave it to us" —
+    // it's only their ABSENCE we're diagnosing.
+    strippedLen: markdown ? null : stripHtml(html).length,
+    extractedLinks: result?.links ? null : extractLinksFromHtml(html, url).length,
   }));
 
   return {
