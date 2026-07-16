@@ -175,8 +175,13 @@ export async function scrapeUrl(env: Env, url: string): Promise<ScrapedPage> {
 
   return {
     html,
-    markdown,
-    // Prefer the browser's Markdown; fall back to stripped HTML if a format was refused.
+    // MUST be undefined (not "") when absent. Callers do
+    // `scraped.markdown ?? scraped.text` and `??` does NOT fall through on an
+    // empty string — returning "" here silently discards the text fallback and
+    // hands the extractor a blank page (which is exactly what it did).
+    markdown: markdown || undefined,
+    // Prefer the browser's Markdown; fall back to stripped HTML if the account's
+    // Browser Rendering ignores/refuses the `formats` param.
     text: markdown || stripHtml(html),
     // `result.links` is currently never sent; keep honouring it if that ever changes.
     links: result.links ? normalizeLinks(result.links) : extractLinksFromHtml(html, url),
