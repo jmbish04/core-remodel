@@ -134,7 +134,13 @@
     // resolution (Gmail search + full-message fetch + embedding per company
     // is far too heavy to run 1,440x/day). A dedicated cron keeps the ingest
     // job isolated, easy to disable independently, and cheap.
-    "crons": ["0 14 * * *", "* * * * *", "15 */4 * * *"],
+    //
+    // "30 13 * * 1": showroom sale/clearance sweep — weekly, Monday. Same
+    // reasoning as Gmail: each sale page costs a Browser Rendering call plus an
+    // AI extraction, so this must not ride the per-minute tick. Weekly matches
+    // how often showrooms actually change a clearance page, and the sweep skips
+    // any page whose content hash is unchanged — so a quiet week is cheap.
+    "crons": ["0 14 * * *", "* * * * *", "15 */4 * * *", "30 13 * * 1"],
   },
   "kv_namespaces": [
     {

@@ -53,6 +53,13 @@ export interface ShowroomScrapeParams {
   ragUuid: string;
 }
 
+/**
+ * One `<a>` the crawl saw: the resolved href plus its anchor text. Anchor text
+ * is carried (not discarded) because it's what lets the sale-link classifier
+ * recognize an opaquely-pathed clearance page like `/collections/c-42`.
+ */
+type ScrapedLink = { href: string; text?: string };
+
 /** Workers-AI embedding model — mirrors the deep-sweep RAG pipeline. */
 const EMBED_MODEL = "@cf/baai/bge-large-en-v1.5" as const;
 

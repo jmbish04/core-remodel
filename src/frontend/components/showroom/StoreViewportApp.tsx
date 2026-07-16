@@ -19,9 +19,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  BadgePercent,
   CalendarPlus,
   CheckCircle2,
   Clock,
+  ExternalLink,
   Globe,
   ImagePlus,
   Link2,
@@ -179,6 +181,32 @@ interface MappedProduct {
   brandName: string | null;
 }
 
+/** One discounted item from a clearance snapshot (see ClearanceItem in D1). */
+interface ClearanceItem {
+  title: string;
+  brand: string | null;
+  category: string | null;
+  originalPrice: number | null;
+  salePrice: number | null;
+  discountPercent: number | null;
+  dealLabel: string | null;
+  url: string | null;
+  notes: string | null;
+}
+
+/** A current clearance snapshot for this store, from GET /api/showroom-sales/store/:id. */
+interface StoreSale {
+  id: number;
+  sourceUrl: string;
+  capturedAt: string | null;
+  details: {
+    items: ClearanceItem[];
+    saleHeadline: string | null;
+    saleEndsText: string | null;
+    summary: string;
+  };
+}
+
 interface NoteRow {
   id: number;
   title: string | null;
@@ -281,6 +309,89 @@ function HeroBanner({
           {overlay}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Clearance alert — the loud, hard-to-miss banner for a showroom that currently
+ * has something marked down. Only rendered when the weekly sweep found actual
+ * discounted items (a sale page that exists but lists nothing produces an empty
+ * snapshot, which deliberately clears this instead of showing a stale sale).
+ *
+ * Shows the top few items inline so the alert is actionable at a glance rather
+ * than just "there's a sale" — with a deep link to the store's own sale page and
+ * a way through to the full /admin/shopping/sales board.
+ */
+function ClearanceAlert({ sales }: { sales: StoreSale[] }) {
+  const items = sales.flatMap((s) => s.details.items);
+  if (items.length === 0) return null;
+
+  const headline = sales.find((s) => s.details.saleHeadline)?.details.saleHeadline ?? null;
+  const endsText = sales.find((s) => s.details.saleEndsText)?.details.saleEndsText ?? null;
+  const primaryUrl = sales[0]?.sourceUrl ?? null;
+  // Lead with the deepest discounts — that's what makes the alert worth reading.
+  const top = [...items]
+    .sort((a, b) => (b.discountPercent ?? 0) - (a.discountPercent ?? 0))
+    .slice(0, 3);
+
+  return (
+    <div className="mt-4 rounded-lg bg-amber-500/10 p-3 ring-1 ring-amber-500/30">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-amber-300">
+          <BadgePercent className="size-3" />
+          On sale now
+        </span>
+        <span className="text-sm font-medium text-amber-200">
+          {headline ?? `${items.length} item${items.length === 1 ? "" : "s"} marked down`}
+        </span>
+        {endsText ? (
+          <span className="text-xs text-amber-400/80">· {endsText}</span>
+        ) : null}
+      </div>
+
+      <ul className="mt-2 space-y-1">
+        {top.map((item, i) => (
+          <li
+            key={`${item.title}-${i}`}
+            className="flex items-baseline justify-between gap-3 text-xs"
+          >
+            <span className="min-w-0 truncate text-muted-foreground">
+              {item.brand ? <span className="text-foreground">{item.brand} </span> : null}
+              {item.title}
+            </span>
+            <span className="shrink-0 tabular-nums text-amber-300">
+              {item.discountPercent != null
+                ? `${Math.round(item.discountPercent)}% off`
+                : item.dealLabel ?? ""}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+        {primaryUrl ? (
+          <a
+            href={primaryUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 font-medium text-amber-300 hover:text-amber-200"
+          >
+            View their sale page <ExternalLink className="size-3" />
+          </a>
+        ) : null}
+        <a
+          href="/admin/shopping/sales"
+          className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+        >
+          All clearance <ArrowRight className="size-3" />
+        </a>
+        {items.length > top.length ? (
+          <span className="text-muted-foreground/70">
+            +{items.length - top.length} more
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -411,6 +522,8 @@ export function StoreViewportApp({
   const [notes, setNotes] = useState<NoteRow[]>([]);
   const [photos, setPhotos] = useState<ShowroomPhoto[]>([]);
   const [contacts, setContacts] = useState<ContactRow[]>([]);
+  // Current clearance for this store (empty when nothing is on sale).
+  const [sales, setSales] = useState<StoreSale[]>([]);
 
   // Google Places gallery photos (hero banner source + the Photos section's
   // "From Google Places" collection + theater lightbox). Distinct from the
@@ -521,6 +634,16 @@ export function StoreViewportApp({
     }
   }, [id]);
 
+  const loadSales = useCallback(async () => {
+    try {
+      const data = await api<{ sales: StoreSale[] }>(`/api/showroom-sales/store/${id}`);
+      setSales(data.sales);
+    } catch (e) {
+      // Non-fatal: no clearance alert is a fine degraded state for the page.
+      console.error("[store/sales]", e);
+    }
+  }, [id]);
+
   const deleteGalleryPhoto = useCallback(async (photoId: number) => {
     try {
       const res = await fetch(`/api/showroom-stores/${id}/photos-gallery/${photoId}`, {
@@ -560,7 +683,16 @@ export function StoreViewportApp({
     void loadPhotos();
     void loadContacts();
     void loadGalleryPhotos();
-  }, [loadStore, loadMappedProducts, loadNotes, loadPhotos, loadContacts, loadGalleryPhotos]);
+    void loadSales();
+  }, [
+    loadStore,
+    loadMappedProducts,
+    loadNotes,
+    loadPhotos,
+    loadContacts,
+    loadGalleryPhotos,
+    loadSales,
+  ]);
 
   // ── Scrape status: mount fetch + poll while in-flight ─────────────────────
   //
@@ -1051,6 +1183,9 @@ export function StoreViewportApp({
                 </p>
               </div>
             ) : null}
+
+            {/* Clearance alert — only when the sweep found live discounts. */}
+            <ClearanceAlert sales={sales} />
 
             {/* Contact row — click-to-call + Globe + social profiles from D1. */}
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[13px]">
