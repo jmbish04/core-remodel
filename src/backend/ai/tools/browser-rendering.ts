@@ -173,6 +173,25 @@ export async function scrapeUrl(env: Env, url: string): Promise<ScrapedPage> {
   const html = result.content ?? "";
   const markdown = result.markdown ?? "";
 
+  // TEMPORARY DIAGNOSTIC (remove once the response shape is pinned down).
+  // Two fixes based on the documented shape (#139 result.content, #142
+  // markdown:undefined) both failed to produce content in prod, so the docs and
+  // reality disagree somewhere. Log what the API ACTUALLY returns instead of
+  // guessing a third time.
+  console.log("[br:snapshot:diag]", JSON.stringify({
+    url,
+    topLevelKeys: Object.keys(payload ?? {}),
+    resultType: typeof result,
+    resultKeys: result && typeof result === "object" ? Object.keys(result) : null,
+    contentLen: typeof result?.content === "string" ? result.content.length : null,
+    markdownLen: typeof result?.markdown === "string" ? result.markdown.length : null,
+    hasScreenshot: !!result?.screenshot,
+    linksType: Array.isArray(result?.links) ? `array[${result.links.length}]` : typeof result?.links,
+    htmlLen: html.length,
+    strippedLen: stripHtml(html).length,
+    extractedLinks: extractLinksFromHtml(html, url).length,
+  }));
+
   return {
     html,
     // MUST be undefined (never "") when absent. Every caller does
