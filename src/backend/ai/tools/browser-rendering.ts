@@ -127,11 +127,27 @@ export async function scrapeUrl(env: Env, url: string): Promise<ScrapedPage> {
   const response = await fetch(`${base}/snapshot`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ url, formats: ["content", "screenshot", "markdown"] }),
-    // Bound the call so a hung origin can't stall a workflow step forever. 60s,
-    // NOT the ~10s you'd use for a plain API: this is a real browser rendering a
-    // JS-heavy retail site, where 10s would time out exactly the pages we most
-    // need and silently reproduce the blank-page bug this function just fixed.
+    body: JSON.stringify({
+      url,
+      formats: ["content", "screenshot", "markdown"],
+      // THE actual fix. `waitUntil` defaults to `domcontentloaded`, which fires
+      // BEFORE the load event and long before client-side JS renders — so we were
+      // capturing the bare SPA shell: real nav <a href>s (which is why link
+      // discovery worked) but ~150 chars of text (which is why every extraction
+      // saw a blank page). Docs: "For pages that rely on JavaScript to render
+      // content, use networkidle0 or networkidle2".
+      //
+      // networkidle2 (<=2 connections idle 500ms) over networkidle0 (zero): retail
+      // sites keep analytics/chat/pixel sockets open that never fully idle, so
+      // networkidle0 would burn the full timeout on exactly the sites we need.
+      gotoOptions: { waitUntil: "networkidle2", timeout: GOTO_TIMEOUT_MS },
+      // Full-page, not viewport-only. Never set before, so every stored
+      // "fullpage" screenshot was actually just the fold.
+      screenshotOptions: { fullPage: true },
+      viewport: { width: 1280, height: 720 },
+    }),
+    // Must sit ABOVE Browser Run's own timers (goto <=60s, actionTimeout <=5min)
+    // or we'd preempt them and turn a slow render into a hard failure.
     signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS),
   });
 
@@ -210,8 +226,15 @@ export async function scrapeUrl(env: Env, url: string): Promise<ScrapedPage> {
   };
 }
 
-/** Upper bound for one /snapshot render. Generous — a real browser, not an API. */
-const SNAPSHOT_TIMEOUT_MS = 60_000;
+/** Page-load budget handed to Browser Run. Docs cap goToOptions.timeout at 60s. */
+const GOTO_TIMEOUT_MS = 45_000;
+
+/**
+ * Our own fetch bound. Deliberately ABOVE Browser Run's internal timers
+ * (goto <=60s + action time) so the API gets to fail on its own terms with a
+ * real error instead of us aborting mid-render.
+ */
+const SNAPSHOT_TIMEOUT_MS = 120_000;
 
 /** `<a href="...">text</a>` — tolerant of attribute order and multi-line tags. */
 const HREF_RE = /<a\b[^>]*?\shref\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
