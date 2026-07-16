@@ -39,6 +39,15 @@ export function isPathActive(currentPath: string, href: string): boolean {
   // The Shopping hub has its own sub-pages listed in the sidebar; exact-match so
   // a sub-page (e.g. /admin/shopping/showrooms) doesn't also light up the hub.
   if (href === "/admin/shopping") return currentPath === "/admin/shopping";
+  // Changelog and its Preview twin are both sidebar items, and Preview lives
+  // UNDER /admin/changelog — so prefix-matching would light up both. Scope
+  // Changelog to itself + its own [slug] pages, never the /preview subtree.
+  if (href === "/admin/changelog") {
+    return (
+      (currentPath === href || currentPath.startsWith(`${href}/`)) &&
+      !currentPath.startsWith("/admin/changelog/preview")
+    );
+  }
   return currentPath === href || currentPath.startsWith(`${href}/`);
 }
 

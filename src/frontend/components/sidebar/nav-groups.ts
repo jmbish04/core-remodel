@@ -101,6 +101,9 @@ export const NAV_GROUPS: NavGroupDef[] = [
       { href: "/admin", label: "Analytics" },
       { href: "/admin/plans", label: "Plans" },
       { href: "/admin/changelog", label: "Changelog" },
+      // The presser drafted in advance: what open branches WILL ship, reviewable
+      // on the deployed worker before it lands.
+      { href: "/admin/changelog/preview", label: "Changelog Preview" },
       { href: "/admin/studio", label: "Studio" },
       { href: "/admin/mcp-ops", label: "MCP Ops" },
       { href: "/admin/integrations/usage", label: "Integrations Usage" },

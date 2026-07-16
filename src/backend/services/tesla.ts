@@ -12,11 +12,13 @@
  *   2. `getLocation(env)` — read the car's current coordinates. Used by the
  *      park webhook to figure out which showroom the car stopped at.
  *
- * Config comes from three secret bindings (all optional — when unset the drive
- * app simply hides the Tesla button and the webhook no-ops):
- *   - `TESSIE_TOKEN`         Tessie API bearer token
- *   - `TESSIE_VIN`           which vehicle to command
- *   - `TESLA_WEBHOOK_SECRET` shared secret the inbound webhook must present
+ * Config comes from Secrets Store bindings, read through the dedicated getters in
+ * `utils/secrets.ts` (all optional — when unset the drive app simply hides the
+ * Tesla button and the webhook no-ops):
+ *   - `TESSIE_API_TOKEN`  Tessie hosted Fleet API bearer token → getTessieToken()
+ *   - `TESLA_BETSY_VIN`   which vehicle to command             → getTeslaVin()
+ *   - `WORKER_API_KEY`    shared key the inbound webhook/telemetry must present
+ *                         (no dedicated Tesla webhook secret)  → getWorkerApiKey()
  *
  * IMPORTANT LIMITATION (surfaced to the user, not a bug): neither the Tesla
  * Fleet API nor Tessie can force-open a web page in the car's browser. The
@@ -121,7 +123,9 @@ export interface SendNavResult {
  */
 export async function sendNavigation(env: Env, dest: string): Promise<SendNavResult> {
   const cfg = await getTessieConfig(env);
-  if (!cfg) return { ok: false, error: "Tessie is not configured (TESSIE_TOKEN / TESSIE_VIN)." };
+  if (!cfg) {
+    return { ok: false, error: "Tessie is not configured (TESSIE_API_TOKEN / TESLA_BETSY_VIN)." };
+  }
   const value = dest.trim();
   if (!value) return { ok: false, error: "Empty destination." };
   try {

@@ -1,0 +1,81 @@
+---
+/**
+ * Changelog list view — shared by /admin/changelog (shipped) and
+ * /admin/changelog/preview (staged/proposed).
+ *
+ * Renders the two list blocks per the product spec:
+ *   changelog24 → release highlights (quick summary up top)
+ *   changelog3  → release feed (every entry for the stage)
+ *
+ * Both blocks are presentational, so they render server-side with no hydration.
+ */
+import { Changelog24 } from "../../../components/beste/block/changelog24";
+import { Changelog3 } from "../../../components/beste/block/changelog3";
+import { loadChangelog, toFeed, toHighlights, type ChangelogStage } from "@/lib/changelog-blocks";
+
+interface Props {
+  stage: ChangelogStage;
+}
+
+const { stage } = Astro.props;
+const staged = stage === "staged";
+
+// `runtime?.env` — the Cloudflare runtime is absent during a static build / some
+// local-test setups; loadChangelog falls back to the bundled seed rather than
+// letting a TypeError 500 the page.
+const { entries, source } = await loadChangelog(Astro.locals.runtime?.env, stage);
+const highlights = toHighlights(entries, stage);
+const feed = toFeed(entries, stage);
+---
+
+<main class="container mx-auto max-w-5xl px-4 py-10">
+  <header class="mb-8 flex flex-wrap items-start justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-semibold tracking-tight">
+        {staged ? "Changelog preview" : "Changelog"}
+      </h1>
+      <p class="mt-1 max-w-2xl text-sm text-muted-foreground">
+        {
+          staged
+            ? "The presser, drafted in advance. Every change proposed by an open branch — reviewable here on the deployed worker before any of it actually lands."
+            : "The full record, newest first. Each entry is badged Shipped or Proposed."
+        }
+      </p>
+    </div>
+    <div class="flex items-center gap-2">
+      <span class="rounded-md bg-card px-2 py-1 font-mono text-[11px] text-muted-foreground ring-1 ring-border/40">
+        {source}
+      </span>
+      <a
+        href={staged ? "/admin/changelog" : "/admin/changelog/preview"}
+        class="rounded-md bg-card px-3 py-1 text-xs text-muted-foreground ring-1 ring-border/40 transition-colors hover:bg-muted/40"
+      >
+        {staged ? "View shipped changelog →" : "View proposed changes →"}
+      </a>
+    </div>
+  </header>
+
+  {
+    entries.length === 0 ? (
+      <div class="rounded-xl bg-card px-6 py-16 text-center ring-1 ring-border/40">
+        <p class="text-sm font-medium">
+          {staged ? "Nothing proposed right now." : "No changelog entries yet."}
+        </p>
+        <p class="mt-1 text-xs text-muted-foreground">
+          {
+            staged
+              ? "Proposed changes appear here as soon as a branch registers its changelog rows."
+              : "Entries appear here as branches register their changelog rows."
+          }
+        </p>
+      </div>
+    ) : (
+      <>
+        <Changelog24 {...highlights} />
+        <div class="mt-4 border-t border-border/40 pt-4">
+          <Changelog3 {...feed} />
+        </div>
+      </>
+    )
+  }
+</main>
