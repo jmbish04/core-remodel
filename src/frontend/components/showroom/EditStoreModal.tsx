@@ -1,12 +1,30 @@
 /**
  * @fileoverview EditStoreModal — full-field editor for a showroom store.
  *
- * Dialog-based form grouped into tabbed sections (Basic, Contact, Location,
- * Operational, Media, POC). Pre-populates from the current store data,
- * submits via `PUT /api/showroom-stores/:id`.
+ * Dialog-based form grouped into tabs, pre-populated from the current store and
+ * submitted via `PUT /api/showroom-stores/:id`.
+ *
+ * The field set MIRRORS the intake form (`ShowroomIntakeApp`) — both write the
+ * same `createStoreSchema` contract, so anything intake can set must be
+ * editable here. To keep the two from drifting again this reuses intake's own
+ * editors rather than reimplementing them:
+ *
+ *   - `LinksField`  → `links[]`      (website + socials + sale pages)
+ *   - `HoursEditor` → `hoursJson`    (structured weekly hours)
+ *   - `FlagsEditor` → the five trait booleans
+ *
+ * Fields the server does NOT accept are deliberately absent. Editing them used
+ * to LOOK like it worked: the old modal posted flat `websiteUrl` /
+ * `instagramUrl` / `facebookUrl` / `pinterestUrl` columns that migration 0109
+ * dropped, and `createStoreSchema.partial().parse()` silently strips unknown
+ * keys — so the request 200'd, the toast said "Showroom updated", and the edit
+ * was thrown away. Those URLs now go through `links[]`, the same as intake.
+ *
+ * `links` and `hoursJson` are REPLACE-ALL on the server, so they're only sent
+ * when actually edited; every other field is sent only when changed.
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, Pencil } from "lucide-react";
 import { toast } from "sonner";
 
@@ -29,12 +47,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { cn } from "@/lib/utils";
+
+import { FlagsEditor, type ShowroomFlags } from "./intake/FlagsEditor";
+import { HoursEditor } from "./intake/HoursEditor";
+import { LinksField, asLinkType, type IntakeLink } from "./intake/LinksField";
+import type { HoursJson } from "./intake/hours-types";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
+
+/** A link row as served by GET /api/showroom-stores/:id. */
+export interface EditableStoreLink {
+  id: number;
+  url: string;
+  type: string;
+  urlNotes: string | null;
+}
 
 /** Minimal store shape — we accept any keys from the API response. */
 export interface EditableStore {
@@ -44,15 +73,17 @@ export interface EditableStore {
   pricePoint?: string | null;
   phoneNumber?: string | null;
   emailAddress?: string | null;
-  websiteUrl?: string | null;
-  instagramUrl?: string | null;
-  facebookUrl?: string | null;
-  pinterestUrl?: string | null;
   iconCfImagesUrl?: string | null;
   heroImageCfImagesUrl?: string | null;
   locationAddress?: string | null;
-  zipCode?: string | null;
+  locationStreetNumber?: string | null;
+  locationStreetName?: string | null;
+  locationCity?: string | null;
+  locationState?: string | null;
+  locationZipCode?: string | null;
   googleMapsLink?: string | null;
+  hoursJson?: HoursJson | null;
+  links?: EditableStoreLink[];
   isAppointmentOnly?: boolean;
   isFlagshipLocation?: boolean;
   isLargeSelection?: boolean;
@@ -67,6 +98,7 @@ export interface EditableStore {
   distanceFromSfTime?: string | null;
   distanceFromSfMiles?: string | null;
   locationNotes?: string | null;
+  reviewSummary?: string | null;
   [key: string]: unknown;
 }
 
@@ -86,12 +118,6 @@ interface TextField {
   placeholder?: string;
 }
 
-interface BoolField {
-  key: string;
-  label: string;
-  description?: string;
-}
-
 const BASIC_FIELDS: TextField[] = [
   { key: "name", label: "Name", placeholder: "Showroom name" },
   { key: "description", label: "Description", type: "textarea", placeholder: "Brief description…" },
@@ -100,18 +126,28 @@ const BASIC_FIELDS: TextField[] = [
   { key: "targetDemographic", label: "Target Demographic", placeholder: "e.g. designers, homeowners" },
 ];
 
+/**
+ * Contact fields that ARE columns on `showroom_stores`. The website + social
+ * URLs are NOT here — they live in `showroom_store_links` and are edited via
+ * LinksField on this same tab.
+ */
 const CONTACT_FIELDS: TextField[] = [
   { key: "phoneNumber", label: "Phone", placeholder: "+1 (xxx) xxx-xxxx" },
   { key: "emailAddress", label: "Email", placeholder: "contact@showroom.com" },
-  { key: "websiteUrl", label: "Website", type: "url", placeholder: "https://…" },
-  { key: "instagramUrl", label: "Instagram", type: "url", placeholder: "https://instagram.com/…" },
-  { key: "facebookUrl", label: "Facebook", type: "url", placeholder: "https://facebook.com/…" },
-  { key: "pinterestUrl", label: "Pinterest", type: "url", placeholder: "https://pinterest.com/…" },
 ];
 
+/**
+ * `locationZipCode` (not the legacy `zipCode` the old modal wrote) plus the
+ * granular parts the place-import backfill populates, so a hand correction can
+ * reach the same columns Google's import does.
+ */
 const LOCATION_FIELDS: TextField[] = [
   { key: "locationAddress", label: "Address", placeholder: "Full street address" },
-  { key: "zipCode", label: "Zip Code", placeholder: "94102" },
+  { key: "locationStreetNumber", label: "Street Number", placeholder: "126" },
+  { key: "locationStreetName", label: "Street Name", placeholder: "Colby St" },
+  { key: "locationCity", label: "City", placeholder: "San Francisco" },
+  { key: "locationState", label: "State", placeholder: "CA" },
+  { key: "locationZipCode", label: "Zip Code", placeholder: "94102" },
   { key: "googleMapsLink", label: "Google Maps Link", type: "url", placeholder: "https://maps.google.com/…" },
   { key: "distanceFromSfTime", label: "Drive Time from SF", placeholder: "e.g. 45 min" },
   { key: "distanceFromSfMiles", label: "Distance from SF", placeholder: "e.g. 30 miles" },
@@ -129,62 +165,109 @@ const POC_FIELDS: TextField[] = [
   { key: "mainPocEmailAddress", label: "Email", placeholder: "jane@showroom.com" },
 ];
 
-const OPERATIONAL_BOOLS: BoolField[] = [
-  { key: "isAppointmentOnly", label: "Appointment Only", description: "Requires scheduling a visit" },
-  { key: "isFlagshipLocation", label: "Flagship Location", description: "Primary/flagship showroom" },
-  { key: "isLargeSelection", label: "Large Selection", description: "Warehouse-scale inventory" },
-  { key: "isBespoke", label: "Bespoke", description: "Hand-selected or made-to-order" },
-  { key: "isTradeRepRequired", label: "Trade Rep Required", description: "Requires trade introduction" },
+const REVIEW_FIELDS: TextField[] = [
+  {
+    key: "reviewSummary",
+    label: "AI Review Summary",
+    type: "textarea",
+    placeholder: "Summary of what reviewers say…",
+  },
 ];
+
+const ALL_TEXT_FIELDS = [
+  ...BASIC_FIELDS,
+  ...CONTACT_FIELDS,
+  ...LOCATION_FIELDS,
+  ...MEDIA_FIELDS,
+  ...POC_FIELDS,
+  ...REVIEW_FIELDS,
+];
+
+const FLAG_KEYS: (keyof ShowroomFlags)[] = [
+  "isAppointmentOnly",
+  "isFlagshipLocation",
+  "isLargeSelection",
+  "isBespoke",
+  "isTradeRepRequired",
+];
+
+// ─── Helpers ────────────────────────────────────────────────────────────────
+
+/** The store's links mapped into the LinksField row shape. */
+function toIntakeLinks(store: EditableStore): IntakeLink[] {
+  return (store.links ?? []).map((l) => ({ url: l.url, type: asLinkType(l.type) }));
+}
+
+/** Compare two link sets by url+type, order-sensitive (the editor preserves order). */
+function linksEqual(a: IntakeLink[], b: IntakeLink[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((l, i) => l.url === b[i].url && l.type === b[i].type);
+}
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export function EditStoreModal({ store, open, onOpenChange, onSaved }: EditStoreModalProps) {
   const [form, setForm] = useState<Record<string, unknown>>({});
+  const [links, setLinks] = useState<IntakeLink[]>([]);
+  const [hours, setHours] = useState<HoursJson | null>(null);
+  const [hoursTouched, setHoursTouched] = useState(false);
   const [saving, setSaving] = useState(false);
 
-  // Populate form from store when modal opens.
+  const originalLinks = useMemo(() => toIntakeLinks(store), [store]);
+
+  // Populate every editor from the store when the modal opens.
   useEffect(() => {
-    if (open) {
-      const initial: Record<string, unknown> = {};
-      const allFields = [...BASIC_FIELDS, ...CONTACT_FIELDS, ...LOCATION_FIELDS, ...MEDIA_FIELDS, ...POC_FIELDS];
-      for (const f of allFields) {
-        initial[f.key] = store[f.key] ?? "";
-      }
-      for (const f of OPERATIONAL_BOOLS) {
-        initial[f.key] = store[f.key] ?? false;
-      }
-      // Price point is a select, handle separately.
-      initial.pricePoint = store.pricePoint ?? "";
-      setForm(initial);
-    }
-  }, [open, store]);
+    if (!open) return;
+    const initial: Record<string, unknown> = {};
+    for (const f of ALL_TEXT_FIELDS) initial[f.key] = store[f.key] ?? "";
+    for (const k of FLAG_KEYS) initial[k] = store[k] ?? false;
+    initial.pricePoint = store.pricePoint ?? "";
+    setForm(initial);
+    setLinks(toIntakeLinks(store));
+    setHours(store.hoursJson ?? null);
+    setHoursTouched(false);
+  }, [open, store, originalLinks]);
 
   const set = useCallback((key: string, value: unknown) => {
     setForm((prev) => ({ ...prev, [key]: value }));
   }, []);
 
+  const flags = useMemo<ShowroomFlags>(
+    () => ({
+      isAppointmentOnly: (form.isAppointmentOnly as boolean) ?? false,
+      isFlagshipLocation: (form.isFlagshipLocation as boolean) ?? false,
+      isLargeSelection: (form.isLargeSelection as boolean) ?? false,
+      isBespoke: (form.isBespoke as boolean) ?? false,
+      isTradeRepRequired: (form.isTradeRepRequired as boolean) ?? false,
+    }),
+    [form],
+  );
+
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
       const body: Record<string, unknown> = {};
-      // Only include fields that changed.
-      const allTextFields = [...BASIC_FIELDS, ...CONTACT_FIELDS, ...LOCATION_FIELDS, ...MEDIA_FIELDS, ...POC_FIELDS];
-      for (const f of allTextFields) {
-        const val = form[f.key] as string;
-        const original = (store[f.key] as string) ?? "";
-        if (val !== original) {
-          body[f.key] = val || null; // empty string → null
-        }
+
+      for (const f of ALL_TEXT_FIELDS) {
+        const val = ((form[f.key] as string) ?? "").trim();
+        const original = ((store[f.key] as string) ?? "").trim();
+        if (val !== original) body[f.key] = val || null; // empty string → null
       }
-      for (const f of OPERATIONAL_BOOLS) {
-        const val = form[f.key] as boolean;
-        const original = (store[f.key] as boolean) ?? false;
-        if (val !== original) body[f.key] = val;
+      for (const k of FLAG_KEYS) {
+        const val = (form[k] as boolean) ?? false;
+        if (val !== ((store[k] as boolean) ?? false)) body[k] = val;
       }
       if ((form.pricePoint || "") !== (store.pricePoint || "")) {
         body.pricePoint = (form.pricePoint as string) || null;
       }
+
+      // links + hoursJson are REPLACE-ALL server-side — only send them when
+      // actually edited, so an unrelated save can't wipe either.
+      const cleanLinks = links
+        .map((l) => ({ url: l.url.trim(), type: l.type }))
+        .filter((l) => l.url);
+      if (!linksEqual(cleanLinks, originalLinks)) body.links = cleanLinks;
+      if (hoursTouched && hours) body.hoursJson = hours;
 
       if (Object.keys(body).length === 0) {
         toast.info("No changes to save.");
@@ -212,7 +295,7 @@ export function EditStoreModal({ store, open, onOpenChange, onSaved }: EditStore
     } finally {
       setSaving(false);
     }
-  }, [form, store, onSaved, onOpenChange]);
+  }, [form, links, hours, hoursTouched, originalLinks, store, onSaved, onOpenChange]);
 
   const renderTextField = (field: TextField) => {
     const value = (form[field.key] as string) ?? "";
@@ -260,6 +343,7 @@ export function EditStoreModal({ store, open, onOpenChange, onSaved }: EditStore
             <TabsTrigger value="basic" className="text-xs">Basic</TabsTrigger>
             <TabsTrigger value="contact" className="text-xs">Contact</TabsTrigger>
             <TabsTrigger value="location" className="text-xs">Location</TabsTrigger>
+            <TabsTrigger value="hours" className="text-xs">Hours</TabsTrigger>
             <TabsTrigger value="ops" className="text-xs">Ops</TabsTrigger>
             <TabsTrigger value="media" className="text-xs">Media</TabsTrigger>
             <TabsTrigger value="poc" className="text-xs">POC</TabsTrigger>
@@ -286,31 +370,39 @@ export function EditStoreModal({ store, open, onOpenChange, onSaved }: EditStore
                   </SelectContent>
                 </Select>
               </div>
+              {REVIEW_FIELDS.map(renderTextField)}
             </TabsContent>
 
             <TabsContent value="contact" className="space-y-3 px-5 pb-2 pt-3">
               {CONTACT_FIELDS.map(renderTextField)}
+              <div className="space-y-1.5 border-t border-border/40 pt-3">
+                <Label className="text-xs text-muted-foreground">Links</Label>
+                <p className="text-[11px] text-muted-foreground/70">
+                  Website + social profiles. The hero builds its icon row from these.
+                </p>
+                <LinksField value={links} onChange={setLinks} />
+              </div>
             </TabsContent>
 
             <TabsContent value="location" className="space-y-3 px-5 pb-2 pt-3">
               {LOCATION_FIELDS.map(renderTextField)}
             </TabsContent>
 
+            <TabsContent value="hours" className="space-y-3 px-5 pb-2 pt-3">
+              <HoursEditor
+                value={hours}
+                onChange={(h) => {
+                  setHours(h);
+                  setHoursTouched(true);
+                }}
+              />
+            </TabsContent>
+
             <TabsContent value="ops" className="space-y-3 px-5 pb-2 pt-3">
-              {OPERATIONAL_BOOLS.map((field) => (
-                <div key={field.key} className="flex items-center justify-between gap-3 rounded-md border border-border/40 bg-muted/30 p-3">
-                  <div>
-                    <p className="text-sm font-medium">{field.label}</p>
-                    {field.description && (
-                      <p className="text-xs text-muted-foreground">{field.description}</p>
-                    )}
-                  </div>
-                  <Switch
-                    checked={(form[field.key] as boolean) ?? false}
-                    onCheckedChange={(v) => set(field.key, v)}
-                  />
-                </div>
-              ))}
+              <FlagsEditor
+                value={flags}
+                onChange={(v) => setForm((prev) => ({ ...prev, ...v }))}
+              />
             </TabsContent>
 
             <TabsContent value="media" className="space-y-3 px-5 pb-2 pt-3">

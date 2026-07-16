@@ -866,7 +866,11 @@ async function upsertBrandMapping(
 
   // Case-insensitive lookup on brands.name.
   const [existing] = await db
-    .select({ id: brands.id, websiteUrl: brands.websiteUrl })
+    .select({
+      id: brands.id,
+      iconCfImagesUrl: brands.iconCfImagesUrl,
+      websiteUrl: brands.websiteUrl,
+    })
     .from(brands)
     .where(sql`lower(${brands.name}) = lower(${name})`)
     .limit(1);
@@ -880,6 +884,32 @@ async function upsertBrandMapping(
     // overwrite — an existing value may have been set by enrichment or a human.
     if (websiteUrl && !existing.websiteUrl) {
       await db.update(brands).set({ websiteUrl }).where(eq(brands.id, brandId));
+    }
+
+    // Self-heal a missing icon. `enrichNewBrand` only runs on FIRST discovery,
+    // so a brand created before enrichment existed — or whose favicon fetch
+    // failed that one time — would render as a lettermark box forever, which is
+    // what makes the Brands & Products tile a wall of letters. Retry per scrape,
+    // fill-blanks: only when the icon is still missing.
+    //
+    // Prefer whatever website we now know (the one just backfilled above, else
+    // the stored one): hydrating from a URL is one cheap fetch. Falling back to
+    // full enrichment costs AI calls, so it honours the same `mayEnrich` budget
+    // as the new-brand path — a 137-brand scrape must not spend its budget
+    // re-enriching brands it already has.
+    const knownSite = existing.websiteUrl ?? websiteUrl;
+    if (!existing.iconCfImagesUrl) {
+      try {
+        if (knownSite) {
+          await faviconService.hydrateBrandIcon(env, brandId, knownSite);
+        } else if (mayEnrich) {
+          // No website anywhere — full enrichment discovers one, then hydrates.
+          await enrichNewBrand(env, brandId, name);
+          outcome = "enriched";
+        }
+      } catch (err) {
+        console.error(`showroom-scrape: icon backfill failed for "${name}"`, err);
+      }
     }
   } else {
     const [inserted] = await db

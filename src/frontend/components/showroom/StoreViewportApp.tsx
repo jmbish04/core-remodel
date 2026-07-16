@@ -112,6 +112,12 @@ interface StoreBrand {
   websiteUrl?: string | null;
   onlineRating?: number | null;
   pricePoint?: string | null;
+  /**
+   * CF Images delivery URLs for this brand's product/lifestyle photography,
+   * newest first (from `brand_images`). Drives the Brands & Products bento
+   * slideshow. Absent/empty when the brand research scrape hasn't captured any.
+   */
+  images?: string[];
 }
 
 /** A brand enriched with its per-showroom product count for the list cards. */
@@ -132,10 +138,13 @@ interface StoreDetail {
   pricePoint: string | null;
   phoneNumber: string | null;
   emailAddress: string | null;
+  /**
+   * Derived server-side from the store's first WEBSITE link. The socials the
+   * API also derives (instagramUrl / facebookUrl / pinterestUrl) are
+   * intentionally NOT modelled here — those columns are gone and the hero reads
+   * `links` directly, which is the only shape that can carry X / LinkedIn.
+   */
   websiteUrl: string | null;
-  instagramUrl: string | null;
-  facebookUrl: string | null;
-  pinterestUrl: string | null;
   iconCfImagesUrl: string | null;
   heroImageCfImagesUrl: string | null;
   scrapeStatus: ScrapeStatus;
@@ -1411,16 +1420,124 @@ function AngledBrandCard({
   );
 }
 
+/** How long each brand photo holds before the slideshow advances. */
+const SLIDESHOW_INTERVAL_MS = 3_500;
+
+/** One slide: a brand photo plus the brand it belongs to. */
+interface BrandSlide {
+  brandId: number;
+  brandName: string;
+  icon: string | null;
+  image: string;
+}
+
 /**
- * Angled, zoomed brand-logo collage — a hand-fanned spread of oversized logo
- * cards that straightens and breathes apart on tile hover, with a right-edge
- * fade + "+N" chip for overflow. Purely decorative preview for the Brands &
- * Products bento tile — no interactive children (the tile itself is the button).
+ * Flatten the brands into a slide list, INTERLEAVED by photo index so the
+ * slideshow alternates brands (A1, B1, C1, A2, B2 …) rather than showing six
+ * photos of one brand before moving on.
+ */
+function buildBrandSlides(brands: BrandWithCount[]): BrandSlide[] {
+  const withImages = brands.filter((b) => (b.images?.length ?? 0) > 0);
+  const deepest = Math.max(0, ...withImages.map((b) => b.images?.length ?? 0));
+  const slides: BrandSlide[] = [];
+  for (let i = 0; i < deepest; i++) {
+    for (const b of withImages) {
+      const image = b.images?.[i];
+      if (image) {
+        slides.push({ brandId: b.id, brandName: b.name, icon: b.iconCfImagesUrl, image });
+      }
+    }
+  }
+  return slides;
+}
+
+/**
+ * Cross-fading slideshow of real brand photography for the Brands & Products
+ * bento tile — the tile used to be a large, static wall of lettermarks, which
+ * read as empty. Photos come from `brand_images` (captured by the brand
+ * research scrape, served off CF Images); each slide is captioned with the
+ * owning brand's icon + name so the cycling doubles as brand discovery.
+ *
+ * Purely decorative — no interactive children, because the bento tile itself is
+ * the button. Pauses when the tab is hidden and respects prefers-reduced-motion
+ * (which pins it to the first slide rather than cycling).
+ */
+function BrandsPhotoSlideshow({ slides }: { slides: BrandSlide[] }) {
+  const [index, setIndex] = useState(0);
+  const [broken, setBroken] = useState<Set<string>>(() => new Set());
+
+  // Drop slides whose image 404s so a dead CF Images URL can't freeze the show.
+  const usable = useMemo(
+    () => slides.filter((s) => !broken.has(s.image)),
+    [slides, broken],
+  );
+
+  useEffect(() => {
+    if (usable.length <= 1) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    const id = setInterval(() => {
+      // Don't advance in a background tab — otherwise returning to the page
+      // shows a burst of catch-up transitions.
+      if (document.hidden) return;
+      setIndex((i) => (i + 1) % usable.length);
+    }, SLIDESHOW_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [usable.length]);
+
+  // The active index must stay in range as slides drop out.
+  const active = usable.length > 0 ? index % usable.length : 0;
+  const current = usable[active];
+  if (!current) return null;
+
+  return (
+    <div className="space-y-2" aria-hidden>
+      <div className="relative h-24 overflow-hidden rounded-lg bg-muted/50 ring-1 ring-border/40">
+        {usable.map((s, i) => (
+          <img
+            key={s.image}
+            src={s.image}
+            alt=""
+            loading="lazy"
+            onError={() => setBroken((prev) => new Set(prev).add(s.image))}
+            className={`absolute inset-0 size-full object-cover transition-opacity duration-1000 ease-out motion-reduce:transition-none ${
+              i === active ? "opacity-100" : "opacity-0"
+            }`}
+          />
+        ))}
+        {/* Bottom scrim keeps the brand caption legible over any photo. */}
+        <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-background/95 to-transparent" />
+        <div className="absolute inset-x-2 bottom-1.5 flex items-center gap-1.5">
+          <BrandCardIcon image={current.icon} name={current.brandName} size="xs" />
+          <span className="truncate text-[11px] font-medium text-foreground">
+            {current.brandName}
+          </span>
+          {usable.length > 1 ? (
+            <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+              {active + 1}/{usable.length}
+            </span>
+          ) : null}
+        </div>
+      </div>
+      <p className="flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors group-hover/tile:text-foreground">
+        Shop by brand
+        <ArrowRight className="size-3.5 transition-transform group-hover/tile:translate-x-0.5" />
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Preview for the Brands & Products bento tile. Prefers a cycling slideshow of
+ * real brand photography; falls back to the angled logo fan when no brand has
+ * usable images yet, and to a ghost fan when the store has no brands at all.
  */
 function BrandsTilePreview({ brands }: { brands: BrandWithCount[] }) {
+  const slides = useMemo(() => buildBrandSlides(brands), [brands]);
   const MAX = 5;
   const shown = brands.slice(0, MAX);
   const overflow = brands.length - shown.length;
+
+  if (slides.length > 0) return <BrandsPhotoSlideshow slides={slides} />;
 
   if (shown.length === 0) {
     // No brands linked yet — an inviting ghost fan instead of a bare tile.
@@ -1477,23 +1594,37 @@ function BrandsTilePreview({ brands }: { brands: BrandWithCount[] }) {
 // ─── Brand list card ────────────────────────────────────────────────────────────
 
 /** Leading brand icon tile for a list card, with a lettermark fallback. */
-function BrandCardIcon({ image, name }: { image: string | null; name: string }) {
+function BrandCardIcon({
+  image,
+  name,
+  size = "md",
+}: {
+  image: string | null;
+  name: string;
+  /** `xs` is the slideshow caption chip; `md` the brand list card. */
+  size?: "xs" | "md";
+}) {
   const [broken, setBroken] = useState(false);
   const showImage = Boolean(image) && !broken;
   const letter = name.trim().charAt(0).toUpperCase() || "?";
+  const box = size === "xs" ? "size-5 rounded" : "size-12 rounded-lg";
+  const pad = size === "xs" ? "p-0.5" : "p-1.5";
+  const text = size === "xs" ? "text-[9px]" : "text-base";
 
   return (
-    <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted ring-1 ring-border/40">
+    <span
+      className={`flex ${box} shrink-0 items-center justify-center overflow-hidden bg-muted ring-1 ring-border/40`}
+    >
       {showImage ? (
         <img
           src={image ?? undefined}
           alt={`${name} logo`}
           loading="lazy"
           onError={() => setBroken(true)}
-          className="size-full object-contain p-1.5"
+          className={`size-full object-contain ${pad}`}
         />
       ) : (
-        <span className="text-base font-semibold text-muted-foreground">{letter}</span>
+        <span className={`${text} font-semibold text-muted-foreground`}>{letter}</span>
       )}
     </span>
   );

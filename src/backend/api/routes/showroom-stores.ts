@@ -8,7 +8,7 @@
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import type { Context } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, desc, asc, and, like, inArray, sql } from "drizzle-orm";
+import { eq, desc, asc, and, like, inArray, ne, sql } from "drizzle-orm";
 import { getAgentByName } from "agents";
 
 import {
@@ -44,6 +44,7 @@ import {
   productShowroomPhotos,
 } from "@backend/db/schema/showroom/index";
 import {
+  brandImages,
   brands,
   showroomBrandMappings,
 } from "@backend/db/schema/brands/index";
@@ -139,6 +140,53 @@ const linkInputSchema = z.object({
   type: z.enum(SHOWROOM_LINK_TYPES),
   urlNotes: z.string().optional().nullable(),
 });
+
+/**
+ * The `brand_images.imageKind` values worth showing in the Brands & Products
+ * slideshow. `logo` is redundant with the brand icon, and `catalog`/`unknown`
+ * are usually spec-sheet scans rather than something inviting to look at.
+ */
+const SLIDESHOW_IMAGE_KINDS = ["product", "lifestyle"] as const;
+
+/** Per-brand slideshow cap — enough to cycle, few enough to keep the payload small. */
+const MAX_SLIDESHOW_IMAGES_PER_BRAND = 6;
+
+/**
+ * Approved brand imagery keyed by brand id, newest first, for the bento
+ * slideshow. Returns CF Images delivery URLs only. Brands with no usable images
+ * are simply absent from the map (the tile falls back to icons/lettermarks).
+ */
+async function getBrandImagesMap(
+  db: ReturnType<typeof drizzle>,
+  brandIds: number[],
+): Promise<Map<number, string[]>> {
+  const map = new Map<number, string[]>();
+  if (brandIds.length === 0) return map;
+
+  const rows = await chunkedByIds(brandIds, (chunk) =>
+    db
+      .select({
+        brandId: brandImages.brandId,
+        deliveryUrl: brandImages.deliveryUrl,
+      })
+      .from(brandImages)
+      .where(
+        and(
+          inArray(brandImages.brandId, chunk),
+          ne(brandImages.reviewStatus, "rejected"),
+          inArray(brandImages.imageKind, [...SLIDESHOW_IMAGE_KINDS]),
+        ),
+      )
+      .orderBy(desc(brandImages.id)),
+  );
+
+  for (const r of rows) {
+    const list = map.get(r.brandId);
+    if (!list) map.set(r.brandId, [r.deliveryUrl]);
+    else if (list.length < MAX_SLIDESHOW_IMAGES_PER_BRAND) list.push(r.deliveryUrl);
+  }
+  return map;
+}
 
 const createStoreSchema = z.object({
   name: z.string().min(1),
@@ -1434,6 +1482,21 @@ showroomStoresRouter.get("/:id", async (c) => {
     a.name.localeCompare(b.name)
   );
 
+  // Brand imagery for the Brands & Products bento slideshow. These rows are
+  // captured by the BrandResearchWorkflow's website scrape (uploaded to CF
+  // Images); we surface the non-rejected ones so the tile can cycle real
+  // product/lifestyle photos instead of rendering as a wall of lettermarks.
+  // `catalog`/`unknown` kinds are excluded — they're usually spec-sheet
+  // scans, and `logo` is already covered by the brand icon.
+  const brandImageMap = await getBrandImagesMap(
+    db,
+    mergedBrands.map((b) => b.id),
+  );
+  const brandsWithImages = mergedBrands.map((b) => ({
+    ...b,
+    images: brandImageMap.get(b.id) ?? [],
+  }));
+
   // Normalized per-day hours (only open days; absent day = closed).
   const hours = await db
     .select({
@@ -1483,7 +1546,7 @@ showroomStoresRouter.get("/:id", async (c) => {
       tagName: r.tag.name,
       tagColor: r.tag.color,
     })),
-    brands: mergedBrands,
+    brands: brandsWithImages,
   });
 });
 
