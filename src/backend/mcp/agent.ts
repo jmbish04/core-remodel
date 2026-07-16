@@ -16,7 +16,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
 import { drizzle } from "drizzle-orm/d1";
 
-import { logInvocation, principalLabel } from "./logging";
+import { logInvocation, principalLabel, type McpTransport } from "./logging";
 import { getAllTools } from "./registry";
 import type { McpProps, ToolCtx } from "./types";
 
@@ -60,6 +60,17 @@ export class RemodelMcpAgent extends McpAgent<Env, unknown, McpProps> {
           } catch {
             sessionId = this.ctx.id.toString();
           }
+          // Both of these were hardcoded to "streamable", so every SSE session
+          // in `mcp_sessions` was mislabelled and the column was worthless for
+          // answering "did the SSE transport ever connect?". getTransportType()
+          // parses the same DO name as getSessionId() above, and throws the same
+          // way before a session is bound — hence the identical guard.
+          let transport: McpTransport;
+          try {
+            transport = this.getTransportType() === "sse" ? "sse" : "streamable";
+          } catch {
+            transport = "streamable";
+          }
           const startedAt = Date.now();
           const input = args ?? {};
           try {
@@ -68,7 +79,7 @@ export class RemodelMcpAgent extends McpAgent<Env, unknown, McpProps> {
             this.ctx.waitUntil(
               logInvocation(this.env, {
                 sessionId,
-                transport: "streamable",
+                transport,
                 principal: principalLabel(props),
                 toolName: tool.name,
                 args: input,
@@ -97,7 +108,7 @@ export class RemodelMcpAgent extends McpAgent<Env, unknown, McpProps> {
             this.ctx.waitUntil(
               logInvocation(this.env, {
                 sessionId,
-                transport: "streamable",
+                transport,
                 principal: principalLabel(props),
                 toolName: tool.name,
                 args: input,
