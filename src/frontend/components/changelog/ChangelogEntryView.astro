@@ -11,7 +11,8 @@
  *   5. Migrations + files touched (the receipts)
  *
  * The blocks render server-side (presentational); only the mermaid diagrams
- * hydrate (`client:visible`) since they render in the browser.
+ * hydrate (`client:load` — see the note at the Diagrams section) since they
+ * render in the browser.
  */
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -41,7 +42,11 @@ const staged = stage === "staged";
 let entry: ChangelogEntry | undefined;
 let detailJson: unknown;
 try {
-  const db = drizzle(Astro.locals.runtime.env.DB);
+  // Guard explicitly rather than relying on a TypeError being caught below —
+  // the Cloudflare runtime is absent during a static build / local tests.
+  const env = Astro.locals.runtime?.env;
+  if (!env?.DB) throw new Error("D1 binding unavailable — using bundled seed");
+  const db = drizzle(env.DB);
   const [row] = await db
     .select()
     .from(changelogEntries)
@@ -70,8 +75,10 @@ if (!entry) entry = CHANGELOG.find((e) => e.id === slug);
 const detail = entry ? resolveDetail(slug, detailJson) : undefined;
 const notFound = !entry;
 
-const dev = entry ? toDevChangelog(entry, detail) : null;
-const recap = entry ? toRecap(entry, stage) : null;
+// `{}` (not null) so the blocks can be spread without a non-null assertion —
+// the notFound branch means these are only ever spread when `entry` exists.
+const dev = entry ? toDevChangelog(entry, detail) : {};
+const recap = entry ? toRecap(entry, stage) : {};
 const diagrams = toDiagrams(detail);
 const backHref = staged ? "/admin/changelog/preview" : "/admin/changelog";
 // An entry viewed from the wrong stage (e.g. a shipped row under /preview) still
@@ -175,7 +182,7 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
       ) : null}
 
       <section class="mt-8 border-t border-border/40 pt-4">
-        <Changelog19 {...dev!} />
+        <Changelog19 {...dev} />
       </section>
 
       {detail?.migrations && detail.migrations.length > 0 ? (
@@ -212,7 +219,7 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
       ) : null}
 
       <section class="mt-8 border-t border-border/40 pt-4">
-        <Changelog21 {...recap!} />
+        <Changelog21 {...recap} />
       </section>
     </main>
   )

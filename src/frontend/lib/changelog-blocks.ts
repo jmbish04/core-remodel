@@ -59,11 +59,18 @@ export interface LoadedChangelog {
  * the bundled seed so the page still renders (same contract the previous
  * hand-rolled pages used).
  *
- * @param env   Worker env (from `Astro.locals.runtime.env`).
+ * @param env   Worker env (from `Astro.locals.runtime?.env`). Optional: the
+ *              Cloudflare runtime isn't present during a static build or some
+ *              local-test setups, in which case we fall back to the seed rather
+ *              than crash the page.
  * @param stage Which entries to return — `shipped` or `staged`.
  */
-export async function loadChangelog(env: Env, stage: ChangelogStage): Promise<LoadedChangelog> {
+export async function loadChangelog(
+  env: Env | undefined,
+  stage: ChangelogStage,
+): Promise<LoadedChangelog> {
   try {
+    if (!env?.DB) throw new Error("D1 binding unavailable — using bundled seed");
     const db = drizzle(env.DB);
     const [branchRows, entryRows] = await Promise.all([
       db.select().from(changelogBranches).orderBy(desc(changelogBranches.createdAt)).all(),

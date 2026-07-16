@@ -20,7 +20,10 @@ interface Props {
 const { stage } = Astro.props;
 const staged = stage === "staged";
 
-const { entries, source } = await loadChangelog(Astro.locals.runtime.env, stage);
+// `runtime?.env` — the Cloudflare runtime is absent during a static build / some
+// local-test setups; loadChangelog falls back to the bundled seed rather than
+// letting a TypeError 500 the page.
+const { entries, source } = await loadChangelog(Astro.locals.runtime?.env, stage);
 const highlights = toHighlights(entries, stage);
 const feed = toFeed(entries, stage);
 ---
