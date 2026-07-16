@@ -267,8 +267,20 @@ check("rejects socials, tel: links and CTAs on the directory page", () => {
   );
 });
 
-check("decodes HTML entities in brand names", () => {
+check("decodes HTML entities in brand names \u2014 named + decimal + hex", () => {
+  // Gemini review on #150: decimal-only would leave a raw "&#x2019;" sitting
+  // inside the brand name. Many CMS templates emit hex.
   assert.deepEqual(names(DIR, [{ href: "https://alsons.com", text: "Alson&#8217;s" }]), ["Alson\u2019s"]);
+  assert.deepEqual(names(DIR, [{ href: "https://alsons.com", text: "Alson&#x2019;s" }]), ["Alson\u2019s"]);
+  assert.deepEqual(names(DIR, [{ href: "https://alsons.com", text: "Alson&#X2019;S" }]), ["Alson\u2019S"]);
+  assert.deepEqual(names(DIR, [{ href: "https://bg.com", text: "Bell &amp; Gossett" }]), ["Bell & Gossett"]);
+  assert.deepEqual(names(DIR, [{ href: "https://x1.com", text: "A&#x26;B Supply" }]), ["A&B Supply"]);
+});
+
+check("a malformed numeric entity can't throw and kill the extraction", () => {
+  // String.fromCodePoint(1114112) is a RangeError \u2014 unguarded it would take the
+  // whole page's brand extraction down.
+  assert.deepEqual(names(DIR, [{ href: "https://x2.com", text: "Acme&#1114112; Co" }]), ["Acme Co"]);
 });
 
 check("dedupes case-insensitively, prefers the entry with a website", () => {

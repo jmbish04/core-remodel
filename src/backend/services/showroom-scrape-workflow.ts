@@ -647,11 +647,23 @@ function normalizeExtraction(source: Partial<PageExtraction>): PageExtraction {
 // Step 5 — aggregate (Instagram, hero image, brands)
 // ---------------------------------------------------------------------------
 
-/** Hostname of a URL, or undefined when it will not parse. */
+/**
+ * Hostname of a URL, or undefined when it will not parse.
+ *
+ * Tolerates a schemeless value ("rubensteinsupply.com"). `showroom_store_links.url`
+ * is documented as "stored as entered" and the intake route validates it with
+ * `z.string().min(1)` — NOT `.url()` — so a hand-typed host with no scheme is
+ * reachable. `new URL("foo.com")` throws, which would return undefined here and
+ * SILENTLY disable brand extraction + own-domain link classification for that
+ * store. Silent degradation is the failure mode that hid the blank-scrape bug for
+ * months, so it is worth the two lines. (Currently 0 of 126 prod WEBSITE links
+ * are schemeless — this is defensive, not a live fix.)
+ */
 function safeHost(raw: string | null | undefined): string | undefined {
   if (!raw) return undefined;
   try {
-    return new URL(raw).hostname;
+    const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    return new URL(withScheme).hostname;
   } catch {
     return undefined;
   }

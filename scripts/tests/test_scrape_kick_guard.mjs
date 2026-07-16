@@ -99,4 +99,38 @@ check("idle but carrying a stale ragUuid — kick and reuse the uuid", () => {
   assert.equal(shouldKick({ scrapeStatus: "idle", ragUuid: "stale" }, "https://x.com"), true);
 });
 
+console.log("\nsafeHost — schemeless tolerance");
+
+/** Mirrors safeHost() in services/showroom-scrape-workflow.ts. */
+function safeHost(raw) {
+  if (!raw) return undefined;
+  try {
+    const withScheme = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+    return new URL(withScheme).hostname;
+  } catch {
+    return undefined;
+  }
+}
+
+check("schemeless host resolves (Gemini #150) — else brands silently vanish", () => {
+  // showroom_store_links.url is "stored as entered" and the intake route
+  // validates with z.string().min(1), not .url() — so this is reachable.
+  // new URL("rubensteinsupply.com") throws; undefined here would silently
+  // disable brand extraction for the store, with no error anywhere.
+  assert.equal(safeHost("rubensteinsupply.com"), "rubensteinsupply.com");
+  assert.equal(safeHost("www.rubensteinsupply.com/about"), "www.rubensteinsupply.com");
+});
+
+check("scheme'd URLs unchanged", () => {
+  assert.equal(safeHost("https://rubensteinsupply.com/x"), "rubensteinsupply.com");
+  assert.equal(safeHost("http://rubensteinsupply.com"), "rubensteinsupply.com");
+  assert.equal(safeHost("HTTPS://Rubenstein.com"), "rubenstein.com");
+});
+
+check("junk still yields undefined, not a bogus host", () => {
+  assert.equal(safeHost(null), undefined);
+  assert.equal(safeHost(""), undefined);
+  assert.equal(safeHost("   "), undefined);
+});
+
 console.log(`\n${process.exitCode ? "FAILED" : "PASSED"} — ${passed} checks\n`);

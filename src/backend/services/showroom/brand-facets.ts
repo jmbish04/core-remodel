@@ -114,17 +114,27 @@ function cleanBrandText(raw: string | undefined): string | null {
 
 /**
  * The link extractor strips tags but not entities, so brand names arrive as
- * `AB&amp;A` / `Alson&#8217;s`. Only the handful that actually show up.
+ * `AB&amp;A` / `Alson&#8217;s`. Named entities cover the handful that show up;
+ * the numeric branch handles BOTH decimal (`&#8217;`) and hex (`&#x2019;`) —
+ * hex is what many CMS templates emit, and decimal-only would leave the raw
+ * `&#x2019;` sitting inside a brand name.
  */
 function decodeEntities(s: string): string {
   return s
     .replace(/&amp;/g, "&")
-    .replace(/&#0?39;|&apos;|&#8217;|&rsquo;/g, "’")
-    .replace(/&quot;|&#34;/g, '"')
-    .replace(/&nbsp;|&#160;/g, " ")
+    .replace(/&apos;|&rsquo;/g, "’")
+    .replace(/&quot;/g, '"')
+    .replace(/&nbsp;/g, " ")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
-    .replace(/&#(\d+);/g, (_, d) => String.fromCodePoint(Number(d)));
+    .replace(/&#(?:x([0-9a-f]+)|(\d+));/gi, (_, hex: string, dec: string) => {
+      const code = hex ? parseInt(hex, 16) : Number(dec);
+      // Guard fromCodePoint: a malformed entity (&#1114112;) would throw
+      // RangeError and take the whole scrape's brand extraction with it.
+      return Number.isFinite(code) && code >= 0 && code <= 0x10ffff
+        ? String.fromCodePoint(code)
+        : "";
+    });
 }
 
 /** The brand's homepage — origin only; the deep path is this store's affiliate link. */
