@@ -229,7 +229,16 @@ export class ShowroomScrapeWorkflow extends WorkflowEntrypoint<
       });
     } catch (error) {
       // Any unrecoverable failure flips status to "failed" then re-throws so
-      // Workflows records the error for observability.
+      // Log the REASON, not just the fact. Re-throwing alone parks the message
+      // inside the Workflows instance record, where it is invisible to
+      // `query_worker_observability` — so prod shows 44 stores flipping to
+      // "failed" with no logged cause, and the only way to read it is
+      // `wrangler workflows instances describe <id>`. That gap turned a one-line
+      // Vectorize id bug into an afternoon of guessing from symptoms.
+      console.error(
+        `showroom-scrape: workflow failed for showroom ${showroomId}:`,
+        error,
+      );
       try {
         await db
           .update(showroomStores)
@@ -453,6 +462,22 @@ async function embedPage(
   const namespace = `showroom:scrape:${params.ragUuid}`;
   let written = 0;
 
+  // Vector ids are capped at 64 BYTES by Vectorize. The id below is
+  // `${ragUuid}:${hash}:${chunkIndex}` = 36 + 1 + 16 + 1 + n = 55-58 bytes.
+  //
+  // It used to be `${namespace}:${hash}:${chunkIndex}`, i.e. the ragUuid PLUS a
+  // 16-char "showroom:scrape:" prefix = 71 bytes, which Vectorize rejected:
+  //   VECTOR_UPSERT_ERROR (code = 40008): id too long; max is 64 bytes, got 71
+  // That id could never have worked — but this whole function was unreachable
+  // (chunks.length === 0) for months, because scrapeUrl was handing it an empty
+  // page. The first scrape that returned real text failed here, retried, and
+  // re-rendered the page on every retry.
+  //
+  // The prefix is pure redundancy inside the id: `namespace` is already its own
+  // field on the vector AND in metadata. ragUuid stays in the id, the namespace,
+  // the metadata, and on the browser_run_pages row — it is the join key between
+  // Vectorize and D1, so it does not get dropped to save bytes.
+
   for (let i = 0; i < chunks.length; i += 100) {
     const batch = chunks.slice(i, i + 100);
     const embeddingResult = (await env.AI.run(
@@ -464,7 +489,7 @@ async function embedPage(
     const vectors = embeddingResult.data.map((values, offset) => {
       const chunkIndex = i + offset;
       return {
-        id: `${namespace}:${hash}:${chunkIndex}`,
+        id: `${params.ragUuid}:${hash}:${chunkIndex}`,
         values,
         namespace,
         metadata: {

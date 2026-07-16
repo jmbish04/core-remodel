@@ -189,29 +189,13 @@ export async function scrapeUrl(env: Env, url: string): Promise<ScrapedPage> {
   const html = result.content ?? "";
   const markdown = result.markdown ?? "";
 
-  // TEMPORARY DIAGNOSTIC (remove once the response shape is pinned down).
-  // Two fixes based on the documented shape (#139 result.content, #142
-  // markdown:undefined) both failed to produce content in prod, so the docs and
-  // reality disagree somewhere. Log what the API ACTUALLY returns instead of
-  // guessing a third time.
-  console.log("[br:snapshot:diag]", JSON.stringify({
-    url,
-    topLevelKeys: Object.keys(payload ?? {}),
-    resultType: typeof result,
-    resultKeys: result && typeof result === "object" ? Object.keys(result) : null,
-    contentLen: typeof result?.content === "string" ? result.content.length : null,
-    markdownLen: typeof result?.markdown === "string" ? result.markdown.length : null,
-    hasScreenshot: !!result?.screenshot,
-    linksType: Array.isArray(result?.links) ? `array[${result.links.length}]` : typeof result?.links,
-    htmlLen: html.length,
-    // Only compute these when they'd actually tell us something. Both are regex
-    // passes over the FULL html of a heavy retail page; running them on every
-    // scrape burns Worker CPU to log a number we already have. When
-    // `markdown`/`links` came back, the answer is "the API gave it to us" — it's
-    // only their ABSENCE this diagnostic exists to explain.
-    strippedLen: markdown ? null : stripHtml(html).length,
-    extractedLinks: result?.links ? null : extractLinksFromHtml(html, url).length,
-  }));
+  // The diagnostic that lived here has been removed — it did its job. For the
+  // record, what it proved against real sites (davincimarble.com):
+  //   contentLen 137945, markdownLen 8462, hasScreenshot true,
+  //   linksType "undefined", strippedLen 5243, extractedLinks 31
+  // i.e. `result.content` + `result.markdown` are correct and `formats` works;
+  // `/snapshot` genuinely never returns `links`, so extractLinksFromHtml is
+  // required, not optional. The blank pages were gotoOptions/waitUntil, above.
 
   return {
     html,
