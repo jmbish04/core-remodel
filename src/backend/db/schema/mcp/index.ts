@@ -10,3 +10,4 @@ export * from "./tool_invocations";
 export * from "./conversations";
 export * from "./agent_issues";
 export * from "./feature_requests";
+export * from "./agent_adhoc_memory";
