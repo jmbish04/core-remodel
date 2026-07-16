@@ -39,7 +39,7 @@ import {
 } from "@backend/db/schema/showroom/index";
 import { brands } from "@backend/db/schema/brands/index";
 import { runDeepResearch } from "@backend/ai/deep-research";
-import { scrapeUrl } from "@backend/ai/tools/browser-rendering";
+import { normalizeCrawlUrl, scrapeUrl } from "@backend/ai/tools/browser-rendering";
 import { chunkMarkdown } from "@backend/ai/agents/ResearchAgent/methods/chunk-markdown";
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
@@ -1201,21 +1201,13 @@ function hostOf(raw: string): string | null {
   }
 }
 
-/** Normalize a URL against a base, stripping the hash. Returns null on junk. */
-function normalizeUrl(raw: string, base?: string): string | null {
-  const text = raw?.trim();
-  if (!text || text.startsWith("data:") || text.startsWith("mailto:")) {
-    return null;
-  }
-  try {
-    const u = new URL(text, base);
-    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
-    u.hash = "";
-    return u.toString();
-  } catch {
-    return null;
-  }
-}
+/**
+ * Canonical crawl key — shared with the showroom/brand crawlers. This file's copy
+ * was the best of the three (it alone had the http(s) guard, now folded into the
+ * shared helper) but still missed the trailing-slash collapse, so `/x` and `/x/`
+ * were different `seen` keys and both got rendered.
+ */
+const normalizeUrl = normalizeCrawlUrl;
 
 async function tryCreateProcessor(
   env: Env,

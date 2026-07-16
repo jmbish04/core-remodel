@@ -33,7 +33,7 @@ import {
   showroomStores,
 } from "@backend/db/schema/showroom/index";
 import { brands, showroomBrandMappings } from "@backend/db/schema/brands/index";
-import { scrapeUrl } from "@backend/ai/tools/browser-rendering";
+import { normalizeCrawlUrl, scrapeUrl } from "@backend/ai/tools/browser-rendering";
 import { chunkMarkdown } from "@backend/ai/agents/ResearchAgent/methods/chunk-markdown";
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
@@ -315,20 +315,13 @@ async function discoverLinks(env: Env, websiteUrl: string): Promise<string[]> {
   return ordered.slice(0, MAX_PAGES);
 }
 
-/** Normalize a URL against a base, stripping the hash. Returns null on junk. */
-function normalizeUrl(raw: string, base?: string): string | null {
-  const text = raw?.trim();
-  if (!text || text.startsWith("data:") || text.startsWith("mailto:")) {
-    return null;
-  }
-  try {
-    const u = new URL(text, base);
-    u.hash = "";
-    return u.toString();
-  } catch {
-    return null;
-  }
-}
+/**
+ * Canonical crawl key — shared with brand/product research via
+ * `normalizeCrawlUrl`. Previously a local copy that stripped the hash but NOT the
+ * trailing slash, so `/locations` and `/locations/` were different `seen` keys and
+ * both got rendered.
+ */
+const normalizeUrl = normalizeCrawlUrl;
 
 // ---------------------------------------------------------------------------
 // Step 3 — scrape one page (markdown → R2, screenshot → CF Images, embed, extract)
