@@ -26,15 +26,34 @@ import { showroomStoreLinks, showroomStores } from "@backend/db/schema/showroom/
 import { kickShowroomScrape } from "./onboarding";
 
 /**
- * Stores kicked per tick. Browser Rendering crawls up to MAX_PAGES per store and
- * is concurrency-limited, so this stays deliberately small — the cron runs every
- * minute, which drains ~130 stores in under an hour without a thundering herd.
+ * KILL SWITCH — the bulk backfill is OFF.
+ *
+ * This drain was written while every scrape no-op'd on a blank page in
+ * milliseconds and cost ~nothing. Fixing the scraper (see `scrapeUrl`:
+ * gotoOptions/waitUntil) turned each store into up to MAX_PAGES REAL browser
+ * renders plus Workers AI extraction plus Vectorize embedding — so the same
+ * "3 per minute" that was free is now genuinely expensive, and it stacked 54
+ * scrapes in flight before anyone had verified a single store end-to-end.
+ *
+ * Leave this false until ONE store has been verified start-to-finish (real
+ * markdown, socials, favicon, brands, accessLevel). Then re-enable deliberately
+ * — ideally after the Browser-Run-budget queue lands, since Browser Run's real
+ * ceiling is 10 req/s and 120 concurrent browsers ACCOUNT-WIDE, shared with
+ * brand-research and product-research.
+ *
+ * Single stores can still be scraped on demand via
+ * `POST /api/showroom-stores/:id/scrape` — that path is unaffected by this flag.
  */
+const BACKFILL_ENABLED = false;
+
+/** Stores kicked per tick, when enabled. */
 const BATCH = 3;
 
 export async function reScrapeStaleShowrooms(
   env: Env,
 ): Promise<{ kicked: number; remaining: number }> {
+  if (!BACKFILL_ENABLED) return { kicked: 0, remaining: -1 };
+
   const db = drizzle(env.DB);
 
   // Candidates: a WEBSITE link to crawl + a scrape that never ran or failed.
