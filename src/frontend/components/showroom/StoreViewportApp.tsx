@@ -80,6 +80,7 @@ import {
   HoursMiniCard,
   ManageLinksModal,
   SocialLinks,
+  SOCIAL_LINK_TYPES,
   type StoreCategoryChip,
 } from "./hero";
 import type { HoursJson } from "./intake/hours-types";
@@ -1064,11 +1065,9 @@ export function StoreViewportApp({
                   Website
                 </a>
               ) : null}
-              <SocialLinks
-                instagramUrl={store.instagramUrl}
-                facebookUrl={store.facebookUrl}
-                pinterestUrl={store.pinterestUrl}
-              />
+              {/* Social profiles, built dynamically from showroom_store_links —
+                  only the types the store actually has render. */}
+              <SocialLinks links={store.links} />
             </div>
           </div>
 
@@ -1730,8 +1729,15 @@ function ContactsSection({
 }) {
   const general = contacts.find((c) => c.type === "GENERAL_CONTACT") ?? null;
   const people = contacts.filter((c) => c.type !== "GENERAL_CONTACT");
-  // Dedupe the website out of the extra-links list (it already gets its own row).
-  const extraLinks = links.filter((l) => l.url && l.url !== websiteUrl);
+  // Socials render as branded @handle icons via SocialLinks; the website gets
+  // its own row. Everything left (OTHER, sale pages) falls through to the
+  // generic Globe list below.
+  const extraLinks = links.filter(
+    (l) =>
+      l.url &&
+      l.url !== websiteUrl &&
+      !(SOCIAL_LINK_TYPES as readonly string[]).includes(l.type),
+  );
 
   return (
     <div className="space-y-6">
@@ -1783,9 +1789,9 @@ function ContactsSection({
           </p>
         )}
 
-        {/* Website + other links. */}
-        {(websiteUrl || extraLinks.length > 0) ? (
-          <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5 border-t border-border/30 pt-3 text-[13px]">
+        {/* Website + social profiles + any other links. */}
+        {(websiteUrl || links.length > 0) ? (
+          <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-border/30 pt-3 text-[13px]">
             {websiteUrl ? (
               <a
                 href={websiteUrl}
@@ -1796,6 +1802,7 @@ function ContactsSection({
                 <Globe className="size-3.5" /> Website
               </a>
             ) : null}
+            <SocialLinks links={links} iconClassName="size-3.5" />
             {extraLinks.map((l) => (
               <a
                 key={l.id}

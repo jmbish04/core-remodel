@@ -81,6 +81,7 @@ import {
   mapPlaceToHoursJson,
   mapPlaceToIntake,
   showroomIntakeSchema,
+  stripGeminiMarker,
   type FieldDiag,
   type GooglePlaceDetails,
   type GooglePlacePhoto,
@@ -691,8 +692,10 @@ export function ShowroomIntakeApp() {
         setDetectedBrands((ai?.brands ?? []).filter((b): b is AiBrand => !!b));
         setReviewAiInsight(ai);
 
-        // ── Review summary ── the "[gemini summarized] …" copy (editable below).
-        const resolvedReviewSummary = mapped.reviewSummary ?? "";
+        // ── Review summary ── the AI-written copy (editable below). Older Places
+        // responses prefixed it with "[gemini summarized] "; strip that so a
+        // re-scan of a stale record can't reintroduce the marker.
+        const resolvedReviewSummary = stripGeminiMarker(mapped.reviewSummary ?? "");
 
         // Forward diagnostics + raw photos for the red labels and submit body.
         setDiagnostics(mapped._diagnostics ?? {});

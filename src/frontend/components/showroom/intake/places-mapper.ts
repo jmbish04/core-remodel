@@ -573,13 +573,23 @@ function buildDiagnostics(
 }
 
 /**
+ * Strip the legacy "[gemini summarized] " marker the maps service used to
+ * prepend to AI-written review summaries. The marker is no longer written, but
+ * it is baked into rows persisted before that change, so every read path
+ * normalizes it away rather than surfacing it to the homeowner.
+ */
+export function stripGeminiMarker(text: string): string {
+  return text.replace(/^\s*\[gemini summarized\]\s*/i, "").trim();
+}
+
+/**
  * Pull the best available review-summary text: Google's condensed
  * `reviewSummary.text.text` when present, else the generative/editorial summary
  * (`extractSummary`), else undefined.
  */
 function extractReviewSummary(place: GooglePlaceDetails): string | undefined {
   const rs = place.reviewSummary?.text?.text;
-  if (rs && rs.trim()) return rs.trim();
+  if (rs && stripGeminiMarker(rs)) return stripGeminiMarker(rs);
   return extractSummary(place);
 }
 
