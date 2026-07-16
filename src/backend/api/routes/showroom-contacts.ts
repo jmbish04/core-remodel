@@ -29,6 +29,10 @@ import {
   splitFullName,
   type ContactType,
 } from "@backend/utils/contact-intake";
+import {
+  SHOWROOM_LINK_TYPES,
+  type ShowroomLinkType,
+} from "@backend/utils/showroom-links";
 import { businessCardService } from "@backend/services/business-card";
 
 type Db = ReturnType<typeof drizzle>;
@@ -407,8 +411,8 @@ export async function fieldOutContacts(
     for (const u of effectiveUrls) {
       const url = u.url.trim();
       if (!url) continue;
-      const type = ["WEBSITE", "INSTAGRAM", "PINTEREST", "FACEBOOK", "OTHER"].includes(u.type)
-        ? (u.type as "WEBSITE")
+      const type = (SHOWROOM_LINK_TYPES as readonly string[]).includes(u.type)
+        ? (u.type as ShowroomLinkType)
         : "OTHER";
       const [dup] = await db
         .select({ id: showroomStoreLinks.id })

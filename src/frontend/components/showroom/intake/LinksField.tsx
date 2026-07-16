@@ -22,11 +22,20 @@ import {
 
 // ─── Link-type vocabulary ─────────────────────────────────────────────────────
 
+// Mirrors SHOWROOM_LINK_TYPES in src/backend/db/schema/showroom/links.ts. Kept as
+// its own literal because this is a client bundle and the schema module pulls in
+// drizzle; the Record<LinkType, string> below fails to compile if the two drift.
 export const LINK_TYPES = [
   "WEBSITE",
+  "WEBSITE_CLEARANCE",
   "INSTAGRAM",
   "PINTEREST",
   "FACEBOOK",
+  "TWITTER_X",
+  "LINKEDIN",
+  "YELP",
+  "SHOWROOM_TOUR",
+  "SHOWROOM_PHOTOS",
   "OTHER",
 ] as const;
 
@@ -34,9 +43,15 @@ export type LinkType = (typeof LINK_TYPES)[number];
 
 export const LINK_TYPE_LABELS: Record<LinkType, string> = {
   WEBSITE: "Website",
+  WEBSITE_CLEARANCE: "Sale / Clearance",
   INSTAGRAM: "Instagram",
   PINTEREST: "Pinterest",
   FACEBOOK: "Facebook",
+  TWITTER_X: "X (Twitter)",
+  LINKEDIN: "LinkedIn",
+  YELP: "Yelp",
+  SHOWROOM_TOUR: "360° Tour",
+  SHOWROOM_PHOTOS: "Showroom Photos",
   OTHER: "Other",
 };
 

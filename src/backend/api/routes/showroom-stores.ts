@@ -133,7 +133,10 @@ const hoursJsonSchema = z
 /** One external link in a create/update `links` payload. */
 const linkInputSchema = z.object({
   url: z.string().min(1),
-  type: z.enum(SHOWROOM_LINK_TYPES as [string, ...string[]]),
+  // No cast needed: SHOWROOM_LINK_TYPES is a readonly tuple, which z.enum takes
+  // directly. The old `as [string, ...string[]]` widened it to plain strings and
+  // threw away the union, so an unknown type would have parsed clean here.
+  type: z.enum(SHOWROOM_LINK_TYPES),
   urlNotes: z.string().optional().nullable(),
 });
 

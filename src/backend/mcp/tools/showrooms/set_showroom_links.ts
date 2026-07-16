@@ -1,5 +1,5 @@
 import { showroomStoreLinks, showroomStores } from "@backend/db";
-import { replaceStoreLinks } from "@backend/utils/showroom-links";
+import { SHOWROOM_LINK_TYPES, replaceStoreLinks } from "@backend/utils/showroom-links";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -12,7 +12,7 @@ export const setShowroomLinks = defineTool({
   category: "showrooms",
   title: "Set a showroom's links",
   description:
-    "Replace ALL of a showroom's links (website + socials + misc) in one call. Send the FULL desired list — it replaces the existing set (so include links you want to keep). Each link has a `url` and a `type` (WEBSITE / INSTAGRAM / PINTEREST / FACEBOOK / OTHER) plus optional `urlNotes`. Use this for the website/social URLs that update_showroom no longer accepts. Validates the showroom exists first.",
+    "Replace ALL of a showroom's links (website + socials + misc) in one call. Send the FULL desired list — it replaces the existing set (so include links you want to keep). Each link has a `url` and a `type` (WEBSITE, WEBSITE_CLEARANCE for a sales/clearance page, INSTAGRAM, PINTEREST, FACEBOOK, TWITTER_X, LINKEDIN, YELP, SHOWROOM_TOUR for a Matterport 360 walkthrough, SHOWROOM_PHOTOS for photos of the showroom itself, or OTHER) plus optional `urlNotes`. Use this for the website/social URLs that update_showroom no longer accepts. Validates the showroom exists first.",
   inputShape: {
     storeId: z.number().int().positive().describe("Showroom store id (from list_showrooms)"),
     links: z
@@ -20,7 +20,7 @@ export const setShowroomLinks = defineTool({
         z.object({
           url: z.string().url().describe("The full URL (https://…)"),
           type: z
-            .enum(["WEBSITE", "INSTAGRAM", "PINTEREST", "FACEBOOK", "OTHER"])
+            .enum(SHOWROOM_LINK_TYPES)
             .describe("Link type"),
           urlNotes: z.string().optional().describe("Optional note about this link"),
         }),

@@ -31,7 +31,7 @@ import {
 } from "@backend/db/schema/showroom/index";
 import { fieldOutContacts } from "@backend/api/routes/showroom-contacts";
 import { showroomStoreHours, showroomStoreLinks } from "@backend/db/schema/showroom/index";
-import { replaceStoreLinks } from "@backend/utils/showroom-links";
+import { SHOWROOM_LINK_TYPES, replaceStoreLinks } from "@backend/utils/showroom-links";
 import { changelogBranches, changelogEntries } from "@backend/db/schema/changelog/changelog";
 import { deriveIsOpenWeekends, hoursJsonToRows, rowsToHoursJson } from "@backend/utils/showroom-hours";
 import { loadProductPromptContext } from "@backend/ai/agents/ShowroomResearchAgent/methods/prompt-context";
@@ -308,7 +308,7 @@ const TOOLS: McpTool[] = [
             type: "object",
             properties: {
               url: { type: "string" },
-              type: { type: "string", enum: ["WEBSITE", "INSTAGRAM", "PINTEREST", "FACEBOOK", "OTHER"] },
+              type: { type: "string", enum: [...SHOWROOM_LINK_TYPES] },
               urlNotes: { type: "string" },
             },
             required: ["url", "type"],
@@ -380,7 +380,7 @@ const TOOLS: McpTool[] = [
             type: "object",
             properties: {
               url: { type: "string" },
-              type: { type: "string", enum: ["WEBSITE", "INSTAGRAM", "PINTEREST", "FACEBOOK", "OTHER"] },
+              type: { type: "string", enum: [...SHOWROOM_LINK_TYPES] },
               urlNotes: { type: "string" },
             },
             required: ["url", "type"],

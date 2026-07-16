@@ -47,6 +47,7 @@ import {
   getGoogleMapsApiKey,
 } from "@backend/utils/secrets";
 import { inferAndMapCategories } from "@backend/utils/showroom-categories";
+import { getStoreWebsiteUrl } from "@backend/utils/showroom-links";
 import { classifyBayAreaRegion } from "@backend/lib/bay-area-region";
 // Type-only import (erased at build — no frontend runtime code enters the worker
 // bundle). The pure `mapPlaceToHoursJson` logic is inlined below to keep the
@@ -514,10 +515,37 @@ async function getShowroomResearchAgent(env: Env): Promise<{ researchStore(id: n
   }>;
 }
 
-/** Kick the website scrape workflow: mint a ragUuid, mark pending, create it. */
+/**
+ * Kick the website scrape workflow: mint a ragUuid, mark pending, create it.
+ *
+ * Idempotent, because the caller now runs AFTER the research agent and can race
+ * the Manage-backfill path's `triggerBackfillScrape`, which mints its own
+ * ragUuid for the same store. Whichever lost that race would overwrite the
+ * other's ragUuid and orphan a live workflow's Vectorize rows.
+ *
+ * THE GUARD IS ON ragUuid, NOT scrapeStatus. `scrapeStatus` cannot answer "has a
+ * scrape been kicked?": the MCP tools (create_showroom, import_showroom_from_place)
+ * INSERT the row with scrapeStatus "pending" as an optimistic state before any
+ * workflow exists. A `status !== "idle"` guard therefore silently disables the
+ * scrape for every MCP-created showroom. A ragUuid is minted ONLY here and in the
+ * two sibling kickers, always alongside "pending", so its presence is the real
+ * "a workflow was created for this store" marker.
+ */
 async function kickShowroomScrape(env: Env, showroomId: number, websiteUrl: string) {
+  if (!websiteUrl) return;
   const db = drizzle(env.DB);
-  const ragUuid = crypto.randomUUID();
+  const [store] = await db
+    .select({ scrapeStatus: showroomStores.scrapeStatus, ragUuid: showroomStores.ragUuid })
+    .from(showroomStores)
+    .where(eq(showroomStores.id, showroomId))
+    .limit(1);
+  if (!store) return;
+  // Already kicked (pending/running/complete/failed with a minted uuid) — leave
+  // it alone. Re-running a finished or failed scrape is the Manage backfill's
+  // job, on the user's explicit say-so, not something intake decides.
+  if (store.ragUuid && store.scrapeStatus !== "idle") return;
+
+  const ragUuid = store.ragUuid ?? crypto.randomUUID();
   await db
     .update(showroomStores)
     .set({ ragUuid, scrapeStatus: "pending", updatedAt: new Date() })
@@ -695,16 +723,17 @@ export function scheduleShowroomEnrichment(
   const showroomId = store.id;
 
   // 1. AI research agent — aligns the store to the user's renovation context.
-  schedule(
-    (async () => {
-      try {
-        const agent = await getShowroomResearchAgent(env);
-        await agent.researchStore(showroomId);
-      } catch (err) {
-        console.error(`[showroom-onboarding] research failed for ${showroomId}:`, err);
-      }
-    })(),
-  );
+  //    Retained as a promise because step 3 must wait on it: research is often
+  //    what DISCOVERS the website, and the scrape can't start without one.
+  const research = (async () => {
+    try {
+      const agent = await getShowroomResearchAgent(env);
+      await agent.researchStore(showroomId);
+    } catch (err) {
+      console.error(`[showroom-onboarding] research failed for ${showroomId}:`, err);
+    }
+  })();
+  schedule(research);
 
   // 2. Category inference (fill-blanks) from structured signal tokens.
   if (input.categoryTokens && input.categoryTokens.some(Boolean)) {
@@ -721,19 +750,46 @@ export function scheduleShowroomEnrichment(
   }
 
   // 3. Favicon hydration + website scrape workflow.
-  if (input.websiteUrl && input.websiteUrl.length > 0) {
-    const websiteUrl = input.websiteUrl;
-    schedule(
-      faviconService.hydrateShowroomIcon(env, showroomId, websiteUrl).catch((err) => {
+  //
+  // THE WEBSITE IS RESOLVED FROM THE DB, NOT THE INTAKE PAYLOAD, AND ONLY AFTER
+  // RESEARCH. This block used to be gated on `input.websiteUrl` alone, which is
+  // whatever the intake form happened to send. When Google Places returns no
+  // website, the form seeds no WEBSITE link, the gate failed, and NOTHING ever
+  // kicked the scrape — even though the research agent discovered the site ~10s
+  // later and wrote the link itself. Measured in prod on 2026-07-16: stores
+  // #133/#134/#135 each got their WEBSITE link 10-38s after creation and sat at
+  // scrape_status "idle" with rag_uuid NULL forever, while #130/#131/#132 (whose
+  // website WAS in the payload, link lag 0s) all kicked fine. The Manage-backfill
+  // path never had this bug because it reads the website with getStoreWebsiteUrl.
+  //
+  // Awaiting `research` is what closes the gap; the payload value is still
+  // preferred so a store that already has a website doesn't wait on research.
+  schedule(
+    (async () => {
+      const payloadUrl = input.websiteUrl?.trim();
+      if (!payloadUrl) {
+        // Nothing to scrape yet — let research try to find one first. It is
+        // already error-guarded internally and never rejects.
+        await research;
+      }
+      let websiteUrl = payloadUrl ?? "";
+      if (!websiteUrl) {
+        try {
+          websiteUrl = (await getStoreWebsiteUrl(drizzle(env.DB), showroomId)) ?? "";
+        } catch (err) {
+          console.error(`[showroom-onboarding] website lookup failed for ${showroomId}:`, err);
+        }
+      }
+      if (!websiteUrl) return; // genuinely no website — nothing to scrape
+
+      await faviconService.hydrateShowroomIcon(env, showroomId, websiteUrl).catch((err) => {
         console.error(`[showroom-onboarding] favicon failed for ${showroomId}:`, err);
-      }),
-    );
-    schedule(
-      kickShowroomScrape(env, showroomId, websiteUrl).catch((err) => {
+      });
+      await kickShowroomScrape(env, showroomId, websiteUrl).catch((err) => {
         console.error(`[showroom-onboarding] scrape trigger failed for ${showroomId}:`, err);
-      }),
-    );
-  }
+      });
+    })(),
+  );
 
   // 4. Places photos → Cloudflare Images pipeline (+ hero image).
   if (input.photos && input.photos.length > 0) {

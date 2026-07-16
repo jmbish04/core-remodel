@@ -15,20 +15,14 @@ import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { showroomStoreLinks } from "@backend/db/schema/showroom/index";
 
-export type ShowroomLinkType =
-  | "WEBSITE"
-  | "INSTAGRAM"
-  | "PINTEREST"
-  | "FACEBOOK"
-  | "OTHER";
-
-export const SHOWROOM_LINK_TYPES: readonly ShowroomLinkType[] = [
-  "WEBSITE",
-  "INSTAGRAM",
-  "PINTEREST",
-  "FACEBOOK",
-  "OTHER",
-] as const;
+// The vocabulary is defined in the schema (which this module imports), so it is
+// re-exported here rather than redeclared — these were two lists that could drift.
+export {
+  SHOWROOM_LINK_TYPES,
+  type ShowroomLinkType,
+} from "@backend/db/schema/showroom/links";
+import { SHOWROOM_LINK_TYPES } from "@backend/db/schema/showroom/links";
+import type { ShowroomLinkType } from "@backend/db/schema/showroom/links";
 
 /** A link as sent by an API/MCP caller. */
 export interface StoreLinkInput {
@@ -137,13 +131,19 @@ export async function getStoreLinksMap(
 
 const TYPE_ORDER: Record<ShowroomLinkType, number> = {
   WEBSITE: 0,
-  INSTAGRAM: 1,
-  FACEBOOK: 2,
-  PINTEREST: 3,
-  OTHER: 4,
+  WEBSITE_CLEARANCE: 1,
+  SHOWROOM_TOUR: 2,
+  SHOWROOM_PHOTOS: 3,
+  INSTAGRAM: 4,
+  FACEBOOK: 5,
+  PINTEREST: 6,
+  TWITTER_X: 7,
+  LINKEDIN: 8,
+  YELP: 9,
+  OTHER: 10,
 };
 
-/** Stable display order: WEBSITE, socials, OTHER; then insertion (id). */
+/** Stable display order: WEBSITE, own-site pages, socials, OTHER; then insertion (id). */
 function sortLinks(links: StoreLinkRow[]): StoreLinkRow[] {
   return [...links].sort((a, b) => TYPE_ORDER[a.type] - TYPE_ORDER[b.type] || a.id - b.id);
 }
