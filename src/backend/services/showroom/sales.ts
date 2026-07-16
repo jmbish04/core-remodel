@@ -204,6 +204,18 @@ export async function sweepSalePage(
   link: { id: number; url: string },
 ): Promise<SalePageResult> {
   const db = drizzle(env.DB);
+
+  // Mark the ATTEMPT up front, not just a successful write. `sweepShowroomSales`
+  // orders its queue by `updatedAt ASC`, so a link that is unchanged (the common
+  // case) or that permanently errors must still move to the back — otherwise it
+  // sits at the head of the queue and a capped run re-scans the same few pages
+  // every week while the tail never gets swept. Mirrors the same
+  // stampede guard in brand-enrichment.
+  await db
+    .update(showroomStoreLinks)
+    .set({ updatedAt: new Date() })
+    .where(eq(showroomStoreLinks.id, link.id));
+
   try {
     const scraped = await scrapeUrl(env, link.url);
     const markdown = scraped.markdown ?? scraped.text ?? "";
