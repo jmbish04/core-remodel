@@ -26,7 +26,8 @@ import { showroomStoreLinks, showroomStores } from "@backend/db/schema/showroom/
 import { kickShowroomScrape } from "./onboarding";
 
 /**
- * KILL SWITCH — the bulk backfill is OFF.
+ * KILL SWITCH — the bulk backfill is OFF unless `SHOWROOM_SCRAPE_BACKFILL_ENABLED`
+ * is explicitly true (see wrangler.jsonc `vars`).
  *
  * This drain was written while every scrape no-op'd on a blank page in
  * milliseconds and cost ~nothing. Fixing the scraper (see `scrapeUrl`:
@@ -35,16 +36,29 @@ import { kickShowroomScrape } from "./onboarding";
  * "3 per minute" that was free is now genuinely expensive, and it stacked 54
  * scrapes in flight before anyone had verified a single store end-to-end.
  *
- * Leave this false until ONE store has been verified start-to-finish (real
- * markdown, socials, favicon, brands, accessLevel). Then re-enable deliberately
- * — ideally after the Browser-Run-budget queue lands, since Browser Run's real
- * ceiling is 10 req/s and 120 concurrent browsers ACCOUNT-WIDE, shared with
- * brand-research and product-research.
+ * Leave it off until ONE store has been verified start-to-finish (real markdown,
+ * socials, favicon, brands, accessLevel). Then re-enable deliberately — ideally
+ * after the Browser-Run-budget queue lands, since Browser Run's real ceiling is
+ * 10 req/s and 120 concurrent browsers ACCOUNT-WIDE, shared with brand-research
+ * and product-research.
  *
  * Single stores can still be scraped on demand via
  * `POST /api/showroom-stores/:id/scrape` — that path is unaffected by this flag.
+ *
+ * Accepts BOTH a real boolean and the string "true": wrangler.jsonc vars are JSON
+ * so they can be a genuine `true`, but the dashboard and `.dev.vars` can only ever
+ * produce strings. Handling one and not the other is how a flag ends up enabled on
+ * one surface and silently disabled on another. Anything else — absent, "false",
+ * "", 0, junk — is OFF. Fail-safe by construction: this drain never runs by
+ * accident, only by decision.
  */
-const BACKFILL_ENABLED = false;
+function isBackfillEnabled(env: Env): boolean {
+  const flag = (env as { SHOWROOM_SCRAPE_BACKFILL_ENABLED?: unknown })
+    .SHOWROOM_SCRAPE_BACKFILL_ENABLED;
+  if (typeof flag === "boolean") return flag;
+  if (typeof flag === "string") return flag.trim().toLowerCase() === "true";
+  return false;
+}
 
 /** Stores kicked per tick, when enabled. */
 const BATCH = 3;
@@ -52,7 +66,7 @@ const BATCH = 3;
 export async function reScrapeStaleShowrooms(
   env: Env,
 ): Promise<{ kicked: number; remaining: number }> {
-  if (!BACKFILL_ENABLED) return { kicked: 0, remaining: -1 };
+  if (!isBackfillEnabled(env)) return { kicked: 0, remaining: -1 };
 
   const db = drizzle(env.DB);
 
