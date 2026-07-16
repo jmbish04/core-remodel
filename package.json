@@ -42,6 +42,7 @@
     "cf-typegen": "wrangler types --include-runtime false",
     "secrets:google-photos": "node scripts/google-photos-secrets.mjs",
     "test:throttle": "node scripts/tests/test_throttled_pipeline.mjs",
+    "test:links": "node scripts/tests/test_link_classification.mjs",
     "py:batch-ai-photo-edits": "proofs/tight/jason_20260615/upper_level/kitchen/ai_renders/.venv/bin/python scripts/batch_image_edit.py"
   },
   "dependencies": {

@@ -209,7 +209,7 @@ export class ShowroomScrapeWorkflow extends WorkflowEntrypoint<
 
       // ── 5. aggregate ────────────────────────────────────────────────────
       await step.do("aggregate", async () =>
-        aggregate(env, showroomId, extractions, allHrefs),
+        aggregate(env, showroomId, extractions, allHrefs, websiteUrl),
       );
 
       // ── 5b. classify-access-level ───────────────────────────────────────
@@ -611,43 +611,89 @@ function normalizeExtraction(source: Partial<PageExtraction>): PageExtraction {
 // Step 5 — aggregate (Instagram, hero image, brands)
 // ---------------------------------------------------------------------------
 
+/** Hostname of a URL, or undefined when it will not parse. */
+function safeHost(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
+  try {
+    return new URL(raw).hostname;
+  } catch {
+    return undefined;
+  }
+}
+
 async function aggregate(
   env: Env,
   showroomId: number,
   extractions: PageExtraction[],
   hrefs: string[] = [],
+  /** The store's website — its host gates the own-domain link classifier. */
+  websiteUrl?: string,
 ): Promise<void> {
   const db = drizzle(env.DB);
 
-  // ── Social profiles ────────────────────────────────────────────────────
+  // ── Social profiles + own-site pages ───────────────────────────────────
   // Deterministic: classify every href the crawl saw (header/footer icons),
   // filtering out share widgets. The AI's instagramUrl is folded in as a weak
   // secondary signal — it historically missed 100% of the time, so it is never
-  // the primary source. Existing (type,url) rows are left alone.
-  const social = collectSocialLinks([...hrefs, ...extractions.map((e) => e.instagramUrl)]);
+  // the primary source.
+  //
+  // siteHost unlocks the own-domain classifier (WEBSITE_CLEARANCE /
+  // SHOWROOM_PHOTOS); without it, only off-domain social hosts are matched.
+  const siteHost = safeHost(websiteUrl);
+  const social = collectSocialLinks(
+    [...hrefs, ...extractions.map((e) => e.instagramUrl)],
+    siteHost,
+  );
   if (social.length > 0) {
     const existing = await db
-      .select({ url: showroomStoreLinks.url, type: showroomStoreLinks.type })
+      .select({
+        id: showroomStoreLinks.id,
+        url: showroomStoreLinks.url,
+        type: showroomStoreLinks.type,
+      })
       .from(showroomStoreLinks)
       .where(eq(showroomStoreLinks.storeId, showroomId))
       .all();
-    const have = new Set(existing.map((l) => `${l.type}:${l.url.toLowerCase()}`));
+    // Keyed by URL, NOT by (type,url). When the vocabulary grows, a URL we
+    // already stored gets re-classified — x.com used to land as OTHER and is now
+    // TWITTER_X. Keying on (type,url) would miss the old row and insert a second
+    // one for the same URL. Key on url and re-type in place instead.
+    const byUrl = new Map(existing.map((l) => [l.url.toLowerCase(), l]));
 
-    const rows = social
-      .filter((s) => !have.has(`${s.type}:${s.url.toLowerCase()}`))
-      .map((s) => ({
-        storeId: showroomId,
-        url: s.url,
-        type: s.type,
-        urlNotes: s.urlNotes,
-      }));
+    const inserts: Array<typeof showroomStoreLinks.$inferInsert> = [];
+    const retypes: Array<{ id: number; type: (typeof social)[number]["type"]; notes: string | null }> =
+      [];
+
+    for (const s of social) {
+      const prior = byUrl.get(s.url.toLowerCase());
+      if (!prior) {
+        inserts.push({ storeId: showroomId, url: s.url, type: s.type, urlNotes: s.urlNotes });
+      } else if (prior.type !== s.type) {
+        // Only ever tighten OTHER → a real type. Never clobber a type a human
+        // set by hand (e.g. someone marked a page WEBSITE_CLEARANCE that our
+        // path regex wouldn't catch).
+        if (prior.type === "OTHER") retypes.push({ id: prior.id, type: s.type, notes: s.urlNotes });
+      }
+    }
 
     // Chunked single-row inserts: a site linking many profiles could otherwise
     // push a multi-row VALUES past D1's 100-bound-parameter cap.
-    for (let i = 0; i < rows.length; i += LINK_INSERT_CHUNK) {
-      const chunk = rows
+    for (let i = 0; i < inserts.length; i += LINK_INSERT_CHUNK) {
+      const chunk = inserts
         .slice(i, i + LINK_INSERT_CHUNK)
         .map((row) => db.insert(showroomStoreLinks).values(row));
+      if (chunk.length === 0) continue;
+      await db.batch(chunk as [(typeof chunk)[number], ...(typeof chunk)[number][]]);
+    }
+    for (let i = 0; i < retypes.length; i += LINK_INSERT_CHUNK) {
+      const chunk = retypes
+        .slice(i, i + LINK_INSERT_CHUNK)
+        .map((r) =>
+          db
+            .update(showroomStoreLinks)
+            .set({ type: r.type, urlNotes: r.notes, updatedAt: new Date() })
+            .where(eq(showroomStoreLinks.id, r.id)),
+        );
       if (chunk.length === 0) continue;
       await db.batch(chunk as [(typeof chunk)[number], ...(typeof chunk)[number][]]);
     }
