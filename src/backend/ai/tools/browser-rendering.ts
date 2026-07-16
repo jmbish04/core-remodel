@@ -128,6 +128,11 @@ export async function scrapeUrl(env: Env, url: string): Promise<ScrapedPage> {
     method: "POST",
     headers,
     body: JSON.stringify({ url, formats: ["content", "screenshot", "markdown"] }),
+    // Bound the call so a hung origin can't stall a workflow step forever. 60s,
+    // NOT the ~10s you'd use for a plain API: this is a real browser rendering a
+    // JS-heavy retail site, where 10s would time out exactly the pages we most
+    // need and silently reproduce the blank-page bug this function just fixed.
+    signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -178,6 +183,9 @@ export async function scrapeUrl(env: Env, url: string): Promise<ScrapedPage> {
     screenshotUrl,
   };
 }
+
+/** Upper bound for one /snapshot render. Generous — a real browser, not an API. */
+const SNAPSHOT_TIMEOUT_MS = 60_000;
 
 /** `<a href="...">text</a>` — tolerant of attribute order and multi-line tags. */
 const HREF_RE = /<a\b[^>]*?\shref\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;

@@ -27,20 +27,29 @@ export interface ClassifiedLink {
 const NON_PROFILE_PATH_RE =
   /^\/(sharer|share|share\.php|dialog|intent|pin\/create|shareArticle|submit|login|signup|help|about|policy|privacy|terms|legal|explore|search|hashtag|p|reel|reels|posts|watch|events|marketplace|groups|tr)(\/|$)/i;
 
+/**
+ * Hosts are matched with an OPTIONAL subdomain: sites link mobile (`m.facebook.com`)
+ * and localized (`fr-fr.facebook.com`, `en-gb.facebook.com`) variants, which an
+ * apex-only match would silently drop. Non-profile subdomains that slip through
+ * (business.facebook.com, developers.facebook.com) are caught by the path filter.
+ */
 const SOCIAL_HOSTS: Array<{ re: RegExp; type: ShowroomLinkType; notes?: string }> = [
-  { re: /^instagram\.com$/i, type: "INSTAGRAM" },
-  { re: /^facebook\.com$/i, type: "FACEBOOK" },
-  { re: /^fb\.com$/i, type: "FACEBOOK" },
-  { re: /^pinterest\.(com|[a-z]{2}|co\.[a-z]{2})$/i, type: "PINTEREST" },
-  { re: /^youtube\.com$/i, type: "OTHER", notes: "YouTube" },
+  { re: /^(?:[a-z0-9-]+\.)?instagram\.com$/i, type: "INSTAGRAM" },
+  { re: /^(?:[a-z0-9-]+\.)?facebook\.com$/i, type: "FACEBOOK" },
+  { re: /^(?:[a-z0-9-]+\.)?fb\.com$/i, type: "FACEBOOK" },
+  { re: /^(?:[a-z0-9-]+\.)?pinterest\.(com|[a-z]{2}|co\.[a-z]{2})$/i, type: "PINTEREST" },
+  { re: /^(?:[a-z0-9-]+\.)?youtube\.com$/i, type: "OTHER", notes: "YouTube" },
   { re: /^youtu\.be$/i, type: "OTHER", notes: "YouTube" },
-  { re: /^tiktok\.com$/i, type: "OTHER", notes: "TikTok" },
-  { re: /^linkedin\.com$/i, type: "OTHER", notes: "LinkedIn" },
-  { re: /^houzz\.com$/i, type: "OTHER", notes: "Houzz" },
-  { re: /^yelp\.com$/i, type: "OTHER", notes: "Yelp" },
-  { re: /^x\.com$/i, type: "OTHER", notes: "X" },
-  { re: /^twitter\.com$/i, type: "OTHER", notes: "X" },
+  { re: /^(?:[a-z0-9-]+\.)?tiktok\.com$/i, type: "OTHER", notes: "TikTok" },
+  { re: /^(?:[a-z0-9-]+\.)?linkedin\.com$/i, type: "OTHER", notes: "LinkedIn" },
+  { re: /^(?:[a-z0-9-]+\.)?houzz\.com$/i, type: "OTHER", notes: "Houzz" },
+  { re: /^(?:[a-z0-9-]+\.)?yelp\.com$/i, type: "OTHER", notes: "Yelp" },
+  { re: /^(?:[a-z0-9-]+\.)?x\.com$/i, type: "OTHER", notes: "X" },
+  { re: /^(?:[a-z0-9-]+\.)?twitter\.com$/i, type: "OTHER", notes: "X" },
 ];
+
+/** Platform subdomains that are never a business profile. */
+const NON_PROFILE_SUBDOMAIN_RE = /^(business|developers?|about|careers|help|support|ads|analytics)\./i;
 
 /**
  * Classify one URL as a social profile link, or null when it is not social / is a
@@ -59,6 +68,7 @@ export function classifySocialLink(rawUrl: string): ClassifiedLink | null {
   const host = u.hostname.replace(/^www\./i, "").toLowerCase();
   const entry = SOCIAL_HOSTS.find((s) => s.re.test(host));
   if (!entry) return null;
+  if (NON_PROFILE_SUBDOMAIN_RE.test(host)) return null;
 
   const path = u.pathname.replace(/\/+$/, "");
   // Bare platform root (instagram.com/) — a logo link, not a profile.

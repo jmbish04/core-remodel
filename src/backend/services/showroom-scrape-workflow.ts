@@ -61,6 +61,9 @@ const EXTRACT_MODEL = "@cf/moonshotai/kimi-k2.6" as const;
 /** Hard cap on the number of pages crawled per run. */
 const MAX_PAGES = 10;
 
+/** Link rows per db.batch — keeps each query under D1's 100-bound-parameter cap. */
+const LINK_INSERT_CHUNK = 50;
+
 /** Path fragments we prioritize when selecting pages to crawl. */
 const PRIORITY_PATH_RE = /about|brands|lines|location|contact|hours|showroom/i;
 
@@ -621,10 +624,14 @@ async function aggregate(
         urlNotes: s.urlNotes,
       }));
 
-    if (rows.length > 0) {
-      await db
-        .insert(showroomStoreLinks)
-        .values(rows as [(typeof rows)[number], ...(typeof rows)[number][]]);
+    // Chunked single-row inserts: a site linking many profiles could otherwise
+    // push a multi-row VALUES past D1's 100-bound-parameter cap.
+    for (let i = 0; i < rows.length; i += LINK_INSERT_CHUNK) {
+      const chunk = rows
+        .slice(i, i + LINK_INSERT_CHUNK)
+        .map((row) => db.insert(showroomStoreLinks).values(row));
+      if (chunk.length === 0) continue;
+      await db.batch(chunk as [(typeof chunk)[number], ...(typeof chunk)[number][]]);
     }
   }
 
