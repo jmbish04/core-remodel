@@ -229,9 +229,52 @@ const SNAPSHOT_TIMEOUT_MS = 120_000;
 const HREF_RE = /<a\b[^>]*?\shref\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
 
 /**
- * Extract absolute links from raw HTML, resolving relative hrefs against the page
- * URL and de-duplicating. Needed because `/snapshot` returns no `links` array —
- * without this the crawler only ever sees the landing page.
+ * Canonicalize a URL for CRAWLING — the single dedupe key shared by every
+ * crawler (showroom-scrape, brand-research, product-research).
+ *
+ * Returns null for anything not worth fetching: empty, fragment-only, and
+ * non-http(s) schemes (data:/mailto:/tel:/javascript:).
+ *
+ * The trailing-slash collapse is the point. `/locations` and `/locations/` are the
+ * same page on every real site, but they are DIFFERENT strings — so a `Set` keyed
+ * on the raw URL happily keeps both and the crawler renders the page twice. Seen
+ * live on rubensteinsupply.com: 10 discovered links contained `/locations` +
+ * `/locations/` AND `/eventsnew` + `/eventsnew/`, i.e. 8 unique pages costing 10
+ * full networkidle2 renders — and burning 2 of the 10 MAX_PAGES slots that should
+ * have gone to brands/about pages.
+ *
+ * Root is preserved as "/" (collapsing it to "" would produce a different string
+ * than the landing URL and reintroduce the duplicate it exists to prevent).
+ */
+export function normalizeCrawlUrl(raw: string, base?: string): string | null {
+  const text = raw?.trim();
+  if (!text || text.startsWith("#")) return null;
+
+  const lower = text.toLowerCase();
+  if (
+    lower.startsWith("data:") ||
+    lower.startsWith("mailto:") ||
+    lower.startsWith("tel:") ||
+    lower.startsWith("javascript:")
+  ) {
+    return null;
+  }
+
+  try {
+    const u = new URL(text, base);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    u.hash = "";
+    u.pathname = u.pathname.replace(/\/+$/, "") || "/";
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Extract absolute links from raw HTML, canonicalized via {@link normalizeCrawlUrl}
+ * and de-duplicated. Needed because `/snapshot` returns no `links` array — without
+ * this the crawler only ever sees the landing page.
  */
 export function extractLinksFromHtml(html: string, baseUrl: string): ScrapedPage["links"] {
   if (!html) return [];
@@ -242,22 +285,8 @@ export function extractLinksFromHtml(html: string, baseUrl: string): ScrapedPage
   HREF_RE.lastIndex = 0;
   let match: RegExpExecArray | null;
   while ((match = HREF_RE.exec(html)) !== null) {
-    const raw = match[1]?.trim();
-    if (!raw || raw.startsWith("#")) continue;
-    const lower = raw.toLowerCase();
-    if (lower.startsWith("javascript:") || lower.startsWith("mailto:") || lower.startsWith("tel:")) {
-      continue;
-    }
-
-    let href: string;
-    try {
-      const resolved = new URL(raw, baseUrl);
-      resolved.hash = "";
-      href = resolved.toString();
-    } catch {
-      continue;
-    }
-    if (seen.has(href)) continue;
+    const href = normalizeCrawlUrl(match[1] ?? "", baseUrl);
+    if (!href || seen.has(href)) continue;
     seen.add(href);
 
     const text = match[2]?.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();

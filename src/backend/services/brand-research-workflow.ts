@@ -45,7 +45,7 @@ import {
   brandTypeMappings,
 } from "@backend/db/schema/brands/index";
 import { runDeepResearch } from "@backend/ai/deep-research";
-import { scrapeUrl } from "@backend/ai/tools/browser-rendering";
+import { normalizeCrawlUrl, scrapeUrl } from "@backend/ai/tools/browser-rendering";
 import { chunkMarkdown } from "@backend/ai/agents/ResearchAgent/methods/chunk-markdown";
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
@@ -902,20 +902,12 @@ function looksLikePdfLink(href: string, text?: string): boolean {
   }
 }
 
-/** Normalize a URL against a base, stripping the hash. Returns null on junk. */
-function normalizeUrl(raw: string, base?: string): string | null {
-  const text = raw?.trim();
-  if (!text || text.startsWith("data:") || text.startsWith("mailto:")) {
-    return null;
-  }
-  try {
-    const u = new URL(text, base);
-    u.hash = "";
-    return u.toString();
-  } catch {
-    return null;
-  }
-}
+/**
+ * Canonical crawl key — shared with the showroom/product crawlers. The local copy
+ * this replaces stripped the hash but NOT the trailing slash (so `/x` and `/x/`
+ * were different `seen` keys and both got rendered) and had no http(s) guard.
+ */
+const normalizeUrl = normalizeCrawlUrl;
 
 /** Workers-AI extraction of prominent images / PDF catalogs / socials from a page. */
 async function extractPageAssets(
