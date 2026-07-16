@@ -1,4 +1,4 @@
-import { showroomStores } from "@backend/db";
+import { showroomStoreLinks, showroomStores } from "@backend/db";
 import { GoogleMapsService } from "@backend/services/google/maps";
 import {
   computeStoreGeoPatch,
@@ -12,6 +12,7 @@ import { toolError } from "../../format";
 import { looseObject, urlField } from "../../schemas";
 import { showroomUrl } from "../../urls";
 import { defineTool, WRITE } from "../../types";
+
 import { persistPlaceShowroom, rethrowMapsError } from "./_shared";
 
 export const createShowroom = defineTool({
@@ -25,9 +26,10 @@ export const createShowroom = defineTool({
     "— and any explicit fields you also pass (e.g. pricePoint) override the Google-derived values. Without a " +
     "placeId it creates a manual row from the fields you provide; only `name` is required. The region hub (East " +
     "Bay / South Bay / …) is captured immediately, but ONBOARDING RUNS IN THE BACKGROUND: this tool returns " +
-    "right away with `status:\"processing\"` and the bare store row — do NOT wait on it. Poll " +
-    "`check_showroom_intake_status` (by showroomId or placeId) to watch enrichment finish (photos, brands, hours, " +
-    "access level). Idempotent on `placeId` (an existing placeId returns the existing store unchanged, `created:false`).",
+    "right away with `status:\"processing\"` and the bare store row — do NOT wait on it and do NOT retry on a " +
+    "timeout (the work is durable). Poll `check_showroom_intake_status` (by showroomId or placeId) to watch " +
+    "enrichment finish (photos, brands, hours, access level). Idempotent on `placeId` (an existing placeId " +
+    "returns the existing store unchanged, `created:false`).",
   inputShape: {
     name: z.string().optional().describe("Store / location name (required unless a placeId is given)"),
     placeId: z
@@ -101,7 +103,7 @@ export const createShowroom = defineTool({
       if (input.pricePoint) mapped.values.pricePoint = input.pricePoint;
       if (input.phoneNumber) mapped.values.phoneNumber = input.phoneNumber;
       if (input.emailAddress) mapped.values.emailAddress = input.emailAddress;
-      if (input.websiteUrl) mapped.values.websiteUrl = input.websiteUrl;
+      if (input.websiteUrl) mapped.websiteUrl = input.websiteUrl;
       if (input.isAppointmentOnly != null) {
         mapped.values.isAppointmentOnly = input.isAppointmentOnly;
       }
@@ -116,7 +118,7 @@ export const createShowroom = defineTool({
       };
     }
 
-    // ── Manual path: name + provided fields, region captured, enrichment queued ──
+    // ── Manual path: name + provided fields, region + enrichment captured ──
     const name = input.name?.trim();
     if (!name) toolError("`name` is required and cannot be empty (or pass a placeId).");
 
@@ -135,7 +137,6 @@ export const createShowroom = defineTool({
         locationAddress: input.locationAddress,
         phoneNumber: input.phoneNumber,
         emailAddress: input.emailAddress,
-        websiteUrl: input.websiteUrl,
         zipCode: input.zipCode,
         pricePoint: input.pricePoint,
         isAppointmentOnly: input.isAppointmentOnly,
@@ -144,13 +145,23 @@ export const createShowroom = defineTool({
       })
       .returning();
 
+    // Website → showroom_store_links (WEBSITE), not a store column.
+    const manualWebsite = input.websiteUrl?.trim();
+    if (manualWebsite) {
+      await db.insert(showroomStoreLinks).values({
+        storeId: created.id,
+        url: manualWebsite,
+        type: "WEBSITE",
+      });
+    }
+
     // Kick background enrichment durably (research always; favicon + scrape when a
     // website is known) and return immediately — MCP has no waitUntil, so the
     // ShowroomOnboardingWorkflow keeps the work alive. Poll check_showroom_intake_status.
     await env.SHOWROOM_ONBOARDING_WORKFLOW.create({
       params: {
         showroomId: created.id,
-        enrichment: { websiteUrl: input.websiteUrl },
+        enrichment: { websiteUrl: manualWebsite ?? null },
       },
     });
 

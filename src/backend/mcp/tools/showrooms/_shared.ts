@@ -1,7 +1,7 @@
 /**
  * @fileoverview Shared helpers for the Showrooms MCP tool domain.
  */
-import { showroomStoreHours, showroomStores } from "@backend/db";
+import { showroomStoreHours, showroomStoreLinks, showroomStores } from "@backend/db";
 import {
   computeStoreGeoPatch,
   hoursJsonToRows,
@@ -35,10 +35,11 @@ export function rethrowMapsError(err: unknown): never {
  *
  * Enrichment used to be awaited inline here, but it takes ~25s+ and routinely
  * outran the MCP client/transport timeout (the tool errored while the work
- * completed server-side). Now the row is inserted with `scrapeStatus: "pending"`
- * and {@link ShowroomOnboardingWorkflow} runs the enrichment durably; callers
- * poll `check_showroom_intake_status`. The returned row is the freshly-inserted
- * one (before enrichment), so hero image / brands / research populate afterward.
+ * completed server-side, forcing a retry that hit placeId idempotency). Now the
+ * row is inserted with `scrapeStatus: "pending"` and ShowroomOnboardingWorkflow
+ * runs the enrichment durably; callers poll `check_showroom_intake_status`. The
+ * returned row is the freshly-inserted one (before enrichment), so hero image /
+ * brands / research populate afterward.
  */
 export async function persistPlaceShowroom(
   env: Env,
@@ -66,11 +67,21 @@ export async function persistPlaceShowroom(
     }
   }
 
+  // Website → showroom_store_links (WEBSITE). URLs live in the links table now,
+  // not on the store row.
+  if (mapped.websiteUrl) {
+    await db.insert(showroomStoreLinks).values({
+      storeId: created.id,
+      url: mapped.websiteUrl,
+      type: "WEBSITE",
+    });
+  }
+
   await env.SHOWROOM_ONBOARDING_WORKFLOW.create({
     params: {
       showroomId: created.id,
       enrichment: {
-        websiteUrl: mapped.values.websiteUrl,
+        websiteUrl: mapped.websiteUrl,
         photos: mapped.photos,
         brands: mapped.brands,
         categoryTokens: mapped.categoryTokens,

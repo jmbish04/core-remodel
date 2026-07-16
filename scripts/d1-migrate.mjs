@@ -29,8 +29,16 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const BINDING = "DB";
-const MIGRATIONS_DIR = "drizzle";
+/** Read `--flag=value` from argv, or a default. Lets this script target either
+ * the app DB (default) or the Tesla telemetry DB (`--binding=TESLA_DB
+ * --dir=drizzle-tesla`) without a second copy of the applier. */
+function argValue(flag, fallback) {
+  const hit = process.argv.find((a) => a.startsWith(`${flag}=`));
+  return hit ? hit.slice(flag.length + 1) : fallback;
+}
+
+const BINDING = argValue("--binding", "DB");
+const MIGRATIONS_DIR = argValue("--dir", "drizzle");
 const STATEMENT_BREAK = "--> statement-breakpoint";
 const IDEMPOTENT_ERROR = /duplicate column name|already exists/i;
 

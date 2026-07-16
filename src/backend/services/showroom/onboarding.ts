@@ -219,7 +219,7 @@ function formatGoogleTime(point: { hour?: number | null; minute?: number | null 
  * Returns null when there are no usable periods (caller leaves hours unset).
  * Mirrors the intake form's `mapPlaceToHoursJson`.
  */
-function placeToStructuredHours(regularOpeningHours: unknown): StructuredHours | null {
+export function placeToStructuredHours(regularOpeningHours: unknown): StructuredHours | null {
   const roh = regularOpeningHours as { periods?: unknown } | null | undefined;
   const periods = roh?.periods;
   if (!Array.isArray(periods) || periods.length === 0) return null;
@@ -357,6 +357,9 @@ export type ReviewAiInsight = ShowroomStoreInsert["reviewAiInsight"];
 export interface MappedPlaceStore {
   /** Store columns ready to merge into an insert (name guaranteed non-empty). */
   values: Partial<ShowroomStoreInsert> & { name: string };
+  /** Website URL (from Places or explicit input) → persisted as a WEBSITE link,
+   *  NOT a store column. Null when unknown. */
+  websiteUrl: string | null;
   /** Structured hours parsed from Google periods (or null when unavailable). */
   hoursJson: StructuredHours | null;
   /** First 5 Places photo refs to run through the CF Images pipeline. */
@@ -397,7 +400,8 @@ export function mapPlaceDetailsToStoreInput(
   const phone =
     place.internationalPhoneNumber?.trim() || place.nationalPhoneNumber?.trim();
   if (phone) values.phoneNumber = phone;
-  if (place.websiteUri) values.websiteUrl = place.websiteUri;
+  // Website goes to the showroom_store_links table (WEBSITE), not a store column.
+  const websiteUrl = place.websiteUri?.trim() || null;
   if (place.id) {
     values.googleMapsLink = `https://www.google.com/maps/place/?q=place_id:${place.id}`;
     values.placeId = place.id;
@@ -476,14 +480,14 @@ export function mapPlaceDetailsToStoreInput(
 
   const hoursJson = placeToStructuredHours(place.regularOpeningHours);
   if (hoursJson) {
-    const derived = deriveHoursSummary(hoursJson);
-    values.weekdayHours = derived.weekdayHours;
-    values.weekendHours = derived.weekendHours;
-    values.isOpenWeekends = derived.isOpenWeekends;
+    // Hours live in showroom_store_hours rows (written by the caller from
+    // hoursJson). Only the derived is_open_weekends flag stays on the store.
+    values.isOpenWeekends = deriveHoursSummary(hoursJson).isOpenWeekends;
   }
 
   return {
     values,
+    websiteUrl,
     hoursJson,
     photos: (place.photos ?? []).slice(0, 5),
     categoryTokens: [...(place.types ?? []), place.primaryType],

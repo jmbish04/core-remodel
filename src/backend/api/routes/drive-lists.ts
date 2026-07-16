@@ -10,7 +10,11 @@
  * Mounted at `/api/drive-lists`.
  */
 import { driveListStops, driveLists, showroomStores } from "@backend/db";
-import { createDriveList, parseDriveNotes } from "@backend/services/drive-lists";
+import {
+  createDriveList,
+  demoteOtherActiveDrives,
+  parseDriveNotes,
+} from "@backend/services/drive-lists";
 import { isRequestAuthenticated } from "@backend/utils/access";
 import { asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -218,6 +222,12 @@ driveListsRouter.patch("/:slug/stops/:stopId", async (c) => {
     .set({ status, updatedAt: new Date() })
     .where(eq(driveLists.id, drive.id))
     .run();
+
+  // If this re-opened the drive (archived → active), keep the single-active
+  // invariant by demoting any other active drive.
+  if (status === "active" && current?.status === "archived") {
+    await demoteOtherActiveDrives(db, drive.id);
+  }
 
   return c.json({ ok: true, visited: body.visited, status });
 });

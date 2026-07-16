@@ -10,6 +10,7 @@ import { runPermitSync } from "./backend/services/dbi/permits-sync.js";
 import { dispatchDueWorkflows } from "./backend/services/workflow-dispatcher";
 import { autoHealImageUploads } from "./backend/services/image-processor/auto-heal";
 import { monitorShowroomSourcingCoverage } from "./backend/services/showroom-sourcing-monitor";
+import { backfillShowroomPlacesData } from "./backend/services/showroom/places-backfill";
 import { ingestCompanyEmails } from "./backend/services/gmail/ingestion";
 import {
   getDeviceIdFromRequest,
@@ -17,6 +18,7 @@ import {
   isSafeInternalPath,
 } from "./backend/utils/access";
 import { getDeviceLandingPath } from "./backend/services/device-preferences";
+import { getActiveDriveLandingPath } from "./backend/services/drive-lists";
 import { handleOAuthAuthorize } from "./backend/mcp/oauth-ui";
 import { RemodelMcpAgent } from "./backend/mcp/agent";
 import { routeAgentRequest } from "agents";
@@ -148,10 +150,23 @@ const legacyHandler: ExportedHandler<Env> = {
     // to the normal home/login. Path is validated to block open-redirects.
     if (url.pathname === "/") {
       const deviceId = getDeviceIdFromRequest(request);
-      if (deviceId && (await isRequestAuthenticated(request, env))) {
-        const landing = await getDeviceLandingPath(env, deviceId);
-        if (landing && landing !== "/" && isSafeInternalPath(landing)) {
-          return Response.redirect(`${url.origin}${landing}`, 302);
+      // Auth is always required — a device that was an admin in the past still
+      // must present a VALID admin cookie. An expired/absent cookie falls through
+      // to the normal home/login and never gets an auto-redirect.
+      if (await isRequestAuthenticated(request, env)) {
+        // Active-drive override: while ONE drive list is active, admin devices
+        // auto-land on it (temporary — reverts to the device's normal landing
+        // once no drive is active). Takes precedence over the device pref.
+        const drivePath = await getActiveDriveLandingPath(env);
+        if (drivePath && isSafeInternalPath(drivePath)) {
+          return Response.redirect(`${url.origin}${drivePath}`, 302);
+        }
+        // Otherwise fall back to the device's chosen landing page.
+        if (deviceId) {
+          const landing = await getDeviceLandingPath(env, deviceId);
+          if (landing && landing !== "/" && isSafeInternalPath(landing)) {
+            return Response.redirect(`${url.origin}${landing}`, 302);
+          }
         }
       }
     }
@@ -253,6 +268,20 @@ const legacyHandler: ExportedHandler<Env> = {
       // errors (or whose workflow never started) without manual reprocessing.
       ctx.waitUntil(autoHealImageUploads(env));
       ctx.waitUntil(monitorShowroomSourcingCoverage(env));
+      // One-shot re-enrichment of showroom website/hours/address from Google
+      // Places (0108/0109 dropped the legacy columns before backfill). Processes
+      // a small batch per tick and no-ops once every place_id store is done.
+      ctx.waitUntil(
+        backfillShowroomPlacesData(env)
+          .then((r) => {
+            if (r.processed > 0) {
+              console.log(
+                `[scheduled] showroom places backfill: processed=${r.processed} remaining=${r.remaining}`,
+              );
+            }
+          })
+          .catch((err) => console.error("[scheduled] showroom places backfill failed:", err)),
+      );
       return;
     }
     if (event.cron === "15 */4 * * *") {

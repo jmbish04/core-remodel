@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "511fe2a9-cf0f-418f-b7d1-39e7fc9da95f",
-  "prevId": "9c60e672-b706-448f-97cd-f879ae2b9d1c",
+  "id": "97dc9d1e-0246-426d-9d4d-2c58118ce9fa",
+  "prevId": "511fe2a9-cf0f-418f-b7d1-39e7fc9da95f",
   "tables": {
     "users": {
       "name": "users",
@@ -22787,6 +22787,73 @@
           "name": "mcp_feature_requests_created_at_idx",
           "columns": [
             "created_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "agent_adhoc_memory": {
+      "name": "agent_adhoc_memory",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "memory_uuid": {
+          "name": "memory_uuid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entry_key": {
+          "name": "entry_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "label": {
+          "name": "label",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "payload": {
+          "name": "payload",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "entry_created_at": {
+          "name": "entry_created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        }
+      },
+      "indexes": {
+        "agent_adhoc_memory_uuid_idx": {
+          "name": "agent_adhoc_memory_uuid_idx",
+          "columns": [
+            "memory_uuid"
           ],
           "isUnique": false
         }

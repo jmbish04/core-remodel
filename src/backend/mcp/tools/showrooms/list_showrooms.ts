@@ -1,12 +1,18 @@
 import { showroomStores } from "@backend/db";
+import { getStoreLinksMap, linksToLegacyUrls } from "@backend/utils/showroom-links";
 import { z } from "zod";
 
 import { matchesQuery, paginate } from "../../format";
 import { looseObject, pageOutput } from "../../schemas";
 import { defineTool, READ_ONLY } from "../../types";
 
-/** Shape a store row into a compact list row for `list_showrooms`. */
-function storeListDto(s: typeof showroomStores.$inferSelect) {
+/** Shape a store row into a compact list row for `list_showrooms`. The website
+ *  is derived from the store's WEBSITE link (URLs live in showroom_store_links,
+ *  no longer on the store row). */
+function storeListDto(
+  s: typeof showroomStores.$inferSelect,
+  website: string | null,
+) {
   return {
     id: s.id,
     name: s.name,
@@ -14,7 +20,7 @@ function storeListDto(s: typeof showroomStores.$inferSelect) {
     address: s.locationAddress,
     zipCode: s.zipCode,
     phone: s.phoneNumber,
-    website: s.websiteUrl,
+    website,
     rating: s.rating,
     isAppointmentOnly: s.isAppointmentOnly,
   };
@@ -70,6 +76,13 @@ export const listShowrooms = defineTool({
       }
       return true;
     });
-    return paginate(filtered.map(storeListDto), input.limit ?? 50, input.offset ?? 0);
+    const linksMap = await getStoreLinksMap(db, filtered.map((s) => s.id));
+    return paginate(
+      filtered.map((s) =>
+        storeListDto(s, linksToLegacyUrls(linksMap.get(s.id) ?? []).websiteUrl),
+      ),
+      input.limit ?? 50,
+      input.offset ?? 0,
+    );
   },
 });

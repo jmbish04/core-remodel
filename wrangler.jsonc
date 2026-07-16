@@ -173,6 +173,17 @@
       "migrations_dir": "drizzle",
       "remote": true,
     },
+    {
+      // Tesla/Tessie hosted Fleet API + Fleet Telemetry (~500ms) sink — isolated
+      // from the app DB so high-frequency telemetry writes don't contend with it.
+      // Schema: src/backend/db/schema/tesla/*; migrations: drizzle-tesla/
+      // (applied by `pnpm run migrate:tesla:remote`, wired into `deploy`).
+      "binding": "TESLA_DB",
+      "database_name": "core-remodel-tesla-telemetry",
+      "database_id": "1e291822-e19d-42b1-86b6-aa047934a3d7",
+      "migrations_dir": "drizzle-tesla",
+      "remote": true,
+    },
   ],
   "r2_buckets": [
     {
@@ -272,6 +283,23 @@
       "secret_name": "GOOGLE_SEARCH_API_KEY",
       "remote": true
     },
+    {
+      // Tessie hosted Fleet API bearer token. Read via getTessieToken().
+      "binding": "TESSIE_API_TOKEN",
+      "store_id": "8c42fa70938644e0a8a109744467375f",
+      "secret_name": "TESSIE_API_TOKEN",
+      "remote": true
+    },
+    {
+      // VIN of the vehicle ("Betsy") Tessie commands are addressed to.
+      // Read via getTeslaVin().
+      "binding": "TESLA_BETSY_VIN",
+      "store_id": "8c42fa70938644e0a8a109744467375f",
+      "secret_name": "TESLA_BETSY_VIN",
+      "remote": true
+    },
+    // Tesla webhook/telemetry auth reuses the existing WORKER_API_KEY binding
+    // (above) — no dedicated webhook secret.
     {
       // ClickUp task mirror (0009): consumed by RemodelOrchestrator + /api/clickup.
       "binding": "CLICKUP_TOKEN",

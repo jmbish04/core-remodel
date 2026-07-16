@@ -12,7 +12,7 @@ export const updateShowroom = defineTool({
   category: "showrooms",
   title: "Update showroom details",
   description:
-    "Patch any known columns on a showroom store (fill-in-missing-details). Only the fields you pass are changed; everything else is left untouched. The `id` cannot be changed. Great for enriching a store after research: address, contact, hours summaries, social links, POC, rating context, access level, notes.",
+    "Patch any known columns on a showroom store (fill-in-missing-details). Only the fields you pass are changed; everything else is left untouched. The `id` cannot be changed. Great for enriching a store after research: address, contact, POC, rating context, access level, notes. For website/social URLs use set_showroom_links; for opening hours use set_showroom_hours.",
   inputShape: {
     id: z.number().int().positive().describe("Showroom store id (from list_showrooms)"),
     name: z.string().optional(),
@@ -21,11 +21,8 @@ export const updateShowroom = defineTool({
     locationAddress: z.string().optional(),
     phoneNumber: z.string().optional(),
     emailAddress: z.string().optional(),
-    websiteUrl: z.string().optional(),
     zipCode: z.string().optional(),
     googleMapsLink: z.string().optional(),
-    weekdayHours: z.string().optional().describe("Human-readable weekday hours summary"),
-    weekendHours: z.string().optional().describe("Human-readable weekend hours summary"),
     isAppointmentOnly: z.boolean().optional(),
     mainPocFullname: z.string().optional(),
     mainPocPhoneNumber: z.string().optional(),
@@ -33,9 +30,6 @@ export const updateShowroom = defineTool({
     rating: z.number().int().min(1).max(5).optional().describe("Latest-visit star rating 1-5"),
     ratingContextHtml: z.string().optional(),
     ratingContextMarkdown: z.string().optional(),
-    instagramUrl: z.string().optional(),
-    facebookUrl: z.string().optional(),
-    pinterestUrl: z.string().optional(),
     overviewNoteHtml: z.string().optional(),
     overviewNoteMarkdown: z.string().optional(),
     accessLevel: z
@@ -55,11 +49,11 @@ export const updateShowroom = defineTool({
   examples: [
     { title: "Add a phone number", args: { id: 4, phoneNumber: "(415) 555-0142" } },
     {
-      title: "Enrich socials + access",
+      title: "Set access + rating",
       args: {
         id: 4,
-        instagramUrl: "https://instagram.com/studiobelmontbath",
         accessLevel: "PUBLIC_UNRESTRICTED",
+        rating: 5,
       },
     },
   ],
