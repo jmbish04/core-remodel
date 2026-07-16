@@ -515,7 +515,7 @@ async function getShowroomResearchAgent(env: Env): Promise<{ researchStore(id: n
 }
 
 /** Kick the website scrape workflow: mint a ragUuid, mark pending, create it. */
-export async function kickShowroomScrape(env: Env, showroomId: number, websiteUrl: string) {
+async function kickShowroomScrape(env: Env, showroomId: number, websiteUrl: string) {
   const db = drizzle(env.DB);
   const ragUuid = crypto.randomUUID();
   await db
