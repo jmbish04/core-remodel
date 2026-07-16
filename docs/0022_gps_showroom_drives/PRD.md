@@ -167,29 +167,53 @@ The on-demand "find me showrooms near here" flow is **worker-orchestrated and D1
 | `slug` | text unique | `/admin/shopping/showrooms/finder/<slug>` |
 | `title` | text | human label the model gives it ("Remodel showrooms near Livermore, 1pm") |
 | `params_json` | text (json) | the full query: `near` (point/area/`current-location`), `radiusM`, `query?` (optional — broad when absent), `broad` (bool), `excludeDirectory` (default true), `excludeNotInterested` (default true), `likeStoreId?`, `excludeCategories?`, `excludeStoreIds?` |
-| `status` | text enum | `running` \| `ready` \| `refining` \| `error` |
+| `status` | text enum | `running` \| `ready` \| `refining` \| `final` \| `error`. A fresh slug is **pending** (`ready`, not yet `final`) — badged pending on the list — until the AI (or user) marks it `final`. |
+| `current_revision` | int | latest revision number (see `showroom_search_revision`) |
 | `summary` | text | short worker/AI summary of the result set |
 | `result_count` | int | |
 | `origin` | text | e.g. `mcp`, `ui` |
 | `origin_conversation` | text | chat/session ref |
 | `created_at` / `updated_at` | int timestamp | |
 
+**`showroom_search_revision`** (app `DB`) — every change to a slug is a numbered revision (the model can always cite "revision N"). Mirrors the `artifact_revisions` pattern.
+| column | type | notes |
+|---|---|---|
+| `id` | int PK | |
+| `search_id` | int FK → `showroom_search.id` (cascade) | |
+| `revision_number` | int | 1-based, per search |
+| `params_json` | text (json) | the params used for this revision |
+| `source` | text enum | `places` \| `ai` \| `mixed` (where this revision's results came from) |
+| `used_places` | int (bool) | whether the Places API was actually called (vs hard-disabled by quota) |
+| `change_note` | text | e.g. "excluded 'appointment only' + Foo Tile" |
+| `created_at` | int timestamp | |
+Unique `(search_id, revision_number)`.
+
 **`showroom_search_result`** (app `DB`) — the result rows for a search (replaced on refine of the same slug).
 | column | type | notes |
 |---|---|---|
 | `id` | int PK | |
 | `search_id` | int FK → `showroom_search.id` (cascade) | |
+| `revision_id` | int FK → `showroom_search_revision.id` (cascade) | which revision produced this row |
 | `place_id` | text | Google Place id when available |
 | `name` | text | |
 | `location_street_number`/`location_street_name`/`location_city`/`location_state`/`location_zip_code` | text | mirrors `showroom_stores` normalized address |
+| `full_address` | text | display/copy address string |
 | `latitude`/`longitude` | real | |
-| `category_guess` | text | |
+| `category_guess` / `primary_type` | text | drive the **type badges** |
+| `phone` | text | click-to-dial (`tel:`) |
+| `website` | text | |
+| `google_rating` | real | **stars badge** when available |
+| `user_rating_count` | int | |
+| `opening_hours_json` | text (json) | Places hours → the viewport computes **open / closing-soon / closed / closed-weekends** relative to the search time |
+| `source` | text enum | `places` \| `ai` — where THIS candidate came from (model-submitted vs Places) |
 | `ai_relevance` | real | 0–1 relevance score |
 | `ai_reasoning` | text | why it's relevant (or not) |
 | `distance_m` | real | from the search point |
 | `in_directory` | int (bool) | already a registered showroom |
 | `existing_store_id` | int | when `in_directory` |
-| `is_excluded` | int (bool) | matched the not-interested list |
+| `is_excluded` | int (bool) | matched the not-interested list (kept, flagged, reported separately — not shown in the main list) |
+| `matched_exclusion_id` | int FK → `showroom_exclusions.id` (set null) | which exclusion matched (so the model can explain *why* it was dropped) |
+| `imported_at` | int timestamp | set when the user/AI imports this result into the directory |
 | `rank` | int | sort order |
 | `created_at` | int timestamp | |
 
@@ -201,7 +225,7 @@ The on-demand "find me showrooms near here" flow is **worker-orchestrated and D1
 | `name` | text notNull | |
 | `location_street_number`/`location_street_name`/`location_city`/`location_state`/`location_zip_code` | text | flat/normalized address (mirror `showroom_stores`) |
 | `latitude`/`longitude` | real | optional — enables coord-proximity match when no place_id |
-| `reason` | text | "why I don't like it" (feeds the model's taste model) |
+| `reason_markdown` / `reason_html` | text | "why I don't like it" — **PlateJS (markdown+html), optional**, captured in the exclude confirmation popup. Feeds the model's taste model. |
 | `category` | text | |
 | `source` | text enum | `manual` \| `ai` |
 | `created_at` / `updated_at` | int timestamp | |
@@ -302,8 +326,9 @@ PARK EVENT (recording on, drive active)
 - `POST /api/tesla/navigate-drive` — multi-waypoint send for a drive (unvisited only).
 - `POST /api/showroom-visit-logs` also serves the model's cold/active-drive create (`useActiveDrive`, `showroomName` resolution) — full CRUD (GET/PATCH/**DELETE**) at parity with the MCP tools (§14.1).
 - `POST /api/showroom-contact-log` — log a phone/email/in-person interaction (mirrors `log_contact_interaction`).
-- **Discovery search:** `GET /api/showroom-searches` (list), `GET /api/showroom-searches/:slug` (head + results), `POST /api/showroom-searches` (create/run), `POST /api/showroom-searches/:slug/refine` (re-run in place). Search execution runs in `waitUntil` (status `running`→`ready`); the page polls.
-- **Exclusions:** `GET/POST /api/showroom-exclusions`, `DELETE /api/showroom-exclusions/:id`.
+- **Discovery search:** `GET /api/showroom-searches` (list), `GET /api/showroom-searches/:slug` (head + latest results), `GET /api/showroom-searches/:slug/revisions` (revision history), `POST /api/showroom-searches` (create/run), `POST /api/showroom-searches/:slug/refine` (new revision in place), `POST /api/showroom-searches/:slug/finalize` (status→`final`), `POST /api/showroom-searches/:slug/import` (bulk-import selected result ids → intake), `POST /api/showroom-searches/:slug/exclude` (result → `showroom_exclusions`, remove from slug). Execution runs in `waitUntil`; **realtime via WS** (§14.5), polling fallback.
+- **Realtime:** `GET /api/showrooms/discovery/ws` (+ per-slug room) — WebSocket to the discovery broadcast DO.
+- **Exclusions:** `GET/POST /api/showroom-exclusions` (reason = PlateJS markdown+html), `DELETE /api/showroom-exclusions/:id`.
 - Config: reuse `GET/POST /api/admin/config` for the Tesla keys (no new route).
 - Webhook/telemetry ingest: extend existing `/api/tesla/webhook` + `/api/tesla/telemetry` with the recording gate + park pipeline hook.
 
@@ -311,7 +336,7 @@ PARK EVENT (recording on, drive active)
 - `get_current_vehicle_location` (RO) — `{lat,lng,address, capturedAt, ageSeconds, isStale, serverTime, hint?}` (§14.3). Backs "what's near me" + time/location grounding.
 - **Visit CRUD (full, §14.1):** `create_visit_log` (cold or `useActiveDrive`/`driveListId`; optional `storeId`/`showroomName`), `get_visit_log`, `list_visit_logs`, `update_visit_log`, `delete_visit_log`. `stage_showroom_visit` (WRITE) = `AI_STAGED` convenience; `finalize_visit_log` = status→`SUBMITTED`. Extend `record_showroom_visit` to also insert a `SUBMITTED` `showroom_visit_log`.
 - `log_contact_interaction` (WRITE) — phone/email/in-person → `showroom_store_contact_log` (§14.1).
-- **Discovery orchestration (§14.2):** `find_showrooms` (WRITE — worker runs the sweep, persists a slug, returns `{slug,url,count,summary,serverTime}`; supports `near`/`current-location`, `radiusM`, optional `query`, `broad`, `likeStoreId`, `excludeCategories`, `excludeStoreIds`; pass an existing `slug` to **refine in place**). `get_showroom_search`/`list_showroom_searches` (RO). Tool description states the model may ALSO use its own web tools.
+- **Discovery orchestration (§14.2):** `find_showrooms` (WRITE — worker merges `aiResults[]` + (optional, quota-guarded) Places sweep, excludes directory + not-interested, ranks, writes a revision, returns `{slug,url,revision,count,summary,serverTime,results,excluded}`; params incl. `near`/`current-location`, `radiusM`, `query?`, `broad`, `likeStoreId`, `excludeCategories`, `excludeStoreIds`, `usePlaces`, `aiResults[]`; pass an existing `slug` to **refine in place**). `list_showroom_searches`/`get_showroom_search`/`get_search_revisions` (RO — pick up an existing slug). `finalize_showroom_search` (WRITE — mark `final`). `import_search_results` (WRITE — bulk-import result ids → intake). `exclude_search_result` (WRITE — result → exclusions, off the slug). All operate on a slug **without re-running a search**. Tool description states the model may ALSO use its own web tools (submit via `aiResults`).
 - **Exclusions (§14.2):** `add_showroom_exclusion` (WRITE), `list_showroom_exclusions` (RO), `remove_showroom_exclusion` (WRITE).
 - `whats_near_me` (RO) — thin wrapper: `find_showrooms` around the live location; returns candidates + already-registered nearby.
 - `list_showroom_discoveries` (RO) + `decide_showroom_discovery` (WRITE) — triage the park-event HITL queue.
@@ -401,17 +426,21 @@ The model must be able to log interactions conversationally, both **cold** and *
 ### 14.2 Worker-orchestrated discovery search (the "beefed-up" finder)
 Today `search_showrooms` returns a handful of Places text-search hits, unpersisted. Replace/augment with an **orchestration split**: the model *orchestrates*, the worker *executes + renders*.
 
-- **`find_showrooms` MCP tool** — the model calls it with intent (`near`/`current-location`, `radiusM`, optional `query`, `broad`, `likeStoreId`, `excludeCategories`, `excludeStoreIds`). It does **not** require a specialty — broad "anything home-remodel" is a first-class mode. The **worker** then:
-  1. runs a **wide Places sweep** around the point (build a real radius/nearby search — current `placesTextSearchMany` is a hardcoded 50 km bias, single page ≤20; extend to a bounded radius + paging),
-  2. **auto-excludes** the user's directory (`showroom_stores.place_id`) and the **not-interested** list (`showroom_exclusions`) — always, behind the scenes,
-  3. classifies/ranks survivors with Gemini (relevance to home remodeling; `likeStoreId` biases toward a loved store's profile),
-  4. **persists** a `showroom_search` (slug) + `showroom_search_result` rows,
-  5. returns `{ slug, url, count, summary, serverTime }` — a small payload, not the raw list.
-- **The result lives on a page, not in the model's context.** The user opens `/admin/shopping/showrooms/finder/<slug>` (appears live in the finder list as it runs) while still talking to Claude.
-- **Refine loop:** the model calls `find_showrooms` again with the **same `slug`** + adjusted params ("exclude these categories/stores"); the worker **replaces that slug's results in place** (status `refining` → `ready`). The model never rebuilds the page — it just re-orchestrates; the worker owns the D1 records and the rendered page.
-- **Model keeps its own tools.** The tool description explicitly states the model may *also* use its own web search / knowledge — `find_showrooms` is an accelerator (bulk Places + exclusions + persistence), not a replacement. The model can cross-reference `showroom_exclusions` (via `list_showroom_exclusions`) to understand the user's taste and avoid recommending disliked places even from its own tools.
-- **Not-interested capture:** `add_showroom_exclusion` (place_id/name/address + reason) so "I've seen that one, don't show it again" is one call; auto-applied to all future sweeps. `list_showroom_exclusions` / `remove_showroom_exclusion` round out CRUD.
-- Cost: this is user-initiated (not per-frame), but the sweep is heavier than a single text search — quota-gate via the existing `isUnderMonthlyQuota`, cap page depth, and dedupe before AI classification. (Deep browser-rendering scrape via `ShowroomResearchAgent` is a **future** upgrade path for a "go deep on these" second pass; 0022's finder is Places+Gemini breadth.)
+- **`find_showrooms` MCP tool** — the model calls it with intent (`near`/`current-location`, `radiusM`, optional `query`, `broad`, `likeStoreId`, `excludeCategories`, `excludeStoreIds`, **`usePlaces`**, **`aiResults[]`**, optional **`slug`**). It does **not** require a specialty — broad "anything home-remodel" is first-class. The **worker** then, as **one revision** of the slug:
+  1. takes the model's own **`aiResults[]`** (candidates the model found with its *own* tools) — `source: "ai"`,
+  2. if `usePlaces` and the Places API is available, runs a **wide Places sweep** around the point (`source: "places"`) — real radius/nearby search + paging (extend `placesTextSearchMany`: today a 50 km bias, single page ≤20),
+  3. **merges + dedupes** AI + Places candidates,
+  4. **auto-excludes** the user's directory (`showroom_stores.place_id`) and the **not-interested** list (`showroom_exclusions`) — flagging excluded rows `is_excluded` + `matched_exclusion_id` rather than dropping them silently,
+  5. classifies/ranks survivors with Gemini (`likeStoreId` biases toward a loved store's profile), captures hours/type/rating/phone for the viewport,
+  6. writes a new `showroom_search_revision` (+ its result rows); `create` makes revision 1 under a fresh slug, `slug` given → appends the next revision **in place**,
+  7. returns a **small** payload: `{ slug, url, revision, count, summary, serverTime, results:[…], excluded:[{name, matchedExclusionReason}] }` — the `excluded` key is **separate** so if the user asks "why isn't Foo Tile here?", the model can answer *"it's on your not-interested list."* Raw result detail lives on the page, not the context.
+- **Places hard-disable (cost guard).** `usePlaces` is a toggle, but even when true the worker **hard-disables** the Places call when the maps-usage D1 table reports the free tier is exhausted (would incur cost) — it reuses the existing `isUnderMonthlyQuota()` / `MAPS_MONTHLY_FREE_TIER_LIMIT` + usage log. When hard-disabled, the revision runs on `aiResults` only, `used_places=false`, and the summary says so, so the model/user know Places was skipped for cost (not error).
+- **The result lives on a page, not in the model's context** (`/admin/shopping/showrooms/discovery/<slug>`), appearing live in the discovery list as it runs (§14.5 realtime).
+- **Refine = a new revision, in place.** Same `slug` + adjusted params → the worker appends a revision and swaps the visible result set (status `refining` → `ready`). The model never rebuilds the page. Every slug keeps a numbered revision history.
+- **Slug actions WITHOUT re-running a search (MCP + API parity).** Once a slug exists, the model (or UI) can operate on it directly: `list_showroom_searches` (pick up an existing slug), `get_showroom_search`, **mark it `final`**, **bulk-import** selected results into the directory (same intake path), **exclude** a result → `showroom_exclusions` (removes it from the slug). None of these re-run a search.
+- **Model keeps its own tools.** The tool description states the model may *also* use its own web search/knowledge — `find_showrooms` is an accelerator (merge + exclusions + persistence + rendering), not a replacement, and the model can submit what it finds via `aiResults[]`.
+- **Not-interested capture:** `add_showroom_exclusion` (place_id/name/address + optional PlateJS reason) — one call; auto-applied to all future sweeps. `list_showroom_exclusions` / `remove_showroom_exclusion` round out CRUD.
+- Cost: user-initiated (not per-frame); quota-gate + hard-disable as above; dedupe before AI classification. (Deep browser-rendering scrape via `ShowroomResearchAgent` is a **future** "go deep on these" second pass; 0022 discovery is Places+Gemini breadth.)
 
 ### 14.3 Time + location grounding (models are bad at "now")
 Every location/discovery MCP tool returns `serverTime` (ISO) so the model is time-rooted on each call. Specifically:
@@ -422,6 +451,12 @@ Every location/discovery MCP tool returns `serverTime` (ISO) so the model is tim
 **Symptom:** MCP tools report "down" during Claude *real-time voice* sessions but work immediately in normal text chat. **Findings:** the connector is served as Streamable-HTTP `/mcp` + SSE `/mcp/sse` via `OAuthProvider` → `RemodelMcpAgent` (`McpAgent` DO); the only keepalive is the `agents` library's 30 s SSE ping — **there is no app-level heartbeat/session-pinning**, and the DO is per-session. Long-lived voice sessions plausibly break on one of: (a) the voice connector negotiating a transport whose stream isn't kept warm, (b) **DO hibernation/eviction** between sparse voice tool calls, (c) OAuth **token expiry** over a long session.
 - **Spike + fix task (P7-INFRA-01):** confirm which transport claude.ai voice negotiates and whether the `RemodelMcpAgent` DO is being hibernated/evicted mid-session; then add an app-level keepalive — e.g. a DO `alarm()`-driven self-ping / session-pin while a session is open, WebSocket auto-response/hibernation handling, and/or lengthened session TTL — so tools stay registered and reachable for the duration of a voice drive. Verify against a real voice session.
 - This is scoped as investigate-then-implement (the exact fix depends on the transport finding); it must not regress normal-chat MCP behavior.
+
+### 14.5 Realtime discovery pages (WebSocket)
+The discovery **list** and **slug viewport** are **live** — a search kicked off by voice appears as a new row while the user is parked, revisions swap results in place, and a result removed (imported or excluded) via **UI, MCP, or API** disappears on the page in realtime, no refresh.
+- Implement with a Durable Object broadcast hub (reuse the existing realtime pattern — `EstimateCollabHub` / `FloorplanSessionDO`; WebSocket route wired in `src/_worker.ts` like `/api/room/:name/ws`). Pages open a WS to a `discovery` room; every write path (`find_showrooms`, import, exclude, mark-final — whether from MCP, REST, or the UI) publishes a small event (`search.created`, `search.updated`, `result.added/removed`, `search.finalized`) that the hub fans out to subscribers.
+- Writes stay in D1 (source of truth); the WS carries only change notifications (client re-reads or patches). Fall back to polling if the socket drops.
+- Scope: the two discovery pages in 0022. (Other pages can adopt the same hub later.)
 
 ---
 

@@ -76,23 +76,33 @@
 - Submit → `POST /api/showroom-visit-logs` (status defaults `DRAFT` unless "Submit" pressed → `SUBMITTED`).
 - Guardrail: require either a selected store or a completed OTHER intake before submit.
 
-## 4. NEW — Showroom Discoveries (HITL) — `/admin/shopping/showrooms/discoveries`
-- The proximity-scan review queue (`GET /api/showroom-hitl-queue?decision=TBD`). Nav item under `shopping` ("Discoveries", with a count badge when TBD > 0).
+## 4. NEW — Park-Scan Queue (HITL) — `/admin/shopping/showrooms/hitl`
+> Naming: this is the **park-event auto-discovery** queue (places the car parked near). The on-demand **Discovery** search is a separate surface at `/discovery` (§4b) — don't conflate them.
+- The proximity-scan review queue (`GET /api/showroom-hitl-queue?decision=TBD`). Nav item under `shopping` ("Park Finds", with a count badge when TBD > 0).
 - Card per candidate: guessed name, category chip, distance/where (mini map marker), the drive it was found on, the AI one-liner, and any Places info. Actions: **Add to directory** (`PATCH …/:id {user_decision:PROCESS}` → runs intake, links `store_id`, toast *"Added — enriching in background"*) · **Not relevant** (`DO_NOT_PROCESS`, with an optional reason) · **Decide later** (leaves TBD).
 - **Empty:** "Nothing new discovered. As you drive past remodel showrooms with tracking on, they'll collect here."
 - This is where the "organic discovery" delight lives — copy should feel like *found treasure*, not a chore. Subtle count badge in nav so it's a pleasant surprise, not nagging.
 
-## 4b. NEW — Showroom Finder (worker-orchestrated discovery) — `/admin/shopping/showrooms/finder`
-The on-the-road "find me something nearby" surface. The AI orchestrates via `find_showrooms`; **the worker renders here** from D1 (`showroom_search` + `showroom_search_result`). Nav item "Finder" under `shopping`.
+## 4b. NEW — Discovery (worker-orchestrated search) — `/admin/shopping/showrooms/discovery`
+The on-the-road "find me something nearby" surface. The AI *orchestrates* via `find_showrooms`; **the worker renders here** from D1 (`showroom_search` + `_revision` + `_result`). Nav item "Discovery" under `shopping`. **Both pages are realtime over WebSocket (§14.5)** — no manual refresh.
 
-- **List page** (`/finder`): searches newest-first — title, when, result count, status pill (`running` shows a live spinner; `ready`; `refining`; `error`). **Live-updating** (poll while any search is `running`/`refining`) so a search the user kicked off by voice **appears as a new row while they're parked**, tap-through to results. "+ New search" opens a small form (near / current-location, radius, optional query, broad toggle).
-- **Detail page** (`/finder/[slug]`): the result set as a sortable/filterable table — name, category, distance, AI-relevance, address, and flags (in-directory, excluded). Row actions: **Add to directory** (→ intake, like the discoveries queue) · **Not interested** (→ `add_showroom_exclusion` with a reason; row greys out) · open in Maps / `NavigateTeslaButton`.
-  - **Refine controls** at the top (also drivable by voice): exclude categories (multiselect), exclude specific stores, toggle "hide ones already in my directory," radius. Applying re-runs `POST …/refine` on the **same slug**; the table updates in place (status → `refining` → `ready`) — no new page. Mirror exactly what the voice refine does so screen + voice stay in lockstep.
-  - Header shows the search params + the point on a mini map (MapLibre, no key).
-  - **Empty/among-excluded:** if everything was filtered out, say so and offer to widen the radius or clear an exclusion.
-- **Mobile / car:** the list + a simplified result card stack must be glanceable and tappable at Tesla-screen width — this is the surface the user opens while parked mid-conversation.
+### 4b.1 Discovery list — `/discovery`
+- Rows = discovery slugs, newest-first: title, timestamp, result count, **status badge** — `running` (live spinner), **`pending`** (ready but not yet finalized by the AI/user — the default for a fresh slug), `refining`, **`final`**, `error`. Revision number shown.
+- **Realtime:** a slug started by voice **appears as a new row while the user is parked**; status/counts update live; a slug finalized or a result removed reflects instantly. No refresh.
+- "+ New search" (near / current-location, radius, optional query, broad toggle). Click a row → the slug viewport.
 
-## 4c. NEW — Not-interested list — `/admin/shopping/showrooms/exclusions` (or a tab on Finder)
+### 4b.2 Discovery slug viewport — `/discovery/[slug]`
+A **rich shadcn page modeled on the existing showroom directory listing** — a **map with markers** for every result, plus a directory-style card/list. Realtime: results appearing, being imported, or excluded animate in/out live.
+- **Map** (MapLibre, no key): a numbered/typed marker per result; click a marker ↔ highlights its card; fit-bounds to the set; the search point marked distinctly.
+- **Per-result card** (mirror the directory card UX): name; **type badge(s)** (from `primary_type`/`category_guess`); **hours badge** computed from `opening_hours_json` **relative to the search time** — `Open` / `Closing soon` / `Closed` / `Closed weekends` (so a 3:30pm search clearly shows the places that shut at 3pm or close at 4pm); **rating stars** + count when available; **phone** as a click-to-dial `tel:` chip; **full address** shown, **click-to-copy** (toast "Address copied"); **`NavigateTeslaButton`** (send to car); "open in Maps"; an `in-directory` pill when already registered.
+- **Bulk import:** checkbox per result + a select-all; a sticky action bar "Import N to directory" opens the **same intake modal** the directory uses (pre-filled per selected place), creating stores; imported rows get an "In directory" state and drop out of the "new" set. Available to the AI too (`import_search_results`).
+- **Exclude → not-interested:** a per-card "Not interested" action. **Requires confirmation per showroom** (prevent accidental) — the confirm dialog includes an **optional PlateJS reason** editor ("why exclude?"). On confirm → `showroom_exclusions` (reason markdown+html) and the row **disappears from the slug** live. Never a bare browser confirm — shadcn `AlertDialog` + embedded `OverviewNoteEditor`.
+- **Refine controls** (top; also drivable by voice): exclude categories (multiselect), exclude specific stores, "hide ones already in my directory," radius, `usePlaces` toggle. Apply → `POST …/refine` (a **new revision** in place; status `refining`→`ready`). A **revision switcher** lets the user view prior revisions. Screen refine and voice refine stay in lockstep (both append revisions).
+- **"Why isn't X here?"** an "Excluded (N)" disclosure lists results the worker auto-hid because they matched the not-interested list, each with the exclusion reason — so the answer is visible on-page too, not just via the model.
+- **Header:** search params + `used_places`/quota note (e.g. "Places skipped — free tier reached") + point on the map.
+- **Mobile / car:** glanceable, tappable at Tesla-screen width — the surface opened while parked mid-conversation.
+
+## 4c. NEW — Not-interested list — `/admin/shopping/showrooms/exclusions` (or a tab on Discovery)
 Simple managed table of `showroom_exclusions`: name, address, place_id, reason, category, source (manual/ai), date. Add (manual form) / remove. Copy: *"Places you've ruled out — they won't show up in Finder or discoveries again."* Small nav or a tab; low-traffic.
 
 ## 5. NEW — Tesla config — `/admin/config/tesla`
