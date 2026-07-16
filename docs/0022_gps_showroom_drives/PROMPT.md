@@ -26,6 +26,7 @@ Work the phases in `TASKS.json`. **P0 is already shipped** (marked `done`). Reco
 - **PR-D (P4 discovery):** `showroom_store_hitl_queue` + store proximity flags, `proximityScan`, decision 1.d, discoveries page + REST + MCP, drive detour forks.
 - **PR-E (P5 navigation):** `NavigateTeslaButton` shared, showroom button, waypoints **spike** (`P5-SPIKE-01`) → multi-waypoint navigate-drive + send-to-car UI.
 - **PR-F (P6 AI surface):** `get_current_vehicle_location`, `whats_near_me`, staging/nav MCP tools.
+- **PR-G (P7 voice companion — §14, highest daily-use leverage):** full visit/contact CRUD (MCP+API parity, cold + active-drive) → `showroom_search`/`_result` + `showroom_exclusions` tables → Places radius/paging + `find_showrooms` orchestration service → discovery/exclusions REST + MCP → Finder pages (live-updating + in-place refine) + Exclusions page → time/location grounding (`get_current_vehicle_location` staleness + `serverTime`) → **P7-INFRA-01 real-time MCP keepalive spike+fix**. Can be pulled forward right after PR-A/PR-B if the voice loop is the priority — it depends on the visit-log schema (P1) and config (P2) but not P3–P6.
 
 Do `P5-SPIKE-01` (verify `navigation_waypoints_request` payload against a live vehicle) **before** building `P5-API-01`; if it can't be verified, implement the documented fallback (sequential single `share` + park auto-advance, which already exists) and leave the waypoint path behind a flag.
 

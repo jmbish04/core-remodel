@@ -82,6 +82,19 @@
 - **Empty:** "Nothing new discovered. As you drive past remodel showrooms with tracking on, they'll collect here."
 - This is where the "organic discovery" delight lives — copy should feel like *found treasure*, not a chore. Subtle count badge in nav so it's a pleasant surprise, not nagging.
 
+## 4b. NEW — Showroom Finder (worker-orchestrated discovery) — `/admin/shopping/showrooms/finder`
+The on-the-road "find me something nearby" surface. The AI orchestrates via `find_showrooms`; **the worker renders here** from D1 (`showroom_search` + `showroom_search_result`). Nav item "Finder" under `shopping`.
+
+- **List page** (`/finder`): searches newest-first — title, when, result count, status pill (`running` shows a live spinner; `ready`; `refining`; `error`). **Live-updating** (poll while any search is `running`/`refining`) so a search the user kicked off by voice **appears as a new row while they're parked**, tap-through to results. "+ New search" opens a small form (near / current-location, radius, optional query, broad toggle).
+- **Detail page** (`/finder/[slug]`): the result set as a sortable/filterable table — name, category, distance, AI-relevance, address, and flags (in-directory, excluded). Row actions: **Add to directory** (→ intake, like the discoveries queue) · **Not interested** (→ `add_showroom_exclusion` with a reason; row greys out) · open in Maps / `NavigateTeslaButton`.
+  - **Refine controls** at the top (also drivable by voice): exclude categories (multiselect), exclude specific stores, toggle "hide ones already in my directory," radius. Applying re-runs `POST …/refine` on the **same slug**; the table updates in place (status → `refining` → `ready`) — no new page. Mirror exactly what the voice refine does so screen + voice stay in lockstep.
+  - Header shows the search params + the point on a mini map (MapLibre, no key).
+  - **Empty/among-excluded:** if everything was filtered out, say so and offer to widen the radius or clear an exclusion.
+- **Mobile / car:** the list + a simplified result card stack must be glanceable and tappable at Tesla-screen width — this is the surface the user opens while parked mid-conversation.
+
+## 4c. NEW — Not-interested list — `/admin/shopping/showrooms/exclusions` (or a tab on Finder)
+Simple managed table of `showroom_exclusions`: name, address, place_id, reason, category, source (manual/ai), date. Add (manual form) / remove. Copy: *"Places you've ruled out — they won't show up in Finder or discoveries again."* Small nav or a tab; low-traffic.
+
 ## 5. NEW — Tesla config — `/admin/config/tesla`
 - Mirror `PropertyAddressConfigApp.tsx` inside `ConfigShell`; add to `config-nav.ts`.
 - **Recording card:** big shadcn `Switch` **"Record Tesla telemetry"** (`tesla_record_telemetry`) with clear on/off helper: *"When on, your car streams location to this app while you drive. Turn it off to stop recording."* Include a live status line (last frame received, from `TESLA_DB`).

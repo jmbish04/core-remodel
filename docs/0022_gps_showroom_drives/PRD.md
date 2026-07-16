@@ -157,6 +157,56 @@ This lets 1.d insert a real detour stop (checked-off, `is_detour=1`, `hitl_queue
 - `tesla_telemetry_events` (exists) — already stores raw frames + hoisted `latitude/longitude/speed/shift_state/battery_level/odometer`. **Add** `destination_name` (text, from field 163 when available) and a derived `is_parked` (bool) so the park pipeline can query cheaply. (Optional; can be computed instead — see TASKS.)
 - `tesla_webhook_events` (exists) — already stores webhook payloads + match result. No change required.
 
+### 5.7 NEW — Discovery-search + exclusions  *(appended — real-time voice companion, §14)*
+The on-demand "find me showrooms near here" flow is **worker-orchestrated and D1-backed** (the AI only orchestrates; the worker does the scrape and owns the rendered result). Artifacts are TSX-only (confirmed), so this gets dedicated tables, not the artifacts system.
+
+**`showroom_search`** (app `DB`) — one orchestrated search (a slug the user can open while still talking to Claude).
+| column | type | notes |
+|---|---|---|
+| `id` | int PK | |
+| `slug` | text unique | `/admin/shopping/showrooms/finder/<slug>` |
+| `title` | text | human label the model gives it ("Remodel showrooms near Livermore, 1pm") |
+| `params_json` | text (json) | the full query: `near` (point/area/`current-location`), `radiusM`, `query?` (optional — broad when absent), `broad` (bool), `excludeDirectory` (default true), `excludeNotInterested` (default true), `likeStoreId?`, `excludeCategories?`, `excludeStoreIds?` |
+| `status` | text enum | `running` \| `ready` \| `refining` \| `error` |
+| `summary` | text | short worker/AI summary of the result set |
+| `result_count` | int | |
+| `origin` | text | e.g. `mcp`, `ui` |
+| `origin_conversation` | text | chat/session ref |
+| `created_at` / `updated_at` | int timestamp | |
+
+**`showroom_search_result`** (app `DB`) — the result rows for a search (replaced on refine of the same slug).
+| column | type | notes |
+|---|---|---|
+| `id` | int PK | |
+| `search_id` | int FK → `showroom_search.id` (cascade) | |
+| `place_id` | text | Google Place id when available |
+| `name` | text | |
+| `location_street_number`/`location_street_name`/`location_city`/`location_state`/`location_zip_code` | text | mirrors `showroom_stores` normalized address |
+| `latitude`/`longitude` | real | |
+| `category_guess` | text | |
+| `ai_relevance` | real | 0–1 relevance score |
+| `ai_reasoning` | text | why it's relevant (or not) |
+| `distance_m` | real | from the search point |
+| `in_directory` | int (bool) | already a registered showroom |
+| `existing_store_id` | int | when `in_directory` |
+| `is_excluded` | int (bool) | matched the not-interested list |
+| `rank` | int | sort order |
+| `created_at` | int timestamp | |
+
+**`showroom_exclusions`** (app `DB`) — the "seen it, not interested, never show me again" list. Net-new — today "rule out" only writes a 1★ rating on an already-imported store; there is no way to suppress a *candidate that was never imported*. Auto-applied to every discovery sweep.
+| column | type | notes |
+|---|---|---|
+| `id` | int PK | |
+| `place_id` | text | optional but preferred match key |
+| `name` | text notNull | |
+| `location_street_number`/`location_street_name`/`location_city`/`location_state`/`location_zip_code` | text | flat/normalized address (mirror `showroom_stores`) |
+| `latitude`/`longitude` | real | optional — enables coord-proximity match when no place_id |
+| `reason` | text | "why I don't like it" (feeds the model's taste model) |
+| `category` | text | |
+| `source` | text enum | `manual` \| `ai` |
+| `created_at` / `updated_at` | int timestamp | |
+Match on `place_id` first; else fuzzy name + address/coord proximity. **Never resurfaces** in discovery (mirrors the `showroom_gaps` dismissed-key pattern). Indexes: `place_id`, `location_zip_code`.
+
 ---
 
 ## 6. Backend — the processing pipeline
@@ -250,20 +300,26 @@ PARK EVENT (recording on, drive active)
 - `PATCH /api/showroom-hitl-queue/:id` — decide (`PROCESS` → run intake, set `store_id`; `DO_NOT_PROCESS`).
 - `PATCH /api/drive-lists/:slug/active` — set active/paused (single-active enforced).
 - `POST /api/tesla/navigate-drive` — multi-waypoint send for a drive (unvisited only).
+- `POST /api/showroom-visit-logs` also serves the model's cold/active-drive create (`useActiveDrive`, `showroomName` resolution) — full CRUD (GET/PATCH/**DELETE**) at parity with the MCP tools (§14.1).
+- `POST /api/showroom-contact-log` — log a phone/email/in-person interaction (mirrors `log_contact_interaction`).
+- **Discovery search:** `GET /api/showroom-searches` (list), `GET /api/showroom-searches/:slug` (head + results), `POST /api/showroom-searches` (create/run), `POST /api/showroom-searches/:slug/refine` (re-run in place). Search execution runs in `waitUntil` (status `running`→`ready`); the page polls.
+- **Exclusions:** `GET/POST /api/showroom-exclusions`, `DELETE /api/showroom-exclusions/:id`.
 - Config: reuse `GET/POST /api/admin/config` for the Tesla keys (no new route).
 - Webhook/telemetry ingest: extend existing `/api/tesla/webhook` + `/api/tesla/telemetry` with the recording gate + park pipeline hook.
 
 ### 7.2 MCP tools (`src/backend/mcp/tools/tesla.ts`, new category `tesla` or under `drives`/`showrooms`)
-- `get_current_vehicle_location` (RO) — latest telemetry/`getLocation` → `{lat,lng,address,at}`. Backs "what's near me."
-- `whats_near_me` (RO) — `proximityScan` around the live location (or a passed point); returns candidate showrooms + any already-registered nearby. The on-the-road voice use case.
-- `stage_showroom_visit` (WRITE) — create `AI_STAGED` visit-log rows for the user to finalize.
-- `list_visit_logs` / `get_visit_log` (RO).
-- `finalize_visit_log` (WRITE) — set fields/status (for agent-assisted completion).
-- `list_showroom_discoveries` (RO) + `decide_showroom_discovery` (WRITE) — triage the HITL queue.
-- `navigate_tesla` (WRITE) — single destination to the car (by store_id / stop / coords / address).
+- `get_current_vehicle_location` (RO) — `{lat,lng,address, capturedAt, ageSeconds, isStale, serverTime, hint?}` (§14.3). Backs "what's near me" + time/location grounding.
+- **Visit CRUD (full, §14.1):** `create_visit_log` (cold or `useActiveDrive`/`driveListId`; optional `storeId`/`showroomName`), `get_visit_log`, `list_visit_logs`, `update_visit_log`, `delete_visit_log`. `stage_showroom_visit` (WRITE) = `AI_STAGED` convenience; `finalize_visit_log` = status→`SUBMITTED`. Extend `record_showroom_visit` to also insert a `SUBMITTED` `showroom_visit_log`.
+- `log_contact_interaction` (WRITE) — phone/email/in-person → `showroom_store_contact_log` (§14.1).
+- **Discovery orchestration (§14.2):** `find_showrooms` (WRITE — worker runs the sweep, persists a slug, returns `{slug,url,count,summary,serverTime}`; supports `near`/`current-location`, `radiusM`, optional `query`, `broad`, `likeStoreId`, `excludeCategories`, `excludeStoreIds`; pass an existing `slug` to **refine in place**). `get_showroom_search`/`list_showroom_searches` (RO). Tool description states the model may ALSO use its own web tools.
+- **Exclusions (§14.2):** `add_showroom_exclusion` (WRITE), `list_showroom_exclusions` (RO), `remove_showroom_exclusion` (WRITE).
+- `whats_near_me` (RO) — thin wrapper: `find_showrooms` around the live location; returns candidates + already-registered nearby.
+- `list_showroom_discoveries` (RO) + `decide_showroom_discovery` (WRITE) — triage the park-event HITL queue.
+- `navigate_tesla` (WRITE) — single destination (store_id / stop / coords / address).
 - `map_drive_to_tesla` (WRITE) — multi-waypoint send for a drive.
 - `set_drive_active` (WRITE) — mark a drive active/paused.
-- Extend `record_showroom_visit` to also insert a `showroom_visit_log` (`SUBMITTED`) so agent-recorded visits join the history.
+
+**Cross-cutting:** every location/discovery tool returns `serverTime`; timestamped payloads include a worker-computed `ageSeconds` so the model is time-rooted (§14.3).
 
 All tools: hand-written Zod v4, `READ_ONLY`/`WRITE` annotations, examples, `url` fields to the relevant page — matching `tools/drives.ts`.
 
@@ -276,6 +332,7 @@ Backed by `project_system_variables` (category `tesla`), reusing `GET/POST /api/
 - `tesla_work_address` (+ resolved `tesla_work_lat`/`tesla_work_lng`, optional).
 - `tesla_proximity_radius_m` (default 250), `tesla_home_work_radius_m` (default 150).
 - `tesla_proximity_scan_enabled` (Switch; on = allow §6.3 during active drives).
+- `tesla_location_stale_seconds` (default 300) — age past which `get_current_vehicle_location` reports `isStale` (§14.3).
 - Add nav entry to `config-nav.ts`; page mirrors `PropertyAddressConfigApp.tsx` inside `ConfigShell`.
 - Add a **"primary residence"** toggle to the permit address config so home coords can be shared.
 
@@ -296,8 +353,9 @@ Backed by `project_system_variables` (category `tesla`), reusing `GET/POST /api/
 - **P4 — Discovery (HITL):** `showroom_store_hitl_queue`, `proximityScan`, decision tree 1.d, discoveries page, detour forks, `showroom_stores` proximity flags.
 - **P5 — Navigation:** reusable Tesla button on showrooms; multi-waypoint "send drive to car" (+ spike); re-send-on-visit.
 - **P6 — AI surface:** `whats_near_me`, `get_current_vehicle_location`, `stage_showroom_visit`, discovery/visit MCP tools.
+- **P7 — Voice companion (§14):** full visit/contact CRUD (MCP+API parity, cold + active-drive), the worker-orchestrated discovery finder (`showroom_search`/`_result` + `find_showrooms` + finder pages), the `showroom_exclusions` not-interested list, time/location grounding (staleness + `serverTime`), and the real-time MCP keepalive fix.
 
-Each phase is independently shippable; P1 alone is useful.
+Each phase is independently shippable; P1 alone is useful. P7 is the highest-leverage for the daily driving workflow — can be pulled forward after P1/P2 if the voice loop is the priority.
 
 ---
 
@@ -311,6 +369,10 @@ Each phase is independently shippable; P1 alone is useful.
 - **A7.** `/admin/config/tesla`: master recording switch, home/work addresses; parking at home/work pauses all active drives.
 - **A8.** All visit/discovery notes persist **both** markdown and html (PlateJS). Enforced in schema, API, MCP, and UI.
 - **A9.** The AI can, via MCP: report the car's current location, list nearby candidate showrooms, stage visits, and triage discoveries.
+- **A10.** The AI can full-CRUD a visit log and log a contact interaction (phone/email/in-person) by voice — cold or against "my active drive" with no id — mirrored 1:1 by REST.
+- **A11.** `find_showrooms` (broad or specific) runs a worker-side sweep that auto-excludes the directory + not-interested list, persists a slug, and returns a small `{slug,url,summary}`; the slug page appears live in the finder and refines in place on a follow-up call. `add_showroom_exclusion` suppresses a candidate from all future sweeps.
+- **A12.** `get_current_vehicle_location` returns `capturedAt` + worker-computed `ageSeconds` + `isStale` + `serverTime`; a stale fix makes the model ask the user rather than search a wrong point.
+- **A13.** MCP tools stay available through a long real-time voice session (P7-INFRA-01), without regressing normal-chat MCP.
 
 ---
 
@@ -322,6 +384,44 @@ Each phase is independently shippable; P1 alone is useful.
 - **R5.** D1 write volume from 500 ms logging → isolated DB now; coalesce lever documented.
 - **Q1.** Should a `SUBMITTED` visit-log rating overwrite the `showroom_stores` denormalized snapshot? **Proposed:** yes — latest `SUBMITTED` wins the snapshot; the log keeps full history.
 - **Q2.** Drive "Active toggle" off → `paused` vs `draft`? **Proposed:** `paused` (resumable), reserving `draft` for never-started.
+
+---
+
+## 14. Real-time voice driving companion  *(appended)*
+The primary field workflow is a **hands-free Claude voice session over Bluetooth while driving**. Between showrooms the user dictates visit notes; on the road they ask "find me something nearby, I've got time to kill." Three capabilities must be first-class for that to work: full visit/contact CRUD from the model, a worker-orchestrated discovery search the model drives but doesn't render, and time/location grounding. Plus a reliability fix so tools don't drop mid-voice-session.
+
+### 14.1 Visit + contact CRUD from the model (MCP **and** API, full parity)
+The model must be able to log interactions conversationally, both **cold** and **in active-drive context**:
+- **Cold:** "just record a showroom visit" / "I just had a phone call with X, log it" — no drive list involved.
+- **Active-drive context:** "on my active drive I just visited X, here are the notes" — the tool resolves **the** active drive (single-active invariant) automatically; no id needed.
+- Full CRUD, not just create: `create_visit_log`, `get_visit_log`, `list_visit_logs`, `update_visit_log`, `delete_visit_log` — mirrored 1:1 by REST (`/api/showroom-visit-logs`). Create accepts an optional `driveListId` OR a `useActiveDrive: true`, an optional `storeId` (or a `showroomName` the tool resolves/creates), `type`, `rating`, `notes` (markdown+html), arrival/departure.
+- **Contacts:** `log_contact_interaction` (→ `showroom_store_contact_log`, `type` = `PHONE|EMAIL|SHOWROOM_IN_PERSON`, optional `showroomVisitLogId`) so "log a phone call" is one tool call.
+- Notes obey the PlateJS rule: markdown+html both stored. When the model supplies plain text, the API derives html from markdown.
+
+### 14.2 Worker-orchestrated discovery search (the "beefed-up" finder)
+Today `search_showrooms` returns a handful of Places text-search hits, unpersisted. Replace/augment with an **orchestration split**: the model *orchestrates*, the worker *executes + renders*.
+
+- **`find_showrooms` MCP tool** — the model calls it with intent (`near`/`current-location`, `radiusM`, optional `query`, `broad`, `likeStoreId`, `excludeCategories`, `excludeStoreIds`). It does **not** require a specialty — broad "anything home-remodel" is a first-class mode. The **worker** then:
+  1. runs a **wide Places sweep** around the point (build a real radius/nearby search — current `placesTextSearchMany` is a hardcoded 50 km bias, single page ≤20; extend to a bounded radius + paging),
+  2. **auto-excludes** the user's directory (`showroom_stores.place_id`) and the **not-interested** list (`showroom_exclusions`) — always, behind the scenes,
+  3. classifies/ranks survivors with Gemini (relevance to home remodeling; `likeStoreId` biases toward a loved store's profile),
+  4. **persists** a `showroom_search` (slug) + `showroom_search_result` rows,
+  5. returns `{ slug, url, count, summary, serverTime }` — a small payload, not the raw list.
+- **The result lives on a page, not in the model's context.** The user opens `/admin/shopping/showrooms/finder/<slug>` (appears live in the finder list as it runs) while still talking to Claude.
+- **Refine loop:** the model calls `find_showrooms` again with the **same `slug`** + adjusted params ("exclude these categories/stores"); the worker **replaces that slug's results in place** (status `refining` → `ready`). The model never rebuilds the page — it just re-orchestrates; the worker owns the D1 records and the rendered page.
+- **Model keeps its own tools.** The tool description explicitly states the model may *also* use its own web search / knowledge — `find_showrooms` is an accelerator (bulk Places + exclusions + persistence), not a replacement. The model can cross-reference `showroom_exclusions` (via `list_showroom_exclusions`) to understand the user's taste and avoid recommending disliked places even from its own tools.
+- **Not-interested capture:** `add_showroom_exclusion` (place_id/name/address + reason) so "I've seen that one, don't show it again" is one call; auto-applied to all future sweeps. `list_showroom_exclusions` / `remove_showroom_exclusion` round out CRUD.
+- Cost: this is user-initiated (not per-frame), but the sweep is heavier than a single text search — quota-gate via the existing `isUnderMonthlyQuota`, cap page depth, and dedupe before AI classification. (Deep browser-rendering scrape via `ShowroomResearchAgent` is a **future** upgrade path for a "go deep on these" second pass; 0022's finder is Places+Gemini breadth.)
+
+### 14.3 Time + location grounding (models are bad at "now")
+Every location/discovery MCP tool returns `serverTime` (ISO) so the model is time-rooted on each call. Specifically:
+- **`get_current_vehicle_location`** returns `{ latitude, longitude, address, capturedAt, ageSeconds, isStale, serverTime }`. `ageSeconds` = `serverTime − capturedAt` computed by the worker; `isStale` = `ageSeconds > tesla_location_stale_seconds` (config, default ~300s). When stale, the payload says so explicitly (`isStale: true` + a `hint` string) so the model asks the user for their location instead of trusting an 18,000-seconds-ago fix.
+- `find_showrooms` with `near: "current-location"` uses this internally and refuses/falls back gracefully when the fix is stale (returns a `needsUserLocation` flag rather than searching a stale point).
+
+### 14.4 Real-time (voice) MCP reliability — keep tools alive
+**Symptom:** MCP tools report "down" during Claude *real-time voice* sessions but work immediately in normal text chat. **Findings:** the connector is served as Streamable-HTTP `/mcp` + SSE `/mcp/sse` via `OAuthProvider` → `RemodelMcpAgent` (`McpAgent` DO); the only keepalive is the `agents` library's 30 s SSE ping — **there is no app-level heartbeat/session-pinning**, and the DO is per-session. Long-lived voice sessions plausibly break on one of: (a) the voice connector negotiating a transport whose stream isn't kept warm, (b) **DO hibernation/eviction** between sparse voice tool calls, (c) OAuth **token expiry** over a long session.
+- **Spike + fix task (P7-INFRA-01):** confirm which transport claude.ai voice negotiates and whether the `RemodelMcpAgent` DO is being hibernated/evicted mid-session; then add an app-level keepalive — e.g. a DO `alarm()`-driven self-ping / session-pin while a session is open, WebSocket auto-response/hibernation handling, and/or lengthened session TTL — so tools stay registered and reachable for the duration of a voice drive. Verify against a real voice session.
+- This is scoped as investigate-then-implement (the exact fix depends on the transport finding); it must not regress normal-chat MCP behavior.
 
 ---
 
