@@ -175,8 +175,15 @@ export async function scrapeUrl(env: Env, url: string): Promise<ScrapedPage> {
 
   return {
     html,
-    markdown,
-    // Prefer the browser's Markdown; fall back to stripped HTML if a format was refused.
+    // MUST be undefined (never "") when absent. Every caller does
+    // `scraped.markdown ?? scraped.text` and `??` does NOT fall through on an
+    // empty string — returning "" silently discards the text fallback and hands
+    // the extractor a blank page. That is exactly what shipped in #139: pages
+    // written after the deploy still had ~811-char prompts ending in
+    // "PAGE CONTENT:" with nothing after it.
+    markdown: markdown || undefined,
+    // Prefer the browser's Markdown; fall back to stripped HTML when the account's
+    // Browser Rendering ignores/refuses the (recent) `formats` param.
     text: markdown || stripHtml(html),
     // `result.links` is currently never sent; keep honouring it if that ever changes.
     links: result.links ? normalizeLinks(result.links) : extractLinksFromHtml(html, url),
