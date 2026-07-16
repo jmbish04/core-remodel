@@ -56,19 +56,6 @@
     // website discovery in brand-enrichment.ts. Empty string == disabled;
     // falls back to Workers-AI-only discovery.
     "GOOGLE_SEARCH_CX": "",
-    // KILL SWITCH for the bulk showroom re-scrape drain (services/showroom/
-    // scrape-backfill.ts). OFF by default and read fail-safe: anything that is
-    // not an explicit true leaves the drain off.
-    //
-    // Each store is now up to MAX_PAGES REAL browser renders + Workers AI
-    // extraction + Vectorize embedding, and Browser Run's ceiling (10 req/s,
-    // 120 concurrent browsers) is ACCOUNT-WIDE — shared with brand-research and
-    // product-research. Only turn this on deliberately, watching spend.
-    //
-    // NOTE: flipping this in the dashboard is NOT durable — `wrangler deploy`
-    // rewrites vars from this file, so a dashboard edit is reverted by the next
-    // deploy. Treat this file as the source of truth.
-    "SHOWROOM_SCRAPE_BACKFILL_ENABLED": false,
   },
   // DO NOT DELETE COMMENTS
   //  wrangler vectorize create core-remodel-research --preset @cf/baai/bge-large-en-v1.5
