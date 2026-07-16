@@ -182,6 +182,17 @@ category with no subcategory.
   for sort/compare/sum). The API accepts text and derives cents (or takes an explicit
   override). See `product_price_observations` (price/priceCents) for the pattern.
 
+**Rich-text notes (PlateJS)** → any user-authored rich text (visit notes, overview notes,
+review context, drive notes, HITL context, etc.) is captured with the **PlateJS** editor
+(`@/components/showroom/OverviewNoteEditor` `<OverviewNoteEditor>`, or an equivalent Plate host),
+which emits `{ markdown, html }` via `onChange`. NEVER a bare `<textarea>` for a note field.
+- **D1 for rich text: store BOTH** a `<field>_markdown` TEXT column AND a `<field>_html` TEXT
+  column. The markdown is the portable/round-trippable source of truth; the html is the
+  render-ready cache. Never persist only one. The API accepts both (sanitize the html on write);
+  MCP tools that write notes accept/return both. See `store_notes` (contentMarkdown/contentHtml)
+  and `showroom_stores` (overviewNoteMarkdown/overviewNoteHtml, ratingContextMarkdown/…Html) for
+  the pattern; `showroom_visit_log` (notes_markdown/notes_html) follows it.
+
 **Single-select with "Other"** → `@/components/ui/combobox-with-other` `<ComboboxWithOther>`
 (brand, style, single category…). **Multi-select with "Other"** → `@/components/ui/multiple-selector`
 `<MultipleSelector>` (colors, categories…). Both support option create via `onCreateOther`/
