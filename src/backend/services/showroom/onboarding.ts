@@ -368,6 +368,13 @@ export interface MappedPlaceStore {
   categoryTokens: Array<string | null | undefined>;
   /** Detected brands to create + map (from the AI insight). */
   brands: Array<{ name?: string; type?: string; websiteUrl?: string }>;
+  /**
+   * Social profile URLs the Gemini (search-grounded) review analysis found →
+   * persisted as typed rows in `showroom_store_links`. Raw URLs only: the
+   * hostname classifier in `services/showroom/social-links` decides the type and
+   * rejects share widgets, so a mislabeled Gemini `type` can never poison the row.
+   */
+  socialUrls: string[];
 }
 
 /**
@@ -492,6 +499,9 @@ export function mapPlaceDetailsToStoreInput(
     photos: (place.photos ?? []).slice(0, 5),
     categoryTokens: [...(place.types ?? []), place.primaryType],
     brands: ai?.brands ?? [],
+    socialUrls: ((ai as { socialLinks?: Array<{ url?: string }> } | undefined)?.socialLinks ?? [])
+      .map((s) => s?.url)
+      .filter((u): u is string => typeof u === "string" && u.length > 0),
   };
 }
 
@@ -505,7 +515,7 @@ async function getShowroomResearchAgent(env: Env): Promise<{ researchStore(id: n
 }
 
 /** Kick the website scrape workflow: mint a ragUuid, mark pending, create it. */
-async function kickShowroomScrape(env: Env, showroomId: number, websiteUrl: string) {
+export async function kickShowroomScrape(env: Env, showroomId: number, websiteUrl: string) {
   const db = drizzle(env.DB);
   const ragUuid = crypto.randomUUID();
   await db

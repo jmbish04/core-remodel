@@ -11,6 +11,7 @@ import { dispatchDueWorkflows } from "./backend/services/workflow-dispatcher";
 import { autoHealImageUploads } from "./backend/services/image-processor/auto-heal";
 import { monitorShowroomSourcingCoverage } from "./backend/services/showroom-sourcing-monitor";
 import { backfillShowroomPlacesData } from "./backend/services/showroom/places-backfill";
+import { reScrapeStaleShowrooms } from "./backend/services/showroom/scrape-backfill";
 import { ingestCompanyEmails } from "./backend/services/gmail/ingestion";
 import {
   getDeviceIdFromRequest,
@@ -268,6 +269,18 @@ const legacyHandler: ExportedHandler<Env> = {
       // errors (or whose workflow never started) without manual reprocessing.
       ctx.waitUntil(autoHealImageUploads(env));
       ctx.waitUntil(monitorShowroomSourcingCoverage(env));
+      // Drain the website-scrape backlog: every scrape captured an empty page
+      // until scrapeUrl was reading the wrong response field, so stores left
+      // idle/failed get re-kicked a few per tick. No-ops once drained.
+      ctx.waitUntil(
+        reScrapeStaleShowrooms(env)
+          .then((r) => {
+            if (r.kicked > 0) {
+              console.log(`[scheduled] showroom re-scrape: kicked=${r.kicked}`);
+            }
+          })
+          .catch((err) => console.error("[scheduled] showroom re-scrape failed:", err)),
+      );
       // One-shot re-enrichment of showroom website/hours/address from Google
       // Places (0108/0109 dropped the legacy columns before backfill). Processes
       // a small batch per tick and no-ops once every place_id store is done.

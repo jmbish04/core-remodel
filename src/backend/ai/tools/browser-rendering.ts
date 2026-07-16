@@ -103,9 +103,22 @@ async function uploadScreenshotToImages(
 // ---------------------------------------------------------------------------
 
 /**
- * Scrapes a URL using the Browser Rendering `/snapshot` endpoint.
- * This captures rendered HTML and a base64 screenshot simultaneously.
- * The screenshot is uploaded to Cloudflare Images for persistent storage.
+ * Scrapes a URL using the Browser Rendering `/snapshot` endpoint: rendered page
+ * content + native Markdown + a screenshot in one request. The screenshot is
+ * uploaded to Cloudflare Images for persistent storage.
+ *
+ * TWO API SHAPES THAT BIT US (both silently, for months):
+ *  1. `/snapshot` returns the rendered HTML under `result.content` — `html` is the
+ *     REQUEST field (render-this-HTML), not the response field. Reading `result.html`
+ *     yielded "" for every page, so `text` was always "", so every consumer
+ *     (showroom scrape, brand/product research, estimate intake) silently scraped a
+ *     blank page while the screenshot kept working.
+ *  2. `/snapshot` never returns a `links` array at all, so link discovery has to be
+ *     parsed out of the HTML — see {@link extractLinksFromHtml}.
+ *
+ * `formats` (added 2026-06-11) lets us ask for Markdown rendered by the browser,
+ * which preserves link targets and beats stripHtml(). At least two formats are
+ * required by the API; we ask for all three we use.
  */
 export async function scrapeUrl(env: Env, url: string): Promise<ScrapedPage> {
   const base = await brBaseUrl(env);
@@ -114,7 +127,12 @@ export async function scrapeUrl(env: Env, url: string): Promise<ScrapedPage> {
   const response = await fetch(`${base}/snapshot`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ url }),
+    body: JSON.stringify({ url, formats: ["content", "screenshot", "markdown"] }),
+    // Bound the call so a hung origin can't stall a workflow step forever. 60s,
+    // NOT the ~10s you'd use for a plain API: this is a real browser rendering a
+    // JS-heavy retail site, where 10s would time out exactly the pages we most
+    // need and silently reproduce the blank-page bug this function just fixed.
+    signal: AbortSignal.timeout(SNAPSHOT_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -126,7 +144,10 @@ export async function scrapeUrl(env: Env, url: string): Promise<ScrapedPage> {
   const payload = (await response.json()) as {
     success: boolean;
     result: {
-      html?: string;
+      /** Rendered HTML. NOT `html` — that is the request-side field. */
+      content?: string;
+      /** Browser-rendered Markdown (formats: ["markdown"]). */
+      markdown?: string;
       screenshot?: string; // base64-encoded PNG
       links?: Array<string | { href?: string; text?: string }>;
     };
@@ -149,12 +170,63 @@ export async function scrapeUrl(env: Env, url: string): Promise<ScrapedPage> {
     }
   }
 
+  const html = result.content ?? "";
+  const markdown = result.markdown ?? "";
+
   return {
-    html: result.html ?? "",
-    text: stripHtml(result.html ?? ""),
-    links: normalizeLinks(result.links),
+    html,
+    markdown,
+    // Prefer the browser's Markdown; fall back to stripped HTML if a format was refused.
+    text: markdown || stripHtml(html),
+    // `result.links` is currently never sent; keep honouring it if that ever changes.
+    links: result.links ? normalizeLinks(result.links) : extractLinksFromHtml(html, url),
     screenshotUrl,
   };
+}
+
+/** Upper bound for one /snapshot render. Generous — a real browser, not an API. */
+const SNAPSHOT_TIMEOUT_MS = 60_000;
+
+/** `<a href="...">text</a>` — tolerant of attribute order and multi-line tags. */
+const HREF_RE = /<a\b[^>]*?\shref\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+
+/**
+ * Extract absolute links from raw HTML, resolving relative hrefs against the page
+ * URL and de-duplicating. Needed because `/snapshot` returns no `links` array —
+ * without this the crawler only ever sees the landing page.
+ */
+export function extractLinksFromHtml(html: string, baseUrl: string): ScrapedPage["links"] {
+  if (!html) return [];
+
+  const out: Array<{ href: string; text?: string }> = [];
+  const seen = new Set<string>();
+
+  HREF_RE.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = HREF_RE.exec(html)) !== null) {
+    const raw = match[1]?.trim();
+    if (!raw || raw.startsWith("#")) continue;
+    const lower = raw.toLowerCase();
+    if (lower.startsWith("javascript:") || lower.startsWith("mailto:") || lower.startsWith("tel:")) {
+      continue;
+    }
+
+    let href: string;
+    try {
+      const resolved = new URL(raw, baseUrl);
+      resolved.hash = "";
+      href = resolved.toString();
+    } catch {
+      continue;
+    }
+    if (seen.has(href)) continue;
+    seen.add(href);
+
+    const text = match[2]?.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    out.push({ href, text: text || undefined });
+  }
+
+  return out;
 }
 
 // ---------------------------------------------------------------------------
