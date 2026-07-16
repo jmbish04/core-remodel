@@ -5,6 +5,9 @@ import { toolError } from "../../format";
 import { defineTool, WRITE } from "../../types";
 import { memPrefix, parseEnvelope } from "./_shared";
 
+/** Entries drained per KV-fetch + db.batch round. */
+const FLUSH_CHUNK = 50;
+
 export const flushAgentMemory = defineTool({
   name: "flush_agent_memory",
   category: "memory",
@@ -43,28 +46,53 @@ export const flushAgentMemory = defineTool({
     }
 
     const ids: number[] = [];
-    for (const k of list.keys) {
-      const raw = await env.AGENT_ADHOC_MEMORY_KV.get(k.name);
-      if (raw == null) continue;
 
-      const parsed = parseEnvelope(k.name.slice(prefix.length), raw);
-      const parsedDate = parsed?.createdAt ? new Date(parsed.createdAt) : null;
-      const entryCreatedAt =
-        parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null;
+    // Chunked: a group can hold up to 1000 entries, and serializing 1000 KV gets
+    // + 1000 inserts would itself blow the MCP client timeout this PR exists to
+    // avoid. Per chunk we fetch KV in parallel and land the rows in ONE db.batch
+    // of single-row inserts (single-row keeps each query under D1's 100-bound-
+    // parameter limit — a multi-row VALUES would break past ~16 rows).
+    for (let i = 0; i < list.keys.length; i += FLUSH_CHUNK) {
+      const chunk = list.keys.slice(i, i + FLUSH_CHUNK);
 
-      const [row] = await db
-        .insert(agentAdhocMemory)
-        .values({
-          memoryUuid,
-          entryKey: k.name,
-          label: parsed?.label ?? null,
-          payload: raw,
-          entryCreatedAt,
-        })
-        .returning({ id: agentAdhocMemory.id });
-      ids.push(row.id);
+      const fetched = await Promise.all(
+        chunk.map(async (k) => ({
+          key: k.name,
+          raw: await env.AGENT_ADHOC_MEMORY_KV.get(k.name),
+        })),
+      );
+      const present = fetched.filter((f): f is { key: string; raw: string } => f.raw != null);
+      if (present.length === 0) continue;
 
-      if (input.clearKv) await env.AGENT_ADHOC_MEMORY_KV.delete(k.name);
+      const inserts = present.map(({ key, raw }) => {
+        const parsed = parseEnvelope(key.slice(prefix.length), raw);
+        const parsedDate = parsed?.createdAt ? new Date(parsed.createdAt) : null;
+        const entryCreatedAt =
+          parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null;
+
+        return db
+          .insert(agentAdhocMemory)
+          .values({
+            memoryUuid,
+            entryKey: key,
+            label: parsed?.label ?? null,
+            payload: raw,
+            entryCreatedAt,
+          })
+          .returning({ id: agentAdhocMemory.id });
+      });
+
+      const results = await db.batch(
+        inserts as [(typeof inserts)[number], ...(typeof inserts)[number][]],
+      );
+      for (const rows of results) {
+        const row = (rows as Array<{ id: number }>)[0];
+        if (row) ids.push(row.id);
+      }
+
+      if (input.clearKv) {
+        await Promise.all(present.map(({ key }) => env.AGENT_ADHOC_MEMORY_KV.delete(key)));
+      }
     }
 
     return { memoryUuid, persisted: ids.length, cleared: !!input.clearKv, ids };
