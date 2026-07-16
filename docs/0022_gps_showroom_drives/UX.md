@@ -41,6 +41,7 @@
   - **Empty:** "No visits logged yet. Record your first visit or turn on Tesla tracking to auto-stage them." + a "Record visit" button.
 - **Action bar (existing latest-visit block, `StoreViewportApp.tsx` ~L1112–1169):** add `NavigateTeslaButton` next to the existing buttons. Keep "Record visit" (it now writes a `showroom_visit_log`, not just the snapshot).
 - **Header badge:** if the store has ≥1 pending visit, show a small amber "· 1 to finalize" chip near the store title so it's visible without opening the section.
+- **Staged-visit alert banner:** if the store has a `TESLA_STAGED`/`AI_STAGED` visit, show a prominent shadcn `Alert` at the top of the viewport — *"Complete your visit notes"* + the arrival date + a **Finalize** CTA that opens `VisitLogEditor` prefilled. This is stronger than the chip alone for the "GPS beat me to it, now fill it in" moment; show the banner **and** the chip.
 
 ## 2. UPDATE — Drive viewport (`DriveViewportApp.tsx`, `/admin/shopping/drives/[slug]`)
 

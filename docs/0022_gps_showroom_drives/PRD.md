@@ -147,6 +147,12 @@ Add support for in-person interactions logged against a visit.
   - Home/work park → all `active` drives become `paused`.
   - The drive viewport's **Active toggle** flips `active` ↔ `paused` (turning on demotes any other active drive to `paused`).
 
+### 5.5b CHANGE — `drive_list_stops`  *(appended from external-PRD review)*
+The current schema has `is_optional`, `visited`, `visited_at`. To represent a discovery **detour** as a first-class stop on the active drive (rather than only rendering it), add:
+- **Add** `is_detour` int (boolean) default 0 — a stop the system inserted because the car parked at a discovered place, not a pre-planned stop.
+- **Add** `hitl_queue_id` int FK → `showroom_store_hitl_queue.id` (set null) — links the detour stop to the discovery it represents.
+This lets 1.d insert a real detour stop (checked-off, `is_detour=1`, `hitl_queue_id` set) so the drive's completion math and the map treat it consistently, and the fork UI reads from a row instead of a side channel.
+
 ### 5.6 Tesla DB (`TESLA_DB`) — extend existing
 - `tesla_telemetry_events` (exists) — already stores raw frames + hoisted `latitude/longitude/speed/shift_state/battery_level/odometer`. **Add** `destination_name` (text, from field 163 when available) and a derived `is_parked` (bool) so the park pipeline can query cheaply. (Optional; can be computed instead — see TASKS.)
 - `tesla_webhook_events` (exists) — already stores webhook payloads + match result. No change required.
@@ -165,6 +171,12 @@ Two independent decisions on every inbound Tesla event:
 
 ### 6.2 Park pipeline (decision tree)
 Triggered when a park is detected (webhook `drive_state`/shift→P, or telemetry `Gear` transition to `P`), **and** recording is on, **and** `shouldProcessLocation` is true. Uses the parked `{lat,lng}` (from the event, else `getLocation`). "Within range" = configurable `tesla_proximity_radius_m` (default 250 m; home/work uses `tesla_home_work_radius_m`, default 150 m). All distance checks reuse `haversineMeters` against stored `latitude`/`longitude`.
+
+**Transition detection (appended from external-PRD review).** Telemetry is ~500 ms — evaluating geospatial logic every frame is wasteful. The heavy pipeline runs **only on a shift-state *transition***, detected by persisting the **last shift state per VIN** in KV (`CACHE`, keyed `tesla:last-shift:<vin>`, short TTL) and comparing to the incoming frame:
+- `…→P` (last `D`/`R`/`N`, now `P`) → **park event** → run the decision tree below.
+- `P→D` (last `P`, now `D`) → **drive-away event** → run the departure step (close open `TESLA_SOFT_ARRIVAL` rows → `TESLA_STAGED` with `timestamp_departure`; see §6.2 drive-away).
+- No transition → just log the raw frame (when recording), do nothing else.
+This makes the raw 500 ms stream cheap (one KV read/write + compare) and confines all DB/Places/AI work to the two rare transition moments. Webhook `drive_state` events feed the same comparator, so either signal triggers it; dedupe on the event id via `CACHE` (existing `/webhook` pattern) so a webhook + its telemetry twin don't double-fire.
 
 ```
 PARK EVENT (recording on, drive active)
@@ -193,7 +205,9 @@ PARK EVENT (recording on, drive active)
          → proximityScan({lat,lng,radiusM}) (normalized, reusable — §6.3)
          → if it returns a remodel-related candidate:
              • insert showroom_store_hitl_queue (user_decision=TBD, drive_list_id, proximity_scan_json)
-             • add a DETOUR fork on the active drive referencing hitl_queue_id
+             • insert a DETOUR drive_list_stop on the active drive (is_detour=1,
+               hitl_queue_id set, visited=1/visited_at=now) — a first-class row so
+               completion math + the map treat it consistently (§5.5b)
              • insert showroom_visit_log: type=TESLA_SOFT_ARRIVAL, status=TESLA_STAGED,
                hitl_queue_id, drive_list_id, provenance
              • on drive-away → TESLA_STAGED follow-up row (hitl_queue_id, departure)
@@ -308,3 +322,20 @@ Each phase is independently shippable; P1 alone is useful.
 - **R5.** D1 write volume from 500 ms logging → isolated DB now; coalesce lever documented.
 - **Q1.** Should a `SUBMITTED` visit-log rating overwrite the `showroom_stores` denormalized snapshot? **Proposed:** yes — latest `SUBMITTED` wins the snapshot; the log keeps full history.
 - **Q2.** Drive "Active toggle" off → `paused` vs `draft`? **Proposed:** `paused` (resumable), reserving `draft` for never-started.
+
+---
+
+## 13. Appendix — reconciliation with the external (Gemini-chat) PRD
+A second PRD was drafted in a separate Gemini chat. It largely mirrors this plan (same feature set, smaller schema). Everything in this plan is retained; the following were **appended** from that review, and a few of its suggestions were **intentionally not adopted** because they conflict with repo conventions.
+
+**Adopted (appended above):**
+- **Shift-state transition detection via persisted last-state (KV).** §6.2 — run the heavy pipeline only on `…→P` / `P→D` transitions, comparing the incoming frame to `tesla:last-shift:<vin>` in `CACHE`. Makes the 500 ms stream cheap and gives the drive-away step a precise trigger. (Its idea; it proposed `AGENT_ADHOC_MEMORY_KV` — we use `CACHE` for consistency with the existing webhook-dedup path.)
+- **`drive_list_stops` detour columns** `is_detour` + `hitl_queue_id`. §5.5b — makes a discovery detour a first-class stop row (consistent completion math + map) instead of a side channel.
+- **Staged-visit alert banner** on the showroom viewport (UX §1) — a prominent "Complete your visit notes" `Alert` for `*_STAGED` visits, alongside the header chip.
+
+**Not adopted (kept our approach):**
+- *Hand-written `0110_tesla_visit_tracking.sql` migration* → repo rule is **`pnpm run db:generate`** only; never hand-author migrations (`AGENTS.md`, project memory). Drizzle generates them.
+- *"Workers AI verification" for proximity classification* → this repo calls **Gemini direct** (not via AI Gateway; every call logged to `gemini_usage_log`) per project memory. `proximityScan` uses the existing Gemini factory.
+- *Dropping visit richness* → the external schema omits `rating`, GPS provenance (`arrival_lat/lng`, `match_distance_m`, `gps_source`, `provenance_json`), the `soft_arrival_id` self-ref, and the CHECK/XOR/unique constraints. **Retained** — they back the multi-visit history, the GPS-attestation moat (§1), and DB-level integrity (§5.1).
+- *`interaction_type` default `SHOWROOM_IN_PERSON`* → we keep the enum **nullable/no default** so a legacy phone/email contact isn't silently mislabeled in-person; the visit-log flow sets `SHOWROOM_IN_PERSON` explicitly.
+- Its MCP/API/frontend set is a subset of §7/UX (we additionally have `whats_near_me`, `get_current_vehicle_location`, discovery + finalize tools, the `/new` visit page, the "all caught up" empty state, and the two-row soft-arrival model). No reductions.
