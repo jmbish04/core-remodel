@@ -96,7 +96,7 @@ The receipts drawer. One row per visit (or staged/soft-arrival event).
 | `timestamp_departure` | int timestamp | optional (not always known) |
 | `status` | text enum | `TESLA_STAGED` \| `AI_STAGED` \| `DRAFT` \| `SUBMITTED` |
 | `type` | text enum | `TESLA_SOFT_ARRIVAL` \| `TESLA_STAGED` \| `AI_STAGED` \| `WALK_IN_NO_SALES_INTERACTION` \| `WALK_IN_FULL_SALES_EXPERIENCE` \| `DEDICATED_APPOINTMENT` |
-| `rating` | int | optional 1–5 (multi-visit rating; supersedes the store snapshot when SUBMITTED) |
+| `rating` | int | optional 1–5 (multi-visit rating; supersedes the store snapshot when SUBMITTED). **DB CHECK `rating IS NULL OR rating BETWEEN 1 AND 5`.** |
 | `notes_markdown` | text | PlateJS markdown |
 | `notes_html` | text | PlateJS html |
 | `arrival_latitude` / `arrival_longitude` | real | GPS provenance of the arrival |
@@ -107,7 +107,8 @@ The receipts drawer. One row per visit (or staged/soft-arrival event).
 | `created_at` / `updated_at` | int timestamp | |
 
 Indexes: `store_id`, `hitl_queue_id`, `drive_list_id`, `status`, `type`, `timestamp_arrival`.
-**Invariant (app-enforced):** `store_id IS NOT NULL` XOR `hitl_queue_id IS NOT NULL`.
+**Unique index on `soft_arrival_id`** (partial / where not null) — each `TESLA_SOFT_ARRIVAL` gets at most **one** `TESLA_STAGED` follow-up (enforces the 1-to-1 at the DB level, not just in code).
+**XOR invariant — enforce at BOTH layers:** application validation AND a table **CHECK constraint** `((store_id IS NOT NULL) <> (hitl_queue_id IS NOT NULL))`, so a direct D1 write or an alternate API path can't create a row that is neither/both. (SQLite `<>` on the two `IS NOT NULL` booleans is a true XOR.)
 
 ### 5.2 NEW — `showroom_store_hitl_queue`  (app `DB`)
 Staging area for showrooms discovered by proximity scan (or added by the AI) awaiting the user's approve/reject before normal intake.
@@ -208,6 +209,7 @@ PARK EVENT (recording on, drive active)
 - Pass survivors to Gemini (existing `google/maps.ts` / gemini factory) with a structured-output schema matching the fields we capture at intake → returns normalized candidates.
 - **Cost discipline:** invoked **only on park events while a drive is active** in 0022. The function takes a plain `{lat,lng,radiusM}` so a future "scan every N yards while driving" caller can reuse it unchanged (that caller is deferred pending a cost model — §9).
 - Idempotency: dedupe candidates against existing `showroom_stores.place_id` and open `showroom_store_hitl_queue` rows before inserting.
+- **Timeouts (required):** it runs inside `waitUntil` background processing, so **every** external fetch (Google Places Nearby, Gemini) must set `AbortSignal.timeout(10_000)` — an unresponsive upstream must never hang the background task. Errors are swallowed/logged, never allowed to reject an already-sent webhook response.
 
 ### 6.4 Home/Work resolution
 - Primary residence + optional work address configured on `/admin/config/tesla` (address text → geocode to coords via existing `GoogleMapsService`, cached in `project_system_variables`).
@@ -218,6 +220,7 @@ PARK EVENT (recording on, drive active)
 - **Single destination** (existing `sendNavigation` → Tessie `/command/share`): used by the reusable Tesla button on stops and showrooms.
 - **Whole-drive multi-waypoint** (NEW): "Send drive to car" → Tesla Fleet API `navigation_waypoints_request` via `api.tessie.com`, waypoints = **unvisited** stops on the active drive in order. Re-sends the remaining unvisited set when a stop is marked visited.
   - ⚠️ **Risk/spike:** the `navigation_waypoints_request` body is under-documented publicly (confirmed in research). **T-spike:** verify the exact payload against a live vehicle; **fallback** = send the first unvisited waypoint via `share` and advance sequentially on each park (already how park auto-advance works today).
+  - **Timeout (required):** the waypoints fetch to `api.tessie.com` sets `AbortSignal.timeout(15_000)`, matching the existing `sendNavigation` wake-and-share timeout — a hung command must not stall the request.
 
 ---
 
