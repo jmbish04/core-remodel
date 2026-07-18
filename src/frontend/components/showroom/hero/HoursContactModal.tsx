@@ -195,6 +195,40 @@ function ContactTile({
   );
 }
 
+/**
+ * Copy `text`, with a fallback for embedded webviews.
+ *
+ * `navigator.clipboard` is undefined in a non-secure context and in some
+ * in-car/embedded browsers — which is exactly the environment this modal is
+ * built for, so a bare `navigator.clipboard.writeText` would TypeError there.
+ * Falls back to the legacy `execCommand("copy")` over an offscreen textarea,
+ * which those webviews do still support. Returns whether the copy landed.
+ */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Permission denied or unavailable — fall through to the legacy path.
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 // ─── Action row ───────────────────────────────────────────────────────────────
 
 /** Big-button sizing for the action row — the in-car tap targets. */
@@ -217,11 +251,10 @@ function ActionRow({ store }: { store: HoursContactStore }) {
 
   const copyAddress = async () => {
     if (!store.locationAddress) return;
-    try {
-      await navigator.clipboard.writeText(store.locationAddress);
+    if (await copyText(store.locationAddress)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
+    } else {
       toast.error("Couldn't copy to clipboard");
     }
   };
@@ -348,12 +381,8 @@ export function HoursContactModal({
     : null;
 
   const copy = async (text: string, what: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      toast.success(`${what} copied`);
-    } catch {
-      toast.error("Couldn't copy to clipboard");
-    }
+    if (await copyText(text)) toast.success(`${what} copied`);
+    else toast.error("Couldn't copy to clipboard");
   };
 
   const hasContact =
