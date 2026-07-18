@@ -19,6 +19,24 @@ export interface DiagramCard {
   code: string; // Mermaid source
 }
 
+/**
+ * What was actually run to prove the change works (AGENTS.md § Changelog
+ * discipline). `output` is pasted verbatim from the run — never paraphrased —
+ * so a reader can answer "is this actually live and actually verified?" without
+ * leaving the page. `migrationsApplied` records remote-DB state per tag, since
+ * migrations do NOT ride the branch build.
+ */
+export interface VerificationBlock {
+  /** Repo path of the QC script, e.g. "scripts/qc/pr_152.mjs". */
+  script: string;
+  /** The command that was run, e.g. "pnpm run test:pr 152". */
+  command: string;
+  /** Real stdout from that command. */
+  output: string;
+  /** Per-migration remote-apply state; empty when the PR changed no schema. */
+  migrationsApplied?: { tag: string; appliedToRemote: boolean }[];
+}
+
 export interface PhaseDetail {
   slug: string;
   problem: string;
@@ -28,9 +46,90 @@ export interface PhaseDetail {
   migrations: { tag: string; sql: string }[];
   code: CodeCard[];
   diagrams: DiagramCard[];
+  verification?: VerificationBlock;
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "showroom-touch-ux": {
+    slug: "showroom-touch-ux",
+    problem:
+      "The showroom viewport is used from a Tesla touchscreen, standing next to the car outside the showroom — and every control on it was sized for a mouse. The website and socials were 13px text hyperlinks; the open/closed badge was a 10px pill; 'Edit hours' and 'Edit address' were 28px-tall buttons crammed under the hours card; the hours modal capped at `max-w-lg` and buried tap-to-call under a scroll; 'Upload photo' fired a hidden file input with no target and no feedback; the categories checkboxes were 16px squares in a two-column grid. Nothing on the page was reliably hittable with a thumb.",
+    approach:
+      "Push tap targets to 48px+ and give the modals room. The hero's link text row becomes `HeroLinkButtons`: a wide Website button, then one same-size icon button per link type actually present in `showroom_store_links` (absent types render nothing, so the row is built from real data rather than a fixed grid), then the Links button — moved up from under the hours card. The four touch modals (hours, links, upload, categories) share one `TOUCH_DIALOG_CLASS` constant at ~80% of the viewport so 'same size as the hours modal' cannot drift. The hours modal leads with the three things you actually want while parked — Call / Copy address / Send to Tesla — reporting result INSIDE the button (green check, red X + reason), because a toast is easy to miss on a car screen. The open/closed badge goes full-width and picks up a fourth 'Opening Soon' state, retrofitted from the closed PR #135's `computeOpenBadge` (its `computePst`/`hourRowsFromHoursJson` duplicates were dropped in favour of the already-merged `pstNow`/`hoursJsonToRows`).",
+    apiChanges: [
+      "No new endpoints — the Navigate button reuses the existing POST /api/tesla/navigate ({lat,lng} preferred, {destination} fallback)",
+      "GET /api/showroom-stores/:id — no shape change; the client type now models the latitude/longitude the payload already carried",
+    ],
+    filesTouched: [
+      "src/frontend/components/showroom/hours-status.ts",
+      "src/frontend/components/showroom/hero/HeroLinkButtons.tsx",
+      "src/frontend/components/showroom/hero/UploadPhotoModal.tsx",
+      "src/frontend/components/showroom/hero/touch-dialog.ts",
+      "src/frontend/components/showroom/hero/HoursContactModal.tsx",
+      "src/frontend/components/showroom/hero/HoursMiniCard.tsx",
+      "src/frontend/components/showroom/hero/CategoryChipsEditor.tsx",
+      "src/frontend/components/showroom/hero/StoreEditModals.tsx",
+      "src/frontend/components/showroom/hero/SocialLinks.tsx",
+      "src/frontend/components/showroom/hero/index.ts",
+      "src/frontend/components/showroom/StoreViewportApp.tsx",
+    ],
+    migrations: [],
+    code: [
+      {
+        title: "The fourth state — closed now, but open again later today",
+        lang: "ts",
+        code: `export function computeOpenBadge(hours: HourRow[], now: PstNow): OpenBadge | null {
+  if (!hours || hours.length === 0) return null;
+  const row = rowForDay(hours, now.day);
+  if (row) {
+    const open = openMinutes(row);
+    const close = closeMinutes(row);
+    if (now.minutes >= open && now.minutes < close) {
+      return close - now.minutes <= 60 ? "closing-soon" : "open";
+    }
+    if (now.minutes < open) return "opening-soon";
+  }
+  return "closed";
+}`,
+      },
+      {
+        title: "One size constant for every touch modal",
+        lang: "ts",
+        code: `// max-w-none beats DialogContent's sm:max-w-sm (which would clamp w-[80vw]);
+// flex flex-col beats its \`grid\` so the body can flex-1 into the height.
+export const TOUCH_DIALOG_CLASS =
+  "flex h-[80vh] max-h-[80vh] w-[80vw] max-w-none flex-col gap-4 overflow-hidden p-5 sm:max-w-none";`,
+      },
+      {
+        title: "The link row is built from what the store actually has",
+        lang: "tsx",
+        code: `const iconLinks = ICON_ORDER.flatMap((type) => {
+  const href = firstOfType(type);
+  const Icon = LINK_ICONS[type];
+  if (!href || !Icon) return [];       // absent type → renders nothing
+  return [{ type, href, Icon, label: LINK_TYPE_LABELS[type] }];
+});`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Hero → modal routing after the rework",
+        code: `flowchart TD
+  Hero["Showroom hero"] --> Web["Website button (new tab)"]
+  Hero --> Icons["Icon button per registered link type"]
+  Hero --> LinksBtn["Links"]
+  Hero --> Card["Hours card (full-width badge)"]
+  LinksBtn --> LinksModal["Links modal — list view"]
+  LinksModal -->|pencil| LinksEdit["Add / edit form"]
+  Card --> HoursModal["Hours + contact modal"]
+  HoursModal --> Call["Call (tel:)"]
+  HoursModal --> Copy["Copy address (clipboard)"]
+  HoursModal --> Nav["Navigate — POST /api/tesla/navigate"]
+  HoursModal --> EditHours["Edit hours"]
+  HoursModal --> EditAddr["Edit address"]`,
+      },
+    ],
+  },
   "changelog-preview": {
     slug: "changelog-preview",
     problem:

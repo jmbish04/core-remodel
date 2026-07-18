@@ -13,6 +13,9 @@ export {
   type StoreLink,
 } from "./SocialLinks";
 export { HoursMiniCard } from "./HoursMiniCard";
+export { HeroLinkButtons } from "./HeroLinkButtons";
+export { UploadPhotoModal } from "./UploadPhotoModal";
+export { TOUCH_DIALOG_BODY_CLASS, TOUCH_DIALOG_CLASS } from "./touch-dialog";
 export { HoursContactModal, type HoursContactStore } from "./HoursContactModal";
 export {
   EditHoursModal,

@@ -43,6 +43,14 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/showroom-touch-ux",
+    title: "Showroom viewport, usable from a Tesla touchscreen",
+    summary:
+      "Every control on the showroom page was sized for a mouse: small buttons, smaller hyperlinks, cramped modals. The hero's link row becomes large tap targets (website + one icon per registered link type), the hours card gets a full-width four-state badge, and the hours / links / upload / categories modals all move to ~80% of the viewport with Call, Copy address, and Send-to-Tesla as big buttons at the top.",
+    date: "2026-07-18",
+    status: "staged",
+  },
+  {
     branch: "claude/changelog-preview",
     title: "Changelog preview — the presser, drafted in advance",
     summary:
@@ -84,6 +92,27 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "showroom-touch-ux",
+    branch: "claude/showroom-touch-ux",
+    date: "2026-07-18",
+    tag: "Showrooms",
+    area: "Showrooms",
+    title: "Showroom viewport, usable from a Tesla touchscreen",
+    summary:
+      "The showroom page is used standing at the car, from a touchscreen — and everything on it was mouse-sized. The website and social links become large buttons, the open/closed badge goes full-width with a new 'Opening Soon' state, and the hours modal leads with Call / Copy address / Send to Tesla instead of burying them under a scroll.",
+    status: "staged",
+    changes: [
+      { kind: "added", text: "Hero link row: a large Website button plus one same-size icon button per link type the showroom actually has registered (Instagram, X, LinkedIn, Facebook, Pinterest, Yelp, 360° tour, showroom photos, clearance)." },
+      { kind: "added", text: "Links modal — every URL as a tappable hyperlink, with a pencil that flips the same modal into the add/edit form." },
+      { kind: "added", text: "Hours modal now leads with Call, Copy address, and Send to Tesla as large buttons; copy and navigate report success/failure inside the button, and a failed navigate prints the reason." },
+      { kind: "added", text: "\"Opening Soon\" — a fourth open/closed state for a showroom that is shut right now but opens later today." },
+      { kind: "added", text: "Upload photo now opens a drag-and-drop dropzone (or tap to browse) instead of a hidden file input, and accepts several photos at once." },
+      { kind: "changed", text: "The open/closed badge is full-width and colour-coded across all four states." },
+      { kind: "changed", text: "Hours, links, upload and categories modals all render at ~80% of the viewport; category checkboxes are noticeably larger." },
+      { kind: "removed", text: "The hero's small \"Edit hours\" and \"Edit address\" buttons — both now live inside the hours modal." },
+    ],
+  },
   {
     id: "changelog-preview",
     branch: "claude/changelog-preview",

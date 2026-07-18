@@ -123,6 +123,13 @@ export function pstNow(): PstNow {
 
 export type ShowroomStatus = "open" | "closed" | "closing-soon";
 
+/**
+ * Compact badge state. Distinguishes "opens later today" (opening-soon) from
+ * "closed for the day" (closed) — a split `computeShowroomStatus` collapses into
+ * a single "closed". Drives the hero hours card's full-width badge.
+ */
+export type OpenBadge = "open" | "closing-soon" | "opening-soon" | "closed";
+
 /** Enum day → JS getDay() index (Sun = 0 … Sat = 6). */
 const DAY_ENUM_TO_INDEX: Record<ShowroomDay, number> = {
   SUNDAY: 0,
@@ -247,4 +254,26 @@ export function computeShowroomStatus(
   }
 
   return { status: "closed", label: `Opens ${whenStr} ${openStr}` };
+}
+
+/**
+ * The compact badge for the current PST moment:
+ *   - open now, >60 min to close      → "open"
+ *   - open now, ≤60 min to close       → "closing-soon"
+ *   - closed now but opens later today → "opening-soon"
+ *   - otherwise                        → "closed"
+ * Returns `null` when there are no hours at all (caller hides the badge).
+ */
+export function computeOpenBadge(hours: HourRow[], now: PstNow): OpenBadge | null {
+  if (!hours || hours.length === 0) return null;
+  const row = rowForDay(hours, now.day);
+  if (row) {
+    const open = openMinutes(row);
+    const close = closeMinutes(row);
+    if (now.minutes >= open && now.minutes < close) {
+      return close - now.minutes <= 60 ? "closing-soon" : "open";
+    }
+    if (now.minutes < open) return "opening-soon";
+  }
+  return "closed";
 }

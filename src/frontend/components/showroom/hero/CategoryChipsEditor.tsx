@@ -25,6 +25,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
+import { TOUCH_DIALOG_BODY_CLASS, TOUCH_DIALOG_CLASS } from "./touch-dialog";
+
 /** A category mapping row as served by GET /api/showroom-stores/:id. */
 export interface StoreCategoryChip {
   categoryId: number;
@@ -147,7 +149,7 @@ export function CategoryChipsEditor({
       </div>
 
       <Dialog open={open} onOpenChange={(next) => !saving && setOpen(next)}>
-        <DialogContent className="max-w-md">
+        <DialogContent className={TOUCH_DIALOG_CLASS}>
           <DialogHeader>
             <DialogTitle>Edit categories</DialogTitle>
             <DialogDescription>
@@ -157,17 +159,22 @@ export function CategoryChipsEditor({
           </DialogHeader>
 
           {loadingOptions ? (
-            <div className="flex min-h-[160px] items-center justify-center text-muted-foreground">
+            <div className="flex min-h-[160px] flex-1 items-center justify-center text-muted-foreground">
               <Loader2 className="size-5 animate-spin" />
             </div>
           ) : (
-            <div className="grid max-h-[50vh] grid-cols-1 gap-1 overflow-y-auto pr-1 sm:grid-cols-2">
+            <div
+              className={`${TOUCH_DIALOG_BODY_CLASS} grid grid-cols-1 content-start gap-2 sm:grid-cols-2 lg:grid-cols-3`}
+            >
               {options.map((opt) => (
+                // min-h-14 + size-6 checkbox: a category list is the single most
+                // mis-tapped control in the viewport from a car screen.
                 <label
                   key={opt.id}
-                  className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-muted/60"
+                  className="flex min-h-14 cursor-pointer items-center gap-3 rounded-lg px-3 py-2 text-base ring-1 ring-border/40 transition-colors hover:bg-muted/60"
                 >
                   <Checkbox
+                    className="size-6"
                     checked={selected.has(opt.id)}
                     onCheckedChange={() => toggle(opt.id)}
                   />
@@ -185,10 +192,19 @@ export function CategoryChipsEditor({
           )}
 
           <DialogFooter className="mt-2 gap-2">
-            <Button variant="outline" onClick={() => setOpen(false)} disabled={saving}>
+            <Button
+              variant="outline"
+              className="h-12 px-4"
+              onClick={() => setOpen(false)}
+              disabled={saving}
+            >
               Cancel
             </Button>
-            <Button onClick={() => void save()} disabled={saving || loadingOptions}>
+            <Button
+              className="h-12 px-4"
+              onClick={() => void save()}
+              disabled={saving || loadingOptions}
+            >
               {saving && <Loader2 className="mr-1.5 size-4 animate-spin" />}
               Save categories
             </Button>
