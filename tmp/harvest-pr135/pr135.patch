@@ -1,0 +1,817 @@
+diff --git a/src/backend/mcp/tools/showrooms.ts b/src/backend/mcp/tools/showrooms.ts
+index 3aa1eae..a1dde0c 100644
+--- a/src/backend/mcp/tools/showrooms.ts
++++ b/src/backend/mcp/tools/showrooms.ts
+@@ -24,13 +24,16 @@
+  */
+ import { showroomStoreHours, showroomStoreLinks, showroomPocs, showroomStores, storeNotes } from "@backend/db";
+ import { GoogleMapsService } from "@backend/services/google/maps";
++import { faviconService } from "@backend/services/favicon";
+ import { getStoreLinksMap, linksToLegacyUrls, replaceStoreLinks } from "@backend/utils/showroom-links";
+ import {
+   computeStoreGeoPatch,
+   hoursJsonToRows,
+   mapPlaceDetailsToStoreInput,
++  runPhotoPipeline,
+   scheduleShowroomEnrichment,
+   type MappedPlaceStore,
++  type PlacePhotoRef,
+ } from "@backend/services/showroom/onboarding";
+ import type { GooglePlaceDetails } from "@frontend/components/showroom/intake/places-mapper";
+ import type { RemodelDb } from "../types";
+@@ -467,6 +470,9 @@ export const showroomTools: RemodelTool[] = [
+       emailAddress: z.string().optional(),
+       zipCode: z.string().optional(),
+       googleMapsLink: z.string().optional(),
++      latitude: z.number().optional().describe("Manual latitude — enables the map marker when Places can't resolve it"),
++      longitude: z.number().optional().describe("Manual longitude — pair with latitude"),
++      placeId: z.string().optional().describe("Google Place ID — links the store for future coordinate/photo enrichment"),
+       isAppointmentOnly: z.boolean().optional(),
+       mainPocFullname: z.string().optional(),
+       mainPocPhoneNumber: z.string().optional(),
+@@ -1136,4 +1142,217 @@ export const showroomTools: RemodelTool[] = [
+       };
+     },
+   }),
++
++  defineTool({
++    name: "backfill_showroom_media",
++    category: "showrooms",
++    title: "Backfill showroom icons, hero images + coordinates",
++    description:
++      "One-shot maintenance so the directory cards + map are complete for existing showrooms. Per store, fills whatever " +
++      "is missing:\n" +
++      "• COORDINATES — if lat/lng are absent it uses the stored Google `placeId`; when there is NO placeId it runs a " +
++      "Places TEXT SEARCH by name+address to recover one, then captures lat/lng + the region hub (this is how the " +
++      "manually-added stores with no placeId finally get a map pin).\n" +
++      "• ICON — hydrates the favicon/logo by scraping the store's website (from its WEBSITE link). No Google quota.\n" +
++      "• HERO — fetches the store's Google Places photos and runs the Cloudflare Images pipeline (hero = first photo).\n" +
++      "Coordinates + icons run by default; heroes are opt-in (`fetchHeroes`) because Places Photo calls are " +
++      "quota-metered. Processes up to `limit` stores per call (default 25, max 50) so you can pace spend — re-run until " +
++      "`remaining` is 0. Idempotent (already-filled fields are skipped). Returns `unresolved` — stores it still could " +
++      "not fill (e.g. Places found no match) for manual follow-up.",
++    inputShape: {
++      limit: z
++        .number()
++        .int()
++        .min(1)
++        .max(50)
++        .optional()
++        .describe("Max stores to process this run (default 25)"),
++      fetchCoordinates: z
++        .boolean()
++        .optional()
++        .describe(
++          "Recover missing lat/lng via stored placeId or a Places text search (default true).",
++        ),
++      fetchIcons: z
++        .boolean()
++        .optional()
++        .describe("Hydrate missing favicons/logos from each store's website (default true, no Google quota)."),
++      fetchHeroes: z
++        .boolean()
++        .optional()
++        .describe(
++          "Fetch missing hero images from Google Places photos (default FALSE — quota-metered Places Photo calls).",
++        ),
++    },
++    annotations: WRITE_IDEMPOTENT,
++    outputShape: {
++      processed: z.number().int(),
++      coordinatesSet: z.number().int(),
++      iconsSet: z.number().int(),
++      heroesSet: z.number().int(),
++      remaining: z.number().int(),
++      unresolved: z.array(
++        looseObject({ id: z.number().int(), name: z.string().nullable(), missing: z.array(z.string()) }),
++      ),
++    },
++    examples: [
++      { title: "Coords + icons (free)", args: {} },
++      { title: "Everything incl. heroes, 10/run", args: { fetchHeroes: true, limit: 10 } },
++    ],
++    handler: async ({ env, db }, input) => {
++      const limit = input.limit ?? 25;
++      const doCoords = input.fetchCoordinates ?? true;
++      const doIcons = input.fetchIcons ?? true;
++      const doHeroes = input.fetchHeroes ?? false;
++
++      const all = await db.select().from(showroomStores).all();
++      const linkMap = await getStoreLinksMap(
++        db,
++        all.map((s) => s.id),
++      );
++      const websiteOf = (id: number) => linksToLegacyUrls(linkMap.get(id) ?? []).websiteUrl;
++
++      const needs = (s: (typeof all)[number]) => {
++        const missing: string[] = [];
++        if (doCoords && (s.latitude == null || s.longitude == null)) missing.push("coordinates");
++        if (doIcons && !s.iconCfImagesUrl && websiteOf(s.id)) missing.push("icon");
++        if (doHeroes && !s.heroImageCfImagesUrl) missing.push("hero");
++        return missing;
++      };
++
++      const candidates = all.filter((s) => needs(s).length > 0);
++      const batch = candidates.slice(0, limit);
++
++      const maps = new GoogleMapsService(env);
++
++      for (const s of batch) {
++        const website = websiteOf(s.id);
++        let placeId = s.placeId;
++        let lat = s.latitude;
++        let lng = s.longitude;
++
++        // ── Coordinates: stored placeId → else Places text search to recover one.
++        if (doCoords && (lat == null || lng == null)) {
++          try {
++            if (!placeId && s.name) {
++              const query = [s.name, s.locationAddress].filter(Boolean).join(" ");
++              const results = await maps.placesTextSearchMany(query, {
++                maxResults: 1,
++                near: s.locationAddress ?? "San Francisco, CA",
++              });
++              const top = results[0];
++              if (top?.placeId) {
++                placeId = top.placeId;
++                const loc = top.location as { latitude?: number; longitude?: number } | undefined;
++                if (typeof loc?.latitude === "number" && typeof loc?.longitude === "number") {
++                  lat = loc.latitude;
++                  lng = loc.longitude;
++                }
++              }
++            } else if (placeId) {
++              const d = await maps.placeDetails(placeId, undefined, { skipAi: true });
++              const loc = d.location as { latitude?: number; longitude?: number } | undefined;
++              if (typeof loc?.latitude === "number" && typeof loc?.longitude === "number") {
++                lat = loc.latitude;
++                lng = loc.longitude;
++              }
++            }
++          } catch {
++            // Tolerate quota / lookup failures — the store lands in `unresolved`.
++          }
++
++          if (lat != null && lng != null) {
++            const geo = computeStoreGeoPatch({
++              latitude: lat,
++              longitude: lng,
++              zipCode: s.zipCode,
++              locationAddress: s.locationAddress,
++            });
++            const patch: Partial<typeof showroomStores.$inferInsert> = {
++              latitude: lat,
++              longitude: lng,
++              updatedAt: new Date(),
++            };
++            // Capture a recovered placeId so future enrichment (hero, dedup) works.
++            if (placeId && !s.placeId) patch.placeId = placeId;
++            if (geo.hubRoute && s.hubRoute == null) {
++              patch.hubRoute = geo.hubRoute;
++              patch.hubName = geo.hubName;
++            }
++            await db.update(showroomStores).set(patch).where(eq(showroomStores.id, s.id)).run();
++          }
++        }
++
++        // ── Icon: scrape the favicon/logo from the website (self-updates the row).
++        if (doIcons && !s.iconCfImagesUrl && website) {
++          try {
++            await faviconService.hydrateShowroomIcon(env, s.id, website);
++          } catch (err) {
++            // hydrateShowroomIcon is meant to swallow its own errors, but guard
++            // the loop anyway so one bad site can't abort the whole batch.
++            console.error(`[backfill_showroom_media] icon failed for store ${s.id}:`, err);
++          }
++        }
++
++        // ── Hero: Google Places photos → Cloudflare Images pipeline.
++        if (doHeroes && !s.heroImageCfImagesUrl && placeId) {
++          try {
++            const d = await maps.placeDetails(placeId, undefined, { skipAi: true });
++            const photos = ((d.photos as PlacePhotoRef[] | undefined) ?? []).slice(0, 5);
++            if (photos.length > 0) await runPhotoPipeline(env, s.id, photos);
++          } catch (err) {
++            console.error(`[backfill_showroom_media] hero failed for store ${s.id}:`, err);
++          }
++        }
++      }
++
++      // Re-read the batch to count what actually landed + collect leftovers.
++      const ids = batch.map((s) => s.id);
++      const after =
++        ids.length > 0
++          ? await db
++              .select({
++                id: showroomStores.id,
++                name: showroomStores.name,
++                latitude: showroomStores.latitude,
++                longitude: showroomStores.longitude,
++                iconCfImagesUrl: showroomStores.iconCfImagesUrl,
++                heroImageCfImagesUrl: showroomStores.heroImageCfImagesUrl,
++              })
++              .from(showroomStores)
++              .where(inArray(showroomStores.id, ids))
++              .all()
++          : [];
++      const beforeById = new Map(batch.map((s) => [s.id, s]));
++
++      let coordinatesSet = 0;
++      let iconsSet = 0;
++      let heroesSet = 0;
++      const unresolved: Array<{ id: number; name: string | null; missing: string[] }> = [];
++
++      for (const row of after) {
++        const before = beforeById.get(row.id);
++        if (!before) continue;
++        if (doCoords && (before.latitude == null || before.longitude == null) && row.latitude != null)
++          coordinatesSet++;
++        if (doIcons && !before.iconCfImagesUrl && row.iconCfImagesUrl) iconsSet++;
++        if (doHeroes && !before.heroImageCfImagesUrl && row.heroImageCfImagesUrl) heroesSet++;
++
++        const stillMissing: string[] = [];
++        if (doCoords && (row.latitude == null || row.longitude == null)) stillMissing.push("coordinates");
++        if (doIcons && !row.iconCfImagesUrl && websiteOf(row.id)) stillMissing.push("icon");
++        if (doHeroes && !row.heroImageCfImagesUrl) stillMissing.push("hero");
++        if (stillMissing.length > 0) unresolved.push({ id: row.id, name: row.name, missing: stillMissing });
++      }
++
++      return {
++        processed: batch.length,
++        coordinatesSet,
++        iconsSet,
++        heroesSet,
++        remaining: Math.max(0, candidates.length - batch.length),
++        unresolved,
++      };
++    },
++  }),
+ ];
+diff --git a/src/backend/services/showroom/onboarding.ts b/src/backend/services/showroom/onboarding.ts
+index 03a82f7..f72f600 100644
+--- a/src/backend/services/showroom/onboarding.ts
++++ b/src/backend/services/showroom/onboarding.ts
+@@ -522,7 +522,7 @@ async function kickShowroomScrape(env: Env, showroomId: number, websiteUrl: stri
+  * store a `showroom_photos_mapping` row, and set the hero image from photo[0].
+  * Error-guarded per photo — one failure never aborts the pipeline.
+  */
+-async function runPhotoPipeline(
++export async function runPhotoPipeline(
+   env: Env,
+   showroomId: number,
+   photos: PlacePhotoRef[],
+diff --git a/src/frontend/components/showroom/hero/HoursContactModal.tsx b/src/frontend/components/showroom/hero/HoursContactModal.tsx
+index 6b6d637..10fb233 100644
+--- a/src/frontend/components/showroom/hero/HoursContactModal.tsx
++++ b/src/frontend/components/showroom/hero/HoursContactModal.tsx
+@@ -1,16 +1,18 @@
+ /**
+- * @fileoverview HoursContactModal — full business hours + contact info + map.
++ * @fileoverview HoursContactModal — full showroom hours + contact + map.
+  *
+- * Opened from the hero's HoursMiniCard. Three blocks:
++ * Opened from the hero's HoursMiniCard. Four blocks in a roomy dialog:
+  *   1. Weekly hours table — one row per day from the structured `hoursJson`
+- *      (today highlighted); falls back to the legacy weekday/weekend summary
+- *      strings for pre-normalization rows.
+- *   2. Contact — click-to-call phone, email, website, address.
++ *      (today highlighted), with a live open/closed badge in the header and an
++ *      optional inline "Edit hours" affordance.
++ *   2. Contact cards — click-to-call phone (tel:), copy-to-clipboard email +
++ *      address, and an open-in-new-tab website. Built for phone / in-car use.
+  *   3. Map — keyless Google Maps embed centered on the store's address, plus a
+  *      "Open in Google Maps" link (prefers the stored place-id deep link).
+  */
+ 
+ import { Clock, ExternalLink, Globe, Mail, MapPin, Pencil, Phone } from "lucide-react";
++import { toast } from "sonner";
+ 
+ import { Button } from "@/components/ui/button";
+ import {
+@@ -23,6 +25,12 @@ import {
+ 
+ import type { DayKey, HoursJson } from "../intake/hours-types";
+ import { DAY_KEYS, DAY_LABELS, to12h } from "../intake/hours-types";
++import {
++  computeOpenBadge,
++  computePst,
++  hourRowsFromHoursJson,
++  type OpenBadge,
++} from "../hours-status";
+ 
+ /** The store fields the modal renders. All nullable — render defensively. */
+ export interface HoursContactStore {
+@@ -47,17 +55,19 @@ function windowLabel(open: string, close: string): string {
+ const JS_DAY_TO_KEY: DayKey[] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+ 
+ function WeeklyHoursTable({ hoursJson }: { hoursJson: HoursJson }) {
+-  const todayKey = JS_DAY_TO_KEY[new Date().getDay()];
++  // Highlight the PST "today" so it matches the PST-based status badge (a
++  // browser in another timezone would otherwise highlight the wrong row).
++  const todayKey = JS_DAY_TO_KEY[computePst().day];
+   return (
+-    <ul className="divide-y divide-border/40">
++    <ul className="space-y-0.5">
+       {DAY_KEYS.map((key) => {
+         const slot = hoursJson[key] ?? null;
+         const isToday = key === todayKey;
+         return (
+           <li
+             key={key}
+-            className={`flex items-center justify-between py-1.5 text-sm ${
+-              isToday ? "font-medium text-foreground" : "text-muted-foreground"
++            className={`flex items-center justify-between rounded-md px-3 py-2 text-sm ${
++              isToday ? "bg-primary/10 font-medium text-foreground" : "text-muted-foreground"
+             }`}
+           >
+             <span className="flex items-center gap-2">
+@@ -86,6 +96,17 @@ function formatPhone(raw: string): string {
+   return `(${ten.slice(0, 3)}) ${ten.slice(3, 6)} - ${ten.slice(6)}`;
+ }
+ 
++/** Header open/closed badge → label + tint (mirrors the hero mini-card). */
++const BADGE_STYLES: Record<OpenBadge, { label: string; className: string }> = {
++  open: { label: "Open Now", className: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30" },
++  "closing-soon": {
++    label: "Closing Soon",
++    className: "bg-amber-500/15 text-amber-300 ring-amber-500/30",
++  },
++  "opening-soon": { label: "Opening Soon", className: "bg-sky-500/15 text-sky-300 ring-sky-500/30" },
++  closed: { label: "Closed Today", className: "bg-rose-500/15 text-rose-300 ring-rose-500/30" },
++};
++
+ /** Small inline "Edit" affordance rendered beside a section heading. */
+ function EditLink({ onClick, label }: { onClick: () => void; label: string }) {
+   return (
+@@ -101,6 +122,56 @@ function EditLink({ onClick, label }: { onClick: () => void; label: string }) {
+   );
+ }
+ 
++/** Shared shell for a tappable contact tile (link or copy-button). */
++function ContactTile({
++  icon,
++  label,
++  value,
++  onClick,
++  href,
++  target,
++}: {
++  icon: React.ReactNode;
++  label: string;
++  value: string;
++  onClick?: () => void;
++  href?: string;
++  target?: string;
++}) {
++  const inner = (
++    <>
++      <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted/60 text-muted-foreground">
++        {icon}
++      </span>
++      <span className="min-w-0 text-left">
++        <span className="block text-[11px] uppercase tracking-wide text-muted-foreground/70">
++          {label}
++        </span>
++        <span className="block truncate text-sm font-medium text-foreground">{value}</span>
++      </span>
++    </>
++  );
++  const cls =
++    "flex w-full items-center gap-3 rounded-lg bg-card p-3 text-left ring-1 ring-border/40 transition-colors hover:bg-muted/40";
++  if (href) {
++    return (
++      <a
++        href={href}
++        target={target}
++        rel={target === "_blank" ? "noreferrer" : undefined}
++        className={cls}
++      >
++        {inner}
++      </a>
++    );
++  }
++  return (
++    <button type="button" onClick={onClick} className={cls}>
++      {inner}
++    </button>
++  );
++}
++
+ export function HoursContactModal({
+   store,
+   open,
+@@ -129,22 +200,45 @@ export function HoursContactModal({
+       ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(mapQuery)}`
+       : null);
+ 
++  const badge = store.hoursJson
++    ? computeOpenBadge(hourRowsFromHoursJson(store.hoursJson), computePst())
++    : null;
++
++  const copy = async (text: string, what: string) => {
++    try {
++      await navigator.clipboard.writeText(text);
++      toast.success(`${what} copied`);
++    } catch {
++      toast.error("Couldn't copy to clipboard");
++    }
++  };
++
++  const hasContact =
++    store.phoneNumber || store.emailAddress || store.websiteUrl || store.locationAddress;
++
+   return (
+     <Dialog open={open} onOpenChange={onOpenChange}>
+-      <DialogContent className="max-w-lg">
++      <DialogContent className="max-h-[90vh] w-[calc(100vw-2rem)] max-w-2xl overflow-hidden">
+         <DialogHeader>
+-          <DialogTitle className="flex items-center gap-2">
++          <DialogTitle className="flex flex-wrap items-center gap-2">
+             <Clock className="size-4" /> {store.name}
++            {badge ? (
++              <span
++                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ring-1 ${BADGE_STYLES[badge].className}`}
++              >
++                {BADGE_STYLES[badge].label}
++              </span>
++            ) : null}
+           </DialogTitle>
+-          <DialogDescription>Business hours, contact, and location.</DialogDescription>
++          <DialogDescription>Showroom hours, contact, and location.</DialogDescription>
+         </DialogHeader>
+ 
+-        <div className="max-h-[70vh] space-y-5 overflow-y-auto pr-1">
++        <div className="max-h-[75vh] space-y-6 overflow-y-auto pr-1">
+           {/* ── Weekly hours ── */}
+           <section>
+-            <div className="flex items-center justify-between">
++            <div className="mb-1.5 flex items-center justify-between">
+               <h3 className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+-                Hours
++                Showroom Hours
+               </h3>
+               {onEditHours ? (
+                 <EditLink
+@@ -157,20 +251,19 @@ export function HoursContactModal({
+               ) : null}
+             </div>
+             {store.hoursJson ? (
+-              <div className="mt-1.5">
++              <div className="rounded-lg bg-card p-2 ring-1 ring-border/40">
+                 <WeeklyHoursTable hoursJson={store.hoursJson} />
+               </div>
+             ) : (
+-              <p className="mt-1.5 text-sm text-muted-foreground/70">
+-                No hours on file yet — run a backfill or edit the showroom to add
+-                them.
++              <p className="text-sm text-muted-foreground/70">
++                No hours on file yet — run a backfill or edit the showroom to add them.
+               </p>
+             )}
+           </section>
+ 
+           {/* ── Contact ── */}
+           <section>
+-            <div className="flex items-center justify-between">
++            <div className="mb-1.5 flex items-center justify-between">
+               <h3 className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                 Contact
+               </h3>
+@@ -184,55 +277,51 @@ export function HoursContactModal({
+                 />
+               ) : null}
+             </div>
+-            <div className="mt-1.5 space-y-1.5 text-sm">
+-              {store.phoneNumber ? (
+-                <a
+-                  href={`tel:${store.phoneNumber.replace(/[^\d+]/g, "")}`}
+-                  className="flex items-center gap-2 font-medium text-sky-400 hover:text-sky-300"
+-                >
+-                  <Phone className="size-3.5 shrink-0" />
+-                  {formatPhone(store.phoneNumber)}
+-                </a>
+-              ) : null}
+-              {store.emailAddress ? (
+-                <a
+-                  href={`mailto:${store.emailAddress}`}
+-                  className="flex items-center gap-2 text-muted-foreground hover:text-foreground"
+-                >
+-                  <Mail className="size-3.5 shrink-0" />
+-                  {store.emailAddress}
+-                </a>
+-              ) : null}
+-              {store.websiteUrl ? (
+-                <a
+-                  href={store.websiteUrl}
+-                  target="_blank"
+-                  rel="noreferrer"
+-                  className="flex items-center gap-2 text-muted-foreground hover:text-foreground"
+-                >
+-                  <Globe className="size-3.5 shrink-0" />
+-                  <span className="truncate">{store.websiteUrl}</span>
+-                </a>
+-              ) : null}
+-              {store.locationAddress ? (
+-                <p className="flex items-start gap-2 text-muted-foreground">
+-                  <MapPin className="mt-0.5 size-3.5 shrink-0" />
+-                  {store.locationAddress}
+-                </p>
+-              ) : null}
+-              {!store.phoneNumber &&
+-              !store.emailAddress &&
+-              !store.websiteUrl &&
+-              !store.locationAddress ? (
+-                <p className="text-muted-foreground/70">No contact info on file.</p>
+-              ) : null}
+-            </div>
++            {hasContact ? (
++              <div className="grid gap-2 sm:grid-cols-2">
++                {store.phoneNumber ? (
++                  <ContactTile
++                    icon={<Phone className="size-4" />}
++                    label="Tap to call"
++                    value={formatPhone(store.phoneNumber)}
++                    href={`tel:${store.phoneNumber.replace(/[^\d+]/g, "")}`}
++                  />
++                ) : null}
++                {store.emailAddress ? (
++                  <ContactTile
++                    icon={<Mail className="size-4" />}
++                    label="Tap to copy email"
++                    value={store.emailAddress}
++                    onClick={() => copy(store.emailAddress as string, "Email")}
++                  />
++                ) : null}
++                {store.websiteUrl ? (
++                  <ContactTile
++                    icon={<Globe className="size-4" />}
++                    label="Open website"
++                    value={store.websiteUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}
++                    href={store.websiteUrl}
++                    target="_blank"
++                  />
++                ) : null}
++                {store.locationAddress ? (
++                  <ContactTile
++                    icon={<MapPin className="size-4" />}
++                    label="Tap to copy address"
++                    value={store.locationAddress}
++                    onClick={() => copy(store.locationAddress as string, "Address")}
++                  />
++                ) : null}
++              </div>
++            ) : (
++              <p className="text-sm text-muted-foreground/70">No contact info on file.</p>
++            )}
+           </section>
+ 
+           {/* ── Map ── */}
+           {mapSrc ? (
+             <section>
+-              <div className="flex items-center justify-between">
++              <div className="mb-1.5 flex items-center justify-between">
+                 <h3 className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                   Location
+                 </h3>
+@@ -247,11 +336,11 @@ export function HoursContactModal({
+                   </a>
+                 ) : null}
+               </div>
+-              <div className="mt-1.5 overflow-hidden rounded-lg ring-1 ring-border/40">
++              <div className="overflow-hidden rounded-lg ring-1 ring-border/40">
+                 <iframe
+                   src={mapSrc}
+                   title={`Map of ${store.name}`}
+-                  className="h-56 w-full"
++                  className="h-72 w-full"
+                   loading="lazy"
+                   referrerPolicy="no-referrer-when-downgrade"
+                   allowFullScreen
+diff --git a/src/frontend/components/showroom/hero/HoursMiniCard.tsx b/src/frontend/components/showroom/hero/HoursMiniCard.tsx
+index a6b3cce..561327b 100644
+--- a/src/frontend/components/showroom/hero/HoursMiniCard.tsx
++++ b/src/frontend/components/showroom/hero/HoursMiniCard.tsx
+@@ -1,17 +1,47 @@
+ /**
+- * @fileoverview HoursMiniCard — compact "Office Hours" card for the showroom hero.
++ * @fileoverview HoursMiniCard — compact "Showroom Hours" card for the hero.
+  *
+- * Two summary lines (weekday + weekend) under a Clock heading, styled as a
+- * Monolith mini-card (bg-card + ring, no 1px borders). The whole card is a
+- * button — clicking opens the full hours/contact/map modal. Summary lines are
+- * derived from the structured `hoursJson`. Renders a subtle "Hours unknown"
+- * card when no hour data exists so the modal (contact + map) stays reachable.
++ * Deliberately simple: a Clock heading, at most two summary lines (weekday +
++ * weekend), and a live open/closed status badge. Anything more detailed (the
++ * full weekly table, contact, map) lives one click away in HoursContactModal.
++ * Summary lines + badge are derived from the structured `hoursJson`.
+  */
+ 
+ import { ChevronRight, Clock } from "lucide-react";
+ 
+ import type { HoursJson } from "../intake/hours-types";
+ import { weekdayWeekendLines } from "../intake/hours-types";
++import {
++  computeOpenBadge,
++  computePst,
++  hourRowsFromHoursJson,
++  type OpenBadge,
++} from "../hours-status";
++
++/** Badge state → label + tint classes (JIT-safe literal classNames). */
++const BADGE_STYLES: Record<OpenBadge, { label: string; className: string }> = {
++  open: { label: "Open Now", className: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30" },
++  "closing-soon": {
++    label: "Closing Soon",
++    className: "bg-amber-500/15 text-amber-300 ring-amber-500/30",
++  },
++  "opening-soon": {
++    label: "Opening Soon",
++    className: "bg-sky-500/15 text-sky-300 ring-sky-500/30",
++  },
++  closed: { label: "Closed Today", className: "bg-rose-500/15 text-rose-300 ring-rose-500/30" },
++};
++
++function StatusBadge({ badge }: { badge: OpenBadge }) {
++  const { label, className } = BADGE_STYLES[badge];
++  return (
++    <span
++      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ring-1 ${className}`}
++    >
++      {label}
++    </span>
++  );
++}
+ 
+ export function HoursMiniCard({
+   hoursJson,
+@@ -25,30 +55,41 @@ export function HoursMiniCard({
+   const weekend = structured?.weekend ?? null;
+   const hasHours = Boolean(weekday || weekend);
+ 
++  // Live open/closed badge from the structured hours (needs the day windows).
++  const badge = hoursJson ? computeOpenBadge(hourRowsFromHoursJson(hoursJson), computePst()) : null;
++
+   return (
+     <button
+       type="button"
+       onClick={onClick}
+       className="group/hours w-full rounded-lg bg-card p-3 text-left ring-1 ring-border/40 transition-colors hover:bg-muted/40 sm:w-60"
+-      aria-label="View full business hours, contact info, and map"
++      aria-label="View full showroom hours, contact info, and map"
+     >
+       <p className="flex items-center gap-2 text-sm font-medium">
+         <Clock className="size-4" />
+-        Office Hours
++        Showroom Hours
+         <ChevronRight className="ml-auto size-3.5 text-muted-foreground/60 transition-transform group-hover/hours:translate-x-0.5" />
+       </p>
++
++      {badge ? (
++        <div className="mt-2">
++          <StatusBadge badge={badge} />
++        </div>
++      ) : null}
++
+       {hasHours ? (
+-        <>
++        <div className="mt-2 space-y-0.5">
+           {weekday ? (
+-            <p className="mt-1 text-sm text-muted-foreground">{weekday}</p>
++            <p className="truncate text-sm text-muted-foreground">{weekday}</p>
+           ) : null}
+           {weekend ? (
+-            <p className="text-sm text-muted-foreground">{weekend}</p>
++            <p className="truncate text-sm text-muted-foreground">{weekend}</p>
+           ) : null}
+-        </>
++        </div>
+       ) : (
+-        <p className="mt-1 text-sm text-muted-foreground/70">Hours unknown</p>
++        <p className="mt-2 text-sm text-muted-foreground/70">Hours unknown</p>
+       )}
++
+       <p className="mt-1.5 text-[11px] text-muted-foreground/60">
+         Full hours · contact · map
+       </p>
+diff --git a/src/frontend/components/showroom/hours-status.ts b/src/frontend/components/showroom/hours-status.ts
+index 178d4d3..515c1a2 100644
+--- a/src/frontend/components/showroom/hours-status.ts
++++ b/src/frontend/components/showroom/hours-status.ts
+@@ -15,6 +15,9 @@
+  *   - Otherwise closed today            → "Opens tomorrow 10:00 AM" / "Opens Monday 10:00 AM"
+  */
+ 
++import type { HoursJson } from "./intake/hours-types";
++import { DAY_KEYS } from "./intake/hours-types";
++
+ export type ShowroomDay =
+   | "MONDAY"
+   | "TUESDAY"
+@@ -41,6 +44,13 @@ export interface PstNow {
+ 
+ export type ShowroomStatus = "open" | "closed" | "closing-soon";
+ 
++/**
++ * Compact hero-badge state. Distinguishes "opens later today" (opening-soon)
++ * from "closed for the day" (closed) — a split `computeShowroomStatus` collapses
++ * into a single "closed". Drives the Showroom-Hours card badge.
++ */
++export type OpenBadge = "open" | "closing-soon" | "opening-soon" | "closed";
++
+ /** Enum day → JS getDay() index (Sun = 0 … Sat = 6). */
+ const DAY_ENUM_TO_INDEX: Record<ShowroomDay, number> = {
+   SUNDAY: 0,
+@@ -166,3 +176,92 @@ export function computeShowroomStatus(
+ 
+   return { status: "closed", label: `Opens ${whenStr} ${openStr}` };
+ }
++
++// ─── hoursJson bridge + hero badge ──────────────────────────────────────────
++
++/** DayKey (mon…sun) → the normalized showroom_hours enum. */
++const DAY_KEY_TO_ENUM: Record<(typeof DAY_KEYS)[number], ShowroomDay> = {
++  mon: "MONDAY",
++  tue: "TUESDAY",
++  wed: "WEDNESDAY",
++  thu: "THURSDAY",
++  fri: "FRIDAY",
++  sat: "SATURDAY",
++  sun: "SUNDAY",
++};
++
++/**
++ * Convert a structured `hoursJson` into the normalized `HourRow[]` the status
++ * helpers consume — one row per open day (closed/absent days are dropped). Lets
++ * the hero components reuse the same open/closed logic as the directory cards
++ * without needing the API's normalized rows on hand.
++ */
++export function hourRowsFromHoursJson(h: HoursJson | null | undefined): HourRow[] {
++  if (!h) return [];
++  const rows: HourRow[] = [];
++  for (const key of DAY_KEYS) {
++    const slot = h[key];
++    if (!slot) continue;
++    const [oh, om] = slot.open.split(":");
++    const [ch, cm] = slot.close.split(":");
++    rows.push({
++      day: DAY_KEY_TO_ENUM[key],
++      openHour: parseInt(oh, 10) || 0,
++      openMinute: parseInt(om ?? "0", 10) || 0,
++      closeHour: parseInt(ch, 10) || 0,
++      closeMinute: parseInt(cm ?? "0", 10) || 0,
++    });
++  }
++  return rows;
++}
++
++/** JS getDay() short name → our PstNow.day index helper table. */
++const PST_DAY_INDEX: Record<string, number> = {
++  sun: 0,
++  mon: 1,
++  tue: 2,
++  wed: 3,
++  thu: 4,
++  fri: 5,
++  sat: 6,
++};
++
++/** Current PST snapshot (day 0=Sun…6=Sat, minutes since midnight, "h:mm AM"). */
++export function computePst(): PstNow {
++  const parts = new Intl.DateTimeFormat("en-US", {
++    timeZone: "America/Los_Angeles",
++    weekday: "short",
++    hour: "2-digit",
++    minute: "2-digit",
++    hour12: false,
++  }).formatToParts(new Date());
++  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
++  const wd = get("weekday").toLowerCase().slice(0, 3);
++  let hour = parseInt(get("hour"), 10);
++  if (hour === 24 || Number.isNaN(hour)) hour = 0;
++  const minute = parseInt(get("minute"), 10) || 0;
++  const minutes = hour * 60 + minute;
++  return { day: PST_DAY_INDEX[wd] ?? 0, minutes, label: fmtHm(hour, minute) };
++}
++
++/**
++ * The compact hero badge for the current PST moment:
++ *   - open now, >60 min to close      → "open"
++ *   - open now, ≤60 min to close       → "closing-soon"
++ *   - closed now but opens later today → "opening-soon"
++ *   - otherwise                        → "closed"
++ * Returns `null` when there are no hours at all (caller hides the badge).
++ */
++export function computeOpenBadge(hours: HourRow[], now: PstNow): OpenBadge | null {
++  if (!hours || hours.length === 0) return null;
++  const row = rowForDay(hours, now.day);
++  if (row) {
++    const open = openMinutes(row);
++    const close = closeMinutes(row);
++    if (now.minutes >= open && now.minutes < close) {
++      return close - now.minutes <= 60 ? "closing-soon" : "open";
++    }
++    if (now.minutes < open) return "opening-soon";
++  }
++  return "closed";
++}
