@@ -54,6 +54,18 @@ async function main() {
   checks.ok("GET /api/showroom-sales (keyword) → 200", kw.status === 200, `got ${kw.status}`);
   checks.ok("keyword response shape { items[], mode }", Array.isArray(kw.json?.items) && !!kw.json?.mode);
 
+  // Regression: an UNFILTERED list must return every item the facets counted.
+  // A absent-numeric-param bug (`Number(undefined ?? "")` === 0, so a
+  // `maxPrice <= 0` filter silently applies) drops every priced item here while
+  // /facets still counts them — so a mismatch catches it the moment data exists.
+  // Invisible on an empty table, which is exactly how it shipped past QC once.
+  const unfiltered = await client.get("/api/showroom-sales");
+  checks.ok(
+    "unfiltered list returns all items the facets counted (no phantom filter)",
+    unfiltered.json?.items?.length === facets.json?.totalItems,
+    `list=${unfiltered.json?.items?.length} vs facets.totalItems=${facets.json?.totalItems}`,
+  );
+
   const rag = await client.get("/api/showroom-sales?mode=rag&q=marble%20remnants");
   checks.ok("GET /api/showroom-sales (rag) → 200", rag.status === 200, `got ${rag.status}`);
   checks.ok(

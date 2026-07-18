@@ -146,6 +146,19 @@ function multi(c: Context<{ Bindings: Env }>, key: string): string[] {
   return all.map((v) => v.trim()).filter(Boolean);
 }
 
+/**
+ * A numeric query param, or null when absent/blank/unparseable.
+ *
+ * Returning null (rather than NaN or 0) is what lets a caller distinguish
+ * "no filter" from "filter at 0" — see the note at the call site.
+ */
+function numericQuery(c: Context<{ Bindings: Env }>, key: string): number | null {
+  const raw = c.req.query(key);
+  if (raw == null || raw.trim() === "") return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
 // ---------------------------------------------------------------------------
 // GET / — filtered + searched clearance items
 // ---------------------------------------------------------------------------
@@ -160,8 +173,12 @@ showroomSalesRouter.get("/", async (c) => {
   const dealLabels = multi(c, "dealLabel").map((v) => v.toLowerCase());
   const storeIds = multi(c, "storeId").map(Number).filter(Number.isInteger);
   const cities = multi(c, "city").map((v) => v.toLowerCase());
-  const minDiscount = Number(c.req.query("minDiscount") ?? "");
-  const maxPrice = Number(c.req.query("maxPrice") ?? "");
+  // Parse ONLY when the caller actually sent the param. `Number(undefined ?? "")`
+  // is 0 — not NaN — so a naive Number.isFinite() guard treats an ABSENT filter
+  // as "0", and the two filters below then silently drop every item with a price
+  // (`salePrice <= 0`) or without a stated percent. Absent must mean absent.
+  const minDiscount = numericQuery(c, "minDiscount");
+  const maxPrice = numericQuery(c, "maxPrice");
 
   const rows = await loadCurrentSales(db);
 
@@ -201,10 +218,10 @@ showroomSalesRouter.get("/", async (c) => {
   if (cities.length) {
     items = items.filter((i) => i.storeCity && cities.includes(i.storeCity.toLowerCase()));
   }
-  if (Number.isFinite(minDiscount)) {
+  if (minDiscount != null) {
     items = items.filter((i) => (i.discountPercent ?? -1) >= minDiscount);
   }
-  if (Number.isFinite(maxPrice)) {
+  if (maxPrice != null) {
     // An item with no stated price can't satisfy a price ceiling.
     items = items.filter((i) => i.salePrice != null && i.salePrice <= maxPrice);
   }
