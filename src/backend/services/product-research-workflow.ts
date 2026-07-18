@@ -27,7 +27,7 @@ import {
   type WorkflowStep,
 } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import {
   productImages,
@@ -505,7 +505,12 @@ async function markRunning(
     .select({ id: showroomStores.id, name: showroomStores.name })
     .from(showroomProductMappings)
     .innerJoin(showroomStores, eq(showroomProductMappings.showroomId, showroomStores.id))
-    .where(eq(showroomProductMappings.productId, storeProductId))
+    .where(
+      and(
+        eq(showroomProductMappings.productId, storeProductId),
+        eq(showroomStores.isActive, true),
+      ),
+    )
     .limit(1);
 
   let brandName: string | null = null;

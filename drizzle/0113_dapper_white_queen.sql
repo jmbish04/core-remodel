@@ -1,0 +1,1 @@
+ALTER TABLE `showroom_stores` ADD `is_active` integer DEFAULT true NOT NULL;

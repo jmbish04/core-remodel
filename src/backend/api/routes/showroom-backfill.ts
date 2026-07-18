@@ -145,7 +145,9 @@ showroomBackfillRouter.openapi(
         iconCfImagesUrl: showroomStores.iconCfImagesUrl,
         scrapeStatus: showroomStores.scrapeStatus,
       })
-      .from(showroomStores);
+      .from(showroomStores)
+      // Soft-deleted stores are not enrichment candidates.
+      .where(eq(showroomStores.isActive, true));
 
     // Aggregate presence of one-to-many enrichment across all stores in 4 reads.
     const [hoursRows, photoRows, categoryRows, websiteRows] = await Promise.all([
@@ -588,6 +590,7 @@ showroomBackfillRouter.post("/backfill/addresses", async (c) => {
       and(
         isNotNull(showroomStores.placeId),
         isNull(showroomStores.locationStreetNumber),
+        eq(showroomStores.isActive, true),
       ),
     );
 
@@ -602,6 +605,7 @@ showroomBackfillRouter.post("/backfill/addresses", async (c) => {
       and(
         isNotNull(showroomStores.placeId),
         isNull(showroomStores.locationStreetNumber),
+        eq(showroomStores.isActive, true),
       ),
     )
     .limit(limit);

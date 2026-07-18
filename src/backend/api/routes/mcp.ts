@@ -47,7 +47,7 @@ import {
   listMeasurements,
 } from "@backend/services/measurements";
 import { isRequestAuthenticated } from "@backend/utils/access";
-import { and, eq, like, or } from "drizzle-orm";
+import { and, eq, isNull, like, or } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
@@ -1027,6 +1027,9 @@ async function callTool(env: Env, auth: McpAuthContext, name: string, args: Reco
       if (args.storeId != null) conds.push(eq(showroomStoreContacts.storeId, Number(args.storeId)));
       if (typeof args.type === "string") conds.push(eq(showroomStoreContacts.type, args.type as any));
       if (!args.includeDrafts) conds.push(eq(showroomStoreContacts.isDraft, false));
+      // Mirrors GET /api/showroom-contacts: hide contacts of a soft-deleted
+      // store, keep unattached ones (storeId is nullable).
+      conds.push(or(isNull(showroomStoreContacts.storeId), eq(showroomStores.isActive, true)));
       if (typeof args.q === "string" && args.q.trim()) {
         const q = `%${args.q.trim()}%`;
         conds.push(or(like(showroomStoreContacts.firstName, q), like(showroomStoreContacts.lastName, q), like(showroomStoreContacts.emailAddress, q)));

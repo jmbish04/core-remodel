@@ -25,9 +25,19 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Loader2, Pencil } from "lucide-react";
+import { Loader2, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -107,6 +117,8 @@ interface EditStoreModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved?: () => void;
+  /** Called after a successful soft delete; the viewport navigates away. */
+  onDeleted?: () => void;
 }
 
 // ─── Field definitions ──────────────────────────────────────────────────────
@@ -206,12 +218,20 @@ function linksEqual(a: IntakeLink[], b: IntakeLink[]): boolean {
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export function EditStoreModal({ store, open, onOpenChange, onSaved }: EditStoreModalProps) {
+export function EditStoreModal({
+  store,
+  open,
+  onOpenChange,
+  onSaved,
+  onDeleted,
+}: EditStoreModalProps) {
   const [form, setForm] = useState<Record<string, unknown>>({});
   const [links, setLinks] = useState<IntakeLink[]>([]);
   const [hours, setHours] = useState<HoursJson | null>(null);
   const [hoursTouched, setHoursTouched] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const originalLinks = useMemo(() => toIntakeLinks(store), [store]);
 
@@ -296,6 +316,34 @@ export function EditStoreModal({ store, open, onOpenChange, onSaved }: EditStore
       setSaving(false);
     }
   }, [form, links, hours, hoursTouched, originalLinks, store, onSaved, onOpenChange]);
+
+  /**
+   * Soft delete — `DELETE /api/showroom-stores/:id` flips `is_active` to 0. The
+   * row and every child (notes, photos, ratings, price history) survive, so the
+   * toast says "removed", not "deleted", and the store can be restored.
+   */
+  const handleDelete = useCallback(async () => {
+    setDeleting(true);
+    try {
+      const res = await fetch(`/api/showroom-stores/${store.id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const payload = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+        throw new Error((payload.error as string) ?? `Failed to delete (${res.status})`);
+      }
+      toast.success(`${store.name} removed from the directory.`);
+      setConfirmDelete(false);
+      onOpenChange(false);
+      onDeleted?.();
+    } catch (err) {
+      console.error("[EditStoreModal] delete failed:", err);
+      toast.error(err instanceof Error ? err.message : "Failed to delete showroom");
+    } finally {
+      setDeleting(false);
+    }
+  }, [store, onOpenChange, onDeleted]);
 
   const renderTextField = (field: TextField) => {
     const value = (form[field.key] as string) ?? "";
@@ -430,7 +478,20 @@ export function EditStoreModal({ store, open, onOpenChange, onSaved }: EditStore
           </ScrollArea>
         </Tabs>
 
-        <DialogFooter className="border-t border-border/40 px-5 py-3">
+        <DialogFooter className="border-t border-border/40 px-5 py-3 sm:justify-between">
+          {/* Soft delete — sits apart from Cancel/Save so it can't be hit by
+              accident, and behind a confirm because it removes the showroom
+              from every list at once. */}
+          <Button
+            variant="destructive"
+            size="sm"
+            className="gap-1.5"
+            onClick={() => setConfirmDelete(true)}
+            disabled={saving || deleting}
+          >
+            <Trash2 className="size-3.5" /> Delete showroom
+          </Button>
+          <div className="flex gap-2">
           <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={saving}>
             Cancel
           </Button>
@@ -438,8 +499,42 @@ export function EditStoreModal({ store, open, onOpenChange, onSaved }: EditStore
             {saving && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
             Save Changes
           </Button>
+          </div>
         </DialogFooter>
       </DialogContent>
+
+      <AlertDialog
+        open={confirmDelete}
+        onOpenChange={(next) => {
+          if (deleting) return;
+          setConfirmDelete(next);
+        }}
+      >
+        <AlertDialogContent className="max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {store.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              It disappears from the directory, map, drives and search. Nothing is
+              erased — notes, photos, ratings and price history are kept, and the
+              showroom can be restored.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-2 gap-2">
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                void handleDelete();
+              }}
+              disabled={deleting}
+              className="bg-rose-500 text-white hover:bg-rose-600"
+            >
+              {deleting && <Loader2 className="mr-1.5 size-4 animate-spin" />}
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

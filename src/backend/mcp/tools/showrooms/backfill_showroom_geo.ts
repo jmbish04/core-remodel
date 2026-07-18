@@ -49,7 +49,11 @@ export const backfillShowroomGeo = defineTool({
     const limit = input.limit ?? 25;
     const fetchCoordinates = input.fetchCoordinates ?? true;
 
-    const all = await db.select().from(showroomStores).all();
+    const all = await db
+      .select()
+      .from(showroomStores)
+      .where(eq(showroomStores.isActive, true))
+      .all();
     const candidates = all.filter(
       (s) => s.hubRoute == null || s.latitude == null || s.longitude == null,
     );
