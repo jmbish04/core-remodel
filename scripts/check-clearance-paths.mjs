@@ -24,14 +24,26 @@ import { readFileSync } from "node:fs";
 const SRC = "src/backend/services/showroom/social-links.ts";
 const src = readFileSync(SRC, "utf8");
 
-const m = /const CLEARANCE_PATH_RE =\s*(\/[\s\S]*?\/[a-z]*);/.exec(src);
-assert.ok(m, `could not find CLEARANCE_PATH_RE in ${SRC}`);
-const body = m[1].trim();
-const lastSlash = body.lastIndexOf("/");
-const CLEARANCE_PATH_RE = new RegExp(body.slice(1, lastSlash), body.slice(lastSlash + 1));
+function regexFromSource(name) {
+  const m = new RegExp(`const ${name} =\\s*(/[\\s\\S]*?/[a-z]*);`).exec(src);
+  assert.ok(m, `could not find ${name} in ${SRC}`);
+  const body = m[1].trim();
+  const lastSlash = body.lastIndexOf("/");
+  return new RegExp(body.slice(1, lastSlash), body.slice(lastSlash + 1));
+}
 
-/** classifySiteLink() strips the trailing slash before testing. */
-const test = (path) => CLEARANCE_PATH_RE.test(path.replace(/\/+$/, ""));
+const CLEARANCE_PATH_RE = regexFromSource("CLEARANCE_PATH_RE");
+const INFRA_PATH_RE = regexFromSource("INFRA_PATH_RE");
+
+/**
+ * Mirrors classifySiteLink()'s order: strip the trailing slash, veto
+ * infrastructure paths, then test for clearance.
+ */
+const test = (path) => {
+  const p = path.replace(/\/+$/, "");
+  if (INFRA_PATH_RE.test(p)) return false;
+  return CLEARANCE_PATH_RE.test(p);
+};
 
 // ─── Must match ───────────────────────────────────────────────────────────────
 for (const path of [
@@ -88,6 +100,13 @@ for (const path of [
   "/idealab", // contains "deal"
   "/specialsituations", // contains "specials"
   "/outletter", // contains "outlet"
+  // Infra / bot-challenge paths. The first one is REAL — it was stored as
+  // WEBSITE_CLEARANCE in prod, because the Cloudflare interstitial's own url
+  // ends in "clearance". Everything after it is the same class of trap.
+  "/cloudflare-challenges/concepts/clearance",
+  "/cdn-cgi/l/email-protection/sale",
+  "/.well-known/clearance",
+  "/wp-admin/clearance",
 ]) {
   assert.equal(test(path), false, `expected NO clearance match: ${path}`);
 }

@@ -150,6 +150,19 @@ const SHOWROOM_PHOTOS_PATH_RE =
 const PRODUCT_CONTEXT_RE = /(^|\/)(shop|store|product|products|catalog|collections?|browse)(\/|$)/i;
 
 /**
+ * Infrastructure / bot-challenge paths that are never real site content, vetoed
+ * before any classification.
+ *
+ * Found in prod, not in review: a scrape of decorativeplumbingsupply.com stored
+ * `/cloudflare-challenges/concepts/clearance` as WEBSITE_CLEARANCE — the bot
+ * interstitial's OWN url happens to end in "clearance", so the path matcher was
+ * structurally right and the result was still junk. Left alone it would have
+ * been re-scraped (Browser Rendering + an AI extraction) every week forever.
+ */
+const INFRA_PATH_RE =
+  /(^|\/)(cloudflare-challenges?|cdn-cgi|__cf[a-z_]*|\.well-known|wp-admin|wp-login|xmlrpc\.php)(\/|$)/i;
+
+/**
  * Classify a link ON THE STORE'S OWN DOMAIN by its path. Returns null for
  * off-domain links (those are {@link classifySocialLink}'s job) and for paths
  * that match nothing.
@@ -174,6 +187,7 @@ export function classifySiteLink(rawUrl: string, siteHost: string): ClassifiedLi
 
   const path = u.pathname.replace(/\/+$/, "");
   if (!path) return null; // the homepage is the WEBSITE link, not a sub-page
+  if (INFRA_PATH_RE.test(path)) return null;
 
   let type: ShowroomLinkType | null = null;
   if (CLEARANCE_PATH_RE.test(path)) type = "WEBSITE_CLEARANCE";
