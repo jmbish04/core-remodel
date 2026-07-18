@@ -53,6 +53,13 @@ export interface ShowroomScrapeParams {
   ragUuid: string;
 }
 
+/**
+ * One `<a>` the crawl saw: the resolved href plus its anchor text. Anchor text
+ * is carried (not discarded) because it's what lets the sale-link classifier
+ * recognize an opaquely-pathed clearance page like `/collections/c-42`.
+ */
+type ScrapedLink = { href: string; text?: string };
+
 /** Workers-AI embedding model — mirrors the deep-sweep RAG pipeline. */
 const EMBED_MODEL = "@cf/baai/bge-large-en-v1.5" as const;
 
@@ -866,7 +873,11 @@ async function upsertBrandMapping(
 
   // Case-insensitive lookup on brands.name.
   const [existing] = await db
-    .select({ id: brands.id, websiteUrl: brands.websiteUrl })
+    .select({
+      id: brands.id,
+      iconCfImagesUrl: brands.iconCfImagesUrl,
+      websiteUrl: brands.websiteUrl,
+    })
     .from(brands)
     .where(sql`lower(${brands.name}) = lower(${name})`)
     .limit(1);
@@ -880,6 +891,32 @@ async function upsertBrandMapping(
     // overwrite — an existing value may have been set by enrichment or a human.
     if (websiteUrl && !existing.websiteUrl) {
       await db.update(brands).set({ websiteUrl }).where(eq(brands.id, brandId));
+    }
+
+    // Self-heal a missing icon. `enrichNewBrand` only runs on FIRST discovery,
+    // so a brand created before enrichment existed — or whose favicon fetch
+    // failed that one time — would render as a lettermark box forever, which is
+    // what makes the Brands & Products tile a wall of letters. Retry per scrape,
+    // fill-blanks: only when the icon is still missing.
+    //
+    // Prefer whatever website we now know (the one just backfilled above, else
+    // the stored one): hydrating from a URL is one cheap fetch. Falling back to
+    // full enrichment costs AI calls, so it honours the same `mayEnrich` budget
+    // as the new-brand path — a 137-brand scrape must not spend its budget
+    // re-enriching brands it already has.
+    const knownSite = existing.websiteUrl ?? websiteUrl;
+    if (!existing.iconCfImagesUrl) {
+      try {
+        if (knownSite) {
+          await faviconService.hydrateBrandIcon(env, brandId, knownSite);
+        } else if (mayEnrich) {
+          // No website anywhere — full enrichment discovers one, then hydrates.
+          await enrichNewBrand(env, brandId, name);
+          outcome = "enriched";
+        }
+      } catch (err) {
+        console.error(`showroom-scrape: icon backfill failed for "${name}"`, err);
+      }
     }
   } else {
     const [inserted] = await db

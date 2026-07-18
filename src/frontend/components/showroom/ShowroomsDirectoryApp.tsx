@@ -93,7 +93,9 @@ import {
 import {
   computeShowroomStatus,
   isOpenNow as isOpenNowStructured,
+  pstNow,
   type HourRow,
+  type PstNow,
 } from "./hours-status";
 import { ShowroomMergedCard } from "./ShowroomMergedCard";
 import { ManageShowroomsModal } from "./ManageShowroomsModal";
@@ -283,50 +285,6 @@ function categoryIconFor(store: Store): ComponentType<{ className?: string }> | 
     if (test.test(haystack)) return Icon;
   }
   return store.categories.length > 0 ? StoreIcon : null;
-}
-
-// ── Hours parsing (free-text like "M-F 9AM-5PM", "Sat 10AM-4PM") ───────────────
-
-const DAY_INDEX: Record<string, number> = {
-  sun: 0,
-  mon: 1,
-  tue: 2,
-  wed: 3,
-  thu: 4,
-  fri: 5,
-  sat: 6,
-};
-
-interface PstNow {
-  day: number; // 0 = Sun … 6 = Sat
-  minutes: number; // minutes since midnight, PST
-  label: string; // "2:45 PM"
-}
-
-function fmt12(min: number): string {
-  let h = Math.floor(min / 60);
-  const m = min % 60;
-  const mer = h >= 12 ? "PM" : "AM";
-  h = h % 12;
-  if (h === 0) h = 12;
-  return `${h}:${m.toString().padStart(2, "0")} ${mer}`;
-}
-
-function computePst(): PstNow {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles",
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(new Date());
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
-  const wd = get("weekday").toLowerCase().slice(0, 3);
-  let hour = parseInt(get("hour"), 10);
-  if (hour === 24 || Number.isNaN(hour)) hour = 0;
-  const minute = parseInt(get("minute"), 10) || 0;
-  const minutes = hour * 60 + minute;
-  return { day: DAY_INDEX[wd] ?? 0, minutes, label: fmt12(minutes) };
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -1572,7 +1530,7 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
   // editor remounts and re-seeds from the freshly mapped description.
   const [descSeedKey, setDescSeedKey] = useState(0);
   // Bumped on autofill so the (seed-once) review-summary editor re-seeds from
-  // the freshly mapped `[gemini summarized] …` copy.
+  // the freshly mapped AI summary copy.
   const [reviewSeedKey, setReviewSeedKey] = useState(0);
   // One session token per search session: shared with the child typeahead by ref
   // so every autocomplete keystroke + the terminal details call bill as ONE
@@ -2326,7 +2284,7 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
   const [cities, setCities] = useState<City[]>([]);
   const [filters, setFilters] = useState<Filters>({ ...EMPTY_FILTERS });
   const [viewMode, setViewMode] = useState<ViewMode>(initialTab);
-  const [pst, setPst] = useState<PstNow>(() => computePst());
+  const [pst, setPst] = useState<PstNow>(() => pstNow());
 
   // Tab ↔ URL sync. Clicking a tab pushes /admin/shopping/showrooms/<tab>;
   // browser back/forward (popstate) restores the tab from the path.
@@ -2351,7 +2309,7 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
 
   // Keep the PST clock (Open Now filter + live hours cues) fresh each minute.
   useEffect(() => {
-    const id = setInterval(() => setPst(computePst()), 60_000);
+    const id = setInterval(() => setPst(pstNow()), 60_000);
     return () => clearInterval(id);
   }, []);
 

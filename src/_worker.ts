@@ -11,6 +11,7 @@ import { dispatchDueWorkflows } from "./backend/services/workflow-dispatcher";
 import { autoHealImageUploads } from "./backend/services/image-processor/auto-heal";
 import { monitorShowroomSourcingCoverage } from "./backend/services/showroom-sourcing-monitor";
 import { backfillShowroomPlacesData } from "./backend/services/showroom/places-backfill";
+import { sweepShowroomSales } from "./backend/services/showroom/sales";
 import { ingestCompanyEmails } from "./backend/services/gmail/ingestion";
 import {
   getDeviceIdFromRequest,
@@ -296,6 +297,22 @@ const legacyHandler: ExportedHandler<Env> = {
             ),
           )
           .catch((err) => console.error("[scheduled] gmail ingestion failed:", err)),
+      );
+      return;
+    }
+    if (event.cron === "30 13 * * 1") {
+      // Weekly showroom sale/clearance sweep. Re-scans every WEBSITE_CLEARANCE
+      // link and records a showroom_store_sales snapshot ONLY
+      // when the page content actually changed vs the last scrape.
+      ctx.waitUntil(
+        sweepShowroomSales(env)
+          .then((r) =>
+            console.log(
+              `[scheduled] showroom sales sweep: pages=${r.pagesScanned} stores=${r.storesScanned} ` +
+                `recorded=${r.recorded} unchanged=${r.unchanged} empty=${r.empty} errors=${r.errors}`,
+            ),
+          )
+          .catch((err) => console.error("[scheduled] showroom sales sweep failed:", err)),
       );
       return;
     }

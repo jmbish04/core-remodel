@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { SalesApp } from "@/components/showroom/sales/SalesApp";
+---
+
+<BaseLayout
+  title="Sales & Clearance — The Monolith"
+  description="What the tracked showrooms currently have marked down, refreshed weekly from each store's sale and clearance pages."
+>
+  <SalesApp client:only="react" />
+</BaseLayout>

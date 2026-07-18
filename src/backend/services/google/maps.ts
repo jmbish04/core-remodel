@@ -921,9 +921,12 @@ Rules for each field:
         if (parsed) {
           const aiSummary = parsed.summary ?? "";
 
+          // The `_meta.engine` on aiInference already records that this is a
+          // Gemini summary; the string must stay clean because it renders
+          // verbatim as the store's "AI review summary".
           data.reviewSummary = {
             text: {
-              text: `[gemini summarized] ${aiSummary}`,
+              text: aiSummary,
               languageCode: "en",
             },
           };

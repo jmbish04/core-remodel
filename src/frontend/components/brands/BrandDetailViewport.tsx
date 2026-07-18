@@ -863,11 +863,15 @@ export function BrandDetailViewport({ brandId }: { brandId: number }) {
                   {productCount} {productCount === 1 ? "product" : "products"}
                 </span>
 
-                {/* Social icon row (Instagram / Facebook / Pinterest) */}
+                {/* Social icon row. SocialLinks is link-row driven (showrooms
+                    moved their URLs to showroom_store_links); the brands table
+                    still carries flat social columns, so adapt them here. */}
                 <SocialLinks
-                  instagramUrl={brand.instagramUrl}
-                  facebookUrl={brand.facebookUrl}
-                  pinterestUrl={brand.pinterestUrl}
+                  links={[
+                    { type: "INSTAGRAM", url: brand.instagramUrl ?? "" },
+                    { type: "FACEBOOK", url: brand.facebookUrl ?? "" },
+                    { type: "PINTEREST", url: brand.pinterestUrl ?? "" },
+                  ].filter((l) => l.url)}
                 />
               </div>
 

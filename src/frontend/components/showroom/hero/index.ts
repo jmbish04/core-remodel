@@ -5,7 +5,13 @@
  */
 
 export { CategoryChipsEditor, type StoreCategoryChip } from "./CategoryChipsEditor";
-export { SocialLinks } from "./SocialLinks";
+export {
+  SocialLinks,
+  SOCIAL_LINK_TYPES,
+  handleFromUrl,
+  type SocialLinkType,
+  type StoreLink,
+} from "./SocialLinks";
 export { HoursMiniCard } from "./HoursMiniCard";
 export { HoursContactModal, type HoursContactStore } from "./HoursContactModal";
 export {

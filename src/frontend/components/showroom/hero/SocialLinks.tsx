@@ -1,13 +1,21 @@
 /**
  * @fileoverview SocialLinks — icon row for a showroom's social profiles.
  *
- * Renders one icon link per configured social URL (Instagram, Facebook,
- * Pinterest — the columns on `showroom_stores`), muted-to-foreground on hover.
- * Renders nothing when no social URL is set. Pinterest has no lucide glyph, so
- * all three are consistent inline SVGs (currentColor, 24-unit viewBox).
+ * Driven by the store's `showroom_store_links` rows, NOT by flat columns: one
+ * icon per link whose `type` is a social type, in the order declared by
+ * `SOCIAL_LINK_TYPES`. A type with no link in the table renders nothing, so the row
+ * is built dynamically from whatever the store actually has. Renders nothing at
+ * all when the store has no social links.
+ *
+ * Each icon links out in a new tab and is labelled with the @handle parsed off
+ * the URL (falling back to the network name when no handle can be read).
+ * Pinterest / X / LinkedIn have no lucide glyphs, so all five are consistent
+ * inline SVGs (currentColor, 24-unit viewBox).
  */
 
-// ─── Inline brand glyphs (fill: currentColor) ─────────────────────────────────
+import type { ReactElement } from "react";
+
+// ─── Inline brand glyphs (currentColor) ───────────────────────────────────────
 
 function InstagramIcon({ className }: { className?: string }) {
   return (
@@ -35,55 +43,151 @@ function PinterestIcon({ className }: { className?: string }) {
   );
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+/** The post-rebrand X mark (the "bird" is retired branding). */
+function TwitterXIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
+      <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+    </svg>
+  );
+}
+
+function LinkedInIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
+      <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 0 1 0-4.124 2.062 2.062 0 0 1 0 4.124zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.225 0z" />
+    </svg>
+  );
+}
+
+// ─── Types + config ───────────────────────────────────────────────────────────
+
+/**
+ * The link types this row renders, in display order. Mirrors the backend's
+ * `SOCIAL_LINK_TYPES` (@backend/utils/showroom-links) — deliberately duplicated
+ * rather than imported, because that module pulls drizzle + the D1 schema in
+ * with it and this is a browser bundle. Display order is a UI concern anyway.
+ */
+export const SOCIAL_LINK_TYPES = [
+  "INSTAGRAM",
+  "TWITTER_X",
+  "LINKEDIN",
+  "FACEBOOK",
+  "PINTEREST",
+] as const;
+
+export type SocialLinkType = (typeof SOCIAL_LINK_TYPES)[number];
+
+interface SocialConfig {
+  network: string;
+  Icon: (props: { className?: string }) => ReactElement;
+}
+
+const SOCIAL_CONFIG: Record<SocialLinkType, SocialConfig> = {
+  INSTAGRAM: { network: "Instagram", Icon: InstagramIcon },
+  TWITTER_X: { network: "X", Icon: TwitterXIcon },
+  LINKEDIN: { network: "LinkedIn", Icon: LinkedInIcon },
+  FACEBOOK: { network: "Facebook", Icon: FacebookIcon },
+  PINTEREST: { network: "Pinterest", Icon: PinterestIcon },
+};
+
+function isSocialType(t: string): t is SocialLinkType {
+  return (SOCIAL_LINK_TYPES as readonly string[]).includes(t);
+}
+
+/** A store link as served by GET /api/showroom-stores/:id. */
+export interface StoreLink {
+  url: string;
+  type: string;
+}
+
+// ─── URL → @handle ────────────────────────────────────────────────────────────
 
 /** Normalize a possibly-schemeless URL value into an absolute https URL. */
 function absoluteHref(url: string | null | undefined): string | null {
   if (!url) return null;
   const trimmed = url.trim();
   if (!trimmed) return null;
-  return trimmed.startsWith("http") ? trimmed : `https://${trimmed}`;
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
 }
 
+/**
+ * Path segments that are never a handle — LinkedIn and Facebook namespace their
+ * profiles behind one of these, so the handle is the segment AFTER it.
+ */
+const NAMESPACE_SEGMENTS = new Set(["company", "in", "school", "pages", "profile", "people"]);
+
+/**
+ * Parse the @handle out of a profile URL, e.g.
+ *   https://instagram.com/davincimarble/      → "@davincimarble"
+ *   https://www.linkedin.com/company/acme-co  → "@acme-co"
+ *   https://x.com/acme?ref=nav                → "@acme"
+ *
+ * Returns null when there's no usable handle segment (e.g. a bare
+ * "https://facebook.com" or a deep permalink), and the caller falls back to the
+ * network name.
+ */
+export function handleFromUrl(url: string): string | null {
+  let path: string;
+  try {
+    path = new URL(absoluteHref(url) as string).pathname;
+  } catch {
+    return null;
+  }
+  const segments = path.split("/").filter(Boolean);
+  if (segments.length === 0) return null;
+
+  // Skip a leading namespace segment ("company", "in", …) to reach the handle.
+  const first = segments[0].toLowerCase();
+  const handle = NAMESPACE_SEGMENTS.has(first) ? segments[1] : segments[0];
+  if (!handle) return null;
+
+  const clean = decodeURIComponent(handle).replace(/^@/, "").trim();
+  // Reject file-ish / permalink-ish segments rather than showing "@posts.php".
+  if (!clean || /\.(php|html?|aspx?)$/i.test(clean)) return null;
+  return `@${clean}`;
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export interface SocialLinksProps {
-  instagramUrl: string | null | undefined;
-  facebookUrl: string | null | undefined;
-  pinterestUrl: string | null | undefined;
+  /** The store's full link set; non-social types are ignored. */
+  links: StoreLink[] | null | undefined;
   /** Icon sizing class (default size-4). */
   iconClassName?: string;
 }
 
 /**
- * Icon row for the showroom's social profiles. Only renders links whose URL is
- * present in D1; renders nothing at all when every social column is empty.
+ * Icon row for the showroom's social profiles, built from `showroom_store_links`.
+ * Only types actually present in the table render; the row disappears entirely
+ * when the store has no social links.
  */
-export function SocialLinks({
-  instagramUrl,
-  facebookUrl,
-  pinterestUrl,
-  iconClassName = "size-4",
-}: SocialLinksProps) {
-  const links = [
-    { label: "Instagram", href: absoluteHref(instagramUrl), Icon: InstagramIcon },
-    { label: "Facebook", href: absoluteHref(facebookUrl), Icon: FacebookIcon },
-    { label: "Pinterest", href: absoluteHref(pinterestUrl), Icon: PinterestIcon },
-  ].filter((l): l is typeof l & { href: string } => Boolean(l.href));
+export function SocialLinks({ links, iconClassName = "size-4" }: SocialLinksProps) {
+  const resolved = SOCIAL_LINK_TYPES.flatMap((type) => {
+    const match = (links ?? []).find((l) => isSocialType(l.type) && l.type === type);
+    const href = absoluteHref(match?.url);
+    if (!href) return [];
+    const { network, Icon } = SOCIAL_CONFIG[type];
+    const label = handleFromUrl(href) ?? network;
+    return [{ type, href, network, label, Icon }];
+  });
 
-  if (links.length === 0) return null;
+  if (resolved.length === 0) return null;
 
   return (
-    <div className="flex items-center gap-3">
-      {links.map(({ label, href, Icon }) => (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      {resolved.map(({ type, href, network, label, Icon }) => (
         <a
-          key={label}
+          key={type}
           href={href}
           target="_blank"
           rel="noreferrer"
-          aria-label={label}
-          title={label}
-          className="text-muted-foreground transition-colors hover:text-foreground"
+          aria-label={`${network}: ${label}`}
+          title={`${network} · ${label}`}
+          className="inline-flex items-center gap-1.5 text-muted-foreground transition-colors hover:text-foreground"
         >
-          <Icon className={iconClassName} />
+          <Icon className={`${iconClassName} shrink-0`} />
+          <span className="max-w-[12ch] truncate text-[13px]">{label}</span>
         </a>
       ))}
     </div>

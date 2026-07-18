@@ -22,6 +22,7 @@ export * from "./browser_run_pages";
 export * from "./photos_mapping";
 export * from "./hours";
 export * from "./links";
+export * from "./sales";
 export * from "./contacts";
 export * from "./product_intel";
 export * from "./product_photos";

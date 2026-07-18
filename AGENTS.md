@@ -224,6 +224,85 @@ list-mappings / filter-by-mapping) — **FLAG it to the user** and ask, per inst
 it should **stay as-is** or be **brought into compliance**. Do not silently leave a
 comma-separated multi-value or a text-only currency field; surface it.
 
+## Pull-request workflow (MANDATORY)
+
+This repo is worked by **multiple concurrent agentic sessions**. Assume that as the norm,
+not the exception. The rules below exist because parallel sessions in one repo silently
+collide, and because a PR that nobody verified against the deployed worker is a guess.
+
+### 1. Size + timing — decide for yourself, but check for neighbours first
+
+Ship **one PR per feature set or phase**. Prefer several small PRs over one large one; a PR
+that touches three unrelated subsystems is too big — split it. You do **not** need to ask
+permission to open a PR: if you, acting as an expert engineer, judge that a coherent slice
+is done, open it.
+
+**BEFORE opening one, check for concurrent work** — this is not optional:
+
+```bash
+git worktree list                                    # other sessions' checkouts
+git fetch origin && git log --oneline HEAD..origin/main   # what landed under you
+gh pr list --limit 20                                # open PRs (read their FILE lists)
+git for-each-ref --sort=-committerdate --format='%(committerdate:relative)|%(refname:short)' refs/remotes/origin | head -20
+```
+
+If another open PR or active worktree touches the **same files**, say so before proceeding
+and propose an order. Overlapping edits to one file across two sessions is the single most
+expensive failure mode here — whoever merges second eats a manual conflict resolution.
+Rebase onto `origin/main` before opening, and again before merging.
+
+### 2. Review loop — wait for the bot, then actually engage with it
+
+After the PR is open and conflict-free:
+
+1. **Wait** for the AI review bot to comment on the diff. (Today that is the Gemini review
+   bot; it is being retired in favour of **codra** — `codra.hacolby.workers.dev`. Support
+   whichever is posting.)
+2. **Read every comment and judge it.** AI review comments are frequently right and
+   sometimes wrong or inapplicable. Fix the applicable ones; for the rest, reply saying
+   *why* it does not apply. Never blanket-accept and never blanket-ignore.
+3. **Patch the PR** with the fixes, push, let CI go green.
+4. **Clear any conflicts**, then **merge**.
+
+### 3. Migrations — always apply to remote when the PR changes schema
+
+If the PR adds or changes a drizzle schema, run `pnpm run migrate:remote` (never
+`wrangler d1 execute --file`) and **verify** the result before merging:
+
+```bash
+pnpm run migrate:remote
+# then confirm the table/column actually exists on the remote DB, and that any
+# data backfill in the migration hit the row count you expected
+```
+
+Note the deploy topology: **every branch push builds and deploys the worker**, but
+migrations do **not** ride the build. So new code reaches production before its table
+exists unless you run the migration. Endpoints that query a missing table return **500** —
+if a QC check 500s right after a schema PR, an unapplied migration is the first suspect.
+
+### 4. QC script — every PR ships one
+
+Create **`scripts/qc/pr_<number>.mjs`** exercising the API and/or MCP surface the PR
+touched, plus a regression guard on anything existing it could break. Import the shared
+helpers so every PR's harness behaves identically:
+
+- **`scripts/config.mjs`** — base URL resolution (`--base` → `$BASE_URL` → prod),
+  `accessCookie()`, `createClient()`, `createChecks()`, `assertReachable()`.
+- **`scripts/tokens.mjs`** — `getToken(name)` over the local `tokens` CLI.
+
+Run it with the shared runner:
+
+```bash
+pnpm run test:pr 151              # scripts/qc/pr_151.mjs
+pnpm run test:pr 151 -- --sweep   # opt-in expensive paths
+pnpm run test:pr --all            # every QC script
+```
+
+**QC targets the DEPLOYED worker, not `wrangler dev`.** `WORKER_API_KEY` is a
+`remote: true` secrets-store binding with no local fallback, so every authed route 500s
+locally — a local run cannot verify an API at all. Paste the QC output into the PR
+description and into the changelog entry (below).
+
 ## Changelog discipline (MANDATORY)
 
 The changelog is a **persistent, append-only** record in D1 (`changelog_branches` +
@@ -242,6 +321,31 @@ never create or edit a `CHANGELOG.md`.
    keyed by the same `id`: `problem`, `approach`, `apiChanges[]`, `filesTouched[]`,
    `migrations[{tag, sql}]`, `code[]`, and a Mermaid `diagrams[]` where a table/flow is involved.
    Renders at `/admin/changelog/:id`.
+
+4. **Verification block** → on the same `PhaseDetail`, a `verification` object recording
+   what you actually ran: the QC script path, its source snippet, the command, and its real
+   output — plus, when the PR changed schema, each migration tag with whether it has been
+   applied to the **remote** DB. Never fabricate or paraphrase results; paste what ran.
+
+**Every changelog entry MUST surface, on the frontend:** the **git branch name**, the **PR
+number**, the **tests that were run and their results**, and (when schema changed) **remote
+migration status**. These are not optional metadata — they are how a reader answers "is this
+actually live and actually verified?" without leaving the page.
+
+**The PR description MUST contain a direct link to the changelog entry**, every time:
+
+```
+Changelog: https://core-remodel.hacolby.workers.dev/admin/changelog/<slug>
+```
+
+Write the D1 rows (don't rely on the next deploy's seed) so the link resolves the moment the
+PR is opened:
+
+```bash
+# upsert by slug — never overwrites another branch's rows
+curl -X POST "$BASE/api/changelog/entries" -H 'content-type: application/json' \
+  -H "cookie: remodel_access=$(node scripts/tokens.mjs WORKER_API_KEY | ...)" -d @entry.json
+```
 
 This bundled data is the seed + SSR fallback. The source of truth is D1: after deploy run
 `POST /api/changelog/seed` once (idempotent), or push entries live with

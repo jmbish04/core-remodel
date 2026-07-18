@@ -19,9 +19,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  BadgePercent,
   CalendarPlus,
   CheckCircle2,
   Clock,
+  ExternalLink,
   Globe,
   ImagePlus,
   Link2,
@@ -80,6 +82,7 @@ import {
   HoursMiniCard,
   ManageLinksModal,
   SocialLinks,
+  SOCIAL_LINK_TYPES,
   type StoreCategoryChip,
 } from "./hero";
 import type { HoursJson } from "./intake/hours-types";
@@ -111,6 +114,12 @@ interface StoreBrand {
   websiteUrl?: string | null;
   onlineRating?: number | null;
   pricePoint?: string | null;
+  /**
+   * CF Images delivery URLs for this brand's product/lifestyle photography,
+   * newest first (from `brand_images`). Drives the Brands & Products bento
+   * slideshow. Absent/empty when the brand research scrape hasn't captured any.
+   */
+  images?: string[];
 }
 
 /** A brand enriched with its per-showroom product count for the list cards. */
@@ -131,10 +140,13 @@ interface StoreDetail {
   pricePoint: string | null;
   phoneNumber: string | null;
   emailAddress: string | null;
+  /**
+   * Derived server-side from the store's first WEBSITE link. The socials the
+   * API also derives (instagramUrl / facebookUrl / pinterestUrl) are
+   * intentionally NOT modelled here — those columns are gone and the hero reads
+   * `links` directly, which is the only shape that can carry X / LinkedIn.
+   */
   websiteUrl: string | null;
-  instagramUrl: string | null;
-  facebookUrl: string | null;
-  pinterestUrl: string | null;
   iconCfImagesUrl: string | null;
   heroImageCfImagesUrl: string | null;
   scrapeStatus: ScrapeStatus;
@@ -167,6 +179,32 @@ interface MappedProduct {
   mappingId: number;
   product: { id: number; itemName: string; brandId: number | null };
   brandName: string | null;
+}
+
+/** One discounted item from a clearance snapshot (see ClearanceItem in D1). */
+interface ClearanceItem {
+  title: string;
+  brand: string | null;
+  category: string | null;
+  originalPrice: number | null;
+  salePrice: number | null;
+  discountPercent: number | null;
+  dealLabel: string | null;
+  url: string | null;
+  notes: string | null;
+}
+
+/** A current clearance snapshot for this store, from GET /api/showroom-sales/store/:id. */
+interface StoreSale {
+  id: number;
+  sourceUrl: string;
+  capturedAt: string | null;
+  details: {
+    items: ClearanceItem[];
+    saleHeadline: string | null;
+    saleEndsText: string | null;
+    summary: string;
+  };
 }
 
 interface NoteRow {
@@ -271,6 +309,89 @@ function HeroBanner({
           {overlay}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Clearance alert — the loud, hard-to-miss banner for a showroom that currently
+ * has something marked down. Only rendered when the weekly sweep found actual
+ * discounted items (a sale page that exists but lists nothing produces an empty
+ * snapshot, which deliberately clears this instead of showing a stale sale).
+ *
+ * Shows the top few items inline so the alert is actionable at a glance rather
+ * than just "there's a sale" — with a deep link to the store's own sale page and
+ * a way through to the full /admin/shopping/sales board.
+ */
+function ClearanceAlert({ sales }: { sales: StoreSale[] }) {
+  const items = sales.flatMap((s) => s.details.items);
+  if (items.length === 0) return null;
+
+  const headline = sales.find((s) => s.details.saleHeadline)?.details.saleHeadline ?? null;
+  const endsText = sales.find((s) => s.details.saleEndsText)?.details.saleEndsText ?? null;
+  const primaryUrl = sales[0]?.sourceUrl ?? null;
+  // Lead with the deepest discounts — that's what makes the alert worth reading.
+  const top = [...items]
+    .sort((a, b) => (b.discountPercent ?? 0) - (a.discountPercent ?? 0))
+    .slice(0, 3);
+
+  return (
+    <div className="mt-4 rounded-lg bg-amber-500/10 p-3 ring-1 ring-amber-500/30">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-amber-300">
+          <BadgePercent className="size-3" />
+          On sale now
+        </span>
+        <span className="text-sm font-medium text-amber-200">
+          {headline ?? `${items.length} item${items.length === 1 ? "" : "s"} marked down`}
+        </span>
+        {endsText ? (
+          <span className="text-xs text-amber-400/80">· {endsText}</span>
+        ) : null}
+      </div>
+
+      <ul className="mt-2 space-y-1">
+        {top.map((item, i) => (
+          <li
+            key={`${item.title}-${i}`}
+            className="flex items-baseline justify-between gap-3 text-xs"
+          >
+            <span className="min-w-0 truncate text-muted-foreground">
+              {item.brand ? <span className="text-foreground">{item.brand} </span> : null}
+              {item.title}
+            </span>
+            <span className="shrink-0 tabular-nums text-amber-300">
+              {item.discountPercent != null
+                ? `${Math.round(item.discountPercent)}% off`
+                : item.dealLabel ?? ""}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+        {primaryUrl ? (
+          <a
+            href={primaryUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 font-medium text-amber-300 hover:text-amber-200"
+          >
+            View their sale page <ExternalLink className="size-3" />
+          </a>
+        ) : null}
+        <a
+          href="/admin/shopping/sales"
+          className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+        >
+          All clearance <ArrowRight className="size-3" />
+        </a>
+        {items.length > top.length ? (
+          <span className="text-muted-foreground/70">
+            +{items.length - top.length} more
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -401,6 +522,8 @@ export function StoreViewportApp({
   const [notes, setNotes] = useState<NoteRow[]>([]);
   const [photos, setPhotos] = useState<ShowroomPhoto[]>([]);
   const [contacts, setContacts] = useState<ContactRow[]>([]);
+  // Current clearance for this store (empty when nothing is on sale).
+  const [sales, setSales] = useState<StoreSale[]>([]);
 
   // Google Places gallery photos (hero banner source + the Photos section's
   // "From Google Places" collection + theater lightbox). Distinct from the
@@ -511,6 +634,16 @@ export function StoreViewportApp({
     }
   }, [id]);
 
+  const loadSales = useCallback(async () => {
+    try {
+      const data = await api<{ sales: StoreSale[] }>(`/api/showroom-sales/store/${id}`);
+      setSales(data.sales);
+    } catch (e) {
+      // Non-fatal: no clearance alert is a fine degraded state for the page.
+      console.error("[store/sales]", e);
+    }
+  }, [id]);
+
   const deleteGalleryPhoto = useCallback(async (photoId: number) => {
     try {
       const res = await fetch(`/api/showroom-stores/${id}/photos-gallery/${photoId}`, {
@@ -550,7 +683,16 @@ export function StoreViewportApp({
     void loadPhotos();
     void loadContacts();
     void loadGalleryPhotos();
-  }, [loadStore, loadMappedProducts, loadNotes, loadPhotos, loadContacts, loadGalleryPhotos]);
+    void loadSales();
+  }, [
+    loadStore,
+    loadMappedProducts,
+    loadNotes,
+    loadPhotos,
+    loadContacts,
+    loadGalleryPhotos,
+    loadSales,
+  ]);
 
   // ── Scrape status: mount fetch + poll while in-flight ─────────────────────
   //
@@ -1042,6 +1184,9 @@ export function StoreViewportApp({
               </div>
             ) : null}
 
+            {/* Clearance alert — only when the sweep found live discounts. */}
+            <ClearanceAlert sales={sales} />
+
             {/* Contact row — click-to-call + Globe + social profiles from D1. */}
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[13px]">
               {store.phoneNumber ? (
@@ -1064,11 +1209,9 @@ export function StoreViewportApp({
                   Website
                 </a>
               ) : null}
-              <SocialLinks
-                instagramUrl={store.instagramUrl}
-                facebookUrl={store.facebookUrl}
-                pinterestUrl={store.pinterestUrl}
-              />
+              {/* Social profiles, built dynamically from showroom_store_links —
+                  only the types the store actually has render. */}
+              <SocialLinks links={store.links} />
             </div>
           </div>
 
@@ -1412,16 +1555,124 @@ function AngledBrandCard({
   );
 }
 
+/** How long each brand photo holds before the slideshow advances. */
+const SLIDESHOW_INTERVAL_MS = 3_500;
+
+/** One slide: a brand photo plus the brand it belongs to. */
+interface BrandSlide {
+  brandId: number;
+  brandName: string;
+  icon: string | null;
+  image: string;
+}
+
 /**
- * Angled, zoomed brand-logo collage — a hand-fanned spread of oversized logo
- * cards that straightens and breathes apart on tile hover, with a right-edge
- * fade + "+N" chip for overflow. Purely decorative preview for the Brands &
- * Products bento tile — no interactive children (the tile itself is the button).
+ * Flatten the brands into a slide list, INTERLEAVED by photo index so the
+ * slideshow alternates brands (A1, B1, C1, A2, B2 …) rather than showing six
+ * photos of one brand before moving on.
+ */
+function buildBrandSlides(brands: BrandWithCount[]): BrandSlide[] {
+  const withImages = brands.filter((b) => (b.images?.length ?? 0) > 0);
+  const deepest = Math.max(0, ...withImages.map((b) => b.images?.length ?? 0));
+  const slides: BrandSlide[] = [];
+  for (let i = 0; i < deepest; i++) {
+    for (const b of withImages) {
+      const image = b.images?.[i];
+      if (image) {
+        slides.push({ brandId: b.id, brandName: b.name, icon: b.iconCfImagesUrl, image });
+      }
+    }
+  }
+  return slides;
+}
+
+/**
+ * Cross-fading slideshow of real brand photography for the Brands & Products
+ * bento tile — the tile used to be a large, static wall of lettermarks, which
+ * read as empty. Photos come from `brand_images` (captured by the brand
+ * research scrape, served off CF Images); each slide is captioned with the
+ * owning brand's icon + name so the cycling doubles as brand discovery.
+ *
+ * Purely decorative — no interactive children, because the bento tile itself is
+ * the button. Pauses when the tab is hidden and respects prefers-reduced-motion
+ * (which pins it to the first slide rather than cycling).
+ */
+function BrandsPhotoSlideshow({ slides }: { slides: BrandSlide[] }) {
+  const [index, setIndex] = useState(0);
+  const [broken, setBroken] = useState<Set<string>>(() => new Set());
+
+  // Drop slides whose image 404s so a dead CF Images URL can't freeze the show.
+  const usable = useMemo(
+    () => slides.filter((s) => !broken.has(s.image)),
+    [slides, broken],
+  );
+
+  useEffect(() => {
+    if (usable.length <= 1) return;
+    if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    const id = setInterval(() => {
+      // Don't advance in a background tab — otherwise returning to the page
+      // shows a burst of catch-up transitions.
+      if (document.hidden) return;
+      setIndex((i) => (i + 1) % usable.length);
+    }, SLIDESHOW_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [usable.length]);
+
+  // The active index must stay in range as slides drop out.
+  const active = usable.length > 0 ? index % usable.length : 0;
+  const current = usable[active];
+  if (!current) return null;
+
+  return (
+    <div className="space-y-2" aria-hidden>
+      <div className="relative h-24 overflow-hidden rounded-lg bg-muted/50 ring-1 ring-border/40">
+        {usable.map((s, i) => (
+          <img
+            key={s.image}
+            src={s.image}
+            alt=""
+            loading="lazy"
+            onError={() => setBroken((prev) => new Set(prev).add(s.image))}
+            className={`absolute inset-0 size-full object-cover transition-opacity duration-1000 ease-out motion-reduce:transition-none ${
+              i === active ? "opacity-100" : "opacity-0"
+            }`}
+          />
+        ))}
+        {/* Bottom scrim keeps the brand caption legible over any photo. */}
+        <div className="absolute inset-x-0 bottom-0 h-2/3 bg-gradient-to-t from-background/95 to-transparent" />
+        <div className="absolute inset-x-2 bottom-1.5 flex items-center gap-1.5">
+          <BrandCardIcon image={current.icon} name={current.brandName} size="xs" />
+          <span className="truncate text-[11px] font-medium text-foreground">
+            {current.brandName}
+          </span>
+          {usable.length > 1 ? (
+            <span className="ml-auto shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+              {active + 1}/{usable.length}
+            </span>
+          ) : null}
+        </div>
+      </div>
+      <p className="flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors group-hover/tile:text-foreground">
+        Shop by brand
+        <ArrowRight className="size-3.5 transition-transform group-hover/tile:translate-x-0.5" />
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Preview for the Brands & Products bento tile. Prefers a cycling slideshow of
+ * real brand photography; falls back to the angled logo fan when no brand has
+ * usable images yet, and to a ghost fan when the store has no brands at all.
  */
 function BrandsTilePreview({ brands }: { brands: BrandWithCount[] }) {
+  const slides = useMemo(() => buildBrandSlides(brands), [brands]);
   const MAX = 5;
   const shown = brands.slice(0, MAX);
   const overflow = brands.length - shown.length;
+
+  if (slides.length > 0) return <BrandsPhotoSlideshow slides={slides} />;
 
   if (shown.length === 0) {
     // No brands linked yet — an inviting ghost fan instead of a bare tile.
@@ -1478,23 +1729,37 @@ function BrandsTilePreview({ brands }: { brands: BrandWithCount[] }) {
 // ─── Brand list card ────────────────────────────────────────────────────────────
 
 /** Leading brand icon tile for a list card, with a lettermark fallback. */
-function BrandCardIcon({ image, name }: { image: string | null; name: string }) {
+function BrandCardIcon({
+  image,
+  name,
+  size = "md",
+}: {
+  image: string | null;
+  name: string;
+  /** `xs` is the slideshow caption chip; `md` the brand list card. */
+  size?: "xs" | "md";
+}) {
   const [broken, setBroken] = useState(false);
   const showImage = Boolean(image) && !broken;
   const letter = name.trim().charAt(0).toUpperCase() || "?";
+  const box = size === "xs" ? "size-5 rounded" : "size-12 rounded-lg";
+  const pad = size === "xs" ? "p-0.5" : "p-1.5";
+  const text = size === "xs" ? "text-[9px]" : "text-base";
 
   return (
-    <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted ring-1 ring-border/40">
+    <span
+      className={`flex ${box} shrink-0 items-center justify-center overflow-hidden bg-muted ring-1 ring-border/40`}
+    >
       {showImage ? (
         <img
           src={image ?? undefined}
           alt={`${name} logo`}
           loading="lazy"
           onError={() => setBroken(true)}
-          className="size-full object-contain p-1.5"
+          className={`size-full object-contain ${pad}`}
         />
       ) : (
-        <span className="text-base font-semibold text-muted-foreground">{letter}</span>
+        <span className={`${text} font-semibold text-muted-foreground`}>{letter}</span>
       )}
     </span>
   );
@@ -1730,8 +1995,15 @@ function ContactsSection({
 }) {
   const general = contacts.find((c) => c.type === "GENERAL_CONTACT") ?? null;
   const people = contacts.filter((c) => c.type !== "GENERAL_CONTACT");
-  // Dedupe the website out of the extra-links list (it already gets its own row).
-  const extraLinks = links.filter((l) => l.url && l.url !== websiteUrl);
+  // Socials render as branded @handle icons via SocialLinks; the website gets
+  // its own row. Everything left (OTHER, sale pages) falls through to the
+  // generic Globe list below.
+  const extraLinks = links.filter(
+    (l) =>
+      l.url &&
+      l.url !== websiteUrl &&
+      !(SOCIAL_LINK_TYPES as readonly string[]).includes(l.type),
+  );
 
   return (
     <div className="space-y-6">
@@ -1783,9 +2055,9 @@ function ContactsSection({
           </p>
         )}
 
-        {/* Website + other links. */}
-        {(websiteUrl || extraLinks.length > 0) ? (
-          <div className="mt-4 flex flex-wrap gap-x-4 gap-y-1.5 border-t border-border/30 pt-3 text-[13px]">
+        {/* Website + social profiles + any other links. */}
+        {(websiteUrl || links.length > 0) ? (
+          <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-border/30 pt-3 text-[13px]">
             {websiteUrl ? (
               <a
                 href={websiteUrl}
@@ -1796,6 +2068,7 @@ function ContactsSection({
                 <Globe className="size-3.5" /> Website
               </a>
             ) : null}
+            <SocialLinks links={links} iconClassName="size-3.5" />
             {extraLinks.map((l) => (
               <a
                 key={l.id}
