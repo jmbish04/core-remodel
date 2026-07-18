@@ -492,10 +492,15 @@ export function EditStoreModal({
             <Trash2 className="size-3.5" /> Delete showroom
           </Button>
           <div className="flex gap-2">
-          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} disabled={saving}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onOpenChange(false)}
+            disabled={saving || deleting}
+          >
             Cancel
           </Button>
-          <Button size="sm" onClick={handleSave} disabled={saving}>
+          <Button size="sm" onClick={handleSave} disabled={saving || deleting}>
             {saving && <Loader2 className="mr-1.5 size-3.5 animate-spin" />}
             Save Changes
           </Button>

@@ -2015,7 +2015,7 @@ showroomStoresRouter.delete("/:id", async (c) => {
 
   await db
     .update(showroomStores)
-    .set({ isActive: false })
+    .set({ isActive: false, updatedAt: new Date() })
     .where(eq(showroomStores.id, storeId));
 
   return c.json({ success: true, id: storeId, isActive: false });
@@ -2042,7 +2042,7 @@ showroomStoresRouter.post("/:id/restore", async (c) => {
 
   await db
     .update(showroomStores)
-    .set({ isActive: true })
+    .set({ isActive: true, updatedAt: new Date() })
     .where(eq(showroomStores.id, storeId));
 
   return c.json({ success: true, id: storeId, isActive: true });

@@ -133,7 +133,7 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
   // NOT db.delete(): the row parents notes, photos, ratings, price
   // observations and drive stops, and on D1 that cascade is irreversible.
   await db.update(showroomStores)
-    .set({ isActive: false })
+    .set({ isActive: false, updatedAt: new Date() })
     .where(eq(showroomStores.id, storeId));
   return c.json({ success: true, id: storeId, isActive: false });
 });`,
