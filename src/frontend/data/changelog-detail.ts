@@ -50,6 +50,146 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "showroom-soft-delete": {
+    slug: "showroom-soft-delete",
+    problem:
+      "DELETE /api/showroom-stores/:id destroyed the row. A showroom is the parent of notes, photos, ratings, price observations, brand/product mappings and drive stops, and on D1 that delete cascades — so removing a store you no longer care about also erased every visit you ever logged there, irreversibly. There was no way to take a showroom out of the directory without losing its history.",
+    approach:
+      "Add `is_active` (default true) and make DELETE a flag flip, with POST /:id/restore to undo it. The column is the easy half — a flag nothing reads changes nothing, so the substance of this change is an audit of every query that lists or searches showrooms. 34 of them now filter `is_active = 1`, across routes, MCP tools, both research agents and the cron sweeps. Three classes deliberately do NOT filter, because filtering them would itself be a bug: fetch-by-explicit-id (or a deleted store could never be inspected or restored), the placeId dedupe checks (an inactive row still holds the unique index, so skipping it turns a clean 409 into a raw UNIQUE-constraint failure), and joins that read a showroom only for a coordinate or label on a child row (drive stops, historical prices — the child is the entity). Two joins needed more than a WHERE: the catalog filters in its ON clause, because a WHERE on an outer join would have dropped every unmapped product from the catalog entirely; and the phonebook keeps contacts with a null storeId, since a leftJoin yields NULL and NULL never equals true.",
+    apiChanges: [
+      "DELETE /api/showroom-stores/:id — now a SOFT delete (is_active = 0); returns { success, id, isActive: false }",
+      "POST /api/showroom-stores/:id/restore — NEW; flips is_active back to 1",
+      "GET /api/showroom-stores — now excludes inactive stores (the filter also applies under search/price/city/hub filters)",
+      "GET /api/showroom-stores/:id — unchanged; still resolves an inactive store so it can be inspected and restored",
+      "GET /api/showroom-stores/meta/place-exists — unchanged BY DESIGN; still sees inactive rows, because they still hold the unique placeId index",
+    ],
+    filesTouched: [
+      "src/backend/db/schema/showroom/stores.ts",
+      "drizzle/0113_dapper_white_queen.sql",
+      "src/backend/api/routes/showroom-stores.ts",
+      "src/backend/api/routes/showroom-catalog.ts",
+      "src/backend/api/routes/showroom-products.ts",
+      "src/backend/api/routes/showroom-sales.ts",
+      "src/backend/api/routes/showroom-backfill.ts",
+      "src/backend/api/routes/showroom-contacts.ts",
+      "src/backend/api/routes/brands.ts",
+      "src/backend/api/routes/mcp.ts",
+      "src/backend/mcp/tools/showrooms/list_showrooms.ts",
+      "src/backend/mcp/tools/showrooms/backfill_showroom_geo.ts",
+      "src/backend/mcp/tools/drives/analyze_drive_coverage.ts",
+      "src/backend/mcp/tools/products/get_product.ts",
+      "src/backend/mcp/tools/brands/get_brand.ts",
+      "src/backend/ai/agents/ResearchAgent/methods/chat-tools.ts",
+      "src/backend/ai/agents/ShowroomResearchAgent/methods/prompt-context.ts",
+      "src/backend/services/product-research-workflow.ts",
+      "src/backend/services/showroom-sourcing-monitor.ts",
+      "src/backend/services/showroom/sales.ts",
+      "src/backend/services/showroom/places-backfill.ts",
+      "src/backend/services/deep-research-job-workflow.ts",
+      "src/backend/services/email/showroom-contact-autopopulate.ts",
+      "src/frontend/components/showroom/EditStoreModal.tsx",
+      "src/frontend/components/showroom/StoreViewportApp.tsx",
+    ],
+    migrations: [
+      {
+        tag: "0113_dapper_white_queen",
+        sql: "ALTER TABLE `showroom_stores` ADD `is_active` integer DEFAULT true NOT NULL;",
+      },
+    ],
+    verification: {
+      script: "scripts/qc/pr_154.mjs",
+      command: "pnpm run test:pr 154",
+      output: `PR #154 QC → https://core-remodel.hacolby.workers.dev
+
+  ✓ target reachable (https://core-remodel.hacolby.workers.dev)
+  ✓ GET /api/showroom-stores → 200 (migration 0113 applied)
+  ✓ directory returned real rows to assert against
+  ✓ POST /:id/restore exists (this PR is deployed — safe to exercise DELETE)
+  ✓ restore reports isActive: true
+
+  … soft-deleting "Excel Plumbing Supply Showroom" (id 141) — will be restored
+
+  ✓ DELETE /api/showroom-stores/141 → 200
+  ✓ delete reports isActive: false (soft, not hard)
+  ✓ the row survives: GET /:id still returns it (soft delete, nothing erased)
+  ✓ …and it reports isActive: false
+  ✓ directory no longer lists it
+  ✓ directory count dropped by exactly one
+  ✓ a FILTERED directory query hides it too (predicate survives and(...))
+    (MCP list_showrooms probe returned 404 — skipped)
+  ✓ sales/clearance feed hides its rows
+  ✓ placeId dedupe STILL sees it (else a re-add hits a UNIQUE constraint)
+  ✓ restored "Excel Plumbing Supply Showroom" (id 141)
+  ✓ directory count is back to where it started
+
+16 passed, 0 failed`,
+      migrationsApplied: [{ tag: "0113_dapper_white_queen", appliedToRemote: true }],
+    },
+    code: [
+      {
+        title: "Soft delete, and its undo",
+        lang: "ts",
+        code: `showroomStoresRouter.delete("/:id", async (c) => {
+  // NOT db.delete(): the row parents notes, photos, ratings, price
+  // observations and drive stops, and on D1 that cascade is irreversible.
+  await db.update(showroomStores)
+    .set({ isActive: false })
+    .where(eq(showroomStores.id, storeId));
+  return c.json({ success: true, id: storeId, isActive: false });
+});`,
+      },
+      {
+        title: "The catalog filters in the ON clause, not the WHERE",
+        lang: "ts",
+        code: `// A WHERE here would drop every UNMAPPED product from the catalog:
+// the outer join yields NULL for them, and NULL never equals true.
+.leftJoin(
+  showroomStores,
+  and(
+    eq(showroomProductMappings.showroomId, showroomStores.id),
+    eq(showroomStores.isActive, true),
+  ),
+)`,
+      },
+      {
+        title: "The phonebook keeps contacts that belong to no store",
+        lang: "ts",
+        code: `conds.push(
+  or(
+    isNull(showroomStoreContacts.storeId),   // unattached contact — keep
+    eq(showroomStores.isActive, true),       // attached — only if live
+  ),
+);`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "What a soft delete does and does not reach",
+        code: `flowchart LR
+  Del["DELETE /:id — is_active = 0"] --> Hidden
+  Del --> Kept
+  Del --> Unaffected
+  subgraph Hidden["Hidden (34 queries filter)"]
+    D1["Directory + map"]
+    D2["Catalog / product / brand"]
+    D3["Clearance feed + cron"]
+    D4["Field scan + backfills"]
+    D5["MCP tools + agents"]
+  end
+  subgraph Kept["Kept on disk"]
+    K1["Notes, photos, ratings"]
+    K2["Price observations"]
+    K3["Brand / product mappings"]
+  end
+  subgraph Unaffected["Still resolves by design"]
+    U1["GET /:id (inspect + restore)"]
+    U2["placeId dedupe (holds the unique index)"]
+    U3["Drive stops (child is the entity)"]
+  end
+  Kept --> R["POST /:id/restore — is_active = 1"]`,
+      },
+    ],
+  },
   "showroom-touch-ux": {
     slug: "showroom-touch-ux",
     problem:

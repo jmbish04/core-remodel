@@ -43,6 +43,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/showroom-soft-delete",
+    title: "Showroom soft delete — and the 34 read paths that had to learn about it",
+    summary:
+      "Deleting a showroom used to destroy the row and cascade its notes, photos, ratings and price history. It now flips is_active to 0 and can be restored. The column is the easy half: every query that lists or searches showrooms — directory, map, catalog, drives, field scan, backfill, MCP tools, the clearance cron, gap analysis — was audited and filtered.",
+    date: "2026-07-18",
+    status: "staged",
+    prNumber: 154,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/154",
+  },
+  {
     branch: "claude/showroom-touch-ux",
     title: "Showroom viewport, usable from a Tesla touchscreen",
     summary:
@@ -92,6 +102,24 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "showroom-soft-delete",
+    branch: "claude/showroom-soft-delete",
+    date: "2026-07-18",
+    tag: "Showrooms",
+    area: "Showrooms",
+    title: "Delete a showroom without destroying it",
+    summary:
+      "A showroom can now be removed from the directory without losing anything — the visit notes, photos, ratings and price history all survive, and it can be restored. Deleted showrooms disappear everywhere at once: the directory, the map, drives, search, the catalog, the clearance feed and the AI tools.",
+    status: "staged",
+    changes: [
+      { kind: "added", text: "Delete showroom, from the edit modal — behind a confirm that spells out what is and isn't kept." },
+      { kind: "added", text: "Restore a deleted showroom — POST /api/showroom-stores/:id/restore." },
+      { kind: "changed", text: "DELETE /api/showroom-stores/:id is now a soft delete (is_active = 0) instead of destroying the row and everything hanging off it." },
+      { kind: "changed", text: "34 list/search queries now hide deleted showrooms: directory, map, catalog, product + brand pages, clearance feed, field scan, backfills, contacts matching, phonebook, MCP tools, the research agents and the cron sweeps." },
+      { kind: "migration", text: "0113_dapper_white_queen — showroom_stores.is_active, default true. Applied to remote: 134 stores, 134 active." },
+    ],
+  },
   {
     id: "showroom-touch-ux",
     branch: "claude/showroom-touch-ux",
