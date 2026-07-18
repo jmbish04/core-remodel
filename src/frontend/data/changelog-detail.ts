@@ -74,6 +74,41 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
       "src/frontend/components/showroom/StoreViewportApp.tsx",
     ],
     migrations: [],
+    verification: {
+      script: "scripts/qc/pr_153.mjs",
+      command: "pnpm run test:pr 153",
+      output: `PR #153 QC → https://core-remodel.hacolby.workers.dev
+
+  ── computeOpenBadge (pure) ──
+  ✓ open: Wed 12:00 inside 9–17
+  ✓ closing-soon: Wed 16:30 is within 60m of the 17:00 close
+  ✓ opening-soon: Wed 07:00 is before the 9:00 open (NOT closed)
+  ✓ closed: Wed 18:00 is after the 17:00 close
+  ✓ closed: Sunday has no window at all
+  ✓ open at exactly 9:00 (open is inclusive)
+  ✓ closed at exactly 17:00 (close is exclusive)
+  ✓ closing-soon at exactly 16:00 (the 60m boundary)
+  ✓ null badge when there are no hours
+  ✓ hoursJsonToRows drops closed days
+  ✓ hoursJsonToRows round-trips into an 'open' badge
+
+  ── deployed API contract ──
+  ✓ target reachable (https://core-remodel.hacolby.workers.dev)
+  ✓ showroom API rejects an unauthenticated read (401)
+  ✓ GET /api/showroom-stores → 200
+  ✓ directory returned real rows to assert against
+  ✓ at least one store detail carries a non-empty links[] (hero icon row has data)
+  ✓ every link row carries { url, type } (the icon row keys off type)
+    store 141 links: WEBSITE
+  ✓ store detail exposes latitude/longitude (Tesla Navigate payload)
+  ✓ POST /api/tesla/navigate rejects an empty body (400)
+  ✓ POST /api/tesla/navigate is admin-gated (401 unauthenticated)
+    (a real navigate is NOT sent — it would start routing in the car)
+  ✓ GET /api/showroom-stores/meta/categories → 200
+  ✓ category vocabulary is non-empty (the checkbox grid has rows)
+
+22 passed, 0 failed`,
+    },
     code: [
       {
         title: "The fourth state — closed now, but open again later today",
