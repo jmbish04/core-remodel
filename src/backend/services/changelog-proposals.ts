@@ -152,7 +152,13 @@ export async function upsertProposal(
   }
 
   // ── Proposal row ──────────────────────────────────────────────────────────
-  const planSlug = input.planSlug ?? (input.tasks?.length ? slug : existing?.planSlug ?? null);
+  // `=== undefined`, not `??`: every other field here treats an explicit `null`
+  // as "clear this", and `??` would silently swallow that for planSlug alone —
+  // making it the one field you cannot detach from its plan.
+  const planSlug =
+    input.planSlug === undefined
+      ? (input.tasks?.length ? slug : existing?.planSlug ?? null)
+      : input.planSlug;
 
   // `undefined` = "not supplied, leave alone"; an explicit `null` clears.
   const patch = {

@@ -52,7 +52,17 @@ export const getFeatureProposal = defineTool({
     designBriefMarkdown: z.string().nullable(),
     promptMarkdown: z.string().nullable(),
     tasks: z
-      .array(looseObject({ taskKey: z.string(), title: z.string(), status: z.string() }))
+      .array(
+        looseObject({
+          taskKey: z.string(),
+          title: z.string(),
+          status: z.string(),
+          workstream: z.string(),
+          phase: z.number().int(),
+          changeType: z.string(),
+          notes: z.string().nullable(),
+        }),
+      )
       .describe("Live plan_tasks with their CURRENT status — not the status that was proposed"),
     context: looseObject({
       available: z.boolean(),
