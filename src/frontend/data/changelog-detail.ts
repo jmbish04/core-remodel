@@ -19,6 +19,43 @@ export interface DiagramCard {
   code: string; // Mermaid source
 }
 
+/**
+ * One migration's REMOTE state. The deploy topology makes this the question a
+ * reader actually has: every branch push builds and deploys the worker, but
+ * migrations do NOT ride the build. So code can be live in production while its
+ * table does not exist — and the endpoints that query it return 500. "Merged"
+ * therefore does not imply "applied"; this says which it is.
+ */
+export interface MigrationStatus {
+  tag: string;
+  /** Whether `pnpm run migrate:remote` has actually applied this to the remote DB. */
+  appliedRemote: boolean;
+  /** How that was confirmed, or what is still outstanding. */
+  note?: string;
+}
+
+/**
+ * What was actually run to verify the change — never a paraphrase of it.
+ *
+ * `output` is pasted verbatim from the QC run. A summarized or reconstructed
+ * result is worse than none: it reads as evidence while carrying none, and a
+ * reader has no way to tell the difference.
+ */
+export interface Verification {
+  /** Path to the QC harness, e.g. "scripts/qc/pr_162.mjs". */
+  qcScript: string;
+  /** The exact command that produced `output`, e.g. "pnpm run test:pr 162". */
+  command: string;
+  /** Representative source from the QC script, so the assertions are visible. */
+  source?: string;
+  /** REAL output of `command`, pasted verbatim. */
+  output: string;
+  /** When it ran (YYYY-MM-DD), so stale evidence is recognizable as stale. */
+  ranAt?: string;
+  /** Remote state of each migration this change introduced. */
+  migrations?: MigrationStatus[];
+}
+
 export interface PhaseDetail {
   slug: string;
   problem: string;
@@ -28,6 +65,18 @@ export interface PhaseDetail {
   migrations: { tag: string; sql: string }[];
   code: CodeCard[];
   diagrams: DiagramCard[];
+
+  // ── Provenance + evidence (optional: pre-existing entries predate these) ────
+  // Stored inside `changelog_entries.detail_json`, so extending this type needs
+  // no migration.
+
+  /** Git branch the work landed on. Falls back to the entry's own `branch`. */
+  branch?: string;
+  /** PR number. Falls back to the `changelog_branches` row for this branch. */
+  prNumber?: number;
+  prUrl?: string;
+  /** What was run to verify this, and what it printed. */
+  verification?: Verification;
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
