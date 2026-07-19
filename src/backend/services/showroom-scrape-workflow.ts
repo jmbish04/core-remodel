@@ -24,6 +24,8 @@ import {
   type WorkflowStep,
 } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
+
+import { startRun } from "@backend/services/agent-runs";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -203,6 +205,19 @@ export class ShowroomScrapeWorkflow extends WorkflowEntrypoint<
     const env = this.env;
     const db = drizzle(env.DB);
 
+    // Durable run record. `scrapeStatus` alone is a bare enum with no reason,
+    // no timing and no attempt count — which is why 49 of 145 stores sat in
+    // "failed" with nothing to explain them and only a blind retry button.
+    // This records the WHY somewhere queryable and survives the request.
+    const run = await startRun(env, {
+      agent: "showroom-research",
+      operation: "scrape_store",
+      targetType: "showroom_store",
+      targetId: String(showroomId),
+      input: { websiteUrl },
+      triggeredBy: "agent",
+    });
+
     try {
       // ── 1. mark-running ─────────────────────────────────────────────────
       await step.do("mark-running", async () => {
@@ -280,6 +295,8 @@ export class ShowroomScrapeWorkflow extends WorkflowEntrypoint<
           .set({ scrapeStatus: "complete", updatedAt: new Date() })
           .where(eq(showroomStores.id, showroomId));
       });
+
+      await run.succeed({ pagesScraped: pageTexts.length, extractions: extractions.length });
     } catch (error) {
       // Any unrecoverable failure flips status to "failed" then re-throws so
       // Log the REASON, not just the fact. Re-throwing alone parks the message
@@ -292,6 +309,9 @@ export class ShowroomScrapeWorkflow extends WorkflowEntrypoint<
         `showroom-scrape: workflow failed for showroom ${showroomId}:`,
         error,
       );
+      // Persist the reason in the ledger so /admin/agents can show it and a
+      // retry can be an informed decision rather than a coin flip.
+      await run.fail(error);
       try {
         await db
           .update(showroomStores)

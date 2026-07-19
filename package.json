@@ -47,6 +47,7 @@
     "cf-typegen": "wrangler types --include-runtime false",
     "secrets:google-photos": "node scripts/google-photos-secrets.mjs",
     "test:throttle": "node scripts/tests/test_throttled_pipeline.mjs",
+    "test:agent-runs": "node scripts/tests/test_agent_runs.mjs",
     "test:route-planner": "node scripts/tests/test_route_planner.mjs",
     "test:scout-smoke": "node scripts/tests/run_scout_smoke.mjs",
     "test:links": "node scripts/tests/test_link_classification.mjs",
