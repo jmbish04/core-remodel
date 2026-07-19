@@ -54,32 +54,33 @@ export class AiJsonParseError extends Error {
  *          when `.response` is absent — never returns null so callers can rely
  *          on an object and let their own field-level normalization drop bad
  *          values.
- * @throws  {AiJsonParseError} when `.response` is a string that is not valid
- *          JSON. Callers inside a `step.do()` get a retry; callers that already
- *          wrap in try/catch degrade exactly as they did before, but now log
- *          the real cause instead of persisting a silently empty object.
+ * @throws  {AiJsonParseError} when the payload string is not valid JSON, or
+ *          parses to something other than an object (`null`, a number, a
+ *          string). Callers inside a `step.do()` get a retry; callers that
+ *          already wrap in try/catch degrade exactly as they did before, but
+ *          now log the real cause instead of persisting a silently empty
+ *          object.
  */
 export function parseStructuredResponse<T>(
   raw: ({ response?: unknown } & Partial<T>) | null | undefined,
   label: string,
 ): Partial<T> {
+  // Some Workers-AI models answer in the OpenAI envelope — `choices[0].message
+  // .content` — with no `.response` field at all. Without this branch the
+  // function fell through to "no wrapper, treat raw as the payload" and handed
+  // back `{choices:[…]}`, which carries none of the expected keys, so the
+  // caller's normalizer nulled every field. That is the mechanism behind
+  // product 35's empty intel row, and it is invisible: no parse error, no
+  // throw, just a silently blank result.
+  const choiceContent = openAiChoiceContent(raw);
+  if (choiceContent !== null) {
+    return parseJsonText<T>(choiceContent, label);
+  }
+
   const wrapped = raw?.response;
 
   if (typeof wrapped === "string") {
-    const text = stripJsonFence(wrapped);
-    try {
-      return JSON.parse(text) as Partial<T>;
-    } catch (err) {
-      // Truncated output is the common cause, so surface the tail as well as
-      // the head — a clean-looking prefix with a severed tail is the signature.
-      console.error(
-        `[ai-json] failed to parse ${label} JSON string ` +
-          `(${text.length} chars): head=${JSON.stringify(text.slice(0, 200))} ` +
-          `tail=${JSON.stringify(text.slice(-200))}`,
-        err,
-      );
-      throw new AiJsonParseError(label, text.length, text.slice(0, 200), err);
-    }
+    return parseJsonText<T>(wrapped, label);
   }
 
   if (wrapped && typeof wrapped === "object") {
@@ -89,6 +90,56 @@ export function parseStructuredResponse<T>(
   // No `.response` wrapper — some models spread the payload onto the result
   // directly, so treat the whole object as the source.
   return (raw ?? {}) as Partial<T>;
+}
+
+/**
+ * Pull `choices[0].message.content` out of an OpenAI-style envelope.
+ *
+ * Returns null when `raw` is not that shape. An empty-string `content` is
+ * treated as present-but-empty and reported, not skipped: reasoning models can
+ * spend the whole `max_tokens` budget on `reasoning_content` and emit
+ * `content: ""` with `finish_reason: "length"` — a real failure that must not
+ * be mistaken for "this model uses a different envelope".
+ */
+function openAiChoiceContent(raw: unknown): string | null {
+  const choices = (raw as { choices?: unknown })?.choices;
+  if (!Array.isArray(choices) || choices.length === 0) return null;
+
+  const message = (choices[0] as { message?: unknown })?.message;
+  const content = (message as { content?: unknown })?.content;
+  return typeof content === "string" ? content : null;
+}
+
+/** Fence-strip and parse a JSON payload string, throwing on malformed input. */
+function parseJsonText<T>(raw: string, label: string): Partial<T> {
+  const text = stripJsonFence(raw);
+  try {
+    const parsed: unknown = JSON.parse(text);
+
+    // `JSON.parse` happily returns primitives: "null" -> null, "123" -> 123.
+    // Both would break the documented never-null-object contract and blow up
+    // at call sites that read properties off the result. Treat them as a failed
+    // extraction rather than coercing to `{}` — a model answering `null` has
+    // not produced data, and quietly returning an empty object is exactly the
+    // silent-blank behaviour this module exists to prevent.
+    if (parsed === null || typeof parsed !== "object") {
+      throw new TypeError(
+        `expected a JSON object, got ${parsed === null ? "null" : typeof parsed}`,
+      );
+    }
+
+    return parsed as Partial<T>;
+  } catch (err) {
+    // Truncated output is a common cause, so surface the tail as well as the
+    // head — a clean-looking prefix with a severed tail is the signature.
+    console.error(
+      `[ai-json] failed to parse ${label} JSON string ` +
+        `(${text.length} chars): head=${JSON.stringify(text.slice(0, 200))} ` +
+        `tail=${JSON.stringify(text.slice(-200))}`,
+      err,
+    );
+    throw new AiJsonParseError(label, text.length, text.slice(0, 200), err);
+  }
 }
 
 /**

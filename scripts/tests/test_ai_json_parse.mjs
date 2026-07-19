@@ -59,4 +59,55 @@ assert.throws(
   AiJsonParseError,
 );
 
+// --- THE REAL ROOT CAUSE: OpenAI-style envelope with no `.response` ---
+// gpt-oss-120b and kimi-k2.6 answer as choices[0].message.content. This used to
+// fall through to "treat raw as the payload", handing back {choices:[…]} — no
+// expected keys, so the caller nulled every field with no error anywhere.
+assert.deepEqual(
+  parseStructuredResponse(
+    {
+      choices: [
+        {
+          finish_reason: "stop",
+          message: { content: '{"aiRetailPrice":"$1,500-$2,000"}' },
+        },
+      ],
+    },
+    "openai envelope",
+  ),
+  { aiRetailPrice: "$1,500-$2,000" },
+);
+
+// Reasoning models burn the whole budget on reasoning_content and emit an empty
+// content with finish_reason "length". That is a failure, not a different
+// envelope — it must throw rather than silently yield {}.
+assert.throws(
+  () =>
+    parseStructuredResponse(
+      {
+        choices: [
+          {
+            finish_reason: "length",
+            message: { content: "", reasoning_content: "The user wants me to…" },
+          },
+        ],
+      },
+      "reasoning-model empty content",
+    ),
+  AiJsonParseError,
+  "empty content from a reasoning model must throw, not degrade to {}",
+);
+
+// --- JSON primitives must not satisfy the never-null-object contract ---
+// JSON.parse("null") -> null and JSON.parse("123") -> 123 both parse cleanly,
+// so without an explicit shape check they escape as the "parsed" result and
+// crash callers that read properties off it.
+for (const primitive of ["null", "123", '"just a string"', "true"]) {
+  assert.throws(
+    () => parseStructuredResponse({ response: primitive }, `primitive ${primitive}`),
+    AiJsonParseError,
+    `${primitive} must throw, not escape as a non-object`,
+  );
+}
+
 console.log("ai-json parse guards: OK");
