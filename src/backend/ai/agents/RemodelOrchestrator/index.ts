@@ -111,8 +111,41 @@ export class RemodelOrchestrator extends Agent<Env, RemodelOrchestratorState> {
 
   async onStart() {
     // Bootstrap the audit cycle 60s after creation to give time for configuration.
-    // scheduleEvery() handles idempotent re-scheduling internally.
+    await this.ensureAuditSchedule(60);
+  }
+
+  /**
+   * Queue exactly one pending "audit" schedule, replacing any already there.
+   *
+   * `this.schedule()` is append-only — it inserts a fresh row in
+   * `cf_agents_schedules` every call, it does NOT dedupe. onStart() runs on
+   * every DO wake (not once per lifetime) and audit()'s finally block adds
+   * another, so pending schedules compounded: more rows -> more alarms -> more
+   * rows. The table reached ~1M rows and every alarm full-scanned it, billing
+   * 537 BILLION Durable Object row reads in 30 days (~$512).
+   */
+  private async ensureAuditSchedule(delaySeconds: number) {
+    // ScheduleCriteria has no callback filter, so filter client-side.
+    const pending = await this.listSchedules();
+    for (const s of pending.filter((s) => s.callback === "audit")) {
+      await this.cancelSchedule(s.id);
+    }
+    await this.schedule(delaySeconds, "audit");
+  }
+
+  /**
+   * One-shot repair for an instance that already has a bloated schedule table.
+   * Bulk-deletes rather than iterating cancelSchedule() — loading ~1M rows into
+   * memory to cancel them one at a time would OOM the DO.
+   */
+  @callable()
+  async purgeSchedules() {
+    const [{ n }] = [
+      ...this.sql<{ n: number }>`SELECT COUNT(*) AS n FROM cf_agents_schedules`,
+    ];
+    this.sql`DELETE FROM cf_agents_schedules`;
     await this.schedule(60, "audit");
+    return { deleted: n };
   }
 
   // ── HTTP handler for internal trigger/status calls ─────────────
@@ -152,8 +185,9 @@ export class RemodelOrchestrator extends Agent<Env, RemodelOrchestratorState> {
         lastError: message,
       });
     } finally {
-      // Self-healing loop: reschedule the next audit in 4 hours
-      await this.schedule(AUDIT_INTERVAL_MS / 1000, "audit");
+      // Self-healing loop: reschedule the next audit in 4 hours. Must replace,
+      // not append — see ensureAuditSchedule().
+      await this.ensureAuditSchedule(AUDIT_INTERVAL_MS / 1000);
     }
   }
 
