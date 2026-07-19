@@ -173,6 +173,13 @@ app.use("/api/companies/*", requireAccessAuth);
 // Shared note-editor utilities (AI title generation) — admin-only.
 app.use("/api/notes", requireAccessAuth);
 app.use("/api/notes/*", requireAccessAuth);
+// Feature-proposal bundles. The rest of /api/changelog stays open (it is the
+// public release record), but proposals are gated on both sides: the write path
+// accepts an arbitrarily large body and puts it into R2, and the read path hands
+// back a RAW conversation transcript, which routinely contains material never
+// meant to be public.
+app.use("/api/changelog/proposals", requireAccessAuth);
+app.use("/api/changelog/proposals/*", requireAccessAuth);
 // Gmail comms hub (0013 roadmap P3-07) — admin-only, sends mail as justin@126colby.com.
 app.use("/api/gmail", requireAccessAuth);
 app.use("/api/gmail/*", requireAccessAuth);

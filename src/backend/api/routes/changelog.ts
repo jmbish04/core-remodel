@@ -10,6 +10,12 @@ import { drizzle } from "drizzle-orm/d1";
 import { desc, eq, sql } from "drizzle-orm";
 
 import { changelogBranches, changelogEntries } from "@backend/db/schema/changelog/changelog";
+import {
+  getProposal,
+  getProposalContext,
+  listProposals,
+  upsertProposal,
+} from "@backend/services/changelog-proposals";
 import { BRANCHES, CHANGELOG } from "@/data/changelog";
 import { CHANGELOG_DETAIL } from "@/data/changelog-detail";
 
@@ -41,6 +47,44 @@ const entrySchema = z.object({
   detail: z.record(z.string(), z.unknown()).optional().nullable(),
 });
 
+const proposalStatusSchema = z.enum(["proposed", "accepted", "in_progress", "shipped", "rejected"]);
+
+const proposalTaskSchema = z.object({
+  taskKey: z.string().min(1),
+  title: z.string().min(1),
+  description: z.string().optional().nullable(),
+  workstream: z.string().optional(),
+  phase: z.number().int().min(0).optional(),
+  targetRoute: z.string().optional().nullable(),
+  changeType: z
+    .enum(["new", "move", "update", "delete", "keep", "investigate", "recover"])
+    .optional(),
+  status: z.enum(["pending", "in_progress", "blocked", "deferred", "done"]).optional(),
+  dependsOn: z.array(z.string()).optional().nullable(),
+  sortOrder: z.number().int().optional(),
+  notes: z.string().optional().nullable(),
+});
+
+const proposalSchema = z.object({
+  slug: z.string().min(1),
+  title: z.string().optional().nullable(),
+  summary: z.string().optional().nullable(),
+  area: z.string().optional().nullable(),
+  branch: z.string().optional().nullable(),
+  prNumber: z.number().int().optional().nullable(),
+  planSlug: z.string().optional().nullable(),
+  prdMarkdown: z.string().optional().nullable(),
+  designBriefMarkdown: z.string().optional().nullable(),
+  promptMarkdown: z.string().optional().nullable(),
+  /** Raw transcript — no max length here; it goes to R2, not a bound param. */
+  context: z.string().optional().nullable(),
+  contextCoverageNote: z.string().optional().nullable(),
+  sourceKind: z.enum(["ai_chat", "coding_agent", "human"]).optional(),
+  sourceModel: z.string().optional().nullable(),
+  status: proposalStatusSchema.optional(),
+  tasks: z.array(proposalTaskSchema).optional(),
+});
+
 /** GET / — branches (newest first) each with their entries. */
 changelogRouter.get("/", async (c) => {
   const db = drizzle(c.env.DB);
@@ -53,6 +97,70 @@ changelogRouter.get("/", async (c) => {
       ...b,
       entries: entries.filter((e) => e.branch === b.branch),
     })),
+  });
+});
+
+// ─── Feature proposals ───────────────────────────────────────────────────────
+// Registered BEFORE `GET /:slug` on purpose: Hono matches in registration order,
+// so a `/:slug` handler declared first would swallow `GET /proposals`.
+//
+// All logic lives in the service so the MCP tools (which run in-process) and
+// `scripts/changelog/*.mjs` (which call these routes) share one implementation.
+
+/** GET /proposals — list bundles, newest first. `?status=` filters. */
+changelogRouter.get("/proposals", async (c) => {
+  const db = drizzle(c.env.DB);
+  const status = c.req.query("status");
+  const limit = Number(c.req.query("limit") ?? 50);
+  const parsed = status ? proposalStatusSchema.safeParse(status) : null;
+  if (parsed && !parsed.success) {
+    return c.json({ error: `Unknown status "${status}".` }, 400);
+  }
+  const proposals = await listProposals(db, {
+    status: parsed?.data,
+    limit: Number.isFinite(limit) ? limit : 50,
+  });
+  return c.json({ proposals });
+});
+
+/**
+ * POST /proposals — upsert a bundle by slug.
+ *
+ * `context` (the raw transcript) is accepted inline and streamed to R2; only the
+ * key/size/hash land in D1. It is stored VERBATIM — summarizing it on the way in
+ * would destroy the only thing this feature exists to preserve.
+ */
+changelogRouter.post("/proposals", async (c) => {
+  const db = drizzle(c.env.DB);
+  const parsed = proposalSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
+  const result = await upsertProposal(c.env, db, parsed.data);
+  return c.json({ success: true, ...result }, result.created ? 201 : 200);
+});
+
+/** GET /proposals/:slug — bundle metadata + live plan tasks. Never the raw blob. */
+changelogRouter.get("/proposals/:slug", async (c) => {
+  const db = drizzle(c.env.DB);
+  const bundle = await getProposal(db, c.req.param("slug"));
+  if (!bundle) return c.json({ error: "Not found" }, 404);
+  return c.json(bundle);
+});
+
+/** GET /proposals/:slug/context — stream the raw transcript out of R2. */
+changelogRouter.get("/proposals/:slug/context", async (c) => {
+  const db = drizzle(c.env.DB);
+  const slug = c.req.param("slug");
+  const object = await getProposalContext(c.env, db, slug);
+  if (!object) return c.json({ error: "No transcript stored for this proposal." }, 404);
+  // Stream rather than buffer — these are ~450KB and there is no reason to hold
+  // one in the isolate just to hand it straight back.
+  return new Response(object.body, {
+    headers: {
+      "content-type": "text/markdown; charset=utf-8",
+      "content-length": String(object.size),
+      etag: object.httpEtag,
+      "content-disposition": `inline; filename="${slug}.md"`,
+    },
   });
 });
 
