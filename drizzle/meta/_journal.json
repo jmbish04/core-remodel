@@ -99,6 +99,13 @@
       "when": 1784396014635,
       "tag": "0113_dapper_white_queen",
       "breakpoints": true
+    },
+    {
+      "idx": 114,
+      "version": "6",
+      "when": 1784472442885,
+      "tag": "0114_device_location_and_changelog_proposals_catchup",
+      "breakpoints": true
     }
   ]
 }

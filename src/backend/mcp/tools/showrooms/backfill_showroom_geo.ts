@@ -17,7 +17,10 @@ export const backfillShowroomGeo = defineTool({
     "but have a Google `placeId` it fetches the Place location (one quota-metered Places call each, no Gemini) and " +
     "captures lat/lng + region. Processes up to `limit` stores per call (default 25) so you can pace Places spend — " +
     "re-run until `remaining` is 0. Idempotent: rows that already have a region/coordinates are skipped. Run this " +
-    "once after upgrading, or whenever showrooms were added without a placeId-driven import.",
+    "once after upgrading, or whenever showrooms were added without a placeId-driven import. Pass `recompute:true` " +
+    "to also RE-RESOLVE stores that already have a hub/city but were mis-tagged by the old centroid logic (e.g. a " +
+    "San Bruno store stamped 'SF Design District') — it re-derives the city FK + hub from the stored address for " +
+    "every active store and corrects any mismatch, at no API cost when coordinates are already present.",
   inputShape: {
     limit: z
       .number()
@@ -33,6 +36,13 @@ export const backfillShowroomGeo = defineTool({
         "Fetch missing coordinates from Google Places by placeId (default true). " +
           "Set false to only derive regions from stored addresses with zero API calls.",
       ),
+    recompute: z
+      .boolean()
+      .optional()
+      .describe(
+        "Re-resolve EVERY active store (not just those missing geo) and correct any " +
+          "mis-tagged hub/city from the stored address. Default false (fill-missing only).",
+      ),
   },
   annotations: WRITE_IDEMPOTENT,
   outputShape: {
@@ -45,10 +55,12 @@ export const backfillShowroomGeo = defineTool({
   examples: [
     { title: "Full backfill (25/run)", args: {} },
     { title: "Regions only, no Places calls", args: { fetchCoordinates: false, limit: 100 } },
+    { title: "Re-tag every store from its address", args: { recompute: true, limit: 100 } },
   ],
   handler: async ({ env, db }, input) => {
     const limit = input.limit ?? 25;
     const fetchCoordinates = input.fetchCoordinates ?? true;
+    const recompute = input.recompute ?? false;
 
     const all = await db
       .select()
@@ -59,10 +71,20 @@ export const backfillShowroomGeo = defineTool({
     // The city FK is the field intake historically never set, so this also
     // re-homes rows that were stamped with a wrong centroid-derived hub (e.g. a
     // Peninsula store mislabeled "SF Design District") onto the correct city.
-    const candidates = all.filter(
-      (s) =>
-        s.hubRoute == null || s.latitude == null || s.longitude == null || s.bayAreaCityId == null,
-    );
+    //
+    // In `recompute` mode EVERY active store is a candidate: a row that already
+    // has a (wrong) hub + city FK is not missing anything, so the fill-missing
+    // filter would skip it — but the per-row mismatch logic below still corrects
+    // it. This is the path that heals stores mis-tagged before the city-FK fix.
+    const candidates = recompute
+      ? all
+      : all.filter(
+          (s) =>
+            s.hubRoute == null ||
+            s.latitude == null ||
+            s.longitude == null ||
+            s.bayAreaCityId == null,
+        );
     const batch = candidates.slice(0, limit);
 
     const maps = new GoogleMapsService(env);
