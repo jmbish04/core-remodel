@@ -142,13 +142,21 @@ and a McDonald's food stop inserted on-route.
   (`find_known_showrooms` against the real directory, Maps usage logging) are
   type- and bundle-verified only. Deploying this branch would advance the
   production DO migration tag (v15) and block `main` — merge, then deploy.
-- **Detour publishing is not yet confirmed end to end.** The computation is done
-  and unit-tested, and `publish_route` rejects a route that ignores a cheap open
-  option — but no live run has yet produced a genuinely cheap detour *and* shown
-  the model populating `route.detours` from it. Runs so far either had only
-  expensive options (+19m, +51m, +684m — correctly skipped) or cheap ones that
-  the model dropped before the guardrail existed. Needs one more live run with a
-  wide time window to confirm the loop closes.
+- **Detour publishing: guardrail proven, model response not yet observed live.**
+  The computation, the offerable filter and the missed-detour detection are all
+  unit-tested (including the exact live failure: planner offers +0 min, route
+  publishes none → flagged). What has NOT been seen in a live run is the model
+  *receiving* that rejection and adding the detour on a retry. Live runs so far
+  either had only expensive options (+19/+51/+684 min) or cheap ones that were
+  closed on arrival (+3/+5 min opening at 10:00) — in every case `detours: []`
+  was the correct answer and the guardrail correctly stayed silent. Confirming
+  the retry path needs a run with a cheap option that is genuinely open.
+- **`publish_route` is skipped on roughly a third of runs.** Candidates publish
+  reliably; the route sometimes gets described in prose instead. The paired-call
+  instruction and the end-of-turn checklist improved it but did not eliminate it.
+  The likely next move is the same one that worked everywhere else: stop asking,
+  and have the runtime publish the route from the `plan_drive_route` result
+  directly rather than waiting for the model to relay it.
 - **`gemini-2.5-flash` is the weak link** for structured output. If publish
   reliability regresses, try a stronger model before enlarging any schema.
 - **No frontend.** v1 is headless by design.

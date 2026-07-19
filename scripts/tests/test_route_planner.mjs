@@ -16,6 +16,10 @@ import assert from "node:assert/strict";
 
 import { planRoute } from "../../src/backend/services/drive-route-planner.ts";
 import { caParts, openDuring, resolveWindow, formatMinute } from "../../src/backend/ai/agents/showroom-scout/time.ts";
+import {
+  extractOfferableDetours,
+  findMissedDetours,
+} from "../../src/backend/ai/agents/showroom-scout/detours.ts";
 
 let passed = 0;
 
@@ -268,6 +272,103 @@ check("no detour options when every stop made the route", () => {
   });
   assert.equal(r.stops.length, 2);
   assert.equal(r.detourOptions.length, 0);
+});
+
+console.log("\nshowroom-scout/detours (publish guardrail)");
+
+/** Build a plan_drive_route-shaped payload. */
+function planResult(detourOptions) {
+  return JSON.stringify({ stops: [], dropped: [], detourOptions, trafficDataAvailable: true });
+}
+
+check("keeps a cheap detour that is open on arrival", () => {
+  const got = extractOfferableDetours(
+    planResult([{ name: "Da Vinci Marble", extraMinutes: 6, openAtArrival: "yes" }]),
+  );
+  assert.deepEqual(got, [{ name: "Da Vinci Marble", extraMinutes: 6 }]);
+});
+
+check("keeps a cheap detour with unknown hours (worth a call-ahead)", () => {
+  const got = extractOfferableDetours(
+    planResult([{ name: "Mystery Stone", extraMinutes: 4, openAtArrival: "unknown" }]),
+  );
+  assert.equal(got.length, 1);
+});
+
+check("drops a detour that would be closed on arrival", () => {
+  // Seen live: +3 min away but does not open until 10:00.
+  const got = extractOfferableDetours(
+    planResult([{ name: "Artistic Tile & Stone", extraMinutes: 3, openAtArrival: "no" }]),
+  );
+  assert.deepEqual(got, []);
+});
+
+check("drops an expensive diversion", () => {
+  // Seen live: +684 min — an LA showroom surfaced by an ambiguous "South Bay".
+  const got = extractOfferableDetours(
+    planResult([
+      { name: "Seven Stones Inc.", extraMinutes: 684, openAtArrival: "yes" },
+      { name: "Carmel Stone", extraMinutes: 19, openAtArrival: "yes" },
+    ]),
+  );
+  assert.deepEqual(got, [], "both exceed the 15 minute ceiling");
+});
+
+check("boundary: exactly 15 minutes is offerable, 16 is not", () => {
+  assert.equal(
+    extractOfferableDetours(planResult([{ name: "A", extraMinutes: 15, openAtArrival: "yes" }])).length,
+    1,
+  );
+  assert.equal(
+    extractOfferableDetours(planResult([{ name: "B", extraMinutes: 16, openAtArrival: "yes" }])).length,
+    0,
+  );
+});
+
+check("malformed planner output degrades to no detours, never throws", () => {
+  assert.deepEqual(extractOfferableDetours("not json at all"), []);
+  assert.deepEqual(extractOfferableDetours("{}"), []);
+  assert.deepEqual(extractOfferableDetours(JSON.stringify({ detourOptions: "nope" })), []);
+  assert.deepEqual(
+    extractOfferableDetours(planResult([{ name: "", extraMinutes: 5, openAtArrival: "yes" }])),
+    [],
+    "blank name is not offerable",
+  );
+  assert.deepEqual(
+    extractOfferableDetours(planResult([{ name: "X", extraMinutes: "5", openAtArrival: "yes" }])),
+    [],
+    "non-numeric cost is not offerable",
+  );
+});
+
+check("flags a cheap open detour the route silently dropped", () => {
+  // The exact live failure: planner offered it, published route ignored it.
+  const missed = findMissedDetours(
+    [{ name: "Marble Creations Inc.", extraMinutes: 0 }],
+    [], // route.detours — empty
+    ["Tile Fantastic", "Bullnose Tile"],
+  );
+  assert.equal(missed.length, 1);
+  assert.equal(missed[0].name, "Marble Creations Inc.");
+});
+
+check("does not flag a detour the route actually offered", () => {
+  const missed = findMissedDetours(
+    [{ name: "Marble Creations Inc.", extraMinutes: 0 }],
+    ["marble creations inc."], // case/whitespace-insensitive match
+    [],
+  );
+  assert.deepEqual(missed, []);
+});
+
+check("does not flag a detour that got promoted into the main route", () => {
+  // Being routed is the better outcome, not a failure.
+  const missed = findMissedDetours(
+    [{ name: "All Natural Stone", extraMinutes: 6 }],
+    [],
+    ["  ALL NATURAL STONE  "],
+  );
+  assert.deepEqual(missed, []);
 });
 
 console.log("\nshowroom-scout/time (California)");
