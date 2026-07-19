@@ -1211,6 +1211,7 @@ const openApiSpec = {
       },
       ShowroomScoutState: {
         type: "object",
+        required: ["status", "timeline", "updatedAt"],
         description:
           "Agent session state. `result` holds the published candidates, route, exclusions and " +
           "degraded tools; its nested shape follows the agent's structured output contract.",
@@ -1258,6 +1259,7 @@ const openApiSpec = {
       },
       ShowroomScoutReply: {
         type: "object",
+        required: ["reply", "state"],
         properties: {
           reply: { type: "string", description: "The agent's prose response." },
           state: { $ref: "#/components/schemas/ShowroomScoutState" },
