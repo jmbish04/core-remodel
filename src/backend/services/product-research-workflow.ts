@@ -83,7 +83,17 @@ const TOTAL_JOB_STEPS = 15;
 const EMBED_MODEL = "@cf/baai/bge-large-en-v1.5" as const;
 
 /** Workers-AI instruct model used for structured extraction. */
-const EXTRACT_MODEL = "@cf/moonshotai/kimi-k2.6" as const;
+/**
+ * Extraction model.
+ *
+ * NOT a reasoning model. kimi-k2.6 was used here and returned `content: ""`
+ * with `finish_reason: "length"` on every call — it spent the entire token
+ * budget on `reasoning_content` and emitted nothing, taking ~59s to do it.
+ * Measured 2026-07-18 against product 35's stored report: gpt-oss-120b returns
+ * usable JSON in ~7-10s, llama-3.3-70b was faster still but produced a
+ * malformed envelope on 2 of 3 calls.
+ */
+const EXTRACT_MODEL = "@cf/openai/gpt-oss-120b" as const;
 
 /** Max brand-site pages scraped per run (homepage + best product-page match). */
 const MAX_SCRAPE_PAGES = 2;
@@ -202,6 +212,26 @@ const INTEL_JSON_SCHEMA = {
   // `required` and the `["string","null"]` union. kimi-k2.6 returns nulls for
   // every nullable field regardless. Left as-is pending a model/prompt fix.
   required: ["caRegulatoryFlag", "specs"],
+} as const;
+
+/**
+ * Narrow, non-nullable schema for the pricing follow-up pass.
+ *
+ * On the wide schema every price field is optional and nullable, and models
+ * reliably skip them — gpt-oss-120b returns solid specs and productType but
+ * null prices from the same report that, asked these four questions alone,
+ * yields "$1,500–$2,000" with a rationale. Fewer fields, none nullable, and an
+ * explicit instruction to estimate is what gets a committed answer.
+ */
+const PRICE_JSON_SCHEMA = {
+  type: "object",
+  properties: {
+    aiRetailPrice: { type: "string" },
+    aiRetailRationale: { type: "string" },
+    priceRangeLow: { type: "string" },
+    priceRangeHigh: { type: "string" },
+  },
+  required: ["aiRetailPrice", "aiRetailRationale", "priceRangeLow", "priceRangeHigh"],
 } as const;
 
 /** JSON Schema constraining the product-page link pick. */
@@ -662,6 +692,17 @@ ${findingsPreview}`;
 
   const intel = normalizeIntel(source);
 
+  // The wide pass reliably drops the optional price fields. When it has, ask
+  // the four pricing questions on their own against a non-nullable schema.
+  // Best-effort: pricing is valuable but must not fail the whole extraction.
+  if (intel.aiRetailPrice === null) {
+    try {
+      Object.assign(intel, await extractPricing(env, ctx, reportPreview));
+    } catch (err) {
+      console.error("[product-research] pricing follow-up failed:", err);
+    }
+  }
+
   // A substantial report that yields nothing at all is an extraction failure,
   // not a sparse product. Only `caRegulatoryFlag` and `specs` are schema-
   // required, so a model that ignores the task still satisfies the schema and
@@ -700,6 +741,69 @@ function isEmptyExtraction(intel: IntelExtraction): boolean {
     intel.salesIntel === null &&
     intel.caRegulatoryNotes === null
   );
+}
+
+/**
+ * Pricing-only follow-up pass — see PRICE_JSON_SCHEMA for why this is separate.
+ *
+ * Returns only the fields it could fill, so the caller can Object.assign over
+ * the wide-pass result without clobbering anything with nulls.
+ */
+async function extractPricing(
+  env: Env,
+  ctx: ProductContext,
+  reportPreview: string,
+): Promise<Partial<IntelExtraction>> {
+  const prompt = `Estimate pricing for "${productLabel(ctx)}" from the deep-research report below, for a California (SF Bay Area) homeowner buying through a showroom.
+
+- aiRetailPrice: the price a showroom would charge, as a display string like "$1,150".
+- aiRetailRationale: why — cite what in the report supports it.
+- priceRangeLow / priceRangeHigh: the low and high online street prices as display strings.
+
+Give your best estimate for every field. If the report is not explicit, ESTIMATE from comparable products or brand positioning described in it and say so in the rationale. Never return an empty string.
+
+Respond ONLY with valid JSON conforming to the supplied schema.
+
+RESEARCH REPORT:
+${reportPreview}`;
+
+  const raw = (await env.AI.run(
+    EXTRACT_MODEL as Parameters<typeof env.AI.run>[0],
+    {
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are a pricing analyst for home-renovation purchases. Respond only with JSON.",
+        },
+        { role: "user", content: prompt },
+      ],
+      response_format: { type: "json_schema", json_schema: PRICE_JSON_SCHEMA },
+      max_tokens: EXTRACT_MAX_TOKENS,
+      gateway: { id: env.AI_GATEWAY_ID },
+    } as Parameters<typeof env.AI.run>[1],
+  )) as { response?: unknown } & Partial<IntelExtraction>;
+
+  const source = parseStructuredResponse<IntelExtraction>(
+    raw,
+    "product pricing follow-up",
+  );
+
+  const str = (v: unknown): string | null =>
+    typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
+
+  // Drop nulls so Object.assign never overwrites a value the wide pass found.
+  const picked: Partial<IntelExtraction> = {};
+  for (const key of [
+    "aiRetailPrice",
+    "aiRetailRationale",
+    "priceRangeLow",
+    "priceRangeHigh",
+  ] as const) {
+    const value = str(source[key]);
+    if (value !== null) picked[key] = value;
+  }
+  return picked;
 }
 
 /** Defensive normalization of the Workers-AI intel extraction. */
