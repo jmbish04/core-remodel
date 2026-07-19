@@ -3,11 +3,12 @@
  */
 import { showroomStoreHours, showroomStoreLinks, showroomStores } from "@backend/db";
 import {
-  computeStoreGeoPatch,
+  resolveStoreGeoPatch,
   hoursJsonToRows,
   type MappedPlaceStore,
 } from "@backend/services/showroom/onboarding";
 import { collectSocialLinks } from "@backend/services/showroom/social-links";
+
 import type { RemodelDb } from "../../types";
 
 import { toolError } from "../../format";
@@ -47,11 +48,12 @@ export async function persistPlaceShowroom(
   db: RemodelDb,
   mapped: MappedPlaceStore,
 ): Promise<typeof showroomStores.$inferSelect> {
-  const geo = computeStoreGeoPatch({
+  const geo = await resolveStoreGeoPatch(db, {
     latitude: mapped.values.latitude,
     longitude: mapped.values.longitude,
     zipCode: mapped.values.zipCode,
     locationAddress: mapped.values.locationAddress,
+    locationCity: mapped.values.locationCity,
   });
 
   const [created] = await db

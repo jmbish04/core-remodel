@@ -40,8 +40,20 @@ export interface BayAreaHub {
 /** The five Bay Area procurement hubs, keyed by route letter. */
 export const BAY_AREA_HUBS: Record<HubRoute, BayAreaHub> = {
   A: { route: "A", name: "SF Design District", label: "SF", lat: 37.7749, lng: -122.4194 },
-  B: { route: "B", name: "Silicon Valley & South Bay", label: "South Bay", lat: 37.3382, lng: -121.8863 },
-  C: { route: "C", name: "Peninsula / Mid-Market", label: "Peninsula", lat: 37.5072, lng: -122.2603 },
+  B: {
+    route: "B",
+    name: "Silicon Valley & South Bay",
+    label: "South Bay",
+    lat: 37.3382,
+    lng: -121.8863,
+  },
+  C: {
+    route: "C",
+    name: "Peninsula / Mid-Market",
+    label: "Peninsula",
+    lat: 37.5072,
+    lng: -122.2603,
+  },
   D: { route: "D", name: "East Bay", label: "East Bay", lat: 37.8044, lng: -122.2712 },
   E: { route: "E", name: "North Bay", label: "North Bay", lat: 37.906, lng: -122.545 },
 };
@@ -100,122 +112,124 @@ export function regionFromLatLng(lat: number, lng: number): RegionResult | null 
 const CITY_REGION: Record<string, HubRoute> = {
   // ── A: San Francisco ──
   "san francisco": "A",
-  "sf": "A",
+  sf: "A",
 
   // ── B: Santa Clara county / South Bay ──
   "san jose": "B",
   "santa clara": "B",
-  "sunnyvale": "B",
+  sunnyvale: "B",
   "mountain view": "B",
-  "cupertino": "B",
-  "campbell": "B",
+  cupertino: "B",
+  campbell: "B",
   "los gatos": "B",
-  "saratoga": "B",
-  "milpitas": "B",
+  saratoga: "B",
+  milpitas: "B",
   "morgan hill": "B",
-  "gilroy": "B",
+  gilroy: "B",
   "palo alto": "B",
   "los altos": "B",
   "los altos hills": "B",
   "east palo alto": "B",
-  "alviso": "B",
+  alviso: "B",
 
   // ── C: San Mateo county / Peninsula ──
   "san mateo": "C",
-  "belmont": "C",
-  "burlingame": "C",
-  "millbrae": "C",
-  "hillsborough": "C",
+  belmont: "C",
+  burlingame: "C",
+  millbrae: "C",
+  hillsborough: "C",
   "foster city": "C",
   "redwood city": "C",
   "san carlos": "C",
   "menlo park": "C",
-  "atherton": "C",
+  atherton: "C",
   "portola valley": "C",
-  "woodside": "C",
+  woodside: "C",
   "daly city": "C",
   "south san francisco": "C",
   "san bruno": "C",
-  "brisbane": "C",
-  "pacifica": "C",
+  brisbane: "C",
+  pacifica: "C",
   "half moon bay": "C",
-  "colma": "C",
+  colma: "C",
 
   // ── D: East Bay (Alameda + Contra Costa) ──
-  "oakland": "D",
-  "berkeley": "D",
-  "alameda": "D",
-  "emeryville": "D",
-  "albany": "D",
+  oakland: "D",
+  berkeley: "D",
+  alameda: "D",
+  emeryville: "D",
+  albany: "D",
   "el cerrito": "D",
-  "richmond": "D",
+  richmond: "D",
   "san leandro": "D",
-  "hayward": "D",
+  hayward: "D",
   "union city": "D",
-  "fremont": "D",
-  "newark": "D",
+  fremont: "D",
+  newark: "D",
   "castro valley": "D",
-  "dublin": "D",
-  "pleasanton": "D",
-  "livermore": "D",
+  dublin: "D",
+  pleasanton: "D",
+  livermore: "D",
   "san ramon": "D",
-  "danville": "D",
+  danville: "D",
   "walnut creek": "D",
-  "concord": "D",
+  concord: "D",
   "pleasant hill": "D",
-  "martinez": "D",
-  "lafayette": "D",
-  "orinda": "D",
-  "moraga": "D",
-  "pittsburg": "D",
-  "antioch": "D",
-  "brentwood": "D",
-  "oakley": "D",
-  "hercules": "D",
-  "pinole": "D",
+  martinez: "D",
+  lafayette: "D",
+  orinda: "D",
+  moraga: "D",
+  pittsburg: "D",
+  antioch: "D",
+  brentwood: "D",
+  oakley: "D",
+  hercules: "D",
+  pinole: "D",
   "san pablo": "D",
 
   // ── E: North Bay (Marin / Sonoma / Napa / Solano) ──
   "san rafael": "E",
-  "novato": "E",
+  novato: "E",
   "mill valley": "E",
-  "sausalito": "E",
-  "tiburon": "E",
+  sausalito: "E",
+  tiburon: "E",
   "corte madera": "E",
-  "larkspur": "E",
+  larkspur: "E",
   "san anselmo": "E",
-  "fairfax": "E",
-  "greenbrae": "E",
-  "petaluma": "E",
+  fairfax: "E",
+  greenbrae: "E",
+  petaluma: "E",
   "santa rosa": "E",
   "rohnert park": "E",
-  "sonoma": "E",
-  "sebastopol": "E",
-  "healdsburg": "E",
-  "windsor": "E",
-  "napa": "E",
+  sonoma: "E",
+  sebastopol: "E",
+  healdsburg: "E",
+  windsor: "E",
+  napa: "E",
   "american canyon": "E",
   "st helena": "E",
   "saint helena": "E",
-  "calistoga": "E",
-  "yountville": "E",
-  "vallejo": "E",
-  "benicia": "E",
-  "fairfield": "E",
-  "vacaville": "E",
+  calistoga: "E",
+  yountville: "E",
+  vallejo: "E",
+  benicia: "E",
+  fairfield: "E",
+  vacaville: "E",
   "suisun city": "E",
 };
 
 /**
- * Extract a region from a formatted address by matching the longest known city
- * name it contains. "123 Foo St, South San Francisco, CA 94080, USA" matches
- * "south san francisco" (C) rather than "san francisco" (A) because the longest
- * match wins.
+ * Match the longest known Bay Area city name contained in a formatted address,
+ * returning both the canonical (lowercased) city key and its hub route.
+ * "123 Foo St, South San Francisco, CA 94080, USA" matches "south san francisco"
+ * (C) rather than "san francisco" (A) because the longest match wins.
  */
-export function regionFromAddress(address: string | null | undefined): RegionResult | null {
+export function matchCityInAddress(
+  address: string | null | undefined,
+): { city: string; route: HubRoute } | null {
   if (!address) return null;
   const hay = address.toLowerCase();
-  let best: { route: HubRoute; len: number } | null = null;
+  let best: { city: string; route: HubRoute; len: number } | null = null;
   for (const [city, route] of Object.entries(CITY_REGION)) {
     // Word-boundary-ish contains: require the city token to be delimited so
     // "alameda" doesn't match inside "alameda county" spuriously (still fine)
@@ -228,9 +242,18 @@ export function regionFromAddress(address: string | null | undefined): RegionRes
     // Reject a match glued to another alphanumeric token (a letter OR a digit),
     // so "napa" inside "123napa" / "napafoo" is not treated as the city Napa.
     if (/[a-z0-9]/.test(before) || /[a-z0-9]/.test(after)) continue;
-    if (!best || city.length > best.len) best = { route, len: city.length };
+    if (!best || city.length > best.len) best = { city, route, len: city.length };
   }
-  return best ? hubResult(best.route) : null;
+  return best ? { city: best.city, route: best.route } : null;
+}
+
+/**
+ * Extract a region from a formatted address by matching the longest known city
+ * name it contains.
+ */
+export function regionFromAddress(address: string | null | undefined): RegionResult | null {
+  const m = matchCityInAddress(address);
+  return m ? hubResult(m.route) : null;
 }
 
 // ─── 3. ZIP prefix → region (coarse fallback) ──────────────────────────────────
@@ -244,9 +267,8 @@ export function regionFromAddress(address: string | null | undefined): RegionRes
  * 94591/94592/95620/95625/95687/95688/95696.
  */
 const NORTH_BAY_ZIPS = new Set<number>([
-  94508, 94510, 94512, 94515, 94533, 94534, 94535, 94558, 94559, 94562, 94567,
-  94571, 94573, 94574, 94576, 94581, 94585, 94589, 94590, 94591, 94592, 94599,
-  95620, 95625, 95687, 95688, 95696,
+  94508, 94510, 94512, 94515, 94533, 94534, 94535, 94558, 94559, 94562, 94567, 94571, 94573, 94574,
+  94576, 94581, 94585, 94589, 94590, 94591, 94592, 94599, 95620, 95625, 95687, 95688, 95696,
 ]);
 
 /**
@@ -289,18 +311,82 @@ export interface RegionSignals {
   longitude?: number | null;
   zipCode?: string | null;
   address?: string | null;
+  /** Parsed locality (Google `locality` address component), e.g. "San Bruno". */
+  city?: string | null;
 }
 
 /**
- * Resolve a showroom's region from whatever geographic signals are available,
- * in priority order: coordinates → city name → ZIP. Returns null only when none
- * of the signals place the location in the Bay Area.
+ * Resolve a showroom's region from whatever geographic signals are available.
+ *
+ * Priority is CITY / ADDRESS → ZIP → coordinates, deliberately in that order:
+ * a city's hub is a fixed, curated fact (San Bruno is always the Peninsula hub),
+ * whereas nearest-centroid on lat/lng misfiles boundary cities — San Bruno sits
+ * geometrically closer to the SF centroid than the Peninsula centroid, so a
+ * coordinates-first classifier wrongly stamps it "SF Design District". The
+ * centroid is therefore only a LAST resort, used when we cannot name the city
+ * from its address or place it by ZIP.
+ *
+ * Returns null only when none of the signals place the location in the Bay Area.
  */
 export function classifyBayAreaRegion(signals: RegionSignals): RegionResult | null {
-  const { latitude, longitude, zipCode, address } = signals;
-  if (latitude != null && longitude != null) {
-    const byCoords = regionFromLatLng(latitude, longitude);
-    if (byCoords) return byCoords;
+  const { latitude, longitude, zipCode, address, city } = signals;
+  // 1. Parsed locality — the strongest, unambiguous city signal.
+  if (city) {
+    const route = CITY_REGION[city.trim().toLowerCase()];
+    if (route) return hubResult(route);
   }
-  return regionFromAddress(address) ?? regionFromZip(zipCode) ?? null;
+  // 2. City name matched inside the formatted address.
+  const byAddress = regionFromAddress(address);
+  if (byAddress) return byAddress;
+  // 3. ZIP-prefix county fallback.
+  const byZip = regionFromZip(zipCode);
+  if (byZip) return byZip;
+  // 4. Nearest hub centroid — last resort, coarse at county boundaries.
+  if (latitude != null && longitude != null) {
+    return regionFromLatLng(latitude, longitude);
+  }
+  return null;
+}
+
+// ─── City-record resolution (FK, not free text) ────────────────────────────────
+
+export interface CityResolution {
+  /** Canonical, display-cased city name, e.g. "San Bruno". */
+  name: string;
+  /** Hub route the city belongs to (A–E). */
+  route: HubRoute;
+  /** Human-readable hub name for the route. */
+  hubName: string;
+}
+
+/** Title-case a lowercased city key ("south san francisco" → "South San Francisco"). */
+function titleCaseCity(key: string): string {
+  return key.replace(/\b[a-z]/g, (m) => m.toUpperCase());
+}
+
+/**
+ * Resolve the specific Bay Area CITY a showroom belongs to from its geographic
+ * signals — the value that should back a `bay_area_city_id` foreign key rather
+ * than any free-text label. Coordinates and ZIP are honoured through the shared
+ * region classifier, but the CITY itself is identified from the authoritative
+ * locality: the parsed `city` component (exactly as Google returned it for these
+ * coordinates) is preferred, falling back to the longest known city name found
+ * in the formatted address.
+ *
+ * Returns null when the location cannot be tied to a curated Bay Area city; the
+ * caller then leaves the FK unset (the region hub may still be derivable).
+ */
+export function resolveCityName(signals: RegionSignals): CityResolution | null {
+  // 1. Parsed locality — authoritative when it is a curated Bay Area city.
+  const parsed = signals.city?.trim();
+  if (parsed) {
+    const route = CITY_REGION[parsed.toLowerCase()];
+    if (route) return { name: parsed, route, hubName: BAY_AREA_HUBS[route].name };
+  }
+  // 2. Longest city-name match inside the formatted address.
+  const m = matchCityInAddress(signals.address);
+  if (m) {
+    return { name: titleCaseCity(m.city), route: m.route, hubName: BAY_AREA_HUBS[m.route].name };
+  }
+  return null;
 }

@@ -1,6 +1,6 @@
 import { showroomStores } from "@backend/db";
 import { GoogleMapsService } from "@backend/services/google/maps";
-import { computeStoreGeoPatch } from "@backend/services/showroom/onboarding";
+import { resolveStoreGeoPatch } from "@backend/services/showroom/onboarding";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -38,6 +38,7 @@ export const backfillShowroomGeo = defineTool({
   outputShape: {
     processed: z.number().int(),
     regionsSet: z.number().int(),
+    citiesSet: z.number().int(),
     coordinatesSet: z.number().int(),
     remaining: z.number().int(),
   },
@@ -54,13 +55,19 @@ export const backfillShowroomGeo = defineTool({
       .from(showroomStores)
       .where(eq(showroomStores.isActive, true))
       .all();
+    // Candidates: anything missing coordinates, a region hub, OR the city FK.
+    // The city FK is the field intake historically never set, so this also
+    // re-homes rows that were stamped with a wrong centroid-derived hub (e.g. a
+    // Peninsula store mislabeled "SF Design District") onto the correct city.
     const candidates = all.filter(
-      (s) => s.hubRoute == null || s.latitude == null || s.longitude == null,
+      (s) =>
+        s.hubRoute == null || s.latitude == null || s.longitude == null || s.bayAreaCityId == null,
     );
     const batch = candidates.slice(0, limit);
 
     const maps = new GoogleMapsService(env);
     let regionsSet = 0;
+    let citiesSet = 0;
     let coordinatesSet = 0;
 
     for (const s of batch) {
@@ -81,17 +88,29 @@ export const backfillShowroomGeo = defineTool({
         }
       }
 
-      const geo = computeStoreGeoPatch({
+      const geo = await resolveStoreGeoPatch(db, {
         latitude: lat,
         longitude: lng,
         zipCode: s.zipCode,
         locationAddress: s.locationAddress,
+        locationCity: s.locationCity,
       });
 
       const patch: Partial<typeof showroomStores.$inferInsert> = {};
       if (geo.latitude != null && s.latitude == null) patch.latitude = geo.latitude;
       if (geo.longitude != null && s.longitude == null) patch.longitude = geo.longitude;
-      if (geo.hubRoute && s.hubRoute == null) {
+
+      // A resolved city is authoritative: set the FK and align the hub to it,
+      // correcting any earlier centroid-guessed hub. Otherwise just fill a
+      // missing hub from the coarse fallback.
+      const cityChanged = geo.bayAreaCityId != null && geo.bayAreaCityId !== s.bayAreaCityId;
+      const hubMismatch =
+        geo.bayAreaCityId != null && geo.hubRoute != null && geo.hubRoute !== s.hubRoute;
+      if (cityChanged) {
+        patch.bayAreaCityId = geo.bayAreaCityId;
+        citiesSet++;
+      }
+      if (cityChanged || hubMismatch || (s.hubRoute == null && geo.hubRoute != null)) {
         patch.hubRoute = geo.hubRoute;
         patch.hubName = geo.hubName;
         regionsSet++;
@@ -105,6 +124,7 @@ export const backfillShowroomGeo = defineTool({
     return {
       processed: batch.length,
       regionsSet,
+      citiesSet,
       coordinatesSet,
       remaining: Math.max(0, candidates.length - batch.length),
     };
