@@ -1431,6 +1431,11 @@ export function StoreViewportApp({
         open={editOpen}
         onOpenChange={setEditOpen}
         onSaved={loadStore}
+        // Soft-deleted: this viewport still resolves by id, but the store is
+        // gone from every list — send the user back to the directory.
+        onDeleted={() => {
+          window.location.href = "/admin/shopping/showrooms";
+        }}
       />
     </main>
   );

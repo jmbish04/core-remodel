@@ -100,7 +100,8 @@ export function buildChatDataTools(env: Env) {
       }),
       execute: async ({ search, pricePoint }) => {
         const db = drizzle(env.DB);
-        const conditions = [];
+        // Soft-deleted stores must not ground a vendor recommendation.
+        const conditions = [eq(showroomStores.isActive, true)];
         if (search) conditions.push(like(showroomStores.name, `%${search}%`));
         if (pricePoint) conditions.push(eq(showroomStores.pricePoint, pricePoint));
 

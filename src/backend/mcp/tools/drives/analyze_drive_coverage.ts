@@ -106,7 +106,14 @@ export const analyzeDriveCoverage = defineTool({
       const candidateRows = await db
         .select({ id: showroomStores.id, name: showroomStores.name })
         .from(showroomStores)
-        .where(usedIds.length ? notInArray(showroomStores.id, usedIds) : undefined)
+        .where(
+          usedIds.length
+            ? and(
+                notInArray(showroomStores.id, usedIds),
+                eq(showroomStores.isActive, true),
+              )
+            : eq(showroomStores.isActive, true),
+        )
         .limit(input.candidateLimit ?? 50)
         .all();
 

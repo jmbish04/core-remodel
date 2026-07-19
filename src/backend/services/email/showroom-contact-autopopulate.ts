@@ -49,7 +49,12 @@ async function matchShowroomStore(
     const [byEmail] = await db
       .select({ id: showroomStores.id })
       .from(showroomStores)
-      .where(like(showroomStores.emailAddress, `%@${domain}`))
+      .where(
+        and(
+          like(showroomStores.emailAddress, `%@${domain}`),
+          eq(showroomStores.isActive, true),
+        ),
+      )
       .limit(1);
     if (byEmail) return byEmail.id;
   }
@@ -58,7 +63,12 @@ async function matchShowroomStore(
     const [byName] = await db
       .select({ id: showroomStores.id })
       .from(showroomStores)
-      .where(like(showroomStores.name, `%${senderName.trim()}%`))
+      .where(
+        and(
+          like(showroomStores.name, `%${senderName.trim()}%`),
+          eq(showroomStores.isActive, true),
+        ),
+      )
       .limit(1);
     if (byName) return byName.id;
   }

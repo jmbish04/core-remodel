@@ -99,6 +99,25 @@ export const showroomStores = sqliteTable("showroom_stores", {
   }).default(false),
 
   /**
+   * Soft-delete flag. `false` hides the store from every LIST/SEARCH surface —
+   * the directory, map, drives, field scan, backfill candidates, MCP tools, the
+   * sales/clearance sweep, gap analysis and the catalog — while leaving the row
+   * and all its children (notes, photos, ratings, price observations) intact.
+   *
+   * Two deliberate exceptions keep working on an inactive row:
+   *   - Fetch by explicit id (the detail viewport, get_showroom, every write
+   *     path) — the caller already named the row, and hiding it would make a
+   *     soft-deleted store impossible to inspect or restore.
+   *   - The `placeId` dedupe checks — an inactive row still holds the unique
+   *     `showroom_stores_place_id_uniq` index, so filtering it out would turn a
+   *     clean 409 "already added" into a raw UNIQUE-constraint insert failure.
+   *
+   * Matches the `is_active` convention already used by showroom pocs, ratings,
+   * categories, notes, tags and product areas.
+   */
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+
+  /**
    * Large-selection flag — indicates a warehouse-scale or unusually broad
    * inventory (e.g. "Massive, dual-wing facility").  Replaces the free-text
    * `scale` field for intake filtering; `scale` is retained for legacy display.

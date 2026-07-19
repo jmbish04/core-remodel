@@ -8,7 +8,7 @@ import {
   showroomStoreProducts,
   showroomStores,
 } from "@backend/db";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { toolError } from "../../format";
@@ -107,7 +107,12 @@ export const getProduct = defineTool({
           ? await db
               .select()
               .from(showroomStores)
-              .where(inArray(showroomStores.id, [...showroomIds]))
+              .where(
+                and(
+                  inArray(showroomStores.id, [...showroomIds]),
+                  eq(showroomStores.isActive, true),
+                ),
+              )
               .all()
           : [];
       const storeById = new Map(storeRows.map((s) => [s.id, s]));

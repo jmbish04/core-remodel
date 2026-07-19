@@ -1,5 +1,5 @@
 import { brands, showroomBrandMappings, showroomStores, showroomStoreProducts } from "@backend/db";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { toolError } from "../../format";
@@ -56,7 +56,12 @@ export const getBrand = defineTool({
         ? await db
             .select({ id: showroomStores.id, name: showroomStores.name })
             .from(showroomStores)
-            .where(inArray(showroomStores.id, showroomIds))
+            .where(
+              and(
+                inArray(showroomStores.id, showroomIds),
+                eq(showroomStores.isActive, true),
+              ),
+            )
             .all()
         : [];
 

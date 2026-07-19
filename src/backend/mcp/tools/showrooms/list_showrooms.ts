@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { showroomStores } from "@backend/db";
 import { getStoreLinksMap, linksToLegacyUrls } from "@backend/utils/showroom-links";
 import { z } from "zod";
@@ -65,7 +66,12 @@ export const listShowrooms = defineTool({
     { title: "Affordable tile places", args: { q: "tile", pricePoint: "$$" } },
   ],
   handler: async ({ db }, input) => {
-    const all = await db.select().from(showroomStores).all();
+    // Soft-deleted stores never surface to the agent.
+    const all = await db
+      .select()
+      .from(showroomStores)
+      .where(eq(showroomStores.isActive, true))
+      .all();
     const filtered = all.filter((s) => {
       if (input.q && !matchesQuery([s.name, s.description, s.locationAddress], input.q)) {
         return false;

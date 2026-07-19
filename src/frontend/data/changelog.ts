@@ -43,12 +43,32 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/showroom-soft-delete",
+    title: "Showroom soft delete — and the 34 read paths that had to learn about it",
+    summary:
+      "Deleting a showroom used to destroy the row and cascade its notes, photos, ratings and price history. It now flips is_active to 0 and can be restored. The column is the easy half: every query that lists or searches showrooms — directory, map, catalog, drives, field scan, backfill, MCP tools, the clearance cron, gap analysis — was audited and filtered.",
+    date: "2026-07-18",
+    status: "staged",
+    prNumber: 154,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/154",
+  },
+  {
     branch: "claude/showroom-touch-ux",
     title: "Showroom viewport, usable from a Tesla touchscreen",
     summary:
       "Every control on the showroom page was sized for a mouse: small buttons, smaller hyperlinks, cramped modals. The hero's link row becomes large tap targets (website + one icon per registered link type), the hours card gets a full-width four-state badge, and the hours / links / upload / categories modals all move to ~80% of the viewport with Call, Copy address, and Send-to-Tesla as big buttons at the top.",
     date: "2026-07-18",
     status: "staged",
+  },
+  {
+    branch: "claude/feature-proposals-api-tools-ea0c5c",
+    title: "Feature proposals — carry the conversation, not a summary of it",
+    summary:
+      "An idea worked out with a non-coding AI chat can now be filed as a proposal that travels with the RAW transcript of the conversation behind it, so a coding agent picking it up weeks later inherits the rejected alternatives and the mid-discussion constraints instead of rebuilding a lossy plan from a summary. API + MCP tools + CLI parity, all on one shared service; the transcript lives in R2, never D1.",
+    date: "2026-07-18",
+    status: "staged",
+    prNumber: 152,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/152",
   },
   {
     branch: "claude/changelog-preview",
@@ -93,6 +113,24 @@ export const BRANCHES: ChangelogBranch[] = [
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "showroom-soft-delete",
+    branch: "claude/showroom-soft-delete",
+    date: "2026-07-18",
+    tag: "Showrooms",
+    area: "Showrooms",
+    title: "Delete a showroom without destroying it",
+    summary:
+      "A showroom can now be removed from the directory without losing anything — the visit notes, photos, ratings and price history all survive, and it can be restored. Deleted showrooms disappear everywhere at once: the directory, the map, drives, search, the catalog, the clearance feed and the AI tools.",
+    status: "staged",
+    changes: [
+      { kind: "added", text: "Delete showroom, from the edit modal — behind a confirm that spells out what is and isn't kept." },
+      { kind: "added", text: "Restore a deleted showroom — POST /api/showroom-stores/:id/restore." },
+      { kind: "changed", text: "DELETE /api/showroom-stores/:id is now a soft delete (is_active = 0) instead of destroying the row and everything hanging off it." },
+      { kind: "changed", text: "34 list/search queries now hide deleted showrooms: directory, map, catalog, product + brand pages, clearance feed, field scan, backfills, contacts matching, phonebook, MCP tools, the research agents and the cron sweeps." },
+      { kind: "migration", text: "0113_dapper_white_queen — showroom_stores.is_active, default true. Applied to remote: 134 stores, 134 active." },
+    ],
+  },
+  {
     id: "showroom-touch-ux",
     branch: "claude/showroom-touch-ux",
     date: "2026-07-18",
@@ -112,6 +150,27 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "changed", text: "Hours, links, upload and categories modals all render at ~80% of the viewport; category checkboxes are noticeably larger." },
       { kind: "removed", text: "The hero's small \"Edit hours\" and \"Edit address\" buttons — both now live inside the hours modal." },
     ],
+  },
+  {
+    id: "feature-proposals",
+    branch: "claude/feature-proposals-api-tools-ea0c5c",
+    date: "2026-07-18",
+    area: "Changelog",
+    title: "Feature proposals: file an idea with the conversation behind it",
+    summary:
+      "A proposal bundle (PRD / design brief / PROMPT / TASKS) plus the RAW, unsummarized transcript of the chat that produced it — filed from an AI chat over MCP, from a shell with no MCP, or over HTTP, all through one shared service. Rendered at /admin/changelog/preview/:slug with a copyable PROMPT and the transcript's coverage note beside its link.",
+    changes: [
+      { kind: "added", text: "POST/GET /api/changelog/proposals, GET /api/changelog/proposals/:slug and /:slug/context (streams the R2 transcript)." },
+      { kind: "added", text: "MCP tools submit_feature_proposal / get_feature_proposal / list_feature_proposals under a new `changelog` category." },
+      { kind: "added", text: "scripts/changelog/{submit,get,list}-proposal.mjs — same three operations for agents with no MCP connection." },
+      { kind: "added", text: "Preview page renders the bundle: PRD, design brief, PROMPT with a copy button, plan tasks with live status, transcript link + size + coverage note." },
+      { kind: "added", text: "PhaseDetail gains optional branch/prNumber/prUrl and a `verification` block (QC script, source, verbatim output, per-migration remote state) — stored in detail_json, so no migration." },
+      { kind: "changed", text: "Every changelog entry now surfaces its git branch AND PR number, reading PR metadata off the changelog_branches row so entries written before this still show it." },
+      { kind: "changed", text: "/api/changelog/proposals* is gated behind requireAccessAuth — the write path takes an arbitrarily large body into R2 and the read path returns a raw transcript." },
+      { kind: "migration", text: "0112_careful_gambit (changelog_proposals) applied to remote D1 and verified — 17 columns." },
+    ],
+    migrations: ["0112_careful_gambit"],
+    status: "staged",
   },
   {
     id: "changelog-preview",

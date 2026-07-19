@@ -6,11 +6,62 @@
  * (mermaidcn zoom/pan), changelog19 developer changelog + code, and the
  * changelog21 Features/Fixes/Improvements recap — but for a `staged` entry, so
  * stakeholders can sign off on exactly what the release will say before it ships.
+ *
+ * Below the entry, when a `changelog_proposals` bundle exists for this slug, the
+ * artifact bundle renders: PRD, design brief, the PROMPT (copyable), the linked
+ * plan tasks with live status, and the raw conversation transcript. That bundle
+ * is what lets a coding agent picking this up weeks later inherit the reasoning
+ * instead of rebuilding it from a lossy summary.
  */
+import { drizzle } from "drizzle-orm/d1";
+
 import BaseLayout from "@/layouts/BaseLayout.astro";
 import ChangelogEntryView from "@/components/changelog/ChangelogEntryView.astro";
+import { ProposalBundle, type ProposalBundleProps } from "@/components/changelog/ProposalBundle";
+import { getProposal } from "@backend/services/changelog-proposals";
 
 const slug = Astro.params.slug as string;
+
+// Same try-D1/degrade-gracefully contract the entry view uses: the Cloudflare
+// runtime is absent during a static build, and having no bundle is the normal
+// case for an entry that was written the ordinary way.
+let bundle: ProposalBundleProps | null = null;
+try {
+  const env = Astro.locals.runtime?.env;
+  if (env?.DB) {
+    const found = await getProposal(drizzle(env.DB), slug);
+    if (found) {
+      bundle = {
+        slug: found.proposal.slug,
+        status: found.proposal.status,
+        sourceKind: found.proposal.sourceKind,
+        sourceModel: found.proposal.sourceModel,
+        planSlug: found.proposal.planSlug,
+        prdMarkdown: found.proposal.prdMarkdown,
+        designBriefMarkdown: found.proposal.designBriefMarkdown,
+        promptMarkdown: found.proposal.promptMarkdown,
+        tasks: found.tasks.map((t) => ({
+          taskKey: t.taskKey,
+          title: t.title,
+          workstream: t.workstream,
+          phase: t.phase,
+          changeType: t.changeType,
+          status: t.status,
+          notes: t.notes,
+        })),
+        context: {
+          available: found.context.available,
+          bytes: found.context.bytes,
+          sha256: found.context.sha256,
+          coverageNote: found.context.coverageNote,
+          href: found.context.href,
+        },
+      };
+    }
+  }
+} catch {
+  bundle = null;
+}
 ---
 
 <BaseLayout
@@ -18,4 +69,12 @@ const slug = Astro.params.slug as string;
   description="A proposed change, drafted as release notes before it deploys."
 >
   <ChangelogEntryView slug={slug} stage="staged" />
+  {
+    bundle ? (
+      <div class="container mx-auto max-w-5xl px-4 pb-12">
+        {/* client:load — the PROMPT copy button is the point of this section. */}
+        <ProposalBundle {...bundle} client:load />
+      </div>
+    ) : null
+  }
 </BaseLayout>

@@ -12,7 +12,7 @@
 
 import { OpenAPIHono, z } from "@hono/zod-openapi";
 import { drizzle } from "drizzle-orm/d1";
-import { and, desc, eq, inArray, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, like, or, sql } from "drizzle-orm";
 
 import {
   showroomStores,
@@ -103,7 +103,9 @@ async function matchStore(
       const [s] = await db
         .select({ id: showroomStores.id })
         .from(showroomStores)
-        .where(like(showroomStores.phoneNumber, pattern))
+        .where(
+          and(like(showroomStores.phoneNumber, pattern), eq(showroomStores.isActive, true)),
+        )
         .limit(1);
       if (s) return s.id;
     }
@@ -115,7 +117,12 @@ async function matchStore(
       const [s] = await db
         .select({ id: showroomStores.id })
         .from(showroomStores)
-        .where(like(showroomStores.emailAddress, `%@${domain}`))
+        .where(
+          and(
+            like(showroomStores.emailAddress, `%@${domain}`),
+            eq(showroomStores.isActive, true),
+          ),
+        )
         .limit(1);
       if (s) return s.id;
     }
@@ -125,7 +132,12 @@ async function matchStore(
     const [s] = await db
       .select({ id: showroomStores.id })
       .from(showroomStores)
-      .where(like(showroomStores.locationAddress, `%${hints.address.trim()}%`))
+      .where(
+        and(
+          like(showroomStores.locationAddress, `%${hints.address.trim()}%`),
+          eq(showroomStores.isActive, true),
+        ),
+      )
       .limit(1);
     if (s) return s.id;
   }
@@ -134,7 +146,12 @@ async function matchStore(
     const [s] = await db
       .select({ id: showroomStores.id })
       .from(showroomStores)
-      .where(like(showroomStores.name, `%${hints.name.trim()}%`))
+      .where(
+        and(
+          like(showroomStores.name, `%${hints.name.trim()}%`),
+          eq(showroomStores.isActive, true),
+        ),
+      )
       .limit(1);
     if (s) return s.id;
   }
@@ -492,6 +509,15 @@ showroomContactsRouter.get("/", async (c) => {
   if (type && CONTACT_TYPES.includes(type as ContactType)) conds.push(eq(showroomStoreContacts.type, type as ContactType));
   if (storeId && Number.isInteger(Number(storeId))) conds.push(eq(showroomStoreContacts.storeId, Number(storeId)));
   if (!includeDrafts) conds.push(eq(showroomStoreContacts.isDraft, false));
+  // Hide contacts belonging to a soft-deleted store, but KEEP unattached
+  // contacts — storeId is nullable and a plain isActive check would drop them
+  // (the leftJoin yields NULL, which never equals true).
+  conds.push(
+    or(
+      isNull(showroomStoreContacts.storeId),
+      eq(showroomStores.isActive, true),
+    ) as unknown as ReturnType<typeof eq>,
+  );
   if (q) {
     conds.push(
       or(
@@ -654,10 +680,13 @@ showroomContactsRouter.post("/backfill/from-pocs", async (c) => {
     })
     .from(showroomStores)
     .where(
-      or(
-        sql`${showroomStores.mainPocFullname} IS NOT NULL`,
-        sql`${showroomStores.mainPocPhoneNumber} IS NOT NULL`,
-        sql`${showroomStores.mainPocEmailAddress} IS NOT NULL`,
+      and(
+        eq(showroomStores.isActive, true),
+        or(
+          sql`${showroomStores.mainPocFullname} IS NOT NULL`,
+          sql`${showroomStores.mainPocPhoneNumber} IS NOT NULL`,
+          sql`${showroomStores.mainPocEmailAddress} IS NOT NULL`,
+        ),
       ),
     );
 
