@@ -8,6 +8,21 @@ and before answering any question about how something currently works.** Not
 after. Reading stale code produces confident, entirely wrong analysis, and every
 minute spent after the first stale read is wasted.
 
+A `SessionStart` hook (`.claude/settings.json`) runs this for you and prints the
+result before you read anything:
+
+```bash
+pnpm run worktree:check     # or: node scripts/worktree-check.mjs
+```
+
+It fetches `origin/main` first (a worktree's local `main` ref never updates on
+its own), then reports commits behind/ahead, how old the last commit is, and
+whether another session left uncommitted files here. **≥25 behind prints a loud
+STALE CHECKOUT warning — believe it.** The check only informs; it never blocks,
+because revisiting an old branch is sometimes deliberate.
+
+If the hook did not run, do it by hand:
+
 ```bash
 git fetch origin main -q
 git log --oneline -1 origin/main
@@ -24,10 +39,11 @@ Why this is a hard rule and not a suggestion:
   of commits behind `origin/main` indefinitely. `git status` says "clean" and
   gives no hint. Comparing against local `main` is always wrong — compare
   against `origin/main`, always, and only after an explicit `git fetch`.
-- Long-lived worktrees rot fast. This repo merges to `main` frequently and
-  Workers Builds auto-deploys on merge, so **the live site is `origin/main`** —
-  never the branch you happen to be sitting in. Any bug reported from a
-  production URL must be reproduced against `origin/main`.
+- Long-lived worktrees rot fast. This repo merges to `main` frequently, so **the
+  code you should be reasoning about is `origin/main`** — never the branch you
+  happen to be sitting in. Any bug reported from a production URL must be
+  reproduced against `origin/main`. (Production may lag even `origin/main`,
+  because deploys are manual now — see "LAST ACTION OF EVERY TURN" below.)
 - The failure is silent and expensive. It manufactures false conclusions about
   features being "missing" or "broken" when they were built, renamed, or
   replaced upstream, and any code written against the stale tree conflicts hard
@@ -41,6 +57,52 @@ When picking up work described by an earlier session or a memory file, re-verify
 its claims against `origin/main` before acting — those notes reflect the tree as
 it was, and the named files, routes, and components may have moved or been
 replaced.
+
+## LAST ACTION OF EVERY TURN — you own the deploy (MANDATORY)
+
+**Nothing deploys itself.** Workers Builds auto-deploy is off, so merging to
+`main` does NOT ship. If you finish a turn without running the commands below,
+your work exists only in git and **production is still running the old code** —
+including any schema migration you generated.
+
+`pnpm run deploy` is the whole pipeline, in the only safe order:
+
+```
+build → migrate:remote → migrate:tesla:remote → wrangler deploy
+```
+
+Migrations run BEFORE the upload on purpose. New code reaching production before
+its column exists makes every endpoint that reads it return **500**; that is the
+first thing to suspect whenever a route 500s right after a schema change.
+
+### The contract, by what you did
+
+| You did | Run before ending the turn |
+|---|---|
+| Changed a drizzle schema | `pnpm run migrate:remote`, then **verify** the column/table exists on remote |
+| Opened or updated a PR | `pnpm run deploy:preview` — then QC with `pnpm run test:pr <n> -- --preview` |
+| **Merged to `main`** | **`pnpm run deploy`** — this is the only thing that updates production |
+| Merged the PR | `pnpm run preview:delete` from the branch's worktree |
+
+**Say what you did.** End the turn by stating explicitly whether you deployed,
+whether migrations were applied to remote, and what the QC result was. "Done" is
+not a status. If you deliberately did not deploy — because the work is unfinished
+or you want review first — say that too, so the next session knows production
+does not match `main`.
+
+### Never deploy production from an unmerged branch
+
+`pnpm run deploy` deploys whatever is in your working tree to the LIVE worker.
+Run it only from `main`, after your PR merged and you pulled. From a feature
+branch use `pnpm run deploy:preview`, which targets your own worker. The two
+commands are one word apart and the failure is not recoverable by rerunning.
+
+### Verify the deploy landed
+
+```bash
+npx wrangler deployments list | tail -20   # newest entry should be yours
+pnpm run test:pr <n>                       # QC against production, after merge
+```
 
 ## System Identity & Role Enforcements
 You are an elite Senior Engineer operating within the Google Antigravity IDE framework. Your primary objective is shipping high-performance, self-healing architectures across the Cloudflare Ecosystem.
@@ -304,6 +366,14 @@ After the PR is open and conflict-free:
    *why* it does not apply. Never blanket-accept and never blanket-ignore.
 3. **Patch the PR** with the fixes, push, let CI go green.
 4. **Clear any conflicts**, then **merge**.
+5. **Delete your preview worker**: `pnpm run preview:delete`, run from the branch's
+   worktree (it derives the name from the current branch). One preview worker is
+   created per branch and nothing reaps them — then `pnpm run preview:cleanup`
+   to sweep any whose branch is already gone.
+
+> A branch build going GREEN is not a good sign here — it means the build deployed
+> your branch to **production**. See "Deploy topology & previews" below before you
+> act on any CI result.
 
 ### 3. Migrations — always apply to remote when the PR changes schema
 
@@ -343,6 +413,162 @@ pnpm run test:pr --all            # every QC script
 `remote: true` secrets-store binding with no local fallback, so every authed route 500s
 locally — a local run cannot verify an API at all. Paste the QC output into the PR
 description and into the changelog entry (below).
+
+**While your PR is open, QC against your PREVIEW, not production:**
+
+```bash
+pnpm run test:pr 153 -- --preview     # your branch's own preview worker
+pnpm run test:pr 153                  # production (main) — only after merge
+```
+
+`scripts/config.mjs` defaults to **production**, which runs `main`. QC an unmerged
+branch against the default and you are testing code your branch has not shipped —
+it reads as "my endpoint 404s" or "my column is missing" when the real answer is
+"not merged yet". See the deploy topology below.
+
+## Deploy topology & previews (READ BEFORE VERIFYING ANYTHING)
+
+**Workers Builds auto-deploy is DISABLED.** Deploys are manual and agent-owned —
+see "LAST ACTION OF EVERY TURN" at the top of this file. The history below is
+kept because it explains why CI is off and why it must not be switched back on
+casually.
+
+### CI cannot deploy anywhere except production. Do not turn it back on.
+
+**Workers Builds forces every deploy to the connected worker (`core-remodel`).**
+It injects that script name into the build environment and it overrides both:
+
+- the `name` field in a config passed with `-c`, and
+- an explicit `--name` flag on the wrangler CLI.
+
+Both were tried and both lost. The build log shows the script announcing one
+worker and wrangler uploading another:
+
+```
+▶ Deploying preview worker "core-remodel-preview-claude-per-branch-previews"…
+✘ [ERROR] A request to the Cloudflare API
+          (/accounts/…/workers/scripts/core-remodel) failed.
+```
+
+Consequences you must internalise:
+
+1. **A branch build deploying successfully means it overwrote PRODUCTION.**
+   Not a preview. Production, with unreviewed branch code. This is why the
+   triggers are disabled — while they were live, a branch's "preview" build
+   logged `✅ Preview live: …core-remodel-preview…` and then uploaded
+   `core-remodel`.
+2. **A branch build FAILING was often the only thing protecting production.**
+   The common failure is `10074 — Cannot apply new-sqlite-class migration to
+   class 'RenovationAgent' that is already depended on by existing Durable
+   Objects`, which fires because the branch's DO migration tag collides with
+   production's.
+3. Do **not** "fix" that 10074 by bumping the DO migration tag to make a branch
+   build pass. That does not repair anything — it removes the last guard and
+   ships your branch to production.
+4. Do **not** re-enable the branch trigger to "get previews working in CI". It
+   cannot work: the override applies to every deploy inside a Workers Builds
+   trigger. Deploy previews from your session instead.
+
+Cloudflare's own preview URLs are not an escape hatch either:
+[preview URLs are not generated for Workers that implement a Durable Object](https://developers.cloudflare.com/workers/configuration/previews/#limitations),
+and this Worker exports twelve. `wrangler versions upload` therefore yields a
+safe version with **no viewable URL**. (`previews_enabled` is also unavailable on
+this account — API returns `12044` — but the DO limitation is the binding one.)
+Third-party "Workers preview" GitHub Actions do not help: the commonly-suggested
+one (`shidil/cloudflare-workers-preview`) was evaluated and rejected — abandoned
+March 2022, Node 12 runtime GitHub no longer supports, wants your Cloudflare API
+token, and it deploys a separate named worker anyway, which is what we do below.
+
+### Why not Wrangler environments (`[env.preview]`)?
+
+Evaluated and rejected for the per-branch case, for two reasons:
+
+1. **Environments are static; branch names are not.** `[env.foo]` deploys
+   `core-remodel-foo`. You cannot declare an environment per branch, so it does
+   not give per-branch isolation.
+2. **Bindings are non-inheritable.** Per the
+   [Wrangler docs](https://developers.cloudflare.com/workers/wrangler/environments/#non-inheritable-keys),
+   bindings and vars are NOT inherited from the top level — each environment must
+   redeclare all of them. This Worker carries **37 secrets-store bindings** plus
+   D1, R2, KV, Vectorize, AI, Images, 12 Durable Objects and 9 Workflows. An env
+   block would duplicate that entire surface, and the copy would silently drift
+   from the real one the first time someone adds a binding to only one of them.
+
+`deploy-preview.mjs` takes the opposite approach: it DERIVES the preview config
+from the top-level one at deploy time and overrides only what must differ (name,
+crons, routes, workflow names). Nothing is duplicated, so nothing can drift.
+
+An environment would still be a reasonable fit for one *stable, long-lived*
+target — a permanent `staging` worker, say — where the duplication is written
+once and reviewed. It is the wrong tool for ephemeral per-branch previews.
+
+### Previews are AGENT-OWNED: create one, use it, delete it
+
+Because CI cannot do it, **you** deploy your own preview from your session. The
+worker is named `wcrp-<branch-slug>` (Worker Core Remodel Preview).
+
+```bash
+pnpm run deploy:preview              # deploy wcrp-<branch-slug>, print the URL
+pnpm run test:pr <n> -- --preview    # QC against YOUR branch, not main
+pnpm run preview:list                # what previews exist, per the ledger
+pnpm run preview:delete              # tear down THIS branch's preview
+pnpm run preview:cleanup             # report orphans (branch gone from origin)
+pnpm run preview:cleanup -- --apply  # delete those orphans
+```
+
+The preview gets the **same** D1 / R2 / KV / Vectorize / AI / secret bindings
+(shared by id) but its **own** Durable Object namespaces — which is why it
+sidesteps the 10074 collision — and its own Workflow instances (workflow names
+are ACCOUNT-scoped, so they are suffixed per branch; an unsuffixed name would
+hijack production's bindings). Crons and routes are stripped, so scheduled jobs
+cannot double-run against the shared D1.
+
+**Previews share production's D1.** A branch with a new migration still needs
+`pnpm run migrate:remote` before its pages work, and migrations must stay
+additive so every other branch's preview keeps working against the same DB.
+
+**Never point QC at production while your PR is open.** `scripts/config.mjs`
+defaults to production, which runs `main`; QC'ing an unmerged branch against it
+tests code your branch has not shipped, and reads as "my endpoint 404s" when the
+truth is "not merged yet". Use `--preview`.
+
+#### Clean up your preview when you are done
+
+One worker per branch and nothing reaps them. **Delete yours when the PR merges**
+(step 5 of the review loop), and sweep orphans when you finish a piece of work:
+
+```bash
+pnpm run preview:delete              # from the branch's worktree, before tearing it down
+pnpm run preview:cleanup -- --apply  # anything whose branch is gone from origin
+```
+
+#### The preview ledger — why deletion is not "list and match a prefix"
+
+Every deploy records its worker in a **ledger**, and cleanup may only delete
+workers found there. The ledger is an **allowlist, not a hint**:
+
+- `assertDeletable` refuses any name that is not in the ledger, does not carry
+  the `wcrp-` prefix, or is the production worker — three independent checks.
+- Nothing is deleted without `--apply`; the default is a report.
+
+This account has **184 Workers on it**. Enumerating them and deleting whatever
+matches a pattern puts an agent one bad regex — or one coincidentally named
+worker — away from destroying something that matters. The ledger removes that
+whole class of mistake: if this tooling did not record creating it, this tooling
+will not delete it.
+
+The ledger lives in the git **common dir** (`preview-workers.json` next to the
+main repo's `.git`), so every worktree on the machine shares one copy, it is
+never committed, and concurrent branches never conflict over it. A preview
+created on another machine is simply absent and will not be auto-cleaned — the
+ledger can only ever be too conservative, which is the correct way to be wrong.
+
+**If you need to remove something the ledger does not know about, do it by hand
+and say so** — do not "fix" the guard:
+
+```bash
+npx wrangler delete --name <worker>
+```
 
 ## Changelog discipline (MANDATORY)
 
