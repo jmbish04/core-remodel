@@ -12,20 +12,47 @@
  * local fallback, so every authed route 500s under `wrangler dev`. Local runs
  * therefore cannot verify an API at all — QC targets the deployed worker.
  *
- * Base URL precedence: --base <url>  →  $BASE_URL  →  WORKER_BASE default.
+ * Base URL precedence:
+ *   --base <url>  →  --preview  →  $BASE_URL  →  WORKER_BASE (production).
+ *
+ * USE `--preview` WHILE A PR IS OPEN. The default target is PRODUCTION, which
+ * runs whatever is on `main` — so QC'ing an unmerged branch against the default
+ * silently tests code your branch hasn't shipped yet. That misreads as "my
+ * endpoint 404s / my column is missing" when the truth is simply that the
+ * branch isn't merged. `--preview` targets this branch's own preview worker
+ * (see scripts/deploy-preview.mjs), which is the only URL running your code.
  */
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 
 import { getToken } from "./tokens.mjs";
+import { previewWorkerName } from "./deploy-preview.mjs";
 
 /** Production worker origin (mirrors WORKER_URL in wrangler.jsonc). */
 export const WORKER_BASE = "https://core-remodel.hacolby.workers.dev";
 
-/** Resolve the target base URL, honoring --base and $BASE_URL. */
+/** workers.dev subdomain the previews are published under. */
+const WORKERS_DEV_SUBDOMAIN = "hacolby.workers.dev";
+
+/** This branch's preview origin, e.g. core-remodel-preview-claude-foo.…dev. */
+export function previewBase(branch) {
+  const b =
+    branch ||
+    process.env.WORKERS_CI_BRANCH ||
+    process.env.GITHUB_HEAD_REF ||
+    (spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], { encoding: "utf8" })
+      .stdout || "").trim();
+  if (!b) throw new Error("Could not determine the branch for --preview.");
+  return `https://${previewWorkerName(b)}.${WORKERS_DEV_SUBDOMAIN}`;
+}
+
+/** Resolve the target base URL, honoring --base, --preview and $BASE_URL. */
 export function resolveBase(argv = process.argv) {
   const i = argv.indexOf("--base");
   const fromFlag = i !== -1 ? argv[i + 1] : null;
-  return (fromFlag || process.env.BASE_URL || WORKER_BASE).replace(/\/+$/, "");
+  if (fromFlag) return fromFlag.replace(/\/+$/, "");
+  if (argv.includes("--preview")) return previewBase().replace(/\/+$/, "");
+  return (process.env.BASE_URL || WORKER_BASE).replace(/\/+$/, "");
 }
 
 /**
