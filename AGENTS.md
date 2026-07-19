@@ -319,6 +319,13 @@ After the PR is open and conflict-free:
    *why* it does not apply. Never blanket-accept and never blanket-ignore.
 3. **Patch the PR** with the fixes, push, let CI go green.
 4. **Clear any conflicts**, then **merge**.
+5. **Delete your preview worker**: `pnpm run preview:delete`, run from the branch's
+   worktree (it derives the name from the current branch). One preview worker is
+   created per branch and nothing reaps them.
+
+> A branch build going GREEN is not a good sign here — it means the build deployed
+> your branch to **production**. See "Deploy topology & previews" below before you
+> act on any CI result.
 
 ### 3. Migrations — always apply to remote when the PR changes schema
 
@@ -371,103 +378,86 @@ branch against the default and you are testing code your branch has not shipped 
 it reads as "my endpoint 404s" or "my column is missing" when the real answer is
 "not merged yet". See the deploy topology below.
 
-## Deploy topology & per-branch previews (READ BEFORE VERIFYING ANYTHING)
+## Deploy topology & previews (READ BEFORE VERIFYING ANYTHING)
 
-Cloudflare Workers Builds is connected to this repo with **two triggers**:
+Cloudflare Workers Builds is connected to this repo with two triggers:
 
-| Trigger | Branches | Deploy command | Target |
-|---|---|---|---|
-| Deploy default branch | `main` | `pnpm run deploy` | **production** — `core-remodel.hacolby.workers.dev` |
-| Preview non-production branches | everything except `main` | `pnpm run build && … node scripts/deploy-preview.mjs` | **that branch's preview worker** |
+| Trigger | Branches | Target |
+|---|---|---|
+| Deploy default branch | `main` | **production** — `core-remodel.hacolby.workers.dev` |
+| Preview non-production branches | everything except `main` | **also production** — see below |
 
-So a branch push should never touch production. **For a long time it did**, and
-the cause is worth knowing because it is invisible from the deploy command:
+### CI cannot deploy anywhere except production. Do not try.
 
-> **Workers Builds injects the connected worker's script name into the build
-> environment, and that OVERRIDES the `name` in a config passed via `-c`.**
+**Workers Builds forces every deploy to the connected worker (`core-remodel`).**
+It injects that script name into the build environment and it overrides both:
 
-`deploy-preview.mjs` wrote `.wrangler-preview.json` with
-`name: core-remodel-preview`, logged that it was deploying the preview, and then
-wrangler reported `Uploaded core-remodel` — production. Every branch build
-silently redeployed prod, which is why the shared preview URL stayed frozen for
-weeks while prod kept changing under whoever pushed last. The fix is to pass
-`--name` explicitly on the CLI, where it outranks the injected value. **Do not
-remove that flag.**
+- the `name` field in a config passed with `-c`, and
+- an explicit `--name` flag on the wrangler CLI.
 
-Once that is in place: pushing a branch does NOT deploy to production; only
-merging to `main` does. If you push a branch and then check
-`core-remodel.hacolby.workers.dev`, you are looking at `main` — not your work.
-This is the single most common way a verification step produces a wrong
-conclusion here.
-
-### One preview worker per branch
-
-`scripts/deploy-preview.mjs` deploys to `core-remodel-preview-<branch-slug>`:
+Both were tried and both lost. The build log shows the script announcing one
+worker and wrangler uploading another:
 
 ```
-https://core-remodel-preview-<branch-slug>.hacolby.workers.dev
+▶ Deploying preview worker "core-remodel-preview-claude-per-branch-previews"…
+✘ [ERROR] A request to the Cloudflare API
+          (/accounts/…/workers/scripts/core-remodel) failed.
 ```
 
-It used to be a single shared `core-remodel-preview` slot, which meant
-last-push-wins between concurrent sessions — your preview silently became
-someone else's branch. Per-branch workers remove that race. Each one gets:
+Consequences you must internalise:
 
-- the **same** D1 / R2 / KV / Vectorize / AI / secret bindings (shared by id),
-- its **own** Durable Object namespaces — so a branch's DO migration tag can no
-  longer desync production's,
-- its **own** Workflow instances (workflow names are ACCOUNT-scoped, so they are
-  suffixed per branch — an unsuffixed name would hijack prod's bindings),
-- **no crons and no routes** — otherwise scheduled jobs double-run against the
-  shared D1.
+1. **A branch build deploying successfully means it overwrote PRODUCTION.**
+   Not a preview. Production, with unreviewed branch code.
+2. **A branch build FAILING is often the only thing protecting production.** The
+   common failure is `10074 — Cannot apply new-sqlite-class migration to class
+   'RenovationAgent' that is already depended on by existing Durable Objects`,
+   which fires because the branch's DO migration tag collides with production's.
+3. Do **not** "fix" that 10074 by bumping the DO migration tag to make the
+   branch build pass. That does not repair anything — it removes the last guard
+   and ships your branch to production.
 
-Get your preview URL: the build log prints it, or compute it locally with
-`node -e "import('./scripts/deploy-preview.mjs').then(m=>console.log(m.previewWorkerName('$(git rev-parse --abbrev-ref HEAD)')))"`.
+Cloudflare's own preview URLs are not an escape hatch either:
+[preview URLs are not generated for Workers that implement a Durable Object](https://developers.cloudflare.com/workers/configuration/previews/#limitations),
+and this Worker exports twelve. `wrangler versions upload` therefore yields a
+safe version with **no viewable URL**. (`previews_enabled` is also unavailable on
+this account — API returns `12044` — but the DO limitation is the binding one.)
+Third-party "Workers preview" GitHub Actions do not help: the commonly-suggested
+one (`shidil/cloudflare-workers-preview`) was evaluated and rejected — abandoned
+March 2022, Node 12 runtime GitHub no longer supports, wants your Cloudflare API
+token, and it deploys a separate named worker anyway, which is what we do below.
 
-**Previews share production's D1.** A branch with a new migration still needs
-`pnpm run migrate:remote` before its pages work — migrations never ride a build,
-preview or production. Keep migrations additive so the shared DB stays usable by
-every other branch's preview at once.
+### Previews are AGENT-OWNED: create one, use it, delete it
 
-Preview workers accumulate — one per branch, and nothing reaps them. They are
-inert (no crons, no routes, and they share prod's bindings rather than owning
-anything), so this is housekeeping rather than a risk. Delete one by hand when a
-branch is done:
+Because CI cannot do it, **you** deploy your own preview from your session. This
+works — the override only applies inside a Workers Builds trigger.
 
 ```bash
-npx wrangler delete --name core-remodel-preview-<branch-slug>
+pnpm run deploy:preview     # deploys core-remodel-preview-<branch-slug>, prints the URL
+pnpm run test:pr 154 -- --preview   # QC against YOUR branch, not main
+pnpm run preview:delete     # tear it down — do this when the PR merges
 ```
 
-There is deliberately no automated reaper: `wrangler` has no command that lists
-an account's workers, and the REST API needs a token scope this repo's
-`CLOUDFLARE_API_TOKEN` does not carry. Not worth a credential hunt to delete
-something that costs nothing to leave running.
+The preview worker gets the **same** D1 / R2 / KV / Vectorize / AI / secret
+bindings (shared by id) but its **own** Durable Object namespaces — which is why
+it sidesteps the 10074 collision entirely — and its own Workflow instances
+(workflow names are ACCOUNT-scoped, so they are suffixed per branch; an
+unsuffixed name would hijack production's bindings). Crons and routes are
+stripped, so scheduled jobs cannot double-run against the shared D1.
 
-### Why a named worker and not Cloudflare's own preview URLs
+**Delete the preview when your PR merges.** It is one worker per branch and
+nothing reaps them. `pnpm run preview:delete` derives the name from the current
+branch, so run it from the branch's worktree before you tear the worktree down.
+Deleting is safe: the worker owns no data — its bindings are shared by id with
+production — so only its own DO namespaces go with it.
 
-**Cloudflare cannot generate preview URLs for this Worker, and never will while
-it uses Durable Objects.** From the
-[preview URLs limitations](https://developers.cloudflare.com/workers/configuration/previews/#limitations):
+**Previews share production's D1.** A branch with a new migration still needs
+`pnpm run migrate:remote` before its pages work, and migrations must stay
+additive so every other branch's preview keeps working against the same DB.
 
-> Preview URLs are not generated for Workers that implement a Durable Object.
-
-`core-remodel` exports twelve. So `wrangler versions upload` gives you a safe
-uploaded version with **no viewable URL** — which is useless for verifying a
-branch. Deploying a separate named worker is the only mechanism that yields a
-URL you can actually open. (Separately, `previews_enabled` also can't be turned
-on here — the API returns `12044: This account does not have access to Workers
-Previews` — but the Durable Object limitation is the binding one.)
-
-Do not re-litigate this. Specifically:
-
-- Do **not** switch `deploy-preview.mjs` to `wrangler versions upload`.
-- Do **not** adopt a third-party "Cloudflare Workers preview" GitHub Action.
-  The commonly-suggested one (`shidil/cloudflare-workers-preview`) was evaluated
-  and rejected: last commit **March 2022**, a **Node 12** action runtime that
-  GitHub no longer supports, and it wants your Cloudflare API token as a repo
-  secret. It also deploys a separate named worker anyway — the same idea as
-  `deploy-preview.mjs`, keyed on PR number instead of branch, and unmaintained.
-- Workers Builds already deploys every branch for you. A GitHub Action would
-  duplicate that, not replace it.
+**Never point QC at production while your PR is open.** `scripts/config.mjs`
+defaults to production, which runs `main`; QC'ing an unmerged branch against it
+tests code your branch has not shipped, and reads as "my endpoint 404s" when the
+truth is "not merged yet". Use `--preview`.
 
 ## Changelog discipline (MANDATORY)
 

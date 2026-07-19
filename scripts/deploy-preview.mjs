@@ -99,12 +99,25 @@ if (isEntryPoint) {
   }
   if (branch === "main" || branch === "HEAD") {
     console.error(
-      `Refusing to deploy a preview for "${branch}" — main ships to production via \`pnpm run deploy\`.`,
+      `Refusing to touch a preview for "${branch}" — main ships to production via \`pnpm run deploy\`.`,
     );
     process.exit(1);
   }
 
   const PREVIEW_NAME = previewWorkerName(branch);
+
+  // `--delete` tears this branch's preview down. Run it when the PR merges;
+  // the worker owns nothing (bindings are shared by id with production), so
+  // only its own Durable Object namespaces go with it.
+  if (process.argv.includes("--delete")) {
+    console.log(`\n▶ Deleting preview worker "${PREVIEW_NAME}"…\n`);
+    const del = spawnSync(
+      "npx",
+      ["wrangler@latest", "delete", "--name", PREVIEW_NAME],
+      { stdio: "inherit" },
+    );
+    process.exit(del.status ?? 0);
+  }
 
   /**
    * Strip JSONC comments without corrupting string contents (e.g. "https://…").
