@@ -67,6 +67,7 @@ import {
   replaceStoreLinks,
   type StoreLinkInput,
 } from "@backend/utils/showroom-links";
+import { assessIntakeQuality } from "@backend/utils/showroom-quality";
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { getAgentByName } from "agents";
 import { eq, desc, asc, and, like, inArray, ne, sql } from "drizzle-orm";
@@ -1721,6 +1722,31 @@ showroomStoresRouter.post("/", async (c) => {
     await replaceStoreLinks(db, inserted.id, links as StoreLinkInput[]);
   }
 
+  // ── Data-quality guard ───────────────────────────────────────────────────
+  // Audited 2026-07-16 across 146 prod stores: 86 had ZERO categories, 78 no
+  // logo, and 4 carried a region ("Bay Area, CA") where a street address
+  // belongs. None of it was caught here, because `locationAddress` is
+  // `z.string().optional().nullable()` and `categoryIds` defaults to `[]` —
+  // every one of those payloads parsed clean.
+  //
+  // WARN, do not block: showrooms get added from a phone mid-visit and a store
+  // with a fuzzy address beats no store. Warnings ride back on the 201 so the UI
+  // can surface them, and are logged so the gap is visible without re-auditing
+  // the whole table.
+  const qualityWarnings = assessIntakeQuality({
+    name: storeValues.name,
+    locationAddress: storeValues.locationAddress,
+    categoryIds,
+    links: links as Array<{ url: string; type: string }> | null,
+    websiteUrl,
+  });
+  if (qualityWarnings.length > 0) {
+    console.warn(
+      `[showroom-stores] intake quality store=${inserted.id} "${inserted.name}": ` +
+        qualityWarnings.map((w) => w.code).join(", "),
+    );
+  }
+
   // Fire the full background enrichment pipeline — AI research, favicon +
   // website scrape, the Places-photo → CF Images pipeline, and brand
   // create/map — via the shared onboarding service so this matches exactly what
@@ -1741,7 +1767,14 @@ showroomStoresRouter.post("/", async (c) => {
     (p) => c.executionCtx.waitUntil(p),
   );
 
-  return c.json({ store: inserted }, 201);
+  // Warnings ride on the SUCCESS response — the store is created either way; the
+  // caller just learns what is thin about it.
+  return c.json(
+    qualityWarnings.length > 0
+      ? { store: inserted, warnings: qualityWarnings }
+      : { store: inserted },
+    201,
+  );
 });
 
 /**

@@ -51,7 +51,11 @@
     "test:scout-smoke": "node scripts/tests/run_scout_smoke.mjs",
     "test:links": "node scripts/tests/test_link_classification.mjs",
     "test:kick": "node scripts/tests/test_scrape_kick_guard.mjs",
-    "py:batch-ai-photo-edits": "proofs/tight/jason_20260615/upper_level/kitchen/ai_renders/.venv/bin/python scripts/batch_image_edit.py"
+    "py:batch-ai-photo-edits": "proofs/tight/jason_20260615/upper_level/kitchen/ai_renders/.venv/bin/python scripts/batch_image_edit.py",
+    "test:cats": "node scripts/tests/test_showroom_categories.mjs",
+    "test:quality": "node scripts/tests/test_showroom_quality.mjs",
+    "showroom:audit": "node scripts/showroom-audit.mjs",
+    "showroom:backfill": "node scripts/showroom-backfill.mjs"
   },
   "dependencies": {
     "@a2a-js/sdk": "^0.3.13",
