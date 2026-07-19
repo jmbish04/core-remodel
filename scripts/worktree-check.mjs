@@ -16,6 +16,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { basename } from "node:path";
 
 const git = (...args) => {
   const r = spawnSync("git", args, { encoding: "utf8" });
@@ -38,7 +39,7 @@ const lastCommit = git("log", "-1", "--format=%cr") ?? "unknown";
 const dirty = (git("status", "--porcelain") ?? "").split("\n").filter(Boolean).length;
 
 const lines = [
-  `worktree: ${process.cwd().split("/").slice(-1)[0]}  branch: ${branch}`,
+  `worktree: ${basename(process.cwd())}  branch: ${branch}`,
   `vs origin/main: ${behind} behind, ${ahead} ahead   last commit: ${lastCommit}` +
     (dirty ? `   uncommitted: ${dirty} file(s)` : ""),
 ];
