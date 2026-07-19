@@ -115,6 +115,14 @@ happened, not a precaution. `pnpm run test:scout-smoke` reproduces the harness
 | Planned a route, described it in prose, never published it | Checklist named `publish_candidates` only, so the literal check passed. | `plan_drive_route` and `publish_route` declared a PAIR; checklist covers each publish tool. |
 | Excluded a showroom as "Known in directory" that the dedupe tool never returned | Fabricated exclusion reason. | Exclusion reasons must match tool output; only claim "already in directory" on `known: true`. |
 | Prose restated every published field, crowding out remaining tool calls | No length guidance. | Reply capped ~150–250 words; the app renders the detail. |
+| Routed a showroom to 8:24 AM that it had itself published as **closed Saturdays** | `plan_drive_route` only knows the hours it is handed. | `publish_route` cross-checks every stop against the hours on its own published candidate and rejects the route. |
+| A candidate lost to "a technical error with the `showroomStoreId` field" | Model asked to hand-carry an internal DB id. | Field removed from the model-facing schema; `knownInDirectory` is what the rule needs. |
+| `detours: 0` on every run | The model was asked to *invent* detours with no idea what was near the path. | Planner computes cheapest-insertion cost for unrouted stops; `publish_route` rejects a route ignoring a cheap, open option. |
+| Budget drifted to 27–30 searches, then published nothing | A prose budget is a request, not a limit. | Enforced in `web_search` (12, env-configurable); past the cap it refuses and tells the model to publish. Results also carry a standing publish reminder — the system-prompt rule faded by the time it mattered. |
+
+**The pattern worth remembering:** every durable fix moved a guarantee from the
+prompt into code. Instruction tuning traded one failure for another; enforcement
+in the tool layer held. Reach for a guardrail before another paragraph.
 
 Verified working end to end: per-showroom publish, honest exclusions, real
 traffic-aware ETAs from the live Routes API, opening statements, call-aheads,
@@ -134,8 +142,13 @@ and a McDonald's food stop inserted on-route.
   (`find_known_showrooms` against the real directory, Maps usage logging) are
   type- and bundle-verified only. Deploying this branch would advance the
   production DO migration tag (v15) and block `main` — merge, then deploy.
-- **Detours are not being generated.** The schema and instructions support them;
-  live runs returned `detours: 0` every time. Food stops and call-aheads do fire.
+- **Detour publishing is not yet confirmed end to end.** The computation is done
+  and unit-tested, and `publish_route` rejects a route that ignores a cheap open
+  option — but no live run has yet produced a genuinely cheap detour *and* shown
+  the model populating `route.detours` from it. Runs so far either had only
+  expensive options (+19m, +51m, +684m — correctly skipped) or cheap ones that
+  the model dropped before the guardrail existed. Needs one more live run with a
+  wide time window to confirm the loop closes.
 - **`gemini-2.5-flash` is the weak link** for structured output. If publish
   reliability regresses, try a stronger model before enlarging any schema.
 - **No frontend.** v1 is headless by design.
