@@ -94,6 +94,24 @@ const MAX_PHOTOS = 6;
 /** Max extracted specs persisted per run. */
 const MAX_SPECS = 12;
 
+/**
+ * Output budget for the intel extraction.
+ *
+ * The call previously set none. Truncation turned out NOT to be the cause of
+ * the empty extractions — a live re-run proved the JSON parses fine and the
+ * model simply returns null for every nullable field — but a 15-field object
+ * carrying three price rationales, a sales-intel paragraph and up to 12 specs
+ * still deserves an explicit budget. 4096 covers a full response.
+ */
+const EXTRACT_MAX_TOKENS = 4096;
+
+/**
+ * Report size above which a wholly empty extraction is treated as a failure
+ * rather than a genuinely sparse product. Real reports run 15-25 KB; anything
+ * this size that yields zero fields did not get extracted.
+ */
+const MIN_REPORT_FOR_INTEL = 2_000;
+
 /** Deep-research result shape (per the deep-research engine contract). */
 type DeepResearchResult = Awaited<ReturnType<typeof runDeepResearch>>;
 
@@ -178,6 +196,11 @@ const INTEL_JSON_SCHEMA = {
       },
     },
   },
+  // NOTE: marking every key `required` does NOT fix the all-null extraction —
+  // tried and measured on 2026-07-18. `required` forces the key to be emitted,
+  // not a non-null value, so `"aiRetailPrice": null` still satisfies both
+  // `required` and the `["string","null"]` union. kimi-k2.6 returns nulls for
+  // every nullable field regardless. Left as-is pending a model/prompt fix.
   required: ["caRegulatoryFlag", "specs"],
 } as const;
 
@@ -624,6 +647,7 @@ ${findingsPreview}`;
         type: "json_schema",
         json_schema: INTEL_JSON_SCHEMA,
       },
+      max_tokens: EXTRACT_MAX_TOKENS,
       gateway: { id: env.AI_GATEWAY_ID },
     } as Parameters<typeof env.AI.run>[1],
   )) as { response?: unknown } & Partial<IntelExtraction>;
@@ -641,7 +665,46 @@ ${findingsPreview}`;
     throw new Error("product-research: intel extraction returned no object");
   }
 
-  return normalizeIntel(source);
+  const intel = normalizeIntel(source);
+
+  // A substantial report that yields nothing at all is an extraction failure,
+  // not a sparse product. Only `caRegulatoryFlag` and `specs` are schema-
+  // required, so a model that ignores the task still satisfies the schema and
+  // returns exactly this — which is how a 21 KB report persisted an entirely
+  // empty intel row while the step reported success. Throw so step.do() retries
+  // rather than writing the blank.
+  if (isEmptyExtraction(intel) && research.report.length >= MIN_REPORT_FOR_INTEL) {
+    throw new Error(
+      `product-research: intel extraction returned no fields from a ` +
+        `${research.report.length}-char report (all null, ${intel.specs.length} specs)`,
+    );
+  }
+
+  return intel;
+}
+
+/**
+ * True when the extraction carries no signal whatsoever — every string field
+ * null and no specs. `caRegulatoryFlag` is excluded deliberately: it defaults
+ * to `false`, so it is indistinguishable from "not answered".
+ */
+function isEmptyExtraction(intel: IntelExtraction): boolean {
+  return (
+    intel.specs.length === 0 &&
+    intel.reviewSummary === null &&
+    intel.description === null &&
+    intel.productType === null &&
+    intel.priceRangeLow === null &&
+    intel.priceRangeHigh === null &&
+    intel.aiWholesalePrice === null &&
+    intel.aiWholesaleRationale === null &&
+    intel.aiRetailPrice === null &&
+    intel.aiRetailRationale === null &&
+    intel.aiNegotiatedPrice === null &&
+    intel.aiNegotiatedRationale === null &&
+    intel.salesIntel === null &&
+    intel.caRegulatoryNotes === null
+  );
 }
 
 /** Defensive normalization of the Workers-AI intel extraction. */

@@ -362,16 +362,22 @@ brandsRouter.openapi(
 
     const brandIds = brandRows.map((b) => b.id) as [number, ...number[]];
 
+    // D1 caps a statement at 100 bound parameters, and the unfiltered branch
+    // returns every brand — so only narrow the aggregates by id in the search
+    // branch (capped at 20 above).  Unfiltered, the grouped aggregate scans the
+    // whole table with zero bind params and is filtered in JS by the maps below.
+    const scopeToBrandIds = Boolean(search && search.length > 0);
+
     // ── Product counts — single grouped aggregate query ──────────────────────
     // SELECT brand_id, COUNT(*) AS cnt FROM showroom_store_products
-    // WHERE brand_id IN (...) GROUP BY brand_id
+    // [WHERE brand_id IN (...)] GROUP BY brand_id
     const productCountRows = await db
       .select({
         brandId: showroomStoreProducts.brandId,
         cnt: sql<number>`count(*)`.as("cnt"),
       })
       .from(showroomStoreProducts)
-      .where(inArray(showroomStoreProducts.brandId, brandIds))
+      .where(scopeToBrandIds ? inArray(showroomStoreProducts.brandId, brandIds) : undefined)
       .groupBy(showroomStoreProducts.brandId);
 
     const productCountMap = new Map<number, number>();
@@ -399,7 +405,7 @@ brandsRouter.openapi(
       })
       .from(brandTypeMappings)
       .innerJoin(brandTypesDef, eq(brandTypeMappings.typeId, brandTypesDef.id))
-      .where(inArray(brandTypeMappings.brandId, brandIds));
+      .where(scopeToBrandIds ? inArray(brandTypeMappings.brandId, brandIds) : undefined);
 
     // Build a map brandId → types[].
     const typesMap = new Map<number, { typeId: number; name: string }[]>();
