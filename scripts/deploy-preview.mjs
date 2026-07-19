@@ -33,8 +33,13 @@
  * migrations needs `pnpm run migrate:remote` (additive-only discipline) for
  * its pages to work.
  *
- * Preview workers accumulate; `pnpm run preview:cleanup` deletes the ones whose
- * branch no longer exists on origin.
+ * Preview workers accumulate; delete one by hand when its branch is done:
+ *   npx wrangler delete --name core-remodel-preview-<branch-slug>
+ *
+ * CI GOTCHA: Workers Builds injects the connected worker's script name into the
+ * build environment, which overrides `name` in the config passed via `-c`. Left
+ * unhandled, every "preview" build deployed straight to PRODUCTION. The deploy
+ * below therefore passes `--name` explicitly — see the comment there.
  */
 
 import { readFileSync, writeFileSync, rmSync } from "node:fs";
@@ -189,7 +194,13 @@ if (isEntryPoint) {
   );
   const res = spawnSync(
     "npx",
-    ["wrangler@latest", "deploy", "-c", DERIVED],
+    // `--name` is NOT redundant with the name inside DERIVED. Workers Builds
+    // injects the connected worker's script name into the build environment,
+    // which OVERRODE the config's `name` and made every "preview" build deploy
+    // straight to production (`Uploaded core-remodel`, while the script had
+    // just logged that it was deploying core-remodel-preview). The explicit
+    // CLI flag takes precedence over that injected value. Do not remove it.
+    ["wrangler@latest", "deploy", "-c", DERIVED, "--name", PREVIEW_NAME],
     { stdio: "inherit" },
   );
   rmSync(DERIVED, { force: true });

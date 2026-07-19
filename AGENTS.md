@@ -380,10 +380,25 @@ Cloudflare Workers Builds is connected to this repo with **two triggers**:
 | Deploy default branch | `main` | `pnpm run deploy` | **production** — `core-remodel.hacolby.workers.dev` |
 | Preview non-production branches | everything except `main` | `pnpm run build && … node scripts/deploy-preview.mjs` | **that branch's preview worker** |
 
-So: **pushing a branch does NOT deploy to production.** Only merging to `main`
-does. If you push a branch and then check `core-remodel.hacolby.workers.dev`,
-you are looking at `main` — not your work. This is the single most common way a
-verification step produces a wrong conclusion here.
+So a branch push should never touch production. **For a long time it did**, and
+the cause is worth knowing because it is invisible from the deploy command:
+
+> **Workers Builds injects the connected worker's script name into the build
+> environment, and that OVERRIDES the `name` in a config passed via `-c`.**
+
+`deploy-preview.mjs` wrote `.wrangler-preview.json` with
+`name: core-remodel-preview`, logged that it was deploying the preview, and then
+wrangler reported `Uploaded core-remodel` — production. Every branch build
+silently redeployed prod, which is why the shared preview URL stayed frozen for
+weeks while prod kept changing under whoever pushed last. The fix is to pass
+`--name` explicitly on the CLI, where it outranks the injected value. **Do not
+remove that flag.**
+
+Once that is in place: pushing a branch does NOT deploy to production; only
+merging to `main` does. If you push a branch and then check
+`core-remodel.hacolby.workers.dev`, you are looking at `main` — not your work.
+This is the single most common way a verification step produces a wrong
+conclusion here.
 
 ### One preview worker per branch
 
