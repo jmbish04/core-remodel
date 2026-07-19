@@ -41,6 +41,8 @@
     "deploy": "pnpm run build && cp .assetsignore dist/.assetsignore && pnpm run migrate:remote && pnpm run migrate:tesla:remote && npx wrangler@latest deploy",
     "deploy:preview": "pnpm run build && cp .assetsignore dist/.assetsignore && node scripts/deploy-preview.mjs",
     "preview:delete": "node scripts/deploy-preview.mjs --delete",
+    "preview:cleanup": "node scripts/preview-cleanup.mjs",
+    "preview:list": "node scripts/preview-list.mjs",
     "worktree:check": "node scripts/worktree-check.mjs",
     "cf-typegen": "wrangler types --include-runtime false",
     "secrets:google-photos": "node scripts/google-photos-secrets.mjs",

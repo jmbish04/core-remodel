@@ -6,12 +6,12 @@
  * version preview URLs are not served for Workers that implement Durable
  * Objects (core-remodel exports twelve), so `versions upload` gives safety but
  * no viewable URL. Deploying to a separate worker (`core-remodel-preview`)
- * gives a stable URL — https://core-remodel-preview-<branch>.<subdomain>.workers.dev —
+ * gives a stable URL — https://wcrp-<branch-slug>.<subdomain>.workers.dev —
  * with the SAME D1/R2/KV/Vectorize/AI/secrets bindings (shared by id) and its
  * own fresh Durable Object namespaces.
  *
  * The preview config is derived from wrangler.jsonc with:
- *   - `name` → core-remodel-preview-<branch-slug>
+ *   - `name` → wcrp-<branch-slug>
  *   - `triggers` (crons) REMOVED — otherwise scheduled jobs (permit sync,
  *     gmail ingestion, master tick) would run TWICE against the shared D1.
  *   - `routes` / custom domains REMOVED — workers.dev only.
@@ -20,7 +20,7 @@
  * agentic sessions, and a single shared preview slot just relocates the race
  * that used to hit production — whoever pushed last owned the URL, so "I
  * verified it on the deployed worker" was only true until the next push. The
- * worker is therefore named `core-remodel-preview-<branch-slug>` and each
+ * worker is therefore named `wcrp-<branch-slug>` and each
  * branch gets its own stable URL, its own Durable Object namespaces (so branch
  * DO migration tags can't desync prod's) and its own Workflow instances.
  *
@@ -33,8 +33,10 @@
  * migrations needs `pnpm run migrate:remote` (additive-only discipline) for
  * its pages to work.
  *
- * Preview workers accumulate; delete one by hand when its branch is done:
- *   npx wrangler delete --name core-remodel-preview-<branch-slug>
+ * Every deploy is recorded in the preview LEDGER (see preview-ledger.mjs), which
+ * is the allowlist that later authorizes deletion — cleanup will not remove a
+ * worker this tooling cannot prove it created. Tear down with
+ * `pnpm run preview:delete`; sweep orphans with `pnpm run preview:cleanup`.
  *
  * CI GOTCHA: Workers Builds injects the connected worker's script name into the
  * build environment, which overrides `name` in the config passed via `-c`. Left
@@ -46,9 +48,15 @@ import { readFileSync, writeFileSync, rmSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
+import {
+  PREFIX,
+  assertDeletable,
+  forgetPreview,
+  recordPreview,
+} from "./preview-ledger.mjs";
+
 const SOURCE = "wrangler.jsonc";
 const DERIVED = ".wrangler-preview.json";
-const PREFIX = "core-remodel-preview";
 
 /** Workers script names: [a-z0-9-], 63 chars max. */
 export function slugifyBranch(branch) {
@@ -60,7 +68,12 @@ export function slugifyBranch(branch) {
 }
 
 /**
- * `core-remodel-preview-<slug>`, capped at the 63-char script-name limit.
+ * `wcrp-<slug>` (Worker Core Remodel Preview), capped at the 63-char
+ * script-name limit.
+ *
+ * The prefix is deliberately short: `core-remodel-preview-` burned 21 of the 63
+ * characters and left only 42 for the branch, so long branch names truncated
+ * hard and two of them could collide on one worker. `wcrp-` leaves 58.
  *
  * Truncation keeps the TAIL of the slug, not the head: our branches are
  * `claude/<topic>-<hash>`, so the distinguishing part is at the end and
@@ -110,12 +123,23 @@ if (isEntryPoint) {
   // the worker owns nothing (bindings are shared by id with production), so
   // only its own Durable Object namespaces go with it.
   if (process.argv.includes("--delete")) {
+    // The ledger is the allowlist: this throws unless we recorded creating it.
+    try {
+      assertDeletable(PREVIEW_NAME);
+    } catch (err) {
+      console.error(`\n${err.message}\n`);
+      process.exit(1);
+    }
     console.log(`\n▶ Deleting preview worker "${PREVIEW_NAME}"…\n`);
     const del = spawnSync(
       "npx",
       ["wrangler@latest", "delete", "--name", PREVIEW_NAME],
       { stdio: "inherit" },
     );
+    if ((del.status ?? 0) === 0) {
+      forgetPreview(PREVIEW_NAME);
+      console.log(`\n✅ Deleted and removed from the preview ledger.\n`);
+    }
     process.exit(del.status ?? 0);
   }
 
@@ -222,6 +246,11 @@ if (isEntryPoint) {
 
   // Printed so the Workers Builds log carries the URL a reviewer (or the next
   // agent session) needs, without opening the dashboard.
-  console.log(`\n✅ Preview URL: https://${PREVIEW_NAME}.hacolby.workers.dev\n`);
+  // Record BEFORE announcing: the ledger is what authorizes the later delete,
+  // so a preview must never exist without an entry.
+  recordPreview({ worker: PREVIEW_NAME, branch });
+
+  console.log(`\n✅ Preview URL: https://${PREVIEW_NAME}.hacolby.workers.dev`);
+  console.log(`   Recorded in the preview ledger — tear down with \`pnpm run preview:delete\`.\n`);
 
 }

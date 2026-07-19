@@ -368,7 +368,8 @@ After the PR is open and conflict-free:
 4. **Clear any conflicts**, then **merge**.
 5. **Delete your preview worker**: `pnpm run preview:delete`, run from the branch's
    worktree (it derives the name from the current branch). One preview worker is
-   created per branch and nothing reaps them.
+   created per branch and nothing reaps them — then `pnpm run preview:cleanup`
+   to sweep any whose branch is already gone.
 
 > A branch build going GREEN is not a good sign here — it means the build deployed
 > your branch to **production**. See "Deploy topology & previews" below before you
@@ -503,27 +504,24 @@ once and reviewed. It is the wrong tool for ephemeral per-branch previews.
 
 ### Previews are AGENT-OWNED: create one, use it, delete it
 
-Because CI cannot do it, **you** deploy your own preview from your session. This
-works — the override only applies inside a Workers Builds trigger.
+Because CI cannot do it, **you** deploy your own preview from your session. The
+worker is named `wcrp-<branch-slug>` (Worker Core Remodel Preview).
 
 ```bash
-pnpm run deploy:preview     # deploys core-remodel-preview-<branch-slug>, prints the URL
-pnpm run test:pr 154 -- --preview   # QC against YOUR branch, not main
-pnpm run preview:delete     # tear it down — do this when the PR merges
+pnpm run deploy:preview              # deploy wcrp-<branch-slug>, print the URL
+pnpm run test:pr <n> -- --preview    # QC against YOUR branch, not main
+pnpm run preview:list                # what previews exist, per the ledger
+pnpm run preview:delete              # tear down THIS branch's preview
+pnpm run preview:cleanup             # report orphans (branch gone from origin)
+pnpm run preview:cleanup -- --apply  # delete those orphans
 ```
 
-The preview worker gets the **same** D1 / R2 / KV / Vectorize / AI / secret
-bindings (shared by id) but its **own** Durable Object namespaces — which is why
-it sidesteps the 10074 collision entirely — and its own Workflow instances
-(workflow names are ACCOUNT-scoped, so they are suffixed per branch; an
-unsuffixed name would hijack production's bindings). Crons and routes are
-stripped, so scheduled jobs cannot double-run against the shared D1.
-
-**Delete the preview when your PR merges.** It is one worker per branch and
-nothing reaps them. `pnpm run preview:delete` derives the name from the current
-branch, so run it from the branch's worktree before you tear the worktree down.
-Deleting is safe: the worker owns no data — its bindings are shared by id with
-production — so only its own DO namespaces go with it.
+The preview gets the **same** D1 / R2 / KV / Vectorize / AI / secret bindings
+(shared by id) but its **own** Durable Object namespaces — which is why it
+sidesteps the 10074 collision — and its own Workflow instances (workflow names
+are ACCOUNT-scoped, so they are suffixed per branch; an unsuffixed name would
+hijack production's bindings). Crons and routes are stripped, so scheduled jobs
+cannot double-run against the shared D1.
 
 **Previews share production's D1.** A branch with a new migration still needs
 `pnpm run migrate:remote` before its pages work, and migrations must stay
@@ -533,6 +531,44 @@ additive so every other branch's preview keeps working against the same DB.
 defaults to production, which runs `main`; QC'ing an unmerged branch against it
 tests code your branch has not shipped, and reads as "my endpoint 404s" when the
 truth is "not merged yet". Use `--preview`.
+
+#### Clean up your preview when you are done
+
+One worker per branch and nothing reaps them. **Delete yours when the PR merges**
+(step 5 of the review loop), and sweep orphans when you finish a piece of work:
+
+```bash
+pnpm run preview:delete              # from the branch's worktree, before tearing it down
+pnpm run preview:cleanup -- --apply  # anything whose branch is gone from origin
+```
+
+#### The preview ledger — why deletion is not "list and match a prefix"
+
+Every deploy records its worker in a **ledger**, and cleanup may only delete
+workers found there. The ledger is an **allowlist, not a hint**:
+
+- `assertDeletable` refuses any name that is not in the ledger, does not carry
+  the `wcrp-` prefix, or is the production worker — three independent checks.
+- Nothing is deleted without `--apply`; the default is a report.
+
+This account has **184 Workers on it**. Enumerating them and deleting whatever
+matches a pattern puts an agent one bad regex — or one coincidentally named
+worker — away from destroying something that matters. The ledger removes that
+whole class of mistake: if this tooling did not record creating it, this tooling
+will not delete it.
+
+The ledger lives in the git **common dir** (`preview-workers.json` next to the
+main repo's `.git`), so every worktree on the machine shares one copy, it is
+never committed, and concurrent branches never conflict over it. A preview
+created on another machine is simply absent and will not be auto-cleaned — the
+ledger can only ever be too conservative, which is the correct way to be wrong.
+
+**If you need to remove something the ledger does not know about, do it by hand
+and say so** — do not "fix" the guard:
+
+```bash
+npx wrangler delete --name <worker>
+```
 
 ## Changelog discipline (MANDATORY)
 
