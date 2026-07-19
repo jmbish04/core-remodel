@@ -20,21 +20,40 @@ export interface DiagramCard {
 }
 
 /**
- * What was actually run to prove the change works (AGENTS.md § Changelog
- * discipline). `output` is pasted verbatim from the run — never paraphrased —
- * so a reader can answer "is this actually live and actually verified?" without
- * leaving the page. `migrationsApplied` records remote-DB state per tag, since
- * migrations do NOT ride the branch build.
+ * One migration's REMOTE state. The deploy topology makes this the question a
+ * reader actually has: every branch push builds and deploys the worker, but
+ * migrations do NOT ride the build. So code can be live in production while its
+ * table does not exist — and the endpoints that query it return 500. "Merged"
+ * therefore does not imply "applied"; this says which it is.
  */
-export interface VerificationBlock {
-  /** Repo path of the QC script, e.g. "scripts/qc/pr_152.mjs". */
-  script: string;
-  /** The command that was run, e.g. "pnpm run test:pr 152". */
+export interface MigrationStatus {
+  tag: string;
+  /** Whether `pnpm run migrate:remote` has actually applied this to the remote DB. */
+  appliedRemote: boolean;
+  /** How that was confirmed, or what is still outstanding. */
+  note?: string;
+}
+
+/**
+ * What was actually run to verify the change — never a paraphrase of it.
+ *
+ * `output` is pasted verbatim from the QC run. A summarized or reconstructed
+ * result is worse than none: it reads as evidence while carrying none, and a
+ * reader has no way to tell the difference.
+ */
+export interface Verification {
+  /** Path to the QC harness, e.g. "scripts/qc/pr_162.mjs". */
+  qcScript: string;
+  /** The exact command that produced `output`, e.g. "pnpm run test:pr 162". */
   command: string;
-  /** Real stdout from that command. */
+  /** Representative source from the QC script, so the assertions are visible. */
+  source?: string;
+  /** REAL output of `command`, pasted verbatim. */
   output: string;
-  /** Per-migration remote-apply state; empty when the PR changed no schema. */
-  migrationsApplied?: { tag: string; appliedToRemote: boolean }[];
+  /** When it ran (YYYY-MM-DD), so stale evidence is recognizable as stale. */
+  ranAt?: string;
+  /** Remote state of each migration this change introduced. */
+  migrations?: MigrationStatus[];
 }
 
 export interface PhaseDetail {
@@ -46,7 +65,18 @@ export interface PhaseDetail {
   migrations: { tag: string; sql: string }[];
   code: CodeCard[];
   diagrams: DiagramCard[];
-  verification?: VerificationBlock;
+
+  // ── Provenance + evidence (optional: pre-existing entries predate these) ────
+  // Stored inside `changelog_entries.detail_json`, so extending this type needs
+  // no migration.
+
+  /** Git branch the work landed on. Falls back to the entry's own `branch`. */
+  branch?: string;
+  /** PR number. Falls back to the `changelog_branches` row for this branch. */
+  prNumber?: number;
+  prUrl?: string;
+  /** What was run to verify this, and what it printed. */
+  verification?: Verification;
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
@@ -97,7 +127,7 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
       },
     ],
     verification: {
-      script: "scripts/qc/pr_154.mjs",
+      qcScript: "scripts/qc/pr_154.mjs",
       command: "pnpm run test:pr 154",
       output: `PR #154 QC → https://core-remodel.hacolby.workers.dev
 
@@ -123,7 +153,7 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
   ✓ directory count is back to where it started
 
 16 passed, 0 failed`,
-      migrationsApplied: [{ tag: "0113_dapper_white_queen", appliedToRemote: true }],
+      migrations: [{ tag: "0113_dapper_white_queen", appliedRemote: true }],
     },
     code: [
       {
@@ -215,7 +245,7 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
     ],
     migrations: [],
     verification: {
-      script: "scripts/qc/pr_153.mjs",
+      qcScript: "scripts/qc/pr_153.mjs",
       command: "pnpm run test:pr 153",
       output: `PR #153 QC → https://core-remodel.hacolby.workers.dev
 
@@ -304,6 +334,222 @@ export const TOUCH_DIALOG_CLASS =
   HoursModal --> EditAddr["Edit address"]`,
       },
     ],
+  },
+  "feature-proposals": {
+    slug: "feature-proposals",
+    branch: "claude/feature-proposals-api-tools-ea0c5c",
+    prNumber: 152,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/152",
+    problem:
+      "An idea gets worked out in conversation with an AI model — often a non-coding chat, mid-discussion. Weeks later a brand-new coding agent picks it up with zero shared memory. What survives that gap is a summary, and a summary is exactly what loses the alternatives that were considered and rejected, the 'no, because…', the constraints discovered halfway through, and the specific phrasing of a requirement that a paraphrase quietly changes. The coding agent rebuilds a lossy version of the plan from it — the telephone game — and the divergence only surfaces once the wrong thing is built. Second gap: there was no way to submit an idea AS a proposal from a non-coding tool at all; the changelog only documents work after the fact.",
+    approach:
+      "Let the whole conversation travel with the proposal. A proposal bundle keyed by changelog slug carries the PRD, design brief, and PROMPT in D1 (they get rendered), while the RAW transcript goes to R2 under feature-context/<slug>.md with only its key, size, and SHA-256 in the row. Prod D1 measured 28.3MB during this work; a ~450KB dump per proposal is a real fraction of that, and SQLite reads whole rows, so inlining it would make even `SELECT slug, status` drag every byte off disk. Nothing summarizes the transcript on the way in — the unprocessed text IS the value, so both the MCP tool description and the CLI header say so explicitly, because 'helpfully' condensing it is the one change that would quietly destroy the feature. Three entry points (MCP tool, CLI script, HTTP) all route through one service module, so the R2 + hash + upsert dance exists once. TASKS map onto the EXISTING plan_tasks rather than a second task table, and a re-submit deliberately does not reset task status — progress belongs to whoever is doing the work.",
+    apiChanges: [
+      "POST /api/changelog/proposals — upsert by slug; context streamed to R2, hashed, size recorded; optionally seeds plans + plan_tasks",
+      "GET /api/changelog/proposals — list, ?status= filter",
+      "GET /api/changelog/proposals/:slug — bundle metadata + live plan tasks (never the raw blob)",
+      "GET /api/changelog/proposals/:slug/context — streams the R2 object",
+      "MCP: submit_feature_proposal, get_feature_proposal, list_feature_proposals (new `changelog` category)",
+      "All four routes gated behind requireAccessAuth; the rest of /api/changelog stays open",
+    ],
+    filesTouched: [
+      "src/backend/services/changelog-proposals.ts",
+      "src/backend/api/routes/changelog.ts",
+      "src/backend/api/index.ts",
+      "src/backend/mcp/tools/changelog/submit_feature_proposal.ts",
+      "src/backend/mcp/tools/changelog/get_feature_proposal.ts",
+      "src/backend/mcp/tools/changelog/list_feature_proposals.ts",
+      "src/backend/mcp/tools/changelog/_shared.ts",
+      "src/backend/mcp/tools/changelog/index.ts",
+      "src/backend/mcp/tools/index.ts",
+      "src/backend/mcp/types.ts",
+      "src/frontend/components/changelog/ProposalBundle.tsx",
+      "src/frontend/components/changelog/ChangelogEntryView.astro",
+      "src/frontend/pages/admin/changelog/preview/[slug].astro",
+      "src/frontend/data/changelog-detail.ts",
+      "scripts/changelog/submit-proposal.mjs",
+      "scripts/changelog/get-proposal.mjs",
+      "scripts/changelog/list-proposals.mjs",
+      "scripts/qc/pr_152.mjs",
+    ],
+    migrations: [
+      {
+        tag: "0112_careful_gambit",
+        sql: `CREATE TABLE \`changelog_proposals\` (
+	\`id\` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+	\`slug\` text NOT NULL,
+	\`plan_slug\` text,
+	\`branch\` text,
+	\`pr_number\` integer,
+	\`prd_markdown\` text,
+	\`design_brief_markdown\` text,
+	\`prompt_markdown\` text,
+	\`context_r2_key\` text,
+	\`context_bytes\` integer,
+	\`context_sha256\` text,
+	\`context_coverage_note\` text,
+	\`source_kind\` text DEFAULT 'ai_chat' NOT NULL,
+	\`source_model\` text,
+	\`status\` text DEFAULT 'proposed' NOT NULL,
+	\`created_at\` integer DEFAULT (unixepoch()) NOT NULL,
+	\`updated_at\` integer DEFAULT (unixepoch()) NOT NULL
+);
+CREATE UNIQUE INDEX \`changelog_proposals_slug_unique\` ON \`changelog_proposals\` (\`slug\`);
+CREATE INDEX \`changelog_proposals_plan_idx\` ON \`changelog_proposals\` (\`plan_slug\`);
+CREATE INDEX \`changelog_proposals_status_idx\` ON \`changelog_proposals\` (\`status\`,\`created_at\`);
+CREATE INDEX \`changelog_proposals_branch_idx\` ON \`changelog_proposals\` (\`branch\`);`,
+      },
+    ],
+    code: [
+      {
+        title: "Hash before writing — a re-submitted transcript skips the R2 put",
+        lang: "ts",
+        code: `// Hash first and compare: a re-submitted conversation is the common case (an
+// agent dumps the whole session again after a few more turns), and re-putting
+// an identical 450KB blob is pure waste.
+const context = input.context;
+if (context != null && context.length > 0) {
+  const sha = await sha256Hex(context);
+  const key = contextKeyFor(slug);
+  if (existing?.contextSha256 === sha && existing.contextR2Key === key) {
+    contextUnchanged = true;
+  } else {
+    await env.ARTIFACTS_BUCKET.put(key, context, {
+      httpMetadata: { contentType: "text/markdown; charset=utf-8" },
+      customMetadata: { slug, sha256: sha },
+    });
+  }
+  contextR2Key = key;
+  contextBytes = new TextEncoder().encode(context).length;
+  contextSha256 = sha;
+}`,
+      },
+      {
+        title: "Route order is load-bearing — /proposals must beat /:slug",
+        lang: "ts",
+        code: `// Registered BEFORE \`GET /:slug\` on purpose: Hono matches in registration
+// order, so a \`/:slug\` handler declared first would swallow \`GET /proposals\`.
+// Before the fix, GET /api/changelog/proposals returned the entry handler's
+// {"error":"Not found"} — a 404 that looks like a missing deploy, not a
+// shadowed route.
+changelogRouter.get("/proposals", ...);
+changelogRouter.post("/proposals", ...);
+changelogRouter.get("/proposals/:slug", ...);
+changelogRouter.get("/proposals/:slug/context", ...);
+changelogRouter.get("/:slug", ...);   // <- pre-existing, must stay last`,
+      },
+      {
+        title: "A re-submit must not reset progress someone already made",
+        lang: "ts",
+        code: `.onConflictDoUpdate({
+  // Re-submitting a proposal must not reset progress a coding session
+  // already made, so \`status\` is intentionally NOT in the update set —
+  // plan_tasks.status is owned by whoever is doing the work.
+  target: [planTasks.planSlug, planTasks.taskKey],
+  set: { workstream, phase, title, description, targetRoute,
+         changeType, dependsOn, sortOrder, updatedAt: new Date() },
+})`,
+      },
+      {
+        title: "An absent coverage note is itself the risk — render it as one",
+        lang: "tsx",
+        code: `<div className={cn(
+  "rounded-lg px-3 py-2 text-xs leading-relaxed ring-1",
+  context.coverageNote
+    ? "bg-amber-500/8 text-amber-200/90 ring-amber-500/25"
+    : "bg-rose-500/8 text-rose-200/90 ring-rose-500/25",
+)}>
+  <span className="font-semibold uppercase tracking-wide">Coverage — </span>
+  {context.coverageNote ??
+    "Not recorded. Treat this transcript's completeness as UNKNOWN: it may stop at a compaction boundary or omit earlier discussion."}
+</div>`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "One service, three entry points — and the D1/R2 split",
+        code: `flowchart TD
+  chat["Non-coding AI chat"] -->|MCP| tool["submit_feature_proposal"]
+  agent["Coding agent (no MCP)"] -->|shell| cli["scripts/changelog/*.mjs"]
+  cli -->|HTTP| api["POST /api/changelog/proposals"]
+  tool --> svc["services/changelog-proposals.ts<br/>(the only implementation)"]
+  api --> svc
+  svc -->|"PRD / brief / PROMPT<br/>(rendered, so queryable)"| d1["D1 changelog_proposals"]
+  svc -->|"RAW transcript ~450KB<br/>verbatim, never summarized"| r2["R2 feature-context/&lt;slug&gt;.md"]
+  svc -->|"TASKS[]"| tasks["D1 plan_tasks<br/>(existing table)"]
+  d1 --> page["/admin/changelog/preview/:slug"]
+  r2 -.->|"fetched only on click"| page
+  tasks -->|"live status"| page`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_152.mjs",
+      command:
+        "pnpm run test:pr 152 -- --sweep --base https://core-remodel-preview.hacolby.workers.dev",
+      ranAt: "2026-07-18",
+      source: `// The sweep is where the interesting failures are. A 2KB fixture exercises
+// none of what actually makes this feature risky — the payload size on the
+// write path, the R2 round-trip, and the hash-based dedupe.
+const big = makeTranscript(450_000);
+const bigPost = await client.post("/api/changelog/proposals", {
+  slug: \`\${SLUG}-large\`, context: big, ...
+});
+checks.ok("a ~450KB transcript is accepted",
+  bigPost.status === 200 || bigPost.status === 201, \`got \${bigPost.status}\`);
+
+const bigCtx = await fetch(\`\${resolveBase()}/api/changelog/proposals/\${SLUG}-large/context\`,
+  { headers: { cookie: accessCookie() } });
+checks.ok("the large transcript streams back intact", (await bigCtx.text()) === big);`,
+      output: `PR #152 QC → https://core-remodel-preview.hacolby.workers.dev
+
+  ✓ target reachable (https://core-remodel-preview.hacolby.workers.dev)
+  ✓ unauthenticated GET /api/changelog/proposals is rejected
+  ✓ unauthenticated POST /api/changelog/proposals is rejected
+  ✓ GET /api/changelog/proposals → 200 (migration 0112 applied)
+  ✓ regression: GET /api/changelog/:slug still resolves an entry
+  ✓ regression: GET /api/changelog still lists branches
+  ✓ POST /api/changelog/proposals accepts a full bundle
+  ✓ upsert reports the tasks it seeded
+  ✓ upsert stored a context hash
+  ✓ GET /api/changelog/proposals/:slug → 200
+  ✓ bundle carries the markdown artifacts
+  ✓ bundle NEVER inlines the raw transcript
+  ✓ coverage note round-trips (it is what stops a reader assuming completeness)
+  ✓ TASKS seeded into the EXISTING plan_tasks, with live status
+  ✓ the staged changelog entry was upserted alongside the proposal
+  ✓ GET …/context streams the R2 object
+  ✓ transcript round-trips VERBATIM (nothing summarized it on the way in)
+  ✓ re-submitting an identical transcript is detected as unchanged
+  ✓ re-submit updates rather than duplicates
+  ✓ status-only patch accepted
+  ✓ a field omitted from the patch is NOT blanked
+  ✓ ?status= filters the list
+  ✓ an unknown ?status= is rejected with 400
+  ✓ unknown slug → 404
+  ✓ preview page renders
+  ✓ preview page surfaces the coverage note next to the transcript
+  ✓ MCP catalog exposes submit_feature_proposal
+  ✓ MCP catalog exposes get_feature_proposal
+  ✓ MCP catalog exposes list_feature_proposals
+
+  --sweep: pushing a ~450KB transcript (the size a real dump measured)
+
+    generated 439.5 KB
+  ✓ a ~450KB transcript is accepted
+    stored 450081 bytes in 246ms
+  ✓ stored byte count matches what was sent
+  ✓ the large transcript streams back intact
+  ✓ listing stays fast with a large transcript stored
+
+33 passed, 0 failed`,
+      migrations: [
+        {
+          tag: "0112_careful_gambit",
+          appliedRemote: true,
+          note: "pnpm run migrate:remote → 'applied 0112_careful_gambit.sql'; verified with pragma_table_info('changelog_proposals') → 17 columns",
+        },
+      ],
+    },
   },
   "changelog-preview": {
     slug: "changelog-preview",

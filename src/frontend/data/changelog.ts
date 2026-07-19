@@ -61,6 +61,16 @@ export const BRANCHES: ChangelogBranch[] = [
     status: "staged",
   },
   {
+    branch: "claude/feature-proposals-api-tools-ea0c5c",
+    title: "Feature proposals — carry the conversation, not a summary of it",
+    summary:
+      "An idea worked out with a non-coding AI chat can now be filed as a proposal that travels with the RAW transcript of the conversation behind it, so a coding agent picking it up weeks later inherits the rejected alternatives and the mid-discussion constraints instead of rebuilding a lossy plan from a summary. API + MCP tools + CLI parity, all on one shared service; the transcript lives in R2, never D1.",
+    date: "2026-07-18",
+    status: "staged",
+    prNumber: 152,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/152",
+  },
+  {
     branch: "claude/changelog-preview",
     title: "Changelog preview — the presser, drafted in advance",
     summary:
@@ -140,6 +150,27 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "changed", text: "Hours, links, upload and categories modals all render at ~80% of the viewport; category checkboxes are noticeably larger." },
       { kind: "removed", text: "The hero's small \"Edit hours\" and \"Edit address\" buttons — both now live inside the hours modal." },
     ],
+  },
+  {
+    id: "feature-proposals",
+    branch: "claude/feature-proposals-api-tools-ea0c5c",
+    date: "2026-07-18",
+    area: "Changelog",
+    title: "Feature proposals: file an idea with the conversation behind it",
+    summary:
+      "A proposal bundle (PRD / design brief / PROMPT / TASKS) plus the RAW, unsummarized transcript of the chat that produced it — filed from an AI chat over MCP, from a shell with no MCP, or over HTTP, all through one shared service. Rendered at /admin/changelog/preview/:slug with a copyable PROMPT and the transcript's coverage note beside its link.",
+    changes: [
+      { kind: "added", text: "POST/GET /api/changelog/proposals, GET /api/changelog/proposals/:slug and /:slug/context (streams the R2 transcript)." },
+      { kind: "added", text: "MCP tools submit_feature_proposal / get_feature_proposal / list_feature_proposals under a new `changelog` category." },
+      { kind: "added", text: "scripts/changelog/{submit,get,list}-proposal.mjs — same three operations for agents with no MCP connection." },
+      { kind: "added", text: "Preview page renders the bundle: PRD, design brief, PROMPT with a copy button, plan tasks with live status, transcript link + size + coverage note." },
+      { kind: "added", text: "PhaseDetail gains optional branch/prNumber/prUrl and a `verification` block (QC script, source, verbatim output, per-migration remote state) — stored in detail_json, so no migration." },
+      { kind: "changed", text: "Every changelog entry now surfaces its git branch AND PR number, reading PR metadata off the changelog_branches row so entries written before this still show it." },
+      { kind: "changed", text: "/api/changelog/proposals* is gated behind requireAccessAuth — the write path takes an arbitrarily large body into R2 and the read path returns a raw transcript." },
+      { kind: "migration", text: "0112_careful_gambit (changelog_proposals) applied to remote D1 and verified — 17 columns." },
+    ],
+    migrations: ["0112_careful_gambit"],
+    status: "staged",
   },
   {
     id: "changelog-preview",

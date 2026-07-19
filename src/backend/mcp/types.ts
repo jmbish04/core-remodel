@@ -40,6 +40,7 @@ export type ToolCategory =
   | "research"
   | "ops"
   | "artifacts"
+  | "changelog"
   | "memory";
 
 /**
