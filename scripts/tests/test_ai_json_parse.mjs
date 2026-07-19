@@ -59,4 +59,43 @@ assert.throws(
   AiJsonParseError,
 );
 
+// --- THE REAL ROOT CAUSE: OpenAI-style envelope with no `.response` ---
+// gpt-oss-120b and kimi-k2.6 answer as choices[0].message.content. This used to
+// fall through to "treat raw as the payload", handing back {choices:[…]} — no
+// expected keys, so the caller nulled every field with no error anywhere.
+assert.deepEqual(
+  parseStructuredResponse(
+    {
+      choices: [
+        {
+          finish_reason: "stop",
+          message: { content: '{"aiRetailPrice":"$1,500-$2,000"}' },
+        },
+      ],
+    },
+    "openai envelope",
+  ),
+  { aiRetailPrice: "$1,500-$2,000" },
+);
+
+// Reasoning models burn the whole budget on reasoning_content and emit an empty
+// content with finish_reason "length". That is a failure, not a different
+// envelope — it must throw rather than silently yield {}.
+assert.throws(
+  () =>
+    parseStructuredResponse(
+      {
+        choices: [
+          {
+            finish_reason: "length",
+            message: { content: "", reasoning_content: "The user wants me to…" },
+          },
+        ],
+      },
+      "reasoning-model empty content",
+    ),
+  AiJsonParseError,
+  "empty content from a reasoning model must throw, not degrade to {}",
+);
+
 console.log("ai-json parse guards: OK");
