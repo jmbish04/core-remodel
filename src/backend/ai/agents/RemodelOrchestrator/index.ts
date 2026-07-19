@@ -115,7 +115,7 @@ export class RemodelOrchestrator extends Agent<Env, RemodelOrchestratorState> {
   }
 
   /**
-   * Queue exactly one pending "audit" schedule, replacing any already there.
+   * Queue exactly one pending "audit" schedule, clearing any already there.
    *
    * `this.schedule()` is append-only — it inserts a fresh row in
    * `cf_agents_schedules` every call, it does NOT dedupe. onStart() runs on
@@ -123,29 +123,20 @@ export class RemodelOrchestrator extends Agent<Env, RemodelOrchestratorState> {
    * another, so pending schedules compounded: more rows -> more alarms -> more
    * rows. The table reached ~1M rows and every alarm full-scanned it, billing
    * 537 BILLION Durable Object row reads in 30 days (~$512).
+   *
+   * Clears via bulk SQL rather than listSchedules() + cancelSchedule(): this
+   * runs from onStart() on an instance whose table may still hold ~1M rows,
+   * and materializing those into memory OOMs the Durable Object before any
+   * repair can run. That makes the DELETE the self-heal path — the first
+   * wake after deploy drops the backlog with no manual step.
+   *
+   * ponytail: single unbatched DELETE. Fine at ~1M rows in local SQLite; if a
+   * future instance is orders of magnitude worse, chunk it with a LIMIT loop.
    */
-  private async ensureAuditSchedule(delaySeconds: number) {
-    // ScheduleCriteria has no callback filter, so filter client-side.
-    const pending = await this.listSchedules();
-    for (const s of pending.filter((s) => s.callback === "audit")) {
-      await this.cancelSchedule(s.id);
-    }
-    await this.schedule(delaySeconds, "audit");
-  }
-
-  /**
-   * One-shot repair for an instance that already has a bloated schedule table.
-   * Bulk-deletes rather than iterating cancelSchedule() — loading ~1M rows into
-   * memory to cancel them one at a time would OOM the DO.
-   */
-  @callable()
-  async purgeSchedules() {
-    const [{ n }] = [
-      ...this.sql<{ n: number }>`SELECT COUNT(*) AS n FROM cf_agents_schedules`,
-    ];
-    this.sql`DELETE FROM cf_agents_schedules`;
-    await this.schedule(60, "audit");
-    return { deleted: n };
+  private ensureAuditSchedule(delaySeconds: number) {
+    // Deletes bill as rows written (~$1 per million) — one time, on first wake.
+    this.sql`DELETE FROM cf_agents_schedules WHERE callback = 'audit'`;
+    return this.schedule(delaySeconds, "audit");
   }
 
   // ── HTTP handler for internal trigger/status calls ─────────────
