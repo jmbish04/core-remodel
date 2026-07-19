@@ -39,10 +39,11 @@ Why this is a hard rule and not a suggestion:
   of commits behind `origin/main` indefinitely. `git status` says "clean" and
   gives no hint. Comparing against local `main` is always wrong — compare
   against `origin/main`, always, and only after an explicit `git fetch`.
-- Long-lived worktrees rot fast. This repo merges to `main` frequently and
-  Workers Builds auto-deploys on merge, so **the live site is `origin/main`** —
-  never the branch you happen to be sitting in. Any bug reported from a
-  production URL must be reproduced against `origin/main`.
+- Long-lived worktrees rot fast. This repo merges to `main` frequently, so **the
+  code you should be reasoning about is `origin/main`** — never the branch you
+  happen to be sitting in. Any bug reported from a production URL must be
+  reproduced against `origin/main`. (Production may lag even `origin/main`,
+  because deploys are manual now — see "LAST ACTION OF EVERY TURN" below.)
 - The failure is silent and expensive. It manufactures false conclusions about
   features being "missing" or "broken" when they were built, renamed, or
   replaced upstream, and any code written against the stale tree conflicts hard
@@ -56,6 +57,52 @@ When picking up work described by an earlier session or a memory file, re-verify
 its claims against `origin/main` before acting — those notes reflect the tree as
 it was, and the named files, routes, and components may have moved or been
 replaced.
+
+## LAST ACTION OF EVERY TURN — you own the deploy (MANDATORY)
+
+**Nothing deploys itself.** Workers Builds auto-deploy is off, so merging to
+`main` does NOT ship. If you finish a turn without running the commands below,
+your work exists only in git and **production is still running the old code** —
+including any schema migration you generated.
+
+`pnpm run deploy` is the whole pipeline, in the only safe order:
+
+```
+build → migrate:remote → migrate:tesla:remote → wrangler deploy
+```
+
+Migrations run BEFORE the upload on purpose. New code reaching production before
+its column exists makes every endpoint that reads it return **500**; that is the
+first thing to suspect whenever a route 500s right after a schema change.
+
+### The contract, by what you did
+
+| You did | Run before ending the turn |
+|---|---|
+| Changed a drizzle schema | `pnpm run migrate:remote`, then **verify** the column/table exists on remote |
+| Opened or updated a PR | `pnpm run deploy:preview` — then QC with `pnpm run test:pr <n> -- --preview` |
+| **Merged to `main`** | **`pnpm run deploy`** — this is the only thing that updates production |
+| Merged the PR | `pnpm run preview:delete` from the branch's worktree |
+
+**Say what you did.** End the turn by stating explicitly whether you deployed,
+whether migrations were applied to remote, and what the QC result was. "Done" is
+not a status. If you deliberately did not deploy — because the work is unfinished
+or you want review first — say that too, so the next session knows production
+does not match `main`.
+
+### Never deploy production from an unmerged branch
+
+`pnpm run deploy` deploys whatever is in your working tree to the LIVE worker.
+Run it only from `main`, after your PR merged and you pulled. From a feature
+branch use `pnpm run deploy:preview`, which targets your own worker. The two
+commands are one word apart and the failure is not recoverable by rerunning.
+
+### Verify the deploy landed
+
+```bash
+npx wrangler deployments list | tail -20   # newest entry should be yours
+pnpm run test:pr <n>                       # QC against production, after merge
+```
 
 ## System Identity & Role Enforcements
 You are an elite Senior Engineer operating within the Google Antigravity IDE framework. Your primary objective is shipping high-performance, self-healing architectures across the Cloudflare Ecosystem.
@@ -380,14 +427,12 @@ it reads as "my endpoint 404s" or "my column is missing" when the real answer is
 
 ## Deploy topology & previews (READ BEFORE VERIFYING ANYTHING)
 
-Cloudflare Workers Builds is connected to this repo with two triggers:
+**Workers Builds auto-deploy is DISABLED.** Deploys are manual and agent-owned —
+see "LAST ACTION OF EVERY TURN" at the top of this file. The history below is
+kept because it explains why CI is off and why it must not be switched back on
+casually.
 
-| Trigger | Branches | Target |
-|---|---|---|
-| Deploy default branch | `main` | **production** — `core-remodel.hacolby.workers.dev` |
-| Preview non-production branches | everything except `main` | **also production** — see below |
-
-### CI cannot deploy anywhere except production. Do not try.
+### CI cannot deploy anywhere except production. Do not turn it back on.
 
 **Workers Builds forces every deploy to the connected worker (`core-remodel`).**
 It injects that script name into the build environment and it overrides both:
@@ -407,14 +452,21 @@ worker and wrangler uploading another:
 Consequences you must internalise:
 
 1. **A branch build deploying successfully means it overwrote PRODUCTION.**
-   Not a preview. Production, with unreviewed branch code.
-2. **A branch build FAILING is often the only thing protecting production.** The
-   common failure is `10074 — Cannot apply new-sqlite-class migration to class
-   'RenovationAgent' that is already depended on by existing Durable Objects`,
-   which fires because the branch's DO migration tag collides with production's.
-3. Do **not** "fix" that 10074 by bumping the DO migration tag to make the
-   branch build pass. That does not repair anything — it removes the last guard
-   and ships your branch to production.
+   Not a preview. Production, with unreviewed branch code. This is why the
+   triggers are disabled — while they were live, a branch's "preview" build
+   logged `✅ Preview live: …core-remodel-preview…` and then uploaded
+   `core-remodel`.
+2. **A branch build FAILING was often the only thing protecting production.**
+   The common failure is `10074 — Cannot apply new-sqlite-class migration to
+   class 'RenovationAgent' that is already depended on by existing Durable
+   Objects`, which fires because the branch's DO migration tag collides with
+   production's.
+3. Do **not** "fix" that 10074 by bumping the DO migration tag to make a branch
+   build pass. That does not repair anything — it removes the last guard and
+   ships your branch to production.
+4. Do **not** re-enable the branch trigger to "get previews working in CI". It
+   cannot work: the override applies to every deploy inside a Workers Builds
+   trigger. Deploy previews from your session instead.
 
 Cloudflare's own preview URLs are not an escape hatch either:
 [preview URLs are not generated for Workers that implement a Durable Object](https://developers.cloudflare.com/workers/configuration/previews/#limitations),
@@ -425,6 +477,29 @@ Third-party "Workers preview" GitHub Actions do not help: the commonly-suggested
 one (`shidil/cloudflare-workers-preview`) was evaluated and rejected — abandoned
 March 2022, Node 12 runtime GitHub no longer supports, wants your Cloudflare API
 token, and it deploys a separate named worker anyway, which is what we do below.
+
+### Why not Wrangler environments (`[env.preview]`)?
+
+Evaluated and rejected for the per-branch case, for two reasons:
+
+1. **Environments are static; branch names are not.** `[env.foo]` deploys
+   `core-remodel-foo`. You cannot declare an environment per branch, so it does
+   not give per-branch isolation.
+2. **Bindings are non-inheritable.** Per the
+   [Wrangler docs](https://developers.cloudflare.com/workers/wrangler/environments/#non-inheritable-keys),
+   bindings and vars are NOT inherited from the top level — each environment must
+   redeclare all of them. This Worker carries **37 secrets-store bindings** plus
+   D1, R2, KV, Vectorize, AI, Images, 12 Durable Objects and 9 Workflows. An env
+   block would duplicate that entire surface, and the copy would silently drift
+   from the real one the first time someone adds a binding to only one of them.
+
+`deploy-preview.mjs` takes the opposite approach: it DERIVES the preview config
+from the top-level one at deploy time and overrides only what must differ (name,
+crons, routes, workflow names). Nothing is duplicated, so nothing can drift.
+
+An environment would still be a reasonable fit for one *stable, long-lived*
+target — a permanent `staging` worker, say — where the duplication is written
+once and reviewed. It is the wrong tool for ephemeral per-branch previews.
 
 ### Previews are AGENT-OWNED: create one, use it, delete it
 
