@@ -827,19 +827,26 @@ export function scheduleShowroomEnrichment(
   })();
   schedule(research);
 
-  // 2. Category inference (fill-blanks) from structured signal tokens.
-  if (input.categoryTokens && input.categoryTokens.some(Boolean)) {
-    schedule(
-      inferAndMapCategories(
-        env,
-        showroomId,
-        input.categoryTokens,
-        input.categoryRationale ?? "Inferred from Google Places at intake",
-      ).catch((err) => {
+  // 2. Category inference — ALWAYS run, for every store (manual entries have no
+  //    Google tokens, but the AI classifier reads the store's name / description
+  //    / review summary / brands, so they get categorized too). Runs AFTER
+  //    research: for a placeId store the research agent categorizes first, and
+  //    this call's fill-blanks guard then short-circuits BEFORE a second AI call;
+  //    for a manual store research is a no-op and this is what categorizes it.
+  schedule(
+    research
+      .then(() =>
+        inferAndMapCategories(
+          env,
+          showroomId,
+          input.categoryTokens ?? [],
+          input.categoryRationale ?? "Categorized by AI from the store profile at intake",
+        ),
+      )
+      .catch((err) => {
         console.error(`[showroom-onboarding] categories failed for ${showroomId}:`, err);
       }),
-    );
-  }
+  );
 
   // 3. Favicon hydration + website scrape workflow.
   //

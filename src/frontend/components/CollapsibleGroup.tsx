@@ -33,24 +33,42 @@ const GROUP_SIG_SEP = "|~|";
  *   and `toggle(key)` which opens `key` (collapsing others) or collapses it if
  *   it is already open.
  */
-export function useAccordionGroup(orderedKeys: string[]): {
+export function useAccordionGroup(
+  orderedKeys: string[],
+  /**
+   * Optional group to open by default / when it resolves later (e.g. the region
+   * nearest the user's geolocation). When present in `orderedKeys` it wins over
+   * the first-group default, and a CHANGE in this value re-opens to it — so the
+   * user's local region expands the moment their location is known. Manual
+   * toggles still work; they're only overridden when `preferredKey` next changes.
+   */
+  preferredKey?: string | null,
+): {
   openKey: string | null;
   toggle: (key: string) => void;
 } {
   // A stable signature of the current group set; when it changes we reset the
-  // open group back to the first one.
+  // open group back to the preferred (or first) one.
   const signature = orderedKeys.join(GROUP_SIG_SEP);
+  const preferredValid = preferredKey != null && orderedKeys.includes(preferredKey);
   const [openKey, setOpenKey] = useState<string | null>(
-    orderedKeys[0] ?? null,
+    preferredValid ? preferredKey! : (orderedKeys[0] ?? null),
   );
   const prevSignature = useRef(signature);
+  const prevPreferred = useRef<string | null>(preferredKey ?? null);
 
   useEffect(() => {
+    const valid = preferredKey != null && orderedKeys.includes(preferredKey);
     if (prevSignature.current !== signature) {
       prevSignature.current = signature;
-      setOpenKey(orderedKeys[0] ?? null);
+      prevPreferred.current = preferredKey ?? null;
+      setOpenKey(valid ? preferredKey! : (orderedKeys[0] ?? null));
+    } else if (valid && prevPreferred.current !== preferredKey) {
+      // The preferred group changed (e.g. geolocation just resolved) → open it.
+      prevPreferred.current = preferredKey ?? null;
+      setOpenKey(preferredKey!);
     }
-  }, [signature, orderedKeys]);
+  }, [signature, orderedKeys, preferredKey]);
 
   const toggle = useCallback((key: string) => {
     setOpenKey((current) => (current === key ? null : key));

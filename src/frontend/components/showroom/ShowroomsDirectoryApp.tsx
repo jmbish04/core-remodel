@@ -161,20 +161,49 @@ type ViewMode = "map" | "list" | "directory";
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const HUBS: Record<string, { name: string; lng: number; lat: number }> = {
+  // Bay Area hubs (fine-grained).
   A: { name: "SF Design District", lng: -122.4194, lat: 37.7749 },
   B: { name: "Silicon Valley & South Bay", lng: -121.8863, lat: 37.3382 },
   C: { name: "Peninsula / Mid-Market", lng: -122.2603, lat: 37.5072 },
   D: { name: "East Bay", lng: -122.2712, lat: 37.8044 },
   E: { name: "North Bay", lng: -122.545, lat: 37.906 },
+  // Rest of California (metro-grained). Keep keys + centroids in sync with
+  // CA_REGIONS in src/backend/lib/bay-area-region.ts.
+  SAC: { name: "Sacramento / Capital", lng: -121.4944, lat: 38.5816 },
+  CCST: { name: "Central Coast", lng: -121.4, lat: 36.3 },
+  CVAL: { name: "Central Valley", lng: -119.78, lat: 36.74 },
+  LA: { name: "Los Angeles / SoCal", lng: -118.2437, lat: 34.0522 },
+  SD: { name: "San Diego", lng: -117.1611, lat: 32.7157 },
+  NST: { name: "North State", lng: -122.0, lat: 39.8 },
 };
 
-/** Short region label per hub — filters & markers show this, never the letter. */
+/** Bucket key for stores with no recognized California region (e.g. out of state). */
+const OTHER_HUB = "OTHER";
+
+/**
+ * Generous California bounding box — mirrors `isInCalifornia` in the backend
+ * region lib. Keeps the map's auto-frame focused on California so an
+ * out-of-state showroom (a Texas Costco, a Florida vendor) can't zoom the map
+ * out to the whole country. Out-of-state pins are still drawn; they just don't
+ * drive the default framing.
+ */
+function isInCaliforniaView(lat: number, lng: number): boolean {
+  return lat >= 32.3 && lat <= 42.2 && lng >= -124.6 && lng <= -114.0;
+}
+
+/** Short region label per hub — filters & markers show this, never the code. */
 const HUB_LABEL: Record<string, string> = {
   A: "SF",
   B: "South Bay",
   C: "Peninsula",
   D: "East Bay",
   E: "North Bay",
+  SAC: "Sacramento",
+  CCST: "Central Coast",
+  CVAL: "Central Valley",
+  LA: "Los Angeles",
+  SD: "San Diego",
+  NST: "North State",
 };
 
 const PRICE_POINTS = ["$", "$$", "$$$", "$$$$"] as const;
@@ -876,12 +905,65 @@ function CardGrid({ stores, pst }: { stores: Store[]; pst: PstNow }) {
 
 // ─── Map View (map on top, cards stacked below — mobile friendly) ──────────────
 
+/**
+ * Marker colour by showroom TYPE (its first registered category). Specific
+ * specialties get a hand-picked hue; anything else hashes deterministically into
+ * a palette so the same category always draws the same colour. Inline hex (not
+ * Tailwind classes) keeps the colour JIT-safe for arbitrary category names.
+ * No legend by design — the colour is an at-a-glance grouping cue on the map.
+ */
+const CATEGORY_COLOR_RULES: { test: RegExp; color: string }[] = [
+  { test: /plumb|bath|faucet|sink|shower|tub|vanity/i, color: "#38bdf8" },
+  { test: /light/i, color: "#f59e0b" },
+  { test: /floor|hardwood|wood|vinyl|carpet/i, color: "#b45309" },
+  { test: /tile|stone|slab|porcelain|mosaic|backsplash/i, color: "#14b8a6" },
+  { test: /counter|granite|quartz|marble/i, color: "#8b5cf6" },
+  { test: /kitchen|cabinet|appliance|range|oven|refriger/i, color: "#ef4444" },
+  { test: /window/i, color: "#0ea5e9" },
+  { test: /door|hardware|hinge|lock/i, color: "#eab308" },
+  { test: /closet|storage|organiz/i, color: "#ec4899" },
+  { test: /paint|finish/i, color: "#f97316" },
+  { test: /rug|textile|fabric|drapery/i, color: "#d946ef" },
+  { test: /wall.?cover|wallpaper/i, color: "#22c55e" },
+  { test: /furniture|decor|art/i, color: "#f43f5e" },
+  { test: /outdoor|landscape|garden|patio/i, color: "#84cc16" },
+  { test: /water|filtration/i, color: "#06b6d4" },
+  { test: /smart|automation/i, color: "#6366f1" },
+];
+const CATEGORY_PALETTE = [
+  "#f87171",
+  "#fb923c",
+  "#fbbf24",
+  "#a3e635",
+  "#34d399",
+  "#22d3ee",
+  "#60a5fa",
+  "#a78bfa",
+  "#f472b6",
+  "#e879f9",
+];
+/** Default (no category) — emerald, matching the app's neutral pin colour. */
+const DEFAULT_MARKER_COLOR = "#10b981";
+
+function colorForCategory(category: string | null | undefined): string {
+  if (!category) return DEFAULT_MARKER_COLOR;
+  for (const rule of CATEGORY_COLOR_RULES) if (rule.test.test(category)) return rule.color;
+  let h = 0;
+  for (let i = 0; i < category.length; i++) h = (h * 31 + category.charCodeAt(i)) >>> 0;
+  return CATEGORY_PALETTE[h % CATEGORY_PALETTE.length];
+}
+
 /** A pin for a single showroom, positioned by its captured coordinates. */
 function ShowroomMarker({ store }: { store: Store }) {
+  // Colour by the FIRST registered category (the store's primary type).
+  const color = colorForCategory(store.categories[0]);
   return (
     <MapMarker longitude={store.longitude as number} latitude={store.latitude as number}>
       <MarkerContent className="z-10">
-        <div className="flex size-6 items-center justify-center rounded-full bg-emerald-500/90 ring-2 ring-white/80 shadow-lg transition-transform hover:scale-110">
+        <div
+          className="flex size-6 items-center justify-center rounded-full ring-2 ring-white/80 shadow-lg transition-transform hover:scale-110"
+          style={{ backgroundColor: color }}
+        >
           <MapPin className="size-3.5 text-white" />
         </div>
       </MarkerContent>
@@ -955,19 +1037,32 @@ function viewportForPoints(pts: Array<[number, number]>): {
   return { center, zoom };
 }
 
+/** Region display order for map groups: HUBS order first, "Other" always last. */
+const HUB_ROUTE_ORDER = Object.keys(HUBS);
+function hubRouteRank(route: string): number {
+  if (route === OTHER_HUB) return Number.MAX_SAFE_INTEGER;
+  const i = HUB_ROUTE_ORDER.indexOf(route);
+  return i < 0 ? Number.MAX_SAFE_INTEGER - 1 : i;
+}
+
 function MapView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
   const byHub = useMemo(() => {
     const map = new Map<string, Store[]>();
     for (const s of stores) {
-      if (!s.hubRoute || !HUBS[s.hubRoute]) continue;
-      map.set(s.hubRoute, [...(map.get(s.hubRoute) ?? []), s]);
+      // Unrecognized / out-of-state stores fall into an "Other" bucket so they
+      // stay listed (and their pins still render) — they just don't get a
+      // dedicated California region group.
+      const route = s.hubRoute && HUBS[s.hubRoute] ? s.hubRoute : OTHER_HUB;
+      map.set(route, [...(map.get(route) ?? []), s]);
     }
     return map;
   }, [stores]);
 
-  const hubEntries = useMemo(() => [...byHub.entries()], [byHub]);
+  const hubEntries = useMemo(
+    () => [...byHub.entries()].sort((a, b) => hubRouteRank(a[0]) - hubRouteRank(b[0])),
+    [byHub],
+  );
   const hubKeys = useMemo(() => hubEntries.map(([route]) => route), [hubEntries]);
-  const { openKey, toggle } = useAccordionGroup(hubKeys);
 
   // Stores with captured coordinates get an individual pin.
   const geoStores = useMemo(
@@ -977,25 +1072,63 @@ function MapView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
   const noGeoCount = stores.length - geoStores.length;
 
   // The device's geolocation ("you are here"), when granted. Works on phones
-  // and the in-car (Tesla) browser via the standard Geolocation API.
+  // and the in-car (Tesla) browser via the standard Geolocation API. Reported
+  // to the server so the getUserLocation MCP tool can answer "showrooms near me".
   const [userLoc, setUserLoc] = useState<{ lng: number; lat: number } | null>(null);
+
+  const reportLocation = useCallback((lat: number, lng: number) => {
+    // Best-effort — a failure here never affects the map.
+    void fetch("/api/showroom-stores/device-location", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ latitude: lat, longitude: lng, source: "browser" }),
+    }).catch(() => {});
+  }, []);
 
   const requestLocation = useCallback(() => {
     if (typeof navigator === "undefined" || !("geolocation" in navigator)) return;
     navigator.geolocation.getCurrentPosition(
-      (pos) => setUserLoc({ lng: pos.coords.longitude, lat: pos.coords.latitude }),
+      (pos) => {
+        setUserLoc({ lng: pos.coords.longitude, lat: pos.coords.latitude });
+        reportLocation(pos.coords.latitude, pos.coords.longitude);
+      },
       () => {
         /* denied / unavailable — the map simply won't show a location dot */
       },
       { enableHighAccuracy: false, timeout: 8000, maximumAge: 300_000 },
     );
-  }, []);
+  }, [reportLocation]);
 
   // Best-effort location on mount (a permission prompt the first time). The
   // locate button in MapControls re-requests + flies to the dot on demand.
   useEffect(() => {
     requestLocation();
   }, [requestLocation]);
+
+  // Auto-expand the region group NEAREST the user's location (others collapse):
+  // open Oakland's group when the user is in Oakland at open time, etc. Chosen
+  // among the regions that actually have showrooms so it never opens an empty
+  // group. Null (no location yet / denied) → the accordion keeps its default.
+  const preferredHub = useMemo(() => {
+    if (!userLoc || hubKeys.length === 0) return null;
+    let best: string | null = null;
+    let bestDist = Infinity;
+    for (const route of hubKeys) {
+      const hub = HUBS[route];
+      if (!hub) continue;
+      const dLat = hub.lat - userLoc.lat;
+      const dLng = hub.lng - userLoc.lng;
+      const dist = dLat * dLat + dLng * dLng;
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = route;
+      }
+    }
+    return best;
+  }, [userLoc, hubKeys]);
+
+  const { openKey, toggle } = useAccordionGroup(hubKeys, preferredHub);
 
   // Frame the map around the showrooms currently in view, so markers are
   // visible without hunting. Recomputes when the filtered set changes; free
@@ -1005,8 +1138,16 @@ function MapView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
   // already flies to the user's dot on demand, and folding a possibly-distant
   // location into the bounding box would either over-zoom the map out or fight
   // that flyTo animation the moment it updates userLoc.
+  //
+  // Also EXCLUDES out-of-state showrooms: a store logged in Texas or Florida is
+  // still drawn as a pin, but must not drag the auto-frame out to span the whole
+  // country. Framing to California keeps the map useful for the local directory;
+  // if no in-state showrooms exist, viewportForPoints falls back to the Bay Area.
   const framePoints = useMemo<Array<[number, number]>>(
-    () => geoStores.map((s) => [s.longitude as number, s.latitude as number]),
+    () =>
+      geoStores
+        .filter((s) => isInCaliforniaView(s.latitude as number, s.longitude as number))
+        .map((s) => [s.longitude as number, s.latitude as number]),
     [geoStores],
   );
 
@@ -1086,7 +1227,7 @@ function MapView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
                 <>
                   <MapPin className="size-4 text-sky-400" />
                   <h2 className="text-sm font-semibold uppercase tracking-wide">
-                    {HUB_LABEL[route]}
+                    {HUB_LABEL[route] ?? "Other / Out of State"}
                   </h2>
                   <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
                     {hubStores.length}
@@ -1194,6 +1335,12 @@ const HUB_GROUP_ORDER: Record<string, number> = {
   "Peninsula / Mid-Market": 2,
   "East Bay": 3,
   "North Bay": 4,
+  "Sacramento / Capital": 5,
+  "Central Coast": 6,
+  "Central Valley": 7,
+  "Los Angeles / SoCal": 8,
+  "San Diego": 9,
+  "North State": 10,
 };
 
 function DirectoryView({ stores, pst }: { stores: Store[]; pst: PstNow }) {

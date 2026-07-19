@@ -13,13 +13,16 @@
  * KEEP THE TWO IN SYNC when the vocabulary evolves.
  */
 
-import { drizzle } from "drizzle-orm/d1";
-import { eq } from "drizzle-orm";
-
 import {
+  showroomStores,
   showroomStoreCategory,
   showroomStoreCategoryMapping,
 } from "@backend/db/schema/showroom/index";
+import { createGeminiAiGatewayClient } from "@backend/services/render/providers/gemini-stage-provider";
+import { stripJsonFence } from "@backend/utils/ai-json";
+import { Type } from "@google/genai";
+import { eq } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 
 /**
  * Ordered rules mapping type/brand tokens to internal category NAMES. Each rule
@@ -86,13 +89,92 @@ export function inferCategoryLabelsFromTokens(tokens: Array<string | null | unde
 }
 
 /**
+ * AI classifier: pick the applicable categories for a showroom STRICTLY from the
+ * live vocabulary, using the store's own context (name, description, review
+ * summary, stocked brands, Google place types). This is the real "AI
+ * categorization" — the regex rules above only fire on specific Google `types`
+ * tokens (e.g. `lighting_store`), which most showrooms don't carry, so on their
+ * own they leave nearly every store blank. Returns exact vocabulary names,
+ * relevance-ordered (most central first). Best-effort: returns [] on any error.
+ */
+async function classifyCategoriesWithAI(
+  env: Env,
+  ctx: {
+    name: string;
+    description?: string | null;
+    reviewSummary?: string | null;
+    brands: string[];
+    tokens: string[];
+  },
+  validNames: string[],
+): Promise<string[]> {
+  if (validNames.length === 0) return [];
+  try {
+    const ai = await createGeminiAiGatewayClient(env, "showroom_categorize");
+
+    const context = [
+      `Name: ${ctx.name}`,
+      ctx.description ? `Description: ${ctx.description}` : null,
+      ctx.reviewSummary ? `Review summary: ${ctx.reviewSummary}` : null,
+      ctx.brands.length ? `Stocked/associated brands: ${ctx.brands.join(", ")}` : null,
+      ctx.tokens.length ? `Google place types: ${ctx.tokens.join(", ")}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    const prompt = `You are categorizing a home-renovation showroom / vendor for a homeowner's sourcing directory.
+
+Choose EVERY category from the allowed list below that this showroom clearly sells or specializes in. Order them by relevance, most central to the business FIRST. Only choose a category when the context supports it — do not guess wildly. If the showroom's specialty is genuinely unclear, return your single best guess rather than nothing.
+
+You MUST return only names copied EXACTLY from this allowed list (verbatim, case-sensitive):
+${validNames.map((nm) => `- ${nm}`).join("\n")}
+
+SHOWROOM CONTEXT:
+${context}
+
+Respond with ONLY valid JSON: {"categories": ["Exact Name", ...]}`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            categories: { type: Type.ARRAY, items: { type: Type.STRING } },
+          },
+          required: ["categories"],
+        },
+        temperature: 0.1,
+      },
+    });
+
+    const raw = response.text || "";
+    const parsed = JSON.parse(stripJsonFence(raw)) as { categories?: unknown };
+    if (!Array.isArray(parsed.categories)) return [];
+    return parsed.categories.filter(
+      (c): c is string => typeof c === "string" && c.trim().length > 0,
+    );
+  } catch (err) {
+    console.error(`[categories] AI classification failed for "${ctx.name}":`, err);
+    return [];
+  }
+}
+
+/**
  * Infer categories for a showroom and persist `showroom_store_category_mapping`
  * rows. FILL-BLANKS ONLY: no-ops when the store already has any category
- * mapping. Resolution against the live vocabulary is a case-insensitive
- * bidirectional contains match (mirrors the intake UI's resolution). Never
- * throws — failures log and return 0.
+ * mapping.
  *
- * @param env        Worker env (D1 binding).
+ * Resolution order: an AI classifier reads the store's own context (name,
+ * description, review summary, stocked brands, place types) and picks from the
+ * live vocabulary; the regex token rules run as a cheap fallback/augment so the
+ * store is still categorized if the AI call is unavailable. AI-chosen names are
+ * inserted FIRST (relevance-ordered) so the store's "primary" category — the one
+ * the map colours by — is meaningful. Never throws — failures log and return 0.
+ *
+ * @param env        Worker env (D1 + Gemini).
  * @param showroomId Target `showroom_stores.id`.
  * @param tokens     Signal strings (place types, primaryType, brand types).
  * @param rationale  Human-readable provenance stored on each mapping row.
@@ -115,32 +197,72 @@ export async function inferAndMapCategories(
       .limit(1);
     if (existing) return 0;
 
-    const labels = inferCategoryLabelsFromTokens(tokens);
-    if (labels.length === 0) return 0;
-
     const categories = await db
       .select({ id: showroomStoreCategory.id, name: showroomStoreCategory.name })
       .from(showroomStoreCategory)
       .where(eq(showroomStoreCategory.isActive, true));
+    if (categories.length === 0) return 0;
 
+    // Store context for the AI classifier (name/description/summary/brands).
+    const [store] = await db
+      .select({
+        name: showroomStores.name,
+        description: showroomStores.description,
+        reviewSummary: showroomStores.reviewSummary,
+        reviewAiInsight: showroomStores.reviewAiInsight,
+      })
+      .from(showroomStores)
+      .where(eq(showroomStores.id, showroomId))
+      .limit(1);
+
+    const cleanTokens = tokens.filter(
+      (t): t is string => typeof t === "string" && t.trim().length > 0,
+    );
+    const brandNames = (store?.reviewAiInsight?.brands ?? [])
+      .map((b) => (typeof b?.name === "string" ? b.name : null))
+      .filter((n): n is string => Boolean(n));
+
+    // 1. AI classification against the exact vocabulary (primary signal).
+    const aiNames = store?.name
+      ? await classifyCategoriesWithAI(
+          env,
+          {
+            name: store.name,
+            description: store.description,
+            reviewSummary: store.reviewSummary,
+            brands: brandNames,
+            tokens: cleanTokens,
+          },
+          categories.map((c) => c.name),
+        )
+      : [];
+
+    // 2. Regex token rules — cheap fallback/augment (esp. if the AI call failed).
+    const regexLabels = inferCategoryLabelsFromTokens(tokens);
+
+    // AI names first (exact-match, relevance-ordered), then regex labels.
     const categoryIds: number[] = [];
-    for (const label of labels) {
-      const needle = label.toLowerCase();
+    const pushMatch = (candidate: string, exactOnly: boolean) => {
+      const needle = candidate.toLowerCase();
       const match = categories.find((c) => {
         const name = c.name.toLowerCase();
-        return name.includes(needle) || needle.includes(name);
+        return exactOnly ? name === needle : name.includes(needle) || needle.includes(name);
       });
       if (match && !categoryIds.includes(match.id)) categoryIds.push(match.id);
-    }
+    };
+    for (const nm of aiNames) pushMatch(nm, true);
+    for (const label of regexLabels) pushMatch(label, false);
+
     if (categoryIds.length === 0) return 0;
 
+    const usedAi = aiNames.length > 0;
     for (const categoryId of categoryIds) {
       await db.insert(showroomStoreCategoryMapping).values({
         storeId: showroomId,
         categoryId,
         aiRationale: rationale,
-        // Mid-scale confidence: inferred from structured signals, not verified.
-        aiRationaleConfidenceScore: 5,
+        // Higher confidence when the LLM read the store context; mid otherwise.
+        aiRationaleConfidenceScore: usedAi ? 7 : 5,
       });
     }
     return categoryIds.length;

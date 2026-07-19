@@ -42,6 +42,7 @@ import {
   productPriceObservations,
   productShowroomPhotos,
 } from "@backend/db/schema/showroom/index";
+import { deviceLocation } from "@backend/db/schema/system/device-location";
 import { classifyBayAreaRegion } from "@backend/lib/bay-area-region";
 import { businessCardService } from "@backend/services/business-card";
 import { faviconService } from "@backend/services/favicon";
@@ -1153,7 +1154,10 @@ showroomStoresRouter.get("/", async (c) => {
               showroomStoreCategory,
               eq(showroomStoreCategoryMapping.categoryId, showroomStoreCategory.id),
             )
-            .where(inArray(showroomStoreCategoryMapping.storeId, chunk)),
+            .where(inArray(showroomStoreCategoryMapping.storeId, chunk))
+            // Registration order: the first category is the store's primary type
+            // (drives the map marker colour), so keep it deterministic.
+            .orderBy(showroomStoreCategoryMapping.id),
         )
           .then((catRows) => {
             const map = new Map<number, string[]>();
@@ -2144,6 +2148,38 @@ showroomStoresRouter.put("/:id/address", async (c) => {
     .returning();
   if (!row) return c.json({ error: "Store not found" }, 404);
   return c.json({ success: true, store: row });
+});
+
+// ─── DEVICE LOCATION ────────────────────────────────────────────────────────────
+// The directory reports the browser's granted geolocation here so the
+// getUserLocation MCP tool can answer "showrooms near me" without a live device
+// round-trip. One row per report; the tool reads the most recent.
+
+const deviceLocationSchema = z.object({
+  latitude: z.number().finite(),
+  longitude: z.number().finite(),
+  accuracyMeters: z.number().finite().optional().nullable(),
+  address: z.string().optional().nullable(),
+  source: z.enum(["browser", "phone", "manual"]).optional(),
+});
+
+/** POST /device-location — record the device's last-known position (best-effort). */
+showroomStoresRouter.post("/device-location", async (c) => {
+  const db = drizzle(c.env.DB);
+  const parsed = deviceLocationSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
+  const d = parsed.data;
+  const [row] = await db
+    .insert(deviceLocation)
+    .values({
+      source: d.source ?? "browser",
+      latitude: d.latitude,
+      longitude: d.longitude,
+      accuracyMeters: d.accuracyMeters ?? null,
+      address: d.address ?? null,
+    })
+    .returning({ id: deviceLocation.id });
+  return c.json({ success: true, id: row.id });
 });
 
 // ─── LINKS CRUD ───────────────────────────────────────────────────────────────

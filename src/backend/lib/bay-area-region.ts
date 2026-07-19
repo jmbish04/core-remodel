@@ -1,44 +1,50 @@
 /**
- * @fileoverview Bay Area region classifier — the single source of truth for
- * assigning a showroom to one of the five procurement "hubs" (regions) from its
- * geography rather than from a free-text label.
+ * @fileoverview California region classifier — the single source of truth for
+ * assigning a showroom to one procurement REGION from its geography rather than
+ * from a free-text label. Showrooms are limited to California; the Bay Area is
+ * covered at hub granularity, the rest of the state at metro granularity.
  *
- * The five hubs mirror `store_bayarea_cities.hub_route` (A–E):
- *   A → "SF Design District"        (San Francisco)
- *   B → "Silicon Valley & South Bay"(Santa Clara county / South Bay)
- *   C → "Peninsula / Mid-Market"    (San Mateo county / mid-peninsula)
- *   D → "East Bay"                  (Alameda + Contra Costa)
- *   E → "North Bay"                 (Marin / Sonoma / Napa / Solano)
+ * Region codes mirror `store_bayarea_cities.hub_route`:
+ *   Bay Area hubs (unchanged, legacy A–E):
+ *     A → "SF Design District"         (San Francisco)
+ *     B → "Silicon Valley & South Bay" (Santa Clara county / South Bay)
+ *     C → "Peninsula / Mid-Market"     (San Mateo county / mid-peninsula)
+ *     D → "East Bay"                   (Alameda + Contra Costa)
+ *     E → "North Bay"                  (Marin / Sonoma / Napa / Solano)
+ *   Rest of California:
+ *     SAC  → "Sacramento / Capital"    (Sacramento metro + Sierra foothills)
+ *     CCST → "Central Coast"           (Monterey / Santa Cruz / SLO / Santa Barbara)
+ *     CVAL → "Central Valley"          (Stockton / Modesto / Fresno / Bakersfield)
+ *     LA   → "Los Angeles / SoCal"     (LA / Orange / Inland Empire / Ventura)
+ *     SD   → "San Diego"               (San Diego county)
+ *     NST  → "North State"             (Redding / Chico / Humboldt / Tahoe)
  *
  * Classification is DYNAMIC and derived from the showroom's own address, in
- * priority order:
- *   1. lat/lng          → nearest hub centroid (authoritative; Places always
- *                         returns coordinates so new intakes get this).
- *   2. city name        → matched from the formatted address against a curated
- *                         Bay Area city → region table (accurate for legacy /
- *                         manually-typed rows that have an address but no coords).
- *   3. ZIP prefix       → coarse county-prefix fallback.
- *
- * This lets both the intake flow (capture the region once) and the directory
- * API (a cheap read-time fallback) resolve a region WITHOUT ever calling the
- * Places API on page load.
+ * priority order city → ZIP → coordinates (a city's region is a fixed curated
+ * fact; nearest-centroid on coordinates is only a last resort). This lets both
+ * the intake flow (capture the region once) and the directory API (a cheap
+ * read-time fallback) resolve a region WITHOUT calling Places on page load.
  */
 
-export type HubRoute = "A" | "B" | "C" | "D" | "E";
+export type HubRoute = "A" | "B" | "C" | "D" | "E" | "SAC" | "CCST" | "CVAL" | "LA" | "SD" | "NST";
 
 export interface BayAreaHub {
   route: HubRoute;
-  /** Human-readable hub name — matches `store_bayarea_cities.hub_name`. */
+  /** Human-readable region name — matches `store_bayarea_cities.hub_name`. */
   name: string;
   /** Short region label used by filters and map markers. */
   label: string;
-  /** Centroid used for nearest-hub classification and map framing. */
+  /** Centroid used for nearest-region classification and map framing. */
   lat: number;
   lng: number;
 }
 
-/** The five Bay Area procurement hubs, keyed by route letter. */
-export const BAY_AREA_HUBS: Record<HubRoute, BayAreaHub> = {
+/**
+ * All California procurement regions, keyed by route code. The five Bay Area
+ * hubs keep their legacy single-letter codes; broader metros use short mnemonic
+ * codes. Ordered north-to-south-ish within Bay Area first, then outward.
+ */
+export const CA_REGIONS: Record<HubRoute, BayAreaHub> = {
   A: { route: "A", name: "SF Design District", label: "SF", lat: 37.7749, lng: -122.4194 },
   B: {
     route: "B",
@@ -56,7 +62,37 @@ export const BAY_AREA_HUBS: Record<HubRoute, BayAreaHub> = {
   },
   D: { route: "D", name: "East Bay", label: "East Bay", lat: 37.8044, lng: -122.2712 },
   E: { route: "E", name: "North Bay", label: "North Bay", lat: 37.906, lng: -122.545 },
+  SAC: {
+    route: "SAC",
+    name: "Sacramento / Capital",
+    label: "Sacramento",
+    lat: 38.5816,
+    lng: -121.4944,
+  },
+  CCST: { route: "CCST", name: "Central Coast", label: "Central Coast", lat: 36.3, lng: -121.4 },
+  CVAL: {
+    route: "CVAL",
+    name: "Central Valley",
+    label: "Central Valley",
+    lat: 36.74,
+    lng: -119.78,
+  },
+  LA: {
+    route: "LA",
+    name: "Los Angeles / SoCal",
+    label: "Los Angeles",
+    lat: 34.0522,
+    lng: -118.2437,
+  },
+  SD: { route: "SD", name: "San Diego", label: "San Diego", lat: 32.7157, lng: -117.1611 },
+  NST: { route: "NST", name: "North State", label: "North State", lat: 39.8, lng: -122.0 },
 };
+
+/**
+ * Back-compat alias. The five original Bay Area hubs plus the statewide regions
+ * now live in {@link CA_REGIONS}; older references to `BAY_AREA_HUBS` keep working.
+ */
+export const BAY_AREA_HUBS = CA_REGIONS;
 
 export interface RegionResult {
   route: HubRoute;
@@ -64,32 +100,33 @@ export interface RegionResult {
 }
 
 function hubResult(route: HubRoute): RegionResult {
-  return { route, name: BAY_AREA_HUBS[route].name };
+  return { route, name: CA_REGIONS[route].name };
 }
 
-// ─── 1. lat/lng → nearest hub centroid ─────────────────────────────────────────
+// ─── 1. lat/lng → nearest region centroid ──────────────────────────────────────
 
 /**
- * Rough bounds guard so a coordinate far outside the Bay Area (a bad geocode,
- * an out-of-area place) is not force-fit to the nearest hub. Generous box
- * covering the nine-county Bay Area.
+ * Generous bounding box covering the state of California (plus a little slop at
+ * the edges). Coordinates outside it are treated as NOT in California — used
+ * both to reject out-of-state intakes and to guard the nearest-centroid fallback
+ * from force-fitting a far-away point onto a California region.
  */
-function isInBayArea(lat: number, lng: number): boolean {
-  return lat >= 36.9 && lat <= 38.9 && lng >= -123.2 && lng <= -121.1;
+export function isInCalifornia(lat: number, lng: number): boolean {
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return false;
+  return lat >= 32.3 && lat <= 42.2 && lng >= -124.6 && lng <= -114.0;
 }
 
 /**
- * Classify a coordinate to the nearest hub centroid (squared Euclidean distance
- * in lat/lng space — fine at this scale). Returns null when the point is well
- * outside the Bay Area.
+ * Classify a coordinate to the nearest region centroid (squared Euclidean
+ * distance in lat/lng space — fine at this scale). Returns null when the point
+ * is outside California.
  */
 export function regionFromLatLng(lat: number, lng: number): RegionResult | null {
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  if (!isInBayArea(lat, lng)) return null;
+  if (!isInCalifornia(lat, lng)) return null;
 
   let best: HubRoute | null = null;
   let bestDist = Infinity;
-  for (const hub of Object.values(BAY_AREA_HUBS)) {
+  for (const hub of Object.values(CA_REGIONS)) {
     const dLat = hub.lat - lat;
     const dLng = hub.lng - lng;
     const dist = dLat * dLat + dLng * dLng;
@@ -216,6 +253,102 @@ const CITY_REGION: Record<string, HubRoute> = {
   fairfield: "E",
   vacaville: "E",
   "suisun city": "E",
+
+  // ── SAC: Sacramento / Capital Region ──
+  sacramento: "SAC",
+  "west sacramento": "SAC",
+  "elk grove": "SAC",
+  roseville: "SAC",
+  folsom: "SAC",
+  "rancho cordova": "SAC",
+  "citrus heights": "SAC",
+  rocklin: "SAC",
+  "el dorado hills": "SAC",
+  davis: "SAC",
+  woodland: "SAC",
+  auburn: "SAC",
+  lincoln: "SAC",
+
+  // ── CCST: Central Coast (Monterey / Santa Cruz / SLO / Santa Barbara) ──
+  monterey: "CCST",
+  carmel: "CCST",
+  "carmel-by-the-sea": "CCST",
+  "pacific grove": "CCST",
+  seaside: "CCST",
+  salinas: "CCST",
+  "santa cruz": "CCST",
+  "scotts valley": "CCST",
+  capitola: "CCST",
+  watsonville: "CCST",
+  "san luis obispo": "CCST",
+  "paso robles": "CCST",
+  "pismo beach": "CCST",
+  "santa maria": "CCST",
+  "santa barbara": "CCST",
+  goleta: "CCST",
+  montecito: "CCST",
+  hollister: "CCST",
+
+  // ── CVAL: Central Valley (Stockton / Modesto / Fresno / Bakersfield) ──
+  stockton: "CVAL",
+  tracy: "CVAL",
+  manteca: "CVAL",
+  lodi: "CVAL",
+  modesto: "CVAL",
+  turlock: "CVAL",
+  ceres: "CVAL",
+  merced: "CVAL",
+  fresno: "CVAL",
+  clovis: "CVAL",
+  visalia: "CVAL",
+  tulare: "CVAL",
+  bakersfield: "CVAL",
+
+  // ── LA: Los Angeles / SoCal (LA / Orange / Inland Empire / Ventura) ──
+  "los angeles": "LA",
+  "long beach": "LA",
+  pasadena: "LA",
+  "santa monica": "LA",
+  "beverly hills": "LA",
+  "west hollywood": "LA",
+  "culver city": "LA",
+  glendale: "LA",
+  burbank: "LA",
+  torrance: "LA",
+  malibu: "LA",
+  calabasas: "LA",
+  "thousand oaks": "LA",
+  ventura: "LA",
+  oxnard: "LA",
+  anaheim: "LA",
+  irvine: "LA",
+  "santa ana": "LA",
+  "newport beach": "LA",
+  "huntington beach": "LA",
+  "costa mesa": "LA",
+  riverside: "LA",
+  "san bernardino": "LA",
+  ontario: "LA",
+  "palm springs": "LA",
+
+  // ── SD: San Diego county ──
+  "san diego": "SD",
+  "la jolla": "SD",
+  "chula vista": "SD",
+  carlsbad: "SD",
+  encinitas: "SD",
+  "del mar": "SD",
+  oceanside: "SD",
+  escondido: "SD",
+  coronado: "SD",
+  "solana beach": "SD",
+
+  // ── NST: North State (Redding / Chico / Humboldt / Tahoe) ──
+  redding: "NST",
+  chico: "NST",
+  eureka: "NST",
+  truckee: "NST",
+  "south lake tahoe": "NST",
 };
 
 /**
@@ -301,6 +434,39 @@ export function regionFromZip(zip: string | null | undefined): RegionResult | nu
   // East Bay: Alameda + Contra Costa: 94500–94899 (Napa/Solano 945xx pockets
   // are handled above; anything left here is genuinely East Bay).
   if (n >= 94500 && n <= 94899) return hubResult("D");
+
+  // ── Rest of California (coarse metro buckets; city-name matching above wins) ──
+
+  // Southern California: LA basin 90xxx–91xxx.
+  if (n >= 90001 && n <= 91999) return hubResult("LA");
+  // San Diego county: 92000–92199.
+  if (n >= 92000 && n <= 92199) return hubResult("SD");
+  // Inland Empire / Orange / desert (Riverside, San Bernardino, OC): 92200–92899.
+  if (n >= 92200 && n <= 92899) return hubResult("LA");
+  // Ventura county: 93000–93099 (SoCal).
+  if (n >= 93000 && n <= 93099) return hubResult("LA");
+  // Santa Barbara: 93100–93199 (Central Coast).
+  if (n >= 93100 && n <= 93199) return hubResult("CCST");
+  // Kern / Tulare (Bakersfield, Delano): 93200–93399.
+  if (n >= 93200 && n <= 93399) return hubResult("CVAL");
+  // San Luis Obispo: 93400–93499 (Central Coast).
+  if (n >= 93400 && n <= 93499) return hubResult("CCST");
+  // Kern / Mojave: 93500–93599.
+  if (n >= 93500 && n <= 93599) return hubResult("CVAL");
+  // Fresno / Madera / Visalia: 93600–93799.
+  if (n >= 93600 && n <= 93799) return hubResult("CVAL");
+  // Monterey / Salinas: 93900–93999 (Central Coast).
+  if (n >= 93900 && n <= 93999) return hubResult("CCST");
+  // San Joaquin / Stanislaus / Merced (Stockton, Modesto): 95200–95399.
+  if (n >= 95200 && n <= 95399) return hubResult("CVAL");
+  // Humboldt / far north coast (Eureka): 95500–95599.
+  if (n >= 95500 && n <= 95599) return hubResult("NST");
+  // Sacramento metro: 95600–95899 (Solano 956xx pockets already returned E above).
+  if (n >= 95600 && n <= 95899) return hubResult("SAC");
+  // Yuba / Sutter / Butte (Marysville, Chico): 95900–95999.
+  if (n >= 95900 && n <= 95999) return hubResult("NST");
+  // Shasta / Sierra / Tahoe (Redding, Susanville, Truckee): 96000–96199.
+  if (n >= 96000 && n <= 96199) return hubResult("NST");
   return null;
 }
 
@@ -326,7 +492,7 @@ export interface RegionSignals {
  * centroid is therefore only a LAST resort, used when we cannot name the city
  * from its address or place it by ZIP.
  *
- * Returns null only when none of the signals place the location in the Bay Area.
+ * Returns null only when none of the signals place the location in California.
  */
 export function classifyBayAreaRegion(signals: RegionSignals): RegionResult | null {
   const { latitude, longitude, zipCode, address, city } = signals;
@@ -338,14 +504,61 @@ export function classifyBayAreaRegion(signals: RegionSignals): RegionResult | nu
   // 2. City name matched inside the formatted address.
   const byAddress = regionFromAddress(address);
   if (byAddress) return byAddress;
-  // 3. ZIP-prefix county fallback.
+  // 3. ZIP-prefix fallback.
   const byZip = regionFromZip(zipCode);
   if (byZip) return byZip;
-  // 4. Nearest hub centroid — last resort, coarse at county boundaries.
+  // 4. Nearest region centroid — last resort, coarse at region boundaries.
   if (latitude != null && longitude != null) {
     return regionFromLatLng(latitude, longitude);
   }
   return null;
+}
+
+// ─── California membership (intake gate) ────────────────────────────────────────
+
+/** Parse a 5-digit ZIP from a bare value or a state-anchored formatted address. */
+function parseZip5(zipCode: string | null | undefined, address?: string | null): number | null {
+  const direct = zipCode ? /(\d{5})/.exec(zipCode) : null;
+  if (direct) return parseInt(direct[1], 10);
+  if (address) {
+    const anchored = /\b[A-Z]{2}\s+(\d{5})(?:-\d{4})?\b/i.exec(address);
+    if (anchored) return parseInt(anchored[1], 10);
+  }
+  return null;
+}
+
+export interface CaliforniaSignals {
+  state?: string | null;
+  zipCode?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  address?: string | null;
+}
+
+/**
+ * Decide whether a location is in California. Showrooms are limited to CA, but
+ * the gate is deliberately conservative: it only reports `false` when there is a
+ * POSITIVE out-of-state signal (an explicit non-CA state, a ZIP outside the CA
+ * 90001–96199 band, or coordinates outside the state box). A location with no
+ * usable geo signal is allowed through — we never block an intake we can't prove
+ * is out of state. Signals are weighed most-authoritative first: explicit state,
+ * then ZIP, then coordinates, then an address mention.
+ */
+export function isCaliforniaLocation(sig: CaliforniaSignals): boolean {
+  const state = sig.state?.trim().toLowerCase();
+  if (state) return state === "ca" || state === "california" || state === "calif";
+
+  const zip = parseZip5(sig.zipCode, sig.address);
+  if (zip != null) return zip >= 90001 && zip <= 96199;
+
+  if (sig.latitude != null && sig.longitude != null) {
+    return isInCalifornia(sig.latitude, sig.longitude);
+  }
+
+  if (sig.address && /\bcalif(?:ornia)?\b|,\s*ca\b/i.test(sig.address)) return true;
+
+  // No signal proves out-of-state — allow it through.
+  return true;
 }
 
 // ─── City-record resolution (FK, not free text) ────────────────────────────────
