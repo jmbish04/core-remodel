@@ -38,9 +38,9 @@ export class AiJsonParseError extends Error {
     super(
       `[ai-json] ${label}: model returned unparseable JSON ` +
         `(${textLength} chars). Prefix: ${textPrefix}`,
+      { cause },
     );
     this.name = "AiJsonParseError";
-    this.cause = cause;
   }
 }
 

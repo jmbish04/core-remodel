@@ -97,11 +97,11 @@ const MAX_SPECS = 12;
 /**
  * Output budget for the intel extraction.
  *
- * The call previously set no `max_tokens`, so a 15-field object carrying three
- * price rationales, a sales-intel paragraph and up to 12 specs could run past
- * the model default and come back as truncated JSON — which the parser then
- * swallowed into `{}`, nulling every field while the step reported success.
- * 4096 comfortably covers a full extraction.
+ * The call previously set none. Truncation turned out NOT to be the cause of
+ * the empty extractions — a live re-run proved the JSON parses fine and the
+ * model simply returns null for every nullable field — but a 15-field object
+ * carrying three price rationales, a sales-intel paragraph and up to 12 specs
+ * still deserves an explicit budget. 4096 covers a full response.
  */
 const EXTRACT_MAX_TOKENS = 4096;
 
@@ -196,6 +196,11 @@ const INTEL_JSON_SCHEMA = {
       },
     },
   },
+  // NOTE: marking every key `required` does NOT fix the all-null extraction —
+  // tried and measured on 2026-07-18. `required` forces the key to be emitted,
+  // not a non-null value, so `"aiRetailPrice": null` still satisfies both
+  // `required` and the `["string","null"]` union. kimi-k2.6 returns nulls for
+  // every nullable field regardless. Left as-is pending a model/prompt fix.
   required: ["caRegulatoryFlag", "specs"],
 } as const;
 
