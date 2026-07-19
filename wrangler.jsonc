@@ -56,6 +56,19 @@
     // website discovery in brand-enrichment.ts. Empty string == disabled;
     // falls back to Workers-AI-only discovery.
     "GOOGLE_SEARCH_CX": "",
+    // Showroom Scout model selection. The agent loop runs on the OpenAI Agents
+    // SDK but the model underneath is swappable via the aisdk() bridge:
+    //   SHOWROOM_SCOUT_PROVIDER = "gemini" | "workers-ai"
+    // Grounded web search is a SEPARATE, always-Gemini call (Google only allows
+    // built-in search alongside custom function tools on Gemini 3, and 2.5 fails
+    // silently rather than erroring) — see ai/agents/showroom-scout/model.ts.
+    "SHOWROOM_SCOUT_PROVIDER": "gemini",
+    "SHOWROOM_SCOUT_MODEL": "gemini-2.5-flash",
+    "SHOWROOM_SCOUT_SEARCH_MODEL": "gemini-2.5-flash",
+    // Hard cap on grounded searches per run, enforced in the tool (not a prompt
+    // request — prose budgets did not hold and runs drifted to 30 searches and
+    // published nothing). Past the cap web_search tells the model to publish.
+    "SHOWROOM_SCOUT_SEARCH_BUDGET": "12",
   },
   // DO NOT DELETE COMMENTS
   //  wrangler vectorize create core-remodel-research --preset @cf/baai/bge-large-en-v1.5
@@ -399,6 +412,13 @@
         "class_name": "DeepResearchAgent",
       },
       {
+        // Showroom Scout: discovery + vetting + same-day route planning.
+        // Cloudflare Agents SDK owns durability/streaming; the OpenAI Agents
+        // SDK loop runs inside it. One DO per scouting session.
+        "name": "SHOWROOM_SCOUT",
+        "class_name": "ShowroomScout",
+      },
+      {
         // ClickUp integration: autonomous project auditor (4h alarm cycle).
         "name": "REMODEL_ORCHESTRATOR",
         "class_name": "RemodelOrchestrator",
@@ -479,6 +499,11 @@
       // 0015 MCP connector DO (agents/mcp McpAgent).
       "tag": "v14",
       "new_sqlite_classes": ["RemodelMcpAgent"],
+    },
+    {
+      // Showroom Scout session DO.
+      "tag": "v15",
+      "new_sqlite_classes": ["ShowroomScout"],
     },
   ],
   "worker_loaders": [

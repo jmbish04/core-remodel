@@ -18,10 +18,12 @@ import { listDriveLists } from "./list_drive_lists";
 import { getDriveList } from "./get_drive_list";
 import { createDriveListTool } from "./create_drive_list";
 import { analyzeDriveCoverage } from "./analyze_drive_coverage";
+import { planDriveRoute } from "./plan_drive_route";
 
 export const driveTools: RemodelTool[] = [
   listDriveLists,
   getDriveList,
   createDriveListTool,
   analyzeDriveCoverage,
+  planDriveRoute,
 ];

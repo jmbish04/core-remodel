@@ -15,3 +15,11 @@ allowBuilds:
 overrides:
   '@cloudflare/workers-types': ^4.20260503.1
   hono: ^4.12.16
+  # AI SDK provider spec must stay on v3 across the whole tree.
+  # `ai@6` ships @ai-sdk/provider@3 (LanguageModelV3), and
+  # `@openai/agents-extensions` (the aisdk() bridge used by Showroom Scout)
+  # peer-declares `^2.0.0 || ^3.0.0`. Without this override pnpm installs a
+  # phantom @ai-sdk/provider@4 to satisfy unmet peers and hands it to the
+  # adapter — out of range, and a v4-spec model would be rejected at runtime.
+  # Keep pinned to v3 until agents-extensions declares v4 support.
+  '@ai-sdk/provider': ^3.0.14

@@ -7,6 +7,7 @@ settings:
 overrides:
   '@cloudflare/workers-types': ^4.20260503.1
   hono: ^4.12.16
+  '@ai-sdk/provider': ^3.0.14
 
 importers:
 
@@ -15,6 +16,9 @@ importers:
       '@a2a-js/sdk':
         specifier: ^0.3.13
         version: 0.3.13(express@5.2.1)
+      '@ai-sdk/google':
+        specifier: ^3.0.95
+        version: 3.0.95(zod@4.4.2)
       '@ai-sdk/react':
         specifier: ^3.0.176
         version: 3.0.176(react@19.2.5)(zod@4.4.2)
@@ -75,6 +79,12 @@ importers:
       '@number-flow/react':
         specifier: ^0.6.0
         version: 0.6.0(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+      '@openai/agents':
+        specifier: 0.13.5
+        version: 0.13.5(@cfworker/json-schema@4.1.1)(ws@8.21.1)(zod@4.4.2)
+      '@openai/agents-extensions':
+        specifier: 0.13.5
+        version: 0.13.5(@ai-sdk/provider@3.0.14)(@cfworker/json-schema@4.1.1)(@openai/agents@0.13.5(@cfworker/json-schema@4.1.1)(ws@8.21.1)(zod@4.4.2))(ai@6.0.174(zod@4.4.2))(ws@8.21.1)(zod@4.4.2)
       '@platejs/basic-nodes':
         specifier: 53.0.0
         version: 53.0.0(platejs@53.0.3(@types/react@19.2.14)(immer@11.1.8)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)(scheduler@0.27.0)(use-sync-external-store@1.6.0(react@19.2.5)))(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
@@ -98,7 +108,7 @@ importers:
         version: 0.10.13(hono@4.12.16)
       '@tailwindcss/vite':
         specifier: ^4.2.4
-        version: 4.2.4(vite@8.0.13(@types/node@24.12.2)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))
+        version: 4.2.4(vite@8.0.13(@types/node@24.12.2)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))
       '@tiptap/pm':
         specifier: ^3.27.1
         version: 3.27.1
@@ -140,7 +150,7 @@ importers:
         version: 0.23.0
       agents:
         specifier: 0.12.3
-        version: 0.12.3(@babel/core@7.29.0)(@babel/runtime@7.29.2)(@cloudflare/ai-chat@0.7.1)(@cloudflare/workers-types@4.20260503.1)(ai@6.0.174(zod@4.4.2))(react@19.2.5)(rolldown@1.0.1)(vite@8.0.13(@types/node@24.12.2)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))(zod@4.4.2)
+        version: 0.12.3(@babel/core@7.29.0)(@babel/runtime@7.29.2)(@cloudflare/ai-chat@0.7.1)(@cloudflare/workers-types@4.20260503.1)(ai@6.0.174(zod@4.4.2))(react@19.2.5)(rolldown@1.0.1)(vite@8.0.13(@types/node@24.12.2)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))(zod@4.4.2)
       ai:
         specifier: ^6.0.174
         version: 6.0.174(zod@4.4.2)
@@ -281,7 +291,7 @@ importers:
         version: 1.1.4(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
       workers-ai-provider:
         specifier: ^3.1.14
-        version: 3.1.14(@ai-sdk/provider@3.0.10)(ai@6.0.174(zod@4.4.2))
+        version: 3.1.14(@ai-sdk/provider@3.0.14)(ai@6.0.174(zod@4.4.2))
       zod:
         specifier: ^4.4.2
         version: 4.4.2
@@ -289,6 +299,9 @@ importers:
         specifier: ^3.25.2
         version: 3.25.2(zod@4.4.2)
     devDependencies:
+      '@ai-sdk/provider':
+        specifier: ^3.0.14
+        version: 3.0.14
       '@mermaid-js/parser':
         specifier: ^1.2.0
         version: 1.2.0
@@ -307,6 +320,9 @@ importers:
       drizzle-kit:
         specifier: ^0.24.2
         version: 0.24.2
+      esbuild:
+        specifier: 0.25.12
+        version: 0.25.12
       oxfmt:
         specifier: ^0.35.0
         version: 0.35.0
@@ -318,7 +334,7 @@ importers:
         version: 5.9.3
       vite:
         specifier: ^8.0.13
-        version: 8.0.13(@types/node@24.12.2)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
+        version: 8.0.13(@types/node@24.12.2)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
       wrangler:
         specifier: ^4.100.0
         version: 4.100.0(@cloudflare/workers-types@4.20260503.1)
@@ -346,14 +362,26 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
+  '@ai-sdk/google@3.0.95':
+    resolution: {integrity: sha512-08qpAkbZVtgStqDBmJy6giSczmq9yU8DvMpKEmkTqkW2O7XMvd7a69jffNAp0pni0vbwArrjoNDtmz1vwbq1rg==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
   '@ai-sdk/provider-utils@4.0.26':
     resolution: {integrity: sha512-CsKNLKsOpvPujRlIYvoz+Ybw+kGn7J4/fIZa/58+R7iWLLfwn6ifE2G6Yq8K9XvH/I/3bzaDAJ3NhRwEMsLBKQ==}
     engines: {node: '>=18'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
-  '@ai-sdk/provider@3.0.10':
-    resolution: {integrity: sha512-Q3BZ27qfpYqnCYGvE3vt+Qi6LGOF9R5Nmzn+9JoM1lCRsD9mYaIhfJLkSunN48nfGXJ6n+XNV0J/XVpqGQl7Dw==}
+  '@ai-sdk/provider-utils@4.0.40':
+    resolution: {integrity: sha512-OL5IrpUm9Y8Dwy+w/vvFwPotS6m52O9W0op2oXgXdCROMJIBalBI0oro6OIBYkPxvm5Xg02GSkoQN25RlR0bnw==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/provider@3.0.14':
+    resolution: {integrity: sha512-5X1k57JBJ4H7H1QjX7CnJYAB1I19r/trVZTMcSms7/kLNZ8RaU4Nt2agcwZzv82Hfx6Q7/TOLU7agAKeFfc8cA==}
     engines: {node: '>=18'}
 
   '@ai-sdk/react@3.0.176':
@@ -2111,6 +2139,67 @@ packages:
 
   '@open-draft/until@2.1.0':
     resolution: {integrity: sha512-U69T3ItWHvLwGg5eJ0n3I62nWuE6ilHlmz7zM0npLBRvPRd7e6NYmg54vvRtP5mZG7kZqZCFVdsTWo7BPtBujg==}
+
+  '@openai/agents-core@0.13.5':
+    resolution: {integrity: sha512-RI9OwHG94c6ZTLNeEB7mfIpHbncgVxu4YElAmCAhq04EqLPzsLyouWhDgli8wZL/IhN/cYTaBwHvxktFzEbeyQ==}
+    peerDependencies:
+      zod: ^4.0.0
+    peerDependenciesMeta:
+      zod:
+        optional: true
+
+  '@openai/agents-extensions@0.13.5':
+    resolution: {integrity: sha512-XBJI+u6rgt0SVGj9uWxwhZGrEO8Sr2gOc8sRHK1LN9Fixv4nGOhmbhYynbHln24VsSc3BnV6NBf9NH88deG1+g==}
+    peerDependencies:
+      '@ai-sdk/provider': ^3.0.14
+      '@blaxel/core': ^0.2.82
+      '@daytonaio/sdk': ^0.162.0
+      '@e2b/code-interpreter': ^2.3.3
+      '@openai/agents': '>=0.0.0'
+      '@openai/codex-sdk': '>=0.86.0'
+      '@runloop/api-client': ^1.16.2
+      '@vercel/sandbox': ^1.9.3
+      ai: ^6.0.0
+      e2b: ^2.14.1
+      modal: ^0.7.6
+      ws: ^8.21.0
+      zod: ^4.0.0
+    peerDependenciesMeta:
+      '@ai-sdk/provider':
+        optional: true
+      '@blaxel/core':
+        optional: true
+      '@daytonaio/sdk':
+        optional: true
+      '@e2b/code-interpreter':
+        optional: true
+      '@openai/codex-sdk':
+        optional: true
+      '@runloop/api-client':
+        optional: true
+      '@vercel/sandbox':
+        optional: true
+      ai:
+        optional: true
+      e2b:
+        optional: true
+      modal:
+        optional: true
+
+  '@openai/agents-openai@0.13.5':
+    resolution: {integrity: sha512-DfItyOZxE7znrJMj8V8zV7qg9Ig1Q3u6/GfpkG0aTyj3NCAY8BbaxzLz0Qynlon9K4XBvo7LL8Nvxb5/FMeQcA==}
+    peerDependencies:
+      zod: ^4.0.0
+
+  '@openai/agents-realtime@0.13.5':
+    resolution: {integrity: sha512-8rCApGStttqZpPigEWQ1RaiqoKgoisqzQhp0pAnJvzCcZnYgTf/13AWa0wMcP9OQl/hfLcH4YQ+uipRYiVgMzg==}
+    peerDependencies:
+      zod: ^4.0.0
+
+  '@openai/agents@0.13.5':
+    resolution: {integrity: sha512-zmVEQrl2gIvD0Xq9ZcxPMXRkfafgaitESHU/CHA+ill10A8OQu4/pKgKW4oWb99KnJD/lP4Tnn9vX0LgCx9ouw==}
+    peerDependencies:
+      zod: ^4.0.0
 
   '@opentelemetry/api@1.9.0':
     resolution: {integrity: sha512-3giAOQvZiH5F9bMlMiv8+GSPMeqg0dbaeo58/0SlA9sxSqZhnUtxzX9/2FzyhS9sWQf5S0GJE0AKBrFqjpeYcg==}
@@ -4058,6 +4147,9 @@ packages:
 
   '@types/webxr@0.5.24':
     resolution: {integrity: sha512-h8fgEd/DpoS9CBrjEQXR+dIDraopAEfu4wYVNY2tEPwk60stPWhvZMf4Foo5FakuQ7HFZoa8WceaWFervK2Ovg==}
+
+  '@types/ws@8.18.1':
+    resolution: {integrity: sha512-ThVF6DCVhA8kUGy+aazFQ4kXQ7E1Ty7A3ypFOe0IcJV8O/M511G99AW24irKrW56Wt44yG9+ij8FaqoBGkuBXg==}
 
   '@udecode/react-hotkeys@52.0.11':
     resolution: {integrity: sha512-MwdQlfTZhrP0O+BazuNgY9g2qJSZAB05ykdVCdWmBsjv5VQvQ3R9RkXLUMGD20TqUR62iT/Phb/ca8toxiCm0w==}
@@ -6324,6 +6416,26 @@ packages:
     resolution: {integrity: sha512-smsWv2LzFjP03xmvFoJ331ss6h+jixfA4UUV/Bsiyuu4YJPfN+FIQGOIiv4w9/+MoHkfkJ22UIaQWRVFRfH6Vw==}
     engines: {node: '>=20'}
 
+  openai@6.48.0:
+    resolution: {integrity: sha512-KhVp+FyV50QrXNextvL9hIU5l6ox5HYuKQjGVk7lIqprgJol90+dQXWONV6S1lRWsKA1bXjrow8RsUT14M1hNA==}
+    peerDependencies:
+      '@aws-sdk/credential-provider-node': '>=3.972.0 <4'
+      '@smithy/hash-node': '>=4.3.0 <5'
+      '@smithy/signature-v4': '>=5.4.0 <6'
+      ws: ^8.18.0
+      zod: ^3.25 || ^4.0
+    peerDependenciesMeta:
+      '@aws-sdk/credential-provider-node':
+        optional: true
+      '@smithy/hash-node':
+        optional: true
+      '@smithy/signature-v4':
+        optional: true
+      ws:
+        optional: true
+      zod:
+        optional: true
+
   openapi3-ts@4.5.0:
     resolution: {integrity: sha512-jaL+HgTq2Gj5jRcfdutgRGLosCy/hT8sQf6VOy+P+g36cZOjI1iukdPnijC+4CmeRzg/jEllJUboEic2FhxhtQ==}
 
@@ -7791,7 +7903,7 @@ packages:
   workers-ai-provider@3.1.14:
     resolution: {integrity: sha512-/umrajFP6OkZVbDAxwkrO9NPdNFG4c+i0fiVqdf4PGsLN+CiDsLJCI6xW0WXDLDR1ZZyjE4T6Xp6O/IKBIWGHQ==}
     peerDependencies:
-      '@ai-sdk/provider': ^3.0.0
+      '@ai-sdk/provider': ^3.0.14
       ai: ^6.0.0
 
   wrangler@4.100.0:
@@ -7839,6 +7951,18 @@ packages:
 
   ws@8.20.1:
     resolution: {integrity: sha512-It4dO0K5v//JtTXuPkfEOaI3uUN87iYPnqo/ZzqCoG3g8uhA66QUMs/SrM0YK7/NAu+r4LMh/9dq2A7k+rHs+w==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
+  ws@8.21.1:
+    resolution: {integrity: sha512-+0NTnW77fFN/DjQi6k/Sq/Yvk4Sgajw7urW8V+asjXnRgDs9gyGkdb7EzgfhA4goXsRIZKE28fzIXBHEzhuiWw==}
     engines: {node: '>=10.0.0'}
     peerDependencies:
       bufferutil: ^4.0.1
@@ -7974,19 +8098,32 @@ snapshots:
 
   '@ai-sdk/gateway@3.0.109(zod@4.4.2)':
     dependencies:
-      '@ai-sdk/provider': 3.0.10
+      '@ai-sdk/provider': 3.0.14
       '@ai-sdk/provider-utils': 4.0.26(zod@4.4.2)
       '@vercel/oidc': 3.2.0
       zod: 4.4.2
 
+  '@ai-sdk/google@3.0.95(zod@4.4.2)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.14
+      '@ai-sdk/provider-utils': 4.0.40(zod@4.4.2)
+      zod: 4.4.2
+
   '@ai-sdk/provider-utils@4.0.26(zod@4.4.2)':
     dependencies:
-      '@ai-sdk/provider': 3.0.10
+      '@ai-sdk/provider': 3.0.14
       '@standard-schema/spec': 1.1.0
       eventsource-parser: 3.0.8
       zod: 4.4.2
 
-  '@ai-sdk/provider@3.0.10':
+  '@ai-sdk/provider-utils@4.0.40(zod@4.4.2)':
+    dependencies:
+      '@ai-sdk/provider': 3.0.14
+      '@standard-schema/spec': 1.1.0
+      eventsource-parser: 3.0.8
+      zod: 4.4.2
+
+  '@ai-sdk/provider@3.0.14':
     dependencies:
       json-schema: 0.4.0
 
@@ -8425,7 +8562,7 @@ snapshots:
   '@cloudflare/ai-chat@0.7.1(@ai-sdk/react@3.0.176(react@19.2.5)(zod@4.4.2))(agents@0.12.3)(ai@6.0.174(zod@4.4.2))(react@19.2.5)(zod@4.4.2)':
     dependencies:
       '@ai-sdk/react': 3.0.176(react@19.2.5)(zod@4.4.2)
-      agents: 0.12.3(@babel/core@7.29.0)(@babel/runtime@7.29.2)(@cloudflare/ai-chat@0.7.1)(@cloudflare/workers-types@4.20260503.1)(ai@6.0.174(zod@4.4.2))(react@19.2.5)(rolldown@1.0.1)(vite@8.0.13(@types/node@24.12.2)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))(zod@4.4.2)
+      agents: 0.12.3(@babel/core@7.29.0)(@babel/runtime@7.29.2)(@cloudflare/ai-chat@0.7.1)(@cloudflare/workers-types@4.20260503.1)(ai@6.0.174(zod@4.4.2))(react@19.2.5)(rolldown@1.0.1)(vite@8.0.13(@types/node@24.12.2)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))(zod@4.4.2)
       ai: 6.0.174(zod@4.4.2)
       nanoid: 5.1.11
       react: 19.2.5
@@ -9380,6 +9517,87 @@ snapshots:
       outvariant: 1.4.3
 
   '@open-draft/until@2.1.0': {}
+
+  '@openai/agents-core@0.13.5(@cfworker/json-schema@4.1.1)(ws@8.21.1)(zod@4.4.2)':
+    dependencies:
+      debug: 4.4.3
+      openai: 6.48.0(ws@8.21.1)(zod@4.4.2)
+    optionalDependencies:
+      '@modelcontextprotocol/sdk': 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.4.2)
+      zod: 4.4.2
+    transitivePeerDependencies:
+      - '@aws-sdk/credential-provider-node'
+      - '@cfworker/json-schema'
+      - '@smithy/hash-node'
+      - '@smithy/signature-v4'
+      - supports-color
+      - ws
+
+  '@openai/agents-extensions@0.13.5(@ai-sdk/provider@3.0.14)(@cfworker/json-schema@4.1.1)(@openai/agents@0.13.5(@cfworker/json-schema@4.1.1)(ws@8.21.1)(zod@4.4.2))(ai@6.0.174(zod@4.4.2))(ws@8.21.1)(zod@4.4.2)':
+    dependencies:
+      '@openai/agents': 0.13.5(@cfworker/json-schema@4.1.1)(ws@8.21.1)(zod@4.4.2)
+      '@openai/agents-core': 0.13.5(@cfworker/json-schema@4.1.1)(ws@8.21.1)(zod@4.4.2)
+      '@types/ws': 8.18.1
+      debug: 4.4.3
+      ws: 8.21.1
+      zod: 4.4.2
+    optionalDependencies:
+      '@ai-sdk/provider': 3.0.14
+      ai: 6.0.174(zod@4.4.2)
+    transitivePeerDependencies:
+      - '@aws-sdk/credential-provider-node'
+      - '@cfworker/json-schema'
+      - '@smithy/hash-node'
+      - '@smithy/signature-v4'
+      - supports-color
+
+  '@openai/agents-openai@0.13.5(@cfworker/json-schema@4.1.1)(ws@8.21.1)(zod@4.4.2)':
+    dependencies:
+      '@openai/agents-core': 0.13.5(@cfworker/json-schema@4.1.1)(ws@8.21.1)(zod@4.4.2)
+      debug: 4.4.3
+      openai: 6.48.0(ws@8.21.1)(zod@4.4.2)
+      zod: 4.4.2
+    transitivePeerDependencies:
+      - '@aws-sdk/credential-provider-node'
+      - '@cfworker/json-schema'
+      - '@smithy/hash-node'
+      - '@smithy/signature-v4'
+      - supports-color
+      - ws
+
+  '@openai/agents-realtime@0.13.5(@cfworker/json-schema@4.1.1)(zod@4.4.2)':
+    dependencies:
+      '@openai/agents-core': 0.13.5(@cfworker/json-schema@4.1.1)(ws@8.21.1)(zod@4.4.2)
+      '@types/ws': 8.18.1
+      debug: 4.4.3
+      ws: 8.21.1
+      zod: 4.4.2
+    transitivePeerDependencies:
+      - '@aws-sdk/credential-provider-node'
+      - '@cfworker/json-schema'
+      - '@smithy/hash-node'
+      - '@smithy/signature-v4'
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+
+  '@openai/agents@0.13.5(@cfworker/json-schema@4.1.1)(ws@8.21.1)(zod@4.4.2)':
+    dependencies:
+      '@openai/agents-core': 0.13.5(@cfworker/json-schema@4.1.1)(ws@8.21.1)(zod@4.4.2)
+      '@openai/agents-openai': 0.13.5(@cfworker/json-schema@4.1.1)(ws@8.21.1)(zod@4.4.2)
+      '@openai/agents-realtime': 0.13.5(@cfworker/json-schema@4.1.1)(zod@4.4.2)
+      debug: 4.4.3
+      openai: 6.48.0(ws@8.21.1)(zod@4.4.2)
+      zod: 4.4.2
+    transitivePeerDependencies:
+      - '@aws-sdk/credential-provider-node'
+      - '@cfworker/json-schema'
+      - '@smithy/hash-node'
+      - '@smithy/signature-v4'
+      - bufferutil
+      - supports-color
+      - utf-8-validate
+      - ws
 
   '@opentelemetry/api@1.9.0': {}
 
@@ -10543,14 +10761,14 @@ snapshots:
   '@rolldown/binding-win32-x64-msvc@1.0.1':
     optional: true
 
-  '@rolldown/plugin-babel@0.2.3(@babel/core@7.29.0)(@babel/runtime@7.29.2)(rolldown@1.0.1)(vite@8.0.13(@types/node@24.12.2)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))':
+  '@rolldown/plugin-babel@0.2.3(@babel/core@7.29.0)(@babel/runtime@7.29.2)(rolldown@1.0.1)(vite@8.0.13(@types/node@24.12.2)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))':
     dependencies:
       '@babel/core': 7.29.0
       picomatch: 4.0.4
       rolldown: 1.0.1
     optionalDependencies:
       '@babel/runtime': 7.29.2
-      vite: 8.0.13(@types/node@24.12.2)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
+      vite: 8.0.13(@types/node@24.12.2)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
 
   '@rolldown/pluginutils@1.0.0-beta.27': {}
 
@@ -10786,12 +11004,12 @@ snapshots:
       '@tailwindcss/oxide-win32-arm64-msvc': 4.2.4
       '@tailwindcss/oxide-win32-x64-msvc': 4.2.4
 
-  '@tailwindcss/vite@4.2.4(vite@8.0.13(@types/node@24.12.2)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))':
+  '@tailwindcss/vite@4.2.4(vite@8.0.13(@types/node@24.12.2)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))':
     dependencies:
       '@tailwindcss/node': 4.2.4
       '@tailwindcss/oxide': 4.2.4
       tailwindcss: 4.2.4
-      vite: 8.0.13(@types/node@24.12.2)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
+      vite: 8.0.13(@types/node@24.12.2)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
 
   '@tippyjs/react@4.2.6(react-dom@19.2.5(react@19.2.5))(react@19.2.5)':
     dependencies:
@@ -11242,6 +11460,10 @@ snapshots:
 
   '@types/webxr@0.5.24': {}
 
+  '@types/ws@8.18.1':
+    dependencies:
+      '@types/node': 24.12.2
+
   '@udecode/react-hotkeys@52.0.11(react-dom@19.2.5(react@19.2.5))(react@19.2.5)':
     dependencies:
       react: 19.2.5
@@ -11408,12 +11630,12 @@ snapshots:
 
   agent-base@7.1.4: {}
 
-  agents@0.12.3(@babel/core@7.29.0)(@babel/runtime@7.29.2)(@cloudflare/ai-chat@0.7.1)(@cloudflare/workers-types@4.20260503.1)(ai@6.0.174(zod@4.4.2))(react@19.2.5)(rolldown@1.0.1)(vite@8.0.13(@types/node@24.12.2)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))(zod@4.4.2):
+  agents@0.12.3(@babel/core@7.29.0)(@babel/runtime@7.29.2)(@cloudflare/ai-chat@0.7.1)(@cloudflare/workers-types@4.20260503.1)(ai@6.0.174(zod@4.4.2))(react@19.2.5)(rolldown@1.0.1)(vite@8.0.13(@types/node@24.12.2)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))(zod@4.4.2):
     dependencies:
       '@babel/plugin-proposal-decorators': 7.29.0(@babel/core@7.29.0)
       '@cfworker/json-schema': 4.1.1
       '@modelcontextprotocol/sdk': 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.4.2)
-      '@rolldown/plugin-babel': 0.2.3(@babel/core@7.29.0)(@babel/runtime@7.29.2)(rolldown@1.0.1)(vite@8.0.13(@types/node@24.12.2)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))
+      '@rolldown/plugin-babel': 0.2.3(@babel/core@7.29.0)(@babel/runtime@7.29.2)(rolldown@1.0.1)(vite@8.0.13(@types/node@24.12.2)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4))
       ai: 6.0.174(zod@4.4.2)
       cron-schedule: 6.0.0
       mimetext: 3.0.28
@@ -11425,7 +11647,7 @@ snapshots:
       zod: 4.4.2
     optionalDependencies:
       '@cloudflare/ai-chat': 0.7.1(@ai-sdk/react@3.0.176(react@19.2.5)(zod@4.4.2))(agents@0.12.3)(ai@6.0.174(zod@4.4.2))(react@19.2.5)(zod@4.4.2)
-      vite: 8.0.13(@types/node@24.12.2)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
+      vite: 8.0.13(@types/node@24.12.2)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4)
     transitivePeerDependencies:
       - '@babel/core'
       - '@babel/plugin-transform-runtime'
@@ -11437,7 +11659,7 @@ snapshots:
   ai@6.0.174(zod@4.4.2):
     dependencies:
       '@ai-sdk/gateway': 3.0.109(zod@4.4.2)
-      '@ai-sdk/provider': 3.0.10
+      '@ai-sdk/provider': 3.0.14
       '@ai-sdk/provider-utils': 4.0.26(zod@4.4.2)
       '@opentelemetry/api': 1.9.0
       zod: 4.4.2
@@ -13943,6 +14165,11 @@ snapshots:
       powershell-utils: 0.1.0
       wsl-utils: 0.3.1
 
+  openai@6.48.0(ws@8.21.1)(zod@4.4.2):
+    optionalDependencies:
+      ws: 8.21.1
+      zod: 4.4.2
+
   openapi3-ts@4.5.0:
     dependencies:
       yaml: 2.8.4
@@ -15551,7 +15778,7 @@ snapshots:
       tsx: 4.21.0
       yaml: 2.8.4
 
-  vite@8.0.13(@types/node@24.12.2)(esbuild@0.27.7)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4):
+  vite@8.0.13(@types/node@24.12.2)(esbuild@0.25.12)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.4):
     dependencies:
       lightningcss: 1.32.0
       picomatch: 4.0.4
@@ -15560,7 +15787,7 @@ snapshots:
       tinyglobby: 0.2.16
     optionalDependencies:
       '@types/node': 24.12.2
-      esbuild: 0.27.7
+      esbuild: 0.25.12
       fsevents: 2.3.3
       jiti: 2.6.1
       tsx: 4.21.0
@@ -15610,9 +15837,9 @@ snapshots:
       '@cloudflare/workerd-linux-arm64': 1.20260611.1
       '@cloudflare/workerd-windows-64': 1.20260611.1
 
-  workers-ai-provider@3.1.14(@ai-sdk/provider@3.0.10)(ai@6.0.174(zod@4.4.2)):
+  workers-ai-provider@3.1.14(@ai-sdk/provider@3.0.14)(ai@6.0.174(zod@4.4.2)):
     dependencies:
-      '@ai-sdk/provider': 3.0.10
+      '@ai-sdk/provider': 3.0.14
       ai: 6.0.174(zod@4.4.2)
 
   wrangler@4.100.0(@cloudflare/workers-types@4.20260503.1):
@@ -15666,6 +15893,8 @@ snapshots:
   ws@8.18.0: {}
 
   ws@8.20.1: {}
+
+  ws@8.21.1: {}
 
   wsl-utils@0.3.1:
     dependencies:
