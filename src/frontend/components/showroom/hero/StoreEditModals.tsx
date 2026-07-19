@@ -16,7 +16,17 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
-import { Clock, Globe, Link2, Loader2, MapPin, Plus, Trash2 } from "lucide-react";
+import {
+  Clock,
+  ExternalLink,
+  Globe,
+  Link2,
+  Loader2,
+  MapPin,
+  Pencil,
+  Plus,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -38,6 +48,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+import { TOUCH_DIALOG_BODY_CLASS, TOUCH_DIALOG_CLASS } from "./touch-dialog";
 import { HoursEditor } from "../intake/HoursEditor";
 import type { HoursJson } from "../intake/hours-types";
 import {
@@ -46,6 +57,7 @@ import {
   asLinkType,
   type LinkType,
 } from "../intake/LinksField";
+import { absoluteHref } from "./SocialLinks";
 
 // ─── Edit hours ───────────────────────────────────────────────────────────────
 
@@ -356,6 +368,7 @@ export function ManageLinksModal({
   const [newUrl, setNewUrl] = useState("");
   const [newType, setNewType] = useState<LinkType>("WEBSITE");
   const [adding, setAdding] = useState(false);
+  const [editing, setEditing] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -445,19 +458,54 @@ export function ManageLinksModal({
     }
   }, [storeId, newUrl, newType, refresh]);
 
+  // Opens on the read-only list — the common case in a showroom parking lot is
+  // "take me to their Instagram", not "fix a URL". The pencil switches to CRUD.
+  useEffect(() => {
+    if (open) setEditing(false);
+  }, [open]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className={TOUCH_DIALOG_CLASS}>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Link2 className="size-4" /> Manage links
+            <Link2 className="size-4" /> {editing ? "Edit links" : "Links"}
           </DialogTitle>
           <DialogDescription>
             Website, social profiles, and any other links for this showroom.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="max-h-[60vh] space-y-4 overflow-y-auto pr-1">
+        {!editing ? (
+          <div className={`${TOUCH_DIALOG_BODY_CLASS} space-y-2`}>
+            {loading ? (
+              <div className="flex items-center gap-2 py-4 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" /> Loading links…
+              </div>
+            ) : links.length === 0 ? (
+              <p className="py-2 text-sm text-muted-foreground">No links yet.</p>
+            ) : (
+              links.map((l) => (
+                <a
+                  key={l.id}
+                  href={absoluteHref(l.url) ?? l.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex min-h-14 items-center gap-3 rounded-lg bg-card p-3 ring-1 ring-border/40 transition-colors hover:bg-muted/40"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-[11px] uppercase tracking-wide text-muted-foreground/70">
+                      {LINK_TYPE_LABELS[asLinkType(l.type)]}
+                    </span>
+                    <span className="block truncate text-base text-sky-400">{l.url}</span>
+                  </span>
+                  <ExternalLink className="size-4 shrink-0 text-muted-foreground" />
+                </a>
+              ))
+            )}
+          </div>
+        ) : (
+        <div className={`${TOUCH_DIALOG_BODY_CLASS} space-y-4`}>
           {/* Existing links */}
           <div className="space-y-2">
             {loading ? (
@@ -521,10 +569,18 @@ export function ManageLinksModal({
             </div>
           </div>
         </div>
+        )}
 
-        <DialogFooter className="mt-2">
-          <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-            Done
+        <DialogFooter className="mt-2 gap-2">
+          <Button
+            variant="outline"
+            className="h-12 gap-2 px-4"
+            onClick={() => setEditing((v) => !v)}
+          >
+            <Pencil className="size-4" /> {editing ? "Done editing" : "Edit links"}
+          </Button>
+          <Button variant="ghost" className="h-12 px-4" onClick={() => onOpenChange(false)}>
+            Close
           </Button>
         </DialogFooter>
       </DialogContent>

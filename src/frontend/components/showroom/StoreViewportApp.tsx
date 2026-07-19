@@ -22,11 +22,9 @@ import {
   BadgePercent,
   CalendarPlus,
   CheckCircle2,
-  Clock,
   ExternalLink,
   Globe,
   ImagePlus,
-  Link2,
   Loader2,
   Mail,
   MapPin,
@@ -78,11 +76,13 @@ import {
   CategoryChipsEditor,
   EditAddressModal,
   EditHoursModal,
+  HeroLinkButtons,
   HoursContactModal,
   HoursMiniCard,
   ManageLinksModal,
   SocialLinks,
   SOCIAL_LINK_TYPES,
+  UploadPhotoModal,
   type StoreCategoryChip,
 } from "./hero";
 import type { HoursJson } from "./intake/hours-types";
@@ -162,6 +162,9 @@ interface StoreDetail {
   locationState: string | null;
   locationZipCode: string | null;
   googleMapsLink: string | null;
+  /** Places coordinates — preferred over the address text for Tesla navigation. */
+  latitude: number | null;
+  longitude: number | null;
   googleRating: number | null;
   userRatingCount: number | null;
   reviewSummary: string | null;
@@ -541,6 +544,7 @@ export function StoreViewportApp({
   const [editHoursOpen, setEditHoursOpen] = useState(false);
   const [editAddressOpen, setEditAddressOpen] = useState(false);
   const [manageLinksOpen, setManageLinksOpen] = useState(false);
+  const [uploadOpen, setUploadOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
 
   // Note delete (inline; create/edit now navigate to the full-page editor).
@@ -557,8 +561,6 @@ export function StoreViewportApp({
   const [removingBrandId, setRemovingBrandId] = useState<number | null>(null);
   const [removingProductId, setRemovingProductId] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ── Data loaders ──────────────────────────────────────────────────────────────
 
@@ -852,43 +854,6 @@ export function StoreViewportApp({
       }
     },
     [id, removingProductId, loadMappedProducts, loadStore],
-  );
-
-  const uploadPhoto = useCallback(
-    async (file: File) => {
-      if (uploading) return;
-      setUploading(true);
-      try {
-        const dataUrl = await fileToDataUrl(file);
-        const res = await fetch(`/api/showroom-stores/${id}/photos`, {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ image: dataUrl, altText: file.name }),
-        });
-        if (!res.ok) {
-          const payload = (await res.json().catch(() => ({}))) as { error?: string };
-          throw new Error(payload.error ?? `Upload failed (${res.status})`);
-        }
-        toast.success("Photo uploaded");
-        await loadPhotos();
-      } catch (e) {
-        console.error("[store/photo-upload]", e);
-        toast.error(e instanceof Error ? e.message : "Failed to upload photo");
-      } finally {
-        setUploading(false);
-      }
-    },
-    [id, uploading, loadPhotos],
-  );
-
-  const onFilePicked = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      e.target.value = ""; // allow re-picking the same file
-      if (file) void uploadPhoto(file);
-    },
-    [uploadPhoto],
   );
 
   /**
@@ -1187,7 +1152,7 @@ export function StoreViewportApp({
             {/* Clearance alert — only when the sweep found live discounts. */}
             <ClearanceAlert sales={sales} />
 
-            {/* Contact row — click-to-call + Globe + social profiles from D1. */}
+            {/* Contact row — click-to-call. */}
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[13px]">
               {store.phoneNumber ? (
                 <a
@@ -1198,57 +1163,25 @@ export function StoreViewportApp({
                   {formatPhone(store.phoneNumber)}
                 </a>
               ) : null}
-              {store.websiteUrl ? (
-                <a
-                  href={store.websiteUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 text-muted-foreground hover:text-foreground"
-                >
-                  <Globe className="size-3.5" />
-                  Website
-                </a>
-              ) : null}
-              {/* Social profiles, built dynamically from showroom_store_links —
-                  only the types the store actually has render. */}
-              <SocialLinks links={store.links} />
             </div>
+
+            {/* Large tap targets for the website + every registered link type,
+                then the "Links" modal. Replaces the old text hyperlinks, which
+                were unhittable from a car touchscreen. */}
+            <HeroLinkButtons
+              links={store.links}
+              onOpenLinks={() => setManageLinksOpen(true)}
+            />
           </div>
 
-          {/* Office-hours mini-card — click for full hours + contact + map —
-              plus the correction affordances (hours / address / links) for when
-              intake got a field wrong, left it blank, or the store moved. */}
+          {/* Office-hours mini-card — click for full hours + contact + map, plus
+              the Call / Copy address / Navigate actions and the hours + address
+              edit affordances (all now live inside that modal). */}
           <div className="shrink-0 space-y-2 sm:w-60">
             <HoursMiniCard
               hoursJson={store.hoursJson}
               onClick={() => setHoursModalOpen(true)}
             />
-            <div className="flex flex-wrap gap-1.5">
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 gap-1 px-2 text-[11px]"
-                onClick={() => setEditHoursOpen(true)}
-              >
-                <Clock className="size-3" /> Edit hours
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 gap-1 px-2 text-[11px]"
-                onClick={() => setEditAddressOpen(true)}
-              >
-                <MapPin className="size-3" /> Edit address
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 gap-1 px-2 text-[11px]"
-                onClick={() => setManageLinksOpen(true)}
-              >
-                <Link2 className="size-3" /> Links
-              </Button>
-            </div>
           </div>
           </div>
 
@@ -1283,7 +1216,7 @@ export function StoreViewportApp({
             size="sm"
             variant="outline"
             className="gap-1.5"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => setUploadOpen(true)}
             disabled={uploading}
           >
             {uploading ? (
@@ -1354,7 +1287,7 @@ export function StoreViewportApp({
             galleryPhotos={galleryPhotos}
             photos={photos}
             uploading={uploading}
-            onUploadClick={() => fileInputRef.current?.click()}
+            onUploadClick={() => setUploadOpen(true)}
             onImportFiles={uploadPhotos}
             onPhotoSaved={loadPhotos}
             onOpenGallery={(index) => {
@@ -1371,15 +1304,6 @@ export function StoreViewportApp({
       <div className="mt-8">
         <EntityDocumentsPanel entityType="showroom" entityId={String(id)} />
       </div>
-
-      {/* Shared hidden file input for photo upload (hero + photos section). */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={onFilePicked}
-      />
 
       {/* ── Modals ────────────────────────────────────────────────────────────── */}
       <RecordVisitModal
@@ -1460,6 +1384,8 @@ export function StoreViewportApp({
           locationAddress: store.locationAddress,
           googleMapsLink: store.googleMapsLink,
           cityName: store.cityName,
+          latitude: store.latitude,
+          longitude: store.longitude,
         }}
         open={hoursModalOpen}
         onOpenChange={setHoursModalOpen}
@@ -1488,6 +1414,12 @@ export function StoreViewportApp({
         onOpenChange={setEditAddressOpen}
         onSaved={loadStore}
       />
+      <UploadPhotoModal
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        uploading={uploading}
+        onUpload={uploadPhotos}
+      />
       <ManageLinksModal
         storeId={id}
         open={manageLinksOpen}
@@ -1499,6 +1431,11 @@ export function StoreViewportApp({
         open={editOpen}
         onOpenChange={setEditOpen}
         onSaved={loadStore}
+        // Soft-deleted: this viewport still resolves by id, but the store is
+        // gone from every list — send the user back to the directory.
+        onDeleted={() => {
+          window.location.href = "/admin/shopping/showrooms";
+        }}
       />
     </main>
   );

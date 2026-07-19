@@ -1,39 +1,20 @@
 /**
  * @fileoverview HoursContactModal — full showroom hours + contact + map.
  *
- * Opened from the hero's HoursMiniCard, at ~80% of the viewport (see
- * `touch-dialog`) because this is the screen you actually use standing at the
- * car. Blocks, in order:
- *   0. Action row — Call / Copy address / Send to Tesla. Large, and FIRST,
- *      because these are the three things you want while parked and they were
- *      previously buried under a scroll as small text links.
+ * Opened from the hero's HoursMiniCard. Four blocks in a roomy dialog:
  *   1. Weekly hours table — one row per day from the structured `hoursJson`
- *      (today highlighted, PST), with a live open/closed badge in the header
- *      and an optional inline "Edit hours" affordance.
+ *      (today highlighted), with a live open/closed badge in the header and an
+ *      optional inline "Edit hours" affordance.
  *   2. Contact cards — click-to-call phone (tel:), copy-to-clipboard email +
- *      address, and an open-in-new-tab website.
+ *      address, and an open-in-new-tab website. Built for phone / in-car use.
  *   3. Map — keyless Google Maps embed centered on the store's address, plus a
  *      "Open in Google Maps" link (prefers the stored place-id deep link).
  */
 
-import { useState } from "react";
-import {
-  Check,
-  Clock,
-  Copy,
-  ExternalLink,
-  Globe,
-  Loader2,
-  Mail,
-  MapPin,
-  Navigation,
-  Pencil,
-  Phone,
-  X,
-} from "lucide-react";
+import { Clock, ExternalLink, Globe, Mail, MapPin, Pencil, Phone } from "lucide-react";
 import { toast } from "sonner";
 
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -41,17 +22,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { cn } from "src/frontend/lib/utils";
 
 import type { DayKey, HoursJson } from "../intake/hours-types";
 import { DAY_KEYS, DAY_LABELS, to12h } from "../intake/hours-types";
 import {
   computeOpenBadge,
-  hoursJsonToRows,
-  pstNow,
+  computePst,
+  hourRowsFromHoursJson,
   type OpenBadge,
 } from "../hours-status";
-import { TOUCH_DIALOG_BODY_CLASS, TOUCH_DIALOG_CLASS } from "./touch-dialog";
 
 /** The store fields the modal renders. All nullable — render defensively. */
 export interface HoursContactStore {
@@ -63,9 +42,6 @@ export interface HoursContactStore {
   locationAddress: string | null;
   googleMapsLink: string | null;
   cityName: string | null;
-  /** Precise coords when known — preferred over the address text for Tesla nav. */
-  latitude?: number | null;
-  longitude?: number | null;
 }
 
 /** Format one day's window as "9:00 AM – 5:00 PM". */
@@ -81,7 +57,7 @@ const JS_DAY_TO_KEY: DayKey[] = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"
 function WeeklyHoursTable({ hoursJson }: { hoursJson: HoursJson }) {
   // Highlight the PST "today" so it matches the PST-based status badge (a
   // browser in another timezone would otherwise highlight the wrong row).
-  const todayKey = JS_DAY_TO_KEY[pstNow().day];
+  const todayKey = JS_DAY_TO_KEY[computePst().day];
   return (
     <ul className="space-y-0.5">
       {DAY_KEYS.map((key) => {
@@ -136,11 +112,12 @@ function EditLink({ onClick, label }: { onClick: () => void; label: string }) {
   return (
     <Button
       type="button"
-      variant="outline"
+      variant="ghost"
+      size="sm"
       onClick={onClick}
-      className="h-9 gap-1.5 px-3 text-xs text-muted-foreground hover:text-foreground"
+      className="h-6 gap-1 px-1.5 text-[11px] text-muted-foreground hover:text-foreground"
     >
-      <Pencil className="size-3.5" /> {label}
+      <Pencil className="size-3" /> {label}
     </Button>
   );
 }
@@ -175,7 +152,7 @@ function ContactTile({
     </>
   );
   const cls =
-    "flex min-h-14 w-full items-center gap-3 rounded-lg bg-card p-3 text-left ring-1 ring-border/40 transition-colors hover:bg-muted/40";
+    "flex w-full items-center gap-3 rounded-lg bg-card p-3 text-left ring-1 ring-border/40 transition-colors hover:bg-muted/40";
   if (href) {
     return (
       <a
@@ -192,159 +169,6 @@ function ContactTile({
     <button type="button" onClick={onClick} className={cls}>
       {inner}
     </button>
-  );
-}
-
-/**
- * Copy `text`, with a fallback for embedded webviews.
- *
- * `navigator.clipboard` is undefined in a non-secure context and in some
- * in-car/embedded browsers — which is exactly the environment this modal is
- * built for, so a bare `navigator.clipboard.writeText` would TypeError there.
- * Falls back to the legacy `execCommand("copy")` over an offscreen textarea,
- * which those webviews do still support. Returns whether the copy landed.
- */
-async function copyText(text: string): Promise<boolean> {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return true;
-    }
-  } catch {
-    // Permission denied or unavailable — fall through to the legacy path.
-  }
-  try {
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.setAttribute("readonly", "");
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand("copy");
-    document.body.removeChild(ta);
-    return ok;
-  } catch {
-    return false;
-  }
-}
-
-// ─── Action row ───────────────────────────────────────────────────────────────
-
-/** Big-button sizing for the action row — the in-car tap targets. */
-const ACTION_BTN = "h-14 flex-1 basis-40 gap-2 text-base";
-
-/**
- * Call / Copy address / Send to Tesla, at the top of the modal.
- *
- * Copy and Navigate report their result INSIDE the button (green check / red X)
- * rather than only via a toast, because a toast is easy to miss on a car screen;
- * a failed navigate additionally prints the reason underneath, since "did the
- * car get it?" is the only question that matters here.
- */
-function ActionRow({ store }: { store: HoursContactStore }) {
-  const [copied, setCopied] = useState(false);
-  const [navState, setNavState] = useState<"idle" | "sending" | "ok" | "error">("idle");
-  const [navError, setNavError] = useState<string | null>(null);
-
-  const tel = store.phoneNumber ? `tel:${store.phoneNumber.replace(/[^\d+]/g, "")}` : null;
-
-  const copyAddress = async () => {
-    if (!store.locationAddress) return;
-    if (await copyText(store.locationAddress)) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } else {
-      toast.error("Couldn't copy to clipboard");
-    }
-  };
-
-  const sendToTesla = async () => {
-    setNavState("sending");
-    setNavError(null);
-    // Coords are exact; the address text is the fallback the car geocodes itself.
-    const body =
-      store.latitude != null && store.longitude != null
-        ? { lat: store.latitude, lng: store.longitude }
-        : { destination: store.locationAddress ?? "" };
-    try {
-      const res = await fetch("/api/tesla/navigate", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
-      if (res.ok && data.ok === true) {
-        setNavState("ok");
-        setTimeout(() => setNavState("idle"), 4000);
-      } else {
-        setNavState("error");
-        setNavError(data.error ?? `Failed to send to Tesla (${res.status})`);
-      }
-    } catch (e) {
-      setNavState("error");
-      setNavError((e as Error).message || "Failed to send to Tesla");
-    }
-  };
-
-  const canNavigate = Boolean(
-    (store.latitude != null && store.longitude != null) || store.locationAddress,
-  );
-
-  if (!tel && !store.locationAddress && !canNavigate) return null;
-
-  return (
-    <div>
-      <div className="flex flex-wrap gap-2">
-        {tel ? (
-          <a href={tel} className={cn(buttonVariants({ size: "lg" }), ACTION_BTN)}>
-            <Phone className="size-5" /> Call
-          </a>
-        ) : null}
-
-        {store.locationAddress ? (
-          <Button
-            variant="outline"
-            size="lg"
-            className={ACTION_BTN}
-            onClick={() => void copyAddress()}
-          >
-            {copied ? (
-              <Check className="size-5 text-emerald-400" />
-            ) : (
-              <Copy className="size-5" />
-            )}
-            Copy address
-          </Button>
-        ) : null}
-
-        {canNavigate ? (
-          <Button
-            variant="outline"
-            size="lg"
-            className={ACTION_BTN}
-            disabled={navState === "sending"}
-            onClick={() => void sendToTesla()}
-          >
-            {navState === "sending" ? (
-              <Loader2 className="size-5 animate-spin" />
-            ) : navState === "ok" ? (
-              <Check className="size-5 text-emerald-400" />
-            ) : navState === "error" ? (
-              <X className="size-5 text-rose-400" />
-            ) : (
-              <Navigation className="size-5" />
-            )}
-            Navigate
-          </Button>
-        ) : null}
-      </div>
-
-      {navState === "error" && navError ? (
-        <p className="mt-1.5 text-sm text-rose-400">{navError}</p>
-      ) : null}
-    </div>
   );
 }
 
@@ -377,12 +201,16 @@ export function HoursContactModal({
       : null);
 
   const badge = store.hoursJson
-    ? computeOpenBadge(hoursJsonToRows(store.hoursJson), pstNow())
+    ? computeOpenBadge(hourRowsFromHoursJson(store.hoursJson), computePst())
     : null;
 
   const copy = async (text: string, what: string) => {
-    if (await copyText(text)) toast.success(`${what} copied`);
-    else toast.error("Couldn't copy to clipboard");
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(`${what} copied`);
+    } catch {
+      toast.error("Couldn't copy to clipboard");
+    }
   };
 
   const hasContact =
@@ -390,7 +218,7 @@ export function HoursContactModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={TOUCH_DIALOG_CLASS}>
+      <DialogContent className="max-h-[90vh] w-[calc(100vw-2rem)] max-w-2xl overflow-hidden">
         <DialogHeader>
           <DialogTitle className="flex flex-wrap items-center gap-2">
             <Clock className="size-4" /> {store.name}
@@ -402,13 +230,10 @@ export function HoursContactModal({
               </span>
             ) : null}
           </DialogTitle>
-          <DialogDescription>Business hours, contact, and location.</DialogDescription>
+          <DialogDescription>Showroom hours, contact, and location.</DialogDescription>
         </DialogHeader>
 
-        {/* Fixed above the scroll area — the reason the modal was opened. */}
-        <ActionRow store={store} />
-
-        <div className={`${TOUCH_DIALOG_BODY_CLASS} space-y-6`}>
+        <div className="max-h-[75vh] space-y-6 overflow-y-auto pr-1">
           {/* ── Weekly hours ── */}
           <section>
             <div className="mb-1.5 flex items-center justify-between">
@@ -471,12 +296,10 @@ export function HoursContactModal({
                   />
                 ) : null}
                 {store.websiteUrl ? (
-                  // Labelled, not the raw URL — a long URL is unreadable at a
-                  // glance and this is a button you press, not text you read.
                   <ContactTile
                     icon={<Globe className="size-4" />}
-                    label="Website"
-                    value="[Open website]"
+                    label="Open website"
+                    value={store.websiteUrl.replace(/^https?:\/\//, "").replace(/\/$/, "")}
                     href={store.websiteUrl}
                     target="_blank"
                   />

@@ -485,7 +485,12 @@ brandsRouter.get("/:id", async (c) => {
           })
           .from(showroomBrandMappings)
           .innerJoin(showroomStores, eq(showroomBrandMappings.showroomId, showroomStores.id))
-          .where(eq(showroomBrandMappings.brandId, brandId)),
+          .where(
+            and(
+              eq(showroomBrandMappings.brandId, brandId),
+              eq(showroomStores.isActive, true),
+            ),
+          ),
 
         // (2b) Showrooms via product mapping (showroom carries a product of this brand)
         db
@@ -500,7 +505,12 @@ brandsRouter.get("/:id", async (c) => {
             eq(showroomProductMappings.productId, showroomStoreProducts.id),
           )
           .innerJoin(showroomStores, eq(showroomProductMappings.showroomId, showroomStores.id))
-          .where(eq(showroomStoreProducts.brandId, brandId)),
+          .where(
+            and(
+              eq(showroomStoreProducts.brandId, brandId),
+              eq(showroomStores.isActive, true),
+            ),
+          ),
 
         // (3) Products for this brand
         db

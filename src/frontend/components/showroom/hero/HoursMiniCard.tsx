@@ -8,10 +8,10 @@
  *   Sat       11:00 AM–3:00 PM
  *   Sun       Closed
  *
- * The status badge is live (open / closing soon / closed) and derives from the
- * same PST-aware `computeShowroomStatus` the directory cards use, so the hero
- * and the list can never disagree. The whole card is a button — clicking opens
- * the advanced hours/contact/map modal.
+ * The status badge is live and full-width — four colour-coded states (open /
+ * closing soon / opening soon / closed) from the PST-aware `computeOpenBadge`,
+ * sized to be readable at arm's length from a car screen. The whole card is a
+ * button — clicking opens the advanced hours/contact/map modal.
  *
  * Weekdays collapse to a single "Mon–Fri" line only when every OPEN weekday
  * shares one window; otherwise each weekday gets its own line rather than
@@ -23,34 +23,44 @@ import { ChevronRight, Clock } from "lucide-react";
 import type { DayKey, DayHours, HoursJson } from "../intake/hours-types";
 import { DAY_LABELS, to12h } from "../intake/hours-types";
 import {
-  computeShowroomStatus,
+  computeOpenBadge,
   hoursJsonToRows,
   pstNow,
-  type ShowroomStatus,
+  type OpenBadge,
 } from "../hours-status";
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
 
-const STATUS_STYLES: Record<ShowroomStatus, { label: string; className: string }> = {
+/**
+ * Four colour-coded states — `opening-soon` (closed now, opens later today) is
+ * split out of `closed` so a store you can still catch today doesn't read as
+ * shut. Rendered full-bleed across the card so it's legible at a glance from a
+ * car screen.
+ */
+const BADGE_STYLES: Record<OpenBadge, { label: string; className: string }> = {
   open: {
     label: "Open Now",
-    className: "bg-emerald-500/15 text-emerald-400 ring-emerald-500/30",
+    className: "bg-emerald-500/15 text-emerald-300 ring-emerald-500/30",
   },
   "closing-soon": {
     label: "Closing Soon",
-    className: "bg-amber-500/15 text-amber-400 ring-amber-500/30",
+    className: "bg-amber-500/15 text-amber-300 ring-amber-500/30",
+  },
+  "opening-soon": {
+    label: "Opening Soon",
+    className: "bg-sky-500/15 text-sky-300 ring-sky-500/30",
   },
   closed: {
     label: "Closed",
-    className: "bg-muted text-muted-foreground ring-border/40",
+    className: "bg-rose-500/15 text-rose-300 ring-rose-500/30",
   },
 };
 
-function StatusBadge({ status }: { status: ShowroomStatus }) {
-  const { label, className } = STATUS_STYLES[status];
+function StatusBadge({ badge }: { badge: OpenBadge }) {
+  const { label, className } = BADGE_STYLES[badge];
   return (
     <span
-      className={`rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ${className}`}
+      className={`block w-full rounded-md px-2 py-1.5 text-center text-xs font-semibold uppercase tracking-wide ring-1 ${className}`}
     >
       {label}
     </span>
@@ -127,7 +137,7 @@ export function HoursMiniCard({
 }) {
   const lines = hoursJson ? buildHoursLines(hoursJson) : [];
   const rows = hoursJson ? hoursJsonToRows(hoursJson) : [];
-  const status = rows.length > 0 ? computeShowroomStatus(rows, pstNow()) : null;
+  const badge = rows.length > 0 ? computeOpenBadge(rows, pstNow()) : null;
   // A store closed literally every day yields lines but no rows — there is no
   // meaningful weekly schedule to show, so fall through to the unknown state.
   const hasHours = rows.length > 0;
@@ -145,9 +155,9 @@ export function HoursMiniCard({
         <ChevronRight className="ml-auto size-3.5 shrink-0 text-muted-foreground/60 transition-transform group-hover/hours:translate-x-0.5" />
       </p>
 
-      {status ? (
+      {badge ? (
         <p className="mt-2">
-          <StatusBadge status={status.status} />
+          <StatusBadge badge={badge} />
         </p>
       ) : null}
 

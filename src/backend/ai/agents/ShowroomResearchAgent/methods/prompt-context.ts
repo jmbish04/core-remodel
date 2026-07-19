@@ -145,7 +145,12 @@ export async function loadProductPromptContext(
     .select({ store: showroomStores })
     .from(showroomProductMappings)
     .innerJoin(showroomStores, eq(showroomProductMappings.showroomId, showroomStores.id))
-    .where(eq(showroomProductMappings.productId, productId))
+    .where(
+      and(
+        eq(showroomProductMappings.productId, productId),
+        eq(showroomStores.isActive, true),
+      ),
+    )
     .limit(1)
     .then((rows) => rows.map((r) => r.store));
 

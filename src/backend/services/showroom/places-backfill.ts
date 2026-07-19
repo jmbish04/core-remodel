@@ -50,6 +50,7 @@ export async function backfillShowroomPlacesData(
       and(
         isNotNull(showroomStores.placeId),
         isNull(showroomStores.locationStreetNumber),
+        eq(showroomStores.isActive, true),
       ),
     )
     .limit(BATCH);
@@ -144,6 +145,7 @@ export async function backfillShowroomPlacesData(
       and(
         isNotNull(showroomStores.placeId),
         isNull(showroomStores.locationStreetNumber),
+        eq(showroomStores.isActive, true),
       ),
     );
 

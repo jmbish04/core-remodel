@@ -718,7 +718,12 @@ showroomStoresRouter.get("/products/:pid/research/context", async (c) => {
         .select({ id: showroomStores.id, name: showroomStores.name })
         .from(showroomProductMappings)
         .innerJoin(showroomStores, eq(showroomProductMappings.showroomId, showroomStores.id))
-        .where(eq(showroomProductMappings.productId, productId)),
+        .where(
+          and(
+            eq(showroomProductMappings.productId, productId),
+            eq(showroomStores.isActive, true),
+          ),
+        ),
       product.brandId != null
         ? db
             .select({ id: brands.id, name: brands.name })
@@ -1120,7 +1125,9 @@ showroomStoresRouter.get("/", async (c) => {
     .orderBy(desc(showroomStores.createdAt))
     .$dynamic();
 
-  const conditions = [];
+  // Soft-deleted stores never appear in the directory / map / list. Pushed in
+  // first so `conditions` is never empty and the and(...) below always applies.
+  const conditions = [eq(showroomStores.isActive, true)];
   if (priceFilter) {
     conditions.push(
       eq(showroomStores.pricePoint, priceFilter as "$" | "$$" | "$$$" | "$$$$")
@@ -1986,15 +1993,59 @@ showroomStoresRouter.put("/:id/categories", async (c) => {
 });
 
 /**
- * DELETE /:id — Delete a store (hard delete).
+ * DELETE /:id — SOFT delete a store (`is_active = 0`).
+ *
+ * Deliberately not a hard delete: a showroom row is the parent of notes,
+ * photos, ratings, price observations, brand/product mappings and drive stops,
+ * and on D1 a `DROP`/`DELETE` cascade takes those with it irreversibly. Flipping
+ * the flag removes the store from every list surface while leaving the history
+ * intact and the row restorable via `POST /:id/restore`.
  */
 showroomStoresRouter.delete("/:id", async (c) => {
   const db = drizzle(c.env.DB);
   const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId)) return c.json({ error: "Invalid store id" }, 400);
 
-  await db.delete(showroomStores).where(eq(showroomStores.id, storeId));
+  const [row] = await db
+    .select({ id: showroomStores.id })
+    .from(showroomStores)
+    .where(eq(showroomStores.id, storeId))
+    .limit(1);
+  if (!row) return c.json({ error: "Store not found" }, 404);
 
-  return c.json({ success: true });
+  await db
+    .update(showroomStores)
+    .set({ isActive: false, updatedAt: new Date() })
+    .where(eq(showroomStores.id, storeId));
+
+  return c.json({ success: true, id: storeId, isActive: false });
+});
+
+/**
+ * POST /:id/restore — undo a soft delete (`is_active = 1`).
+ *
+ * The counterpart to DELETE above: because the row and its children were never
+ * removed, restoring is a single flag flip and the store returns to every list
+ * surface exactly as it was.
+ */
+showroomStoresRouter.post("/:id/restore", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId)) return c.json({ error: "Invalid store id" }, 400);
+
+  const [row] = await db
+    .select({ id: showroomStores.id })
+    .from(showroomStores)
+    .where(eq(showroomStores.id, storeId))
+    .limit(1);
+  if (!row) return c.json({ error: "Store not found" }, 404);
+
+  await db
+    .update(showroomStores)
+    .set({ isActive: true, updatedAt: new Date() })
+    .where(eq(showroomStores.id, storeId));
+
+  return c.json({ success: true, id: storeId, isActive: true });
 });
 
 // ─── HOURS ────────────────────────────────────────────────────────────────────

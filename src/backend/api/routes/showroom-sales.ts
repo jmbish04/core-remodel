@@ -93,7 +93,12 @@ async function loadCurrentSales(db: ReturnType<typeof drizzle>): Promise<SaleRow
     })
     .from(showroomStoreSales)
     .innerJoin(showroomStores, eq(showroomStoreSales.storeId, showroomStores.id))
-    .where(eq(showroomStoreSales.isCurrent, true))
+    .where(
+      and(
+        eq(showroomStoreSales.isCurrent, true),
+        eq(showroomStores.isActive, true),
+      ),
+    )
     .orderBy(desc(showroomStoreSales.timestamp));
 
   return rows as SaleRow[];

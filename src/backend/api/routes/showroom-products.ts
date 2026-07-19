@@ -131,7 +131,12 @@ showroomProductsRouter.get("/", async (c) => {
       })
       .from(showroomProductMappings)
       .innerJoin(showroomStores, eq(showroomProductMappings.showroomId, showroomStores.id))
-      .where(inArray(showroomProductMappings.productId, ids)),
+      .where(
+        and(
+          inArray(showroomProductMappings.productId, ids),
+          eq(showroomStores.isActive, true),
+        ),
+      ),
   ]);
 
   // 3. Build lookup maps. allImages is DESC by createdAt; first hit wins.

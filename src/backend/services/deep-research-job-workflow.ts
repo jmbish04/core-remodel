@@ -29,7 +29,7 @@ import {
   type WorkflowStep,
 } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import { researchJobs, type ResearchJob } from "@backend/db/schema/research/index";
 import { showroomStores } from "@backend/db/schema/showroom/stores";
@@ -440,13 +440,23 @@ async function findRegistryMatch(
       const [exact] = await db
         .select({ id: showroomStores.id, name: showroomStores.name })
         .from(showroomStores)
-        .where(sql`lower(${showroomStores.name}) = ${lower}`)
+        .where(
+          and(
+            sql`lower(${showroomStores.name}) = ${lower}`,
+            eq(showroomStores.isActive, true),
+          ),
+        )
         .limit(1);
       if (exact) return exact;
       const [fuzzy] = await db
         .select({ id: showroomStores.id, name: showroomStores.name })
         .from(showroomStores)
-        .where(sql`lower(${showroomStores.name}) LIKE ${`%${lower}%`}`)
+        .where(
+          and(
+            sql`lower(${showroomStores.name}) LIKE ${`%${lower}%`}`,
+            eq(showroomStores.isActive, true),
+          ),
+        )
         .limit(1);
       return fuzzy ?? null;
     }

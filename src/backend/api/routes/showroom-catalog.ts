@@ -49,7 +49,15 @@ showroomCatalogRouter.get("/catalog/products", async (c) => {
     })
     .from(showroomStoreProducts)
     .leftJoin(showroomProductMappings, eq(showroomProductMappings.productId, showroomStoreProducts.id))
-    .leftJoin(showroomStores, eq(showroomProductMappings.showroomId, showroomStores.id))
+    // Filter in the ON clause, not the WHERE: this is an outer join, so a
+    // WHERE on showroomStores would drop every unmapped product entirely.
+    .leftJoin(
+      showroomStores,
+      and(
+        eq(showroomProductMappings.showroomId, showroomStores.id),
+        eq(showroomStores.isActive, true),
+      ),
+    )
     .leftJoin(storeBayareaCities, eq(showroomStores.bayAreaCityId, storeBayareaCities.id))
     .orderBy(desc(showroomStoreProducts.createdAt))
     .$dynamic();
@@ -122,7 +130,15 @@ showroomCatalogRouter.get("/catalog/compare", async (c) => {
     .select({ product: showroomStoreProducts, storeName: showroomStores.name })
     .from(showroomStoreProducts)
     .leftJoin(showroomProductMappings, eq(showroomProductMappings.productId, showroomStoreProducts.id))
-    .leftJoin(showroomStores, eq(showroomProductMappings.showroomId, showroomStores.id))
+    // Filter in the ON clause, not the WHERE: this is an outer join, so a
+    // WHERE on showroomStores would drop every unmapped product entirely.
+    .leftJoin(
+      showroomStores,
+      and(
+        eq(showroomProductMappings.showroomId, showroomStores.id),
+        eq(showroomStores.isActive, true),
+      ),
+    )
     .where(inArray(showroomStoreProducts.id, ids));
 
   const specRows = await db

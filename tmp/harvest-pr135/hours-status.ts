@@ -15,6 +15,9 @@
  *   - Otherwise closed today            → "Opens tomorrow 10:00 AM" / "Opens Monday 10:00 AM"
  */
 
+import type { HoursJson } from "./intake/hours-types";
+import { DAY_KEYS } from "./intake/hours-types";
+
 export type ShowroomDay =
   | "MONDAY"
   | "TUESDAY"
@@ -32,101 +35,19 @@ export interface HourRow {
   closeMinute: number;
 }
 
-/** `HoursJson` day key → the `showroom_store_hours` day enum. */
-const JSON_KEY_TO_DAY: Record<string, ShowroomDay> = {
-  mon: "MONDAY",
-  tue: "TUESDAY",
-  wed: "WEDNESDAY",
-  thu: "THURSDAY",
-  fri: "FRIDAY",
-  sat: "SATURDAY",
-  sun: "SUNDAY",
-};
-
-/**
- * Convert the structured `HoursJson` the store detail carries into the
- * `HourRow[]` shape the status math takes — one row per OPEN day, closed days
- * dropped (which is exactly the `showroom_store_hours` convention). Lets a
- * caller holding only `hoursJson` reuse `computeShowroomStatus` rather than
- * reimplementing open/closed logic.
- *
- * Typed loosely (`Record<string, {open,close} | null>`) to avoid importing the
- * intake's `HoursJson` type here and coupling this pure module to that folder.
- */
-export function hoursJsonToRows(
-  json: Record<string, { open: string; close: string } | null> | null | undefined,
-): HourRow[] {
-  if (!json) return [];
-  const rows: HourRow[] = [];
-  for (const [key, day] of Object.entries(JSON_KEY_TO_DAY)) {
-    const w = json[key];
-    if (!w) continue;
-    const [oh, om] = w.open.split(":").map((n) => parseInt(n, 10));
-    const [ch, cm] = w.close.split(":").map((n) => parseInt(n, 10));
-    if (![oh, om, ch, cm].every(Number.isFinite)) continue;
-    rows.push({ day, openHour: oh, openMinute: om, closeHour: ch, closeMinute: cm });
-  }
-  return rows;
-}
-
 /** Current PST snapshot (0 = Sun … 6 = Sat, minutes since midnight). */
 export interface PstNow {
   day: number;
   minutes: number;
-  /** The moment rendered as a 12-hour label, e.g. "2:45 PM". */
   label: string;
-}
-
-/** Three-letter lowercase weekday → JS day index. */
-const WEEKDAY_ABBREV_TO_INDEX: Record<string, number> = {
-  sun: 0,
-  mon: 1,
-  tue: 2,
-  wed: 3,
-  thu: 4,
-  fri: 5,
-  sat: 6,
-};
-
-/** Minutes-since-midnight → "2:45 PM". */
-function fmtMinutes(min: number): string {
-  let h = Math.floor(min / 60);
-  const m = min % 60;
-  const mer = h >= 12 ? "PM" : "AM";
-  h = h % 12;
-  if (h === 0) h = 12;
-  return `${h}:${m.toString().padStart(2, "0")} ${mer}`;
-}
-
-/**
- * The current moment in America/Los_Angeles — every showroom hour in D1 is
- * stored as local showroom (PST) wall-clock time, so open/closed math must be
- * done in that zone regardless of where the browser is.
- */
-export function pstNow(): PstNow {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/Los_Angeles",
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(new Date());
-  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
-  const wd = get("weekday").toLowerCase().slice(0, 3);
-  // Intl can emit hour "24" for midnight under hour12:false.
-  let hour = parseInt(get("hour"), 10);
-  if (hour === 24 || Number.isNaN(hour)) hour = 0;
-  const minute = parseInt(get("minute"), 10) || 0;
-  const minutes = hour * 60 + minute;
-  return { day: WEEKDAY_ABBREV_TO_INDEX[wd] ?? 0, minutes, label: fmtMinutes(minutes) };
 }
 
 export type ShowroomStatus = "open" | "closed" | "closing-soon";
 
 /**
- * Compact badge state. Distinguishes "opens later today" (opening-soon) from
- * "closed for the day" (closed) — a split `computeShowroomStatus` collapses into
- * a single "closed". Drives the hero hours card's full-width badge.
+ * Compact hero-badge state. Distinguishes "opens later today" (opening-soon)
+ * from "closed for the day" (closed) — a split `computeShowroomStatus` collapses
+ * into a single "closed". Drives the Showroom-Hours card badge.
  */
 export type OpenBadge = "open" | "closing-soon" | "opening-soon" | "closed";
 
@@ -256,8 +177,75 @@ export function computeShowroomStatus(
   return { status: "closed", label: `Opens ${whenStr} ${openStr}` };
 }
 
+// ─── hoursJson bridge + hero badge ──────────────────────────────────────────
+
+/** DayKey (mon…sun) → the normalized showroom_hours enum. */
+const DAY_KEY_TO_ENUM: Record<(typeof DAY_KEYS)[number], ShowroomDay> = {
+  mon: "MONDAY",
+  tue: "TUESDAY",
+  wed: "WEDNESDAY",
+  thu: "THURSDAY",
+  fri: "FRIDAY",
+  sat: "SATURDAY",
+  sun: "SUNDAY",
+};
+
 /**
- * The compact badge for the current PST moment:
+ * Convert a structured `hoursJson` into the normalized `HourRow[]` the status
+ * helpers consume — one row per open day (closed/absent days are dropped). Lets
+ * the hero components reuse the same open/closed logic as the directory cards
+ * without needing the API's normalized rows on hand.
+ */
+export function hourRowsFromHoursJson(h: HoursJson | null | undefined): HourRow[] {
+  if (!h) return [];
+  const rows: HourRow[] = [];
+  for (const key of DAY_KEYS) {
+    const slot = h[key];
+    if (!slot) continue;
+    const [oh, om] = slot.open.split(":");
+    const [ch, cm] = slot.close.split(":");
+    rows.push({
+      day: DAY_KEY_TO_ENUM[key],
+      openHour: parseInt(oh, 10) || 0,
+      openMinute: parseInt(om ?? "0", 10) || 0,
+      closeHour: parseInt(ch, 10) || 0,
+      closeMinute: parseInt(cm ?? "0", 10) || 0,
+    });
+  }
+  return rows;
+}
+
+/** JS getDay() short name → our PstNow.day index helper table. */
+const PST_DAY_INDEX: Record<string, number> = {
+  sun: 0,
+  mon: 1,
+  tue: 2,
+  wed: 3,
+  thu: 4,
+  fri: 5,
+  sat: 6,
+};
+
+/** Current PST snapshot (day 0=Sun…6=Sat, minutes since midnight, "h:mm AM"). */
+export function computePst(): PstNow {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Los_Angeles",
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(new Date());
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  const wd = get("weekday").toLowerCase().slice(0, 3);
+  let hour = parseInt(get("hour"), 10);
+  if (hour === 24 || Number.isNaN(hour)) hour = 0;
+  const minute = parseInt(get("minute"), 10) || 0;
+  const minutes = hour * 60 + minute;
+  return { day: PST_DAY_INDEX[wd] ?? 0, minutes, label: fmtHm(hour, minute) };
+}
+
+/**
+ * The compact hero badge for the current PST moment:
  *   - open now, >60 min to close      → "open"
  *   - open now, ≤60 min to close       → "closing-soon"
  *   - closed now but opens later today → "opening-soon"

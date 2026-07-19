@@ -83,7 +83,7 @@ interface SocialConfig {
   Icon: (props: { className?: string }) => ReactElement;
 }
 
-const SOCIAL_CONFIG: Record<SocialLinkType, SocialConfig> = {
+export const SOCIAL_CONFIG: Record<SocialLinkType, SocialConfig> = {
   INSTAGRAM: { network: "Instagram", Icon: InstagramIcon },
   TWITTER_X: { network: "X", Icon: TwitterXIcon },
   LINKEDIN: { network: "LinkedIn", Icon: LinkedInIcon },
@@ -104,7 +104,7 @@ export interface StoreLink {
 // ─── URL → @handle ────────────────────────────────────────────────────────────
 
 /** Normalize a possibly-schemeless URL value into an absolute https URL. */
-function absoluteHref(url: string | null | undefined): string | null {
+export function absoluteHref(url: string | null | undefined): string | null {
   if (!url) return null;
   const trimmed = url.trim();
   if (!trimmed) return null;

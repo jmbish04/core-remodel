@@ -447,7 +447,12 @@ export async function sweepShowroomSales(
     })
     .from(showroomStoreLinks)
     .innerJoin(showroomStores, eq(showroomStoreLinks.storeId, showroomStores.id))
-    .where(eq(showroomStoreLinks.type, "WEBSITE_CLEARANCE"))
+    .where(
+      and(
+        eq(showroomStoreLinks.type, "WEBSITE_CLEARANCE"),
+        eq(showroomStores.isActive, true),
+      ),
+    )
     .orderBy(showroomStoreLinks.updatedAt)
     .limit(limit);
 

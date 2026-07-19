@@ -142,7 +142,13 @@ export async function monitorShowroomSourcingCoverage(env: Env): Promise<{
           eq(storeRating.isActive, true),
         ),
       )
-      .where(eq(showroomStoreCategoryMapping.categoryId, category.id));
+      // A soft-deleted store must not inflate mappedCount and suppress a sweep.
+      .where(
+        and(
+          eq(showroomStoreCategoryMapping.categoryId, category.id),
+          eq(showroomStores.isActive, true),
+        ),
+      );
 
     const coverage = analyzeCoverage(rows);
     const mappedCount = coverage.mappedStoreIds.size;

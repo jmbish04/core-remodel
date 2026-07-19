@@ -43,6 +43,24 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/showroom-soft-delete",
+    title: "Showroom soft delete — and the 34 read paths that had to learn about it",
+    summary:
+      "Deleting a showroom used to destroy the row and cascade its notes, photos, ratings and price history. It now flips is_active to 0 and can be restored. The column is the easy half: every query that lists or searches showrooms — directory, map, catalog, drives, field scan, backfill, MCP tools, the clearance cron, gap analysis — was audited and filtered.",
+    date: "2026-07-18",
+    status: "staged",
+    prNumber: 154,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/154",
+  },
+  {
+    branch: "claude/showroom-touch-ux",
+    title: "Showroom viewport, usable from a Tesla touchscreen",
+    summary:
+      "Every control on the showroom page was sized for a mouse: small buttons, smaller hyperlinks, cramped modals. The hero's link row becomes large tap targets (website + one icon per registered link type), the hours card gets a full-width four-state badge, and the hours / links / upload / categories modals all move to ~80% of the viewport with Call, Copy address, and Send-to-Tesla as big buttons at the top.",
+    date: "2026-07-18",
+    status: "staged",
+  },
+  {
     branch: "claude/feature-proposals-api-tools-ea0c5c",
     title: "Feature proposals — carry the conversation, not a summary of it",
     summary:
@@ -94,6 +112,45 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "showroom-soft-delete",
+    branch: "claude/showroom-soft-delete",
+    date: "2026-07-18",
+    tag: "Showrooms",
+    area: "Showrooms",
+    title: "Delete a showroom without destroying it",
+    summary:
+      "A showroom can now be removed from the directory without losing anything — the visit notes, photos, ratings and price history all survive, and it can be restored. Deleted showrooms disappear everywhere at once: the directory, the map, drives, search, the catalog, the clearance feed and the AI tools.",
+    status: "staged",
+    changes: [
+      { kind: "added", text: "Delete showroom, from the edit modal — behind a confirm that spells out what is and isn't kept." },
+      { kind: "added", text: "Restore a deleted showroom — POST /api/showroom-stores/:id/restore." },
+      { kind: "changed", text: "DELETE /api/showroom-stores/:id is now a soft delete (is_active = 0) instead of destroying the row and everything hanging off it." },
+      { kind: "changed", text: "34 list/search queries now hide deleted showrooms: directory, map, catalog, product + brand pages, clearance feed, field scan, backfills, contacts matching, phonebook, MCP tools, the research agents and the cron sweeps." },
+      { kind: "migration", text: "0113_dapper_white_queen — showroom_stores.is_active, default true. Applied to remote: 134 stores, 134 active." },
+    ],
+  },
+  {
+    id: "showroom-touch-ux",
+    branch: "claude/showroom-touch-ux",
+    date: "2026-07-18",
+    tag: "Showrooms",
+    area: "Showrooms",
+    title: "Showroom viewport, usable from a Tesla touchscreen",
+    summary:
+      "The showroom page is used standing at the car, from a touchscreen — and everything on it was mouse-sized. The website and social links become large buttons, the open/closed badge goes full-width with a new 'Opening Soon' state, and the hours modal leads with Call / Copy address / Send to Tesla instead of burying them under a scroll.",
+    status: "staged",
+    changes: [
+      { kind: "added", text: "Hero link row: a large Website button plus one same-size icon button per link type the showroom actually has registered (Instagram, X, LinkedIn, Facebook, Pinterest, Yelp, 360° tour, showroom photos, clearance)." },
+      { kind: "added", text: "Links modal — every URL as a tappable hyperlink, with a pencil that flips the same modal into the add/edit form." },
+      { kind: "added", text: "Hours modal now leads with Call, Copy address, and Send to Tesla as large buttons; copy and navigate report success/failure inside the button, and a failed navigate prints the reason." },
+      { kind: "added", text: "\"Opening Soon\" — a fourth open/closed state for a showroom that is shut right now but opens later today." },
+      { kind: "added", text: "Upload photo now opens a drag-and-drop dropzone (or tap to browse) instead of a hidden file input, and accepts several photos at once." },
+      { kind: "changed", text: "The open/closed badge is full-width and colour-coded across all four states." },
+      { kind: "changed", text: "Hours, links, upload and categories modals all render at ~80% of the viewport; category checkboxes are noticeably larger." },
+      { kind: "removed", text: "The hero's small \"Edit hours\" and \"Edit address\" buttons — both now live inside the hours modal." },
+    ],
+  },
   {
     id: "feature-proposals",
     branch: "claude/feature-proposals-api-tools-ea0c5c",

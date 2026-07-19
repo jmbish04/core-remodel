@@ -80,6 +80,261 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "showroom-soft-delete": {
+    slug: "showroom-soft-delete",
+    problem:
+      "DELETE /api/showroom-stores/:id destroyed the row. A showroom is the parent of notes, photos, ratings, price observations, brand/product mappings and drive stops, and on D1 that delete cascades — so removing a store you no longer care about also erased every visit you ever logged there, irreversibly. There was no way to take a showroom out of the directory without losing its history.",
+    approach:
+      "Add `is_active` (default true) and make DELETE a flag flip, with POST /:id/restore to undo it. The column is the easy half — a flag nothing reads changes nothing, so the substance of this change is an audit of every query that lists or searches showrooms. 34 of them now filter `is_active = 1`, across routes, MCP tools, both research agents and the cron sweeps. Three classes deliberately do NOT filter, because filtering them would itself be a bug: fetch-by-explicit-id (or a deleted store could never be inspected or restored), the placeId dedupe checks (an inactive row still holds the unique index, so skipping it turns a clean 409 into a raw UNIQUE-constraint failure), and joins that read a showroom only for a coordinate or label on a child row (drive stops, historical prices — the child is the entity). Two joins needed more than a WHERE: the catalog filters in its ON clause, because a WHERE on an outer join would have dropped every unmapped product from the catalog entirely; and the phonebook keeps contacts with a null storeId, since a leftJoin yields NULL and NULL never equals true.",
+    apiChanges: [
+      "DELETE /api/showroom-stores/:id — now a SOFT delete (is_active = 0); returns { success, id, isActive: false }",
+      "POST /api/showroom-stores/:id/restore — NEW; flips is_active back to 1",
+      "GET /api/showroom-stores — now excludes inactive stores (the filter also applies under search/price/city/hub filters)",
+      "GET /api/showroom-stores/:id — unchanged; still resolves an inactive store so it can be inspected and restored",
+      "GET /api/showroom-stores/meta/place-exists — unchanged BY DESIGN; still sees inactive rows, because they still hold the unique placeId index",
+    ],
+    filesTouched: [
+      "src/backend/db/schema/showroom/stores.ts",
+      "drizzle/0113_dapper_white_queen.sql",
+      "src/backend/api/routes/showroom-stores.ts",
+      "src/backend/api/routes/showroom-catalog.ts",
+      "src/backend/api/routes/showroom-products.ts",
+      "src/backend/api/routes/showroom-sales.ts",
+      "src/backend/api/routes/showroom-backfill.ts",
+      "src/backend/api/routes/showroom-contacts.ts",
+      "src/backend/api/routes/brands.ts",
+      "src/backend/api/routes/mcp.ts",
+      "src/backend/mcp/tools/showrooms/list_showrooms.ts",
+      "src/backend/mcp/tools/showrooms/backfill_showroom_geo.ts",
+      "src/backend/mcp/tools/drives/analyze_drive_coverage.ts",
+      "src/backend/mcp/tools/products/get_product.ts",
+      "src/backend/mcp/tools/brands/get_brand.ts",
+      "src/backend/ai/agents/ResearchAgent/methods/chat-tools.ts",
+      "src/backend/ai/agents/ShowroomResearchAgent/methods/prompt-context.ts",
+      "src/backend/services/product-research-workflow.ts",
+      "src/backend/services/showroom-sourcing-monitor.ts",
+      "src/backend/services/showroom/sales.ts",
+      "src/backend/services/showroom/places-backfill.ts",
+      "src/backend/services/deep-research-job-workflow.ts",
+      "src/backend/services/email/showroom-contact-autopopulate.ts",
+      "src/frontend/components/showroom/EditStoreModal.tsx",
+      "src/frontend/components/showroom/StoreViewportApp.tsx",
+    ],
+    migrations: [
+      {
+        tag: "0113_dapper_white_queen",
+        sql: "ALTER TABLE `showroom_stores` ADD `is_active` integer DEFAULT true NOT NULL;",
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_154.mjs",
+      command: "pnpm run test:pr 154",
+      output: `PR #154 QC → https://core-remodel.hacolby.workers.dev
+
+  ✓ target reachable (https://core-remodel.hacolby.workers.dev)
+  ✓ GET /api/showroom-stores → 200 (migration 0113 applied)
+  ✓ directory returned real rows to assert against
+  ✓ POST /:id/restore exists (this PR is deployed — safe to exercise DELETE)
+  ✓ restore reports isActive: true
+
+  … soft-deleting "Excel Plumbing Supply Showroom" (id 141) — will be restored
+
+  ✓ DELETE /api/showroom-stores/141 → 200
+  ✓ delete reports isActive: false (soft, not hard)
+  ✓ the row survives: GET /:id still returns it (soft delete, nothing erased)
+  ✓ …and it reports isActive: false
+  ✓ directory no longer lists it
+  ✓ directory count dropped by exactly one
+  ✓ a FILTERED directory query hides it too (predicate survives and(...))
+    (MCP list_showrooms probe returned 404 — skipped)
+  ✓ sales/clearance feed hides its rows
+  ✓ placeId dedupe STILL sees it (else a re-add hits a UNIQUE constraint)
+  ✓ restored "Excel Plumbing Supply Showroom" (id 141)
+  ✓ directory count is back to where it started
+
+16 passed, 0 failed`,
+      migrations: [{ tag: "0113_dapper_white_queen", appliedRemote: true }],
+    },
+    code: [
+      {
+        title: "Soft delete, and its undo",
+        lang: "ts",
+        code: `showroomStoresRouter.delete("/:id", async (c) => {
+  // NOT db.delete(): the row parents notes, photos, ratings, price
+  // observations and drive stops, and on D1 that cascade is irreversible.
+  await db.update(showroomStores)
+    .set({ isActive: false, updatedAt: new Date() })
+    .where(eq(showroomStores.id, storeId));
+  return c.json({ success: true, id: storeId, isActive: false });
+});`,
+      },
+      {
+        title: "The catalog filters in the ON clause, not the WHERE",
+        lang: "ts",
+        code: `// A WHERE here would drop every UNMAPPED product from the catalog:
+// the outer join yields NULL for them, and NULL never equals true.
+.leftJoin(
+  showroomStores,
+  and(
+    eq(showroomProductMappings.showroomId, showroomStores.id),
+    eq(showroomStores.isActive, true),
+  ),
+)`,
+      },
+      {
+        title: "The phonebook keeps contacts that belong to no store",
+        lang: "ts",
+        code: `conds.push(
+  or(
+    isNull(showroomStoreContacts.storeId),   // unattached contact — keep
+    eq(showroomStores.isActive, true),       // attached — only if live
+  ),
+);`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "What a soft delete does and does not reach",
+        code: `flowchart LR
+  Del["DELETE /:id — is_active = 0"] --> Hidden
+  Del --> Kept
+  Del --> Unaffected
+  subgraph Hidden["Hidden (34 queries filter)"]
+    D1["Directory + map"]
+    D2["Catalog / product / brand"]
+    D3["Clearance feed + cron"]
+    D4["Field scan + backfills"]
+    D5["MCP tools + agents"]
+  end
+  subgraph Kept["Kept on disk"]
+    K1["Notes, photos, ratings"]
+    K2["Price observations"]
+    K3["Brand / product mappings"]
+  end
+  subgraph Unaffected["Still resolves by design"]
+    U1["GET /:id (inspect + restore)"]
+    U2["placeId dedupe (holds the unique index)"]
+    U3["Drive stops (child is the entity)"]
+  end
+  Kept --> R["POST /:id/restore — is_active = 1"]`,
+      },
+    ],
+  },
+  "showroom-touch-ux": {
+    slug: "showroom-touch-ux",
+    problem:
+      "The showroom viewport is used from a Tesla touchscreen, standing next to the car outside the showroom — and every control on it was sized for a mouse. The website and socials were 13px text hyperlinks; the open/closed badge was a 10px pill; 'Edit hours' and 'Edit address' were 28px-tall buttons crammed under the hours card; the hours modal capped at `max-w-lg` and buried tap-to-call under a scroll; 'Upload photo' fired a hidden file input with no target and no feedback; the categories checkboxes were 16px squares in a two-column grid. Nothing on the page was reliably hittable with a thumb.",
+    approach:
+      "Push tap targets to 48px+ and give the modals room. The hero's link text row becomes `HeroLinkButtons`: a wide Website button, then one same-size icon button per link type actually present in `showroom_store_links` (absent types render nothing, so the row is built from real data rather than a fixed grid), then the Links button — moved up from under the hours card. The four touch modals (hours, links, upload, categories) share one `TOUCH_DIALOG_CLASS` constant at ~80% of the viewport so 'same size as the hours modal' cannot drift. The hours modal leads with the three things you actually want while parked — Call / Copy address / Send to Tesla — reporting result INSIDE the button (green check, red X + reason), because a toast is easy to miss on a car screen. The open/closed badge goes full-width and picks up a fourth 'Opening Soon' state, retrofitted from the closed PR #135's `computeOpenBadge` (its `computePst`/`hourRowsFromHoursJson` duplicates were dropped in favour of the already-merged `pstNow`/`hoursJsonToRows`).",
+    apiChanges: [
+      "No new endpoints — the Navigate button reuses the existing POST /api/tesla/navigate ({lat,lng} preferred, {destination} fallback)",
+      "GET /api/showroom-stores/:id — no shape change; the client type now models the latitude/longitude the payload already carried",
+    ],
+    filesTouched: [
+      "src/frontend/components/showroom/hours-status.ts",
+      "src/frontend/components/showroom/hero/HeroLinkButtons.tsx",
+      "src/frontend/components/showroom/hero/UploadPhotoModal.tsx",
+      "src/frontend/components/showroom/hero/touch-dialog.ts",
+      "src/frontend/components/showroom/hero/HoursContactModal.tsx",
+      "src/frontend/components/showroom/hero/HoursMiniCard.tsx",
+      "src/frontend/components/showroom/hero/CategoryChipsEditor.tsx",
+      "src/frontend/components/showroom/hero/StoreEditModals.tsx",
+      "src/frontend/components/showroom/hero/SocialLinks.tsx",
+      "src/frontend/components/showroom/hero/index.ts",
+      "src/frontend/components/showroom/StoreViewportApp.tsx",
+    ],
+    migrations: [],
+    verification: {
+      qcScript: "scripts/qc/pr_153.mjs",
+      command: "pnpm run test:pr 153",
+      output: `PR #153 QC → https://core-remodel.hacolby.workers.dev
+
+  ── computeOpenBadge (pure) ──
+  ✓ open: Wed 12:00 inside 9–17
+  ✓ closing-soon: Wed 16:30 is within 60m of the 17:00 close
+  ✓ opening-soon: Wed 07:00 is before the 9:00 open (NOT closed)
+  ✓ closed: Wed 18:00 is after the 17:00 close
+  ✓ closed: Sunday has no window at all
+  ✓ open at exactly 9:00 (open is inclusive)
+  ✓ closed at exactly 17:00 (close is exclusive)
+  ✓ closing-soon at exactly 16:00 (the 60m boundary)
+  ✓ null badge when there are no hours
+  ✓ hoursJsonToRows drops closed days
+  ✓ hoursJsonToRows round-trips into an 'open' badge
+
+  ── deployed API contract ──
+  ✓ target reachable (https://core-remodel.hacolby.workers.dev)
+  ✓ showroom API rejects an unauthenticated read (401)
+  ✓ GET /api/showroom-stores → 200
+  ✓ directory returned real rows to assert against
+  ✓ at least one store detail carries a non-empty links[] (hero icon row has data)
+  ✓ every link row carries { url, type } (the icon row keys off type)
+    store 141 links: WEBSITE
+  ✓ store detail exposes latitude/longitude (Tesla Navigate payload)
+  ✓ POST /api/tesla/navigate rejects an empty body (400)
+  ✓ POST /api/tesla/navigate is admin-gated (401 unauthenticated)
+    (a real navigate is NOT sent — it would start routing in the car)
+  ✓ GET /api/showroom-stores/meta/categories → 200
+  ✓ category vocabulary is non-empty (the checkbox grid has rows)
+
+22 passed, 0 failed`,
+    },
+    code: [
+      {
+        title: "The fourth state — closed now, but open again later today",
+        lang: "ts",
+        code: `export function computeOpenBadge(hours: HourRow[], now: PstNow): OpenBadge | null {
+  if (!hours || hours.length === 0) return null;
+  const row = rowForDay(hours, now.day);
+  if (row) {
+    const open = openMinutes(row);
+    const close = closeMinutes(row);
+    if (now.minutes >= open && now.minutes < close) {
+      return close - now.minutes <= 60 ? "closing-soon" : "open";
+    }
+    if (now.minutes < open) return "opening-soon";
+  }
+  return "closed";
+}`,
+      },
+      {
+        title: "One size constant for every touch modal",
+        lang: "ts",
+        code: `// max-w-none beats DialogContent's sm:max-w-sm (which would clamp w-[80vw]);
+// flex flex-col beats its \`grid\` so the body can flex-1 into the height.
+export const TOUCH_DIALOG_CLASS =
+  "flex h-[80vh] max-h-[80vh] w-[80vw] max-w-none flex-col gap-4 overflow-hidden p-5 sm:max-w-none";`,
+      },
+      {
+        title: "The link row is built from what the store actually has",
+        lang: "tsx",
+        code: `const iconLinks = ICON_ORDER.flatMap((type) => {
+  const href = firstOfType(type);
+  const Icon = LINK_ICONS[type];
+  if (!href || !Icon) return [];       // absent type → renders nothing
+  return [{ type, href, Icon, label: LINK_TYPE_LABELS[type] }];
+});`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Hero → modal routing after the rework",
+        code: `flowchart TD
+  Hero["Showroom hero"] --> Web["Website button (new tab)"]
+  Hero --> Icons["Icon button per registered link type"]
+  Hero --> LinksBtn["Links"]
+  Hero --> Card["Hours card (full-width badge)"]
+  LinksBtn --> LinksModal["Links modal — list view"]
+  LinksModal -->|pencil| LinksEdit["Add / edit form"]
+  Card --> HoursModal["Hours + contact modal"]
+  HoursModal --> Call["Call (tel:)"]
+  HoursModal --> Copy["Copy address (clipboard)"]
+  HoursModal --> Nav["Navigate — POST /api/tesla/navigate"]
+  HoursModal --> EditHours["Edit hours"]
+  HoursModal --> EditAddr["Edit address"]`,
+      },
+    ],
+  },
   "feature-proposals": {
     slug: "feature-proposals",
     branch: "claude/feature-proposals-api-tools-ea0c5c",

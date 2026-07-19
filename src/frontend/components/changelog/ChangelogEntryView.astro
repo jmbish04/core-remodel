@@ -248,6 +248,33 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
         </section>
       ) : null}
 
+      {detail?.verification ? (
+        <section class="mt-8">
+          <h2 class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+            Verification
+          </h2>
+          <p class="mt-2 text-sm text-muted-foreground">
+            <code class="font-mono text-[11px]">{detail.verification.command}</code>
+            {" — "}
+            <code class="font-mono text-[11px]">{detail.verification.script}</code>
+          </p>
+          {detail.verification.migrationsApplied &&
+          detail.verification.migrationsApplied.length > 0 ? (
+            <div class="mt-3 flex flex-wrap gap-2">
+              {detail.verification.migrationsApplied.map((m) => (
+                <span class="rounded-md bg-card px-2 py-1 font-mono text-[11px] ring-1 ring-border/40">
+                  {m.tag} ·{" "}
+                  <span class={m.appliedToRemote ? "text-emerald-400" : "text-rose-400"}>
+                    {m.appliedToRemote ? "applied to remote" : "NOT applied to remote"}
+                  </span>
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <pre class="mt-3 overflow-x-auto rounded-xl bg-card px-4 py-3 text-xs leading-relaxed ring-1 ring-border/40"><code>{detail.verification.output}</code></pre>
+        </section>
+      ) : null}
+
       {detail?.filesTouched && detail.filesTouched.length > 0 ? (
         <section class="mt-8">
           <h2 class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
