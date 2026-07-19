@@ -26,9 +26,21 @@ export const backfillShowroomGeo = defineTool({
       .number()
       .int()
       .min(1)
-      .max(100)
+      .max(1000)
       .optional()
-      .describe("Max stores to process this run (default 25)"),
+      .describe(
+        "Max stores to process this run. Default 25 for fill-missing, but 1000 in " +
+          "`recompute` mode so the whole re-tag completes in one pass.",
+      ),
+    offset: z
+      .number()
+      .int()
+      .min(0)
+      .optional()
+      .describe(
+        "Skip this many candidates before processing — for paging `recompute` runs " +
+          "(whose candidate set doesn't shrink between calls). Default 0.",
+      ),
     fetchCoordinates: z
       .boolean()
       .optional()
@@ -58,9 +70,13 @@ export const backfillShowroomGeo = defineTool({
     { title: "Re-tag every store from its address", args: { recompute: true, limit: 100 } },
   ],
   handler: async ({ env, db }, input) => {
-    const limit = input.limit ?? 25;
-    const fetchCoordinates = input.fetchCoordinates ?? true;
     const recompute = input.recompute ?? false;
+    // Recompute's candidate set (all active stores) does NOT shrink between runs,
+    // so a small default would reprocess the same first N forever. Default high so
+    // it finishes in one pass; `offset` pages it when a caller sets a small limit.
+    const limit = input.limit ?? (recompute ? 1000 : 25);
+    const offset = input.offset ?? 0;
+    const fetchCoordinates = input.fetchCoordinates ?? true;
 
     const all = await db
       .select()
@@ -85,7 +101,7 @@ export const backfillShowroomGeo = defineTool({
             s.longitude == null ||
             s.bayAreaCityId == null,
         );
-    const batch = candidates.slice(0, limit);
+    const batch = candidates.slice(offset, offset + limit);
 
     const maps = new GoogleMapsService(env);
     let regionsSet = 0;
@@ -148,7 +164,7 @@ export const backfillShowroomGeo = defineTool({
       regionsSet,
       citiesSet,
       coordinatesSet,
-      remaining: Math.max(0, candidates.length - batch.length),
+      remaining: Math.max(0, candidates.length - offset - batch.length),
     };
   },
 });
