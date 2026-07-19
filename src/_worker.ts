@@ -48,6 +48,7 @@ export { ShowroomResearchAgent } from "./backend/ai/agents/ShowroomResearchAgent
 export { DeepResearchAgent } from "./backend/ai/agents/DeepResearchAgent/index";
 export { RemodelOrchestrator } from "./backend/ai/agents/RemodelOrchestrator";
 export { AdminChatAgent } from "./backend/ai/agents/AdminChatAgent";
+export { ShowroomScout } from "./backend/ai/agents/showroom-scout/index";
 // 0015 MCP connector Durable Object (agents/mcp McpAgent).
 export { RemodelMcpAgent } from "./backend/mcp/agent";
 
@@ -128,6 +129,24 @@ const legacyHandler: ExportedHandler<Env> = {
     // by the provider). Handle it before agent routing / auth gates.
     const authorizeResponse = await handleOAuthAuthorize(request, env);
     if (authorizeResponse) return authorizeResponse;
+
+    // Showroom Scout spends real Gemini and Google Maps quota on every run, so
+    // its agent surface (HTTP + WebSocket) is gated before `routeAgentRequest`,
+    // which otherwise runs ahead of every auth check in this Worker.
+    //
+    // Scoped deliberately to this one agent rather than all of them: the other
+    // agent namespaces predate this gate and changing their auth posture is a
+    // separate decision. That means the remaining `/agents/*` namespaces are
+    // still open — see the note in the Showroom Scout README.
+    const agentUrl = new URL(request.url);
+    if (agentUrl.pathname.startsWith("/agents/showroom-scout")) {
+      if (!(await isRequestAuthenticated(request, env))) {
+        return new Response(JSON.stringify({ error: "Unauthorized" }), {
+          status: 401,
+          headers: { "content-type": "application/json" },
+        });
+      }
+    }
 
     const agentResponse = await routeAgentRequest(request, env);
     if (agentResponse) return agentResponse;

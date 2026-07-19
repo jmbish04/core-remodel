@@ -1308,4 +1308,118 @@ Rules for each field:
       durationMinutes: durationMins,
     };
   }
+
+  // ─── Routes API — traffic-aware matrix (multi-stop planning) ─────────────
+
+  /**
+   * Traffic-aware drive-time matrix between waypoints.
+   *
+   * `computeCommute` above answers "how far is this one place from home?".
+   * Route planning needs every pairwise leg at once, at a specific departure
+   * time, with traffic — a 22-minute hop at 10am is 50 minutes at 4pm, and a
+   * route sequenced on distance alone will miss closing times.
+   *
+   * Uses `TRAFFIC_AWARE` (not `TRAFFIC_AWARE_OPTIMAL`): the optimal tier costs
+   * substantially more per element and this is an n² matrix. Accuracy is
+   * adequate for a shopping-day plan.
+   *
+   * One Routes API call covers the whole matrix, so it bills as a single
+   * request against the monthly free tier regardless of stop count.
+   *
+   * @param waypoints Ordered list; each needs a `placeId` OR lat/lng OR address.
+   * @param departureTime Instant to model traffic for. Must be in the future;
+   *   the API rejects past departure times, so callers planning a window that
+   *   has already begun should pass `new Date()`.
+   * @returns `matrix[i][j]` = minutes from waypoint i to waypoint j
+   *   (`null` when Google could not route that pair), plus miles.
+   * @throws Error('MAPS_QUOTA_EXCEEDED') when the monthly free tier is spent.
+   */
+  async computeRouteMatrix(
+    waypoints: Array<{ placeId?: string; latitude?: number; longitude?: number; address?: string }>,
+    departureTime: Date,
+  ): Promise<{ minutes: (number | null)[][]; miles: (number | null)[][] }> {
+    if (waypoints.length < 2) {
+      throw new Error("computeRouteMatrix requires at least 2 waypoints");
+    }
+    // Routes API caps a matrix at 625 elements (origins × destinations).
+    if (waypoints.length > 25) {
+      throw new Error(`computeRouteMatrix supports at most 25 waypoints (got ${waypoints.length})`);
+    }
+    if (!(await this.canUseGoogleMaps())) {
+      throw new Error("MAPS_QUOTA_EXCEEDED");
+    }
+
+    const gmapKey = await getGoogleMapsApiKey(this.env);
+
+    const toWaypoint = (w: (typeof waypoints)[number]) => {
+      if (w.placeId) return { waypoint: { placeId: w.placeId } };
+      if (w.latitude != null && w.longitude != null) {
+        return { waypoint: { location: { latLng: { latitude: w.latitude, longitude: w.longitude } } } };
+      }
+      if (w.address) return { waypoint: { address: w.address } };
+      throw new Error("Each waypoint needs placeId, lat/lng, or address");
+    };
+
+    // The API rejects a departureTime in the past; clamp with a small cushion
+    // to survive clock skew between here and Google.
+    const departure = new Date(Math.max(departureTime.getTime(), Date.now() + 60_000));
+
+    const body = {
+      origins: waypoints.map(toWaypoint),
+      destinations: waypoints.map(toWaypoint),
+      travelMode: "DRIVE",
+      routingPreference: "TRAFFIC_AWARE",
+      departureTime: departure.toISOString(),
+    };
+
+    const res = await fetch("https://routes.googleapis.com/distanceMatrix/v2:computeRouteMatrix", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": gmapKey,
+        "X-Goog-FieldMask": "originIndex,destinationIndex,duration,distanceMeters,condition",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(15_000),
+    });
+
+    const raw = await res.text();
+    await this.logUsage("routes:computeRouteMatrix", body, raw.slice(0, 2000), {
+      statusCode: res.status,
+    });
+
+    if (!res.ok) {
+      throw new Error(`ROUTE_MATRIX_ERROR: ${res.status} ${raw.slice(0, 300)}`);
+    }
+
+    // computeRouteMatrix streams a JSON array of per-pair elements.
+    let elements: Array<{
+      originIndex: number;
+      destinationIndex: number;
+      duration?: string;
+      distanceMeters?: number;
+      condition?: string;
+    }>;
+    try {
+      elements = JSON.parse(raw);
+    } catch {
+      throw new Error(`ROUTE_MATRIX_ERROR: unparseable response: ${raw.slice(0, 300)}`);
+    }
+
+    const n = waypoints.length;
+    const minutes: (number | null)[][] = Array.from({ length: n }, () => Array(n).fill(null));
+    const miles: (number | null)[][] = Array.from({ length: n }, () => Array(n).fill(null));
+
+    for (const el of elements) {
+      const { originIndex: i, destinationIndex: j } = el;
+      if (i == null || j == null) continue;
+      // ROUTE_NOT_FOUND stays null so the planner can route around it rather
+      // than treating an unreachable pair as a zero-minute hop.
+      if (el.condition && el.condition !== "ROUTE_EXISTS") continue;
+      if (el.duration) minutes[i][j] = Math.round(parseInt(el.duration.replace("s", ""), 10) / 60);
+      if (el.distanceMeters != null) miles[i][j] = el.distanceMeters * 0.000621371;
+    }
+
+    return { minutes, miles };
+  }
 }
