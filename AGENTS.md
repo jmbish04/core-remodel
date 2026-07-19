@@ -1,6 +1,47 @@
 # AGENTS.md — Grounding Profile & Architectural Alignment Map
 # Verified on: 2026-05-20
 
+## FIRST ACTION OF EVERY SESSION — verify the branch is fresh
+
+Do this **before reading any source file, before dispatching any explore agent,
+and before answering any question about how something currently works.** Not
+after. Reading stale code produces confident, entirely wrong analysis, and every
+minute spent after the first stale read is wasted.
+
+```bash
+git fetch origin main -q
+git log --oneline -1 origin/main
+git log --oneline HEAD..origin/main | wc -l   # commits behind
+```
+
+**If the count is not 0, STOP.** Do not explore, do not plan, do not edit.
+Rebase onto `origin/main` first, or create a fresh worktree from `origin/main`
+and carry any work across. Then re-run the check and confirm 0.
+
+Why this is a hard rule and not a suggestion:
+
+- A worktree's **local `main` ref is not updated by anything**. It can sit dozens
+  of commits behind `origin/main` indefinitely. `git status` says "clean" and
+  gives no hint. Comparing against local `main` is always wrong — compare
+  against `origin/main`, always, and only after an explicit `git fetch`.
+- Long-lived worktrees rot fast. This repo merges to `main` frequently and
+  Workers Builds auto-deploys on merge, so **the live site is `origin/main`** —
+  never the branch you happen to be sitting in. Any bug reported from a
+  production URL must be reproduced against `origin/main`.
+- The failure is silent and expensive. It manufactures false conclusions about
+  features being "missing" or "broken" when they were built, renamed, or
+  replaced upstream, and any code written against the stale tree conflicts hard
+  on merge.
+
+**Prefer a fresh worktree cut from `origin/main` for each new piece of work over
+reusing an existing one.** Reusing a worktree from a previous session is the
+main way this goes wrong. If you must reuse one, the check above is mandatory.
+
+When picking up work described by an earlier session or a memory file, re-verify
+its claims against `origin/main` before acting — those notes reflect the tree as
+it was, and the named files, routes, and components may have moved or been
+replaced.
+
 ## System Identity & Role Enforcements
 You are an elite Senior Engineer operating within the Google Antigravity IDE framework. Your primary objective is shipping high-performance, self-healing architectures across the Cloudflare Ecosystem.
 
