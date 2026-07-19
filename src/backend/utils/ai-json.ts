@@ -54,10 +54,12 @@ export class AiJsonParseError extends Error {
  *          when `.response` is absent — never returns null so callers can rely
  *          on an object and let their own field-level normalization drop bad
  *          values.
- * @throws  {AiJsonParseError} when `.response` is a string that is not valid
- *          JSON. Callers inside a `step.do()` get a retry; callers that already
- *          wrap in try/catch degrade exactly as they did before, but now log
- *          the real cause instead of persisting a silently empty object.
+ * @throws  {AiJsonParseError} when the payload string is not valid JSON, or
+ *          parses to something other than an object (`null`, a number, a
+ *          string). Callers inside a `step.do()` get a retry; callers that
+ *          already wrap in try/catch degrade exactly as they did before, but
+ *          now log the real cause instead of persisting a silently empty
+ *          object.
  */
 export function parseStructuredResponse<T>(
   raw: ({ response?: unknown } & Partial<T>) | null | undefined,
@@ -112,7 +114,21 @@ function openAiChoiceContent(raw: unknown): string | null {
 function parseJsonText<T>(raw: string, label: string): Partial<T> {
   const text = stripJsonFence(raw);
   try {
-    return JSON.parse(text) as Partial<T>;
+    const parsed: unknown = JSON.parse(text);
+
+    // `JSON.parse` happily returns primitives: "null" -> null, "123" -> 123.
+    // Both would break the documented never-null-object contract and blow up
+    // at call sites that read properties off the result. Treat them as a failed
+    // extraction rather than coercing to `{}` — a model answering `null` has
+    // not produced data, and quietly returning an empty object is exactly the
+    // silent-blank behaviour this module exists to prevent.
+    if (parsed === null || typeof parsed !== "object") {
+      throw new TypeError(
+        `expected a JSON object, got ${parsed === null ? "null" : typeof parsed}`,
+      );
+    }
+
+    return parsed as Partial<T>;
   } catch (err) {
     // Truncated output is a common cause, so surface the tail as well as the
     // head — a clean-looking prefix with a severed tail is the signature.

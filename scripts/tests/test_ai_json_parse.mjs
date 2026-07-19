@@ -98,4 +98,16 @@ assert.throws(
   "empty content from a reasoning model must throw, not degrade to {}",
 );
 
+// --- JSON primitives must not satisfy the never-null-object contract ---
+// JSON.parse("null") -> null and JSON.parse("123") -> 123 both parse cleanly,
+// so without an explicit shape check they escape as the "parsed" result and
+// crash callers that read properties off it.
+for (const primitive of ["null", "123", '"just a string"', "true"]) {
+  assert.throws(
+    () => parseStructuredResponse({ response: primitive }, `primitive ${primitive}`),
+    AiJsonParseError,
+    `${primitive} must throw, not escape as a non-object`,
+  );
+}
+
 console.log("ai-json parse guards: OK");
