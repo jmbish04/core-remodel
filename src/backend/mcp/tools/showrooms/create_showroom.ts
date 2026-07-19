@@ -1,18 +1,18 @@
+import type { GooglePlaceDetails } from "@frontend/components/showroom/intake/places-mapper";
+
 import { showroomStoreLinks, showroomStores } from "@backend/db";
 import { GoogleMapsService } from "@backend/services/google/maps";
 import {
-  computeStoreGeoPatch,
+  resolveStoreGeoPatch,
   mapPlaceDetailsToStoreInput,
 } from "@backend/services/showroom/onboarding";
-import type { GooglePlaceDetails } from "@frontend/components/showroom/intake/places-mapper";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { toolError } from "../../format";
 import { looseObject, urlField } from "../../schemas";
-import { showroomUrl } from "../../urls";
 import { defineTool, WRITE } from "../../types";
-
+import { showroomUrl } from "../../urls";
 import { persistPlaceShowroom, rethrowMapsError } from "./_shared";
 
 export const createShowroom = defineTool({
@@ -26,16 +26,21 @@ export const createShowroom = defineTool({
     "— and any explicit fields you also pass (e.g. pricePoint) override the Google-derived values. Without a " +
     "placeId it creates a manual row from the fields you provide; only `name` is required. The region hub (East " +
     "Bay / South Bay / …) is captured immediately, but ONBOARDING RUNS IN THE BACKGROUND: this tool returns " +
-    "right away with `status:\"processing\"` and the bare store row — do NOT wait on it and do NOT retry on a " +
+    'right away with `status:"processing"` and the bare store row — do NOT wait on it and do NOT retry on a ' +
     "timeout (the work is durable). Poll `check_showroom_intake_status` (by showroomId or placeId) to watch " +
     "enrichment finish (photos, brands, hours, access level). Idempotent on `placeId` (an existing placeId " +
     "returns the existing store unchanged, `created:false`).",
   inputShape: {
-    name: z.string().optional().describe("Store / location name (required unless a placeId is given)"),
+    name: z
+      .string()
+      .optional()
+      .describe("Store / location name (required unless a placeId is given)"),
     placeId: z
       .string()
       .optional()
-      .describe("Google Place ID (from search_showrooms) — triggers full AI onboarding when provided"),
+      .describe(
+        "Google Place ID (from search_showrooms) — triggers full AI onboarding when provided",
+      ),
     description: z.string().optional(),
     locationAddress: z.string().optional().describe("Street address of the location"),
     latitude: z.number().optional().describe("Latitude — enables the individual map marker"),
@@ -49,7 +54,10 @@ export const createShowroom = defineTool({
   },
   annotations: WRITE,
   examples: [
-    { title: "From a Google Place (full onboarding)", args: { placeId: "ChIJN1t_tDeuEmsRUsoyG83frY4" } },
+    {
+      title: "From a Google Place (full onboarding)",
+      args: { placeId: "ChIJN1t_tDeuEmsRUsoyG83frY4" },
+    },
     { title: "Minimal manual", args: { name: "Studio Belmont" } },
     {
       title: "Manual with details",
@@ -122,7 +130,7 @@ export const createShowroom = defineTool({
     const name = input.name?.trim();
     if (!name) toolError("`name` is required and cannot be empty (or pass a placeId).");
 
-    const geo = computeStoreGeoPatch({
+    const geo = await resolveStoreGeoPatch(db, {
       latitude: input.latitude,
       longitude: input.longitude,
       zipCode: input.zipCode,

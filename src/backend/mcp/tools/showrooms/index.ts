@@ -14,6 +14,7 @@ import { importShowroomFromPlace } from "./import_showroom_from_place";
 import { checkShowroomIntakeStatus } from "./check_showroom_intake_status";
 import { backfillShowroomGeo } from "./backfill_showroom_geo";
 import { findKnownShowrooms } from "./find_known_showrooms";
+import { getUserLocation } from "./get_user_location";
 
 export const showroomTools: RemodelTool[] = [
   listShowrooms,
@@ -30,4 +31,5 @@ export const showroomTools: RemodelTool[] = [
   checkShowroomIntakeStatus,
   backfillShowroomGeo,
   findKnownShowrooms,
+  getUserLocation,
 ];

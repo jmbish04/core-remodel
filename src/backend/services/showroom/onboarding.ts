@@ -23,36 +23,38 @@
  * done.
  */
 
-import { drizzle } from "drizzle-orm/d1";
-import { eq, sql } from "drizzle-orm";
-import { getAgentByName } from "agents";
+// Type-only import (erased at build — no frontend runtime code enters the worker
+// bundle). The pure `mapPlaceToHoursJson` logic is inlined below to keep the
+// backend free of any runtime dependency on frontend modules.
+import type { GooglePlaceDetails } from "@frontend/components/showroom/intake/places-mapper";
 
-import {
-  showroomStores,
-  showroomStoreHours,
-  showroomPhotosMapping,
-  type ShowroomStore,
-  type ShowroomStoreInsert,
-} from "@backend/db/schema/showroom/index";
 import {
   brands,
   brandTypesDef,
   brandTypeMappings,
   showroomBrandMappings,
 } from "@backend/db/schema/brands/index";
-import { ImageProcessorService } from "@backend/services/image-processor";
-import { faviconService } from "@backend/services/favicon";
 import {
-  resolveCloudflareImagesCredentials,
-  getGoogleMapsApiKey,
-} from "@backend/utils/secrets";
+  showroomStores,
+  showroomStoreHours,
+  showroomPhotosMapping,
+  storeBayareaCities,
+  type ShowroomStore,
+  type ShowroomStoreInsert,
+} from "@backend/db/schema/showroom/index";
+import {
+  classifyBayAreaRegion,
+  resolveCityName,
+  type CityResolution,
+} from "@backend/lib/bay-area-region";
+import { faviconService } from "@backend/services/favicon";
+import { ImageProcessorService } from "@backend/services/image-processor";
+import { resolveCloudflareImagesCredentials, getGoogleMapsApiKey } from "@backend/utils/secrets";
 import { inferAndMapCategories } from "@backend/utils/showroom-categories";
 import { getStoreWebsiteUrl } from "@backend/utils/showroom-links";
-import { classifyBayAreaRegion } from "@backend/lib/bay-area-region";
-// Type-only import (erased at build — no frontend runtime code enters the worker
-// bundle). The pure `mapPlaceToHoursJson` logic is inlined below to keep the
-// backend free of any runtime dependency on frontend modules.
-import type { GooglePlaceDetails } from "@frontend/components/showroom/intake/places-mapper";
+import { getAgentByName } from "agents";
+import { eq, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/d1";
 
 /**
  * A single Google Places photo reference — the minimal shape the CF Images
@@ -117,10 +119,7 @@ function to12h(time: string): string {
   return `${h12}:${m} ${period}`;
 }
 
-function collapseHoursGroups(
-  days: Array<keyof StructuredHours>,
-  hours: StructuredHours,
-): string[] {
+function collapseHoursGroups(days: Array<keyof StructuredHours>, hours: StructuredHours): string[] {
   const openDays = days.filter((d) => hours[d] !== null);
   if (openDays.length === 0) return [];
   const groups: Array<{ open: string; close: string; startDay: string; endDay: string }> = [];
@@ -130,7 +129,12 @@ function collapseHoursGroups(
     if (last && last.open === slot.open && last.close === slot.close) {
       last.endDay = DAY_LABELS[day];
     } else {
-      groups.push({ open: slot.open, close: slot.close, startDay: DAY_LABELS[day], endDay: DAY_LABELS[day] });
+      groups.push({
+        open: slot.open,
+        close: slot.close,
+        startDay: DAY_LABELS[day],
+        endDay: DAY_LABELS[day],
+      });
     }
   }
   return groups.map((g) => {
@@ -308,6 +312,87 @@ export function computeStoreGeoPatch(fields: {
   };
 }
 
+/** Drizzle handle type shared by the HTTP routes and the MCP tools. */
+type GeoDb = ReturnType<typeof drizzle>;
+
+/**
+ * Find (or create) the `store_bayarea_cities` row for a resolved city and return
+ * its id. Lookup is case-insensitive; a missing city is inserted with the hub
+ * derived from the curated city→hub table, so the reference table grows to cover
+ * every city a showroom is actually onboarded in. Idempotent and race-safe (the
+ * unique `bay_area_city_name` index + `onConflictDoNothing` + re-select).
+ */
+async function upsertBayAreaCityId(db: GeoDb, city: CityResolution): Promise<number | null> {
+  const byName = () =>
+    db
+      .select({ id: storeBayareaCities.id })
+      .from(storeBayareaCities)
+      .where(sql`lower(${storeBayareaCities.bayAreaCityName}) = lower(${city.name})`)
+      .limit(1);
+
+  const [existing] = await byName();
+  if (existing) return existing.id;
+
+  const [inserted] = await db
+    .insert(storeBayareaCities)
+    .values({
+      bayAreaCityName: city.name,
+      hubRoute: city.route,
+      hubName: city.hubName,
+    })
+    .onConflictDoNothing()
+    .returning({ id: storeBayareaCities.id });
+  if (inserted) return inserted.id;
+
+  // Lost an insert race on the unique name — read the winner back.
+  const [again] = await byName();
+  return again?.id ?? null;
+}
+
+/**
+ * The complete geo patch persisted on a showroom row: pass-through coordinates,
+ * the region hub, AND the `bay_area_city_id` foreign key.
+ *
+ * This is the single write-path helper the intake / edit flows call so a
+ * showroom is ALWAYS tied to a real city RECORD (resolved mathematically from
+ * its coordinates / ZIP / address) instead of a free-text label. When a city is
+ * resolved its curated hub is authoritative and overrides the coarse
+ * coordinate-derived hub from `computeStoreGeoPatch`.
+ */
+export async function resolveStoreGeoPatch(
+  db: GeoDb,
+  fields: {
+    latitude?: number | null;
+    longitude?: number | null;
+    zipCode?: string | null;
+    locationAddress?: string | null;
+    locationCity?: string | null;
+  },
+): Promise<
+  Pick<ShowroomStoreInsert, "latitude" | "longitude" | "hubRoute" | "hubName" | "bayAreaCityId">
+> {
+  const base = computeStoreGeoPatch(fields);
+  const city = resolveCityName({
+    city: fields.locationCity,
+    address: fields.locationAddress,
+    zipCode: fields.zipCode,
+    latitude: fields.latitude,
+    longitude: fields.longitude,
+  });
+  if (!city) {
+    return { ...base, bayAreaCityId: null };
+  }
+  const bayAreaCityId = await upsertBayAreaCityId(db, city);
+  return {
+    latitude: base.latitude,
+    longitude: base.longitude,
+    // The resolved city's hub is authoritative — never a centroid guess.
+    hubRoute: city.route,
+    hubName: city.hubName,
+    bayAreaCityId,
+  };
+}
+
 // ─── Places Details → store input ──────────────────────────────────────────────
 
 const PRICE_LEVEL_MAP: Record<string, "$" | "$$" | "$$$" | "$$$$"> = {
@@ -384,9 +469,7 @@ export interface MappedPlaceStore {
  * inputs — the same mapping the intake form performs client-side, kept here so
  * MCP onboarding is identical.
  */
-export function mapPlaceDetailsToStoreInput(
-  place: GooglePlaceDetails,
-): MappedPlaceStore | null {
+export function mapPlaceDetailsToStoreInput(place: GooglePlaceDetails): MappedPlaceStore | null {
   const name = place.displayName?.text?.trim();
   if (!name) return null;
 
@@ -405,8 +488,7 @@ export function mapPlaceDetailsToStoreInput(
   if (typeof lat === "number") values.latitude = lat;
   if (typeof lng === "number") values.longitude = lng;
 
-  const phone =
-    place.internationalPhoneNumber?.trim() || place.nationalPhoneNumber?.trim();
+  const phone = place.internationalPhoneNumber?.trim() || place.nationalPhoneNumber?.trim();
   if (phone) values.phoneNumber = phone;
   // Website goes to the showroom_store_links table (WEBSITE), not a store column.
   const websiteUrl = place.websiteUri?.trim() || null;
@@ -508,7 +590,9 @@ export function mapPlaceDetailsToStoreInput(
 
 // ─── Enrichment pipeline ───────────────────────────────────────────────────────
 
-async function getShowroomResearchAgent(env: Env): Promise<{ researchStore(id: number): Promise<unknown> }> {
+async function getShowroomResearchAgent(
+  env: Env,
+): Promise<{ researchStore(id: number): Promise<unknown> }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return getAgentByName(env.SHOWROOM_RESEARCH_AGENT as any, "showroom-research") as Promise<{
     researchStore(id: number): Promise<unknown>;
@@ -560,14 +644,12 @@ async function kickShowroomScrape(env: Env, showroomId: number, websiteUrl: stri
  * store a `showroom_photos_mapping` row, and set the hero image from photo[0].
  * Error-guarded per photo — one failure never aborts the pipeline.
  */
-async function runPhotoPipeline(
-  env: Env,
-  showroomId: number,
-  photos: PlacePhotoRef[],
-) {
+async function runPhotoPipeline(env: Env, showroomId: number, photos: PlacePhotoRef[]) {
   const { accountId, apiTokens } = await resolveCloudflareImagesCredentials(env);
   if (!accountId || apiTokens.length === 0) {
-    console.error(`[showroom-onboarding] photos: CF Images credentials missing for store ${showroomId}`);
+    console.error(
+      `[showroom-onboarding] photos: CF Images credentials missing for store ${showroomId}`,
+    );
     return;
   }
   const [primaryToken, ...fallbackApiTokens] = apiTokens;
@@ -575,7 +657,9 @@ async function runPhotoPipeline(
 
   const mapsKey = await getGoogleMapsApiKey(env).catch(() => null);
   if (!mapsKey) {
-    console.error(`[showroom-onboarding] photos: Google Maps API key missing for store ${showroomId}`);
+    console.error(
+      `[showroom-onboarding] photos: Google Maps API key missing for store ${showroomId}`,
+    );
     return;
   }
 
@@ -587,7 +671,9 @@ async function runPhotoPipeline(
       const mediaUrl = `https://places.googleapis.com/v1/${photo.name}/media?maxWidthPx=1600&key=${mapsKey}`;
       const res = await fetch(mediaUrl, { signal: AbortSignal.timeout(8000) });
       if (!res.ok) {
-        console.warn(`[showroom-onboarding] photos: non-ok ${res.status} for photo ${i} of store ${showroomId}`);
+        console.warn(
+          `[showroom-onboarding] photos: non-ok ${res.status} for photo ${i} of store ${showroomId}`,
+        );
         continue;
       }
       const blob = await res.blob();
@@ -615,7 +701,10 @@ async function runPhotoPipeline(
           .where(eq(showroomStores.id, showroomId));
       }
     } catch (photoErr) {
-      console.error(`[showroom-onboarding] photos: error on photo ${i} for store ${showroomId}:`, photoErr);
+      console.error(
+        `[showroom-onboarding] photos: error on photo ${i} for store ${showroomId}:`,
+        photoErr,
+      );
     }
   }
 }
@@ -690,7 +779,10 @@ async function runBrandPipeline(
           .onConflictDoNothing();
       }
     } catch (brandErr) {
-      console.error(`[showroom-onboarding] brands: error on "${name}" for store ${showroomId}:`, brandErr);
+      console.error(
+        `[showroom-onboarding] brands: error on "${name}" for store ${showroomId}:`,
+        brandErr,
+      );
     }
   }
 }
@@ -735,19 +827,26 @@ export function scheduleShowroomEnrichment(
   })();
   schedule(research);
 
-  // 2. Category inference (fill-blanks) from structured signal tokens.
-  if (input.categoryTokens && input.categoryTokens.some(Boolean)) {
-    schedule(
-      inferAndMapCategories(
-        env,
-        showroomId,
-        input.categoryTokens,
-        input.categoryRationale ?? "Inferred from Google Places at intake",
-      ).catch((err) => {
+  // 2. Category inference — ALWAYS run, for every store (manual entries have no
+  //    Google tokens, but the AI classifier reads the store's name / description
+  //    / review summary / brands, so they get categorized too). Runs AFTER
+  //    research: for a placeId store the research agent categorizes first, and
+  //    this call's fill-blanks guard then short-circuits BEFORE a second AI call;
+  //    for a manual store research is a no-op and this is what categorizes it.
+  schedule(
+    research
+      .then(() =>
+        inferAndMapCategories(
+          env,
+          showroomId,
+          input.categoryTokens ?? [],
+          input.categoryRationale ?? "Categorized by AI from the store profile at intake",
+        ),
+      )
+      .catch((err) => {
         console.error(`[showroom-onboarding] categories failed for ${showroomId}:`, err);
       }),
-    );
-  }
+  );
 
   // 3. Favicon hydration + website scrape workflow.
   //
