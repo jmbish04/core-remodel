@@ -110,6 +110,20 @@ export class ShowroomScout extends Agent<Env, ScoutState> {
   /** Conversation history, so replanning mid-drive keeps full context. */
   private history: AgentInputItem[] = [];
 
+  /**
+   * Cheap, open detour options from the most recent `plan_drive_route`.
+   *
+   * Held so `publish_route` can check the agent actually considered them. The
+   * planner computes real diversion costs, but across live runs the model
+   * consistently ignored them and published `detours: []` even with a +0 and
+   * +6 minute option available — the same "instructions fade" pattern that made
+   * publishing itself unreliable.
+   */
+  private pendingDetours: Array<{ name: string; extraMinutes: number }> = [];
+
+  /** Worth offering: a short diversion that is not known to be closed. */
+  static readonly DETOUR_MAX_MINUTES = 15;
+
   static docsMetadata() {
     return {
       title: "Showroom Scout",
@@ -206,6 +220,12 @@ export class ShowroomScout extends Agent<Env, ScoutState> {
   /** Build tools, run the OpenAI agent loop, fold the outcome into state. */
   private async execute(instructions: string, userMessage: string): Promise<{ reply: string; state: ScoutState }> {
     const onEvent = (event: ToolEvent) => {
+      // Capture the planner's detour options so publish_route can verify they
+      // were considered rather than silently dropped.
+      if (event.tool === "plan_drive_route" && event.status === "ok" && event.result) {
+        this.pendingDetours = extractOfferableDetours(event.result);
+      }
+
       if (event.status === "start") {
         this.push({ kind: "tool", tool: event.tool, message: `${event.tool} …${event.detail ? ` ${event.detail}` : ""}` });
         return;
@@ -331,6 +351,33 @@ export class ShowroomScout extends Agent<Env, ScoutState> {
     });
   }
 
+  /**
+   * Route stops the agent itself reported as closed on the trip day.
+   *
+   * Compares each routed stop against the hours on its own published candidate.
+   * Only fires on an explicit "closed" — unknown or unparsed hours are left
+   * alone, since a false rejection would block a legitimate route.
+   */
+  private findClosedStops(route: z.infer<typeof routePlanSchema>): string[] {
+    const day = this.state.window?.day;
+    if (!day) return [];
+
+    const field =
+      day === "saturday" ? "saturday" : day === "sunday" ? "sunday" : ("weekday" as const);
+
+    const byName = new Map(
+      (this.state.result?.candidates ?? []).map((c) => [c.name.toLowerCase().trim(), c]),
+    );
+
+    const closed: string[] = [];
+    for (const stop of route.stops) {
+      const candidate = byName.get(stop.name.toLowerCase().trim());
+      const hours = candidate?.hours?.[field];
+      if (typeof hours === "string" && /\bclosed\b/i.test(hours)) closed.push(stop.name);
+    }
+    return closed;
+  }
+
   private publishRunSummaryTool(onEvent: (e: ToolEvent) => void) {
     return tool({
       name: "publish_run_summary",
@@ -374,6 +421,45 @@ export class ShowroomScout extends Agent<Env, ScoutState> {
       parameters: z.object({ route: routePlanSchema }),
       strict: true,
       execute: async (payload) => {
+        // GUARDRAIL: a live run routed a showroom to 8:24 AM after publishing
+        // its own finding that the place is CLOSED on Saturdays. Sending a user
+        // to a locked door is the worst failure this product can produce, and
+        // instructions alone did not prevent it — plan_drive_route only knows
+        // the hours it was handed, so the contradiction has to be caught here,
+        // against what the agent already told us about each showroom.
+        // Cheap, open detours the planner surfaced but the route ignored.
+        const offered = new Set(payload.route.detours.map((d) => d.name.toLowerCase().trim()));
+        const routed = new Set(payload.route.stops.map((s) => s.name.toLowerCase().trim()));
+        const missedDetours = this.pendingDetours.filter(
+          (d) => !offered.has(d.name.toLowerCase().trim()) && !routed.has(d.name.toLowerCase().trim()),
+        );
+        if (missedDetours.length > 0) {
+          const listed = missedDetours.map((d) => `${d.name} (+${d.extraMinutes} min)`).join(", ");
+          onEvent({ tool: "publish_route", status: "error", detail: `missed detours: ${listed}` });
+          return (
+            `REJECTED — plan_drive_route found near-path showrooms you neither routed nor offered ` +
+            `as detours: ${listed}. These cost very little to divert to. Add each to the route's ` +
+            `detours with its exact extraMinutes, why it is a detour rather than a main stop, and ` +
+            `the unique value it adds — then publish again. If one genuinely is not worth ` +
+            `offering, drop it from consideration by explaining that in your reply.`
+          );
+        }
+
+        const conflicts = this.findClosedStops(payload.route);
+        if (conflicts.length > 0) {
+          onEvent({
+            tool: "publish_route",
+            status: "error",
+            detail: `closed-on-trip-day stops: ${conflicts.join(", ")}`,
+          });
+          return (
+            `REJECTED — this route sends the user to ${conflicts.length} showroom(s) that you ` +
+            `yourself reported as CLOSED on the trip day: ${conflicts.join(", ")}. ` +
+            `Remove them, move them to excluded with the reason "closed on the trip day", ` +
+            `re-run plan_drive_route without them, and publish the corrected route.`
+          );
+        }
+
         this.setState({
           ...this.state,
           result: {
@@ -393,5 +479,30 @@ export class ShowroomScout extends Agent<Env, ScoutState> {
         return `Published a ${payload.route.stops.length}-stop route.`;
       },
     });
+  }
+}
+
+/**
+ * Pull the detour options worth offering out of a `plan_drive_route` result.
+ *
+ * "Worth offering" = a short diversion that is not known to be closed on
+ * arrival. Parsing defensively: a malformed result must not break publishing.
+ */
+function extractOfferableDetours(rawResult: string): Array<{ name: string; extraMinutes: number }> {
+  try {
+    const parsed = JSON.parse(rawResult) as {
+      detourOptions?: Array<{ name?: string; extraMinutes?: number; openAtArrival?: string }>;
+    };
+    return (parsed.detourOptions ?? [])
+      .filter(
+        (d) =>
+          typeof d.name === "string" &&
+          typeof d.extraMinutes === "number" &&
+          d.extraMinutes <= ShowroomScout.DETOUR_MAX_MINUTES &&
+          d.openAtArrival !== "no",
+      )
+      .map((d) => ({ name: d.name as string, extraMinutes: d.extraMinutes as number }));
+  } catch {
+    return [];
   }
 }

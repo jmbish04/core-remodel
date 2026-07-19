@@ -177,6 +177,99 @@ check("prefers the higher-value stop when time is only enough for one", () => {
   assert.equal(r.stops[0].name, "great");
 });
 
+check("offers an unrouted stop as a detour with its insertion cost", () => {
+  // 3 stops, only 2 fit. The third should come back as a detour option
+  // priced by cheapest insertion, not by total drive time.
+  const stops = [stop("a", { dwellMinutes: 60 }), stop("b", { dwellMinutes: 60 }), stop("c", { dwellMinutes: 60 })];
+  const r = planRoute({
+    stops,
+    travelMinutes: uniformMatrix(3, 10),
+    startMinute: H(9),
+    endMinute: H(11, 30), // room for two 60-min visits, not three
+  });
+  assert.equal(r.stops.length, 2);
+  assert.equal(r.detourOptions.length, 1, "the unrouted stop should be offered as a detour");
+  const d = r.detourOptions[0];
+  // Uniform 10-min matrix: divert 10 + rejoin 10, minus the 10 direct = 10.
+  assert.equal(d.extraMinutes, 10);
+  assert.equal(d.openAtArrival, "yes");
+});
+
+check("detour cost is the insertion delta, not the raw leg time", () => {
+  // Origin→1 is 30 min direct. Going via the detour is 20 + 20 = 40.
+  // The honest extra cost is 10, not 40.
+  const n = 2;
+  const t = Array.from({ length: n + 1 }, () => Array(n + 1).fill(60));
+  t[0][1] = 30; // origin → routed stop
+  t[0][2] = 20; // origin → detour candidate
+  t[2][1] = 20; // detour candidate → routed stop
+  const r = planRoute({
+    stops: [stop("routed", { priority: 99 }), stop("detour", { priority: 1, dwellMinutes: 200 })],
+    travelMinutes: t,
+    startMinute: H(9),
+    endMinute: H(12),
+  });
+  assert.equal(r.stops.length, 1);
+  assert.equal(r.stops[0].name, "routed");
+  const d = r.detourOptions.find((x) => x.name === "detour");
+  assert.ok(d, "expected a detour option");
+  assert.equal(d.extraMinutes, 10, "should be 20+20-30, not 40");
+  assert.equal(d.afterOrder, 0, "cheapest insertion is before the first stop");
+});
+
+check("flags a detour that would be closed on arrival", () => {
+  const stops = [
+    stop("a", { dwellMinutes: 60 }),
+    stop("shut", { dwellMinutes: 300, openMinute: H(14), closeMinute: H(16) }),
+  ];
+  const r = planRoute({
+    stops,
+    travelMinutes: uniformMatrix(2, 10),
+    startMinute: H(9),
+    endMinute: H(11),
+  });
+  const d = r.detourOptions.find((x) => x.name === "shut");
+  assert.ok(d, "expected the unrouted stop as a detour option");
+  assert.equal(d.openAtArrival, "no", "arriving ~9:10 but it opens at 14:00");
+});
+
+check("detour options are sorted cheapest-diversion first", () => {
+  const n = 3;
+  const t = Array.from({ length: n + 1 }, () => Array(n + 1).fill(10));
+  // Make stop 3 an expensive diversion, stop 2 a cheap one.
+  for (let i = 0; i <= n; i++) {
+    t[i][3] = 50;
+    t[3][i] = 50;
+  }
+  const r = planRoute({
+    stops: [
+      stop("routed", { priority: 99, dwellMinutes: 30 }),
+      stop("cheap", { priority: 1, dwellMinutes: 300 }),
+      stop("pricey", { priority: 1, dwellMinutes: 300 }),
+    ],
+    travelMinutes: t,
+    startMinute: H(9),
+    endMinute: H(10, 30),
+  });
+  assert.equal(r.detourOptions.length, 2);
+  assert.ok(
+    r.detourOptions[0].extraMinutes <= r.detourOptions[1].extraMinutes,
+    "cheapest diversion must come first",
+  );
+  assert.equal(r.detourOptions[0].name, "cheap");
+});
+
+check("no detour options when every stop made the route", () => {
+  const r = planRoute({
+    stops: [stop("a"), stop("b")],
+    travelMinutes: uniformMatrix(2, 10),
+    startMinute: H(9),
+    endMinute: H(17),
+  });
+  assert.equal(r.stops.length, 2);
+  assert.equal(r.detourOptions.length, 0);
+});
+
 console.log("\nshowroom-scout/time (California)");
 
 check("caParts reads California wall clock, not UTC", () => {

@@ -72,7 +72,9 @@ export const planDriveRoute = defineTool({
     "stops so that (a) nothing is scheduled outside its opening hours, (b) early-closing stops go " +
     "first, and (c) higher-priority stops win when timing allows a choice. Returns each stop with " +
     "ETA, wait time, recommended dwell, departure time, drive time to the next stop, and timing " +
-    "warnings — plus any stops that could NOT be fitted, with the reason. Supply `priority` and " +
+    "warnings — plus any stops that could NOT be fitted, with the reason, and `detourOptions`: " +
+    "stops that missed the route but sit close to the path, each with the real extra driving " +
+    "cost and whether it would be open when you got there. Supply `priority` and " +
     "`dwellMinutes` yourself; this tool does not judge sourcing value, only feasibility and timing. " +
     "Persist nothing — call create_drive_list once the order is agreed.",
   inputShape: {
@@ -109,6 +111,16 @@ export const planDriveRoute = defineTool({
       }),
     ),
     dropped: z.array(looseObject({ name: z.string(), reason: z.string() })),
+    detourOptions: z.array(
+      looseObject({
+        name: z.string(),
+        insertAfter: z.string().nullable(),
+        insertBefore: z.string().nullable(),
+        extraMinutes: z.number(),
+        openAtArrival: z.enum(["yes", "no", "unknown"]),
+        arriveAt: z.string(),
+      }),
+    ),
     totalDriveMinutes: z.number(),
     finishesAt: z.string(),
     trafficDataAvailable: z.boolean(),
@@ -220,6 +232,17 @@ export const planDriveRoute = defineTool({
         };
       }),
       dropped: plan.dropped.map((d) => ({ name: d.name, reason: d.reason })),
+      // Stops that missed the route but sit near the path, cheapest first.
+      // These are the raw material for optional detours — the caller decides
+      // which are worth offering and explains why.
+      detourOptions: plan.detourOptions.map((d) => ({
+        name: d.name,
+        insertAfter: d.afterStopName,
+        insertBefore: d.beforeStopName,
+        extraMinutes: d.extraMinutes,
+        openAtArrival: d.openAtArrival,
+        arriveAt: formatClock(d.arriveMinute),
+      })),
       totalDriveMinutes: plan.totalDriveMinutes,
       finishesAt: formatClock(plan.endMinute),
       trafficDataAvailable,

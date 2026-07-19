@@ -30,6 +30,8 @@ export interface ToolEvent {
   status: "start" | "ok" | "error" | "invalid_input";
   durationMs?: number;
   detail?: string;
+  /** Raw tool output. Diagnostics only — the DO timeline does not store it. */
+  result?: string;
 }
 
 export interface BridgeOptions {
@@ -83,12 +85,14 @@ export function bridgeTool(remodelTool: RemodelTool, opts: BridgeOptions): Funct
 
       try {
         const result = await remodelTool.handler(opts.ctx, parsed.data as Record<string, unknown>);
+        const payload = typeof result === "string" ? result : JSON.stringify(result);
         opts.onEvent?.({
           tool: remodelTool.name,
           status: "ok",
           durationMs: Date.now() - started,
+          result: payload,
         });
-        return typeof result === "string" ? result : JSON.stringify(result);
+        return payload;
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
         opts.onEvent?.({

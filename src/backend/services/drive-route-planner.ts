@@ -45,10 +45,35 @@ export interface PlannedStop {
   warnings: string[];
 }
 
+/**
+ * A stop that did not make the main route but sits close to the path.
+ *
+ * Detours were originally left to the model to invent, and it never produced
+ * any — reasonably, since it had no idea what was near the route. This is the
+ * same division of labour as the rest of the planner: code computes the cost,
+ * the model explains whether it is worth it.
+ */
+export interface DetourOption {
+  id: string;
+  name: string;
+  /** Insert between the stop at this order and the next (0 = before stop 1). */
+  afterOrder: number;
+  afterStopName: string | null;
+  beforeStopName: string | null;
+  /** Extra driving to divert here and rejoin — the classic insertion delta. */
+  extraMinutes: number;
+  /** Would it actually be open when we'd get there? */
+  openAtArrival: "yes" | "no" | "unknown";
+  /** Projected arrival if inserted, California minutes-from-midnight. */
+  arriveMinute: number;
+}
+
 export interface PlanResult {
   stops: PlannedStop[];
   /** Stops that could not be fitted, with the reason. */
   dropped: Array<{ id: string; name: string; reason: string }>;
+  /** Near-path alternatives, cheapest diversion first. */
+  detourOptions: DetourOption[];
   totalDriveMinutes: number;
   endMinute: number;
 }
@@ -182,9 +207,81 @@ export function planRoute(input: PlanInput): PlanResult {
   return {
     stops: ordered,
     dropped,
+    detourOptions: computeDetourOptions({
+      ordered,
+      stops,
+      travelMinutes,
+      startMinute,
+    }),
     totalDriveMinutes: totalDrive,
     endMinute: ordered.length > 0 ? ordered[ordered.length - 1].departMinute : startMinute,
   };
+}
+
+/** Cheapest-insertion cost for every stop that missed the route. */
+function computeDetourOptions(input: {
+  ordered: PlannedStop[];
+  stops: PlannerStop[];
+  travelMinutes: (number | null)[][];
+  startMinute: number;
+}): DetourOption[] {
+  const { ordered, stops, travelMinutes, startMinute } = input;
+  if (ordered.length === 0) return [];
+
+  const indexOf = new Map(stops.map((s, i) => [s.id, i + 1]));
+  const routedIds = new Set(ordered.map((s) => s.id));
+  const byId = new Map(stops.map((s) => [s.id, s]));
+
+  // Travel-matrix indices along the route, origin first.
+  const path = [0, ...ordered.map((s) => indexOf.get(s.id)!)];
+
+  const options: DetourOption[] = [];
+
+  for (const candidate of stops) {
+    if (routedIds.has(candidate.id)) continue;
+    const k = indexOf.get(candidate.id)!;
+
+    let best: { afterOrder: number; extra: number; arrive: number } | null = null;
+
+    // Try inserting into each leg, including origin → stop 1.
+    for (let seg = 0; seg < path.length - 1; seg++) {
+      const from = path[seg];
+      const to = path[seg + 1];
+      const direct = leg(travelMinutes, from, to);
+      const viaCandidate = leg(travelMinutes, from, k) + leg(travelMinutes, k, to);
+      // Insertion delta — the extra driving, not the total.
+      const extra = viaCandidate - direct;
+
+      // When would we reach it? Depart the preceding stop, then drive.
+      const departPrev = seg === 0 ? startMinute : ordered[seg - 1].departMinute;
+      const arrive = departPrev + leg(travelMinutes, from, k);
+
+      if (!best || extra < best.extra) best = { afterOrder: seg, extra, arrive };
+    }
+
+    if (!best) continue;
+
+    const stop = byId.get(candidate.id)!;
+    let openAtArrival: DetourOption["openAtArrival"] = "unknown";
+    if (!stop.hoursUnknown && stop.openMinute != null && stop.closeMinute != null) {
+      openAtArrival = best.arrive >= stop.openMinute && best.arrive < stop.closeMinute ? "yes" : "no";
+    }
+
+    options.push({
+      id: candidate.id,
+      name: candidate.name,
+      afterOrder: best.afterOrder,
+      afterStopName: best.afterOrder === 0 ? null : ordered[best.afterOrder - 1].name,
+      beforeStopName: ordered[best.afterOrder]?.name ?? null,
+      extraMinutes: Math.max(0, Math.round(best.extra)),
+      openAtArrival,
+      arriveMinute: best.arrive,
+    });
+  }
+
+  // Cheapest diversions first — a 5-minute detour is a genuine offer, a
+  // 40-minute one is a different trip.
+  return options.sort((a, b) => a.extraMinutes - b.extraMinutes);
 }
 
 /** Attach the human-facing timing warnings the route output requires. */

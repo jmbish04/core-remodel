@@ -49,7 +49,25 @@ function extractCitations(response: unknown): Citation[] {
   return out.filter((c) => (seen.has(c.url) ? false : (seen.add(c.url), true)));
 }
 
+/**
+ * Hard ceiling on searches per run.
+ *
+ * A prose "budget" in the instructions did not hold: runs drifted to 27–30
+ * searches, exhausted the turn budget, and ended having published nothing —
+ * the most expensive possible outcome. Every attempt to fix it with more
+ * instruction text traded one failure for another.
+ *
+ * So the budget is enforced here instead. Past the cap the tool stops searching
+ * and tells the model to publish what it has. Deterministic, like the timing
+ * arithmetic in the route planner: the model supplies judgment, code supplies
+ * the guarantees.
+ */
+const DEFAULT_SEARCH_BUDGET = 12;
+
 export function createWebSearchTool(env: Env, onEvent?: (e: ToolEvent) => void) {
+  const budget = Number(env.SHOWROOM_SCOUT_SEARCH_BUDGET ?? DEFAULT_SEARCH_BUDGET);
+  let used = 0;
+
   return tool({
     name: "web_search",
     description:
@@ -72,7 +90,19 @@ export function createWebSearchTool(env: Env, onEvent?: (e: ToolEvent) => void) 
     timeoutBehavior: "error_as_result",
     execute: async ({ query, focus }) => {
       const started = Date.now();
-      onEvent?.({ tool: "web_search", status: "start", detail: query });
+
+      if (used >= budget) {
+        onEvent?.({ tool: "web_search", status: "error", detail: `budget exhausted (${budget})` });
+        return (
+          `SEARCH BUDGET EXHAUSTED (${budget} searches used). No more searches are available ` +
+          `in this run. Stop researching now. Score and publish the showrooms you already have ` +
+          `with publish_candidate, then plan and publish the route. Leave any field you did not ` +
+          `learn as null and list it in the candidate's "unverified" array — do not guess it.`
+        );
+      }
+      used++;
+
+      onEvent?.({ tool: "web_search", status: "start", detail: `[${used}/${budget}] ${query}` });
 
       try {
         const client = await createGeminiClient(env, "showroom_scout_search");
@@ -97,6 +127,7 @@ export function createWebSearchTool(env: Env, onEvent?: (e: ToolEvent) => void) 
           return `No grounded results for "${query}". Try a more specific query, or a different phrasing.`;
         }
 
+        const remaining = budget - used;
         return JSON.stringify({
           query,
           findings: text,
@@ -105,6 +136,15 @@ export function createWebSearchTool(env: Env, onEvent?: (e: ToolEvent) => void) 
             citations.length === 0
               ? "No grounding sources returned — treat these findings as UNVERIFIED and say so."
               : undefined,
+          // A standing reminder in the freshest part of the context. The system
+          // prompt's publish rule reliably faded by the time it mattered: runs
+          // would spend the search budget and then write a prose summary having
+          // published nothing. Repeating the obligation on every search result
+          // keeps it adjacent to the model's actual decision point.
+          reminder:
+            remaining <= 4
+              ? `Only ${remaining} searches left. Stop researching soon and call publish_candidate for each showroom you have scored — prose is not published output.`
+              : `${remaining} searches left. Call publish_candidate as soon as you finish scoring each showroom; do not save them for the end.`,
         });
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);

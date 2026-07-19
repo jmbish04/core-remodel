@@ -82,6 +82,21 @@ const onEvent = (e: ToolEvent) => {
   events.push(e);
   const tag = e.status === "ok" ? "ok " : e.status === "start" ? "..." : "!! ";
   console.log(`  ${tag} ${e.tool}${e.detail ? ` — ${String(e.detail).slice(0, 110)}` : ""}`);
+  // Diagnostics: show what the router actually computed, so a missing detour
+  // list can be traced to the tool vs. the model ignoring it.
+  if (e.tool === "plan_drive_route" && e.result) {
+    try {
+      const r = JSON.parse(e.result);
+      pendingDetours = (r.detourOptions ?? [])
+        .filter((d: any) => d.extraMinutes <= 15 && d.openAtArrival !== "no")
+        .map((d: any) => ({ name: d.name, extraMinutes: d.extraMinutes }));
+      console.log(`      → routed ${r.stops?.length ?? 0}, dropped ${r.dropped?.length ?? 0}, detourOptions ${r.detourOptions?.length ?? 0}, traffic=${r.trafficDataAvailable}`);
+      for (const d of r.detourOptions ?? []) {
+        console.log(`        detourOption: ${d.name} +${d.extraMinutes}m after ${d.insertAfter ?? "START"} open=${d.openAtArrival}`);
+      }
+      for (const d of r.dropped ?? []) console.log(`        dropped: ${d.name} — ${d.reason}`);
+    } catch {}
+  }
 };
 
 const publishCandidateTool = tool({
@@ -119,6 +134,20 @@ const publishRouteTool = tool({
   parameters: z.object({ route: routePlanSchema }),
   strict: true,
   execute: async (payload) => {
+    const offered = new Set(payload.route.detours.map((d: any) => d.name.toLowerCase().trim()));
+    const routed = new Set(payload.route.stops.map((s2: any) => s2.name.toLowerCase().trim()));
+    const missed = pendingDetours.filter(
+      (d) => !offered.has(d.name.toLowerCase().trim()) && !routed.has(d.name.toLowerCase().trim()),
+    );
+    if (missed.length > 0) {
+      const listed = missed.map((d) => `${d.name} (+${d.extraMinutes} min)`).join(", ");
+      console.log(`  !!  publish_route REJECTED — missed detours: ${listed}`);
+      return (
+        `REJECTED — plan_drive_route found near-path showrooms you neither routed nor offered ` +
+        `as detours: ${listed}. Add each to the route's detours with its exact extraMinutes, why ` +
+        `it is a detour rather than a main stop, and the unique value it adds — then publish again.`
+      );
+    }
     publishedRoute = payload.route;
     console.log(`  ok  publish_route — ${payload.route.stops.length} stops`);
     return `Published a ${payload.route.stops.length}-stop route.`;
@@ -128,6 +157,7 @@ const publishRouteTool = tool({
 let publishedCandidates: any[] = [];
 let publishedSummary: any = null;
 let publishedRoute: any = null;
+let pendingDetours: Array<{ name: string; extraMinutes: number }> = [];
 
 const ALLOWLIST = ["find_known_showrooms", "plan_drive_route"] as const;
 

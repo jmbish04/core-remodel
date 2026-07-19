@@ -88,6 +88,7 @@ export const findKnownShowrooms = defineTool({
         matchedName: z.string().nullable(),
         matchedOn: z.enum(["place_id", "name", "none"]),
         confidence: z.number(),
+        url: z.string().nullable().describe("Directory page for the matched showroom, if known"),
       }),
     ),
     knownCount: z.number().int(),

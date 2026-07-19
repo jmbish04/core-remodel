@@ -1411,8 +1411,13 @@ Rules for each field:
     const miles: (number | null)[][] = Array.from({ length: n }, () => Array(n).fill(null));
 
     for (const el of elements) {
-      const { originIndex: i, destinationIndex: j } = el;
-      if (i == null || j == null) continue;
+      // Protobuf JSON omits default-valued fields, so a missing index means 0
+      // rather than "unknown". (Verified against the live API: with these
+      // fields in the FieldMask, index 0 IS currently returned explicitly —
+      // but defaulting costs nothing and is correct either way. Skipping on
+      // undefined would silently drop every leg touching the origin.)
+      const i = el.originIndex ?? 0;
+      const j = el.destinationIndex ?? 0;
       // ROUTE_NOT_FOUND stays null so the planner can route around it rather
       // than treating an unreachable pair as a zero-minute hop.
       if (el.condition && el.condition !== "ROUTE_EXISTS") continue;

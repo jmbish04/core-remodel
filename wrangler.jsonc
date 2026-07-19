@@ -65,6 +65,10 @@
     "SHOWROOM_SCOUT_PROVIDER": "gemini",
     "SHOWROOM_SCOUT_MODEL": "gemini-2.5-flash",
     "SHOWROOM_SCOUT_SEARCH_MODEL": "gemini-2.5-flash",
+    // Hard cap on grounded searches per run, enforced in the tool (not a prompt
+    // request — prose budgets did not hold and runs drifted to 30 searches and
+    // published nothing). Past the cap web_search tells the model to publish.
+    "SHOWROOM_SCOUT_SEARCH_BUDGET": "12",
   },
   // DO NOT DELETE COMMENTS
   //  wrangler vectorize create core-remodel-research --preset @cf/baai/bge-large-en-v1.5

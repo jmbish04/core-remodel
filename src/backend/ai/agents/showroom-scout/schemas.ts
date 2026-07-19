@@ -153,9 +153,17 @@ export const showroomCandidateSchema = z.object({
   aiScore: z.number().min(0).max(100),
   aiRationale: z.string().describe("Why this score, tied to the user's actual goal and the evidence"),
 
-  /** Directory dedupe outcome. */
+  /**
+   * Directory dedupe outcome.
+   *
+   * The internal `showroomStoreId` deliberately is NOT here. A live run lost a
+   * whole candidate to "a technical error with the showroomStoreId field" —
+   * asking a model to hand-carry an internal database id is a failure mode with
+   * no upside. `knownInDirectory` is what the exclude-known rule needs; the id
+   * is re-resolved server-side from find_known_showrooms when a route is
+   * persisted via create_drive_list.
+   */
   knownInDirectory: z.boolean(),
-  showroomStoreId: z.number().int().nullable(),
 
   /** Anything the agent could not verify — surfaced, never hidden. */
   unverified: z.array(z.string()),
