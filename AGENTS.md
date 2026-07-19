@@ -8,6 +8,21 @@ and before answering any question about how something currently works.** Not
 after. Reading stale code produces confident, entirely wrong analysis, and every
 minute spent after the first stale read is wasted.
 
+A `SessionStart` hook (`.claude/settings.json`) runs this for you and prints the
+result before you read anything:
+
+```bash
+pnpm run worktree:check     # or: node scripts/worktree-check.mjs
+```
+
+It fetches `origin/main` first (a worktree's local `main` ref never updates on
+its own), then reports commits behind/ahead, how old the last commit is, and
+whether another session left uncommitted files here. **≥25 behind prints a loud
+STALE CHECKOUT warning — believe it.** The check only informs; it never blocks,
+because revisiting an old branch is sometimes deliberate.
+
+If the hook did not run, do it by hand:
+
 ```bash
 git fetch origin main -q
 git log --oneline -1 origin/main
@@ -343,6 +358,79 @@ pnpm run test:pr --all            # every QC script
 `remote: true` secrets-store binding with no local fallback, so every authed route 500s
 locally — a local run cannot verify an API at all. Paste the QC output into the PR
 description and into the changelog entry (below).
+
+**While your PR is open, QC against your PREVIEW, not production:**
+
+```bash
+pnpm run test:pr 153 -- --preview     # your branch's own preview worker
+pnpm run test:pr 153                  # production (main) — only after merge
+```
+
+`scripts/config.mjs` defaults to **production**, which runs `main`. QC an unmerged
+branch against the default and you are testing code your branch has not shipped —
+it reads as "my endpoint 404s" or "my column is missing" when the real answer is
+"not merged yet". See the deploy topology below.
+
+## Deploy topology & per-branch previews (READ BEFORE VERIFYING ANYTHING)
+
+Cloudflare Workers Builds is connected to this repo with **two triggers**:
+
+| Trigger | Branches | Deploy command | Target |
+|---|---|---|---|
+| Deploy default branch | `main` | `pnpm run deploy` | **production** — `core-remodel.hacolby.workers.dev` |
+| Preview non-production branches | everything except `main` | `pnpm run build && … node scripts/deploy-preview.mjs` | **that branch's preview worker** |
+
+So: **pushing a branch does NOT deploy to production.** Only merging to `main`
+does. If you push a branch and then check `core-remodel.hacolby.workers.dev`,
+you are looking at `main` — not your work. This is the single most common way a
+verification step produces a wrong conclusion here.
+
+### One preview worker per branch
+
+`scripts/deploy-preview.mjs` deploys to `core-remodel-preview-<branch-slug>`:
+
+```
+https://core-remodel-preview-<branch-slug>.hacolby.workers.dev
+```
+
+It used to be a single shared `core-remodel-preview` slot, which meant
+last-push-wins between concurrent sessions — your preview silently became
+someone else's branch. Per-branch workers remove that race. Each one gets:
+
+- the **same** D1 / R2 / KV / Vectorize / AI / secret bindings (shared by id),
+- its **own** Durable Object namespaces — so a branch's DO migration tag can no
+  longer desync production's,
+- its **own** Workflow instances (workflow names are ACCOUNT-scoped, so they are
+  suffixed per branch — an unsuffixed name would hijack prod's bindings),
+- **no crons and no routes** — otherwise scheduled jobs double-run against the
+  shared D1.
+
+Get your preview URL: the build log prints it, or compute it locally with
+`node -e "import('./scripts/deploy-preview.mjs').then(m=>console.log(m.previewWorkerName('$(git rev-parse --abbrev-ref HEAD)')))"`.
+
+**Previews share production's D1.** A branch with a new migration still needs
+`pnpm run migrate:remote` before its pages work — migrations never ride a build,
+preview or production. Keep migrations additive so the shared DB stays usable by
+every other branch's preview at once.
+
+Preview workers accumulate — one per branch, and nothing reaps them. They are
+inert (no crons, no routes, and they share prod's bindings rather than owning
+anything), so this is housekeeping rather than a risk. Delete one by hand when a
+branch is done:
+
+```bash
+npx wrangler delete --name core-remodel-preview-<branch-slug>
+```
+
+There is deliberately no automated reaper: `wrangler` has no command that lists
+an account's workers, and the REST API needs a token scope this repo's
+`CLOUDFLARE_API_TOKEN` does not carry. Not worth a credential hunt to delete
+something that costs nothing to leave running.
+
+> Cloudflare's built-in "Workers Previews" (`previews_enabled`) is **not**
+> available on this account — the API returns `12044: This account does not have
+> access to Workers Previews`. The per-branch worker above is the mechanism; do
+> not waste a session trying to switch the platform feature on.
 
 ## Changelog discipline (MANDATORY)
 

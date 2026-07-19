@@ -40,6 +40,7 @@
     "mcp:issues": "node scripts/mcp-issues.mjs",
     "deploy": "pnpm run build && cp .assetsignore dist/.assetsignore && pnpm run migrate:remote && pnpm run migrate:tesla:remote && npx wrangler@latest deploy",
     "deploy:preview": "pnpm run build && cp .assetsignore dist/.assetsignore && node scripts/deploy-preview.mjs",
+    "worktree:check": "node scripts/worktree-check.mjs",
     "cf-typegen": "wrangler types --include-runtime false",
     "secrets:google-photos": "node scripts/google-photos-secrets.mjs",
     "test:throttle": "node scripts/tests/test_throttled_pipeline.mjs",
