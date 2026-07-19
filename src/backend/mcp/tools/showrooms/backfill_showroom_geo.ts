@@ -6,6 +6,14 @@ import { z } from "zod";
 
 import { defineTool, WRITE_IDEMPOTENT } from "../../types";
 
+/**
+ * A boolean input that also accepts the stringified "true"/"false" some MCP
+ * clients emit for boolean arguments — so `recompute:"true"` is honored rather
+ * than rejected by strict `z.boolean()`.
+ */
+const boolInput = () =>
+  z.preprocess((v) => (typeof v === "string" ? v.trim().toLowerCase() === "true" : v), z.boolean());
+
 export const backfillShowroomGeo = defineTool({
   name: "backfill_showroom_geo",
   category: "showrooms",
@@ -41,15 +49,13 @@ export const backfillShowroomGeo = defineTool({
         "Skip this many candidates before processing — for paging `recompute` runs " +
           "(whose candidate set doesn't shrink between calls). Default 0.",
       ),
-    fetchCoordinates: z
-      .boolean()
+    fetchCoordinates: boolInput()
       .optional()
       .describe(
         "Fetch missing coordinates from Google Places by placeId (default true). " +
           "Set false to only derive regions from stored addresses with zero API calls.",
       ),
-    recompute: z
-      .boolean()
+    recompute: boolInput()
       .optional()
       .describe(
         "Re-resolve EVERY active store (not just those missing geo) and correct any " +
