@@ -713,6 +713,30 @@ const applyPlanSchema = z.object({
 /** Favicon fetches per wave — same throttle shape as the photo pipeline. */
 const LOGO_WAVE = 5;
 
+/**
+ * IDs per `inArray` — D1 rejects a query with more than 100 bound parameters,
+ * so id lists are chunked below that. Mirrors D1_IN_CHUNK in utils/showroom-links.
+ */
+const IN_CHUNK = 90;
+
+/**
+ * Chunked `inArray` select. Every lookup in apply-plan pre-loads its rows in one
+ * pass instead of querying per item: the script batches up to 40 stores per
+ * request, and 40 sequential D1 roundtrips inside a single Worker invocation is
+ * both slow and needless.
+ */
+async function selectByIds<T>(
+  ids: number[],
+  run: (chunk: number[]) => Promise<T[]>,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += IN_CHUNK) {
+    // inArray([]) is invalid SQL — the slice is always non-empty here.
+    out.push(...(await run(ids.slice(i, i + IN_CHUNK))));
+  }
+  return out;
+}
+
 showroomBackfillRouter.post("/backfill/apply-plan", async (c) => {
   const parsed = applyPlanSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) {
@@ -732,55 +756,89 @@ showroomBackfillRouter.post("/backfill/apply-plan", async (c) => {
   };
 
   // ── Categories (fill-blanks: skip any store that already has one) ──────────
-  for (const row of plan.categories) {
-    const [existing] = await db
-      .select({ id: showroomStoreCategoryMapping.id })
-      .from(showroomStoreCategoryMapping)
-      .where(eq(showroomStoreCategoryMapping.storeId, row.storeId))
-      .limit(1);
-    if (existing) {
-      result.categories.skipped++;
-      continue;
-    }
-    if (apply) {
-      for (const categoryId of row.categoryIds) {
-        await db
-          .insert(showroomStoreCategoryMapping)
-          .values({
+  if (plan.categories.length > 0) {
+    const already = new Set(
+      (
+        await selectByIds(
+          plan.categories.map((r) => r.storeId),
+          (chunk) =>
+            db
+              .select({ storeId: showroomStoreCategoryMapping.storeId })
+              .from(showroomStoreCategoryMapping)
+              .where(inArray(showroomStoreCategoryMapping.storeId, chunk)),
+        )
+      ).map((r) => r.storeId),
+    );
+
+    const rows: Array<typeof showroomStoreCategoryMapping.$inferInsert> = [];
+    for (const row of plan.categories) {
+      if (already.has(row.storeId)) {
+        result.categories.skipped++;
+        continue;
+      }
+      if (apply) {
+        for (const categoryId of row.categoryIds) {
+          rows.push({
             storeId: row.storeId,
             categoryId,
             aiRationale: row.rationale ?? "Backfilled from audit plan (no Places)",
             aiRationaleConfidenceScore: 5,
-          })
-          .onConflictDoNothing();
+          });
+        }
       }
+      result.categories.applied++;
     }
-    result.categories.applied++;
+    // 4 bound params per row — 20 rows keeps each batch under D1's 100 cap.
+    for (let i = 0; i < rows.length; i += 20) {
+      const chunk = rows
+        .slice(i, i + 20)
+        .map((r) => db.insert(showroomStoreCategoryMapping).values(r).onConflictDoNothing());
+      if (chunk.length === 0) continue;
+      await db.batch(chunk as [(typeof chunk)[number], ...(typeof chunk)[number][]]);
+    }
   }
 
   // ── Addresses — ONLY values the plan explicitly proposed. Never invented. ──
+  const addressRows: Array<{ storeId: number; proposed: string }> = [];
   for (const row of plan.addresses) {
-    if (apply) {
-      await db
-        .update(showroomStores)
-        .set({ locationAddress: row.proposed, updatedAt: new Date() })
-        .where(eq(showroomStores.id, row.storeId));
-    }
+    if (apply) addressRows.push({ storeId: row.storeId, proposed: row.proposed });
     result.addresses.applied++;
+  }
+  for (let i = 0; i < addressRows.length; i += 20) {
+    const chunk = addressRows
+      .slice(i, i + 20)
+      .map((r) =>
+        db
+          .update(showroomStores)
+          .set({ locationAddress: r.proposed, updatedAt: new Date() })
+          .where(eq(showroomStores.id, r.storeId)),
+      );
+    if (chunk.length === 0) continue;
+    await db.batch(chunk as [(typeof chunk)[number], ...(typeof chunk)[number][]]);
   }
 
   // ── Store logos (favicon) — fill-blanks, throttled ────────────────────────
+  // Icons pre-loaded in one pass so the throttled waves below do no DB work.
+  const existingIcons = new Set(
+    (
+      await selectByIds(
+        plan.storeLogos.map((r) => r.storeId),
+        (chunk) =>
+          db
+            .select({ id: showroomStores.id, icon: showroomStores.iconCfImagesUrl })
+            .from(showroomStores)
+            .where(inArray(showroomStores.id, chunk)),
+      )
+    )
+      .filter((r) => r.icon)
+      .map((r) => r.id),
+  );
   for (let i = 0; i < plan.storeLogos.length; i += LOGO_WAVE) {
     const wave = plan.storeLogos.slice(i, i + LOGO_WAVE);
     await Promise.all(
       wave.map(async (row) => {
         try {
-          const [store] = await db
-            .select({ icon: showroomStores.iconCfImagesUrl })
-            .from(showroomStores)
-            .where(eq(showroomStores.id, row.storeId))
-            .limit(1);
-          if (store?.icon) return; // already has one
+          if (existingIcons.has(row.storeId)) return; // already has one
           if (apply) await faviconService.hydrateShowroomIcon(c.env, row.storeId, row.websiteUrl);
           result.storeLogos.applied++;
         } catch (err) {
@@ -808,12 +866,24 @@ showroomBackfillRouter.post("/backfill/apply-plan", async (c) => {
   }
 
   // ── Stranded scrape kicks — REAL Browser Run spend, so guarded hard ───────
+  const kickStates = new Map(
+    (
+      await selectByIds(
+        plan.scrapeKicks.map((r) => r.storeId),
+        (chunk) =>
+          db
+            .select({
+              id: showroomStores.id,
+              scrapeStatus: showroomStores.scrapeStatus,
+              ragUuid: showroomStores.ragUuid,
+            })
+            .from(showroomStores)
+            .where(inArray(showroomStores.id, chunk)),
+      )
+    ).map((r) => [r.id, r]),
+  );
   for (const row of plan.scrapeKicks) {
-    const [store] = await db
-      .select({ scrapeStatus: showroomStores.scrapeStatus, ragUuid: showroomStores.ragUuid })
-      .from(showroomStores)
-      .where(eq(showroomStores.id, row.storeId))
-      .limit(1);
+    const store = kickStates.get(row.storeId);
     // Same guard as kickShowroomScrape: a minted ragUuid means a workflow exists.
     if (!store || (store.ragUuid && store.scrapeStatus !== "idle")) {
       result.scrapeKicks.skipped++;
