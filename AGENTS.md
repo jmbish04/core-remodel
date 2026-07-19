@@ -427,10 +427,32 @@ an account's workers, and the REST API needs a token scope this repo's
 `CLOUDFLARE_API_TOKEN` does not carry. Not worth a credential hunt to delete
 something that costs nothing to leave running.
 
-> Cloudflare's built-in "Workers Previews" (`previews_enabled`) is **not**
-> available on this account — the API returns `12044: This account does not have
-> access to Workers Previews`. The per-branch worker above is the mechanism; do
-> not waste a session trying to switch the platform feature on.
+### Why a named worker and not Cloudflare's own preview URLs
+
+**Cloudflare cannot generate preview URLs for this Worker, and never will while
+it uses Durable Objects.** From the
+[preview URLs limitations](https://developers.cloudflare.com/workers/configuration/previews/#limitations):
+
+> Preview URLs are not generated for Workers that implement a Durable Object.
+
+`core-remodel` exports twelve. So `wrangler versions upload` gives you a safe
+uploaded version with **no viewable URL** — which is useless for verifying a
+branch. Deploying a separate named worker is the only mechanism that yields a
+URL you can actually open. (Separately, `previews_enabled` also can't be turned
+on here — the API returns `12044: This account does not have access to Workers
+Previews` — but the Durable Object limitation is the binding one.)
+
+Do not re-litigate this. Specifically:
+
+- Do **not** switch `deploy-preview.mjs` to `wrangler versions upload`.
+- Do **not** adopt a third-party "Cloudflare Workers preview" GitHub Action.
+  The commonly-suggested one (`shidil/cloudflare-workers-preview`) was evaluated
+  and rejected: last commit **March 2022**, a **Node 12** action runtime that
+  GitHub no longer supports, and it wants your Cloudflare API token as a repo
+  secret. It also deploys a separate named worker anyway — the same idea as
+  `deploy-preview.mjs`, keyed on PR number instead of branch, and unmaintained.
+- Workers Builds already deploys every branch for you. A GitHub Action would
+  duplicate that, not replace it.
 
 ## Changelog discipline (MANDATORY)
 
