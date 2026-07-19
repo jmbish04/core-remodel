@@ -25,68 +25,32 @@ import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 /**
- * Ordered rules mapping type/brand tokens to internal category NAMES. Each rule
- * tests the combined lowercased haystack; matches contribute one or more
- * category names, de-duplicated in insertion order.
- */
-const CATEGORY_RULES: { test: RegExp; labels: string[] }[] = [
-  // Furniture / home goods / decor
-  { test: /home_goods_store|furniture_store|home_improvement_store/, labels: ["Furniture"] },
-  { test: /home_goods_store/, labels: ["Art & Accessories"] },
-  // Hardware & doors
-  { test: /hardware_store/, labels: ["Doors & Hardware"] },
-  { test: /door/, labels: ["Doors & Hardware"] },
-  // Plumbing / bath
-  { test: /plumbing|plumber/, labels: ["Plumbing Fixtures"] },
-  { test: /bath|bathroom/, labels: ["Bathroom Tile", "Bathroom Vanities"] },
-  // Lighting
-  { test: /lighting_store|lighting|light_fixture/, labels: ["Lighting"] },
-  // Tile / stone / flooring
-  { test: /tile|stone|flooring|floor|carpet|hardwood/, labels: ["Flooring"] },
-  { test: /tile/, labels: ["Bathroom Tile"] },
-  { test: /countertop|slab|granite|quartz|marble/, labels: ["Kitchen Countertops"] },
-  // Kitchen
-  { test: /kitchen|cabinet/, labels: ["Kitchen Cabinetry"] },
-  // Appliances
-  { test: /appliance|electronics_store/, labels: ["Appliances"] },
-  // Windows
-  { test: /window/, labels: ["Windows"] },
-  // Closets / storage
-  { test: /closet|storage|organiz/, labels: ["Closet Systems"] },
-  // Paint & finishes
-  { test: /paint/, labels: ["Paint & Finishes"] },
-  // Rugs / textiles
-  { test: /rug|carpet|textile|fabric|drapery/, labels: ["Rugs & Textiles"] },
-  // Wall coverings
-  { test: /wallpaper|wall_covering/, labels: ["Wall Coverings"] },
-  // Smart home
-  { test: /smart_home|home_automation|locksmith/, labels: ["Smart Home"] },
-  // Outdoor
-  { test: /garden|landscap|outdoor|nursery|patio/, labels: ["Outdoor & Landscape"] },
-  // Water filtration
-  { test: /water|filtration/, labels: ["Water Filtration"] },
-];
-
-/**
- * Infer internal showroom category NAMES from a set of signal tokens (Google
- * place types, primaryType, AI-insight brand type strings).
+ * The rule table and the pure classifier now live in `showroom-category-rules.ts`
+ * and are re-exported here so existing importers are unchanged.
  *
- * @param tokens Raw signal strings; joined + lowercased into one haystack.
- * @returns De-duplicated internal category names (insertion order). May be empty.
+ * WHY THEY MOVED. The table emitted labels from an OLDER vocabulary and was never
+ * updated when the live one changed. Measured against the live 28-row
+ * `showroom_store_category` on 2026-07-16: 15 of 19 emitted labels resolved to
+ * NOTHING, and the 4 that did resolve were WRONG — the single rule
+ * `/tile|stone|flooring/` emitted "Flooring", which the fuzzy branch of
+ * `pushMatch` bound to "Hardwood & Flooring Specialists", filing every tile shop
+ * and stone yard in the directory as a hardwood flooring specialist.
+ *
+ * That is why 86 of 146 stores carried zero categories.
+ *
+ * The rules now emit `CanonicalCategory` — the exact live names — so a stale
+ * label is a COMPILE ERROR rather than a silently dead rule, and the regex path
+ * below can be matched exactly like the AI path. Splitting them into a
+ * dependency-free module also lets `pnpm run test:cats` exercise them with plain
+ * node (this file imports drizzle, which bare node cannot resolve via @backend).
  */
-export function inferCategoryLabelsFromTokens(tokens: Array<string | null | undefined>): string[] {
-  const haystack = tokens.filter(Boolean).join(" ").toLowerCase();
-  if (!haystack.trim()) return [];
-  const out: string[] = [];
-  for (const { test, labels } of CATEGORY_RULES) {
-    if (test.test(haystack)) {
-      for (const label of labels) {
-        if (!out.includes(label)) out.push(label);
-      }
-    }
-  }
-  return out;
-}
+export {
+  CANONICAL_CATEGORIES,
+  type CanonicalCategory,
+  inferCategoryLabelsFromTokens,
+} from "./showroom-category-rules";
+import { inferCategoryLabelsFromTokens } from "./showroom-category-rules";
+
 
 /**
  * AI classifier: pick the applicable categories for a showroom STRICTLY from the
@@ -251,7 +215,11 @@ export async function inferAndMapCategories(
       if (match && !categoryIds.includes(match.id)) categoryIds.push(match.id);
     };
     for (const nm of aiNames) pushMatch(nm, true);
-    for (const label of regexLabels) pushMatch(label, false);
+    // Exact, not fuzzy. The regex labels are now canonical category names, so
+    // the fuzzy branch is no longer needed here — and fuzzy is precisely what let
+    // "Flooring" swallow "Hardwood & Flooring Specialists". The AI path above
+    // already used exact matching for the same reason.
+    for (const label of regexLabels) pushMatch(label, true);
 
     if (categoryIds.length === 0) return 0;
 
