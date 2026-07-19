@@ -31,6 +31,7 @@ import {
 } from "@backend/db/schema/showroom/index";
 import { GoogleMapsService } from "@backend/services/google/maps";
 import { getStoreWebsiteUrl } from "@backend/utils/showroom-links";
+import { faviconService } from "@backend/services/favicon";
 import {
   deriveIsOpenWeekends,
   hoursJsonSchema,
@@ -662,4 +663,171 @@ showroomBackfillRouter.post("/backfill/addresses", async (c) => {
     },
     200,
   );
+});
+
+// ---------------------------------------------------------------------------
+// POST /backfill/apply-plan — apply a reviewed audit plan. NO GOOGLE PLACES.
+// ---------------------------------------------------------------------------
+
+/**
+ * Applies a plan produced by `scripts/showroom-audit.mjs`.
+ *
+ * Deliberately separate from `/backfill/addresses` above, which resolves data by
+ * calling Google Places. Everything here is derived from data already in D1
+ * (store name, description, mapped brands) plus favicon fetches, so it costs no
+ * Places quota and no AI calls.
+ *
+ * Every section is opt-in and dry-run by default: the caller sends only the
+ * sections it wants, and nothing is written unless `apply` is true. All writes
+ * are FILL-BLANKS — a store that has since gained categories, a logo, or a
+ * kicked scrape is skipped, so re-running is safe and converges.
+ */
+const applyPlanSchema = z.object({
+  apply: z.boolean().optional().default(false),
+  categories: z
+    .array(z.object({ storeId: z.number().int(), categoryIds: z.array(z.number().int()).min(1), rationale: z.string().optional() }))
+    .optional()
+    .default([]),
+  addresses: z
+    .array(z.object({ storeId: z.number().int(), proposed: z.string().min(1) }))
+    .optional()
+    .default([]),
+  storeLogos: z
+    .array(z.object({ storeId: z.number().int(), websiteUrl: z.string().min(1) }))
+    .optional()
+    .default([]),
+  brandLogos: z
+    .array(z.object({ brandId: z.number().int(), websiteUrl: z.string().min(1) }))
+    .optional()
+    .default([]),
+  scrapeKicks: z
+    .array(z.object({ storeId: z.number().int(), websiteUrl: z.string().min(1) }))
+    .optional()
+    .default([]),
+});
+
+/** Favicon fetches per wave — same throttle shape as the photo pipeline. */
+const LOGO_WAVE = 5;
+
+showroomBackfillRouter.post("/backfill/apply-plan", async (c) => {
+  const parsed = applyPlanSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: "Invalid plan", detail: parsed.error.flatten() }, 400);
+  }
+  const plan = parsed.data;
+  const apply = plan.apply;
+  const db = drizzle(c.env.DB);
+  const result = {
+    apply,
+    categories: { applied: 0, skipped: 0 },
+    addresses: { applied: 0, skipped: 0 },
+    storeLogos: { applied: 0, failed: 0 },
+    brandLogos: { applied: 0, failed: 0 },
+    scrapeKicks: { applied: 0, skipped: 0 },
+    notes: [] as string[],
+  };
+
+  // ── Categories (fill-blanks: skip any store that already has one) ──────────
+  for (const row of plan.categories) {
+    const [existing] = await db
+      .select({ id: showroomStoreCategoryMapping.id })
+      .from(showroomStoreCategoryMapping)
+      .where(eq(showroomStoreCategoryMapping.storeId, row.storeId))
+      .limit(1);
+    if (existing) {
+      result.categories.skipped++;
+      continue;
+    }
+    if (apply) {
+      for (const categoryId of row.categoryIds) {
+        await db
+          .insert(showroomStoreCategoryMapping)
+          .values({
+            storeId: row.storeId,
+            categoryId,
+            aiRationale: row.rationale ?? "Backfilled from audit plan (no Places)",
+            aiRationaleConfidenceScore: 5,
+          })
+          .onConflictDoNothing();
+      }
+    }
+    result.categories.applied++;
+  }
+
+  // ── Addresses — ONLY values the plan explicitly proposed. Never invented. ──
+  for (const row of plan.addresses) {
+    if (apply) {
+      await db
+        .update(showroomStores)
+        .set({ locationAddress: row.proposed, updatedAt: new Date() })
+        .where(eq(showroomStores.id, row.storeId));
+    }
+    result.addresses.applied++;
+  }
+
+  // ── Store logos (favicon) — fill-blanks, throttled ────────────────────────
+  for (let i = 0; i < plan.storeLogos.length; i += LOGO_WAVE) {
+    const wave = plan.storeLogos.slice(i, i + LOGO_WAVE);
+    await Promise.all(
+      wave.map(async (row) => {
+        try {
+          const [store] = await db
+            .select({ icon: showroomStores.iconCfImagesUrl })
+            .from(showroomStores)
+            .where(eq(showroomStores.id, row.storeId))
+            .limit(1);
+          if (store?.icon) return; // already has one
+          if (apply) await faviconService.hydrateShowroomIcon(c.env, row.storeId, row.websiteUrl);
+          result.storeLogos.applied++;
+        } catch (err) {
+          result.storeLogos.failed++;
+          console.error(`[apply-plan] store logo failed for ${row.storeId}:`, err);
+        }
+      }),
+    );
+  }
+
+  // ── Brand logos (favicon) — the big one: ~280 brands ──────────────────────
+  for (let i = 0; i < plan.brandLogos.length; i += LOGO_WAVE) {
+    const wave = plan.brandLogos.slice(i, i + LOGO_WAVE);
+    await Promise.all(
+      wave.map(async (row) => {
+        try {
+          if (apply) await faviconService.hydrateBrandIcon(c.env, row.brandId, row.websiteUrl);
+          result.brandLogos.applied++;
+        } catch (err) {
+          result.brandLogos.failed++;
+          console.error(`[apply-plan] brand logo failed for ${row.brandId}:`, err);
+        }
+      }),
+    );
+  }
+
+  // ── Stranded scrape kicks — REAL Browser Run spend, so guarded hard ───────
+  for (const row of plan.scrapeKicks) {
+    const [store] = await db
+      .select({ scrapeStatus: showroomStores.scrapeStatus, ragUuid: showroomStores.ragUuid })
+      .from(showroomStores)
+      .where(eq(showroomStores.id, row.storeId))
+      .limit(1);
+    // Same guard as kickShowroomScrape: a minted ragUuid means a workflow exists.
+    if (!store || (store.ragUuid && store.scrapeStatus !== "idle")) {
+      result.scrapeKicks.skipped++;
+      continue;
+    }
+    if (apply) {
+      const ragUuid = store.ragUuid ?? crypto.randomUUID();
+      await db
+        .update(showroomStores)
+        .set({ ragUuid, scrapeStatus: "pending", updatedAt: new Date() })
+        .where(eq(showroomStores.id, row.storeId));
+      await c.env.SHOWROOM_SCRAPE_WORKFLOW.create({
+        params: { showroomId: row.storeId, websiteUrl: row.websiteUrl, ragUuid },
+      });
+    }
+    result.scrapeKicks.applied++;
+  }
+
+  if (!apply) result.notes.push("DRY RUN — nothing written. Re-send with apply:true.");
+  return c.json(result, 200);
 });

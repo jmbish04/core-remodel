@@ -1,16 +1,39 @@
 /**
  * @fileoverview Server-side showroom category inference + persistence.
  *
- * Maps Google Places `types` / `primaryType` tokens (plus any AI-insight brand
- * type strings, e.g. "Hardwood Flooring", "Tile") onto the internal showroom
- * category vocabulary seeded in `seed-reference-data.sql`, then writes
- * `showroom_store_category_mapping` rows — FILL-BLANKS ONLY (a store that
- * already has any category mapping is left untouched).
+ * Maps free-text signal tokens onto the internal showroom category vocabulary,
+ * then writes `showroom_store_category_mapping` rows — FILL-BLANKS ONLY (a store
+ * that already has any category mapping is left untouched).
  *
- * The rule table mirrors `CATEGORY_RULES` in
- * `src/frontend/components/showroom/intake/places-mapper.ts` (the single-add
- * intake uses the frontend copy to pre-select the category multi-select).
- * KEEP THE TWO IN SYNC when the vocabulary evolves.
+ * TOKENS ARE NOT GOOGLE-SPECIFIC. This used to be fed exclusively by Google
+ * Places `types`/`primaryType`. It now takes any text: the store NAME (by far the
+ * strongest signal — "Archetype Lighting", "Tez Marble", "Tileshop"), the
+ * description, mapped brand names, and scraped page text. Places is no longer
+ * required for a store to get categorised.
+ *
+ * WHY THIS FILE WAS REWRITTEN (2026-07-16). The rule table emitted labels from an
+ * OLDER category vocabulary and was never updated when the live vocabulary
+ * changed, while resolution used a fuzzy bidirectional `includes` match that hid
+ * the breakage. Measured against the live 28-row `showroom_store_category` table:
+ *
+ *   - 15 of 19 emitted labels resolved to NOTHING ("Plumbing Fixtures",
+ *     "Kitchen Cabinetry", "Appliances", "Closet Systems", "Smart Home", …).
+ *   - The 4 that did resolve were WRONG: the single rule `/tile|stone|flooring/`
+ *     emitted "Flooring", which fuzzy-matched "Hardwood & Flooring Specialists",
+ *     so every tile and stone yard in the directory was filed as a hardwood
+ *     flooring specialist. "Tileshop", "Art Tile", "All Natural Stone" and
+ *     "Italics Tile & Stone" all landed there.
+ *
+ * That is why 86 of 146 stores carried zero categories.
+ *
+ * TWO STRUCTURAL FIXES so it cannot silently rot again:
+ *   1. Rules emit CANONICAL_CATEGORIES members — the exact live names — and the
+ *      type system rejects any other string at compile time.
+ *   2. Resolution is an EXACT case-insensitive name match. The old fuzzy contains
+ *      match is what let "Flooring" swallow "Hardwood & Flooring Specialists".
+ *
+ * `scripts/tests/test_showroom_categories.mjs` asserts every rule label is a real
+ * category and pins the classification of real store names.
  */
 
 import { drizzle } from "drizzle-orm/d1";
@@ -20,70 +43,16 @@ import {
   showroomStoreCategory,
   showroomStoreCategoryMapping,
 } from "@backend/db/schema/showroom/index";
+import {
+  CANONICAL_CATEGORIES,
+  type CanonicalCategory,
+  inferCategoryLabelsFromTokens,
+} from "./showroom-category-rules";
 
-/**
- * Ordered rules mapping type/brand tokens to internal category NAMES. Each rule
- * tests the combined lowercased haystack; matches contribute one or more
- * category names, de-duplicated in insertion order.
- */
-const CATEGORY_RULES: { test: RegExp; labels: string[] }[] = [
-  // Furniture / home goods / decor
-  { test: /home_goods_store|furniture_store|home_improvement_store/, labels: ["Furniture"] },
-  { test: /home_goods_store/, labels: ["Art & Accessories"] },
-  // Hardware & doors
-  { test: /hardware_store/, labels: ["Doors & Hardware"] },
-  { test: /door/, labels: ["Doors & Hardware"] },
-  // Plumbing / bath
-  { test: /plumbing|plumber/, labels: ["Plumbing Fixtures"] },
-  { test: /bath|bathroom/, labels: ["Bathroom Tile", "Bathroom Vanities"] },
-  // Lighting
-  { test: /lighting_store|lighting|light_fixture/, labels: ["Lighting"] },
-  // Tile / stone / flooring
-  { test: /tile|stone|flooring|floor|carpet|hardwood/, labels: ["Flooring"] },
-  { test: /tile/, labels: ["Bathroom Tile"] },
-  { test: /countertop|slab|granite|quartz|marble/, labels: ["Kitchen Countertops"] },
-  // Kitchen
-  { test: /kitchen|cabinet/, labels: ["Kitchen Cabinetry"] },
-  // Appliances
-  { test: /appliance|electronics_store/, labels: ["Appliances"] },
-  // Windows
-  { test: /window/, labels: ["Windows"] },
-  // Closets / storage
-  { test: /closet|storage|organiz/, labels: ["Closet Systems"] },
-  // Paint & finishes
-  { test: /paint/, labels: ["Paint & Finishes"] },
-  // Rugs / textiles
-  { test: /rug|carpet|textile|fabric|drapery/, labels: ["Rugs & Textiles"] },
-  // Wall coverings
-  { test: /wallpaper|wall_covering/, labels: ["Wall Coverings"] },
-  // Smart home
-  { test: /smart_home|home_automation|locksmith/, labels: ["Smart Home"] },
-  // Outdoor
-  { test: /garden|landscap|outdoor|nursery|patio/, labels: ["Outdoor & Landscape"] },
-  // Water filtration
-  { test: /water|filtration/, labels: ["Water Filtration"] },
-];
+// Re-exported so existing importers of this module keep working unchanged.
+export { CANONICAL_CATEGORIES, inferCategoryLabelsFromTokens };
+export type { CanonicalCategory };
 
-/**
- * Infer internal showroom category NAMES from a set of signal tokens (Google
- * place types, primaryType, AI-insight brand type strings).
- *
- * @param tokens Raw signal strings; joined + lowercased into one haystack.
- * @returns De-duplicated internal category names (insertion order). May be empty.
- */
-export function inferCategoryLabelsFromTokens(tokens: Array<string | null | undefined>): string[] {
-  const haystack = tokens.filter(Boolean).join(" ").toLowerCase();
-  if (!haystack.trim()) return [];
-  const out: string[] = [];
-  for (const { test, labels } of CATEGORY_RULES) {
-    if (test.test(haystack)) {
-      for (const label of labels) {
-        if (!out.includes(label)) out.push(label);
-      }
-    }
-  }
-  return out;
-}
 
 /**
  * Infer categories for a showroom and persist `showroom_store_category_mapping`
@@ -126,10 +95,13 @@ export async function inferAndMapCategories(
     const categoryIds: number[] = [];
     for (const label of labels) {
       const needle = label.toLowerCase();
-      const match = categories.find((c) => {
-        const name = c.name.toLowerCase();
-        return name.includes(needle) || needle.includes(name);
-      });
+      // EXACT match. The old `name.includes(needle) || needle.includes(name)`
+      // fuzzy compare is what let the label "Flooring" bind to "Hardwood &
+      // Flooring Specialists", mis-filing every tile and stone yard in the
+      // directory. Rules now emit canonical names, so exact is sufficient — and
+      // a rule that drifts from the vocabulary fails the test instead of
+      // silently binding to the wrong category.
+      const match = categories.find((c) => c.name.toLowerCase() === needle);
       if (match && !categoryIds.includes(match.id)) categoryIds.push(match.id);
     }
     if (categoryIds.length === 0) return 0;

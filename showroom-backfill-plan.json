@@ -1,0 +1,3267 @@
+{
+  "generatedAt": "2026-07-19T19:07:09.211Z",
+  "source": "remote",
+  "note": "Derived from existing D1 data only — no Google Places. Review before applying.",
+  "summary": {
+    "storesTotal": 146,
+    "categoriesToFill": 83,
+    "storeLogosToFetch": 72,
+    "brandLogosToFetch": 280,
+    "addressesBroken": 5,
+    "scrapesStranded": 10,
+    "needsManual": 32
+  },
+  "categories": [
+    {
+      "storeId": 5,
+      "storeName": "California Closets",
+      "categoryIds": [
+        5
+      ],
+      "categoryNames": [
+        "Closet & Wardrobe Systems"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 9,
+      "storeName": "Townsend Showroom",
+      "categoryIds": [
+        3,
+        8,
+        10
+      ],
+      "categoryNames": [
+        "Plumbing & Bath Supply",
+        "Lighting Showrooms",
+        "Hardware & Architectural Fittings"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 12,
+      "storeName": "Insensation Inc.",
+      "categoryIds": [
+        9,
+        13,
+        18,
+        24
+      ],
+      "categoryNames": [
+        "Windows & Doors Dealerships",
+        "Glass & Shower Enclosures",
+        "Home Decor, Furniture & Textiles",
+        "Acoustic & Soundproofing Solutions"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 15,
+      "storeName": "Archetype Lighting",
+      "categoryIds": [
+        8
+      ],
+      "categoryNames": [
+        "Lighting Showrooms"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 18,
+      "storeName": "Poliform",
+      "categoryIds": [
+        5,
+        18
+      ],
+      "categoryNames": [
+        "Closet & Wardrobe Systems",
+        "Home Decor, Furniture & Textiles"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 20,
+      "storeName": "Avera by The Container Store",
+      "categoryIds": [
+        5
+      ],
+      "categoryNames": [
+        "Closet & Wardrobe Systems"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 23,
+      "storeName": "Studio Belmont (San Jose)",
+      "categoryIds": [
+        4,
+        6
+      ],
+      "categoryNames": [
+        "Kitchen & Custom Cabinetry",
+        "Appliance Galleries"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 24,
+      "storeName": "Tredi Interiors",
+      "categoryIds": [
+        4,
+        18
+      ],
+      "categoryNames": [
+        "Kitchen & Custom Cabinetry",
+        "Home Decor, Furniture & Textiles"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 25,
+      "storeName": "Topcret (San Jose)",
+      "categoryIds": [
+        11,
+        12
+      ],
+      "categoryNames": [
+        "Paint, Plaster & Specialty Coatings",
+        "Architectural Concrete & Cast Stone"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 27,
+      "storeName": "Concreteworks",
+      "categoryIds": [
+        1,
+        4,
+        12,
+        18
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Kitchen & Custom Cabinetry",
+        "Architectural Concrete & Cast Stone",
+        "Home Decor, Furniture & Textiles"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 28,
+      "storeName": "America's Dream HomeWorks",
+      "categoryIds": [
+        4
+      ],
+      "categoryNames": [
+        "Kitchen & Custom Cabinetry"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 29,
+      "storeName": "Duraamen",
+      "categoryIds": [
+        7,
+        11,
+        12
+      ],
+      "categoryNames": [
+        "Hardwood & Flooring Specialists",
+        "Paint, Plaster & Specialty Coatings",
+        "Architectural Concrete & Cast Stone"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 30,
+      "storeName": "IKEA PAX",
+      "categoryIds": [
+        5,
+        19
+      ],
+      "categoryNames": [
+        "Closet & Wardrobe Systems",
+        "General Home Improvement Centers"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 32,
+      "storeName": "Petty Masonry Inc.",
+      "categoryIds": [
+        15,
+        25
+      ],
+      "categoryNames": [
+        "Landscape & Exterior Hardscape",
+        "Metalwork & Custom Fabrication"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 33,
+      "storeName": "Archatrak",
+      "categoryIds": [
+        15
+      ],
+      "categoryNames": [
+        "Landscape & Exterior Hardscape"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 34,
+      "storeName": "Closet Factory",
+      "categoryIds": [
+        5,
+        19
+      ],
+      "categoryNames": [
+        "Closet & Wardrobe Systems",
+        "General Home Improvement Centers"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 35,
+      "storeName": "SF City Lights",
+      "categoryIds": [
+        8
+      ],
+      "categoryNames": [
+        "Lighting Showrooms"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 37,
+      "storeName": "All Natural Stone",
+      "categoryIds": [
+        1,
+        2
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Tile & Surfaces Showrooms"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 38,
+      "storeName": "Roman Marble Shop",
+      "categoryIds": [
+        1
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 39,
+      "storeName": "Carmel Stone Imports",
+      "categoryIds": [
+        2,
+        1
+      ],
+      "categoryNames": [
+        "Tile & Surfaces Showrooms",
+        "Slab & Natural Stone Yards"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 40,
+      "storeName": "East Star Building Supply",
+      "categoryIds": [
+        2,
+        1,
+        4,
+        3,
+        20
+      ],
+      "categoryNames": [
+        "Tile & Surfaces Showrooms",
+        "Slab & Natural Stone Yards",
+        "Kitchen & Custom Cabinetry",
+        "Plumbing & Bath Supply",
+        "Lumber, Millwork & Building Materials"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 42,
+      "storeName": "All Natural Stone",
+      "categoryIds": [
+        1,
+        2
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Tile & Surfaces Showrooms"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 43,
+      "storeName": "Tileshop",
+      "categoryIds": [
+        2,
+        1
+      ],
+      "categoryNames": [
+        "Tile & Surfaces Showrooms",
+        "Slab & Natural Stone Yards"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 44,
+      "storeName": "Italics Tile & Stone",
+      "categoryIds": [
+        1,
+        2
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Tile & Surfaces Showrooms"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 45,
+      "storeName": "Art Tile",
+      "categoryIds": [
+        2,
+        3,
+        4
+      ],
+      "categoryNames": [
+        "Tile & Surfaces Showrooms",
+        "Plumbing & Bath Supply",
+        "Kitchen & Custom Cabinetry"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 46,
+      "storeName": "Tez Marble",
+      "categoryIds": [
+        1,
+        18,
+        25
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Home Decor, Furniture & Textiles",
+        "Metalwork & Custom Fabrication"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 47,
+      "storeName": "Luxe Home by Douglah Designs",
+      "categoryIds": [
+        1,
+        4,
+        3,
+        8
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Kitchen & Custom Cabinetry",
+        "Plumbing & Bath Supply",
+        "Lighting Showrooms"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 48,
+      "storeName": "Modello Tile & Countertop Studio",
+      "categoryIds": [
+        1,
+        2,
+        4
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Tile & Surfaces Showrooms",
+        "Kitchen & Custom Cabinetry"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 49,
+      "storeName": "PORCELANOSA Walnut Creek",
+      "categoryIds": [
+        2,
+        3,
+        4
+      ],
+      "categoryNames": [
+        "Tile & Surfaces Showrooms",
+        "Plumbing & Bath Supply",
+        "Kitchen & Custom Cabinetry"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 50,
+      "storeName": "Capri Stone",
+      "categoryIds": [
+        1
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 51,
+      "storeName": "All Natural Stone",
+      "categoryIds": [
+        1,
+        2
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Tile & Surfaces Showrooms"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 52,
+      "storeName": "Daltile, American Olean, Marazzi Sales Service Center",
+      "categoryIds": [
+        1,
+        2,
+        18
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Tile & Surfaces Showrooms",
+        "Home Decor, Furniture & Textiles"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 53,
+      "storeName": "Everlasting Surfaces Inc",
+      "categoryIds": [
+        1,
+        2,
+        18,
+        25
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Tile & Surfaces Showrooms",
+        "Home Decor, Furniture & Textiles",
+        "Metalwork & Custom Fabrication"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 54,
+      "storeName": "Arizona Tile",
+      "categoryIds": [
+        1,
+        2
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Tile & Surfaces Showrooms"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 55,
+      "storeName": "Kraftician Design Surfaces, Inc.",
+      "categoryIds": [
+        1,
+        2,
+        7,
+        16
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Tile & Surfaces Showrooms",
+        "Hardwood & Flooring Specialists",
+        "Roofing & Exterior Materials"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 56,
+      "storeName": "Evolv Surfaces",
+      "categoryIds": [
+        1,
+        2
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Tile & Surfaces Showrooms"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 57,
+      "storeName": "Costco Wholesale",
+      "categoryIds": [
+        19
+      ],
+      "categoryNames": [
+        "General Home Improvement Centers"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 58,
+      "storeName": "Concrete Exchange",
+      "categoryIds": [
+        1,
+        4,
+        5,
+        11,
+        12
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Kitchen & Custom Cabinetry",
+        "Closet & Wardrobe Systems",
+        "Paint, Plaster & Specialty Coatings",
+        "Architectural Concrete & Cast Stone"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 59,
+      "storeName": "Awesome Materials, LLC",
+      "categoryIds": [
+        11
+      ],
+      "categoryNames": [
+        "Paint, Plaster & Specialty Coatings"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 60,
+      "storeName": "Gem Concrete Polishing",
+      "categoryIds": [
+        12
+      ],
+      "categoryNames": [
+        "Architectural Concrete & Cast Stone"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 61,
+      "storeName": "C*Rock Finishing",
+      "categoryIds": [
+        11,
+        12
+      ],
+      "categoryNames": [
+        "Paint, Plaster & Specialty Coatings",
+        "Architectural Concrete & Cast Stone"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 62,
+      "storeName": "California Concrete Overlay Inc.",
+      "categoryIds": [
+        1,
+        11,
+        12
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Paint, Plaster & Specialty Coatings",
+        "Architectural Concrete & Cast Stone"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 63,
+      "storeName": "Metro Lighting",
+      "categoryIds": [
+        8
+      ],
+      "categoryNames": [
+        "Lighting Showrooms"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 64,
+      "storeName": "General Plumbing Supply",
+      "categoryIds": [
+        3,
+        4,
+        10
+      ],
+      "categoryNames": [
+        "Plumbing & Bath Supply",
+        "Kitchen & Custom Cabinetry",
+        "Hardware & Architectural Fittings"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 65,
+      "storeName": "Homewise Appliance",
+      "categoryIds": [
+        6
+      ],
+      "categoryNames": [
+        "Appliance Galleries"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 66,
+      "storeName": "Homewise Appliance",
+      "categoryIds": [
+        6
+      ],
+      "categoryNames": [
+        "Appliance Galleries"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 67,
+      "storeName": "Homewise Appliance",
+      "categoryIds": [
+        6
+      ],
+      "categoryNames": [
+        "Appliance Galleries"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 68,
+      "storeName": "Terra Outdoor Living",
+      "categoryIds": [
+        15
+      ],
+      "categoryNames": [
+        "Landscape & Exterior Hardscape"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 69,
+      "storeName": "Walnut Creek Fireplace - Regency Fireplaces & Polywood Outdoor Furniture Store",
+      "categoryIds": [
+        18,
+        22
+      ],
+      "categoryNames": [
+        "Home Decor, Furniture & Textiles",
+        "Fireplaces & Hearths"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 70,
+      "storeName": "American Soil & Stone",
+      "categoryIds": [
+        1,
+        15,
+        18
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Landscape & Exterior Hardscape",
+        "Home Decor, Furniture & Textiles"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 71,
+      "storeName": "Truitt & White Window and Door Showroom",
+      "categoryIds": [
+        9
+      ],
+      "categoryNames": [
+        "Windows & Doors Dealerships"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 72,
+      "storeName": "Ohmega Salvage",
+      "categoryIds": [
+        10
+      ],
+      "categoryNames": [
+        "Hardware & Architectural Fittings"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 73,
+      "storeName": "Urban Ore",
+      "categoryIds": [
+        18,
+        20
+      ],
+      "categoryNames": [
+        "Home Decor, Furniture & Textiles",
+        "Lumber, Millwork & Building Materials"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 74,
+      "storeName": "Berkeley Lighting Co",
+      "categoryIds": [
+        8
+      ],
+      "categoryNames": [
+        "Lighting Showrooms"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 75,
+      "storeName": "Bay Countertops",
+      "categoryIds": [
+        1,
+        4
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Kitchen & Custom Cabinetry"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 76,
+      "storeName": "Raphael Stone Collection",
+      "categoryIds": [
+        1
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 77,
+      "storeName": "MARVEL SURFACES",
+      "categoryIds": [
+        2
+      ],
+      "categoryNames": [
+        "Tile & Surfaces Showrooms"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 78,
+      "storeName": "Style Bath & Kitchen",
+      "categoryIds": [
+        3,
+        4
+      ],
+      "categoryNames": [
+        "Plumbing & Bath Supply",
+        "Kitchen & Custom Cabinetry"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 79,
+      "storeName": "Ferguson Home",
+      "categoryIds": [
+        3
+      ],
+      "categoryNames": [
+        "Plumbing & Bath Supply"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 80,
+      "storeName": "New Luxury Baths & Kitchen",
+      "categoryIds": [
+        4
+      ],
+      "categoryNames": [
+        "Kitchen & Custom Cabinetry"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 81,
+      "storeName": "Ashby Lumber",
+      "categoryIds": [
+        10,
+        20
+      ],
+      "categoryNames": [
+        "Hardware & Architectural Fittings",
+        "Lumber, Millwork & Building Materials"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 82,
+      "storeName": "Walker Zanger",
+      "categoryIds": [
+        1,
+        2
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Tile & Surfaces Showrooms"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 100,
+      "storeName": "Golden State Lumber + Showroom",
+      "categoryIds": [
+        4,
+        9,
+        10,
+        20
+      ],
+      "categoryNames": [
+        "Kitchen & Custom Cabinetry",
+        "Windows & Doors Dealerships",
+        "Hardware & Architectural Fittings",
+        "Lumber, Millwork & Building Materials"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 101,
+      "storeName": "Wooden Works, Windows And Doors Corporation",
+      "categoryIds": [
+        9
+      ],
+      "categoryNames": [
+        "Windows & Doors Dealerships"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 102,
+      "storeName": "San Leandro Door Co",
+      "categoryIds": [
+        9
+      ],
+      "categoryNames": [
+        "Windows & Doors Dealerships"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 104,
+      "storeName": "Dolan's Lumber, Doors and Windows",
+      "categoryIds": [
+        9,
+        19,
+        20
+      ],
+      "categoryNames": [
+        "Windows & Doors Dealerships",
+        "General Home Improvement Centers",
+        "Lumber, Millwork & Building Materials"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 105,
+      "storeName": "Royal Window & Door",
+      "categoryIds": [
+        4,
+        9
+      ],
+      "categoryNames": [
+        "Kitchen & Custom Cabinetry",
+        "Windows & Doors Dealerships"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 106,
+      "storeName": "United Granite & Cabinet",
+      "categoryIds": [
+        1,
+        4
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Kitchen & Custom Cabinetry"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 109,
+      "storeName": "Concrete Concepts and Designs",
+      "categoryIds": [
+        12
+      ],
+      "categoryNames": [
+        "Architectural Concrete & Cast Stone"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 116,
+      "storeName": "Jack London Kitchen and Bath -Walnut Creek",
+      "categoryIds": [
+        3,
+        4,
+        10
+      ],
+      "categoryNames": [
+        "Plumbing & Bath Supply",
+        "Kitchen & Custom Cabinetry",
+        "Hardware & Architectural Fittings"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 118,
+      "storeName": "IRG Stone",
+      "categoryIds": [
+        1
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 119,
+      "storeName": "Fox Marble",
+      "categoryIds": [
+        1,
+        2
+      ],
+      "categoryNames": [
+        "Slab & Natural Stone Yards",
+        "Tile & Surfaces Showrooms"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 121,
+      "storeName": "Aquabella Kitchen, Bath & Lighting Showroom",
+      "categoryIds": [
+        3,
+        4,
+        8
+      ],
+      "categoryNames": [
+        "Plumbing & Bath Supply",
+        "Kitchen & Custom Cabinetry",
+        "Lighting Showrooms"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 126,
+      "storeName": "Engrave Concrete Design Professional Epoxy Flooring Contractor, Pavers Interlocking & Garage Floor Installer",
+      "categoryIds": [
+        7,
+        12,
+        15
+      ],
+      "categoryNames": [
+        "Hardwood & Flooring Specialists",
+        "Architectural Concrete & Cast Stone",
+        "Landscape & Exterior Hardscape"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 133,
+      "storeName": "AquaBella Kitchen, Bath and Lighting Showroom",
+      "categoryIds": [
+        3,
+        4,
+        8,
+        18
+      ],
+      "categoryNames": [
+        "Plumbing & Bath Supply",
+        "Kitchen & Custom Cabinetry",
+        "Lighting Showrooms",
+        "Home Decor, Furniture & Textiles"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 134,
+      "storeName": "The Showroom at Rubenstein",
+      "categoryIds": [
+        3,
+        21
+      ],
+      "categoryNames": [
+        "Plumbing & Bath Supply",
+        "Pool & Spa Supply"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 135,
+      "storeName": "Jackson's Hardware",
+      "categoryIds": [
+        4,
+        9,
+        10,
+        11,
+        13
+      ],
+      "categoryNames": [
+        "Kitchen & Custom Cabinetry",
+        "Windows & Doors Dealerships",
+        "Hardware & Architectural Fittings",
+        "Paint, Plaster & Specialty Coatings",
+        "Glass & Shower Enclosures"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 136,
+      "storeName": "Premier Bath & Kitchen",
+      "categoryIds": [
+        2,
+        3,
+        4,
+        6,
+        8,
+        9,
+        10
+      ],
+      "categoryNames": [
+        "Tile & Surfaces Showrooms",
+        "Plumbing & Bath Supply",
+        "Kitchen & Custom Cabinetry",
+        "Appliance Galleries",
+        "Lighting Showrooms",
+        "Windows & Doors Dealerships",
+        "Hardware & Architectural Fittings"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 137,
+      "storeName": "Designer's Brass Inc.",
+      "categoryIds": [
+        10
+      ],
+      "categoryNames": [
+        "Hardware & Architectural Fittings"
+      ],
+      "derivedFrom": "name+description",
+      "rationale": "Inferred from store name/description (no Places)"
+    },
+    {
+      "storeId": 138,
+      "storeName": "Decorative Plumbing Supply",
+      "categoryIds": [
+        3
+      ],
+      "categoryNames": [
+        "Plumbing & Bath Supply"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 140,
+      "storeName": "Ace Tile & Tadelakt Co",
+      "categoryIds": [
+        2
+      ],
+      "categoryNames": [
+        "Tile & Surfaces Showrooms"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 141,
+      "storeName": "Excel Plumbing Supply Showroom",
+      "categoryIds": [
+        3,
+        4
+      ],
+      "categoryNames": [
+        "Plumbing & Bath Supply",
+        "Kitchen & Custom Cabinetry"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    },
+    {
+      "storeId": 144,
+      "storeName": "Friedmans Appliance",
+      "categoryIds": [
+        4,
+        6
+      ],
+      "categoryNames": [
+        "Kitchen & Custom Cabinetry",
+        "Appliance Galleries"
+      ],
+      "derivedFrom": "name+description+brands",
+      "rationale": "Inferred from store name/description and mapped brands (no Places)"
+    }
+  ],
+  "storeLogos": [
+    {
+      "storeId": 2,
+      "storeName": "Argonaut Window & Door",
+      "websiteUrl": "https://www.argowin.com/"
+    },
+    {
+      "storeId": 6,
+      "storeName": "Studio Belmont (Flagship)",
+      "websiteUrl": "http://www.studiobelmontco.com/"
+    },
+    {
+      "storeId": 7,
+      "storeName": "Studio Belmont (SF)",
+      "websiteUrl": "http://www.studiobelmontco.com/"
+    },
+    {
+      "storeId": 11,
+      "storeName": "Nido Living (Rimadesio)",
+      "websiteUrl": "http://www.nidosf.com/"
+    },
+    {
+      "storeId": 15,
+      "storeName": "Archetype Lighting",
+      "websiteUrl": "http://www.archetypelighting.com/"
+    },
+    {
+      "storeId": 19,
+      "storeName": "Lema",
+      "websiteUrl": "https://www.monarchbaygc.com/"
+    },
+    {
+      "storeId": 23,
+      "storeName": "Studio Belmont (San Jose)",
+      "websiteUrl": "http://www.studiobelmontco.com/"
+    },
+    {
+      "storeId": 24,
+      "storeName": "Tredi Interiors",
+      "websiteUrl": "https://www.trediinteriors.com/"
+    },
+    {
+      "storeId": 26,
+      "storeName": "Studio Belmont (Walnut Creek)",
+      "websiteUrl": "http://www.studiobelmontco.com/"
+    },
+    {
+      "storeId": 28,
+      "storeName": "America's Dream HomeWorks",
+      "websiteUrl": "https://www.dreamhomeworks.com/"
+    },
+    {
+      "storeId": 31,
+      "storeName": "Studio Belmont (Novato)",
+      "websiteUrl": "https://www.studiobelmontco.com/"
+    },
+    {
+      "storeId": 32,
+      "storeName": "Petty Masonry Inc.",
+      "websiteUrl": "http://www.pettymasonryinc.com/"
+    },
+    {
+      "storeId": 38,
+      "storeName": "Roman Marble Shop",
+      "websiteUrl": "https://www.romanmarbleshoponline.com/"
+    },
+    {
+      "storeId": 42,
+      "storeName": "All Natural Stone",
+      "websiteUrl": "https://www.allnaturalstone.com/"
+    },
+    {
+      "storeId": 43,
+      "storeName": "Tileshop",
+      "websiteUrl": "http://www.tile-shop.com/"
+    },
+    {
+      "storeId": 44,
+      "storeName": "Italics Tile & Stone",
+      "websiteUrl": "http://italics-stone.com/"
+    },
+    {
+      "storeId": 46,
+      "storeName": "Tez Marble",
+      "websiteUrl": "http://www.tezmarble.com/"
+    },
+    {
+      "storeId": 47,
+      "storeName": "Luxe Home by Douglah Designs",
+      "websiteUrl": "https://douglahdesigns.com/showroom/"
+    },
+    {
+      "storeId": 48,
+      "storeName": "Modello Tile & Countertop Studio",
+      "websiteUrl": "https://tilestudiowc.com/"
+    },
+    {
+      "storeId": 49,
+      "storeName": "PORCELANOSA Walnut Creek",
+      "websiteUrl": "https://www.porcelanosa.com/us/"
+    },
+    {
+      "storeId": 50,
+      "storeName": "Capri Stone",
+      "websiteUrl": "https://capristones.com/"
+    },
+    {
+      "storeId": 51,
+      "storeName": "All Natural Stone",
+      "websiteUrl": "https://www.allnaturalstone.com/"
+    },
+    {
+      "storeId": 52,
+      "storeName": "Daltile, American Olean, Marazzi Sales Service Center",
+      "websiteUrl": "https://locations.daltile.com/ca/livermore/268/"
+    },
+    {
+      "storeId": 53,
+      "storeName": "Everlasting Surfaces Inc",
+      "websiteUrl": "http://everlastingsurfacesinc.com/"
+    },
+    {
+      "storeId": 54,
+      "storeName": "Arizona Tile",
+      "websiteUrl": "https://www.arizonatile.com/en/locations/livermore"
+    },
+    {
+      "storeId": 55,
+      "storeName": "Kraftician Design Surfaces, Inc.",
+      "websiteUrl": "https://www.kraftician.com/"
+    },
+    {
+      "storeId": 56,
+      "storeName": "Evolv Surfaces",
+      "websiteUrl": "https://www.evolvsurfaces.com/"
+    },
+    {
+      "storeId": 57,
+      "storeName": "Costco Wholesale",
+      "websiteUrl": "https://www.costco.com/warehouse-locations/san-francisco-CA-144.html?utm_term=KW&utm_campaign=Homepage&utm_medium=GMB&utm_source=Google&utm_content=Link"
+    },
+    {
+      "storeId": 58,
+      "storeName": "Concrete Exchange",
+      "websiteUrl": "http://www.concreteexchange.com/"
+    },
+    {
+      "storeId": 59,
+      "storeName": "Awesome Materials, LLC",
+      "websiteUrl": "http://www.awesome-materials.com/"
+    },
+    {
+      "storeId": 60,
+      "storeName": "Gem Concrete Polishing",
+      "websiteUrl": "http://gemconcretepolishing.com/"
+    },
+    {
+      "storeId": 61,
+      "storeName": "C*Rock Finishing",
+      "websiteUrl": "http://crockfinish.com/"
+    },
+    {
+      "storeId": 62,
+      "storeName": "California Concrete Overlay Inc.",
+      "websiteUrl": "http://www.ccoverlay.com/"
+    },
+    {
+      "storeId": 63,
+      "storeName": "Metro Lighting",
+      "websiteUrl": "http://www.metrolighting.com/"
+    },
+    {
+      "storeId": 64,
+      "storeName": "General Plumbing Supply",
+      "websiteUrl": "https://www.generalplumbingsupply.com/"
+    },
+    {
+      "storeId": 65,
+      "storeName": "Homewise Appliance",
+      "websiteUrl": "https://www.homewiseappliance.com/"
+    },
+    {
+      "storeId": 66,
+      "storeName": "Homewise Appliance",
+      "websiteUrl": "http://www.homewiseappliance.com/"
+    },
+    {
+      "storeId": 67,
+      "storeName": "Homewise Appliance",
+      "websiteUrl": "http://www.homewiseappliance.com/"
+    },
+    {
+      "storeId": 68,
+      "storeName": "Terra Outdoor Living",
+      "websiteUrl": "https://terraoutdoor.com/pages/location-walnut-creek"
+    },
+    {
+      "storeId": 69,
+      "storeName": "Walnut Creek Fireplace - Regency Fireplaces & Polywood Outdoor Furniture Store",
+      "websiteUrl": "https://www.walnutcreekfireplace.com/?utm_source=google&utm_medium=organic&utm_campaign=gbp-listing"
+    },
+    {
+      "storeId": 70,
+      "storeName": "American Soil & Stone",
+      "websiteUrl": "https://www.americansoil.com/"
+    },
+    {
+      "storeId": 71,
+      "storeName": "Truitt & White Window and Door Showroom",
+      "websiteUrl": "https://truittandwhite.com/window-door-showroom?utm_medium=organic&utm_source=google&utm_campaign=gmb_showroom"
+    },
+    {
+      "storeId": 72,
+      "storeName": "Ohmega Salvage",
+      "websiteUrl": "http://www.ohmegasalvage.com/"
+    },
+    {
+      "storeId": 73,
+      "storeName": "Urban Ore",
+      "websiteUrl": "http://urbanore.com/"
+    },
+    {
+      "storeId": 74,
+      "storeName": "Berkeley Lighting Co",
+      "websiteUrl": "http://www.berkeleylighting.net/"
+    },
+    {
+      "storeId": 75,
+      "storeName": "Bay Countertops",
+      "websiteUrl": "https://www.baycountertops.com/contact"
+    },
+    {
+      "storeId": 76,
+      "storeName": "Raphael Stone Collection",
+      "websiteUrl": "https://www.raphaelstoneusa.com/"
+    },
+    {
+      "storeId": 77,
+      "storeName": "MARVEL SURFACES",
+      "websiteUrl": "https://www.marvelsurfaces.com/"
+    },
+    {
+      "storeId": 78,
+      "storeName": "Style Bath & Kitchen",
+      "websiteUrl": "https://www.sbkinc.com/"
+    },
+    {
+      "storeId": 79,
+      "storeName": "Ferguson Home",
+      "websiteUrl": "https://www.fergusonhome.com/showroom/branch/concord-ca-showroom-3724?utm_source=google&utm_medium=organic&utm_campaign=shw_lis_listingtraffic&utm_content=listing"
+    },
+    {
+      "storeId": 80,
+      "storeName": "New Luxury Baths & Kitchen",
+      "websiteUrl": "http://www.newluxurybaths.com/"
+    },
+    {
+      "storeId": 81,
+      "storeName": "Ashby Lumber",
+      "websiteUrl": "http://www.ashbylumber.com/"
+    },
+    {
+      "storeId": 82,
+      "storeName": "Walker Zanger",
+      "websiteUrl": "http://www.walkerzanger.com/"
+    },
+    {
+      "storeId": 110,
+      "storeName": "Abba Stone and Tile Inc.",
+      "websiteUrl": "http://www.abbastoneandtile.com/"
+    },
+    {
+      "storeId": 113,
+      "storeName": "Kitchen & Bath Design Center",
+      "websiteUrl": "https://www.kbdcshowroom.com/"
+    },
+    {
+      "storeId": 116,
+      "storeName": "Jack London Kitchen and Bath -Walnut Creek",
+      "websiteUrl": "https://jacklondonkitchenandbath.com/"
+    },
+    {
+      "storeId": 120,
+      "storeName": "Rejuvenation",
+      "websiteUrl": "https://www.rejuvenation.com/pages/find-a-store/berkeley-store/"
+    },
+    {
+      "storeId": 121,
+      "storeName": "Aquabella Kitchen, Bath & Lighting Showroom",
+      "websiteUrl": "https://www.aquabellakbl.com/"
+    },
+    {
+      "storeId": 126,
+      "storeName": "Engrave Concrete Design Professional Epoxy Flooring Contractor, Pavers Interlocking & Garage Floor Installer",
+      "websiteUrl": "https://www.ecd360construction.com/about/"
+    },
+    {
+      "storeId": 129,
+      "storeName": "California Paint Company",
+      "websiteUrl": "http://www.californiapaint.com/"
+    },
+    {
+      "storeId": 130,
+      "storeName": "Laurelwood Kitchen",
+      "websiteUrl": "http://www.laurelwoodkb.com/"
+    },
+    {
+      "storeId": 131,
+      "storeName": "Granite Expo - Emeryville",
+      "websiteUrl": "https://thegraniteexpo.com/"
+    },
+    {
+      "storeId": 133,
+      "storeName": "AquaBella Kitchen, Bath and Lighting Showroom",
+      "websiteUrl": "https://www.aquabellakbl.com/"
+    },
+    {
+      "storeId": 135,
+      "storeName": "Jackson's Hardware",
+      "websiteUrl": "https://www.jacksonshardware.com/"
+    },
+    {
+      "storeId": 136,
+      "storeName": "Premier Bath & Kitchen",
+      "websiteUrl": "http://www.premierbathandkitchen.com/santa-rosa/"
+    },
+    {
+      "storeId": 137,
+      "storeName": "Designer's Brass Inc.",
+      "websiteUrl": "https://www.designersbrass.com/"
+    },
+    {
+      "storeId": 141,
+      "storeName": "Excel Plumbing Supply Showroom",
+      "websiteUrl": "https://www.excel-plumbing.com/"
+    },
+    {
+      "storeId": 142,
+      "storeName": "Sincere Home Decor",
+      "websiteUrl": "https://sincerehomedecor.com/"
+    },
+    {
+      "storeId": 144,
+      "storeName": "Friedmans Appliance",
+      "websiteUrl": "https://www.friedmansappliance.com/"
+    },
+    {
+      "storeId": 147,
+      "storeName": "de Gournay",
+      "websiteUrl": "http://degournay.com/"
+    },
+    {
+      "storeId": 149,
+      "storeName": "F. Schumacher & Co. Showroom",
+      "websiteUrl": "http://www.schumacher.com/"
+    },
+    {
+      "storeId": 153,
+      "storeName": "SCIC SAN FRANCISCO",
+      "websiteUrl": "https://www.scicsanfrancisco.com/"
+    }
+  ],
+  "brandLogos": [
+    {
+      "brandId": 1,
+      "brandName": "Sonoma Tilemakers",
+      "websiteUrl": "https://sonomatilemakers.com"
+    },
+    {
+      "brandId": 2,
+      "brandName": "Artistic Tile",
+      "websiteUrl": "https://www.artistictile.com"
+    },
+    {
+      "brandId": 3,
+      "brandName": "Stone Impressions",
+      "websiteUrl": "https://stoneimpressions.com"
+    },
+    {
+      "brandId": 4,
+      "brandName": "Walker Zanger",
+      "websiteUrl": "https://walkerzanger.com"
+    },
+    {
+      "brandId": 5,
+      "brandName": "New Ravenna",
+      "websiteUrl": "https://www.newravenna.com"
+    },
+    {
+      "brandId": 6,
+      "brandName": "Encore Ceramics",
+      "websiteUrl": "https://encoreceramics.com"
+    },
+    {
+      "brandId": 7,
+      "brandName": "Hallmark Floors",
+      "websiteUrl": "https://hallmarkfloors.com"
+    },
+    {
+      "brandId": 8,
+      "brandName": "Monarch Plank",
+      "websiteUrl": "https://monarchplank.com"
+    },
+    {
+      "brandId": 9,
+      "brandName": "Armstrong Flooring",
+      "websiteUrl": "https://www.armstrongflooring.com"
+    },
+    {
+      "brandId": 10,
+      "brandName": "Cali Bamboo",
+      "websiteUrl": "https://www.calibamboo.com"
+    },
+    {
+      "brandId": 11,
+      "brandName": "SLCC Flooring",
+      "websiteUrl": "https://slccflooring.com"
+    },
+    {
+      "brandId": 12,
+      "brandName": "Duchateau",
+      "websiteUrl": "https://duchateau.com"
+    },
+    {
+      "brandId": 13,
+      "brandName": "California Classics",
+      "websiteUrl": "https://www.californiaclassicsfloors.com"
+    },
+    {
+      "brandId": 14,
+      "brandName": "COREtec",
+      "websiteUrl": "https://coretecfloors.com"
+    },
+    {
+      "brandId": 16,
+      "brandName": "TOTO",
+      "websiteUrl": "https://www.totousa.com"
+    },
+    {
+      "brandId": 17,
+      "brandName": "VOLA",
+      "websiteUrl": "https://vola.com"
+    },
+    {
+      "brandId": 18,
+      "brandName": "Dornbracht",
+      "websiteUrl": "https://www.dornbracht.com"
+    },
+    {
+      "brandId": 19,
+      "brandName": "Gessi",
+      "websiteUrl": "https://www.gessi.com"
+    },
+    {
+      "brandId": 21,
+      "brandName": "California Faucets",
+      "websiteUrl": "https://www.californiafaucets.com"
+    },
+    {
+      "brandId": 22,
+      "brandName": "BainUltra",
+      "websiteUrl": "https://www.bainultra.com"
+    },
+    {
+      "brandId": 23,
+      "brandName": "Duravit",
+      "websiteUrl": "https://www.duravit.com"
+    },
+    {
+      "brandId": 24,
+      "brandName": "Perrin & Rowe",
+      "websiteUrl": "https://www.houseofrohl.com/perrin-and-rowe/"
+    },
+    {
+      "brandId": 25,
+      "brandName": "Porcelanosa",
+      "websiteUrl": "https://www.porcelanosa-usa.com"
+    },
+    {
+      "brandId": 26,
+      "brandName": "Noken",
+      "websiteUrl": "https://www.noken.com"
+    },
+    {
+      "brandId": 27,
+      "brandName": "Gamadecor",
+      "websiteUrl": "https://www.gama-decor.com"
+    },
+    {
+      "brandId": 28,
+      "brandName": "KRION",
+      "websiteUrl": "https://www.krion.com"
+    },
+    {
+      "brandId": 29,
+      "brandName": "XTONE",
+      "websiteUrl": "https://www.xtone-surface.com"
+    },
+    {
+      "brandId": 30,
+      "brandName": "Butech",
+      "websiteUrl": "https://www.butech.net"
+    },
+    {
+      "brandId": 31,
+      "brandName": "AKDO",
+      "websiteUrl": "https://akdo.com"
+    },
+    {
+      "brandId": 32,
+      "brandName": "Country Floors",
+      "websiteUrl": "https://www.countryfloors.com"
+    },
+    {
+      "brandId": 33,
+      "brandName": "Caesarstone",
+      "websiteUrl": "https://www.caesarstoneus.com"
+    },
+    {
+      "brandId": 34,
+      "brandName": "Cambria",
+      "websiteUrl": "https://www.cambriausa.com"
+    },
+    {
+      "brandId": 35,
+      "brandName": "Vadara",
+      "websiteUrl": "https://vadaraquartz.com"
+    },
+    {
+      "brandId": 36,
+      "brandName": "Neolith",
+      "websiteUrl": "https://www.neolith.com"
+    },
+    {
+      "brandId": 37,
+      "brandName": "Dekton",
+      "websiteUrl": "https://www.cosentino.com/dekton"
+    },
+    {
+      "brandId": 38,
+      "brandName": "StoneImpressions",
+      "websiteUrl": "https://stoneimpressions.com"
+    },
+    {
+      "brandId": 39,
+      "brandName": "ARTO",
+      "websiteUrl": "https://www.arto.com"
+    },
+    {
+      "brandId": 40,
+      "brandName": "Aurea Stone",
+      "websiteUrl": "https://aureastone.com/"
+    },
+    {
+      "brandId": 41,
+      "brandName": "Marvin",
+      "websiteUrl": "https://www.marvin.com"
+    },
+    {
+      "brandId": 42,
+      "brandName": "Andersen",
+      "websiteUrl": "https://www.andersenwindows.com"
+    },
+    {
+      "brandId": 43,
+      "brandName": "Milgard",
+      "websiteUrl": "https://www.milgard.com"
+    },
+    {
+      "brandId": 44,
+      "brandName": "LaCantina",
+      "websiteUrl": "https://www.lacantinadoors.com"
+    },
+    {
+      "brandId": 45,
+      "brandName": "TruStile",
+      "websiteUrl": "https://www.trustile.com"
+    },
+    {
+      "brandId": 46,
+      "brandName": "All Weather Architectural Aluminum",
+      "websiteUrl": "https://www.allweatheraa.com"
+    },
+    {
+      "brandId": 47,
+      "brandName": "Western Window Systems",
+      "websiteUrl": "https://www.westernwindowsystems.com"
+    },
+    {
+      "brandId": 48,
+      "brandName": "Velux",
+      "websiteUrl": "https://www.veluxusa.com"
+    },
+    {
+      "brandId": 49,
+      "brandName": "JELD-WEN",
+      "websiteUrl": "https://www.jeld-wen.com"
+    },
+    {
+      "brandId": 50,
+      "brandName": "Kolbe",
+      "websiteUrl": "https://www.kolbewindows.com"
+    },
+    {
+      "brandId": 51,
+      "brandName": "Fleetwood",
+      "websiteUrl": "https://www.fleetwoodusa.com"
+    },
+    {
+      "brandId": 52,
+      "brandName": "The French Steel Company",
+      "websiteUrl": "https://www.frenchsteel.com"
+    },
+    {
+      "brandId": 53,
+      "brandName": "Windsor Windows & Doors",
+      "websiteUrl": "https://www.windsorwindows.com/"
+    },
+    {
+      "brandId": 54,
+      "brandName": "Sun Valley Bronze",
+      "websiteUrl": "https://www.sunvalleybronze.com/"
+    },
+    {
+      "brandId": 55,
+      "brandName": "Baldwin",
+      "websiteUrl": "https://www.baldwinhardware.com/"
+    },
+    {
+      "brandId": 56,
+      "brandName": "Emtek",
+      "websiteUrl": "https://emtek.com/"
+    },
+    {
+      "brandId": 57,
+      "brandName": "Ashley Norton",
+      "websiteUrl": "https://www.ashleynorton.com/"
+    },
+    {
+      "brandId": 58,
+      "brandName": "Turnstyle Designs",
+      "websiteUrl": "https://www.turnstyledesigns.com/"
+    },
+    {
+      "brandId": 59,
+      "brandName": "Armac Martin",
+      "websiteUrl": "https://www.armacmartin.co.uk/"
+    },
+    {
+      "brandId": 63,
+      "brandName": "Viking",
+      "websiteUrl": "https://www.vikingrange.com"
+    },
+    {
+      "brandId": 64,
+      "brandName": "Zephyr",
+      "websiteUrl": "https://www.zephyronline.com"
+    },
+    {
+      "brandId": 66,
+      "brandName": "Lo & Co",
+      "websiteUrl": "https://loandcointeriors.com"
+    },
+    {
+      "brandId": 72,
+      "brandName": "KWC Faucets",
+      "websiteUrl": "https://www.kwc.com"
+    },
+    {
+      "brandId": 74,
+      "brandName": "Tez Marble",
+      "websiteUrl": "https://tezmarble.com/"
+    },
+    {
+      "brandId": 75,
+      "brandName": "Berkeley Mills",
+      "websiteUrl": "https://berkeleymills.com"
+    },
+    {
+      "brandId": 76,
+      "brandName": "McRoskey",
+      "websiteUrl": "https://mcroskeysf.com"
+    },
+    {
+      "brandId": 77,
+      "brandName": "Bellmont Cabinets",
+      "websiteUrl": "https://bellmontcabinets.com"
+    },
+    {
+      "brandId": 78,
+      "brandName": "Waypoint Living Spaces",
+      "websiteUrl": "https://www.waypointlivingspaces.com"
+    },
+    {
+      "brandId": 79,
+      "brandName": "Brizo",
+      "websiteUrl": "https://www.brizo.com"
+    },
+    {
+      "brandId": 80,
+      "brandName": "Sub-Zero",
+      "websiteUrl": "https://www.subzero-wolf.com/"
+    },
+    {
+      "brandId": 81,
+      "brandName": "Wolf",
+      "websiteUrl": "https://www.subzero-wolf.com/"
+    },
+    {
+      "brandId": 82,
+      "brandName": "Thermador",
+      "websiteUrl": "https://www.thermador.com/"
+    },
+    {
+      "brandId": 83,
+      "brandName": "Bosch",
+      "websiteUrl": "https://www.bosch-home.com/"
+    },
+    {
+      "brandId": 84,
+      "brandName": "La Cornue",
+      "websiteUrl": "https://lacornueusa.com/"
+    },
+    {
+      "brandId": 85,
+      "brandName": "Miele",
+      "websiteUrl": "https://www.mieleusa.com/"
+    },
+    {
+      "brandId": 86,
+      "brandName": "Gaggenau",
+      "websiteUrl": "https://www.gaggenau.com/"
+    },
+    {
+      "brandId": 87,
+      "brandName": "JennAir",
+      "websiteUrl": "https://www.jennair.com/"
+    },
+    {
+      "brandId": 88,
+      "brandName": "Lynx",
+      "websiteUrl": "https://www.lynxgrills.com/"
+    },
+    {
+      "brandId": 89,
+      "brandName": "LG",
+      "websiteUrl": "https://www.lg.com"
+    },
+    {
+      "brandId": 90,
+      "brandName": "Original Style",
+      "websiteUrl": "https://www.originalstyle.com"
+    },
+    {
+      "brandId": 91,
+      "brandName": "Daltile",
+      "websiteUrl": "https://www.daltile.com"
+    },
+    {
+      "brandId": 92,
+      "brandName": "Marazzi",
+      "websiteUrl": "https://www.marazzitile.com"
+    },
+    {
+      "brandId": 93,
+      "brandName": "American Olean",
+      "websiteUrl": "https://americanolean.com"
+    },
+    {
+      "brandId": 94,
+      "brandName": "KitchenAid",
+      "websiteUrl": "https://www.kitchenaid.com"
+    },
+    {
+      "brandId": 95,
+      "brandName": "GE Appliances",
+      "websiteUrl": "https://www.geappliances.com"
+    },
+    {
+      "brandId": 96,
+      "brandName": "Whirlpool",
+      "websiteUrl": "https://www.whirlpool.com"
+    },
+    {
+      "brandId": 97,
+      "brandName": "Samsung",
+      "websiteUrl": "https://www.samsung.com"
+    },
+    {
+      "brandId": 98,
+      "brandName": "Foster",
+      "websiteUrl": "https://www.foster-us.com"
+    },
+    {
+      "brandId": 99,
+      "brandName": "Sarto Doors",
+      "websiteUrl": "https://sartodoors.com"
+    },
+    {
+      "brandId": 100,
+      "brandName": "VDOM Doors",
+      "websiteUrl": "https://vdom.us"
+    },
+    {
+      "brandId": 104,
+      "brandName": "Bedrosians Tile & Stone",
+      "websiteUrl": "https://www.bedrosians.com"
+    },
+    {
+      "brandId": 105,
+      "brandName": "Magnifica Porcelain Slabs",
+      "websiteUrl": "https://www.bedrosians.com/en/magnifica/"
+    },
+    {
+      "brandId": 106,
+      "brandName": "Milgard Windows & Doors",
+      "websiteUrl": "https://www.milgard.com"
+    },
+    {
+      "brandId": 107,
+      "brandName": "Therma-Tru",
+      "websiteUrl": "https://www.thermatru.com"
+    },
+    {
+      "brandId": 109,
+      "brandName": "Cove",
+      "websiteUrl": "https://www.subzero-wolf.com"
+    },
+    {
+      "brandId": 110,
+      "brandName": "Asko",
+      "websiteUrl": "https://www.asko.com"
+    },
+    {
+      "brandId": 111,
+      "brandName": "Kalamazoo",
+      "websiteUrl": "https://kalamazoogourmet.com"
+    },
+    {
+      "brandId": 112,
+      "brandName": "Downsview Kitchens",
+      "websiteUrl": "https://www.downsviewkitchens.com"
+    },
+    {
+      "brandId": 113,
+      "brandName": "Crystal Cabinets",
+      "websiteUrl": "https://crystalcabinets.com"
+    },
+    {
+      "brandId": 114,
+      "brandName": "Woodharbor Cabinetry",
+      "websiteUrl": "https://www.woodharbor.com"
+    },
+    {
+      "brandId": 115,
+      "brandName": "AGA",
+      "websiteUrl": "https://www.aga-ranges.com"
+    },
+    {
+      "brandId": 116,
+      "brandName": "Vent-A-Hood",
+      "websiteUrl": "https://www.ventahood.com"
+    },
+    {
+      "brandId": 117,
+      "brandName": "Innovis Corporation",
+      "websiteUrl": "https://www.innoviscorp.com"
+    },
+    {
+      "brandId": 118,
+      "brandName": "AG Millworks",
+      "websiteUrl": "https://www.agmillworks.com"
+    },
+    {
+      "brandId": 119,
+      "brandName": "Wooden Works",
+      "websiteUrl": "https://wwwndoors.com"
+    },
+    {
+      "brandId": 120,
+      "brandName": "Anlin Window Systems",
+      "websiteUrl": "https://anlin.com"
+    },
+    {
+      "brandId": 121,
+      "brandName": "Cal-Royal",
+      "websiteUrl": "https://www.cal-royal.com"
+    },
+    {
+      "brandId": 122,
+      "brandName": "DKS",
+      "websiteUrl": "https://www.dksdoors.com"
+    },
+    {
+      "brandId": 123,
+      "brandName": "Schlage",
+      "websiteUrl": "https://www.schlage.com"
+    },
+    {
+      "brandId": 124,
+      "brandName": "Doormerica",
+      "websiteUrl": "https://www.doormerica.com"
+    },
+    {
+      "brandId": 125,
+      "brandName": "Air Louver",
+      "websiteUrl": "https://www.activarusa.com"
+    },
+    {
+      "brandId": 126,
+      "brandName": "Pemko",
+      "websiteUrl": "https://www.pemko.com"
+    },
+    {
+      "brandId": 127,
+      "brandName": "Timely",
+      "websiteUrl": "https://www.timelyframes.com"
+    },
+    {
+      "brandId": 128,
+      "brandName": "Alpha Aluminum",
+      "websiteUrl": "https://www.alphaaluminum.com"
+    },
+    {
+      "brandId": 129,
+      "brandName": "Pella",
+      "websiteUrl": "https://www.pella.com"
+    },
+    {
+      "brandId": 130,
+      "brandName": "Simpson",
+      "websiteUrl": "https://www.simpsondoor.com"
+    },
+    {
+      "brandId": 131,
+      "brandName": "Simonton",
+      "websiteUrl": "https://www.simonton.com"
+    },
+    {
+      "brandId": 132,
+      "brandName": "Solatube",
+      "websiteUrl": "https://www.solatube.com"
+    },
+    {
+      "brandId": 133,
+      "brandName": "Simpson Door Company",
+      "websiteUrl": "https://www.simpsondoor.com"
+    },
+    {
+      "brandId": 134,
+      "brandName": "Rogue Valley Door",
+      "websiteUrl": "https://www.roguevalleydoor.com"
+    },
+    {
+      "brandId": 135,
+      "brandName": "Plastpro",
+      "websiteUrl": "https://www.plastpro.com"
+    },
+    {
+      "brandId": 136,
+      "brandName": "Trimlite",
+      "websiteUrl": "https://www.trimlite.com"
+    },
+    {
+      "brandId": 137,
+      "brandName": "Masonite",
+      "websiteUrl": "https://www.masonite.com"
+    },
+    {
+      "brandId": 140,
+      "brandName": "PentalQuartz",
+      "websiteUrl": "https://pentalquartz.com"
+    },
+    {
+      "brandId": 141,
+      "brandName": "Vetrazzo",
+      "websiteUrl": "https://www.vetrazzo.com"
+    },
+    {
+      "brandId": 142,
+      "brandName": "IceStone",
+      "websiteUrl": "https://icestoneusa.com"
+    },
+    {
+      "brandId": 143,
+      "brandName": "Buddy Rhodes",
+      "websiteUrl": "https://www.buddyrhodes.com"
+    },
+    {
+      "brandId": 144,
+      "brandName": "Cheng Concrete",
+      "websiteUrl": "https://chengconcrete.com"
+    },
+    {
+      "brandId": 145,
+      "brandName": "Curava",
+      "websiteUrl": "https://curava.com"
+    },
+    {
+      "brandId": 146,
+      "brandName": "Lapitec",
+      "websiteUrl": "https://www.lapitec.com"
+    },
+    {
+      "brandId": 147,
+      "brandName": "Geoluxe",
+      "websiteUrl": "https://www.geoluxe.com"
+    },
+    {
+      "brandId": 148,
+      "brandName": "Alumax",
+      "websiteUrl": "https://www.alumaxshowerdoor.com"
+    },
+    {
+      "brandId": 149,
+      "brandName": "Fleurco",
+      "websiteUrl": "https://fleurco.com"
+    },
+    {
+      "brandId": 150,
+      "brandName": "UltraGlas",
+      "websiteUrl": "https://www.ultraglas.com"
+    },
+    {
+      "brandId": 151,
+      "brandName": "Diamon-Fusion",
+      "websiteUrl": "https://www.diamonfusion.com"
+    },
+    {
+      "brandId": 152,
+      "brandName": "Schicker Glass",
+      "websiteUrl": "https://schickershowerdoors.com"
+    },
+    {
+      "brandId": 155,
+      "brandName": "Sherle Wagner International",
+      "websiteUrl": "https://sherlewagner.com"
+    },
+    {
+      "brandId": 156,
+      "brandName": "Samuel Heath",
+      "websiteUrl": "https://www.samuel-heath.com"
+    },
+    {
+      "brandId": 157,
+      "brandName": "James Martin Vanities",
+      "websiteUrl": "https://jamesmartinvanities.com/"
+    },
+    {
+      "brandId": 158,
+      "brandName": "Madeli",
+      "websiteUrl": "https://www.madeli.com/"
+    },
+    {
+      "brandId": 159,
+      "brandName": "Strasser Woodenworks",
+      "websiteUrl": "https://strasserwood.com/"
+    },
+    {
+      "brandId": 161,
+      "brandName": "Artos",
+      "websiteUrl": "https://artos-us.com/"
+    },
+    {
+      "brandId": 162,
+      "brandName": "Smeg",
+      "websiteUrl": "https://www.smeg.com/"
+    },
+    {
+      "brandId": 163,
+      "brandName": "Riobel",
+      "websiteUrl": "https://riobel.ca/"
+    },
+    {
+      "brandId": 164,
+      "brandName": "American Standard",
+      "websiteUrl": "https://www.americanstandard-us.com/"
+    },
+    {
+      "brandId": 165,
+      "brandName": "Victoria + Albert",
+      "websiteUrl": "https://vandabaths.com"
+    },
+    {
+      "brandId": 166,
+      "brandName": "Waterstone",
+      "websiteUrl": "https://waterstoneco.com"
+    },
+    {
+      "brandId": 168,
+      "brandName": "Santec",
+      "websiteUrl": "https://santecfaucet.com"
+    },
+    {
+      "brandId": 169,
+      "brandName": "Native Trails",
+      "websiteUrl": "https://www.nativetrailshome.com"
+    },
+    {
+      "brandId": 170,
+      "brandName": "KALLISTA",
+      "websiteUrl": "https://www.kallista.com"
+    },
+    {
+      "brandId": 171,
+      "brandName": "Robern",
+      "websiteUrl": "https://www.robern.com"
+    },
+    {
+      "brandId": 172,
+      "brandName": "ANN SACKS",
+      "websiteUrl": "https://www.annsacks.com"
+    },
+    {
+      "brandId": 174,
+      "brandName": "The Galley",
+      "websiteUrl": "https://thegalley.com"
+    },
+    {
+      "brandId": 175,
+      "brandName": "Wow Design",
+      "websiteUrl": "https://www.wowdesigntiles.com"
+    },
+    {
+      "brandId": 176,
+      "brandName": "Laticrete",
+      "websiteUrl": "https://laticrete.com"
+    },
+    {
+      "brandId": 177,
+      "brandName": "Ascale by Tau",
+      "websiteUrl": "https://www.ascale.es"
+    },
+    {
+      "brandId": 178,
+      "brandName": "Encore",
+      "websiteUrl": "https://encoretile.com"
+    },
+    {
+      "brandId": 179,
+      "brandName": "Marin Designworks Glass Tile",
+      "websiteUrl": "http://marindesignworks.com"
+    },
+    {
+      "brandId": 180,
+      "brandName": "Pental Quartz",
+      "websiteUrl": "https://pentalquartz.com/"
+    },
+    {
+      "brandId": 181,
+      "brandName": "Fireclay Tile",
+      "websiteUrl": "https://www.fireclaytile.com/"
+    },
+    {
+      "brandId": 182,
+      "brandName": "Rejuvenation",
+      "websiteUrl": "https://www.rejuvenation.com"
+    },
+    {
+      "brandId": 183,
+      "brandName": "MTI Baths",
+      "websiteUrl": "https://mtibaths.com"
+    },
+    {
+      "brandId": 184,
+      "brandName": "Visual Comfort",
+      "websiteUrl": "https://www.visualcomfort.com"
+    },
+    {
+      "brandId": 185,
+      "brandName": "Colonial Bronze",
+      "websiteUrl": "https://www.colonialbronze.com"
+    },
+    {
+      "brandId": 186,
+      "brandName": "WETSTYLE",
+      "websiteUrl": "https://wetstyle.com"
+    },
+    {
+      "brandId": 187,
+      "brandName": "DXV",
+      "websiteUrl": "https://www.dxv.com"
+    },
+    {
+      "brandId": 188,
+      "brandName": "Newport Brass",
+      "websiteUrl": "https://www.newportbrass.com"
+    },
+    {
+      "brandId": 189,
+      "brandName": "Isenberg",
+      "websiteUrl": "https://www.isenbergfaucets.com"
+    },
+    {
+      "brandId": 191,
+      "brandName": "Applied Coverings",
+      "websiteUrl": "https://www.appliedcoverings.com"
+    },
+    {
+      "brandId": 192,
+      "brandName": "Benjamin Moore",
+      "websiteUrl": "https://www.benjaminmoore.com"
+    },
+    {
+      "brandId": 193,
+      "brandName": "Sikkens",
+      "websiteUrl": "https://www.sikkens.com"
+    },
+    {
+      "brandId": 194,
+      "brandName": "Zar",
+      "websiteUrl": "https://www.zar.com"
+    },
+    {
+      "brandId": 195,
+      "brandName": "Old Masters",
+      "websiteUrl": "https://www.myoldmasters.com"
+    },
+    {
+      "brandId": 196,
+      "brandName": "M.L. Campbell",
+      "websiteUrl": "https://www.mlcampbell.com"
+    },
+    {
+      "brandId": 197,
+      "brandName": "Corona Brushes",
+      "websiteUrl": "https://www.coronabrushes.com"
+    },
+    {
+      "brandId": 198,
+      "brandName": "Ronbow",
+      "websiteUrl": "https://www.ronbow.com"
+    },
+    {
+      "brandId": 199,
+      "brandName": "Merit Kitchens",
+      "websiteUrl": "https://www.merit-kitchens.com"
+    },
+    {
+      "brandId": 201,
+      "brandName": "THOR Kitchen",
+      "websiteUrl": "https://thorkitchen.com"
+    },
+    {
+      "brandId": 202,
+      "brandName": "Dawn",
+      "websiteUrl": "https://www.dawnusa.net"
+    },
+    {
+      "brandId": 208,
+      "brandName": "Pfister",
+      "websiteUrl": "https://www.pfisterfaucets.com"
+    },
+    {
+      "brandId": 209,
+      "brandName": "AO Smith",
+      "websiteUrl": "https://www.aosmith.com"
+    },
+    {
+      "brandId": 210,
+      "brandName": "Sonneman",
+      "websiteUrl": "https://sonnemanlight.com"
+    },
+    {
+      "brandId": 211,
+      "brandName": "Delta Faucet",
+      "websiteUrl": "https://www.deltafaucet.com"
+    },
+    {
+      "brandId": 212,
+      "brandName": "Kichler",
+      "websiteUrl": "https://www.kichler.com"
+    },
+    {
+      "brandId": 213,
+      "brandName": "MasterBrand Cabinets",
+      "websiteUrl": "https://www.masterbrand.com"
+    },
+    {
+      "brandId": 214,
+      "brandName": "Schicker Luxury Shower Doors",
+      "websiteUrl": "https://schickerluxurybath.com"
+    },
+    {
+      "brandId": 215,
+      "brandName": "Zip Water",
+      "websiteUrl": "https://www.zipwater.com"
+    },
+    {
+      "brandId": 216,
+      "brandName": "Big Chill",
+      "websiteUrl": "https://bigchill.com"
+    },
+    {
+      "brandId": 217,
+      "brandName": "Water, Inc.",
+      "websiteUrl": "https://waterinc.com"
+    },
+    {
+      "brandId": 218,
+      "brandName": "Tabarka Studio",
+      "websiteUrl": "https://tabarkastudio.com"
+    },
+    {
+      "brandId": 219,
+      "brandName": "House of Rohl",
+      "websiteUrl": "https://www.houseofrohl.com"
+    },
+    {
+      "brandId": 220,
+      "brandName": "Arteriors Home",
+      "websiteUrl": "https://www.arteriorshome.com"
+    },
+    {
+      "brandId": 221,
+      "brandName": "Visual Comfort & Co.",
+      "websiteUrl": "https://www.visualcomfort.com"
+    },
+    {
+      "brandId": 223,
+      "brandName": "In2Aqua",
+      "websiteUrl": "https://in2aqua.com"
+    },
+    {
+      "brandId": 224,
+      "brandName": "Hapny Cabinet Hardware",
+      "websiteUrl": "https://hapnyhome.com"
+    },
+    {
+      "brandId": 225,
+      "brandName": "Earth Pigments",
+      "websiteUrl": "https://www.earthpigments.com/"
+    },
+    {
+      "brandId": 226,
+      "brandName": "Villeroy & Boch",
+      "websiteUrl": "https://www.villeroy-boch-group.com"
+    },
+    {
+      "brandId": 227,
+      "brandName": "Claybrook",
+      "websiteUrl": "https://claybrookstudio.co.uk/"
+    },
+    {
+      "brandId": 236,
+      "brandName": "Omega Cabinetry",
+      "websiteUrl": "https://www.omegacabinetry.com/"
+    },
+    {
+      "brandId": 237,
+      "brandName": "Schrock Cabinetry",
+      "websiteUrl": "https://www.schrock.com/"
+    },
+    {
+      "brandId": 238,
+      "brandName": "Europa Cabinetry",
+      "websiteUrl": "https://www.europacabinetry.com/"
+    },
+    {
+      "brandId": 239,
+      "brandName": "Diamond Cabinetry",
+      "websiteUrl": "https://www.diamondcabinets.com/"
+    },
+    {
+      "brandId": 240,
+      "brandName": "Strasser",
+      "websiteUrl": "https://strasserwood.com/"
+    },
+    {
+      "brandId": 241,
+      "brandName": "Fairmont Designs",
+      "websiteUrl": "https://fairmontdesigns.com/"
+    },
+    {
+      "brandId": 242,
+      "brandName": "Bertazzoni",
+      "websiteUrl": "https://us.bertazzoni.com"
+    },
+    {
+      "brandId": 243,
+      "brandName": "BlueStar",
+      "websiteUrl": "https://www.bluestarcooking.com"
+    },
+    {
+      "brandId": 244,
+      "brandName": "GE Profile",
+      "websiteUrl": "https://www.geappliances.com"
+    },
+    {
+      "brandId": 245,
+      "brandName": "Speed Queen",
+      "websiteUrl": "https://speedqueen.com"
+    },
+    {
+      "brandId": 246,
+      "brandName": "Fisher & Paykel",
+      "websiteUrl": "https://www.fisherpaykel.com"
+    },
+    {
+      "brandId": 247,
+      "brandName": "Farrow & Ball",
+      "websiteUrl": "https://www.farrow-ball.com"
+    },
+    {
+      "brandId": 248,
+      "brandName": "Schumacher",
+      "websiteUrl": "https://fschumacher.com/"
+    },
+    {
+      "brandId": 249,
+      "brandName": "Janus et Cie",
+      "websiteUrl": "https://www.janusetcie.com/"
+    },
+    {
+      "brandId": 251,
+      "brandName": "Sloan Miyasato",
+      "websiteUrl": "https://sloanm.com/"
+    },
+    {
+      "brandId": 252,
+      "brandName": "de Gournay",
+      "websiteUrl": "https://degournay.com"
+    },
+    {
+      "brandId": 253,
+      "brandName": "Phillip Jeffries",
+      "websiteUrl": "https://www.phillipjeffries.com/"
+    },
+    {
+      "brandId": 254,
+      "brandName": "Patterson Flynn",
+      "websiteUrl": "https://pattersonflynn.com"
+    },
+    {
+      "brandId": 255,
+      "brandName": "Backdrop",
+      "websiteUrl": "https://www.backdrophome.com"
+    },
+    {
+      "brandId": 256,
+      "brandName": "Matouk",
+      "websiteUrl": "https://www.matouk.com"
+    },
+    {
+      "brandId": 261,
+      "brandName": "The Shade Store",
+      "websiteUrl": "https://www.theshadestore.com"
+    },
+    {
+      "brandId": 262,
+      "brandName": "Hartmann & Forbes",
+      "websiteUrl": "https://www.hartmannforbes.com"
+    },
+    {
+      "brandId": 263,
+      "brandName": "Rose Tarlow",
+      "websiteUrl": "https://www.rosetarlow.com"
+    },
+    {
+      "brandId": 264,
+      "brandName": "Dennis & Leen",
+      "websiteUrl": "https://www.dennisandleen.com"
+    },
+    {
+      "brandId": 265,
+      "brandName": "Formations",
+      "websiteUrl": "https://www.formationsusa.com"
+    },
+    {
+      "brandId": 266,
+      "brandName": "Jim Thompson",
+      "websiteUrl": "https://www.jimthompsonfabrics.com"
+    },
+    {
+      "brandId": 267,
+      "brandName": "Scalamandré",
+      "websiteUrl": "https://www.scalamandre.com"
+    },
+    {
+      "brandId": 268,
+      "brandName": "Vaughan Designs",
+      "websiteUrl": "https://www.vaughandesigns.com"
+    },
+    {
+      "brandId": 269,
+      "brandName": "Color Atelier",
+      "websiteUrl": "https://www.coloratelierpaint.com/"
+    },
+    {
+      "brandId": 281,
+      "brandName": "ALAPE",
+      "websiteUrl": "https://www.alape.com"
+    },
+    {
+      "brandId": 282,
+      "brandName": "ALCOVE",
+      "websiteUrl": "http://alcove.ca"
+    },
+    {
+      "brandId": 283,
+      "brandName": "AXENT",
+      "websiteUrl": "https://axentbath.us"
+    },
+    {
+      "brandId": 284,
+      "brandName": "BERENSON",
+      "websiteUrl": "https://www.berensonhardware.com"
+    },
+    {
+      "brandId": 288,
+      "brandName": "DAWN USA",
+      "websiteUrl": "https://www.dawnusa.net"
+    },
+    {
+      "brandId": 289,
+      "brandName": "ELECTRIC MIRRORS",
+      "websiteUrl": "https://www.electricmirror.com"
+    },
+    {
+      "brandId": 290,
+      "brandName": "GEORGE KOVACS",
+      "websiteUrl": "https://www.minkagroup.net"
+    },
+    {
+      "brandId": 291,
+      "brandName": "GLASS CRAFTERS",
+      "websiteUrl": "http://www.glasscraftersinc.com"
+    },
+    {
+      "brandId": 292,
+      "brandName": "ICO",
+      "websiteUrl": "https://icobath.com"
+    },
+    {
+      "brandId": 293,
+      "brandName": "INFINITY DRAIN",
+      "websiteUrl": "https://infinitydrain.com"
+    },
+    {
+      "brandId": 294,
+      "brandName": "JACLO",
+      "websiteUrl": "https://www.jaclo.com"
+    },
+    {
+      "brandId": 295,
+      "brandName": "KARTNERS",
+      "websiteUrl": "https://kartners.com"
+    },
+    {
+      "brandId": 296,
+      "brandName": "KEUCO",
+      "websiteUrl": "https://www.keuco.com"
+    },
+    {
+      "brandId": 297,
+      "brandName": "LACAVA",
+      "websiteUrl": "https://www.lacava.com"
+    },
+    {
+      "brandId": 298,
+      "brandName": "LAUFEN",
+      "websiteUrl": "https://www.us.laufen.com"
+    },
+    {
+      "brandId": 299,
+      "brandName": "LENOVA",
+      "websiteUrl": "https://lenovagroup.com"
+    },
+    {
+      "brandId": 300,
+      "brandName": "LINKASINK",
+      "websiteUrl": "https://www.linkasink.com"
+    },
+    {
+      "brandId": 301,
+      "brandName": "MILA",
+      "websiteUrl": "https://mila-international.com"
+    },
+    {
+      "brandId": 302,
+      "brandName": "NEWPORTBRASS",
+      "websiteUrl": "https://www.newportbrass.com"
+    },
+    {
+      "brandId": 303,
+      "brandName": "OBRIEN SINKS",
+      "websiteUrl": "http://www.obriensinks.com"
+    },
+    {
+      "brandId": 304,
+      "brandName": "PRODUITS NEPTUNE",
+      "websiteUrl": "https://produitsneptune.com"
+    },
+    {
+      "brandId": 305,
+      "brandName": "SCHICKER",
+      "websiteUrl": "https://www.schickershowerdoors.com"
+    },
+    {
+      "brandId": 306,
+      "brandName": "SIGMA",
+      "websiteUrl": "https://www.sigmafaucet.com"
+    },
+    {
+      "brandId": 307,
+      "brandName": "TOP KNOBS",
+      "websiteUrl": "https://www.topknobs.com"
+    },
+    {
+      "brandId": 308,
+      "brandName": "WAC LIGHTING",
+      "websiteUrl": "https://www.waclighting.com"
+    },
+    {
+      "brandId": 309,
+      "brandName": "ACO",
+      "websiteUrl": "https://acoswm.com"
+    },
+    {
+      "brandId": 310,
+      "brandName": "ALNO",
+      "websiteUrl": "https://alnoinc.com"
+    },
+    {
+      "brandId": 311,
+      "brandName": "AMERICH",
+      "websiteUrl": "https://americh.com"
+    },
+    {
+      "brandId": 312,
+      "brandName": "AQUABRASS",
+      "websiteUrl": "https://aquabrass.com"
+    },
+    {
+      "brandId": 313,
+      "brandName": "BELLO",
+      "websiteUrl": "https://bellousa.com"
+    },
+    {
+      "brandId": 314,
+      "brandName": "CALIFORNIA FAUCET",
+      "websiteUrl": "https://www.calfaucets.com"
+    },
+    {
+      "brandId": 315,
+      "brandName": "DORN BRACHT",
+      "websiteUrl": "https://www.dornbracht.com"
+    },
+    {
+      "brandId": 316,
+      "brandName": "ELKAY",
+      "websiteUrl": "https://www.elkay.com"
+    },
+    {
+      "brandId": 317,
+      "brandName": "EWSWATER",
+      "websiteUrl": "https://www.ewswater.com"
+    },
+    {
+      "brandId": 318,
+      "brandName": "FAIRMONT",
+      "websiteUrl": "http://www.fairmontdesigns.com"
+    },
+    {
+      "brandId": 319,
+      "brandName": "GEBERIT",
+      "websiteUrl": "https://www.geberitnorthamerica.com"
+    },
+    {
+      "brandId": 320,
+      "brandName": "GINGER",
+      "websiteUrl": "https://gingerbath.com"
+    },
+    {
+      "brandId": 321,
+      "brandName": "ICERA",
+      "websiteUrl": "https://icerabath.com"
+    },
+    {
+      "brandId": 322,
+      "brandName": "INSINKERATOR",
+      "websiteUrl": "https://insinkerator.emerson.com"
+    },
+    {
+      "brandId": 323,
+      "brandName": "JULIEN",
+      "websiteUrl": "https://www.julien.ca"
+    },
+    {
+      "brandId": 324,
+      "brandName": "LEGRAND",
+      "websiteUrl": "https://www.legrand.us"
+    },
+    {
+      "brandId": 325,
+      "brandName": "MOUNTAIN PLUMBING",
+      "websiteUrl": "https://mountainplumbing.com"
+    },
+    {
+      "brandId": 326,
+      "brandName": "MR. STEAM",
+      "websiteUrl": "https://www.mrsteam.com"
+    },
+    {
+      "brandId": 327,
+      "brandName": "MTI",
+      "websiteUrl": "https://mtibaths.com"
+    },
+    {
+      "brandId": 328,
+      "brandName": "PANASONIC",
+      "websiteUrl": "https://na.panasonic.com"
+    },
+    {
+      "brandId": 329,
+      "brandName": "SONOMA FORGE",
+      "websiteUrl": "https://www.sonomaforge.com"
+    },
+    {
+      "brandId": 330,
+      "brandName": "SWAN",
+      "websiteUrl": "https://swanstone.com"
+    },
+    {
+      "brandId": 331,
+      "brandName": "UKINOX",
+      "websiteUrl": "https://ukinoxusa.com"
+    },
+    {
+      "brandId": 332,
+      "brandName": "VICTORIA ALBERT",
+      "websiteUrl": "https://vandabaths.com"
+    },
+    {
+      "brandId": 333,
+      "brandName": "WET STYLE",
+      "websiteUrl": "https://wetstyle.com"
+    },
+    {
+      "brandId": 334,
+      "brandName": "ZUCCHETTI",
+      "websiteUrl": "https://www.zucchettikos.it"
+    },
+    {
+      "brandId": 335,
+      "brandName": "SCIC Italia",
+      "websiteUrl": "https://www.scic.it/"
+    },
+    {
+      "brandId": 336,
+      "brandName": "Schiffini",
+      "websiteUrl": "https://schiffini.com/"
+    },
+    {
+      "brandId": 337,
+      "brandName": "FENDI Cucine",
+      "websiteUrl": "https://www.fendicucine.com/"
+    },
+    {
+      "brandId": 338,
+      "brandName": "ELIE SAAB Maison",
+      "websiteUrl": "https://eliesaabmaison.com/"
+    }
+  ],
+  "addresses": [
+    {
+      "storeId": 25,
+      "storeName": "Topcret (San Jose)",
+      "current": "San Jose, CA",
+      "problem": "no_street_number",
+      "proposed": null
+    },
+    {
+      "storeId": 27,
+      "storeName": "Concreteworks",
+      "current": "*BY APPOINTMENT ONLY*, 1998 Republic Ave, San Leandro, CA 94577, USA",
+      "problem": "leading_annotation",
+      "proposed": "1998 Republic Ave, San Leandro, CA 94577, USA"
+    },
+    {
+      "storeId": 30,
+      "storeName": "IKEA PAX",
+      "current": "Emeryville, CA",
+      "problem": "no_street_number",
+      "proposed": null
+    },
+    {
+      "storeId": 33,
+      "storeName": "Archatrak",
+      "current": "Bay Area, CA",
+      "problem": "no_street_number",
+      "proposed": null
+    },
+    {
+      "storeId": 34,
+      "storeName": "Closet Factory",
+      "current": "Bay Area, CA",
+      "problem": "no_street_number",
+      "proposed": null
+    }
+  ],
+  "scrapeKicks": [
+    {
+      "storeId": 81,
+      "storeName": "Ashby Lumber",
+      "websiteUrl": "http://www.ashbylumber.com/",
+      "reason": "has website, scrape_status=idle, rag_uuid=NULL — never kicked"
+    },
+    {
+      "storeId": 82,
+      "storeName": "Walker Zanger",
+      "websiteUrl": "http://www.walkerzanger.com/",
+      "reason": "has website, scrape_status=idle, rag_uuid=NULL — never kicked"
+    },
+    {
+      "storeId": 133,
+      "storeName": "AquaBella Kitchen, Bath and Lighting Showroom",
+      "websiteUrl": "https://www.aquabellakbl.com/",
+      "reason": "has website, scrape_status=idle, rag_uuid=NULL — never kicked"
+    },
+    {
+      "storeId": 134,
+      "storeName": "The Showroom at Rubenstein",
+      "websiteUrl": "https://www.rubensteinshowroom.com/",
+      "reason": "has website, scrape_status=idle, rag_uuid=NULL — never kicked"
+    },
+    {
+      "storeId": 135,
+      "storeName": "Jackson's Hardware",
+      "websiteUrl": "https://www.jacksonshardware.com/",
+      "reason": "has website, scrape_status=idle, rag_uuid=NULL — never kicked"
+    },
+    {
+      "storeId": 136,
+      "storeName": "Premier Bath & Kitchen",
+      "websiteUrl": "http://www.premierbathandkitchen.com/santa-rosa/",
+      "reason": "has website, scrape_status=idle, rag_uuid=NULL — never kicked"
+    },
+    {
+      "storeId": 137,
+      "storeName": "Designer's Brass Inc.",
+      "websiteUrl": "https://www.designersbrass.com/",
+      "reason": "has website, scrape_status=idle, rag_uuid=NULL — never kicked"
+    },
+    {
+      "storeId": 141,
+      "storeName": "Excel Plumbing Supply Showroom",
+      "websiteUrl": "https://www.excel-plumbing.com/",
+      "reason": "has website, scrape_status=idle, rag_uuid=NULL — never kicked"
+    },
+    {
+      "storeId": 144,
+      "storeName": "Friedmans Appliance",
+      "websiteUrl": "https://www.friedmansappliance.com/",
+      "reason": "has website, scrape_status=idle, rag_uuid=NULL — never kicked"
+    },
+    {
+      "storeId": 153,
+      "storeName": "SCIC SAN FRANCISCO",
+      "websiteUrl": "https://www.scicsanfrancisco.com/",
+      "reason": "has website, scrape_status=idle, rag_uuid=NULL — never kicked"
+    }
+  ],
+  "needsManual": [
+    {
+      "storeId": 7,
+      "storeName": "Studio Belmont (SF)",
+      "field": "categories",
+      "reason": "no category rule matched name, description, or brands"
+    },
+    {
+      "storeId": 25,
+      "storeName": "Topcret (San Jose)",
+      "field": "logo",
+      "reason": "no WEBSITE link to derive a favicon from"
+    },
+    {
+      "storeId": 25,
+      "storeName": "Topcret (San Jose)",
+      "field": "address",
+      "reason": "no_street_number",
+      "current": "San Jose, CA",
+      "hint": "no website — needs manual entry or a search-grounded lookup"
+    },
+    {
+      "storeId": 26,
+      "storeName": "Studio Belmont (Walnut Creek)",
+      "field": "categories",
+      "reason": "no category rule matched name, description, or brands"
+    },
+    {
+      "storeId": 30,
+      "storeName": "IKEA PAX",
+      "field": "logo",
+      "reason": "no WEBSITE link to derive a favicon from"
+    },
+    {
+      "storeId": 30,
+      "storeName": "IKEA PAX",
+      "field": "address",
+      "reason": "no_street_number",
+      "current": "Emeryville, CA",
+      "hint": "no website — needs manual entry or a search-grounded lookup"
+    },
+    {
+      "storeId": 31,
+      "storeName": "Studio Belmont (Novato)",
+      "field": "categories",
+      "reason": "no category rule matched name, description, or brands"
+    },
+    {
+      "storeId": 33,
+      "storeName": "Archatrak",
+      "field": "logo",
+      "reason": "no WEBSITE link to derive a favicon from"
+    },
+    {
+      "storeId": 33,
+      "storeName": "Archatrak",
+      "field": "address",
+      "reason": "no_street_number",
+      "current": "Bay Area, CA",
+      "hint": "no website — needs manual entry or a search-grounded lookup"
+    },
+    {
+      "storeId": 34,
+      "storeName": "Closet Factory",
+      "field": "logo",
+      "reason": "no WEBSITE link to derive a favicon from"
+    },
+    {
+      "storeId": 34,
+      "storeName": "Closet Factory",
+      "field": "address",
+      "reason": "no_street_number",
+      "current": "Bay Area, CA",
+      "hint": "no website — needs manual entry or a search-grounded lookup"
+    },
+    {
+      "storeId": 106,
+      "storeName": "United Granite & Cabinet",
+      "field": "logo",
+      "reason": "no WEBSITE link to derive a favicon from"
+    },
+    {
+      "storeId": 108,
+      "storeName": "Golden Twins Marble",
+      "field": "logo",
+      "reason": "no WEBSITE link to derive a favicon from"
+    },
+    {
+      "brandId": 101,
+      "brandName": "Wall Kitchens",
+      "field": "brand_logo",
+      "reason": "no website_url to derive a favicon from"
+    },
+    {
+      "brandId": 102,
+      "brandName": "Armalux",
+      "field": "brand_logo",
+      "reason": "no website_url to derive a favicon from"
+    },
+    {
+      "brandId": 103,
+      "brandName": "DND",
+      "field": "brand_logo",
+      "reason": "no website_url to derive a favicon from"
+    },
+    {
+      "brandId": 108,
+      "brandName": "Mugo",
+      "field": "brand_logo",
+      "reason": "no website_url to derive a favicon from"
+    },
+    {
+      "brandId": 200,
+      "brandName": "Milzen Cabinetry",
+      "field": "brand_logo",
+      "reason": "no website_url to derive a favicon from"
+    },
+    {
+      "brandId": 203,
+      "brandName": "HIGOLD",
+      "field": "brand_logo",
+      "reason": "no website_url to derive a favicon from"
+    },
+    {
+      "brandId": 204,
+      "brandName": "DTC",
+      "field": "brand_logo",
+      "reason": "no website_url to derive a favicon from"
+    },
+    {
+      "brandId": 205,
+      "brandName": "Everbright Flooring",
+      "field": "brand_logo",
+      "reason": "no website_url to derive a favicon from"
+    },
+    {
+      "brandId": 270,
+      "brandName": "Luminary",
+      "field": "brand_logo",
+      "reason": "no website_url to derive a favicon from"
+    },
+    {
+      "brandId": 271,
+      "brandName": "KravetContract",
+      "field": "brand_logo",
+      "reason": "no website_url to derive a favicon from"
+    },
+    {
+      "brandId": 272,
+      "brandName": "Cole & Son",
+      "field": "brand_logo",
+      "reason": "no website_url to derive a favicon from"
+    },
+    {
+      "brandId": 273,
+      "brandName": "Clarke & Clarke",
+      "field": "brand_logo",
+      "reason": "no website_url to derive a favicon from"
+    },
+    {
+      "brandId": 274,
+      "brandName": "Winfield Thybony",
+      "field": "brand_logo",
+      "reason": "no website_url to derive a favicon from"
+    },
+    {
+      "brandId": 275,
+      "brandName": "Holland MacRae",
+      "field": "brand_logo",
+      "reason": "no website_url to derive a favicon from"
+    },
+    {
+      "brandId": 276,
+      "brandName": "Bunny Williams Home",
+      "field": "brand_logo",
+      "reason": "no website_url to derive a favicon from"
+    },
+    {
+      "brandId": 277,
+      "brandName": "Kravet Contract",
+      "field": "brand_logo",
+      "reason": "no website_url to derive a favicon from"
+    },
+    {
+      "brandId": 278,
+      "brandName": "Kravet Couture",
+      "field": "brand_logo",
+      "reason": "no website_url to derive a favicon from"
+    },
+    {
+      "brandId": 279,
+      "brandName": "Kravet Design",
+      "field": "brand_logo",
+      "reason": "no website_url to derive a favicon from"
+    },
+    {
+      "brandId": 280,
+      "brandName": "Kravet Smart",
+      "field": "brand_logo",
+      "reason": "no website_url to derive a favicon from"
+    }
+  ]
+}

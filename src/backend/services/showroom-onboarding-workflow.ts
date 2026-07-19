@@ -48,9 +48,22 @@ export class ShowroomOnboardingWorkflow extends WorkflowEntrypoint<
     // never rejects → this step succeeds and runs exactly once (no retry that
     // would double-insert photos/brands).
     await step.do("enrich", async () => {
+      // Re-read the name: category inference keys off it (the strongest signal
+      // when Places supplied no types), and the workflow payload only carries
+      // the id. Falls back to "" so a deleted row cannot crash the step.
+      const db = drizzle(env.DB);
+      const [row] = await db
+        .select({ name: showroomStores.name })
+        .from(showroomStores)
+        .where(eq(showroomStores.id, showroomId))
+        .limit(1);
+
       const tasks: Promise<unknown>[] = [];
-      scheduleShowroomEnrichment(env, { id: showroomId }, enrichment, (p) =>
-        tasks.push(p),
+      scheduleShowroomEnrichment(
+        env,
+        { id: showroomId, name: row?.name ?? "" },
+        enrichment,
+        (p) => tasks.push(p),
       );
       await Promise.allSettled(tasks);
     });

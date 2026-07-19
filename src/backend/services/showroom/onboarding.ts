@@ -698,6 +698,8 @@ async function runBrandPipeline(
 export interface EnrichmentInput {
   /** Website to hydrate the favicon from and crawl via the scrape workflow. */
   websiteUrl?: string | null;
+  /** Store description — a category-inference signal when Places gave no types. */
+  description?: string | null;
   /** Google Places photo refs to fetch + persist to CF Images. */
   photos?: PlacePhotoRef[] | null;
   /** Detected brands (from the AI insight) to create + map. */
@@ -716,7 +718,9 @@ export interface EnrichmentInput {
  */
 export function scheduleShowroomEnrichment(
   env: Env,
-  store: Pick<ShowroomStore, "id">,
+  // `name` is needed for category inference — it is the strongest signal we have
+  // when Places supplied nothing.
+  store: Pick<ShowroomStore, "id" | "name">,
   input: EnrichmentInput,
   schedule: (p: Promise<unknown>) => void,
 ): void {
@@ -735,14 +739,32 @@ export function scheduleShowroomEnrichment(
   })();
   schedule(research);
 
-  // 2. Category inference (fill-blanks) from structured signal tokens.
-  if (input.categoryTokens && input.categoryTokens.some(Boolean)) {
+  // 2. Category inference (fill-blanks).
+  //
+  // THIS USED TO REQUIRE GOOGLE PLACES TOKENS and did nothing without them —
+  // `if (input.categoryTokens && …)`. Places `types` were the only token source,
+  // so any store added without a Places match got no categories at all, forever.
+  // Audited 2026-07-16: 86 of 146 prod stores had ZERO categories.
+  //
+  // The classifier never needed Places — it takes free text. The store NAME is
+  // the strongest signal in practice ("Archetype Lighting", "Tez Marble",
+  // "Tileshop"), so name + description + any Places tokens are all fed in and
+  // inference always runs. `inferAndMapCategories` is fill-blanks, so a store
+  // the user categorised by hand is untouched.
+  const categoryTokens = [
+    store.name,
+    input.description ?? null,
+    ...(input.categoryTokens ?? []),
+    ...(input.brands ?? []).map((b) => b?.name ?? null),
+    ...(input.brands ?? []).map((b) => b?.type ?? null),
+  ].filter(Boolean);
+  if (categoryTokens.length > 0) {
     schedule(
       inferAndMapCategories(
         env,
         showroomId,
-        input.categoryTokens,
-        input.categoryRationale ?? "Inferred from Google Places at intake",
+        categoryTokens,
+        input.categoryRationale ?? "Inferred from store name, description and brands at intake",
       ).catch((err) => {
         console.error(`[showroom-onboarding] categories failed for ${showroomId}:`, err);
       }),
