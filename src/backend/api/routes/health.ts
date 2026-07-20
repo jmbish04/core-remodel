@@ -73,6 +73,50 @@ healthRouter.get("/", async (c) => {
   }
 });
 
+// GET /api/health/billing
+// Durable Object billing-guard status for a frontend banner. Returns the
+// latest guard row plus any currently-firing per-namespace offenders so the UI
+// can shout when a DO is burning row reads (the cf_agents_schedules incident).
+healthRouter.get("/billing", async (c) => {
+  const db = drizzle(c.env.DB);
+  try {
+    const rows = await db
+      .select()
+      .from(healthChecks)
+      .orderBy(desc(healthChecks.timestamp))
+      .limit(200);
+
+    const guard = rows.find((r) => r.serviceName === "durable-object-billing");
+    // Only the most recent row per offending namespace service.
+    const offenders: typeof rows = [];
+    const seen = new Set<string>();
+    for (const r of rows) {
+      if (
+        r.serviceName.startsWith("durable-object-billing:") &&
+        r.status === "down" &&
+        !seen.has(r.serviceName)
+      ) {
+        seen.add(r.serviceName);
+        offenders.push(r);
+      }
+    }
+
+    return c.json({
+      status: guard?.status ?? "unknown",
+      lastChecked: guard?.timestamp ?? null,
+      message: guard?.errorMessage ?? null,
+      offenders: offenders.map((o) => ({
+        service: o.serviceName,
+        message: o.errorMessage,
+        at: o.timestamp,
+      })),
+    });
+  } catch (error) {
+    console.error("Billing health check error:", error);
+    return c.json({ error: "Failed to fetch billing health" }, 500);
+  }
+});
+
 // GET /api/health/history
 healthRouter.get("/history", async (c) => {
   const db = drizzle(c.env.DB);

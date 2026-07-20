@@ -13,6 +13,7 @@ import { monitorShowroomSourcingCoverage } from "./backend/services/showroom-sou
 import { backfillShowroomPlacesData } from "./backend/services/showroom/places-backfill";
 import { sweepShowroomSales } from "./backend/services/showroom/sales";
 import { ingestCompanyEmails } from "./backend/services/gmail/ingestion";
+import { checkDurableObjectBilling } from "./backend/services/billing-guard/check";
 import {
   getDeviceIdFromRequest,
   isRequestAuthenticated,
@@ -332,6 +333,23 @@ const legacyHandler: ExportedHandler<Env> = {
             ),
           )
           .catch((err) => console.error("[scheduled] showroom sales sweep failed:", err)),
+      );
+      return;
+    }
+    if (event.cron === "0 * * * *") {
+      // Durable Object billing guard — detect + auto-remediate a DO row-read
+      // runaway (the cf_agents_schedules incident) before it reaches the bill.
+      ctx.waitUntil(
+        checkDurableObjectBilling(env)
+          .then((r) => {
+            if (!r.ok || r.offenders.length > 0) {
+              console.error(
+                `[scheduled] billing guard: ok=${r.ok} offenders=${r.offenders.length}` +
+                  (r.reason ? ` reason=${r.reason}` : ""),
+              );
+            }
+          })
+          .catch((err) => console.error("[scheduled] billing guard failed:", err)),
       );
       return;
     }

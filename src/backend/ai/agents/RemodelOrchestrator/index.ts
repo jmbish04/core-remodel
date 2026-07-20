@@ -424,6 +424,42 @@ export class RemodelOrchestrator extends Agent<Env, RemodelOrchestratorState> {
     return this._healthProbe();
   }
 
+  /**
+   * Billing-guard hook: report the cf_agents_schedules row count and, if it is
+   * over `maxRows`, purge it. This is the runtime remediation for the
+   * schedule-table runaway that billed ~$50/day in DO row reads (see
+   * ensureAuditSchedule). The billing guard cron (src/backend/services/
+   * billing-guard) calls this on any Agent DO whose analytics show billions of
+   * rows read, so a recurrence self-heals without a redeploy.
+   *
+   * Purging is safe: onStart() re-arms exactly one 'audit' schedule on the next
+   * wake, so a cleared table simply resets the loop to its intended one-row
+   * steady state.
+   */
+  @callable()
+  scheduleGuard(maxRows = 10_000) {
+    const rows = this.scheduleRowCount();
+    let purged = 0;
+    if (rows > maxRows) {
+      this.sql`DELETE FROM cf_agents_schedules`;
+      purged = rows;
+      console.error(
+        `RemodelOrchestrator.scheduleGuard: purged ${purged} runaway ` +
+          `cf_agents_schedules rows (limit ${maxRows}).`,
+      );
+    }
+    return { rows, purged, healthy: rows <= maxRows, maxRows };
+  }
+
+  /** Current cf_agents_schedules row count for this instance. */
+  private scheduleRowCount(): number {
+    const result = this
+      .sql`SELECT COUNT(*) AS count FROM cf_agents_schedules` as unknown as {
+      count: number;
+    }[];
+    return result[0]?.count ?? 0;
+  }
+
   private async _healthProbe() {
     const checks: Record<string, boolean> = {};
 

@@ -14,7 +14,7 @@
   },
   "scripts": {
     "dev": "astro dev",
-    "build": "NODE_OPTIONS=--max-old-space-size=8192 astro build",
+    "build": "node scripts/doBugCheck.mjs && NODE_OPTIONS=--max-old-space-size=8192 astro build",
     "preview": "wrangler dev",
     "start": "astro dev",
     "fmt": "oxfmt",
@@ -38,7 +38,8 @@
     "migrate:tesla:local": "pnpm run db:generate:tesla && node scripts/d1-migrate.mjs --local --binding=TESLA_DB --dir=drizzle-tesla",
     "migrate:tesla:remote": "node scripts/d1-migrate.mjs --remote --binding=TESLA_DB --dir=drizzle-tesla",
     "mcp:issues": "node scripts/mcp-issues.mjs",
-    "deploy": "pnpm run build && cp .assetsignore dist/.assetsignore && pnpm run migrate:remote && pnpm run migrate:tesla:remote && npx wrangler@latest deploy",
+    "bugcheck": "node scripts/doBugCheck.mjs",
+  "deploy": "pnpm run build && cp .assetsignore dist/.assetsignore && pnpm run migrate:remote && pnpm run migrate:tesla:remote && npx wrangler@latest deploy",
     "deploy:preview": "pnpm run build && cp .assetsignore dist/.assetsignore && node scripts/deploy-preview.mjs",
     "preview:delete": "node scripts/deploy-preview.mjs --delete",
     "preview:cleanup": "node scripts/preview-cleanup.mjs",

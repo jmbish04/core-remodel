@@ -1,6 +1,54 @@
 # AGENTS.md — Grounding Profile & Architectural Alignment Map
 # Verified on: 2026-05-20
 
+## ⛔ CRITICAL — Durable Object billing runaway ($700+ and counting)
+
+A Claude-authored bug cost the owner **over $700** in Cloudflare bills. This
+must never happen again. Read this before touching any Durable Object, Agent,
+or scheduling code.
+
+**What happened:** `RemodelOrchestrator` called `this.schedule()` from
+`onStart()`. In the Agents SDK, `this.schedule()` is **append-only — it does
+NOT dedupe**, and `onStart()` fires on **every DO wake, not once per lifetime**.
+Pending schedules compounded: more rows → more alarms → more rows.
+`cf_agents_schedules` reached ~1M rows, every alarm full-scanned it, and it
+billed **~67 BILLION DO row reads per day (~$50/day)** until caught on the
+invoice — days later.
+
+**The rules (non-negotiable):**
+
+1. **Never call `this.schedule()` without a dedupe/purge guard.** Any Agent DO
+   that self-schedules MUST clear prior rows first — copy the
+   `ensureAuditSchedule()` pattern in
+   `src/backend/ai/agents/RemodelOrchestrator/index.ts`
+   (`DELETE FROM cf_agents_schedules WHERE callback = '<name>'` before
+   `this.schedule(...)`). One outstanding schedule per callback, ever.
+2. **Assume `onStart()` runs constantly.** Never do append-only or unbounded
+   work there.
+3. **A same-day charge is NOT proof a fix failed.** Cloudflare bills the whole
+   day; a fix deployed mid-day still shows the morning's runaway on that day's
+   bill. Verify against **hourly** analytics, not the daily total.
+
+**Tools built to prevent recurrence — USE THEM:**
+
+- **`node scripts/doBugCheck.mjs`** — pre-deploy gate. Statically fails the
+  build on any `this.schedule()` without a purge guard, and (with a CF API
+  token in env) fails on any namespace reading >1B rows/24h. Wired into
+  `pnpm run build`, so it runs on every deploy and preview. Do not remove it.
+- **`python3 scripts/do_billing_watch.py`** — daily DO billing report the owner
+  runs to verify spend. `--hourly` pinpoints a spike's start. Exit code 1 above
+  threshold, so it can be cron'd.
+- **Runtime billing guard** — `src/backend/services/billing-guard/check.ts`,
+  fired hourly by the `"0 * * * *"` cron in `src/_worker.ts`. Queries DO
+  analytics, writes a `down` `health_checks` row (surfaced at
+  `/api/health` and `/api/health/billing`), and auto-remediates any DO exposing
+  a `scheduleGuard()` RPC by purging its runaway schedule table. When you add a
+  new self-scheduling Agent DO, give it a `scheduleGuard(maxRows)` callable and
+  register it in `REMEDIABLE` in that file.
+
+When you build ANYTHING that schedules, alarms, or writes to a DO's SQLite in a
+loop: bound it, guard it, and confirm `doBugCheck` passes before you deploy.
+
 ## FIRST ACTION OF EVERY SESSION — verify the branch is fresh
 
 Do this **before reading any source file, before dispatching any explore agent,
