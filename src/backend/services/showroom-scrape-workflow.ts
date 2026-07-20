@@ -29,6 +29,8 @@ import { z } from "zod";
 
 import {
   browserRunPages,
+  showroomStoreCategory,
+  showroomStoreCategoryMapping,
   showroomStoreLinks,
   showroomStores,
 } from "@backend/db/schema/showroom/index";
@@ -92,6 +94,16 @@ const PRIORITY_PATH_RE =
 /** Per-page structured extraction shape returned by Workers AI. */
 interface PageExtraction {
   brandNames: string[];
+  /**
+   * Primary keys from `showroom_store_category`, most relevant first.
+   *
+   * The scrape sees the store's OWN marketing copy across up to 10 pages, which
+   * is the richest categorisation signal available anywhere in the pipeline —
+   * strictly better than the name + Places types the intake classifier works
+   * from. Ids, not names, so a reply either references a real category or is
+   * dropped; the name round-trip is what silently lost categories before.
+   */
+  categoryIds: number[];
   instagramUrl: string | null;
   appointmentOnly: boolean | null;
   hoursText: string | null;
@@ -103,6 +115,7 @@ const EXTRACTION_JSON_SCHEMA = {
   type: "object",
   properties: {
     brandNames: { type: "array", items: { type: "string" } },
+    categoryIds: { type: "array", items: { type: "integer" } },
     instagramUrl: { type: ["string", "null"] },
     appointmentOnly: { type: ["boolean", "null"] },
     hoursText: { type: ["string", "null"] },
@@ -217,12 +230,22 @@ export class ShowroomScrapeWorkflow extends WorkflowEntrypoint<
       // Brands recovered deterministically from each page's links.
       const allFacetBrands: FacetBrand[] = [];
       const siteHost = safeHost(websiteUrl);
+      // Load the category vocabulary ONCE for the whole crawl — every page's
+      // extractor gets the same id list, and the ids come back validated.
+      const categories = await drizzle(env.DB)
+        .select({
+          id: showroomStoreCategory.id,
+          name: showroomStoreCategory.name,
+          description: showroomStoreCategory.description,
+        })
+        .from(showroomStoreCategory)
+        .where(eq(showroomStoreCategory.isActive, true));
 
       for (let i = 0; i < pageUrls.length && i < MAX_PAGES; i++) {
         const pageUrl = pageUrls[i];
         const { markdown, links, facetBrands, ...extraction } = await step.do(
           `scrape-${i}`,
-          async () => scrapePage(env, showroomId, ragUuid, pageUrl, siteHost),
+          async () => scrapePage(env, showroomId, ragUuid, pageUrl, siteHost, categories),
         );
         extractions.push(extraction);
         pageTexts.push({ pageUrl, markdown });
@@ -362,6 +385,8 @@ async function scrapePage(
   pageUrl: string,
   /** The store's own website host — gates deterministic brand extraction. */
   siteHost?: string,
+  /** Live category vocabulary handed to the extractor so it can return ids. */
+  categories: Array<{ id: number; name: string; description: string | null }> = [],
 ): Promise<
   PageExtraction & {
     markdown: string;
@@ -408,8 +433,12 @@ async function scrapePage(
   await embedPage(env, { ragUuid, showroomId, pageUrl, text: markdown });
 
   // (d) Workers-AI structured extraction over the markdown.
-  const workersAiPrompt = buildExtractionPrompt(pageUrl, markdown);
-  const extraction = await extractPage(env, workersAiPrompt);
+  const workersAiPrompt = buildExtractionPrompt(pageUrl, markdown, categories);
+  const extraction = await extractPage(
+    env,
+    workersAiPrompt,
+    new Set(categories.map((c) => c.id)),
+  );
 
   // (e) Persist the browser_run_pages row.
   await db.insert(browserRunPages).values({
@@ -561,7 +590,11 @@ async function stableHash(input: string): Promise<string> {
 // Workers-AI structured extraction
 // ---------------------------------------------------------------------------
 
-function buildExtractionPrompt(pageUrl: string, markdown: string): string {
+function buildExtractionPrompt(
+  pageUrl: string,
+  markdown: string,
+  categories: Array<{ id: number; name: string; description: string | null }>,
+): string {
   const preview =
     markdown.length > 8000 ? `${markdown.slice(0, 8000)}\n\n[truncated]` : markdown;
   return `You are extracting structured facts from a showroom / retailer website page.
@@ -574,6 +607,14 @@ From the page content below, extract:
 - appointmentOnly: true if the showroom is appointment-only / by-appointment, false if it accepts walk-ins, null if unclear.
 - hoursText: a short human-readable opening-hours string if present, else null.
 - heroImageUrl: the URL of the largest / most representative storefront or interior hero image on the page, or null.
+- categoryIds: the numeric ids of EVERY category below that this showroom sells or specializes in, most central to the business FIRST. Choose only what the page supports; return an empty array if the page is not about the showroom's offering (e.g. a privacy policy). Ids MUST come from this list:
+${
+    categories.length > 0
+      ? categories
+          .map((c) => `  ${c.id}: ${c.name}${c.description ? ` — ${c.description}` : ""}`)
+          .join("\n")
+      : "  (none configured — return an empty array)"
+  }
 
 Respond ONLY with valid JSON conforming to the supplied schema.
 
@@ -584,9 +625,11 @@ ${preview}`;
 async function extractPage(
   env: Env,
   prompt: string,
+  validCategoryIds: ReadonlySet<number> = new Set(),
 ): Promise<PageExtraction> {
   const empty: PageExtraction = {
     brandNames: [],
+    categoryIds: [],
     instagramUrl: null,
     appointmentOnly: null,
     hoursText: null,
@@ -621,18 +664,33 @@ async function extractPage(
       "showroom page extraction",
     );
 
-    return normalizeExtraction(source);
+    return normalizeExtraction(source, validCategoryIds);
   } catch (err) {
     console.error("showroom-scrape: AI extraction failed", err);
     return empty;
   }
 }
 
-function normalizeExtraction(source: Partial<PageExtraction>): PageExtraction {
+function normalizeExtraction(
+  source: Partial<PageExtraction>,
+  validCategoryIds: ReadonlySet<number> = new Set(),
+): PageExtraction {
   const brandNames = Array.isArray(source.brandNames)
     ? source.brandNames
         .map((n) => (typeof n === "string" ? n.trim() : ""))
         .filter((n) => n.length > 0)
+    : [];
+
+  // Ids are validated against the live vocabulary: a hallucinated id must never
+  // reach an INSERT, where it would violate the FK or mis-file the store.
+  const categoryIds = Array.isArray(source.categoryIds)
+    ? [
+        ...new Set(
+          source.categoryIds
+            .map((n) => (typeof n === "number" ? n : Number.parseInt(String(n), 10)))
+            .filter((n) => Number.isInteger(n) && validCategoryIds.has(n)),
+        ),
+      ]
     : [];
 
   const str = (v: unknown): string | null =>
@@ -643,6 +701,7 @@ function normalizeExtraction(source: Partial<PageExtraction>): PageExtraction {
 
   return {
     brandNames,
+    categoryIds,
     instagramUrl: str(source.instagramUrl),
     appointmentOnly: bool(source.appointmentOnly),
     hoursText: str(source.hoursText),
@@ -768,6 +827,47 @@ async function aggregate(
         .update(showroomStores)
         .set({ heroImageCfImagesUrl: heroCfUrl, updatedAt: new Date() })
         .where(eq(showroomStores.id, showroomId));
+    }
+  }
+
+  // ── Categories: union across pages, FILL-BLANKS. ────────────────────────
+  // The scrape sees the store's own copy across up to 10 pages — the richest
+  // categorisation signal in the pipeline. It runs LAST, so a store the intake
+  // classifier already handled (or a human set by hand) is left alone; this is
+  // the safety net for the stores intake could not classify.
+  const scrapedCategoryIds = [
+    ...new Set(extractions.flatMap((e) => e.categoryIds ?? [])),
+  ];
+  if (scrapedCategoryIds.length > 0) {
+    const [existingCat] = await db
+      .select({ id: showroomStoreCategoryMapping.id })
+      .from(showroomStoreCategoryMapping)
+      .where(eq(showroomStoreCategoryMapping.storeId, showroomId))
+      .limit(1);
+    if (existingCat) {
+      console.log(
+        `showroom-scrape: showroom ${showroomId} already categorised — skipping ${scrapedCategoryIds.length} scraped categor(ies)`,
+      );
+    } else {
+      // 4 bound params per row — well under D1's 100-parameter cap.
+      const rows = scrapedCategoryIds.map((categoryId) => ({
+        storeId: showroomId,
+        categoryId,
+        aiRationale: "Classified by AI from the showroom's own website content",
+        // Highest confidence in the pipeline: the model read the store's actual
+        // pages, not just its name and Google place types.
+        aiRationaleConfidenceScore: 8,
+      }));
+      for (let i = 0; i < rows.length; i += 20) {
+        const chunk = rows
+          .slice(i, i + 20)
+          .map((r) => db.insert(showroomStoreCategoryMapping).values(r).onConflictDoNothing());
+        if (chunk.length === 0) continue;
+        await db.batch(chunk as [(typeof chunk)[number], ...(typeof chunk)[number][]]);
+      }
+      console.log(
+        `showroom-scrape: showroom ${showroomId} categorised from site content -> [${scrapedCategoryIds.join(", ")}]`,
+      );
     }
   }
 

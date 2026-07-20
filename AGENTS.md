@@ -341,6 +341,56 @@ them and the email does not say which. The correct handling is:
 
 Guessing silently is worse than asking. A wrong mapping propagates into budget,
 takeoffs and comparisons, and nothing downstream can tell it was a guess.
+## AI calls: structured output with a JSON schema (MANDATORY)
+
+**Every** AI call that produces data the code will read — workflows, extraction,
+classification, enrichment — MUST use the provider's dedicated structured-output
+method with an explicit JSON schema. Never ask a model to "reply with JSON" in
+the prompt and then parse the text.
+
+```ts
+// Workers AI
+const raw = await env.AI.run(MODEL, {
+  messages,
+  response_format: { type: "json_schema", json_schema: MY_SCHEMA },
+  gateway: { id: env.AI_GATEWAY_ID },
+});
+
+// Gemini
+await ai.models.generateContent({
+  model,
+  contents,
+  config: { responseMimeType: "application/json", responseSchema: MY_SCHEMA },
+});
+```
+
+**Return primary keys, not display names.** When a model is choosing from a
+vocabulary that lives in D1, hand it `id: name — description` and have it return
+ids. Matching names back to rows is a silent-failure machine: `showroom_store_category`
+lost categories for 86 of 146 stores partly because a name round-trip needed an
+exact case-sensitive match. **Always validate returned ids against the live set
+before inserting** — a hallucinated id must never reach a FK column.
+
+**Never degrade a failed parse to `{}` or `null` silently.** Log it. A blank
+extraction that looks like "the page had nothing" is how the scrape pipeline hid
+a broken field for months.
+
+### The one sanctioned exception: Gemini + Google Search grounding
+
+Gemini **cannot** combine `tools: [{ googleSearch: {} }]` with `responseSchema` /
+`responseMimeType` on `gemini-2.5-*` — the API returns 400 *"controlled
+generation is not supported with google_search tool"*. Grounded calls therefore
+instruct the JSON shape in the prompt and parse defensively (strip ``` fences,
+slice first `{` to last `}`), with a non-grounded schema-constrained fallback.
+`services/google/maps.ts` is the reference implementation.
+
+If you hit this, do NOT quietly drop the schema on an ungrounded call — the
+exception applies only when `googleSearch` is actually attached.
+
+**Upgrade path (2026-07-19, not yet taken):** Gemini 3 models
+(`gemini-3-pro-preview`, `gemini-3-flash-preview`) DO support grounding together
+with structured output. Moving the grounded call to a Gemini 3 model would remove
+this exception entirely — worth doing deliberately, with the fallback kept.
 
 ## Multi-select & config-driven definitions (MANDATORY)
 
