@@ -154,8 +154,10 @@ export function DriveListsApp() {
   // Activating one drive deactivates whichever was active — mirror that locally
   // so the badge/toggle can't show two active drives while the PATCH is in flight.
   const setActive = async (slug: string, isActive: boolean) => {
-    const before = drives;
-    setDrives(drives.map((d) => ({ ...d, isActive: isActive && d.slug === slug })));
+    // Functional updates throughout: two toggles in quick succession must not
+    // let the second one write a snapshot taken before the first landed.
+    const wasActive = drives.find((d) => d.isActive)?.slug ?? null;
+    setDrives((prev) => prev?.map((d) => ({ ...d, isActive: isActive && d.slug === slug })) ?? prev);
     try {
       const res = await fetch(`/api/drive-lists/${encodeURIComponent(slug)}`, {
         method: "PATCH",
@@ -165,7 +167,9 @@ export function DriveListsApp() {
       });
       if (!res.ok) throw new Error(`Save failed (${res.status})`);
     } catch (e) {
-      setDrives(before);
+      // Roll back only the active slot — never a whole-list snapshot, which
+      // would clobber whatever a concurrent toggle already committed.
+      setDrives((prev) => prev?.map((d) => ({ ...d, isActive: d.slug === wasActive })) ?? prev);
       setError((e as Error).message);
     }
   };

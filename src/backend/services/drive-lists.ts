@@ -173,7 +173,11 @@ export async function setActiveDrive(db: RemodelDb, id: number | null): Promise<
   const clear = db
     .update(driveLists)
     .set({ isActive: false, updatedAt: new Date() })
-    .where(and(eq(driveLists.isActive, true), id == null ? undefined : ne(driveLists.id, id)));
+    .where(
+      id == null
+        ? eq(driveLists.isActive, true)
+        : and(eq(driveLists.isActive, true), ne(driveLists.id, id)),
+    );
   if (id == null) {
     await db.batch([clear]);
     return;
