@@ -7,7 +7,7 @@ import {
   type PlacePhotoRef,
 } from "@backend/services/showroom/onboarding";
 import { getStoreLinksMap, linksToLegacyUrls } from "@backend/utils/showroom-links";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 
 import { defineTool, WRITE_IDEMPOTENT } from "../../types";
@@ -107,6 +107,17 @@ export const backfillShowroomMedia = defineTool({
     const candidates = all.filter((s) => needs(s).length > 0);
     const batch = candidates.slice(0, limit);
 
+    if (batch.length === 0) {
+      return {
+        processed: 0,
+        coordinatesSet: 0,
+        iconsSet: 0,
+        heroesSet: 0,
+        remaining: 0,
+        unresolved: [],
+      };
+    }
+
     const maps = new GoogleMapsService(env);
 
     for (const s of batch) {
@@ -193,15 +204,22 @@ export const backfillShowroomMedia = defineTool({
       }
     }
 
-    // Re-read the batch (≤50 ids) to count what actually landed + collect leftovers.
+    // Re-read the batch to count what actually landed + collect leftovers. One
+    // chunked inArray (D1 caps a query at 100 bound params) rather than a select
+    // per store.
     const beforeById = new Map(batch.map((s) => [s.id, s]));
-    let coordinatesSet = 0;
-    let iconsSet = 0;
-    let heroesSet = 0;
-    const unresolved: Array<{ id: number; name: string | null; missing: string[] }> = [];
-
-    for (const s of batch) {
-      const [row] = await db
+    const ids = batch.map((s) => s.id);
+    const D1_IN_CHUNK = 90;
+    const updatedRows: Array<{
+      id: number;
+      name: string | null;
+      latitude: number | null;
+      longitude: number | null;
+      iconCfImagesUrl: string | null;
+      heroImageCfImagesUrl: string | null;
+    }> = [];
+    for (let i = 0; i < ids.length; i += D1_IN_CHUNK) {
+      const rows = await db
         .select({
           id: showroomStores.id,
           name: showroomStores.name,
@@ -211,10 +229,19 @@ export const backfillShowroomMedia = defineTool({
           heroImageCfImagesUrl: showroomStores.heroImageCfImagesUrl,
         })
         .from(showroomStores)
-        .where(eq(showroomStores.id, s.id))
-        .limit(1);
-      if (!row) continue;
-      const before = beforeById.get(s.id)!;
+        .where(inArray(showroomStores.id, ids.slice(i, i + D1_IN_CHUNK)))
+        .all();
+      updatedRows.push(...rows);
+    }
+
+    let coordinatesSet = 0;
+    let iconsSet = 0;
+    let heroesSet = 0;
+    const unresolved: Array<{ id: number; name: string | null; missing: string[] }> = [];
+
+    for (const row of updatedRows) {
+      const before = beforeById.get(row.id);
+      if (!before) continue;
 
       if (doCoords && (before.latitude == null || before.longitude == null) && row.latitude != null)
         coordinatesSet++;
