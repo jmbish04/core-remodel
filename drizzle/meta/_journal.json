@@ -106,6 +106,13 @@
       "when": 1784472442885,
       "tag": "0114_device_location_and_changelog_proposals_catchup",
       "breakpoints": true
+    },
+    {
+      "idx": 115,
+      "version": "6",
+      "when": 1784641024040,
+      "tag": "0115_fair_stardust",
+      "breakpoints": true
     }
   ]
 }

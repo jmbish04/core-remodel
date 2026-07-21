@@ -61,6 +61,24 @@ import { inferCategoryLabelsFromTokens } from "./showroom-category-rules";
  * own they leave nearly every store blank. Returns exact vocabulary names,
  * relevance-ordered (most central first). Best-effort: returns [] on any error.
  */
+/**
+ * Ask Gemini which categories a showroom belongs to.
+ *
+ * RETURNS PRIMARY KEYS, NOT NAMES. The model is handed each category's `id`,
+ * `name` AND `description` and returns `categoryIds`. The previous version sent
+ * names only and matched the reply back with a case-sensitive string compare —
+ * one stray character ("Lighting Showroom" vs "Lighting Showrooms") silently
+ * dropped the category, which is the same class of failure that left 86 of 146
+ * stores uncategorised. An integer either is a real key or it isn't.
+ *
+ * Descriptions matter as much as ids: "Slab & Natural Stone Yards" vs "Tile &
+ * Surfaces Showrooms" is genuinely ambiguous from the name alone, and the seed
+ * descriptions ("Marble, granite, quartzite… slab galleries" vs "Ceramic,
+ * porcelain, glass… tile retailers") are what disambiguate them.
+ *
+ * Returned ids are validated against the live set before use — a hallucinated
+ * id is dropped, never inserted.
+ */
 async function classifyCategoriesWithAI(
   env: Env,
   ctx: {
@@ -70,9 +88,9 @@ async function classifyCategoriesWithAI(
     brands: string[];
     tokens: string[];
   },
-  validNames: string[],
-): Promise<string[]> {
-  if (validNames.length === 0) return [];
+  validCategories: Array<{ id: number; name: string; description: string | null }>,
+): Promise<number[]> {
+  if (validCategories.length === 0) return [];
   try {
     const ai = await createGeminiAiGatewayClient(env, "showroom_categorize");
 
@@ -88,15 +106,15 @@ async function classifyCategoriesWithAI(
 
     const prompt = `You are categorizing a home-renovation showroom / vendor for a homeowner's sourcing directory.
 
-Choose EVERY category from the allowed list below that this showroom clearly sells or specializes in. Order them by relevance, most central to the business FIRST. Only choose a category when the context supports it — do not guess wildly. If the showroom's specialty is genuinely unclear, return your single best guess rather than nothing.
+Choose EVERY category below that this showroom clearly sells or specializes in. Order them by relevance, most central to the business FIRST — the first id is treated as the store's primary category. Only choose a category when the context supports it; do not guess wildly. If the specialty is genuinely unclear, return your single best guess rather than nothing.
 
-You MUST return only names copied EXACTLY from this allowed list (verbatim, case-sensitive):
-${validNames.map((nm) => `- ${nm}`).join("\n")}
+Return the numeric id of each chosen category. Ids must come from this list:
+${validCategories
+      .map((c) => `${c.id}: ${c.name}${c.description ? ` — ${c.description}` : ""}`)
+      .join("\n")}
 
 SHOWROOM CONTEXT:
-${context}
-
-Respond with ONLY valid JSON: {"categories": ["Exact Name", ...]}`;
+${context}`;
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
@@ -106,20 +124,37 @@ Respond with ONLY valid JSON: {"categories": ["Exact Name", ...]}`;
         responseSchema: {
           type: Type.OBJECT,
           properties: {
-            categories: { type: Type.ARRAY, items: { type: Type.STRING } },
+            categoryIds: {
+              type: Type.ARRAY,
+              items: { type: Type.INTEGER },
+              description: "Category primary keys, most relevant first.",
+            },
           },
-          required: ["categories"],
+          required: ["categoryIds"],
         },
         temperature: 0.1,
       },
     });
 
     const raw = response.text || "";
-    const parsed = JSON.parse(stripJsonFence(raw)) as { categories?: unknown };
-    if (!Array.isArray(parsed.categories)) return [];
-    return parsed.categories.filter(
-      (c): c is string => typeof c === "string" && c.trim().length > 0,
-    );
+    // A primitive (null / number / string / bool) means the model did not answer
+    // the question. Falling through to [] would look identical to "this store
+    // genuinely has no categories" — the silent-degradation shape that hid the
+    // blank-scrape bug for months. Throw so the catch logs it as a real failure.
+    const decoded = JSON.parse(stripJsonFence(raw)) as unknown;
+    if (typeof decoded !== "object" || decoded === null) {
+      throw new Error(
+        `AI category response was not a JSON object (got ${typeof decoded})`,
+      );
+    }
+    const parsed = decoded as { categoryIds?: unknown };
+    if (!Array.isArray(parsed.categoryIds)) return [];
+    // Validate against the live set — a hallucinated id must never reach an
+    // INSERT, where it would either violate the FK or mis-file the store.
+    const valid = new Set(validCategories.map((c) => c.id));
+    return parsed.categoryIds
+      .map((n) => (typeof n === "number" ? n : Number.parseInt(String(n), 10)))
+      .filter((n) => Number.isInteger(n) && valid.has(n));
   } catch (err) {
     console.error(`[categories] AI classification failed for "${ctx.name}":`, err);
     return [];
@@ -162,7 +197,15 @@ export async function inferAndMapCategories(
     if (existing) return 0;
 
     const categories = await db
-      .select({ id: showroomStoreCategory.id, name: showroomStoreCategory.name })
+      // `description` is fetched because the AI classifier needs it: the seed
+      // descriptions are what separate "Slab & Natural Stone Yards" (slab
+      // galleries) from "Tile & Surfaces Showrooms" (tile retailers), which the
+      // names alone leave genuinely ambiguous.
+      .select({
+        id: showroomStoreCategory.id,
+        name: showroomStoreCategory.name,
+        description: showroomStoreCategory.description,
+      })
       .from(showroomStoreCategory)
       .where(eq(showroomStoreCategory.isActive, true));
     if (categories.length === 0) return 0;
@@ -187,7 +230,8 @@ export async function inferAndMapCategories(
       .filter((n): n is string => Boolean(n));
 
     // 1. AI classification against the exact vocabulary (primary signal).
-    const aiNames = store?.name
+    //    Returns primary keys, not names — see classifyCategoriesWithAI.
+    const aiIds = store?.name
       ? await classifyCategoriesWithAI(
           env,
           {
@@ -197,33 +241,37 @@ export async function inferAndMapCategories(
             brands: brandNames,
             tokens: cleanTokens,
           },
-          categories.map((c) => c.name),
+          categories,
         )
       : [];
 
     // 2. Regex token rules — cheap fallback/augment (esp. if the AI call failed).
     const regexLabels = inferCategoryLabelsFromTokens(tokens);
 
-    // AI names first (exact-match, relevance-ordered), then regex labels.
+    // AI ids first (relevance-ordered — the first becomes the store's primary
+    // category), then any regex labels the AI missed.
     const categoryIds: number[] = [];
-    const pushMatch = (candidate: string, exactOnly: boolean) => {
-      const needle = candidate.toLowerCase();
-      const match = categories.find((c) => {
-        const name = c.name.toLowerCase();
-        return exactOnly ? name === needle : name.includes(needle) || needle.includes(name);
-      });
-      if (match && !categoryIds.includes(match.id)) categoryIds.push(match.id);
+    const pushId = (id: number) => {
+      if (!categoryIds.includes(id)) categoryIds.push(id);
     };
-    for (const nm of aiNames) pushMatch(nm, true);
+    const pushMatch = (candidate: string) => {
+      // Regex labels are canonical names, so an exact compare is sufficient.
+      // The old fuzzy branch is what let "Flooring" bind to "Hardwood &
+      // Flooring Specialists" and mis-file every tile and stone yard.
+      const needle = candidate.toLowerCase();
+      const match = categories.find((c) => c.name.toLowerCase() === needle);
+      if (match) pushId(match.id);
+    };
+    for (const id of aiIds) pushId(id);
     // Exact, not fuzzy. The regex labels are now canonical category names, so
     // the fuzzy branch is no longer needed here — and fuzzy is precisely what let
     // "Flooring" swallow "Hardwood & Flooring Specialists". The AI path above
     // already used exact matching for the same reason.
-    for (const label of regexLabels) pushMatch(label, true);
+    for (const label of regexLabels) pushMatch(label);
 
     if (categoryIds.length === 0) return 0;
 
-    const usedAi = aiNames.length > 0;
+    const usedAi = aiIds.length > 0;
     for (const categoryId of categoryIds) {
       await db.insert(showroomStoreCategoryMapping).values({
         storeId: showroomId,

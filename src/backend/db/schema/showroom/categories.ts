@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 import { showroomStores } from "./stores";
 
@@ -58,7 +58,22 @@ export const showroomStoreCategoryMapping = sqliteTable(
     isBreadButter: integer("is_bread_butter", { mode: "boolean" }).default(
       false
     ),
-  }
+  },
+  (t) => ({
+    /**
+     * One row per (store, category).
+     *
+     * This table previously had NO index at all, which made every
+     * `.onConflictDoNothing()` against it a silent no-op — it cannot detect a
+     * conflict with no constraint to conflict on. Verified against prod on
+     * 2026-07-21: zero duplicate pairs exist today, but only because the
+     * fill-blanks guard happens to prevent re-runs. The scrape-side classifier
+     * inserts on every run, so the guarantee has to live here.
+     */
+    storeCategoryUniq: uniqueIndex(
+      "showroom_store_category_mapping_store_category_uniq",
+    ).on(t.storeId, t.categoryId),
+  }),
 );
 
 export type ShowroomStoreCategoryType =
