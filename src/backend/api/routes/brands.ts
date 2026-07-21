@@ -24,6 +24,7 @@
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { drizzle } from "drizzle-orm/d1";
+import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import { eq, and, or, isNull, inArray, like, desc, ne, sql } from "drizzle-orm";
 
 import { brands } from "@backend/db/schema/brands/brands";
@@ -35,6 +36,7 @@ import { showroomBrandMappings } from "@backend/db/schema/brands/showroom_brand_
 import { brandIntel } from "@backend/db/schema/brands/brand_intel";
 import { brandImages } from "@backend/db/schema/brands/brand_images";
 import { brandProductLines } from "@backend/db/schema/brands/brand_product_lines";
+import { brandCategories } from "@backend/db/schema/config/brand_categories";
 import { showroomStoreProducts } from "@backend/db/schema/showroom/store_products";
 import { showroomProductMappings } from "@backend/db/schema/showroom/product_mappings";
 import { showroomStores } from "@backend/db/schema/showroom/stores";
@@ -525,27 +527,74 @@ brandsRouter.openapi(
 brandsRouter.get("/health", async (c) => {
   const db = drizzle(c.env.DB);
 
+  // ALL brands, retired included. A duplicate group is only resolved when
+  // exactly one of its members is still active, and that is unknowable if the
+  // retired ones are filtered out before grouping.
   const rows = await db
     .select({
       id: brands.id,
       name: brands.name,
       websiteUrl: brands.websiteUrl,
       iconUrl: brands.iconCfImagesUrl,
+      isActive: brands.isActive,
     })
-    .from(brands)
-    .where(eq(brands.isActive, true));
+    .from(brands);
 
   const variationRows = await db
     .select({
       brandId: brandNameVariations.brandId,
       brandName: brandNameVariations.brandName,
     })
-    .from(brandNameVariations)
-    .where(eq(brandNameVariations.isActive, true));
+    .from(brandNameVariations);
 
   const aliases = new Map<number, string[]>();
   for (const v of variationRows) {
     aliases.set(v.brandId, [...(aliases.get(v.brandId) ?? []), v.brandName]);
+  }
+
+  // ── Orphan scan ──────────────────────────────────────────────────────────
+  // A retired brand must hold NO rows in any table keyed on brand_id: the merge
+  // repoints them to the survivor before flagging is_active=0. Anything left is
+  // an interrupted or hand-rolled merge, and it is invisible without this check
+  // because the rows still resolve — they just point at a brand nobody lists.
+  //
+  // Every table with a brand_id FK is scanned. Adding a new one and forgetting
+  // it here would silently shrink this check, so the list is asserted against
+  // the live schema in scripts/qc/pr_169.mjs.
+  const retiredIds = rows.filter((r) => !r.isActive).map((r) => r.id);
+  const orphansByBrand = new Map<number, Record<string, number>>();
+  let orphanedRowTotal = 0;
+
+  if (retiredIds.length > 0) {
+    const FK_TABLES: Array<[string, SQLiteTable]> = [
+      ["showroom_store_products", showroomStoreProducts],
+      ["brand_categories", brandCategories],
+      ["brand_images", brandImages],
+      ["brand_intel", brandIntel],
+      ["brand_product_lines", brandProductLines],
+      ["brand_type_mappings", brandTypeMappings],
+      ["showroom_brand_mappings", showroomBrandMappings],
+      ["brand_name_variations", brandNameVariations],
+    ];
+
+    for (const [label, table] of FK_TABLES) {
+      const counts = await db
+        .select({
+          brandId: sql<number>`brand_id`,
+          n: sql<number>`count(*)`,
+        })
+        .from(table)
+        .where(inArray(sql`brand_id`, retiredIds))
+        .groupBy(sql`brand_id`);
+
+      for (const row of counts) {
+        if (!row.n) continue;
+        orphanedRowTotal += row.n;
+        const entry = orphansByBrand.get(row.brandId) ?? {};
+        entry[label] = row.n;
+        orphansByBrand.set(row.brandId, entry);
+      }
+    }
   }
 
   const nameKey = (n: string | null) =>
@@ -567,11 +616,28 @@ brandsRouter.get("/health", async (c) => {
     return parts.length >= 2 ? parts.slice(-2).join(".") : host;
   };
 
+  type GroupBrand = {
+    id: number;
+    name: string;
+    websiteUrl: string | null;
+    isActive: boolean;
+    variations: string[];
+    /** FK rows still pointing here, per table. Only counted for retired brands. */
+    orphanedMappings?: Record<string, number>;
+  };
+
   type Group = {
     signal: "name" | "domain" | "logo";
     key: string;
     autoMergeSafe: boolean;
-    brands: Array<{ id: number; name: string; websiteUrl: string | null; variations: string[] }>;
+    activeCount: number;
+    retiredCount: number;
+    /**
+     * More than one active member means the duplicate is UNRESOLVED — the
+     * group is still splitting its data across live rows.
+     */
+    unresolved: boolean;
+    brands: GroupBrand[];
   };
 
   const group = (
@@ -593,17 +659,28 @@ brandsRouter.get("/health", async (c) => {
     }
     return [...buckets.entries()]
       .filter(([, list]) => new Set(list.map((b) => b.id)).size > 1)
-      .map(([key, list]) => ({
-        signal,
-        key,
-        autoMergeSafe,
-        brands: [...new Map(list.map((b) => [b.id, b])).values()].map((b) => ({
-          id: b.id,
-          name: b.name,
-          websiteUrl: b.websiteUrl,
-          variations: aliases.get(b.id) ?? [],
-        })),
-      }));
+      .map(([key, list]) => {
+        const members = [...new Map(list.map((b) => [b.id, b])).values()];
+        const activeCount = members.filter((b) => b.isActive).length;
+        return {
+          signal,
+          key,
+          autoMergeSafe,
+          activeCount,
+          retiredCount: members.length - activeCount,
+          // Only a NAME group can be "unresolved": two active brands sharing a
+          // domain or a logo is a review candidate, not a defect.
+          unresolved: autoMergeSafe && activeCount > 1,
+          brands: members.map((b) => ({
+            id: b.id,
+            name: b.name,
+            websiteUrl: b.websiteUrl,
+            isActive: Boolean(b.isActive),
+            variations: aliases.get(b.id) ?? [],
+            ...(b.isActive ? {} : { orphanedMappings: orphansByBrand.get(b.id) ?? {} }),
+          })),
+        };
+      });
   };
 
   const groups = [
@@ -614,18 +691,48 @@ brandsRouter.get("/health", async (c) => {
 
   // A brand with no primary variation would render nameless once readers move
   // off `brands.name`, so it is a health problem in its own right.
-  const missingPrimary = rows.filter((r) => !(aliases.get(r.id) ?? []).length);
+  // Retired brands legitimately hold no variations — the merge moved them to
+  // the survivor — so only ACTIVE brands can be "missing" a name.
+  const missingPrimary = rows.filter(
+    (r) => r.isActive && !(aliases.get(r.id) ?? []).length,
+  );
+
+  const unresolved = groups.filter((g) => g.unresolved);
 
   return c.json({
-    activeBrands: rows.length,
+    activeBrands: rows.filter((r) => r.isActive).length,
+    retiredBrands: retiredIds.length,
     duplicateGroups: groups,
+    /** Retired brands still referenced by other tables — should always be empty. */
+    retiredBrandsWithMappings: [...orphansByBrand.entries()].map(([brandId, tables]) => ({
+      brandId,
+      name: rows.find((r) => r.id === brandId)?.name ?? null,
+      tables,
+      total: Object.values(tables).reduce((a, b) => a + b, 0),
+    })),
     counts: {
-      byName: groups.filter((g) => g.signal === "name").length,
+      /** Name groups with >1 ACTIVE member — a live duplicate. Resolved pairs
+       *  (one active survivor + retired losers) are history, not a defect. */
+      byName: groups.filter((g) => g.signal === "name" && g.activeCount > 1).length,
+      /** Name groups already merged — reported so the history stays visible. */
+      resolvedNameGroups: groups.filter(
+        (g) => g.signal === "name" && g.activeCount <= 1,
+      ).length,
       byDomain: groups.filter((g) => g.signal === "domain").length,
       byLogo: groups.filter((g) => g.signal === "logo").length,
       missingPrimaryName: missingPrimary.length,
+      /** Groups with >1 active member — the duplicate is still live. */
+      unresolvedDuplicateGroups: unresolved.length,
+      /** Retired brands still holding FK rows, and how many rows in total. */
+      retiredBrandsWithMappings: orphansByBrand.size,
+      orphanedMappingRows: orphanedRowTotal,
     },
-    healthy: groups.length === 0 && missingPrimary.length === 0,
+    // "Healthy" deliberately ignores domain/logo groups: those are review
+    // candidates, not defects (Silestone and Dekton share a domain and are
+    // different brands). Only a live duplicate, an orphaned mapping or a
+    // nameless brand is an actual problem.
+    healthy:
+      unresolved.length === 0 && orphansByBrand.size === 0 && missingPrimary.length === 0,
   });
 });
 

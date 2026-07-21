@@ -39,6 +39,34 @@ if (health.json) {
     h.counts?.byName === 0,
     `${h.counts?.byName} name-duplicate group(s) still present`,
   );
+
+  // --- the two integrity checks that matter after a merge -------------------
+  // 1. Within a duplicate group, exactly ONE member may still be active.
+  //    More than one means the duplicate is live and still splitting its data.
+  check(
+    "no duplicate group has >1 active brand",
+    h.counts?.unresolvedDuplicateGroups === 0,
+    `${h.counts?.unresolvedDuplicateGroups} group(s) with multiple active brands: ` +
+      JSON.stringify(
+        (h.duplicateGroups ?? [])
+          .filter((g) => g.unresolved)
+          .map((g) => ({ key: g.key, brands: g.brands.filter((b) => b.isActive).map((b) => b.id) })),
+      ),
+  );
+
+  // 2. A retired brand must hold NO rows in ANY table keyed on brand_id — the
+  //    merge repoints them before flagging is_active=0. Leftovers are an
+  //    interrupted merge, and they are invisible without this check because the
+  //    rows still resolve; they just point at a brand nobody lists.
+  check(
+    "no retired brand is still mapped to relation tables",
+    h.counts?.retiredBrandsWithMappings === 0,
+    `${h.counts?.retiredBrandsWithMappings} retired brand(s) holding ` +
+      `${h.counts?.orphanedMappingRows} row(s): ` +
+      JSON.stringify(h.retiredBrandsWithMappings ?? []),
+  );
+
+  info(`retired brands: ${h.retiredBrands}`);
   info(`(informational) domain groups: ${h.counts?.byDomain}, logo groups: ${h.counts?.byLogo} — review only`);
 }
 
@@ -79,6 +107,31 @@ check(
   "merged-away duplicates are hidden from the list",
   !brands.some((b) => ["DORN BRACHT", "NEWPORTBRASS", "WET STYLE"].includes(b.primaryName)),
   "a retired duplicate is still being listed",
+);
+
+
+// --- the orphan scan must cover EVERY brand_id FK table -------------------
+// Adding a table with a brand_id FK and forgetting to add it to the health
+// endpoint would silently shrink the check, so assert the coverage list here.
+const EXPECTED_FK_TABLES = [
+  "brand_categories",
+  "brand_images",
+  "brand_intel",
+  "brand_name_variations",
+  "brand_product_lines",
+  "brand_type_mappings",
+  "showroom_brand_mappings",
+  "showroom_store_products",
+];
+const scanned = new Set(
+  (health.json?.retiredBrandsWithMappings ?? []).flatMap((r) => Object.keys(r.tables ?? {})),
+);
+// When there are no orphans there is nothing to enumerate, which is the healthy
+// case — so this only asserts that anything reported is a known table.
+check(
+  "orphan report only names known brand_id FK tables",
+  [...scanned].every((t) => EXPECTED_FK_TABLES.includes(t)),
+  `unexpected table(s): ${[...scanned].filter((t) => !EXPECTED_FK_TABLES.includes(t)).join(", ")}`,
 );
 
 process.exit(summary().failed === 0 ? 0 : 1);
