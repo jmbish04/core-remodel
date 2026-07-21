@@ -34,6 +34,8 @@ import {
   type WorkflowStep,
 } from "cloudflare:workers";
 import { drizzle } from "drizzle-orm/d1";
+
+import { harvestBrandImages } from "./brands/brand-image-harvest";
 import { eq } from "drizzle-orm";
 
 import {
@@ -440,20 +442,37 @@ export class BrandResearchWorkflow extends WorkflowEntrypoint<
         }),
       );
 
-      // ── 5. photos — candidate images → CF Images → brand_images ──────────
+      // ── 5. photos — sitemap harvest → brand_images (SOURCE urls, no CF) ──
+      //
+      // This step used to upload every candidate into CF Images and store the
+      // delivery url. It inserted NOTHING unless that upload succeeded, so a
+      // missing CF Images credential produced zero rows and no error — which is
+      // exactly how `brand_images` stayed empty. Storing the brand's own source
+      // url removes both the cost and that silent failure mode.
       await recorded(
         "photos",
-        "Uploading brand photos",
+        "Harvesting brand photos",
         4,
         () =>
           step.do("photos", async () =>
-            uploadBrandPhotos(env, brandId, site.imageUrls),
+            brand.websiteUrl
+              ? harvestBrandImages(env, brandId, brand.websiteUrl)
+              : {
+                  brandId,
+                  pagesScanned: 0,
+                  imagesConsidered: 0,
+                  imagesKept: 0,
+                  skipped: {} as Record<string, number>,
+                },
           ),
         (value) => ({
-          detail: `${value.uploaded} photo(s) uploaded`,
+          detail: `${value.imagesKept} photo(s) kept from ${value.pagesScanned} page(s)`,
           artifact: {
-            uploaded: value.uploaded,
-            deliveryUrls: value.deliveryUrls.slice(0, 6),
+            kept: value.imagesKept,
+            considered: value.imagesConsidered,
+            // The skip histogram is the whole diagnostic: a run that keeps zero
+            // images must say WHY rather than read as a silent success.
+            skipped: value.skipped,
           },
         }),
       );
@@ -994,79 +1013,6 @@ ${preview}`;
 // Step 5 — photos → Cloudflare Images → brand_images
 // ---------------------------------------------------------------------------
 
-/**
- * Upload up to {@link MAX_PHOTOS} candidate images to Cloudflare Images and
- * insert `brand_images` rows (reviewStatus "pending"). Duplicate
- * (brandId, sourceUrl) pairs are skipped via the unique index +
- * onConflictDoNothing. NEVER throws — per-image failures are logged and skipped.
- */
-async function uploadBrandPhotos(
-  env: Env,
-  brandId: number,
-  candidates: Array<{ url: string; pageUrl: string }>,
-): Promise<{ uploaded: number; deliveryUrls: string[] }> {
-  if (candidates.length === 0) return { uploaded: 0, deliveryUrls: [] };
-
-  const db = drizzle(env.DB);
-  const processor = await tryCreateProcessor(env);
-  if (!processor) {
-    console.error(`brand-research: CF Images credentials missing for brand ${brandId}`);
-    return { uploaded: 0, deliveryUrls: [] };
-  }
-
-  // Pre-check existing sourceUrls so we don't burn CF Images uploads on dupes.
-  const existingRows = await db
-    .select({ sourceUrl: brandImages.sourceUrl })
-    .from(brandImages)
-    .where(eq(brandImages.brandId, brandId));
-  const existing = new Set(existingRows.map((r) => r.sourceUrl));
-
-  let uploaded = 0;
-  const deliveryUrls: string[] = [];
-  const capped = candidates.slice(0, MAX_PHOTOS);
-  for (let i = 0; i < capped.length; i++) {
-    const { url, pageUrl } = capped[i];
-    if (existing.has(url)) continue;
-    try {
-      const resp = await fetch(url, { signal: AbortSignal.timeout(10_000) });
-      if (!resp.ok) continue;
-      const contentType = resp.headers.get("content-type") ?? "";
-      if (!contentType.toLowerCase().startsWith("image/")) continue;
-      const blob = await resp.blob();
-
-      const customId = `brand-photo-${brandId}-${i}`;
-      const upload = await processor.uploadToCloudflareImages(
-        blob,
-        customId,
-        `brand-${brandId}-${i}.jpg`,
-      );
-      const deliveryUrl = processor.getDeliveryUrl(upload, upload.result.id);
-
-      await db
-        .insert(brandImages)
-        .values({
-          brandId,
-          sourceUrl: url,
-          sourcePageUrl: pageUrl,
-          cfImageId: upload.result.id,
-          deliveryUrl,
-          imageKind: "product",
-          mimeType: contentType.split(";")[0].trim() || null,
-          reviewStatus: "pending",
-        })
-        .onConflictDoNothing();
-      uploaded++;
-      deliveryUrls.push(deliveryUrl);
-    } catch (err) {
-      console.error(
-        `brand-research: photo upload failed for brand ${brandId} (${url})`,
-        err,
-      );
-    }
-  }
-
-  return { uploaded, deliveryUrls };
-}
 
 // ---------------------------------------------------------------------------
 // Step 6 helper — PDF filename for catalog titles
