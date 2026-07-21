@@ -10,6 +10,7 @@ import { runPermitSync } from "./backend/services/dbi/permits-sync.js";
 import { dispatchDueWorkflows } from "./backend/services/workflow-dispatcher";
 import { autoHealImageUploads } from "./backend/services/image-processor/auto-heal";
 import { monitorShowroomSourcingCoverage } from "./backend/services/showroom-sourcing-monitor";
+import { pollVehicleForActiveDrive } from "./backend/services/tesla-poller";
 import { backfillShowroomPlacesData } from "./backend/services/showroom/places-backfill";
 import { sweepShowroomSales } from "./backend/services/showroom/sales";
 import { ingestCompanyEmails } from "./backend/services/gmail/ingestion";
@@ -288,6 +289,22 @@ const legacyHandler: ExportedHandler<Env> = {
       // errors (or whose workflow never started) without manual reprocessing.
       ctx.waitUntil(autoHealImageUploads(env));
       ctx.waitUntil(monitorShowroomSourcingCoverage(env));
+      // Vehicle polling. Tessie has no webhook product — its telemetry is a
+      // WebSocket the client dials — so the drive automation pulls instead.
+      // Self-gating: no active drive, or a poll within the last two minutes,
+      // and this is one indexed D1 read.
+      ctx.waitUntil(
+        pollVehicleForActiveDrive(env)
+          .then((r) => {
+            if (r.polled && r.latitude != null) {
+              console.log(
+                `[scheduled] tesla poll: shift=${r.shiftState} matched=${r.matchedStop?.name ?? "none"} ` +
+                  `home=${r.homeArrival?.reason}`,
+              );
+            }
+          })
+          .catch((err) => console.error("[scheduled] tesla poll failed:", err)),
+      );
       // One-shot re-enrichment of showroom website/hours/address from Google
       // Places (0108/0109 dropped the legacy columns before backfill). Processes
       // a small batch per tick and no-ops once every place_id store is done.

@@ -258,6 +258,39 @@ async function main() {
     teslaTools.map((t) => `${t.name}:${t.annotations?.readOnlyHint}`).join(","),
   );
 
+  // ── Vehicle polling (Tessie does not push — see services/tesla-poller) ──
+  // Force one poll and assert the whole chain runs: cached state read, stop
+  // matching, home-arrival verdict, and an event row for the history.
+  const poll = await client.req("POST", "/api/tesla/poll");
+  checks.ok("POST /api/tesla/poll → 200", poll.status === 200, `got ${poll.status}`);
+  checks.info(`  polled=${poll.json?.polled} reason=${poll.json?.reason ?? "-"} shift=${poll.json?.shiftState ?? "-"} home=${poll.json?.homeArrival?.reason ?? "-"}`);
+  checks.ok(
+    "the poll ran, or said exactly why it didn't",
+    poll.json?.polled === true ||
+      ["no-active-drive", "unconfigured", "throttled"].includes(poll.json?.reason),
+    JSON.stringify(poll.json),
+  );
+  if (poll.json?.polled && poll.json?.latitude != null) {
+    checks.ok(
+      "the poll read a real position from Tessie's cache",
+      Number.isFinite(poll.json.latitude) && Number.isFinite(poll.json.longitude),
+      JSON.stringify(poll.json),
+    );
+    checks.ok(
+      "the poll produced a home-arrival verdict",
+      typeof poll.json?.homeArrival?.reason === "string",
+      JSON.stringify(poll.json?.homeArrival),
+    );
+  }
+  // Immediately after a poll the throttle must hold — otherwise a per-minute
+  // cron would hammer Tessie 1,440 times a day.
+  const again = await client.req("POST", "/api/tesla/poll");
+  checks.ok(
+    "a second immediate poll is throttled (or there is no active drive)",
+    ["throttled", "no-active-drive", "unconfigured"].includes(again.json?.reason),
+    JSON.stringify(again.json),
+  );
+
   // The tools are thin wrappers over these endpoints; prove the endpoints work.
   const tessieStatus = await client.get("/api/tesla/status");
   checks.ok("GET /api/tesla/status → 200", tessieStatus.status === 200, `got ${tessieStatus.status}`);

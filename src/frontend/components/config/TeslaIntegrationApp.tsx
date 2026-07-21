@@ -221,9 +221,11 @@ export function TeslaIntegrationApp() {
               Fleet Telemetry recording
             </CardTitle>
             <CardDescription>
-              Tessie forwards a frame roughly every 500ms. With this on, every frame is stored in the
-              dedicated Tesla D1 — that is real write volume, so turn it off when you are not using
-              the history.
+              Tessie does not push telemetry — it exposes a WebSocket
+              (<code>streaming.tessie.com/{"{VIN}"}</code>) that a client has to dial. This switch
+              governs whether frames POSTed to <code>/api/tesla/telemetry</code> are stored at all;
+              at ~500ms a frame that is real write volume, so leave it off until something is
+              actually piping the stream.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -234,8 +236,8 @@ export function TeslaIntegrationApp() {
                   {!status.configured
                     ? "Nothing can be recorded while the integration is unconfigured — there is no vehicle to attribute frames to."
                     : status.telemetryRecordingSetting
-                      ? "Frames are being written. Webhook events (park, drive state) are recorded regardless."
-                      : "Frames are accepted and discarded. Webhook events (park, drive state) are still recorded."}
+                      ? "Frames would be written if something posted them. Position polling is unaffected — it runs regardless."
+                      : "Frames are accepted and discarded. Position polling is unaffected — it runs regardless."}
                 </p>
               </div>
               <Switch
@@ -259,7 +261,8 @@ export function TeslaIntegrationApp() {
                 </CardTitle>
                 <CardDescription>
                   Reads a live position from Tessie and checks the events already collected still
-                  carry what the automation needs — coordinates, shift state, a VIN.
+                  carry what the automation needs — coordinates and a gear — plus how position
+                  updates actually reach the Worker.
                 </CardDescription>
               </div>
               <Button onClick={() => void runHealth()} disabled={checking} className="shrink-0">
@@ -315,9 +318,13 @@ export function TeslaIntegrationApp() {
       title="Tesla / Tessie"
       description="Vehicle integration: credentials, telemetry recording, and whether the data already collected is usable."
     >
-      <div className="mb-6 flex items-center gap-2 text-sm text-muted-foreground">
-        <CarFront className="size-4" aria-hidden />
-        Drives auto-check-off stops and end at home using these events.
+      <div className="mb-6 flex items-start gap-2 text-sm text-muted-foreground">
+        <CarFront className="mt-0.5 size-4 shrink-0" aria-hidden />
+        <span>
+          While a drive list is active, the Worker polls the car's cached position every two minutes
+          — checking off stops as you park at them, and ending the drive when you get home. Cached
+          reads never wake the car, and nothing is polled when no drive is active.
+        </span>
       </div>
       {body()}
     </ConfigShell>

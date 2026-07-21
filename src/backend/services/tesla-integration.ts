@@ -24,6 +24,7 @@
  */
 import { teslaTelemetryEvents, teslaWebhookEvents } from "@backend/db/schema/tesla";
 import { getLocation, tessieConfigured } from "@backend/services/tesla";
+import { POLL_INTERVAL_SECONDS } from "@backend/services/tesla-poller";
 import { setConfigValue } from "@backend/services/usage/metering";
 import { projectSystemVariables } from "@backend/db";
 import { getTessieToken, getTeslaVin, getWorkerApiKey } from "@backend/utils/secrets";
@@ -234,12 +235,12 @@ export async function runTeslaHealthCheck(
     v == null ? null : new Date(Number(v) * 1000).toISOString();
 
   checks.push({
-    id: "webhook-history",
-    label: "Historical webhooks carry coordinates",
+    id: "event-history",
+    label: "Recorded vehicle events carry coordinates",
     status: whTotal === 0 ? "warn" : whCoords > 0 ? "ok" : "fail",
     detail:
       whTotal === 0
-        ? "No webhook events recorded yet — nothing to verify."
+        ? "No vehicle events recorded yet. Events are written by the poller, which only runs while a drive list is active — start a drive and they appear."
         : `${whCoords} of ${whTotal} events have a position. Coordinates are what the auto-visit and home-arrival rules read.`,
   });
 
@@ -257,7 +258,7 @@ export async function runTeslaHealthCheck(
     detail:
       telTotal === 0
         ? status.telemetryRecording
-          ? "Recording is on but no frames have arrived — check Tessie's Fleet Telemetry forwarding."
+          ? "Recording is enabled but no frames have arrived. Tessie does not PUSH telemetry — it exposes a WebSocket (streaming.tessie.com/{VIN}) that a client must dial — so nothing will arrive until something pipes that stream into POST /api/tesla/telemetry."
           : "Recording is off, so no frames are stored. This is the configured state, not a fault."
         : `${telCoords} of ${telTotal} frames have coordinates, ${telShift} have a shift state.`,
   });
@@ -273,8 +274,20 @@ export async function runTeslaHealthCheck(
     status: ageDays == null ? "warn" : ageDays <= staleAfterDays ? "ok" : "warn",
     detail:
       ageDays == null
-        ? "No webhook has ever been received."
-        : `Last webhook ${Math.round(ageDays)} day(s) ago (${lastWebhook}).`,
+        ? "No vehicle event has ever been recorded."
+        : `Last event ${Math.round(ageDays)} day(s) ago (${lastWebhook}).`,
+  });
+
+  // The delivery model itself, stated out loud. This is the check that would
+  // have saved the original design: the sinks were healthy and the producer
+  // did not exist.
+  checks.push({
+    id: "delivery-model",
+    label: "Position updates reach the Worker",
+    status: status.configured ? "ok" : "fail",
+    detail: status.configured
+      ? `Polled from Tessie's cached state every ${POLL_INTERVAL_SECONDS}s while a drive is active (cached reads never wake the car). Tessie has no webhook product, so nothing is pushed to us.`
+      : "Not configured — nothing can be polled.",
   });
 
   const overall: "ok" | "warn" | "fail" = checks.some((c) => c.status === "fail")

@@ -90,6 +90,7 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
     approach:
       "Split the pointer from the label. `is_active` is its own boolean column under a PARTIAL unique index (`WHERE is_active = 1`), so a second active row is a database error rather than a bug that shows up six drives later. Writes go through one service function, setActiveDrive(db, id | null), which clears and sets inside a single db.batch() — D1 never observes two active rows, and D1 has no transactions to fall back on. `status` stays as a plain lifecycle label that nothing infers from anymore: the read path and the check-off no longer rewrite it, and the tabs bucket on stops visited (0 → Pending, some → In progress, all → Finished), which is what the user actually asked the page to show.",
     apiChanges: [
+      "POST /api/tesla/poll — NEW. Forces one vehicle poll (admin); self-gates on an active drive and the 120s throttle.",
       "GET /api/config/tesla — NEW. Masked credentials + the telemetry-recording flag. Secret values are never returned.",
       "PATCH /api/config/tesla { telemetryRecording } — NEW. The recording consent switch.",
       "POST /api/config/tesla/health — NEW. Integration screening: credentials, a live Tessie position, and whether historical events still carry the fields the automation reads. `?live=0` skips the vehicle call.",
@@ -106,6 +107,8 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
       "src/backend/db/schema/drives/drive_lists.ts",
       "src/backend/services/drive-home-arrival.ts",
       "src/backend/services/tesla-integration.ts",
+      "src/backend/services/tesla-poller.ts",
+      "src/_worker.ts",
       "src/backend/mcp/tools/tesla/*.ts",
       "src/frontend/components/config/TeslaIntegrationApp.tsx",
       "src/frontend/pages/admin/config/integrations/tesla.astro",
@@ -155,6 +158,21 @@ CREATE UNIQUE INDEX \`drive_lists_single_active_uniq\` ON \`drive_lists\` (\`is_
     .where(eq(driveLists.id, id));
   await db.batch([clear, set]);
 }`,
+      },
+      {
+        title: "Tessie does not push — so poll, but only while a drive is running",
+        lang: "ts",
+        code: `// Gate 1: is a drive even running? This is the cheap one, so it goes first.
+const activeSlug = await getActiveDriveSlug(db);
+if (!activeSlug) return { polled: false, reason: "no-active-drive" };
+if (!(await tessieConfigured(env))) return { polled: false, reason: "unconfigured" };
+
+// Gate 2: throttle. KV TTL is the clock — a present key means "polled
+// recently", so no timestamp arithmetic and no clock skew to reason about.
+if (await env.CACHE.get(THROTTLE_KEY)) return { polled: false, reason: "throttled" };
+await env.CACHE.put(THROTTLE_KEY, "1", { expirationTtl: POLL_INTERVAL_SECONDS });
+
+const state = await getVehicleState(env);   // GET /{vin}/state?use_cache=true`,
       },
       {
         title: "Getting home ends the drive — every gate, cheapest first",
@@ -276,23 +294,28 @@ if (other) {
   ✓ POST /api/config/tesla/health → 200
   ✓ every probe reports a verdict
       [ok] Credentials present in the Secrets Store — TESSIE_API_TOKEN, TESLA_BETSY_VIN and WORKER_API_KEY are all set.
-      [ok] Live position read from Tessie — Vehicle reported 37.7285, -122.4140.
-      [warn] Historical webhooks carry coordinates — No webhook events recorded yet — nothing to verify.
-      [warn] Historical telemetry carries position + shift state — Recording is on but no frames have arrived — check Tessie's Fleet Telemetry forwarding.
-      [warn] Events are still arriving — No webhook has ever been received.
+      [ok] Live position read from Tessie — Vehicle reported 37.5715, -122.3148.
+      [ok] Recorded vehicle events carry coordinates — 1 of 1 events have a position. Coordinates are what the auto-visit and home-arrival rules read.
+      [warn] Historical telemetry carries position + shift state — Recording is enabled but no frames have arrived. Tessie does not PUSH telemetry — it exposes a WebSocket (streaming.tessie.com/{VIN}) that a client must dial — so nothing will arrive until something pipes that stream into POST /api/tesla/telemetry.
+      [ok] Events are still arriving — Last event 0 day(s) ago (2026-07-21T17:23:47.000Z).
+      [ok] Position updates reach the Worker — Polled from Tessie's cached state every 120s while a drive is active (cached reads never wake the car). Tessie has no webhook product, so nothing is pushed to us.
   ✓ the screening reads the historical event tables
   ✓ GET /api/mcp-docs → 200
   ✓ the tesla tool domain is registered (status, location, events, navigate)
   ✓ every tesla tool documents an example (registry contract)
   ✓ only the navigation tool is a write — the rest are read-only
+  ✓ POST /api/tesla/poll → 200
+      polled=false reason=throttled shift=- home=-
+  ✓ the poll ran, or said exactly why it didn't
+  ✓ a second immediate poll is throttled (or there is no active drive)
   ✓ GET /api/tesla/status → 200
       tessie configured: true
 
-46 passed, 0 failed
+49 passed, 0 failed
 
 $ pnpm run test:home-arrival
 
-(node:38130) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Volumes/Projects/workers/core-remodel/.claude/worktrees/showroom-scout-agent-be625a/src/backend/services/drive-home-arrival-rules.ts is not specified and it doesn't parse as CommonJS.
+(node:49682) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Volumes/Projects/workers/core-remodel/.claude/worktrees/showroom-scout-agent-be625a/src/backend/services/drive-home-arrival-rules.ts is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
 To eliminate this warning, add "type": "module" to /Volumes/Projects/workers/core-remodel/.claude/worktrees/showroom-scout-agent-be625a/package.json.
 (Use \`node --trace-warnings ...\` to show where the warning was created)

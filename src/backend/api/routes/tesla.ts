@@ -38,6 +38,7 @@ import {
 } from "@backend/services/tesla";
 import { evaluateAutomations } from "@backend/services/tesla-automations";
 import { telemetryRecordingAllowed } from "@backend/services/tesla-integration";
+import { pollVehicleForActiveDrive } from "@backend/services/tesla-poller";
 import { isRequestAuthenticated } from "@backend/utils/access";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -119,6 +120,18 @@ teslaRouter.post("/navigate", async (c) => {
   const result = await sendNavigation(c.env, dest);
   if (!result.ok) return c.json({ ok: false, error: result.error }, 502);
   return c.json({ ok: true, destination: dest });
+});
+
+/**
+ * POST /api/tesla/poll — run one vehicle poll now (admin).
+ *
+ * The same function the per-minute cron calls, exposed so a poll can be forced
+ * from the config page or a QC run rather than waiting for the schedule. It
+ * self-gates identically: no active drive, or a poll within the throttle
+ * window, and it returns the reason instead of calling Tessie.
+ */
+teslaRouter.post("/poll", async (c) => {
+  return c.json(await pollVehicleForActiveDrive(c.env));
 });
 
 /**
