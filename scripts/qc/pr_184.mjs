@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * @fileoverview QC for PR #181 — material taxonomy + the MCP surface for it.
+ * @fileoverview QC for PR #184 — material taxonomy + the MCP surface for it.
  *
  * Migrations: 0120_numerous_legion (material_categories, material_subcategories)
  *
- * Run:  pnpm run test:pr 181
- *       pnpm run test:pr 181 -- --preview
+ * Run:  pnpm run test:pr 184
+ *       pnpm run test:pr 184 -- --preview
  *
  * `material_schedule_items` carried only a free-text title, so "does a toilet
  * already exist in this project?" was unanswerable — which blocks any reasoning
@@ -27,7 +27,7 @@ const client = createClient();
 const checks = createChecks();
 
 async function main() {
-  console.log(`\nPR #181 QC → ${client.base}\n`);
+  console.log(`\nPR #184 QC → ${client.base}\n`);
   await assertReachable(client, checks);
 
   // ── Migration 0120 landed ─────────────────────────────────────────────────
