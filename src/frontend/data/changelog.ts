@@ -48,7 +48,7 @@ export const BRANCHES: ChangelogBranch[] = [
     summary:
       "\"Active\" was a value of the `status` enum, so six drive lists claimed it at once and the landing page's Active/Archived tabs bucketed on that same overloaded field. The single-slot pointer is now its own column (`is_active`) under a partial UNIQUE index, so D1 itself refuses a second active drive; the tabs bucket on what actually happened (Pending / In progress / Finished); and each card carries an Active badge plus a toggle.",
     date: "2026-07-21",
-    status: "staged",
+    status: "shipped",
     prNumber: 178,
     prUrl: "https://github.com/jmbish04/core-remodel/pull/178",
   },
@@ -131,7 +131,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     title: "One active drive list — and tabs that match how drives actually go",
     summary:
       "Only one drive can be the active one — the drive this device auto-lands on — and D1 now enforces that with a partial unique index rather than trusting app code. The drives page groups by progress instead of by lifecycle label: Pending (nothing visited yet), In progress, Finished. The active drive wears a badge, every card has a toggle, and pulling into the driveway after 3:30pm ends the drive on its own.",
-    status: "staged",
+    status: "shipped",
     changes: [
       { kind: "added", text: "drive_lists.is_active — the single-slot pointer, under a partial UNIQUE index so a second active row is rejected by the database, not just by code." },
       { kind: "added", text: "PATCH /api/drive-lists/:slug { isActive } — set THE active drive, or clear the slot entirely. Backs the per-card toggle." },

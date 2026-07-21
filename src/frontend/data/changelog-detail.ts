@@ -233,7 +233,7 @@ const state = await getVehicleState(env);   // GET /{vin}/state?use_cache=true`,
     ],
     verification: {
       qcScript: "scripts/qc/pr_178.mjs + scripts/tests/test_home_arrival.mjs",
-      command: "pnpm run test:pr 178 -- --preview  &&  pnpm run test:home-arrival",
+      command: "pnpm run test:pr 178  &&  pnpm run test:home-arrival",
       ranAt: "2026-07-21",
       source: `const on = await client.patch(\`/api/drive-lists/\${newest.slug}\`, { isActive: true });
 checks.ok(\`PATCH \${newest.slug} {isActive:true} → 200\`, on.status === 200, \`got \${on.status}\`);
@@ -247,9 +247,11 @@ if (other) {
     activeOnes(after.drives).map((d) => d.slug).join(", "),
   );
 }`,
-      output: `PR #178 QC → https://wcrp-claude-drive-lists-activation-ui-6f6e47.hacolby.workers.dev
+      output: `$ pnpm run test:pr 178          # PRODUCTION, after merge + deploy
 
-  ✓ target reachable (https://wcrp-claude-drive-lists-activation-ui-6f6e47.hacolby.workers.dev)
+PR #178 QC → https://core-remodel.hacolby.workers.dev
+
+  ✓ target reachable (https://core-remodel.hacolby.workers.dev)
   ✓ drive-lists rejects an unauthenticated read (401)
   ✓ GET /api/drive-lists → 200
   ✓ at least one drive exists to test with
@@ -294,10 +296,10 @@ if (other) {
   ✓ POST /api/config/tesla/health → 200
   ✓ every probe reports a verdict
       [ok] Credentials present in the Secrets Store — TESSIE_API_TOKEN, TESLA_BETSY_VIN and WORKER_API_KEY are all set.
-      [ok] Live position read from Tessie — Vehicle reported 37.5715, -122.3148.
-      [ok] Recorded vehicle events carry coordinates — 1 of 1 events have a position. Coordinates are what the auto-visit and home-arrival rules read.
+      [ok] Live position read from Tessie — Vehicle reported 37.5280, -122.2613.
+      [ok] Recorded vehicle events carry coordinates — 21 of 21 events have a position. Coordinates are what the auto-visit and home-arrival rules read.
       [warn] Historical telemetry carries position + shift state — Recording is enabled but no frames have arrived. Tessie does not PUSH telemetry — it exposes a WebSocket (streaming.tessie.com/{VIN}) that a client must dial — so nothing will arrive until something pipes that stream into POST /api/tesla/telemetry.
-      [ok] Events are still arriving — Last event 0 day(s) ago (2026-07-21T17:23:47.000Z).
+      [ok] Events are still arriving — Last event 0 day(s) ago (2026-07-21T18:26:24.000Z).
       [ok] Position updates reach the Worker — Polled from Tessie's cached state every 120s while a drive is active (cached reads never wake the car). Tessie has no webhook product, so nothing is pushed to us.
   ✓ the screening reads the historical event tables
   ✓ GET /api/mcp-docs → 200
@@ -350,9 +352,9 @@ homeArrivalReason
 18 passed`,
       migrations: [
         {
-          tag: "0119_yellow_micromax",
+          tag: "0122_even_martin_li (was 0119_yellow_micromax before the rebase)",
           appliedRemote: true,
-          note: "Applied 2026-07-21 via pnpm run migrate:remote. Verified on the remote DB: is_active present on all 14 rows; the newest drive (id 14, concord-corridor-sat-jul-18-sf-1pm) holds the slot after the QC run, every other row 0.",
+          note: "main landed 0119-0121 while this PR was open, so the tag was renumbered to 0122 and re-applied; both statements hit d1-migrate's idempotent path (duplicate column name / already exists) because the column was already live. Applied 2026-07-21 via pnpm run migrate:remote. Verified on the remote DB: is_active present on all 14 rows; the newest drive (id 14, concord-corridor-sat-jul-18-sf-1pm) holds the slot after the QC run, every other row 0.",
         },
       ],
     },
