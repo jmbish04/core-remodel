@@ -715,17 +715,15 @@ export async function reprocessEmail(
     .where(eq(workerEmailAttachments.emailId, emailId));
 
   // Clear prior derived rows so a re-run replaces rather than duplicates.
-  // Line items cascade from the invoice FK; staged companies are re-created by
-  // the analysis pass when the sender still matches nothing in the directory.
-  const priorInvoices = await db
-    .select({ id: workerEmailInvoices.id })
-    .from(workerEmailInvoices)
-    .where(eq(workerEmailInvoices.emailId, emailId));
-  for (const inv of priorInvoices) {
-    await db
-      .delete(workerEmailInvoiceLineItems)
-      .where(eq(workerEmailInvoiceLineItems.invoiceId, inv.id));
-  }
+  //
+  // Line items are NOT deleted explicitly: `worker_email_invoice_line_items`
+  // declares `onDelete: "cascade"` on its invoice FK and D1 reports
+  // `PRAGMA foreign_keys = 1`, so removing the invoice removes them. Verified
+  // rather than assumed — inserting an invoice with 2 line items and deleting
+  // only the invoice leaves 0 line items behind.
+  //
+  // Staged companies are re-created by the analysis pass when the sender still
+  // matches nothing in the directory.
   await db.batch([
     db.delete(workerEmailInvoices).where(eq(workerEmailInvoices.emailId, emailId)),
     db.delete(workerEmailContracts).where(eq(workerEmailContracts.emailId, emailId)),
