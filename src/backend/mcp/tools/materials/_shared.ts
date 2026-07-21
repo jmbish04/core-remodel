@@ -137,6 +137,26 @@ export async function replaceTaxonomyMappings(
   }
 }
 
+/**
+ * D1 caps a statement at 100 bound parameters, and `inArray` binds one per id.
+ * `list_materials` allows a limit of 200, so an unchunked lookup over a full
+ * page raises a runtime error the moment this project has >100 materials —
+ * invisible today with a handful of rows, a 500 later.
+ *
+ * Runs `fetchChunk` over slices of at most 90 ids and concatenates the rows.
+ */
+async function inChunks<T>(
+  ids: number[],
+  fetchChunk: (chunk: number[]) => Promise<T[]>,
+): Promise<T[]> {
+  const CHUNK = 90;
+  const out: T[] = [];
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    out.push(...(await fetchChunk(ids.slice(i, i + CHUNK))));
+  }
+  return out;
+}
+
 /** Joined category/subcategory names per material id — two queries, no N+1. */
 export async function taxonomyMap(
   db: Db,
@@ -150,28 +170,32 @@ export async function taxonomyMap(
   if (ids.length === 0) return out;
   for (const id of ids) out.set(id, { categories: [], subcategories: [] });
 
-  const catRows = await db
-    .select({
-      materialId: materialCategories.materialId,
-      id: categories.id,
-      name: categories.name,
-    })
-    .from(materialCategories)
-    .innerJoin(categories, eq(materialCategories.categoryId, categories.id))
-    .where(inArray(materialCategories.materialId, ids))
-    .all();
+  const catRows = await inChunks(ids, (chunk) =>
+    db
+      .select({
+        materialId: materialCategories.materialId,
+        id: categories.id,
+        name: categories.name,
+      })
+      .from(materialCategories)
+      .innerJoin(categories, eq(materialCategories.categoryId, categories.id))
+      .where(inArray(materialCategories.materialId, chunk))
+      .all(),
+  );
   for (const r of catRows) out.get(r.materialId)?.categories.push({ id: r.id, name: r.name });
 
-  const subRows = await db
-    .select({
-      materialId: materialSubcategories.materialId,
-      id: subcategories.id,
-      name: subcategories.name,
-    })
-    .from(materialSubcategories)
-    .innerJoin(subcategories, eq(materialSubcategories.subcategoryId, subcategories.id))
-    .where(inArray(materialSubcategories.materialId, ids))
-    .all();
+  const subRows = await inChunks(ids, (chunk) =>
+    db
+      .select({
+        materialId: materialSubcategories.materialId,
+        id: subcategories.id,
+        name: subcategories.name,
+      })
+      .from(materialSubcategories)
+      .innerJoin(subcategories, eq(materialSubcategories.subcategoryId, subcategories.id))
+      .where(inArray(materialSubcategories.materialId, chunk))
+      .all(),
+  );
   for (const r of subRows) out.get(r.materialId)?.subcategories.push({ id: r.id, name: r.name });
 
   return out;
@@ -184,10 +208,12 @@ export async function roomNameMap(
 ): Promise<Map<number, string>> {
   const ids = [...new Set(roomIds)];
   if (ids.length === 0) return new Map();
-  const rows = await db
-    .select({ id: rooms.id, roomName: rooms.roomName })
-    .from(rooms)
-    .where(inArray(rooms.id, ids))
-    .all();
+  const rows = await inChunks(ids, (chunk) =>
+    db
+      .select({ id: rooms.id, roomName: rooms.roomName })
+      .from(rooms)
+      .where(inArray(rooms.id, chunk))
+      .all(),
+  );
   return new Map(rows.map((r) => [r.id, r.roomName]));
 }

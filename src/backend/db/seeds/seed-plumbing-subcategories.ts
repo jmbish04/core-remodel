@@ -12,7 +12,7 @@
  * select-first check instead.
  */
 
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { categories } from "../schema/config/categories";
@@ -36,16 +36,26 @@ export async function seedPlumbingSubcategories(db: DrizzleD1Database) {
     return { categoryId: null, created: [] as string[] };
   }
 
-  const created: string[] = [];
-  for (const name of PLUMBING_SUBCATEGORIES) {
-    const [existing] = await db
-      .select({ id: subcategories.id })
-      .from(subcategories)
-      .where(and(eq(subcategories.name, name), eq(subcategories.categoryId, plumbing.id)));
-    if (existing) continue;
+  // One read for what already exists, one batched write for what does not —
+  // rather than a SELECT + INSERT per name. Each query is a network round trip
+  // on D1, so the loop cost 16 of them for 8 subcategories.
+  //
+  // `onConflictDoNothing` is NOT relied on here: there is no unique index on
+  // (name, category_id), so it would never fire and duplicates would accumulate
+  // on every re-run. The pre-read is what makes this idempotent.
+  const existing = await db
+    .select({ name: subcategories.name })
+    .from(subcategories)
+    .where(eq(subcategories.categoryId, plumbing.id))
+    .all();
+  const have = new Set(existing.map((row) => row.name));
 
-    await db.insert(subcategories).values({ name, categoryId: plumbing.id });
-    created.push(name);
+  const created = PLUMBING_SUBCATEGORIES.filter((name) => !have.has(name));
+  if (created.length > 0) {
+    const stmts = created.map((name) =>
+      db.insert(subcategories).values({ name, categoryId: plumbing.id }),
+    );
+    await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
   }
 
   console.log(`✅ Plumbing subcategories seeded (${created.length} new: ${created.join(", ") || "none"}).`);
