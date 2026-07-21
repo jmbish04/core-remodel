@@ -1,0 +1,21 @@
+{
+  "plan": {
+    "slug": "0027_health_status_page",
+    "title": "Public /health page with an on-demand live health screen",
+    "description": "Public /health page + POST /api/health/run that actively probes the worker's core bindings (D1, TESLA_DB, KV, R2, Workers AI) and renders per-service status + latency. Reuses health_checks; no schema change. See docs/0027_health_status_page/ and preview changelog /admin/changelog/preview/health-status-page.",
+    "docPath": "docs/0027_health_status_page",
+    "status": "in_progress",
+    "sortOrder": 27
+  },
+  "legend": {
+    "status": ["pending", "in_progress", "blocked", "deferred", "done"],
+    "changeType": ["new", "update", "move", "delete", "keep", "investigate", "recover"],
+    "note": "Mirrors D1 plan_tasks (seeded via submit_feature_proposal, slug health-status-page). All built in PR #182."
+  },
+  "tasks": [
+    { "taskKey": "H-01", "workstream": "services", "phase": 0, "changeType": "new", "status": "done", "title": "runHealthScreen service probing core bindings", "description": "services/health/screen.ts: probe D1+TESLA_DB (SELECT 1), KV put/get, R2 head, AI presence; time each; write one health_checks row per service via db.batch; roll up overall. No probe throws out.", "dependsOn": [] },
+    { "taskKey": "H-02", "workstream": "api", "phase": 0, "changeType": "new", "status": "done", "title": "POST /api/health/run endpoint", "description": "Public on-demand trigger; returns per-service results; 200 even when a service is down.", "dependsOn": ["H-01"] },
+    { "taskKey": "H-03", "workstream": "frontend", "phase": 0, "changeType": "new", "status": "done", "title": "/health public page + HealthCheckApp island", "description": "Thin health.astro + island: snapshot on mount, Run button, per-service cards (status badge + latency), overall roll-up.", "dependsOn": ["H-02"] },
+    { "taskKey": "H-04", "workstream": "qc", "phase": 0, "changeType": "new", "status": "done", "title": "QC pr_182", "description": "scripts/qc/pr_182.mjs: GET /api/health regression, POST /run shape + service coverage, history, /health HTML; preview + prod-pending aware.", "dependsOn": ["H-02"] }
+  ]
+}
