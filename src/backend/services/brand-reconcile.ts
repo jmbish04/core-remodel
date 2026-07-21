@@ -38,13 +38,23 @@ import { parseStructuredResponse } from "@backend/utils/ai-json";
 /**
  * Pinned deliberately rather than taken from the model registry.
  *
- * `getModelRegistry(env).extract` is still `@cf/moonshotai/kimi-k2.6`, a
- * reasoning model that spends its whole token budget on `reasoning_content` and
- * returns `content: ""` — measured at ~59s for nothing. gpt-oss-120b answers the
- * same prompt in ~7-10s. See the product-research workflow, which pins it for
- * the same reason.
+ * NOTE the version — k2.6 and k2.7-code behave completely differently here, so
+ * this is not interchangeable with whatever else says "kimi":
+ *   kimi-k2.6       spends the whole budget on reasoning and returns
+ *                   `content: ""` with finish_reason "length". ~59s for nothing.
+ *                   This is what silently produced all-null extractions for
+ *                   months. It is still what `getModelRegistry(env).extract`
+ *                   points at — see agent issue #6.
+ *   kimi-k2.7-code  ~10s, valid JSON, finish_reason "stop". Verified on this
+ *                   exact prompt: 3/3 identical runs, and it correctly split
+ *                   "Visual Comfort & Co." (same company -> skip) from
+ *                   "Kohler Signature Store" (distinct entity -> create).
+ *
+ * gpt-oss-120b is the measured fallback if this ever regresses: same answers,
+ * ~2s, but it also carries a `reasoning` field and will return empty content if
+ * `max_tokens` is tight.
  */
-const RECONCILE_MODEL = "@cf/openai/gpt-oss-120b" as const;
+const RECONCILE_MODEL = "@cf/moonshotai/kimi-k2.7-code" as const;
 
 /** Enough for a full decision set; short of this the JSON truncates mid-object. */
 const MAX_TOKENS = 4096;
