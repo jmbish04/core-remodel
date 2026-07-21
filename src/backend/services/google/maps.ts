@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { and, sql } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { googleMapsUsage } from "@backend/db/schema";
@@ -12,6 +12,50 @@ import { getGoogleMapsApiKey } from "@/backend/utils/secrets";
  * behind `isUnderMonthlyQuota()` to prevent runaway spend.
  */
 export const MAPS_MONTHLY_FREE_TIER_LIMIT = 10_000;
+
+/**
+ * Per-API monthly request caps — the hard block that keeps a single Google
+ * Maps SKU from spilling past the free tier and incurring charges. The $200/mo
+ * free credit is a SHARED pool across all Maps APIs, so these per-SKU counts are
+ * deliberately conservative proxies: exhausting one SKU blocks ONLY that SKU
+ * (e.g. Geocoding running out never blocks a Places call), and the sum stays well
+ * under the credit. Tune from the usage dashboard as real traffic settles.
+ */
+export const MAPS_API_QUOTAS = {
+  /** Places API (New): autocomplete, details, text/nearby search, photos. */
+  places: 8_000,
+  /** Geocoding API: reverse-geocode (lat/lng → address). */
+  geocoding: 8_000,
+  /** Routes API: computeRoutes, computeRouteMatrix. */
+  routes: 8_000,
+} as const;
+
+export type MapsApiSku = keyof typeof MAPS_API_QUOTAS;
+
+/**
+ * Map a usage-log bucket (`coalesce(endpoint, api_type)`) to its billed SKU, so
+ * per-SKU counts can be summed from the existing `google_maps_usage_log` rows.
+ * Returns null for non-Maps rows (e.g. `gemini:*`) so they never count against a
+ * Maps quota.
+ */
+export function skuForUsageBucket(bucket: string): MapsApiSku | null {
+  const b = bucket.toLowerCase();
+  if (b.startsWith("routes:") || b.includes("computeroute") || b.includes("distancematrix")) {
+    return "routes";
+  }
+  if (b.startsWith("geocode") || b.includes("reverse")) return "geocoding";
+  if (
+    b.startsWith("places:") ||
+    b.includes("autocomplete") ||
+    b.includes("details") ||
+    b.includes("textsearch") ||
+    b.includes("nearby") ||
+    b.includes("photo")
+  ) {
+    return "places";
+  }
+  return null;
+}
 
 /**
  * Optional metadata written alongside the base logUsage fields.
@@ -70,43 +114,19 @@ export class GoogleMapsService {
 
   // ─── Quota helpers ────────────────────────────────────────────────────────
 
+  /**
+   * Generic "may I call Google Maps at all this month" guard, kept for the
+   * external callers that predate the per-SKU model.
+   *
+   * REIMPLEMENTED: it used to compute the month window with `.getTime()`
+   * (MILLISECONDS) while the `timestamp` column stores Unix SECONDS, so its
+   * boundary was ~1000× off and it also used a second, divergent cap (8000). It
+   * now delegates to the SARGABLE seconds-correct `getMonthlyUsage()` and the one
+   * overall free-tier limit — a single source of truth. For a specific API,
+   * prefer the per-SKU `isUnderApiQuota(sku)`.
+   */
   async canUseGoogleMaps(): Promise<boolean> {
-    const db = drizzle(this.env.DB);
-    const now = new Date();
-    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-    const currentMonthEnd = new Date(
-      now.getFullYear(),
-      now.getMonth() + 1,
-      0,
-      23,
-      59,
-      59,
-      999,
-    ).getTime();
-
-    // Google Maps Free Tier: $200/mo.
-    // Places Text Search ($17/1000) + Routes ($5/1000) = $22 per 1000 dual-requests.
-    // Total maximum dual-requests before exceeding $200 is ~9000. Capped at 8000 for safety.
-    const MAX_CALLS_PER_MONTH = 8000;
-
-    try {
-      const usageQuery = await db
-        .select({ total: sql<number>`count(${googleMapsUsage.id})` })
-        .from(googleMapsUsage)
-        .where(
-          and(
-            sql`${googleMapsUsage.timestamp} >= ${currentMonthStart}`,
-            sql`${googleMapsUsage.timestamp} <= ${currentMonthEnd}`,
-          ),
-        )
-        .get();
-
-      return (usageQuery?.total ?? 0) <= MAX_CALLS_PER_MONTH;
-    } catch (e) {
-      console.error("Failed to check Google Maps usage:", e);
-      // Fail-open strategy if D1 schema isn't migrated yet
-      return true;
-    }
+    return this.isUnderMonthlyQuota();
   }
 
   /**
@@ -182,6 +202,41 @@ export class GoogleMapsService {
     return total < MAPS_MONTHLY_FREE_TIER_LIMIT;
   }
 
+  /**
+   * Roll the per-endpoint monthly counts up into per-SKU totals (places /
+   * geocoding / routes), reusing the SARGABLE `getMonthlyUsage()` query. Buckets
+   * that don't map to a Maps SKU (e.g. `gemini:*`) are dropped.
+   */
+  async getUsageBySku(): Promise<{
+    bySku: Record<MapsApiSku, number>;
+    total: number;
+    month: string;
+  }> {
+    const { byEndpoint, total, month } = await this.getMonthlyUsage();
+    const bySku: Record<MapsApiSku, number> = { places: 0, geocoding: 0, routes: 0 };
+    for (const [bucket, count] of Object.entries(byEndpoint)) {
+      const sku = skuForUsageBucket(bucket);
+      if (sku) bySku[sku] += Number(count);
+    }
+    return { bySku, total, month };
+  }
+
+  /**
+   * PER-API hard block: true when THIS SKU is still under its monthly cap. A SKU
+   * over its cap is blocked on its own — the others keep working. Fails OPEN on a
+   * read error (e.g. the usage table hasn't migrated yet) so a transient D1 issue
+   * never bricks every Maps call; the cap is a cost guard, not a correctness gate.
+   */
+  async isUnderApiQuota(sku: MapsApiSku): Promise<boolean> {
+    try {
+      const { bySku } = await this.getUsageBySku();
+      return bySku[sku] < MAPS_API_QUOTAS[sku];
+    } catch (e) {
+      console.error(`Failed to check Google Maps ${sku} quota:`, e);
+      return true;
+    }
+  }
+
   // ─── Logging ─────────────────────────────────────────────────────────────
 
   /**
@@ -242,7 +297,7 @@ export class GoogleMapsService {
     input: string,
     sessionToken?: string,
   ): Promise<{ suggestions: Array<{ placeId: string; text: string }> }> {
-    if (!(await this.isUnderMonthlyQuota())) {
+    if (!(await this.isUnderApiQuota("places"))) {
       throw new Error("MAPS_QUOTA_EXCEEDED");
     }
 
@@ -325,7 +380,7 @@ export class GoogleMapsService {
     sessionToken?: string,
     opts?: { skipAi?: boolean },
   ): Promise<Record<string, unknown>> {
-    if (!(await this.isUnderMonthlyQuota())) {
+    if (!(await this.isUnderApiQuota("places"))) {
       throw new Error("MAPS_QUOTA_EXCEEDED");
     }
 
@@ -990,7 +1045,7 @@ Rules for each field:
     latitude: number | null;
     longitude: number | null;
   } | null> {
-    if (!(await this.isUnderMonthlyQuota())) {
+    if (!(await this.isUnderApiQuota("places"))) {
       throw new Error("MAPS_QUOTA_EXCEEDED");
     }
 
@@ -1064,7 +1119,7 @@ Rules for each field:
    * @throws Error('PLACES_DETAILS_ERROR: <message>') on upstream failure.
    */
   async placeAddressComponents(placeId: string): Promise<ParsedAddress | null> {
-    if (!(await this.isUnderMonthlyQuota())) {
+    if (!(await this.isUnderApiQuota("places"))) {
       throw new Error("MAPS_QUOTA_EXCEEDED");
     }
     const gmapKey = await getGoogleMapsApiKey(this.env);
@@ -1136,7 +1191,7 @@ Rules for each field:
       location: { latitude: number; longitude: number } | null;
     }>
   > {
-    if (!(await this.isUnderMonthlyQuota())) {
+    if (!(await this.isUnderApiQuota("places"))) {
       throw new Error("MAPS_QUOTA_EXCEEDED");
     }
 
@@ -1228,6 +1283,189 @@ Rules for each field:
             ? { latitude: p.location.latitude, longitude: p.location.longitude }
             : null,
       }));
+  }
+
+  // ─── Geocoding API — reverse geocode ─────────────────────────────────────
+
+  /**
+   * Reverse-geocode a coordinate to a formatted address + granular parts.
+   *
+   * Backs the location MCP tools ("what did I just pass?"). Gated PER-API on the
+   * `geocoding` SKU — running out of Geocoding quota blocks only this, never a
+   * Places call — and logged as `geocode:reverse`. Returns null on quota block,
+   * no result, or an API error (never throws, so a caller can degrade to raw
+   * coords).
+   *
+   * @throws never — returns null instead, so the location tools stay resilient.
+   */
+  async reverseGeocode(
+    latitude: number,
+    longitude: number,
+  ): Promise<ParsedAddress | null> {
+    if (!(await this.isUnderApiQuota("geocoding"))) {
+      // Quota block is not an error for the caller — degrade to raw coordinates.
+      await this.logUsage(
+        "geocode:reverse",
+        { latitude, longitude },
+        { skipped: "quota" },
+        { endpoint: "geocode:reverse" },
+      );
+      return null;
+    }
+
+    const gmapKey = await getGoogleMapsApiKey(this.env);
+    const url =
+      `https://maps.googleapis.com/maps/api/geocode/json` +
+      `?latlng=${encodeURIComponent(`${latitude},${longitude}`)}&key=${gmapKey}`;
+
+    try {
+      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      const data = (await res.json()) as {
+        status?: string;
+        results?: Array<{
+          formatted_address?: string;
+          address_components?: Array<{ long_name?: string; short_name?: string; types?: string[] }>;
+        }>;
+        error_message?: string;
+      };
+
+      await this.logUsage(
+        "geocode:reverse",
+        { latitude, longitude },
+        { status: data.status, resultCount: data.results?.length ?? 0, statusCode: res.status },
+        { endpoint: "geocode:reverse", statusCode: res.status },
+      );
+
+      const top = data.results?.[0];
+      if (!res.ok || data.status !== "OK" || !top) return null;
+
+      // The classic Geocoding API uses snake_case address_components; map to the
+      // same ParsedAddress shape the Places (v1) parser produces.
+      const comps = top.address_components ?? [];
+      const pick = (type: string, short = false): string | null => {
+        const c = comps.find((x) => x.types?.includes(type));
+        if (!c) return null;
+        return (short ? c.short_name : c.long_name) ?? c.long_name ?? c.short_name ?? null;
+      };
+      return {
+        formattedAddress: top.formatted_address ?? null,
+        streetNumber: pick("street_number"),
+        streetName: pick("route"),
+        city: pick("locality") ?? pick("postal_town") ?? pick("sublocality"),
+        state: pick("administrative_area_level_1", true),
+        zipCode: pick("postal_code"),
+        googleMapsUri: null,
+      };
+    } catch (e) {
+      console.error("reverseGeocode failed:", e);
+      return null;
+    }
+  }
+
+  // ─── Places API — nearby search ──────────────────────────────────────────
+
+  /**
+   * Places Nearby Search around a point — the "what's near me" primitive for the
+   * on-the-road discovery flow. Gated PER-API on the `places` SKU and logged as
+   * `places:searchNearby`. Returns [] on quota block or error (never throws).
+   */
+  async placesNearby(
+    latitude: number,
+    longitude: number,
+    radiusM: number,
+    opts?: { includedTypes?: string[]; maxResults?: number },
+  ): Promise<
+    Array<{
+      placeId: string;
+      displayName: string | null;
+      formattedAddress: string | null;
+      rating: number | null;
+      userRatingCount: number | null;
+      primaryType: string | null;
+      types: string[];
+      location: { latitude: number; longitude: number } | null;
+    }>
+  > {
+    if (!(await this.isUnderApiQuota("places"))) {
+      await this.logUsage(
+        "places:searchNearby",
+        { latitude, longitude, radiusM },
+        { skipped: "quota" },
+        { endpoint: "nearby" },
+      );
+      return [];
+    }
+
+    const gmapKey = await getGoogleMapsApiKey(this.env);
+    const maxResultCount = Math.min(Math.max(opts?.maxResults ?? 15, 1), 20);
+    const requestBody: Record<string, unknown> = {
+      maxResultCount,
+      locationRestriction: {
+        circle: {
+          center: { latitude, longitude },
+          // Places Nearby caps the radius at 50 km.
+          radius: Math.min(Math.max(radiusM, 1), 50_000),
+        },
+      },
+    };
+    if (opts?.includedTypes?.length) requestBody.includedTypes = opts.includedTypes;
+
+    try {
+      const res = await fetch("https://places.googleapis.com/v1/places:searchNearby", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Goog-Api-Key": gmapKey,
+          "X-Goog-FieldMask":
+            "places.id,places.displayName,places.formattedAddress,places.rating," +
+            "places.userRatingCount,places.location,places.primaryType,places.types",
+        },
+        body: JSON.stringify(requestBody),
+        signal: AbortSignal.timeout(5000),
+      });
+
+      const data = (await res.json()) as {
+        places?: Array<{
+          id?: string;
+          displayName?: { text?: string };
+          formattedAddress?: string;
+          rating?: number;
+          userRatingCount?: number;
+          primaryType?: string;
+          types?: string[];
+          location?: { latitude?: number; longitude?: number };
+        }>;
+        error?: { message?: string };
+      };
+
+      await this.logUsage(
+        "places:searchNearby",
+        requestBody,
+        { resultCount: data.places?.length ?? 0, statusCode: res.status },
+        { endpoint: "nearby", statusCode: res.status },
+      );
+
+      if (!res.ok) return [];
+
+      return (data.places ?? [])
+        .filter((p): p is typeof p & { id: string } => Boolean(p.id))
+        .map((p) => ({
+          placeId: p.id,
+          displayName: p.displayName?.text ?? null,
+          formattedAddress: p.formattedAddress ?? null,
+          rating: typeof p.rating === "number" ? p.rating : null,
+          userRatingCount: typeof p.userRatingCount === "number" ? p.userRatingCount : null,
+          primaryType: p.primaryType ?? null,
+          types: Array.isArray(p.types) ? p.types : [],
+          location:
+            p.location?.latitude != null && p.location?.longitude != null
+              ? { latitude: p.location.latitude, longitude: p.location.longitude }
+              : null,
+        }));
+    } catch (e) {
+      console.error("placesNearby failed:", e);
+      return [];
+    }
   }
 
   async computeCommute(
@@ -1350,7 +1588,7 @@ Rules for each field:
     if (waypoints.length > 25) {
       throw new Error(`computeRouteMatrix supports at most 25 waypoints (got ${waypoints.length})`);
     }
-    if (!(await this.canUseGoogleMaps())) {
+    if (!(await this.isUnderApiQuota("routes"))) {
       throw new Error("MAPS_QUOTA_EXCEEDED");
     }
 

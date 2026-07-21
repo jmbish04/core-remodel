@@ -50,6 +50,7 @@ import {
 import { faviconService } from "@backend/services/favicon";
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { resolveCloudflareImagesCredentials, getGoogleMapsApiKey } from "@backend/utils/secrets";
+import { GoogleMapsService } from "@backend/services/google/maps";
 import { inferAndMapCategories } from "@backend/utils/showroom-categories";
 import { getStoreWebsiteUrl } from "@backend/utils/showroom-links";
 import { getAgentByName } from "agents";
@@ -664,12 +665,28 @@ export async function runPhotoPipeline(env: Env, showroomId: number, photos: Pla
   }
 
   const db = drizzle(env.DB);
+  const maps = new GoogleMapsService(env);
+  // Places Photo is a billed Places SKU. This loop previously fetched it with
+  // NO quota guard and NO usage log, so it spent outside the counter. Gate it on
+  // the per-API Places quota and log every fetch.
+  if (!(await maps.isUnderApiQuota("places"))) {
+    console.warn(
+      `[showroom-onboarding] photos: Places quota exhausted — skipping photos for store ${showroomId}`,
+    );
+    return;
+  }
   const capped = photos.slice(0, 5);
   for (let i = 0; i < capped.length; i++) {
     const photo = capped[i];
     try {
       const mediaUrl = `https://places.googleapis.com/v1/${photo.name}/media?maxWidthPx=1600&key=${mapsKey}`;
       const res = await fetch(mediaUrl, { signal: AbortSignal.timeout(8000) });
+      await maps.logUsage(
+        "places:photo",
+        { photoName: photo.name },
+        { statusCode: res.status },
+        { endpoint: "photo", statusCode: res.status },
+      );
       if (!res.ok) {
         console.warn(
           `[showroom-onboarding] photos: non-ok ${res.status} for photo ${i} of store ${showroomId}`,

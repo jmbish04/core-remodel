@@ -18,6 +18,7 @@ import { sql } from "drizzle-orm";
 
 import {
   GoogleMapsService,
+  MAPS_API_QUOTAS,
   MAPS_MONTHLY_FREE_TIER_LIMIT,
 } from "@/backend/services/google/maps";
 import { geminiUsage } from "@backend/db/schema";
@@ -89,6 +90,20 @@ const IntegrationsUsageSchema = z.object({
       example: 3.5,
     }),
   by_endpoint: ByEndpointSchema,
+  by_sku: z
+    .object({
+      places: z.number().int(),
+      geocoding: z.number().int(),
+      routes: z.number().int(),
+    })
+    .openapi({ description: "Per-API SKU request counts this month (the per-API hard-block buckets)." }),
+  quotas: z
+    .object({
+      places: z.number().int(),
+      geocoding: z.number().int(),
+      routes: z.number().int(),
+    })
+    .openapi({ description: "Per-API monthly caps; a SKU at/over its cap is hard-blocked on its own." }),
   plan: z
     .string()
     .openapi({ description: "Current Google Maps billing plan label.", example: "free_tier" }),
@@ -128,6 +143,7 @@ adminIntegrationsRouter.openapi(
     try {
       const service = new GoogleMapsService(c.env);
       const { total, byEndpoint, month } = await service.getMonthlyUsage();
+      const { bySku } = await service.getUsageBySku();
 
       // Ensure the two fixed frontend rows are always present even when zero.
       const by_endpoint = {
@@ -145,6 +161,8 @@ adminIntegrationsRouter.openapi(
           total_requests: total,
           percentage_used,
           by_endpoint,
+          by_sku: bySku,
+          quotas: MAPS_API_QUOTAS,
           plan: "free_tier",
         },
         200,
