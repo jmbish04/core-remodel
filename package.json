@@ -55,7 +55,8 @@
     "test:cats": "node scripts/tests/test_showroom_categories.mjs",
     "test:quality": "node scripts/tests/test_showroom_quality.mjs",
     "showroom:audit": "node scripts/showroom-audit.mjs",
-    "showroom:backfill": "node scripts/showroom-backfill.mjs"
+    "showroom:backfill": "node scripts/showroom-backfill.mjs",
+    "test:metering": "node scripts/tests/test_usage_metering.mjs"
   },
   "dependencies": {
     "@a2a-js/sdk": "^0.3.13",
