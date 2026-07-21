@@ -56,9 +56,12 @@ const purchasedSchema = z.object({
   purchasedShowroomProductId: z.number().int().positive().optional().nullable(),
 });
 
+// .max(50): the validation below binds one parameter per id via inArray, and
+// D1 caps a statement at 100 bound parameters. The vocabulary is ~8 categories
+// and ~15 subcategories, so this is far above any real call.
 const materialCategoriesPutSchema = z.object({
-  categoryIds: z.array(z.number().int().positive()).default([]),
-  subcategoryIds: z.array(z.number().int().positive()).default([]),
+  categoryIds: z.array(z.number().int().positive()).max(50).default([]),
+  subcategoryIds: z.array(z.number().int().positive()).max(50).default([]),
 });
 
 function parseId(raw: string | undefined): number | null {
@@ -313,6 +316,46 @@ materialsRouter.put("/:id/categories", async (c) => {
   }
 
   const db = drizzle(c.env.DB);
+
+  // Validate the ids BEFORE writing. Without this an unknown id reaches the FK
+  // and D1 raises a constraint error the handler does not catch — a 500 that
+  // tells the caller nothing, when the real answer is "that id does not exist".
+  // The MCP tool guards the same way (assertActiveTaxonomyIds); this is the
+  // REST equivalent, and the two must not drift.
+  const wantedCats = [...new Set(parsed.data.categoryIds ?? [])];
+  if (wantedCats.length > 0) {
+    const found = await db
+      .select({ id: categories.id })
+      .from(categories)
+      .where(and(inArray(categories.id, wantedCats), eq(categories.isActive, true)))
+      .all();
+    const ok = new Set(found.map((r) => r.id));
+    const bad = wantedCats.filter((x) => !ok.has(x));
+    if (bad.length > 0) {
+      return c.json(
+        { error: `Unknown or inactive category id(s): ${bad.join(", ")}` },
+        400,
+      );
+    }
+  }
+
+  const wantedSubs = [...new Set(parsed.data.subcategoryIds ?? [])];
+  if (wantedSubs.length > 0) {
+    const found = await db
+      .select({ id: subcategories.id })
+      .from(subcategories)
+      .where(and(inArray(subcategories.id, wantedSubs), eq(subcategories.isActive, true)))
+      .all();
+    const ok = new Set(found.map((r) => r.id));
+    const bad = wantedSubs.filter((x) => !ok.has(x));
+    if (bad.length > 0) {
+      return c.json(
+        { error: `Unknown or inactive subcategory id(s): ${bad.join(", ")}` },
+        400,
+      );
+    }
+  }
+
   const categoryIds = await replaceMapping(
     db,
     materialCategories,
