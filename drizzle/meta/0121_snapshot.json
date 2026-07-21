@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "08d4ba67-ff22-46fa-bf18-b312d764e2b9",
+  "id": "c9219894-b3d9-45aa-8308-89601ebaeed3",
   "prevId": "074a4bd6-5d73-4e51-af50-58808f71ffb6",
   "tables": {
     "users": {
@@ -14463,6 +14463,154 @@
           "tableTo": "material_schedule_items",
           "columnsFrom": [
             "material_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "material_categories": {
+      "name": "material_categories",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "material_id": {
+          "name": "material_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "category_id": {
+          "name": "category_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        }
+      },
+      "indexes": {
+        "material_categories_material_category_uniq": {
+          "name": "material_categories_material_category_uniq",
+          "columns": [
+            "material_id",
+            "category_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "material_categories_material_id_material_schedule_items_id_fk": {
+          "name": "material_categories_material_id_material_schedule_items_id_fk",
+          "tableFrom": "material_categories",
+          "tableTo": "material_schedule_items",
+          "columnsFrom": [
+            "material_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "material_categories_category_id_categories_id_fk": {
+          "name": "material_categories_category_id_categories_id_fk",
+          "tableFrom": "material_categories",
+          "tableTo": "categories",
+          "columnsFrom": [
+            "category_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "material_subcategories": {
+      "name": "material_subcategories",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "material_id": {
+          "name": "material_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subcategory_id": {
+          "name": "subcategory_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        }
+      },
+      "indexes": {
+        "material_subcategories_material_subcategory_uniq": {
+          "name": "material_subcategories_material_subcategory_uniq",
+          "columns": [
+            "material_id",
+            "subcategory_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "material_subcategories_material_id_material_schedule_items_id_fk": {
+          "name": "material_subcategories_material_id_material_schedule_items_id_fk",
+          "tableFrom": "material_subcategories",
+          "tableTo": "material_schedule_items",
+          "columnsFrom": [
+            "material_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "material_subcategories_subcategory_id_subcategories_id_fk": {
+          "name": "material_subcategories_subcategory_id_subcategories_id_fk",
+          "tableFrom": "material_subcategories",
+          "tableTo": "subcategories",
+          "columnsFrom": [
+            "subcategory_id"
           ],
           "columnsTo": [
             "id"

@@ -8,18 +8,22 @@
 
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { eq, desc, and, like, inArray, sql } from "drizzle-orm";
+import { eq, desc, and, like, inArray, sql, asc } from "drizzle-orm";
 
 import {
   materialScheduleItems,
   materialRequiredSpecs,
+  materialCategories,
+  materialSubcategories,
 } from "@backend/db/schema/materials/index";
 import { rooms } from "@backend/db/schema/home/rooms";
+import { categories, subcategories } from "@backend/db/schema/config/index";
 import {
   showroomStoreProducts,
   productSpecs,
 } from "@backend/db/schema/showroom/index";
 import { z } from "zod";
+import { replaceMapping } from "./config";
 
 export const materialsRouter = new Hono<{ Bindings: Env }>();
 
@@ -50,6 +54,14 @@ const updateMaterialSchema = z.object({
 const purchasedSchema = z.object({
   isPurchased: z.boolean(),
   purchasedShowroomProductId: z.number().int().positive().optional().nullable(),
+});
+
+// .max(50): the validation below binds one parameter per id via inArray, and
+// D1 caps a statement at 100 bound parameters. The vocabulary is ~8 categories
+// and ~15 subcategories, so this is far above any real call.
+const materialCategoriesPutSchema = z.object({
+  categoryIds: z.array(z.number().int().positive()).max(50).default([]),
+  subcategoryIds: z.array(z.number().int().positive()).max(50).default([]),
 });
 
 function parseId(raw: string | undefined): number | null {
@@ -252,6 +264,137 @@ materialsRouter.put("/:id/purchased", async (c) => {
   if (!material) return c.json({ error: "Material not found" }, 404);
 
   return c.json({ material });
+});
+
+// ─── Categories / Subcategories ─────────────────────────────────────────────────
+// "What kind of thing is this material?" — the deduction engine needs this to
+// answer "does a toilet already exist" (AGENTS.md "Multi-select & config-driven
+// definitions"). Mirrors the /photos/:photoId/categories shape in config.ts.
+
+/**
+ * GET /:id/categories — the material's category + subcategory mappings.
+ */
+materialsRouter.get("/:id/categories", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (id === null) return c.json({ error: "Invalid material id" }, 400);
+  const db = drizzle(c.env.DB);
+
+  const categoryRows = await db
+    .select({ id: categories.id, name: categories.name, description: categories.description })
+    .from(materialCategories)
+    .innerJoin(categories, eq(materialCategories.categoryId, categories.id))
+    .where(eq(materialCategories.materialId, id))
+    .orderBy(asc(categories.name));
+
+  const subcategoryRows = await db
+    .select({ id: subcategories.id, name: subcategories.name, categoryId: subcategories.categoryId })
+    .from(materialSubcategories)
+    .innerJoin(subcategories, eq(materialSubcategories.subcategoryId, subcategories.id))
+    .where(eq(materialSubcategories.materialId, id))
+    .orderBy(asc(subcategories.name));
+
+  return c.json({ categories: categoryRows, subcategories: subcategoryRows });
+});
+
+/**
+ * PUT /:id/categories — replace this material's category + subcategory
+ * mappings. Body: { categoryIds: number[], subcategoryIds: number[] }.
+ */
+materialsRouter.put("/:id/categories", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (id === null) return c.json({ error: "Invalid material id" }, 400);
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const parsed = materialCategoriesPutSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
+  }
+
+  const db = drizzle(c.env.DB);
+
+  // Validate the ids BEFORE writing. Without this an unknown id reaches the FK
+  // and D1 raises a constraint error the handler does not catch — a 500 that
+  // tells the caller nothing, when the real answer is "that id does not exist".
+  // The MCP tool guards the same way (assertActiveTaxonomyIds); this is the
+  // REST equivalent, and the two must not drift.
+  const wantedCats = [...new Set(parsed.data.categoryIds ?? [])];
+  if (wantedCats.length > 0) {
+    const found = await db
+      .select({ id: categories.id })
+      .from(categories)
+      .where(and(inArray(categories.id, wantedCats), eq(categories.isActive, true)))
+      .all();
+    const ok = new Set(found.map((r) => r.id));
+    const bad = wantedCats.filter((x) => !ok.has(x));
+    if (bad.length > 0) {
+      return c.json(
+        { error: `Unknown or inactive category id(s): ${bad.join(", ")}` },
+        400,
+      );
+    }
+  }
+
+  const wantedSubs = [...new Set(parsed.data.subcategoryIds ?? [])];
+  if (wantedSubs.length > 0) {
+    const found = await db
+      .select({ id: subcategories.id })
+      .from(subcategories)
+      .where(and(inArray(subcategories.id, wantedSubs), eq(subcategories.isActive, true)))
+      .all();
+    const ok = new Set(found.map((r) => r.id));
+    const bad = wantedSubs.filter((x) => !ok.has(x));
+    if (bad.length > 0) {
+      return c.json(
+        { error: `Unknown or inactive subcategory id(s): ${bad.join(", ")}` },
+        400,
+      );
+    }
+  }
+
+  const categoryIds = await replaceMapping(
+    db,
+    materialCategories,
+    materialCategories.materialId,
+    id,
+    parsed.data.categoryIds,
+    (categoryId) => ({ materialId: id, categoryId }),
+  );
+  const subcategoryIds = await replaceMapping(
+    db,
+    materialSubcategories,
+    materialSubcategories.materialId,
+    id,
+    parsed.data.subcategoryIds,
+    (subcategoryId) => ({ materialId: id, subcategoryId }),
+  );
+
+  return c.json({ materialId: id, categoryIds, subcategoryIds });
+});
+
+/**
+ * GET /by-subcategory/:subcategoryId — materials carrying that subcategory,
+ * e.g. "which materials are toilets". The deduction-engine query.
+ */
+materialsRouter.get("/by-subcategory/:subcategoryId", async (c) => {
+  const subcategoryId = parseId(c.req.param("subcategoryId"));
+  if (subcategoryId === null) return c.json({ error: "Invalid subcategory id" }, 400);
+  const db = drizzle(c.env.DB);
+
+  const rows = await db
+    .select({ material: materialScheduleItems, roomName: rooms.roomName })
+    .from(materialSubcategories)
+    .innerJoin(materialScheduleItems, eq(materialSubcategories.materialId, materialScheduleItems.id))
+    .leftJoin(rooms, eq(materialScheduleItems.roomId, rooms.id))
+    .where(eq(materialSubcategories.subcategoryId, subcategoryId))
+    .orderBy(desc(materialScheduleItems.dateAdded));
+
+  const materials = rows.map((r) => ({ ...r.material, roomName: r.roomName }));
+  return c.json({ materials });
 });
 
 // ─── Required Specs ─────────────────────────────────────────────────────────────

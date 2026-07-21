@@ -45,7 +45,7 @@ export const getRoom = defineTool({
     category: "rooms",
     title: "Get room detail",
     description:
-      "Full detail for one room by `id` or `roomCode`: dimensions, all planning notes (problem/plumbing/electrical/structural/hvac/general), the floor it belongs to, plus the budget line items linked to it and the material schedule items placed in it.",
+      "Full detail for one room by `id` or `roomCode`: dimensions, all planning notes (problem/plumbing/electrical/structural/hvac/general), the floor it belongs to (`floorName`, e.g. \"Upper Level\" — decisive when deducing which of several same-purpose rooms a material belongs to), plus the budget line items linked to it and the material schedule items placed in it.",
     inputShape: {
       id: z.number().int().positive().optional(),
       roomCode: z.string().optional(),
@@ -56,6 +56,7 @@ export const getRoom = defineTool({
       roomCode: z.string().nullable(),
       roomName: z.string().nullable(),
       floorId: z.number().int().nullable(),
+      floorName: z.string().nullable(),
       dimensions: z.string().nullable(),
       areaSqFt: z.number().nullable(),
       isLivingSpace: z.boolean().nullable(),
@@ -110,7 +111,7 @@ export const getRoom = defineTool({
         .all();
 
       return {
-        ...roomDto(room),
+        ...roomDto(room, floor?.name ?? null),
         floor: floor ? { id: floor.id, key: floor.key, name: floor.name } : null,
         notes: {
           problemAreas: room.problemAreas,
