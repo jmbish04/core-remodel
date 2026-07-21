@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { HealthCheckApp } from "@/components/health/HealthCheckApp";
+---
+
+<BaseLayout
+  title="System Health — The Monolith"
+  description="On-demand health screen for the core-remodel worker: run live checks against D1, the Tesla telemetry DB, KV, R2 and Workers AI, and see per-service status and latency."
+>
+  <HealthCheckApp client:only="react" />
+</BaseLayout>

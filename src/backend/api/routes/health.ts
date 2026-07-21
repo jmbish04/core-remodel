@@ -3,11 +3,30 @@
  */
 
 import { healthChecks } from "@backend/db";
+import { runHealthScreen } from "@backend/services/health/screen";
 import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 
 const healthRouter = new Hono<{ Bindings: Env }>();
+
+// POST /api/health/run — the on-demand screen behind the /health page's button.
+// Actively probes every core binding (D1, TESLA_DB, KV, R2, AI), records one
+// health_checks row per service, and returns the per-service results. Public,
+// like GET /api/health; the probes are bounded and free. Returns 200 even when a
+// service is down (the screen itself succeeded) — read `status` from the body.
+healthRouter.post("/run", async (c) => {
+  try {
+    const screen = await runHealthScreen(c.env);
+    return c.json(screen, 200);
+  } catch (error) {
+    console.error("Health screen error:", error);
+    return c.json(
+      { status: "down", timestamp: new Date().toISOString(), error: "Health screen failed" },
+      503,
+    );
+  }
+});
 
 // GET /api/health
 healthRouter.get("/", async (c) => {
