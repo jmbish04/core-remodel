@@ -15,6 +15,7 @@ import { seedBayAreaCities } from "@backend/db/seeds/seed-bay-area-cities";
 import { seedStoreCategories } from "@backend/db/seeds/seed-store-categories";
 import { seedProductAreas } from "@backend/db/seeds/seed-product-areas";
 import { seedShowroomStores } from "@backend/db/seeds/seed-showroom-stores";
+import { seedPlumbingSubcategories } from "@backend/db/seeds/seed-plumbing-subcategories";
 
 export const showroomSeedRouter = new Hono<{ Bindings: Env }>();
 
@@ -27,13 +28,15 @@ showroomSeedRouter.post("/seed", async (c) => {
     await seedStoreCategories(db);
     await seedProductAreas(db);
     await seedShowroomStores(db);
-    // Unrelated domain (tax config, not showroom), but this is the only seed
-    // entrypoint in the repo — wired in per the tax-configuration plan rather
-    // than inventing a second seed runner.
+    // Unrelated domain (config vocab, not showroom), but this is the only
+    // seed entrypoint in the repo — wired in here rather than inventing a
+    // second seed runner.
+    const plumbing = await seedPlumbingSubcategories(db);
 
     return c.json({
       success: true,
-      message: "Seeded cities, categories, product areas, stores, and tax config.",
+      message: "Seeded cities, categories, product areas, stores, and plumbing subcategories.",
+      plumbingSubcategoriesCreated: plumbing.created,
     });
   } catch (err: any) {
     console.error("Seed error:", err);

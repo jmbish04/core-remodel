@@ -21,6 +21,7 @@ import { createMaterial } from "./create_material";
 import { getMaterial } from "./get_material";
 import { linkMaterialToBudgetItem } from "./link_material_to_budget_item";
 import { linkMaterialToRoom } from "./link_material_to_room";
+import { listMaterialCategories } from "./list_material_categories";
 import { listMaterials } from "./list_materials";
 import { markMaterialPurchased } from "./mark_material_purchased";
 import { setMaterialSpecs } from "./set_material_specs";
@@ -29,6 +30,7 @@ import { updateMaterial } from "./update_material";
 export const materialTools: RemodelTool[] = [
   listMaterials,
   getMaterial,
+  listMaterialCategories,
   createMaterial,
   updateMaterial,
   setMaterialSpecs,

@@ -12,20 +12,20 @@ import { z } from "zod";
 import { toolError } from "../../format";
 import { looseObject } from "../../schemas";
 import { defineTool, READ_ONLY } from "../../types";
-import { materialDto, materialDtoSchema } from "./_shared";
+import { materialDto, materialWithTaxonomySchema, taxonomyMap } from "./_shared";
 
 export const getMaterial = defineTool({
     name: "get_material",
     category: "materials",
     title: "Get material detail",
     description:
-      "Full detail for one material by `id`: its required spec sheet, the canonical room it is linked to (roomId → room name), the ACTIVE budget line items it rolls up to (via budget_item_material_mappings → the stable budget trackId), and the showroom products mapped to it.",
+      "Full detail for one material by `id`: its `categories` / `subcategories` (joined from the shared vocabulary — see list_material_categories), its required spec sheet, the canonical room it is linked to (roomId → room name), the ACTIVE budget line items it rolls up to (via budget_item_material_mappings → the stable budget trackId), and the showroom products mapped to it.",
     inputShape: {
       id: z.number().int().positive().describe("Material id (from list_materials)"),
     },
     annotations: READ_ONLY,
     outputShape: {
-      ...materialDtoSchema.shape,
+      ...materialWithTaxonomySchema.shape,
       room: looseObject({ id: z.number().int(), roomName: z.string() }).nullable(),
       requiredSpecs: z.array(looseObject({ id: z.number().int(), key: z.string(), value: z.string() })),
       budgetItems: z.array(
@@ -97,8 +97,13 @@ export const getMaterial = defineTool({
         .where(eq(productMaterialMappings.materialId, material.id))
         .all();
 
+      // Category tags (names joined from the shared vocabulary, never stored).
+      const taxonomy = await taxonomyMap(db, [material.id]);
+
       return {
         ...materialDto(material, room?.roomName ?? null),
+        categories: taxonomy.get(material.id)?.categories ?? [],
+        subcategories: taxonomy.get(material.id)?.subcategories ?? [],
         room,
         requiredSpecs: specs.map((s) => ({ id: s.id, key: s.key, value: s.value })),
         budgetItems,

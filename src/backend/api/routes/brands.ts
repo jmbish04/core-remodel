@@ -542,17 +542,27 @@ brandsRouter.get("/:id", async (c) => {
           .where(eq(brandProductLines.brandId, brandId))
           .orderBy(brandProductLines.sortOrder),
 
-        // (6) Images — everything not rejected, newest first, max 24
+        // (6) Images — live, not rejected, GROUPED so a product's hero and its
+        // gallery frames arrive adjacent and in order. Sorting by id instead
+        // interleaves a dozen products' near-identical frames into a wall of
+        // visual noise; the group key exists precisely to prevent that.
+        // `isActive` filters images the frontend has reported as broken —
+        // unavoidable when hotlinking the brand's own CDN rather than CF Images.
         db
           .select()
           .from(brandImages)
           .where(
             and(
               eq(brandImages.brandId, brandId),
+              eq(brandImages.isActive, true),
               ne(brandImages.reviewStatus, "rejected"),
             ),
           )
-          .orderBy(desc(brandImages.id))
+          .orderBy(
+            brandImages.imageGroupKey,
+            brandImages.groupSortOrder,
+            desc(brandImages.id),
+          )
           .limit(24),
       ]);
 
@@ -1005,4 +1015,41 @@ brandsRouter.post("/:id/research", async (c) => {
     console.error(`[brands] POST /:id/research failed for brand ${brandId}:`, err);
     return c.json({ success: false, error: "Failed to queue brand research" }, 500);
   }
+});
+
+// ─── POST /api/brands/images/:id/deactivate ──────────────────────────────────
+
+/**
+ * Flag a harvested image as dead.
+ *
+ * Harvested imagery is hotlinked from the brand's own CDN rather than copied
+ * into CF Images, so the worker cannot detect rot: it fetched the url once, at
+ * harvest time, and never sees it again. The BROWSER is the only observer of a
+ * later 404 or hotlink block — this is where it reports what it saw.
+ *
+ * Deliberately idempotent and never 404s on an already-dead row: several tiles
+ * from one dead CDN commonly fail in the same paint, and a partly-failed batch
+ * is not a client error worth surfacing.
+ */
+brandsRouter.post("/images/:id/deactivate", async (c) => {
+  const id = Number.parseInt(c.req.param("id"), 10);
+  if (!Number.isInteger(id) || id <= 0) {
+    return c.json({ error: "Invalid image id" }, 400);
+  }
+
+  // `null` is valid JSON, so a bare `null` body parses successfully and then
+  // throws on property access — hence optional chaining, not just the catch.
+  const body = await c.req.json<{ reason?: string } | null>().catch(() => null);
+  // Clamped: the reason is client-supplied and only ever read by a human
+  // debugging a gallery, so it must not become an unbounded write vector.
+  const reason = (body?.reason ?? "frontend detected error on image url").slice(0, 200);
+
+  const db = drizzle(c.env.DB);
+  const rows = await db
+    .update(brandImages)
+    .set({ isActive: false, inactiveReason: reason, updatedAt: new Date() })
+    .where(and(eq(brandImages.id, id), eq(brandImages.isActive, true)))
+    .returning({ id: brandImages.id });
+
+  return c.json({ ok: true, deactivated: rows.length > 0 });
 });

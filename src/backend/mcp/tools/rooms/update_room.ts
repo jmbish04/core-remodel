@@ -1,4 +1,4 @@
-import { rooms } from "@backend/db";
+import { floors, rooms } from "@backend/db";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -37,6 +37,7 @@ export const updateRoom = defineTool({
         roomCode: z.string().nullable(),
         roomName: z.string().nullable(),
         floorId: z.number().int().nullable(),
+        floorName: z.string().nullable(),
         dimensions: z.string().nullable(),
         areaSqFt: z.number().nullable(),
       }),
@@ -51,7 +52,12 @@ export const updateRoom = defineTool({
       const [existing] = await db.select().from(rooms).where(eq(rooms.id, id)).limit(1);
       if (!existing) toolError(`Room ${id} not found. Call list_rooms for valid ids.`);
       await db.update(rooms).set(patch).where(eq(rooms.id, id)).run();
-      const [updated] = await db.select().from(rooms).where(eq(rooms.id, id)).limit(1);
-      return { updated: true, room: roomDto(updated) };
+      const [updated] = await db
+        .select({ room: rooms, floorName: floors.name })
+        .from(rooms)
+        .leftJoin(floors, eq(rooms.floorId, floors.id))
+        .where(eq(rooms.id, id))
+        .limit(1);
+      return { updated: true, room: roomDto(updated.room, updated.floorName) };
     },
   });

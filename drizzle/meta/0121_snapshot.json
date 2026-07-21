@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f08a1f48-1ba7-4201-8823-382ba5f947ef",
+  "id": "c9219894-b3d9-45aa-8308-89601ebaeed3",
   "prevId": "074a4bd6-5d73-4e51-af50-58808f71ffb6",
   "tables": {
     "users": {
@@ -14474,6 +14474,154 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {}
     },
+    "material_categories": {
+      "name": "material_categories",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "material_id": {
+          "name": "material_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "category_id": {
+          "name": "category_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        }
+      },
+      "indexes": {
+        "material_categories_material_category_uniq": {
+          "name": "material_categories_material_category_uniq",
+          "columns": [
+            "material_id",
+            "category_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "material_categories_material_id_material_schedule_items_id_fk": {
+          "name": "material_categories_material_id_material_schedule_items_id_fk",
+          "tableFrom": "material_categories",
+          "tableTo": "material_schedule_items",
+          "columnsFrom": [
+            "material_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "material_categories_category_id_categories_id_fk": {
+          "name": "material_categories_category_id_categories_id_fk",
+          "tableFrom": "material_categories",
+          "tableTo": "categories",
+          "columnsFrom": [
+            "category_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "material_subcategories": {
+      "name": "material_subcategories",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "material_id": {
+          "name": "material_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "subcategory_id": {
+          "name": "subcategory_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        }
+      },
+      "indexes": {
+        "material_subcategories_material_subcategory_uniq": {
+          "name": "material_subcategories_material_subcategory_uniq",
+          "columns": [
+            "material_id",
+            "subcategory_id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "material_subcategories_material_id_material_schedule_items_id_fk": {
+          "name": "material_subcategories_material_id_material_schedule_items_id_fk",
+          "tableFrom": "material_subcategories",
+          "tableTo": "material_schedule_items",
+          "columnsFrom": [
+            "material_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "material_subcategories_subcategory_id_subcategories_id_fk": {
+          "name": "material_subcategories_subcategory_id_subcategories_id_fk",
+          "tableFrom": "material_subcategories",
+          "tableTo": "subcategories",
+          "columnsFrom": [
+            "subcategory_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
     "store_bayarea_cities": {
       "name": "store_bayarea_cities",
       "columns": {
@@ -20366,6 +20514,49 @@
           "notNull": false,
           "autoincrement": false
         },
+        "byte_size": {
+          "name": "byte_size",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "content_hash": {
+          "name": "content_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "is_active": {
+          "name": "is_active",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": true
+        },
+        "inactive_reason": {
+          "name": "inactive_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "image_group_key": {
+          "name": "image_group_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "group_sort_order": {
+          "name": "group_sort_order",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "review_status": {
           "name": "review_status",
           "type": "text",
@@ -20418,6 +20609,23 @@
           "name": "brand_images_brand_idx",
           "columns": [
             "brand_id"
+          ],
+          "isUnique": false
+        },
+        "brand_images_brand_hash_idx": {
+          "name": "brand_images_brand_hash_idx",
+          "columns": [
+            "brand_id",
+            "content_hash"
+          ],
+          "isUnique": false
+        },
+        "brand_images_brand_group_idx": {
+          "name": "brand_images_brand_group_idx",
+          "columns": [
+            "brand_id",
+            "image_group_key",
+            "group_sort_order"
           ],
           "isUnique": false
         }
@@ -23349,14 +23557,6 @@
           "autoincrement": false,
           "default": "'active'"
         },
-        "is_active": {
-          "name": "is_active",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": false
-        },
         "source_conversation": {
           "name": "source_conversation",
           "type": "text",
@@ -23402,14 +23602,6 @@
             "created_at"
           ],
           "isUnique": false
-        },
-        "drive_lists_single_active_uniq": {
-          "name": "drive_lists_single_active_uniq",
-          "columns": [
-            "is_active"
-          ],
-          "isUnique": true,
-          "where": "\"drive_lists\".\"is_active\" = 1"
         }
       },
       "foreignKeys": {},

@@ -4,14 +4,14 @@ import { z } from "zod";
 import { matchesQuery, paginate } from "../../format";
 import { pageOutput } from "../../schemas";
 import { defineTool, READ_ONLY } from "../../types";
-import { materialDto, materialDtoSchema, roomNameMap } from "./_shared";
+import { materialDto, materialWithTaxonomySchema, roomNameMap, taxonomyMap } from "./_shared";
 
 export const listMaterials = defineTool({
     name: "list_materials",
     category: "materials",
     title: "List materials",
     description:
-      "List material schedule items (id, title, room, brand, model, purchased flag). Optional filters: `roomId` (canonical room FK), `isPurchased` (bool), `brand` (exact, case-insensitive), and free-text `q` over title/brand/model/notes. Use a material's `id` as the target for get_material, spec, and link tools.",
+      "List material schedule items (id, title, room, brand, model, purchased flag, plus each item's `categories` and `subcategories` — joined names, so \"which materials are toilets\" is answerable from this call). Optional filters: `roomId` (canonical room FK), `isPurchased` (bool), `brand` (exact, case-insensitive), and free-text `q` over title/brand/model/notes. Use a material's `id` as the target for get_material, spec, and link tools.",
     inputShape: {
       roomId: z
         .number()
@@ -30,7 +30,7 @@ export const listMaterials = defineTool({
     },
     annotations: READ_ONLY,
     outputShape: {
-      ...pageOutput(materialDtoSchema),
+      ...pageOutput(materialWithTaxonomySchema),
     },
     examples: [
       { title: "All materials", args: {} },
@@ -47,11 +47,17 @@ export const listMaterials = defineTool({
         if (input.q && !matchesQuery([m.title, m.brand, m.model, m.notes], input.q)) return false;
         return true;
       });
-      const roomName = await roomNameMap(db, filtered.map((m) => m.roomId));
-      return paginate(
-        filtered.map((m) => materialDto(m, roomName.get(m.roomId) ?? null)),
-        input.limit ?? 50,
-        input.offset ?? 0,
-      );
+      // Paginate the raw rows first, then join names for the page only.
+      const page = paginate(filtered, input.limit ?? 50, input.offset ?? 0);
+      const roomName = await roomNameMap(db, page.items.map((m) => m.roomId));
+      const taxonomy = await taxonomyMap(db, page.items.map((m) => m.id));
+      return {
+        ...page,
+        items: page.items.map((m) => ({
+          ...materialDto(m, roomName.get(m.roomId) ?? null),
+          categories: taxonomy.get(m.id)?.categories ?? [],
+          subcategories: taxonomy.get(m.id)?.subcategories ?? [],
+        })),
+      };
     },
   });
