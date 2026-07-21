@@ -56,6 +56,12 @@ const SCOUT_TOOL_ALLOWLIST = [
   "plan_drive_route",
   "create_drive_list",
   "analyze_drive_coverage",
+  // Vehicle context: the scout plans a driving day, so where the car is and
+  // whether the integration is even alive are legitimate inputs. Read-only —
+  // send_vehicle_navigation is deliberately NOT here; an agent must not
+  // redirect the car mid-plan.
+  "get_tesla_status",
+  "get_vehicle_location",
 ] as const;
 
 export interface ScoutTimelineEntry {

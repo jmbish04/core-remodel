@@ -37,6 +37,7 @@ import {
   verifyWebhookSecret,
 } from "@backend/services/tesla";
 import { evaluateAutomations } from "@backend/services/tesla-automations";
+import { telemetryRecordingAllowed } from "@backend/services/tesla-integration";
 import { isRequestAuthenticated } from "@backend/utils/access";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -251,6 +252,19 @@ teslaRouter.post("/telemetry", async (c) => {
     return c.json({ error: "Forbidden" }, 403);
   }
 
+  // Consent gate (/admin/config/integrations/tesla). Recording requires BOTH a
+  // configured integration and the toggle on — an unconfigured integration has
+  // no vehicle to attribute frames to, so it can never log. When recording is
+  // off we accept the POST (so Tessie doesn't retry) and store nothing, and say
+  // which of the two gates stopped it rather than reporting a silent success.
+  if (!(await telemetryRecordingAllowed(c.env))) {
+    return c.json({
+      ok: true,
+      recorded: false,
+      reason: (await tessieConfigured(c.env)) ? "recording-disabled" : "integration-unconfigured",
+    });
+  }
+
   const payload = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
   const f = extractTelemetryFields(payload);
 
@@ -280,7 +294,7 @@ teslaRouter.post("/telemetry", async (c) => {
     raw: payload,
   });
 
-  return c.json({ ok: true });
+  return c.json({ ok: true, recorded: true });
 });
 
 /**

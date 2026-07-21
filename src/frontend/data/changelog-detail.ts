@@ -90,6 +90,11 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
     approach:
       "Split the pointer from the label. `is_active` is its own boolean column under a PARTIAL unique index (`WHERE is_active = 1`), so a second active row is a database error rather than a bug that shows up six drives later. Writes go through one service function, setActiveDrive(db, id | null), which clears and sets inside a single db.batch() — D1 never observes two active rows, and D1 has no transactions to fall back on. `status` stays as a plain lifecycle label that nothing infers from anymore: the read path and the check-off no longer rewrite it, and the tabs bucket on stops visited (0 → Pending, some → In progress, all → Finished), which is what the user actually asked the page to show.",
     apiChanges: [
+      "GET /api/config/tesla — NEW. Masked credentials + the telemetry-recording flag. Secret values are never returned.",
+      "PATCH /api/config/tesla { telemetryRecording } — NEW. The recording consent switch.",
+      "POST /api/config/tesla/health — NEW. Integration screening: credentials, a live Tessie position, and whether historical events still carry the fields the automation reads. `?live=0` skips the vehicle call.",
+      "POST /api/tesla/telemetry — records only when configured AND recording is on; otherwise returns { recorded: false, reason }.",
+      "MCP: new `tesla` domain — get_tesla_status, get_vehicle_location, list_tesla_events, send_vehicle_navigation (the only write).",
       "GET /api/drive-lists/home-location — NEW. The project's coordinates as the home-arrival rule sees them, plus the radius and cutoff. Geocoded once from the configured permit address, cached in project_system_variables.",
       "POST /api/showroom-stores/device-location — response gains `homeArrival` (the rule's verdict for this fix).",
       "PATCH /api/drive-lists/:slug — NEW. Body { isActive: boolean }. true makes this THE active drive (clearing the previous one in the same batch); false leaves none active. 400 without the flag, 404 on an unknown slug.",
@@ -100,6 +105,10 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
     filesTouched: [
       "src/backend/db/schema/drives/drive_lists.ts",
       "src/backend/services/drive-home-arrival.ts",
+      "src/backend/services/tesla-integration.ts",
+      "src/backend/mcp/tools/tesla/*.ts",
+      "src/frontend/components/config/TeslaIntegrationApp.tsx",
+      "src/frontend/pages/admin/config/integrations/tesla.astro",
       "src/backend/services/drive-home-arrival-rules.ts",
       "src/backend/api/routes/tesla.ts",
       "src/backend/api/routes/showroom-stores.ts",
@@ -254,12 +263,36 @@ if (other) {
   ✓ the active drive survived a far-away fix
   ✓ final state — concord-corridor-sat-jul-18-sf-1pm is the active drive
   ✓ exactly one active drive at rest
+  ✓ GET /api/config/tesla → 200
+  ✓ all three credentials are described
+  ✓ credential VALUES never leave the Worker — masks are dots only
+  ✓ the mask still reports a length, so a truncated secret is visible
+      configured=true telemetryRecording=true
+  ✓ PATCH /api/config/tesla {telemetryRecording:false} → 200
+  ✓ recording reads back as off
+  ✓ the off state persisted
+  ✓ recording restored to on
+  ✓ PATCH without \`telemetryRecording\` → 400
+  ✓ POST /api/config/tesla/health → 200
+  ✓ every probe reports a verdict
+      [ok] Credentials present in the Secrets Store — TESSIE_API_TOKEN, TESLA_BETSY_VIN and WORKER_API_KEY are all set.
+      [ok] Live position read from Tessie — Vehicle reported 37.7285, -122.4140.
+      [warn] Historical webhooks carry coordinates — No webhook events recorded yet — nothing to verify.
+      [warn] Historical telemetry carries position + shift state — Recording is on but no frames have arrived — check Tessie's Fleet Telemetry forwarding.
+      [warn] Events are still arriving — No webhook has ever been received.
+  ✓ the screening reads the historical event tables
+  ✓ GET /api/mcp-docs → 200
+  ✓ the tesla tool domain is registered (status, location, events, navigate)
+  ✓ every tesla tool documents an example (registry contract)
+  ✓ only the navigation tool is a write — the rest are read-only
+  ✓ GET /api/tesla/status → 200
+      tessie configured: true
 
-29 passed, 0 failed
+46 passed, 0 failed
 
 $ pnpm run test:home-arrival
 
-(node:31315) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Volumes/Projects/workers/core-remodel/.claude/worktrees/showroom-scout-agent-be625a/src/backend/services/drive-home-arrival-rules.ts is not specified and it doesn't parse as CommonJS.
+(node:38130) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Volumes/Projects/workers/core-remodel/.claude/worktrees/showroom-scout-agent-be625a/src/backend/services/drive-home-arrival-rules.ts is not specified and it doesn't parse as CommonJS.
 Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
 To eliminate this warning, add "type": "module" to /Volumes/Projects/workers/core-remodel/.claude/worktrees/showroom-scout-agent-be625a/package.json.
 (Use \`node --trace-warnings ...\` to show where the warning was created)

@@ -31,6 +31,7 @@ export type ToolCategory =
   | "materials"
   | "showrooms"
   | "drives"
+  | "tesla"
   | "brands"
   | "products"
   | "links"

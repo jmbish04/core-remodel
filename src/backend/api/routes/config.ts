@@ -60,6 +60,11 @@ import {
   tripBreaker,
   usageConfigKeys,
 } from "@backend/services/usage/metering";
+import {
+  getTeslaIntegrationStatus,
+  runTeslaHealthCheck,
+  setTelemetryRecording,
+} from "@backend/services/tesla-integration";
 
 
 export const configRouter = new Hono<{ Bindings: Env }>();
@@ -594,4 +599,47 @@ configRouter.patch("/usage", async (c) => {
   }
 
   return c.json({ success: true });
+});
+
+// ---------------------------------------------------------------------------
+// Tesla / Tessie integration (/admin/config/integrations/tesla)
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /tesla — credentials (MASKED), the telemetry-recording consent flag, and
+ * the last health report's inputs.
+ *
+ * Secret VALUES never cross this boundary: the page renders a filled-looking
+ * read-only field from a dot mask and a length, which is enough to tell "set"
+ * from "set to the wrong thing" without putting a token in a DOM node.
+ */
+configRouter.get("/tesla", async (c) => {
+  return c.json(await getTeslaIntegrationStatus(c.env));
+});
+
+const teslaPatchSchema = z.object({
+  /** Consent for writing Fleet Telemetry frames to D1. */
+  telemetryRecording: z.boolean(),
+});
+
+/** PATCH /tesla — turn telemetry recording on or off. */
+configRouter.patch("/tesla", async (c) => {
+  const parsed = teslaPatchSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: "`telemetryRecording` (boolean) is required" }, 400);
+  }
+  await setTelemetryRecording(c.env, parsed.data.telemetryRecording);
+  return c.json({ success: true, ...(await getTeslaIntegrationStatus(c.env)) });
+});
+
+/**
+ * POST /tesla/health — run the integration screening.
+ *
+ * POST, not GET: it makes a live Tessie call (`?live=0` to skip), and a probe
+ * with a side effect on the car's connection should not sit behind a URL a
+ * prefetcher might follow.
+ */
+configRouter.post("/tesla/health", async (c) => {
+  const live = c.req.query("live") !== "0";
+  return c.json(await runTeslaHealthCheck(c.env, { liveProbe: live }));
 });

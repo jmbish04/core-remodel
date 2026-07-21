@@ -182,6 +182,87 @@ async function main() {
     activeOnes(done.drives).map((d) => d.slug).join(", "),
   );
 
+  // ── Tesla integration config page (/admin/config/integrations/tesla) ────
+  const tesla = await client.get("/api/config/tesla");
+  checks.ok("GET /api/config/tesla → 200", tesla.status === 200, `got ${tesla.status}`);
+  const secrets = tesla.json?.secrets ?? [];
+  checks.ok(
+    "all three credentials are described",
+    ["TESSIE_API_TOKEN", "TESLA_BETSY_VIN", "WORKER_API_KEY"].every((b) =>
+      secrets.some((s) => s.binding === b),
+    ),
+    secrets.map((s) => s.binding).join(","),
+  );
+  checks.ok(
+    "credential VALUES never leave the Worker — masks are dots only",
+    secrets.every((s) => !s.configured || /^•+$/.test(s.masked)),
+    JSON.stringify(secrets.map((s) => s.masked)),
+  );
+  checks.ok(
+    "the mask still reports a length, so a truncated secret is visible",
+    secrets.every((s) => !s.configured || s.length > 0),
+    JSON.stringify(secrets.map((s) => [s.binding, s.length])),
+  );
+  checks.info(`  configured=${tesla.json?.configured} telemetryRecording=${tesla.json?.telemetryRecording}`);
+
+  // Toggle telemetry off → on, asserting the flag round-trips through D1.
+  const recOff = await client.patch("/api/config/tesla", { telemetryRecording: false });
+  checks.ok("PATCH /api/config/tesla {telemetryRecording:false} → 200", recOff.status === 200, `got ${recOff.status}`);
+  checks.ok("recording reads back as off", recOff.json?.telemetryRecording === false, JSON.stringify(recOff.json?.telemetryRecording));
+  const reread = await client.get("/api/config/tesla");
+  checks.ok("the off state persisted", reread.json?.telemetryRecordingSetting === false, JSON.stringify(reread.json));
+  const recOn = await client.patch("/api/config/tesla", { telemetryRecording: true });
+  checks.ok("recording restored to on", recOn.json?.telemetryRecordingSetting === true, JSON.stringify(recOn.json));
+  const badToggle = await client.patch("/api/config/tesla", { nope: 1 });
+  checks.ok("PATCH without `telemetryRecording` → 400", badToggle.status === 400, `got ${badToggle.status}`);
+
+  // Health screening — the point of the page: are the historical rows usable?
+  const health = await client.req("POST", "/api/config/tesla/health");
+  checks.ok("POST /api/config/tesla/health → 200", health.status === 200, `got ${health.status}`);
+  checks.ok(
+    "every probe reports a verdict",
+    Array.isArray(health.json?.checks) &&
+      health.json.checks.length >= 4 &&
+      health.json.checks.every((c) => ["ok", "warn", "fail"].includes(c.status)),
+    JSON.stringify(health.json?.checks?.map((c) => [c.id, c.status])),
+  );
+  for (const c of health.json?.checks ?? []) checks.info(`  [${c.status}] ${c.label} — ${c.detail}`);
+  checks.ok(
+    "the screening reads the historical event tables",
+    typeof health.json?.stats?.webhookEvents === "number" &&
+      typeof health.json?.stats?.telemetryFrames === "number",
+    JSON.stringify(health.json?.stats),
+  );
+
+  // ── MCP: a model can reach the car ──────────────────────────────────────
+  const docs = await client.get("/api/mcp-docs");
+  checks.ok("GET /api/mcp-docs → 200", docs.status === 200, `got ${docs.status}`);
+  const teslaTools = (docs.json?.tools ?? []).filter((t) => t.category === "tesla");
+  checks.ok(
+    "the tesla tool domain is registered (status, location, events, navigate)",
+    ["get_tesla_status", "get_vehicle_location", "list_tesla_events", "send_vehicle_navigation"].every(
+      (n) => teslaTools.some((t) => t.name === n),
+    ),
+    teslaTools.map((t) => t.name).join(","),
+  );
+  checks.ok(
+    "every tesla tool documents an example (registry contract)",
+    teslaTools.length > 0 && teslaTools.every((t) => (t.examples?.length ?? 0) > 0),
+    teslaTools.map((t) => `${t.name}:${t.examples?.length ?? 0}`).join(","),
+  );
+  checks.ok(
+    "only the navigation tool is a write — the rest are read-only",
+    teslaTools.every((t) =>
+      t.name === "send_vehicle_navigation" ? t.annotations?.readOnlyHint !== true : t.annotations?.readOnlyHint === true,
+    ),
+    teslaTools.map((t) => `${t.name}:${t.annotations?.readOnlyHint}`).join(","),
+  );
+
+  // The tools are thin wrappers over these endpoints; prove the endpoints work.
+  const tessieStatus = await client.get("/api/tesla/status");
+  checks.ok("GET /api/tesla/status → 200", tessieStatus.status === 200, `got ${tessieStatus.status}`);
+  checks.info(`  tessie configured: ${tessieStatus.json?.configured}`);
+
   checks.finish();
 }
 
