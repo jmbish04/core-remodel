@@ -22,8 +22,9 @@
  * });
  *
  * try {
- *   await run.step("fetch page", async () => { ... });
- *   const data = await run.tool("browser.render", { url }, () => render(url));
+ *   const data = await run.step("fetch page", async (step) =>
+ *     step.tool("browser.render", { url }, () => render(url)),
+ *   );
  *   await run.succeed({ brandsFound: data.brands.length });
  * } catch (err) {
  *   await run.fail(err);   // records code + message, rethrows nothing
@@ -52,13 +53,25 @@ export interface StartRunInput {
   attempt?: number;
 }
 
+/** Records tool calls attributed to one specific step. */
+export interface StepRecorder {
+  tool<T>(name: string, args: unknown, fn: () => Promise<T>): Promise<T>;
+}
+
 /** Handle returned by {@link startRun}. All methods are best-effort. */
 export interface RunRecorder {
   /** Ledger row id, or null if the initial insert failed. */
   readonly id: number | null;
-  /** Wrap a named phase. Records timing and failure, rethrows the original. */
-  step<T>(label: string, fn: () => Promise<T>): Promise<T>;
-  /** Wrap one tool/external call. Records args, result, timing, failure. */
+  /**
+   * Wrap a named phase. Records timing and failure, rethrows the original.
+   *
+   * The callback receives a STEP-SCOPED recorder; use `step.tool(...)` so the
+   * call is attributed to this step. Attribution is passed as an argument
+   * rather than held in shared instance state precisely so concurrent steps
+   * (`Promise.all` over pages, say) cannot steal each other's tool calls.
+   */
+  step<T>(label: string, fn: (step: StepRecorder) => Promise<T>): Promise<T>;
+  /** Wrap a tool call made OUTSIDE any step (recorded with a null step). */
   tool<T>(name: string, args: unknown, fn: () => Promise<T>): Promise<T>;
   succeed(output?: unknown): Promise<void>;
   fail(error: unknown): Promise<void>;
@@ -71,7 +84,7 @@ function nullRecorder(): RunRecorder {
   return {
     id: null,
     async step(_label, fn) {
-      return fn();
+      return fn({ tool: (_name, _args, f) => f() });
     },
     async tool(_name, _args, fn) {
       return fn();
@@ -118,7 +131,6 @@ export async function startRun(env: Env, input: StartRunInput): Promise<RunRecor
   }
 
   let seq = 0;
-  let currentStepId: number | null = null;
 
   const finish = async (
     status: "succeeded" | "failed" | "needs_approval",
@@ -155,13 +167,16 @@ export async function startRun(env: Env, input: StartRunInput): Promise<RunRecor
           .values({ runId, seq, label, status: "running", startedAt: stepStart })
           .returning({ id: agentRunSteps.id });
         stepId = row?.id ?? null;
-        currentStepId = stepId;
       } catch (error) {
         console.error("[agent-runs] failed to open step:", error);
       }
 
+      const scoped: StepRecorder = {
+        tool: (name, args, f) => recordTool(name, args, f, stepId),
+      };
+
       try {
-        const result = await fn();
+        const result = await fn(scoped);
         if (stepId !== null) {
           const endedAt = new Date();
           await db
@@ -191,14 +206,29 @@ export async function startRun(env: Env, input: StartRunInput): Promise<RunRecor
         }
         // The step recorded its failure; the caller still owns the error.
         throw error;
-      } finally {
-        currentStepId = null;
       }
     },
 
     async tool(name, args, fn) {
+      return recordTool(name, args, fn, null);
+    },
+
+    succeed: (output) => finish("succeeded", { output }),
+    fail: (error) => finish("failed", { error }),
+    needsApproval: (output) => finish("needs_approval", { output }),
+  };
+
+  /**
+   * Record one tool call against an explicit step (or null for run-level).
+   * Never swallows the caller's error — it records, then rethrows.
+   */
+  async function recordTool<T>(
+    name: string,
+    args: unknown,
+    fn: () => Promise<T>,
+    stepId: number | null,
+  ): Promise<T> {
       const callStart = Date.now();
-      const stepId = currentStepId;
       try {
         const result = await fn();
         try {
@@ -232,10 +262,5 @@ export async function startRun(env: Env, input: StartRunInput): Promise<RunRecor
         }
         throw error;
       }
-    },
-
-    succeed: (output) => finish("succeeded", { output }),
-    fail: (error) => finish("failed", { error }),
-    needsApproval: (output) => finish("needs_approval", { output }),
-  };
+  }
 }

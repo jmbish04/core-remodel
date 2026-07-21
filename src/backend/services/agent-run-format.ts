@@ -34,9 +34,18 @@ export function safeJson(value: unknown): string | null {
       SECRET_KEY_PATTERN.test(key) ? "[redacted]" : val,
     );
     if (!json) return null;
-    return json.length > MAX_JSON_CHARS ? `${json.slice(0, MAX_JSON_CHARS)}…[truncated]` : json;
+    if (json.length <= MAX_JSON_CHARS) return json;
+    // Truncating raw JSON produces INVALID JSON, which then throws in the UI's
+    // JSON.parse and breaks SQLite's json_extract/json_each on this column.
+    // Wrap the preview in a valid envelope so an oversized payload stays
+    // machine-readable instead of poisoning every consumer.
+    return JSON.stringify({
+      _truncated: true,
+      _originalLength: json.length,
+      preview: json.slice(0, MAX_JSON_CHARS),
+    });
   } catch {
-    return '"[unserializable]"';
+    return JSON.stringify({ _unserializable: true });
   }
 }
 
@@ -50,9 +59,23 @@ export function safeJson(value: unknown): string | null {
  */
 export function errorCodeOf(error: unknown): string {
   if (error === null || error === undefined) return "UNKNOWN";
+
+  // 1. An explicit `code` property — the Node/JS convention, and the most
+  //    trustworthy signal there is (ETIMEDOUT, ENOTFOUND, SQLITE_ERROR...).
+  if (typeof error === "object" && error !== null) {
+    const code = (error as { code?: unknown }).code;
+    if (typeof code === "string" && code.trim() !== "") return code;
+    if (typeof code === "number") return String(code);
+  }
+
   const message = error instanceof Error ? error.message : String(error);
 
-  const explicit = message.match(/\b([A-Z][A-Z0-9_]{3,})\b/);
+  // 2. A SCREAMING_SNAKE code in the message. The underscore is REQUIRED:
+  //    without it the pattern also matched incidental acronyms — JSON, HTTP,
+  //    NULL, GET — so "Failed to parse JSON response" grouped under "JSON"
+  //    and unrelated failures collapsed together, destroying the exact
+  //    grouping this function exists to provide.
+  const explicit = message.match(/\b([A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+)\b/);
   if (explicit) return explicit[1];
 
   const status = message.match(/\b([1-5]\d{2})\b/);

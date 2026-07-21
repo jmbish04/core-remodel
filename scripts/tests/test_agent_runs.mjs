@@ -52,10 +52,21 @@ check("redaction is case-insensitive and matches substrings", () => {
   }
 });
 
-check("caps oversized payloads instead of writing them whole", () => {
+check("caps oversized payloads AND stays valid JSON", () => {
   const out = safeJson({ blob: "x".repeat(50_000) });
-  assert.ok(out.length < 5_000, `expected a capped string, got ${out.length} chars`);
-  assert.match(out, /truncated/);
+  assert.ok(out.length < 6_000, `expected a capped string, got ${out.length} chars`);
+  // Raw slicing would emit invalid JSON, which throws in the UI's JSON.parse
+  // and breaks SQLite json_extract on this column.
+  const parsed = JSON.parse(out);
+  assert.equal(parsed._truncated, true);
+  assert.ok(parsed._originalLength > 50_000);
+  assert.equal(typeof parsed.preview, "string");
+});
+
+check("unserializable placeholder is valid JSON too", () => {
+  const a = { name: "a" };
+  a.self = a;
+  assert.deepEqual(JSON.parse(safeJson(a)), { _unserializable: true });
 });
 
 check("returns null for null/undefined rather than the string 'null'", () => {
@@ -67,7 +78,6 @@ check("survives circular structures without throwing", () => {
   const a = { name: "a" };
   a.self = a;
   assert.doesNotThrow(() => safeJson(a));
-  assert.equal(safeJson(a), '"[unserializable]"');
 });
 
 check("passes through ordinary values", () => {
@@ -102,6 +112,31 @@ check("never throws on odd inputs", () => {
   assert.equal(errorCodeOf(undefined), "UNKNOWN");
   assert.equal(typeof errorCodeOf("plain string"), "string");
   assert.equal(typeof errorCodeOf({ weird: true }), "string");
+});
+
+check("REGRESSION: does NOT group on incidental acronyms", () => {
+  // The original regex matched any 4+ char capitalized token, so a message
+  // like "Failed to parse JSON response" grouped under "JSON" and dragged
+  // unrelated failures into one bucket — destroying the grouping this
+  // function exists to provide. Requiring an underscore discriminates a real
+  // SCREAMING_SNAKE code from an incidental acronym.
+  for (const [msg, notCode] of [
+    ["Failed to parse JSON response", "JSON"],
+    ["HTTP request never completed", "HTTP"],
+    ["GET /api/foo hung up", "GET"],
+    ["Invalid URL supplied", "URL"],
+    ["NULL returned where an object was expected", "NULL"],
+  ]) {
+    assert.notEqual(errorCodeOf(new Error(msg)), notCode, `"${msg}" grouped as ${notCode}`);
+  }
+});
+
+check("prefers an explicit .code property over message parsing", () => {
+  // Node convention, and more trustworthy than any regex.
+  const e = Object.assign(new Error("connect failed"), { code: "ETIMEDOUT" });
+  assert.equal(errorCodeOf(e), "ETIMEDOUT");
+  const httpish = Object.assign(new Error("boom"), { code: 503 });
+  assert.equal(errorCodeOf(httpish), "503");
 });
 
 check("groups identical failures under one code", () => {
