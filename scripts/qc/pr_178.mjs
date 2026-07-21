@@ -126,6 +126,52 @@ async function main() {
     );
   }
 
+  // ── Home arrival ends the active drive ──────────────────────────────────
+  // The rule itself (radius, 15:30 cutoff, seven days) is unit-tested in
+  // scripts/tests/test_home_arrival.mjs — plain node, no bindings. Here we only
+  // prove the LIVE wiring: a device fix reaches the rule and its verdict comes
+  // back, and a fix nowhere near the house never ends a drive.
+  await client.patch(`/api/drive-lists/${newest.slug}`, { isActive: true });
+
+  const home = await client.get("/api/drive-lists/home-location");
+  checks.ok("GET /api/drive-lists/home-location → 200", home.status === 200, `got ${home.status}`);
+  checks.ok(
+    "the project address geocoded to real coordinates (cached in project_system_variables)",
+    Number.isFinite(home.json?.home?.latitude) && Number.isFinite(home.json?.home?.longitude),
+    JSON.stringify(home.json),
+  );
+  checks.info(`  home: ${home.json?.home?.latitude}, ${home.json?.home?.longitude} (±${home.json?.radiusM}m after ${home.json?.afterLocalMinutes} local minutes)`);
+  checks.ok(
+    "the coordinates are in the Bay Area, not a null-island fallback",
+    (home.json?.home?.latitude ?? 0) > 36 && (home.json?.home?.latitude ?? 0) < 39 &&
+      (home.json?.home?.longitude ?? 0) < -121 && (home.json?.home?.longitude ?? 0) > -123,
+    JSON.stringify(home.json?.home),
+  );
+
+  const faraway = await client.post("/api/showroom-stores/device-location", {
+    latitude: 38.5816, // Sacramento — ~120km from the project.
+    longitude: -121.4944,
+    source: "phone",
+  });
+  checks.ok("POST device-location → 200", faraway.status === 200, `got ${faraway.status}`);
+  checks.ok(
+    "the fix is evaluated against the home-arrival rule",
+    typeof faraway.json?.homeArrival?.reason === "string",
+    JSON.stringify(faraway.json?.homeArrival),
+  );
+  checks.info(`  reason: ${faraway.json?.homeArrival?.reason}`);
+  checks.ok(
+    "a fix 120km from the house never ends the drive",
+    faraway.json?.homeArrival?.ended === false,
+    JSON.stringify(faraway.json?.homeArrival),
+  );
+  const stillOn = await listDrives();
+  checks.ok(
+    "the active drive survived a far-away fix",
+    activeOnes(stillOn.drives).length === 1,
+    `${activeOnes(stillOn.drives).length} active`,
+  );
+
   // ── Leave prod in the intended end state: newest drive active ───────────
   const restoreActive = await client.patch(`/api/drive-lists/${newest.slug}`, { isActive: true });
   checks.ok(`final state — ${newest.slug} is the active drive`, restoreActive.status === 200, `got ${restoreActive.status}`);

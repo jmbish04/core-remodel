@@ -987,6 +987,8 @@ Rules for each field:
     userRatingCount: number | null;
     nationalPhoneNumber: string | null;
     websiteUri: string | null;
+    latitude: number | null;
+    longitude: number | null;
   } | null> {
     if (!(await this.isUnderMonthlyQuota())) {
       throw new Error("MAPS_QUOTA_EXCEEDED");
@@ -1002,7 +1004,7 @@ Rules for each field:
         "X-Goog-Api-Key": gmapKey,
         "X-Goog-FieldMask":
           "places.id,places.displayName,places.formattedAddress,places.rating," +
-          "places.userRatingCount,places.nationalPhoneNumber,places.websiteUri",
+          "places.userRatingCount,places.nationalPhoneNumber,places.websiteUri,places.location",
       },
       body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(5000),
@@ -1017,6 +1019,7 @@ Rules for each field:
         userRatingCount?: number;
         nationalPhoneNumber?: string;
         websiteUri?: string;
+        location?: { latitude?: number; longitude?: number };
       }>;
       error?: { message?: string };
     };
@@ -1045,6 +1048,8 @@ Rules for each field:
         typeof top.userRatingCount === "number" ? top.userRatingCount : null,
       nationalPhoneNumber: top.nationalPhoneNumber ?? null,
       websiteUri: top.websiteUri ?? null,
+      latitude: typeof top.location?.latitude === "number" ? top.location.latitude : null,
+      longitude: typeof top.location?.longitude === "number" ? top.location.longitude : null,
     };
   }
 

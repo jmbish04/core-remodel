@@ -130,7 +130,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     area: "Showroom Drives",
     title: "One active drive list — and tabs that match how drives actually go",
     summary:
-      "Only one drive can be the active one — the drive this device auto-lands on — and D1 now enforces that with a partial unique index rather than trusting app code. The drives page groups by progress instead of by lifecycle label: Pending (nothing visited yet), In progress, Finished. The active drive wears a badge, and every card has a toggle to hand the slot to another drive.",
+      "Only one drive can be the active one — the drive this device auto-lands on — and D1 now enforces that with a partial unique index rather than trusting app code. The drives page groups by progress instead of by lifecycle label: Pending (nothing visited yet), In progress, Finished. The active drive wears a badge, every card has a toggle, and pulling into the driveway after 3:30pm ends the drive on its own.",
     status: "staged",
     changes: [
       { kind: "added", text: "drive_lists.is_active — the single-slot pointer, under a partial UNIQUE index so a second active row is rejected by the database, not just by code." },
@@ -138,6 +138,8 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "added", text: "Active badge + ring on the active drive's card; list_drive_lists (MCP) now returns isActive." },
       { kind: "changed", text: "Landing tabs are Pending / In progress / Finished, bucketed on stops visited — replacing Active / Archived, which read the overloaded status enum." },
       { kind: "removed", text: "The auto-archive-on-read and un-archive-on-check-off status juggling in GET /api/drive-lists and the stop check-off; progress is now the truth, so neither rewrites status." },
+      { kind: "added", text: "Getting home ends the drive: a Tesla park event — or a phone location fix — at the project address after 3:30pm local, any day of the week, clears the active slot automatically. Driving past the house doesn't count; the fix has to be a stopped one." },
+      { kind: "added", text: "GET /api/drive-lists/home-location — the project's coordinates, geocoded once from the configured permit address and cached in project_system_variables (home_latitude / home_longitude)." },
       { kind: "migration", text: "0119_yellow_micromax — drive_lists.is_active + drive_lists_single_active_uniq. Applied to remote; the newest drive (concord-corridor-sat-jul-18-sf-1pm) holds the slot, all 13 others cleared." },
     ],
     migrations: ["0119_yellow_micromax"],

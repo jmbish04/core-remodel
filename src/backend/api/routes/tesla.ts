@@ -27,6 +27,10 @@ import { driveListStops, driveLists, showroomStores } from "@backend/db";
 import { teslaTelemetryEvents, teslaWebhookEvents } from "@backend/db/schema/tesla";
 import { matchAndMarkVisited } from "@backend/services/drive-geo-match";
 import {
+  maybeEndActiveDriveOnHomeArrival,
+  type HomeArrivalResult,
+} from "@backend/services/drive-home-arrival";
+import {
   getLocation,
   sendNavigation,
   tessieConfigured,
@@ -172,6 +176,7 @@ async function processWebhookEvent(env: Env, payload: Record<string, unknown>): 
     let matched: { id: number; name: string; distanceM: number } | null = null;
     let navigatedTo: string | null = null;
     let matchReason = "no-location";
+    let homeArrival: HomeArrivalResult | null = null;
     if (coord) {
       const appDb = drizzle(env.DB);
       const result = await matchAndMarkVisited(appDb, { lat: coord.latitude, lng: coord.longitude });
@@ -189,6 +194,16 @@ async function processWebhookEvent(env: Env, payload: Record<string, unknown>): 
       } else {
         matchReason = "no-stop-nearby";
       }
+
+      // Home for the day? A PARK at the project address after 15:30 ends the
+      // active drive. Deliberately gated on a parked car — driving past the
+      // house on the way to the next stop is not arriving home.
+      homeArrival = await maybeEndActiveDriveOnHomeArrival(env, {
+        latitude: coord.latitude,
+        longitude: coord.longitude,
+        source: "tesla-webhook",
+        stopped: isParkedEvent(eventType, payload),
+      });
     }
 
     await drizzle(env.TESLA_DB)
@@ -198,7 +213,7 @@ async function processWebhookEvent(env: Env, payload: Record<string, unknown>): 
         eventType,
         latitude: coord?.latitude ?? null,
         longitude: coord?.longitude ?? null,
-        matchResult: JSON.stringify({ reason: matchReason, matched, navigatedTo }),
+        matchResult: JSON.stringify({ reason: matchReason, matched, navigatedTo, homeArrival }),
         data: JSON.stringify(payload),
       })
       .run();
@@ -267,6 +282,22 @@ teslaRouter.post("/telemetry", async (c) => {
 
   return c.json({ ok: true });
 });
+
+/**
+ * Is this webhook a STOPPED-car event? True for an event type mentioning park,
+ * or a payload reporting P gear / zero speed. Tessie's event names vary
+ * ("parked", "drive_state" with shift_state P), so all three are accepted.
+ */
+function isParkedEvent(eventType: string | null, payload: Record<string, unknown>): boolean {
+  if (eventType && /park/i.test(eventType)) return true;
+  for (const c of [payload, payload.drive_state, (payload.data as Record<string, unknown> | undefined)?.drive_state]) {
+    if (!c || typeof c !== "object") continue;
+    const obj = c as Record<string, unknown>;
+    const shift = obj.shift_state ?? obj.shiftState;
+    if (typeof shift === "string" && shift.toUpperCase() === "P") return true;
+  }
+  return false;
+}
 
 /**
  * Pull `{latitude, longitude}` out of a loosely-typed webhook payload. Handles

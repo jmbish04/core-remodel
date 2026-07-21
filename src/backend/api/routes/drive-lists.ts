@@ -10,6 +10,11 @@
  * Mounted at `/api/drive-lists`.
  */
 import { driveListStops, driveLists, showroomStores } from "@backend/db";
+import {
+  HOME_ARRIVAL_AFTER_MINUTES,
+  HOME_RADIUS_M,
+} from "@backend/services/drive-home-arrival-rules";
+import { getHomeCoords } from "@backend/services/drive-home-arrival";
 import { createDriveList, parseDriveNotes, setActiveDrive } from "@backend/services/drive-lists";
 import { isRequestAuthenticated } from "@backend/utils/access";
 import { asc, desc, eq, sql } from "drizzle-orm";
@@ -120,6 +125,27 @@ driveListsRouter.post("/", async (c) => {
   const db = drizzle(c.env.DB);
   const { id, slug, stopCount } = await createDriveList(db, parsed.data);
   return c.json({ ok: true, id, slug, stopCount }, 201);
+});
+
+/**
+ * GET /api/drive-lists/home-location — the project's coordinates, as used by the
+ * home-arrival rule that ends an active drive.
+ *
+ * Resolved from the permit address in `project_system_variables` and cached
+ * there after the first lookup, so this is also how you confirm the geocode
+ * actually worked. `{ home: null }` means the address is unset or the lookup
+ * failed — in which case arriving home ends nothing, by design.
+ *
+ * Declared BEFORE `/:slug` so the literal path wins over the slug pattern.
+ */
+driveListsRouter.get("/home-location", async (c) => {
+  const home = await getHomeCoords(c.env, drizzle(c.env.DB));
+  return c.json({
+    home,
+    radiusM: HOME_RADIUS_M,
+    afterLocalMinutes: HOME_ARRIVAL_AFTER_MINUTES,
+    timezone: "America/Los_Angeles",
+  });
 });
 
 /** GET /api/drive-lists/:slug — one drive + its ordered stops. */

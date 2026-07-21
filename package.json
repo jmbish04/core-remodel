@@ -49,6 +49,7 @@
     "test:throttle": "node scripts/tests/test_throttled_pipeline.mjs",
     "test:agent-runs": "node scripts/tests/test_agent_runs.mjs",
     "test:route-planner": "node scripts/tests/test_route_planner.mjs",
+    "test:home-arrival": "node scripts/tests/test_home_arrival.mjs",
     "test:scout-smoke": "node scripts/tests/run_scout_smoke.mjs",
     "test:links": "node scripts/tests/test_link_classification.mjs",
     "test:kick": "node scripts/tests/test_scrape_kick_guard.mjs",

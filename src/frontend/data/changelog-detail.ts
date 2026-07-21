@@ -90,6 +90,8 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
     approach:
       "Split the pointer from the label. `is_active` is its own boolean column under a PARTIAL unique index (`WHERE is_active = 1`), so a second active row is a database error rather than a bug that shows up six drives later. Writes go through one service function, setActiveDrive(db, id | null), which clears and sets inside a single db.batch() — D1 never observes two active rows, and D1 has no transactions to fall back on. `status` stays as a plain lifecycle label that nothing infers from anymore: the read path and the check-off no longer rewrite it, and the tabs bucket on stops visited (0 → Pending, some → In progress, all → Finished), which is what the user actually asked the page to show.",
     apiChanges: [
+      "GET /api/drive-lists/home-location — NEW. The project's coordinates as the home-arrival rule sees them, plus the radius and cutoff. Geocoded once from the configured permit address, cached in project_system_variables.",
+      "POST /api/showroom-stores/device-location — response gains `homeArrival` (the rule's verdict for this fix).",
       "PATCH /api/drive-lists/:slug — NEW. Body { isActive: boolean }. true makes this THE active drive (clearing the previous one in the same batch); false leaves none active. 400 without the flag, 404 on an unknown slug.",
       "GET /api/drive-lists — now returns `isActive` per drive, and no longer auto-archives fully-visited drives (progress buckets the tabs, so nothing needs the status rewrite).",
       "PATCH /api/drive-lists/:slug/stops/:stopId — no longer rewrites the drive's status or touches the active slot; returns { ok, visited, stopCount, visitedCount }.",
@@ -97,6 +99,12 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
     ],
     filesTouched: [
       "src/backend/db/schema/drives/drive_lists.ts",
+      "src/backend/services/drive-home-arrival.ts",
+      "src/backend/services/drive-home-arrival-rules.ts",
+      "src/backend/api/routes/tesla.ts",
+      "src/backend/api/routes/showroom-stores.ts",
+      "src/backend/services/google/maps.ts",
+      "scripts/tests/test_home_arrival.mjs",
       "src/backend/services/drive-lists.ts",
       "src/backend/api/routes/drive-lists.ts",
       "src/backend/mcp/tools/drives/list_drive_lists.ts",
@@ -140,6 +148,22 @@ CREATE UNIQUE INDEX \`drive_lists_single_active_uniq\` ON \`drive_lists\` (\`is_
 }`,
       },
       {
+        title: "Getting home ends the drive — every gate, cheapest first",
+        lang: "ts",
+        code: `export function homeArrivalReason(facts: {
+  hasActiveDrive: boolean;
+  stopped: boolean;
+  at: Date;
+  distanceM: number | null;
+}): HomeArrivalReason {
+  if (!facts.hasActiveDrive) return "no-active-drive";
+  if (!facts.stopped) return "not-stopped";          // driving PAST the house
+  if (localMinutesInLA(facts.at) < HOME_ARRIVAL_AFTER_MINUTES) return "before-cutoff";
+  if (facts.distanceM == null) return "home-unconfigured";  // never guess
+  return facts.distanceM <= HOME_RADIUS_M ? "ended" : "not-home";
+}`,
+      },
+      {
         title: "Tabs bucket on progress, never on status",
         lang: "tsx",
         code: `function bucketOf(d: DriveListSummary): Bucket {
@@ -149,6 +173,22 @@ CREATE UNIQUE INDEX \`drive_lists_single_active_uniq\` ON \`drive_lists\` (\`is_
       },
     ],
     diagrams: [
+      {
+        caption: "Ending the drive when the driver gets home",
+        code: `flowchart TD
+    A[Tesla park webhook] --> C{Active drive?}
+    B[Phone / browser location fix] --> C
+    C -- no --> X[no-active-drive]
+    C -- yes --> D{Stopped fix?<br/>park event, P gear, or a phone fix}
+    D -- no --> Y[not-stopped — driving past the house]
+    D -- yes --> E{Local time >= 15:30<br/>America/Los_Angeles, any day}
+    E -- no --> Z[before-cutoff — this is a lunch break]
+    E -- yes --> F{Home coords known?<br/>geocoded from the permit address}
+    F -- no --> W[home-unconfigured — never guess]
+    F -- yes --> G{Within 150m of the house?}
+    G -- no --> V[not-home]
+    G -- yes --> H[setActiveDrive null — drive over]`,
+      },
       {
         caption: "Activating a drive — the previous holder is cleared in the same batch",
         code: `sequenceDiagram
@@ -165,8 +205,8 @@ CREATE UNIQUE INDEX \`drive_lists_single_active_uniq\` ON \`drive_lists\` (\`is_
       },
     ],
     verification: {
-      qcScript: "scripts/qc/pr_178.mjs",
-      command: "pnpm run test:pr 178 -- --preview",
+      qcScript: "scripts/qc/pr_178.mjs + scripts/tests/test_home_arrival.mjs",
+      command: "pnpm run test:pr 178 -- --preview  &&  pnpm run test:home-arrival",
       ranAt: "2026-07-21",
       source: `const on = await client.patch(\`/api/drive-lists/\${newest.slug}\`, { isActive: true });
 checks.ok(\`PATCH \${newest.slug} {isActive:true} → 200\`, on.status === 200, \`got \${on.status}\`);
@@ -187,7 +227,7 @@ if (other) {
   ✓ GET /api/drive-lists → 200
   ✓ at least one drive exists to test with
   ✓ every row exposes isActive (migration 0119 applied to remote)
-  ✓ at most ONE drive is active (was 6 before this PR) — now 0
+  ✓ at most ONE drive is active (was 6 before this PR) — now 1
     tabs → pending=14 partial=0 finished=0
   ✓ every drive falls in exactly one progress bucket
   ✓ PATCH concord-corridor-sat-jul-18-sf-1pm {isActive:true} → 200
@@ -203,10 +243,55 @@ if (other) {
   ✓ check-off returns live progress counts
   ✓ stop restored to its original state
   ✓ checking a stop off never activates a drive
+  ✓ GET /api/drive-lists/home-location → 200
+  ✓ the project address geocoded to real coordinates (cached in project_system_variables)
+      home: 37.728496799999995, -122.41406099999999 (±150m after 930 local minutes)
+  ✓ the coordinates are in the Bay Area, not a null-island fallback
+  ✓ POST device-location → 200
+  ✓ the fix is evaluated against the home-arrival rule
+      reason: before-cutoff
+  ✓ a fix 120km from the house never ends the drive
+  ✓ the active drive survived a far-away fix
   ✓ final state — concord-corridor-sat-jul-18-sf-1pm is the active drive
   ✓ exactly one active drive at rest
 
-22 passed, 0 failed`,
+29 passed, 0 failed
+
+$ pnpm run test:home-arrival
+
+(node:31315) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Volumes/Projects/workers/core-remodel/.claude/worktrees/showroom-scout-agent-be625a/src/backend/services/drive-home-arrival-rules.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Volumes/Projects/workers/core-remodel/.claude/worktrees/showroom-scout-agent-be625a/package.json.
+(Use \`node --trace-warnings ...\` to show where the warning was created)
+
+distanceMeters
+
+  ✓ zero distance to itself
+  ✓ ~111m per 0.001° of latitude
+  ✓ a next-door fix is inside the home radius
+  ✓ a showroom across town is not
+
+localMinutesInLA (must be a real timezone conversion, not an offset)
+
+  ✓ 16:00 PDT (summer, UTC-7) reads as 960
+  ✓ 16:00 PST (winter, UTC-8) also reads as 960
+  ✓ midnight local is 0, not 1440
+
+homeArrivalReason
+
+  ✓ parked at home after the cutoff ends the drive
+  ✓ no active drive short-circuits first
+  ✓ driving PAST the house does not end it
+  ✓ home at lunchtime does not end it
+  ✓ parked somewhere else does not end it
+  ✓ exactly on the radius still counts as home
+  ✓ one metre past the radius does not
+  ✓ an unknown home position never reads as 'home'
+  ✓ the cutoff minute itself qualifies (15:30 exactly)
+  ✓ one minute before the cutoff does not
+  ✓ the rule applies seven days a week (Sunday)
+
+18 passed`,
       migrations: [
         {
           tag: "0119_yellow_micromax",
