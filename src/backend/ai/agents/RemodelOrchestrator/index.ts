@@ -114,6 +114,9 @@ export class RemodelOrchestrator extends Agent<Env, RemodelOrchestratorState> {
 
   initialState = { ...DEFAULT_ORCHESTRATOR_STATE };
 
+  /** Once-per-instance guard so the fire-window DDL doesn't run every alarm. */
+  private cbTableCreated = false;
+
   // ── Lifecycle ───────────────────────────────────────────────────
 
   async onStart() {
@@ -153,22 +156,24 @@ export class RemodelOrchestrator extends Agent<Env, RemodelOrchestratorState> {
     const pending = Number(scheduleRows[0]?.n ?? 0);
     if (scheduleTableExceeded(pending)) {
       this.sql`DELETE FROM cf_agents_schedules WHERE callback = 'audit'`;
-      await tripCircuitBreaker(
-        this.env.DB,
-        "RemodelOrchestrator",
+      await this.safeTrip(
         `cf_agents_schedules 'audit' rows=${pending} exceeded the safe bound — halting to prevent the #162 row-read runaway.`,
       );
       return false;
     }
 
     // 3. Fire-rate — a 4-hour cadence firing many times a minute is a loop.
-    this.sql`
-      CREATE TABLE IF NOT EXISTS cb_audit_fire_window (
-        id INTEGER PRIMARY KEY CHECK (id = 1),
-        window_start INTEGER NOT NULL,
-        count INTEGER NOT NULL
-      )
-    `;
+    // Create the window table once per instance lifetime, not on every fire.
+    if (!this.cbTableCreated) {
+      this.sql`
+        CREATE TABLE IF NOT EXISTS cb_audit_fire_window (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          window_start INTEGER NOT NULL,
+          count INTEGER NOT NULL
+        )
+      `;
+      this.cbTableCreated = true;
+    }
     const prevRows = this.sql`
       SELECT window_start AS windowStart, count FROM cb_audit_fire_window WHERE id = 1
     ` as unknown as Array<{ windowStart: number; count: number }>;
@@ -183,15 +188,27 @@ export class RemodelOrchestrator extends Agent<Env, RemodelOrchestratorState> {
     `;
     if (tripped) {
       this.sql`DELETE FROM cf_agents_schedules WHERE callback = 'audit'`;
-      await tripCircuitBreaker(
-        this.env.DB,
-        "RemodelOrchestrator",
+      await this.safeTrip(
         `audit fired ${fires} times within the rate window — halting a suspected alarm loop.`,
       );
       return false;
     }
 
     return true;
+  }
+
+  /**
+   * Flip the global kill-switch, swallowing any D1 error. A throw here would
+   * bubble out of the alarm handler and, in DO semantics, trigger an automatic
+   * RETRY — the opposite of the clean hard-stop we want (the schedule backlog is
+   * already deleted by the caller). So the trip is best-effort: log and return.
+   */
+  private async safeTrip(reason: string): Promise<void> {
+    try {
+      await tripCircuitBreaker(this.env.DB, "RemodelOrchestrator", reason);
+    } catch (err) {
+      console.error("[RemodelOrchestrator] failed to record circuit-breaker trip in D1:", err);
+    }
   }
 
   /** Read the global kill-switch (D1-backed, shared across all alarm DOs). */

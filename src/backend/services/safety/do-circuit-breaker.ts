@@ -77,12 +77,20 @@ export async function readCircuitBreaker(dbBinding: D1Database): Promise<Circuit
     .limit(1);
   if (!row) return { tripped: false };
   try {
-    const parsed = JSON.parse(row.valueText) as CircuitBreakerState;
-    return { ...parsed, tripped: Boolean(parsed.tripped) };
+    const parsed = JSON.parse(row.valueText) as unknown;
+    // Guard against JSON PRIMITIVES: JSON.parse("true") succeeds and returns the
+    // boolean `true` (it does NOT throw), so without this object check we'd read
+    // `true.tripped` -> undefined -> {tripped:false} and treat a tripped breaker
+    // as healthy. Only a real object is the JSON state shape.
+    if (parsed && typeof parsed === "object") {
+      const state = parsed as CircuitBreakerState;
+      return { ...state, tripped: Boolean(state.tripped) };
+    }
   } catch {
-    // Legacy/plain value — treat only the literal "true" as tripped.
-    return { tripped: row.valueText === "true" };
+    // Not JSON — fall through to the legacy plain-value check below.
   }
+  // Legacy/plain value: treat only the literal "true" as tripped.
+  return { tripped: row.valueText === "true" };
 }
 
 /** Upsert the kill-switch row with the given JSON state. */

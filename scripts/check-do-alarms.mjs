@@ -30,6 +30,18 @@ const ALLOWLIST = new Set(["src/backend/ai/agents/RemodelOrchestrator/index.ts"]
 
 const BANNED = /\bthis\.schedule\s*\(/;
 
+/**
+ * Blank out comments while PRESERVING line numbers, so the ban matches real call
+ * sites — not doc comments that legitimately reference `this.schedule()` to
+ * explain why it's forbidden (this very repo has several). Block and line
+ * comments are replaced char-for-char with spaces (newlines kept).
+ */
+function stripComments(src) {
+  return src
+    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, " "))
+    .replace(/(^|[^:])\/\/[^\n]*/g, (m, p1) => p1 + " ".repeat(m.length - p1.length));
+}
+
 let files;
 try {
   files = execSync("git ls-files src", { encoding: "utf8" })
@@ -49,8 +61,9 @@ for (const file of files) {
   } catch {
     continue;
   }
-  if (BANNED.test(text)) {
-    const line = text.split("\n").findIndex((l) => BANNED.test(l)) + 1;
+  const code = stripComments(text);
+  if (BANNED.test(code)) {
+    const line = code.split("\n").findIndex((l) => BANNED.test(l)) + 1;
     offenders.push(`${file}:${line}`);
   }
 }
