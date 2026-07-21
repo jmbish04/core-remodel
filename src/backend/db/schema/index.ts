@@ -140,3 +140,7 @@ export * from "./config/index";
 
 // Persistent append-only changelog (branches + entries)
 export * from "./changelog/index";
+
+// Agent run ledger — one agent-agnostic record of every agent execution, its
+// steps and its tool calls. Powers /admin/agents and informed (non-blind) retries.
+export * from "./agents/index";
