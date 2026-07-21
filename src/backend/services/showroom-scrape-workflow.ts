@@ -232,7 +232,9 @@ export class ShowroomScrapeWorkflow extends WorkflowEntrypoint<
       const siteHost = safeHost(websiteUrl);
       // Load the category vocabulary ONCE for the whole crawl — every page's
       // extractor gets the same id list, and the ids come back validated.
-      const categories = await drizzle(env.DB)
+      // Reuse the `db` opened at the top of run() — a second drizzle() here is
+      // a needless client for the same binding.
+      const categories = await db
         .select({
           id: showroomStoreCategory.id,
           name: showroomStoreCategory.name,
@@ -836,7 +838,7 @@ async function aggregate(
   // classifier already handled (or a human set by hand) is left alone; this is
   // the safety net for the stores intake could not classify.
   const scrapedCategoryIds = [
-    ...new Set(extractions.flatMap((e) => e.categoryIds ?? [])),
+    ...new Set(extractions.flatMap((e) => e.categoryIds)),
   ];
   if (scrapedCategoryIds.length > 0) {
     const [existingCat] = await db

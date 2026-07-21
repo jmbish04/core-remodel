@@ -137,7 +137,17 @@ ${context}`;
     });
 
     const raw = response.text || "";
-    const parsed = JSON.parse(stripJsonFence(raw)) as { categoryIds?: unknown };
+    // A primitive (null / number / string / bool) means the model did not answer
+    // the question. Falling through to [] would look identical to "this store
+    // genuinely has no categories" — the silent-degradation shape that hid the
+    // blank-scrape bug for months. Throw so the catch logs it as a real failure.
+    const decoded = JSON.parse(stripJsonFence(raw)) as unknown;
+    if (typeof decoded !== "object" || decoded === null) {
+      throw new Error(
+        `AI category response was not a JSON object (got ${typeof decoded})`,
+      );
+    }
+    const parsed = decoded as { categoryIds?: unknown };
     if (!Array.isArray(parsed.categoryIds)) return [];
     // Validate against the live set — a hallucinated id must never reach an
     // INSERT, where it would either violate the FK or mis-file the store.
