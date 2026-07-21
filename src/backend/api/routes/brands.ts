@@ -362,7 +362,8 @@ brandsRouter.openapi(
       brandRows = await db
         .select()
         .from(brands)
-        .where(like(brands.name, `%${search}%`))
+        .where(or(like(brands.name, `%${search}%`), sql`${brands.id} IN (SELECT brand_id FROM brand_name_variations
+                 WHERE is_active = 1 AND brand_name LIKE ${'%' + search + '%'})`))
         .orderBy(brands.name)
         .limit(20);
     } else {

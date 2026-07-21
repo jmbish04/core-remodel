@@ -10,7 +10,7 @@
 
 import { OpenAPIHono } from "@hono/zod-openapi";
 import { drizzle } from "drizzle-orm/d1";
-import { like, eq, desc, and, inArray, or } from "drizzle-orm";
+import { like, eq, desc, and, inArray, or, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -87,6 +87,8 @@ showroomProductsRouter.get("/", async (c) => {
       or(
         like(showroomStoreProducts.itemName, `%${search}%`),
         like(brands.name, `%${search}%`),
+        sql`${brands.id} IN (SELECT brand_id FROM brand_name_variations
+                 WHERE is_active = 1 AND brand_name LIKE ${'%' + search + '%'})`,
       ),
     );
   }

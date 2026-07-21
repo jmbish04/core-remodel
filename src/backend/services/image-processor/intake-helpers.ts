@@ -1,4 +1,4 @@
-import { setPrimaryBrandName } from "@backend/services/brand-names";
+import { findBrandIdByAnyName, setPrimaryBrandName } from "@backend/services/brand-names";
 // src/backend/services/image-processor/intake-helpers.ts
 /**
  * @fileoverview Shared showroom-photo-ingest helpers, lifted out of
@@ -41,12 +41,10 @@ export async function resolveBrandId(db: Db, name: string | null | undefined): P
   const trimmed = (name ?? "").trim();
   if (!trimmed) return null;
 
-  const [existing] = await db
-    .select()
-    .from(brands)
-    .where(eq(sql`lower(${brands.name})`, trimmed.toLowerCase()))
-    .limit(1);
-  if (existing) return existing.id;
+  // Search EVERY recorded spelling, not just the display name — a source that
+  // writes "DORN BRACHT" must resolve to Dornbracht rather than fork a new brand.
+  const knownId = await findBrandIdByAnyName(db, trimmed);
+  if (knownId !== null) return knownId;
 
   try {
     const [created] = await db.insert(brands).values({ name: trimmed }).returning();

@@ -14,7 +14,7 @@
  * pattern.
  */
 
-import { and, eq, inArray, ne } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { brands } from "@backend/db/schema/brands/brands";
@@ -72,6 +72,47 @@ export async function loadBrandsWithNames(
     variations: [...(aliases.get(brand.id) ?? [])],
     websiteUrl: brand.websiteUrl ?? null,
   }));
+}
+
+/**
+ * Resolve any spelling of a brand to its id.
+ *
+ * THE point of the variations table. A hand-rolled
+ * `where lower(brands.name) = lower(?)` only ever matches the display name, so
+ * a source spelling it differently misses and the caller creates a duplicate —
+ * which is exactly how the 9 duplicate pairs got made. This searches every
+ * recorded spelling, so a miss means genuinely new, not merely differently
+ * written.
+ *
+ * Case-insensitive and whitespace-tolerant. Returns null when unknown.
+ */
+export async function findBrandIdByAnyName(
+  db: Db,
+  name: string,
+): Promise<number | null> {
+  const trimmed = name.trim();
+  if (!trimmed) return null;
+
+  const [hit] = await db
+    .select({ brandId: brandNameVariations.brandId })
+    .from(brandNameVariations)
+    .where(
+      and(
+        sql`lower(trim(${brandNameVariations.brandName})) = lower(${trimmed})`,
+        eq(brandNameVariations.isActive, true),
+      ),
+    )
+    .limit(1);
+  if (hit) return hit.brandId;
+
+  // Fall back to the legacy column for any brand whose variation row is missing
+  // — belt-and-braces, since the 0117 triggers keep the two in step.
+  const [legacy] = await db
+    .select({ id: brands.id })
+    .from(brands)
+    .where(sql`lower(trim(${brands.name})) = lower(${trimmed})`)
+    .limit(1);
+  return legacy?.id ?? null;
 }
 
 /**
