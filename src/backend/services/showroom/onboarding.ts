@@ -644,7 +644,7 @@ async function kickShowroomScrape(env: Env, showroomId: number, websiteUrl: stri
  * store a `showroom_photos_mapping` row, and set the hero image from photo[0].
  * Error-guarded per photo — one failure never aborts the pipeline.
  */
-async function runPhotoPipeline(env: Env, showroomId: number, photos: PlacePhotoRef[]) {
+export async function runPhotoPipeline(env: Env, showroomId: number, photos: PlacePhotoRef[]) {
   const { accountId, apiTokens } = await resolveCloudflareImagesCredentials(env);
   if (!accountId || apiTokens.length === 0) {
     console.error(
