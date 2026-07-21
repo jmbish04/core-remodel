@@ -48,6 +48,18 @@ import {
   productPhotoBuckets,
 } from "@backend/db";
 import { resolveBrandId } from "@backend/services/image-processor/intake-helpers";
+import {
+  METERED_PROVIDERS,
+  canSpend,
+  cycleStart,
+  getMeteringConfig,
+  resetBreaker,
+  setConfigValue,
+  snooze,
+  tripBreaker,
+  usageConfigKeys,
+} from "@backend/services/usage/metering";
+
 
 export const configRouter = new Hono<{ Bindings: Env }>();
 
@@ -483,4 +495,77 @@ configRouter.put("/products/:productId/categories", async (c) => {
     (categoryId) => ({ productId, categoryId }),
   );
   return c.json({ productId, categoryIds: ids });
+});
+
+// ---------------------------------------------------------------------------
+// Usage metering + circuit breaker  (0025 P0-05)
+// ---------------------------------------------------------------------------
+
+/**
+ * Live spend vs ceiling per provider, plus the knobs to change either.
+ *
+ * Reads and writes go through `services/usage/metering`, which owns the config
+ * key namespace — this route never touches `project_system_variables` directly,
+ * so there is one definition of what a threshold key looks like.
+ */
+configRouter.get("/usage", async (c) => {
+  const cfg = await getMeteringConfig(c.env);
+  const providers = await Promise.all(
+    METERED_PROVIDERS.map(async (p) => {
+      const decision = await canSpend(c.env, p);
+      return {
+        provider: p,
+        thresholdUsd: cfg.providers[p].thresholdUsd,
+        snoozeToUsd: cfg.providers[p].snoozeToUsd,
+        manualBreak: cfg.providers[p].manualBreak,
+        spendUsd: decision.spendUsd,
+        ceilingUsd: decision.ceilingUsd,
+        allowed: decision.allowed,
+        reason: decision.reason,
+      };
+    }),
+  );
+  return c.json({
+    cycleAnchorDay: cfg.cycleAnchorDay,
+    cycleStart: cycleStart(cfg.cycleAnchorDay).toISOString(),
+    providers,
+  });
+});
+
+const usagePatchSchema = z.object({
+  provider: z.enum(METERED_PROVIDERS).optional(),
+  thresholdUsd: z.number().nonnegative().optional(),
+  manualBreak: z.boolean().optional(),
+  /** Raise the ceiling by this many dollars above CURRENT spend. */
+  snoozeUsd: z.number().positive().optional(),
+  /** Clear both the manual break and any snooze. */
+  reset: z.boolean().optional(),
+  /** Global: day of month the billing cycle starts (1-28). */
+  cycleAnchorDay: z.number().int().min(1).max(28).optional(),
+});
+
+configRouter.patch("/usage", async (c) => {
+  const parsed = usagePatchSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: "Invalid payload", detail: parsed.error.flatten() }, 400);
+  }
+  const b = parsed.data;
+
+  if (b.cycleAnchorDay !== undefined) {
+    await setConfigValue(c.env, usageConfigKeys.cycleAnchorDay, String(b.cycleAnchorDay));
+  }
+
+  if (b.provider) {
+    if (b.reset) await resetBreaker(c.env, b.provider);
+    if (b.thresholdUsd !== undefined) {
+      await setConfigValue(c.env, usageConfigKeys.threshold(b.provider), String(b.thresholdUsd));
+    }
+    if (b.manualBreak === true) await tripBreaker(c.env, b.provider);
+    if (b.manualBreak === false && !b.reset) {
+      await setConfigValue(c.env, usageConfigKeys.manualBreak(b.provider), "false");
+    }
+    if (b.snoozeUsd !== undefined) await snooze(c.env, b.provider, b.snoozeUsd);
+  }
+
+  return c.json({ success: true });
 });

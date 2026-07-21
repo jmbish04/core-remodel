@@ -1,0 +1,15 @@
+---
+/**
+ * @fileoverview Usage & cost ceilings — `/admin/config/usage`.
+ * Thin shell mounting `<UsageConfigApp>` (ConfigShell inside).
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { UsageConfigApp } from "@/components/config/UsageConfigApp";
+---
+
+<BaseLayout
+  title="Usage & Cost Ceilings — Configuration"
+  description="What each metered provider has spent this billing cycle, and the circuit breaker that stops it."
+>
+  <UsageConfigApp client:only="react" />
+</BaseLayout>
