@@ -48,6 +48,19 @@ import {
   productPhotoBuckets,
 } from "@backend/db";
 import { resolveBrandId } from "@backend/services/image-processor/intake-helpers";
+import {
+  METERED_PROVIDERS,
+  cycleStart,
+  decideSpend,
+  getCycleSpend,
+  getMeteringConfig,
+  resetBreaker,
+  setConfigValue,
+  snooze,
+  tripBreaker,
+  usageConfigKeys,
+} from "@backend/services/usage/metering";
+
 
 export const configRouter = new Hono<{ Bindings: Env }>();
 
@@ -483,4 +496,102 @@ configRouter.put("/products/:productId/categories", async (c) => {
     (categoryId) => ({ productId, categoryId }),
   );
   return c.json({ productId, categoryIds: ids });
+});
+
+// ---------------------------------------------------------------------------
+// Usage metering + circuit breaker  (0025 P0-05)
+// ---------------------------------------------------------------------------
+
+/**
+ * Live spend vs ceiling per provider, plus the knobs to change either.
+ *
+ * Reads and writes go through `services/usage/metering`, which owns the config
+ * key namespace — this route never touches `project_system_variables` directly,
+ * so there is one definition of what a threshold key looks like.
+ */
+configRouter.get("/usage", async (c) => {
+  // Read the config ONCE and pass it down. canSpend() fetches its own config,
+  // so calling it per provider issued 7 identical queries against
+  // project_system_variables on every page load.
+  const cfg = await getMeteringConfig(c.env);
+  const providers = await Promise.all(
+    METERED_PROVIDERS.map(async (p) => {
+      const pc = cfg.providers[p];
+      const spendUsd = await getCycleSpend(c.env, p, cfg);
+      const decision = decideSpend({
+        manualBreak: pc.manualBreak,
+        snoozeToUsd: pc.snoozeToUsd,
+        thresholdUsd: pc.thresholdUsd,
+        spendUsd,
+      });
+      return {
+        provider: p,
+        thresholdUsd: pc.thresholdUsd,
+        snoozeToUsd: pc.snoozeToUsd,
+        manualBreak: pc.manualBreak,
+        spendUsd,
+        ceilingUsd: decision.ceilingUsd,
+        allowed: decision.allowed,
+        reason: decision.reason,
+      };
+    }),
+  );
+  return c.json({
+    cycleAnchorDay: cfg.cycleAnchorDay,
+    cycleStart: cycleStart(cfg.cycleAnchorDay).toISOString(),
+    providers,
+  });
+});
+
+const usagePatchSchema = z.object({
+  provider: z.enum(METERED_PROVIDERS).optional(),
+  thresholdUsd: z.number().nonnegative().optional(),
+  manualBreak: z.boolean().optional(),
+  /** Raise the ceiling by this many dollars above CURRENT spend. */
+  snoozeUsd: z.number().positive().optional(),
+  /** Clear both the manual break and any snooze. */
+  reset: z.boolean().optional(),
+  /** Global: day of month the billing cycle starts (1-28). */
+  cycleAnchorDay: z.number().int().min(1).max(28).optional(),
+});
+
+configRouter.patch("/usage", async (c) => {
+  const parsed = usagePatchSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: "Invalid payload", detail: parsed.error.flatten() }, 400);
+  }
+  const b = parsed.data;
+
+  // A provider-scoped field with no `provider` used to return 200 and silently
+  // do nothing — the caller believes the threshold was saved when it was not.
+  // Reject explicitly instead.
+  const providerScoped = ["thresholdUsd", "manualBreak", "snoozeUsd", "reset"] as const;
+  const usedScoped = providerScoped.filter((k) => b[k] !== undefined);
+  if (usedScoped.length > 0 && !b.provider) {
+    return c.json(
+      {
+        error: "`provider` is required when setting provider-scoped fields",
+        fields: usedScoped,
+      },
+      400,
+    );
+  }
+
+  if (b.cycleAnchorDay !== undefined) {
+    await setConfigValue(c.env, usageConfigKeys.cycleAnchorDay, String(b.cycleAnchorDay));
+  }
+
+  if (b.provider) {
+    if (b.reset) await resetBreaker(c.env, b.provider);
+    if (b.thresholdUsd !== undefined) {
+      await setConfigValue(c.env, usageConfigKeys.threshold(b.provider), String(b.thresholdUsd));
+    }
+    if (b.manualBreak === true) await tripBreaker(c.env, b.provider);
+    if (b.manualBreak === false && !b.reset) {
+      await setConfigValue(c.env, usageConfigKeys.manualBreak(b.provider), "false");
+    }
+    if (b.snoozeUsd !== undefined) await snooze(c.env, b.provider, b.snoozeUsd);
+  }
+
+  return c.json({ success: true });
 });
