@@ -1,0 +1,21 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { SystemTablePage } from "@/components/system/SystemTablePage";
+---
+
+<BaseLayout title="Audit Log — The Monolith" description="Who changed what, and when, across the platform.">
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 flex items-center gap-2 text-3xl font-bold tracking-tight">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+             stroke-linejoin="round" class="size-6 text-muted-foreground" aria-hidden="true">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M9 15h6"/><path d="M9 11h6"/>
+        </svg>
+        Audit Log
+      </h1>
+      <p class="text-muted-foreground">Who changed what, and when, across the platform.</p>
+    </div>
+    <SystemTablePage kind="audit" client:only="react" />
+  </main>
+</BaseLayout>

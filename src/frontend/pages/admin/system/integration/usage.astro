@@ -1,0 +1,24 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { IntegrationUsageApp } from "@/components/system/IntegrationUsageApp";
+---
+
+<BaseLayout
+  title="Integration Usage — The Monolith"
+  description="Third-party integration and model usage across the platform."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 flex items-center gap-2 text-3xl font-bold tracking-tight">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+             stroke-linejoin="round" class="size-6 text-muted-foreground" aria-hidden="true">
+          <path d="M12 2v20M2 12h20"/><circle cx="12" cy="12" r="10"/>
+        </svg>
+        Integration Usage
+      </h1>
+      <p class="text-muted-foreground">Model and third-party integration usage across the platform.</p>
+    </div>
+    <IntegrationUsageApp client:only="react" />
+  </main>
+</BaseLayout>
