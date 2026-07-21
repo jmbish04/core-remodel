@@ -18,6 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { MapsUsageSection } from "./usage/MapsUsageSection";
 import { GeminiUsageSection } from "./usage/GeminiUsageSection";
 import { AiGatewayUsageSection } from "./usage/AiGatewayUsageSection";
+import { CircuitBreakerSection } from "./usage/CircuitBreakerSection";
 
 export function AdminIntegrationsUsageApp() {
   return (
@@ -40,6 +41,7 @@ export function AdminIntegrationsUsageApp() {
           <TabsTrigger value="gemini">Gemini</TabsTrigger>
           <TabsTrigger value="ai-gateway">AI Gateway</TabsTrigger>
           <TabsTrigger value="maps">Google Maps</TabsTrigger>
+          <TabsTrigger value="safety">Safety</TabsTrigger>
         </TabsList>
 
         {/* Gemini first — it's the primary spend-reconciliation surface. */}
@@ -51,6 +53,9 @@ export function AdminIntegrationsUsageApp() {
         </TabsContent>
         <TabsContent value="maps">
           <MapsUsageSection />
+        </TabsContent>
+        <TabsContent value="safety">
+          <CircuitBreakerSection />
         </TabsContent>
       </Tabs>
     </main>

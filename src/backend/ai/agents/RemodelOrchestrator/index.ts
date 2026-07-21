@@ -24,6 +24,13 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { clickupSystemAlerts, clickupTaskFlags } from "@backend/db";
 import { ClickUpClient } from "@backend/services/clickup-client";
+import {
+  evaluateFireWindow,
+  readCircuitBreaker,
+  scheduleTableExceeded,
+  tripCircuitBreaker,
+  type FireWindow,
+} from "@backend/services/safety/do-circuit-breaker";
 
 import { calculateCriticalPath } from "./critical-path";
 import {
@@ -110,8 +117,93 @@ export class RemodelOrchestrator extends Agent<Env, RemodelOrchestratorState> {
   // ── Lifecycle ───────────────────────────────────────────────────
 
   async onStart() {
+    // Respect the global kill-switch: if the breaker is tripped, do not arm an
+    // alarm at all (and clear any backlog), so a wake can't restart the loop.
+    if (await this.isCircuitBreakerTripped()) {
+      this.sql`DELETE FROM cf_agents_schedules WHERE callback = 'audit'`;
+      return;
+    }
     // Bootstrap the audit cycle 60s after creation to give time for configuration.
     await this.ensureAuditSchedule(60);
+  }
+
+  /**
+   * Circuit-breaker guard — the second line of defence behind the #162 fix. Run at
+   * the top of every alarm fire BEFORE any work. On any runaway signal it TRIPS
+   * (flips the global kill-switch), drops the schedule backlog, and returns false so
+   * the caller hard-stops WITHOUT rescheduling. The checks are cheap by design (a
+   * D1 single-row read, a SARGABLE count, an O(1) window compare) so the guard can
+   * never itself become the cost.
+   *
+   * Returns true only when it is safe to run and re-arm.
+   */
+  private async circuitBreakerGuard(): Promise<boolean> {
+    // 1. Global kill-switch — another DO (or a prior trip) may have halted us.
+    if (await this.isCircuitBreakerTripped()) {
+      this.sql`DELETE FROM cf_agents_schedules WHERE callback = 'audit'`;
+      console.error("[RemodelOrchestrator] circuit breaker tripped — refusing to run/reschedule.");
+      return false;
+    }
+
+    // 2. Schedule-table bound — the EXACT #162 signature. A healthy DO keeps one
+    // pending 'audit' row; a growing count means the append-only backlog is back.
+    const scheduleRows = this.sql`
+      SELECT count(*) AS n FROM cf_agents_schedules WHERE callback = 'audit'
+    ` as unknown as Array<{ n: number }>;
+    const pending = Number(scheduleRows[0]?.n ?? 0);
+    if (scheduleTableExceeded(pending)) {
+      this.sql`DELETE FROM cf_agents_schedules WHERE callback = 'audit'`;
+      await tripCircuitBreaker(
+        this.env.DB,
+        "RemodelOrchestrator",
+        `cf_agents_schedules 'audit' rows=${pending} exceeded the safe bound — halting to prevent the #162 row-read runaway.`,
+      );
+      return false;
+    }
+
+    // 3. Fire-rate — a 4-hour cadence firing many times a minute is a loop.
+    this.sql`
+      CREATE TABLE IF NOT EXISTS cb_audit_fire_window (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        window_start INTEGER NOT NULL,
+        count INTEGER NOT NULL
+      )
+    `;
+    const prevRows = this.sql`
+      SELECT window_start AS windowStart, count FROM cb_audit_fire_window WHERE id = 1
+    ` as unknown as Array<{ windowStart: number; count: number }>;
+    const prev: FireWindow | null = prevRows[0]
+      ? { windowStart: Number(prevRows[0].windowStart), count: Number(prevRows[0].count) }
+      : null;
+    const { window, fires, tripped } = evaluateFireWindow(prev, Date.now());
+    this.sql`
+      INSERT INTO cb_audit_fire_window (id, window_start, count)
+      VALUES (1, ${window.windowStart}, ${window.count})
+      ON CONFLICT(id) DO UPDATE SET window_start = ${window.windowStart}, count = ${window.count}
+    `;
+    if (tripped) {
+      this.sql`DELETE FROM cf_agents_schedules WHERE callback = 'audit'`;
+      await tripCircuitBreaker(
+        this.env.DB,
+        "RemodelOrchestrator",
+        `audit fired ${fires} times within the rate window — halting a suspected alarm loop.`,
+      );
+      return false;
+    }
+
+    return true;
+  }
+
+  /** Read the global kill-switch (D1-backed, shared across all alarm DOs). */
+  private async isCircuitBreakerTripped(): Promise<boolean> {
+    try {
+      return (await readCircuitBreaker(this.env.DB)).tripped;
+    } catch (err) {
+      // A failed read must NOT block work (fail-open on the guard's own error),
+      // but it also must not crash the alarm — log and proceed.
+      console.warn("[RemodelOrchestrator] circuit-breaker read failed:", err);
+      return false;
+    }
   }
 
   /**
@@ -165,6 +257,19 @@ export class RemodelOrchestrator extends Agent<Env, RemodelOrchestratorState> {
 
   /** Named handler invoked by this.schedule(). */
   async audit() {
+    // Circuit-breaker guard FIRST. On a trip it returns false having already
+    // dropped the schedule backlog — we then hard-stop with NO reschedule, so the
+    // loop cannot restart itself. Downtime here is deliberate: it is the price of
+    // never repeating the #162 runaway.
+    if (!(await this.circuitBreakerGuard())) {
+      this.setState({
+        ...this.state,
+        status: "error",
+        lastError: "Circuit breaker tripped — audit halted. Clear it from /admin/integrations/usage.",
+      });
+      return;
+    }
+
     try {
       await this.runAuditCycle();
     } catch (err) {
@@ -177,7 +282,7 @@ export class RemodelOrchestrator extends Agent<Env, RemodelOrchestratorState> {
       });
     } finally {
       // Self-healing loop: reschedule the next audit in 4 hours. Must replace,
-      // not append — see ensureAuditSchedule().
+      // not append — see ensureAuditSchedule(). Only reached when the guard passed.
       await this.ensureAuditSchedule(AUDIT_INTERVAL_MS / 1000);
     }
   }

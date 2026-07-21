@@ -22,6 +22,10 @@ import {
 } from "@/backend/services/google/maps";
 import { geminiUsage } from "@backend/db/schema";
 import { getAiGatewayUsage } from "@backend/services/ai-gateway/analytics";
+import {
+  clearCircuitBreaker,
+  readCircuitBreaker,
+} from "@backend/services/safety/do-circuit-breaker";
 
 export const adminIntegrationsRouter = new OpenAPIHono<{ Bindings: Env }>();
 
@@ -297,3 +301,31 @@ adminIntegrationsRouter.openapi(
     return c.json(usage, 200);
   },
 );
+
+// ─── DO circuit breaker ──────────────────────────────────────────────────────
+// Status + clear for the global Durable Object circuit breaker (the safety guard
+// that hard-stops a runaway alarm loop before it bills into the thousands — see
+// services/safety/do-circuit-breaker.ts). Plain routes (not OpenAPI) to keep the
+// safety surface minimal; still admin-gated by the /api/admin/* middleware.
+
+adminIntegrationsRouter.get("/circuit-breaker", async (c) => {
+  try {
+    const state = await readCircuitBreaker(c.env.DB);
+    return c.json(state, 200);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[admin/integrations/circuit-breaker] read error:", message);
+    return c.json({ error: `Failed to read circuit breaker: ${message}` }, 500);
+  }
+});
+
+adminIntegrationsRouter.post("/circuit-breaker/clear", async (c) => {
+  try {
+    await clearCircuitBreaker(c.env.DB);
+    return c.json({ ok: true, cleared: true }, 200);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[admin/integrations/circuit-breaker/clear] error:", message);
+    return c.json({ error: `Failed to clear circuit breaker: ${message}` }, 500);
+  }
+});
