@@ -56,10 +56,16 @@ export function decideSpend(input: BreakerInput): BreakerDecision {
  */
 export function cycleStart(anchorDay: number, now: Date = new Date()): Date {
   const day = Math.min(Math.max(Math.trunc(anchorDay) || 1, 1), 28);
-  const start = new Date(now.getFullYear(), now.getMonth(), day, 0, 0, 0, 0);
+  // UTC, NOT local time. `gemini_usage_log.timestamp` defaults to
+  // `(unixepoch())`, which is UTC, so a local-time boundary would shift the
+  // cycle by the host offset — silently misattributing spend near midnight and
+  // producing different answers on a dev machine than in the Worker.
+  const start = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), day, 0, 0, 0, 0),
+  );
   if (now.getTime() < start.getTime()) {
     // Before this month's anchor — the cycle began last month.
-    start.setMonth(start.getMonth() - 1);
+    start.setUTCMonth(start.getUTCMonth() - 1);
   }
   return start;
 }

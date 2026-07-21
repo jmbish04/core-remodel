@@ -25,7 +25,7 @@
  */
 
 import { drizzle } from "drizzle-orm/d1";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 
 import { geminiUsage } from "@backend/db/schema/system/gemini-usage";
 import { projectSystemVariables } from "@backend/db/schema/home/project_system_variables";
@@ -145,27 +145,23 @@ export async function setConfigValue(
   valueText: string,
 ): Promise<void> {
   const db = drizzle(env.DB);
-  const [existing] = await db
-    .select({ id: projectSystemVariables.id })
-    .from(projectSystemVariables)
-    .where(eq(projectSystemVariables.variableKey, variableKey))
-    .limit(1);
-
-  if (existing) {
-    await db
-      .update(projectSystemVariables)
-      .set({ valueText })
-      .where(eq(projectSystemVariables.id, existing.id));
-    return;
-  }
-  await db.insert(projectSystemVariables).values({
-    variableKey,
-    valueText,
-    category: CONFIG_CATEGORY,
-    // notNull + unique on this table; mirror the key so it stays stable.
-    mappingRefKey: variableKey,
-    description: "Usage metering / circuit breaker configuration.",
-  });
+  // Single atomic upsert. A select-then-insert races: two concurrent writers
+  // for the same new key both miss, both insert, and the second trips the
+  // unique constraint on `variable_key`.
+  await db
+    .insert(projectSystemVariables)
+    .values({
+      variableKey,
+      valueText,
+      category: CONFIG_CATEGORY,
+      // notNull + unique on this table; mirror the key so it stays stable.
+      mappingRefKey: variableKey,
+      description: "Usage metering / circuit breaker configuration.",
+    })
+    .onConflictDoUpdate({
+      target: projectSystemVariables.variableKey,
+      set: { valueText },
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -241,7 +237,10 @@ export async function getCycleSpend(
     .where(
       and(
         eq(geminiUsage.provider, provider),
-        sql`${geminiUsage.timestamp} >= ${Math.floor(start.getTime() / 1000)}`,
+        // `timestamp` is mode:"timestamp", so drizzle serializes the Date to
+        // seconds itself — a manual /1000 duplicates that and drifts if the
+        // column mode ever changes.
+        gte(geminiUsage.timestamp, start),
       ),
     )
     .get();

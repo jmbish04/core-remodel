@@ -79,22 +79,32 @@ check("a zero ceiling means unconfigured, not blocked", () => {
 
 console.log("\nbilling cycle — anchored, not calendar-month");
 
+// UTC throughout — the ledger is UTC, and local-time assertions would fail on
+// any machine that is not on UTC.
 check("after the anchor, the cycle started this month", () => {
-  const s = cycleStart(15, new Date(2026, 6, 20)); // Jul 20, anchor 15
-  assert.equal(s.getMonth(), 6);
-  assert.equal(s.getDate(), 15);
+  const s = cycleStart(15, new Date(Date.UTC(2026, 6, 20))); // Jul 20, anchor 15
+  assert.equal(s.getUTCMonth(), 6);
+  assert.equal(s.getUTCDate(), 15);
 });
 
 check("before the anchor, the cycle started LAST month", () => {
-  const s = cycleStart(15, new Date(2026, 6, 3)); // Jul 3, anchor 15
-  assert.equal(s.getMonth(), 5); // June
-  assert.equal(s.getDate(), 15);
+  const s = cycleStart(15, new Date(Date.UTC(2026, 6, 3))); // Jul 3, anchor 15
+  assert.equal(s.getUTCMonth(), 5); // June
+  assert.equal(s.getUTCDate(), 15);
 });
 
 check("anchor clamps to 1-28 so it exists in February", () => {
   // A 31st anchor would silently skip months that have no 31st.
-  assert.equal(cycleStart(31, new Date(2026, 1, 10)).getDate(), 28);
-  assert.equal(cycleStart(0, new Date(2026, 1, 10)).getDate(), 1);
+  assert.equal(cycleStart(31, new Date(Date.UTC(2026, 1, 10))).getUTCDate(), 28);
+  assert.equal(cycleStart(0, new Date(Date.UTC(2026, 1, 10))).getUTCDate(), 1);
+});
+
+check("boundary is UTC, not local — a non-UTC host must agree", () => {
+  // 2026-07-15T00:30Z is AFTER the anchor in UTC. In UTC-8 local time it is
+  // still Jul 14, which would have put the cycle start a month earlier.
+  const s = cycleStart(15, new Date(Date.UTC(2026, 6, 15, 0, 30)));
+  assert.equal(s.getUTCMonth(), 6);
+  assert.equal(s.getUTCDate(), 15);
 });
 
 console.log(`\n${process.exitCode ? "FAILED" : "PASSED"} — ${passed} checks\n`);
