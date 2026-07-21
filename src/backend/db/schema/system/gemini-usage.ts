@@ -29,7 +29,29 @@ export const geminiUsage = sqliteTable("gemini_usage_log", {
     .notNull()
     .default(sql`(unixepoch())`),
 
-  /** Gemini model id, e.g. "gemini-2.5-flash", "gemini-3-pro-image". */
+  /**
+   * Which metered provider this call hit.
+   *
+   * The table began life as Gemini-only, but its shape — model, feature,
+   * tokens, cost, status — is exactly what every heavy provider needs, so it is
+   * generalized rather than duplicated per provider. Defaults to GEMINI so the
+   * rows that predate this column backfill correctly.
+   */
+  provider: text("provider", {
+    enum: [
+      "GEMINI",
+      "WORKERS_AI",
+      "BROWSER_RENDERING",
+      "DURABLE_OBJECT",
+      "VECTORIZE",
+      "CF_IMAGES",
+      "GOOGLE_PLACES",
+    ],
+  })
+    .notNull()
+    .default("GEMINI"),
+
+  /** Model id, e.g. "gemini-2.5-flash", "@cf/baai/bge-large-en-v1.5". */
   model: text("model").notNull(),
 
   /**
@@ -73,7 +95,8 @@ export const GEMINI_USAGE_TABLE_DESCRIPTION =
 export const GEMINI_USAGE_COLUMN_DESCRIPTIONS: Record<string, string> = {
   id: "Unique identifier for the usage event.",
   timestamp: "Timestamp when the Gemini call completed (or failed).",
-  model: "Gemini model id used for the call.",
+  provider: "Which metered provider the call hit (GEMINI, WORKERS_AI, ...).",
+  model: "Model id used for the call.",
   feature: "Calling surface label for cost attribution (e.g. 'email_classify').",
   status: "'ok' if the call returned, 'error' if it threw.",
   prompt_tokens: "Input/prompt tokens billed (from usageMetadata). Nullable.",
