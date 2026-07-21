@@ -50,8 +50,9 @@ import {
 import { resolveBrandId } from "@backend/services/image-processor/intake-helpers";
 import {
   METERED_PROVIDERS,
-  canSpend,
   cycleStart,
+  decideSpend,
+  getCycleSpend,
   getMeteringConfig,
   resetBreaker,
   setConfigValue,
@@ -509,16 +510,26 @@ configRouter.put("/products/:productId/categories", async (c) => {
  * so there is one definition of what a threshold key looks like.
  */
 configRouter.get("/usage", async (c) => {
+  // Read the config ONCE and pass it down. canSpend() fetches its own config,
+  // so calling it per provider issued 7 identical queries against
+  // project_system_variables on every page load.
   const cfg = await getMeteringConfig(c.env);
   const providers = await Promise.all(
     METERED_PROVIDERS.map(async (p) => {
-      const decision = await canSpend(c.env, p);
+      const pc = cfg.providers[p];
+      const spendUsd = await getCycleSpend(c.env, p, cfg);
+      const decision = decideSpend({
+        manualBreak: pc.manualBreak,
+        snoozeToUsd: pc.snoozeToUsd,
+        thresholdUsd: pc.thresholdUsd,
+        spendUsd,
+      });
       return {
         provider: p,
-        thresholdUsd: cfg.providers[p].thresholdUsd,
-        snoozeToUsd: cfg.providers[p].snoozeToUsd,
-        manualBreak: cfg.providers[p].manualBreak,
-        spendUsd: decision.spendUsd,
+        thresholdUsd: pc.thresholdUsd,
+        snoozeToUsd: pc.snoozeToUsd,
+        manualBreak: pc.manualBreak,
+        spendUsd,
         ceilingUsd: decision.ceilingUsd,
         allowed: decision.allowed,
         reason: decision.reason,
@@ -550,6 +561,21 @@ configRouter.patch("/usage", async (c) => {
     return c.json({ error: "Invalid payload", detail: parsed.error.flatten() }, 400);
   }
   const b = parsed.data;
+
+  // A provider-scoped field with no `provider` used to return 200 and silently
+  // do nothing — the caller believes the threshold was saved when it was not.
+  // Reject explicitly instead.
+  const providerScoped = ["thresholdUsd", "manualBreak", "snoozeUsd", "reset"] as const;
+  const usedScoped = providerScoped.filter((k) => b[k] !== undefined);
+  if (usedScoped.length > 0 && !b.provider) {
+    return c.json(
+      {
+        error: "`provider` is required when setting provider-scoped fields",
+        fields: usedScoped,
+      },
+      400,
+    );
+  }
 
   if (b.cycleAnchorDay !== undefined) {
     await setConfigValue(c.env, usageConfigKeys.cycleAnchorDay, String(b.cycleAnchorDay));
