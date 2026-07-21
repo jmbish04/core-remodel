@@ -101,6 +101,21 @@ const TRAILING_COUNT_RE = /\s*[([]?\s*\d+\s*[)\]]?\s*$/;
 const MIN_LEN = 2;
 const MAX_LEN = 60;
 
+/**
+ * Field-wise merge: first non-null wins per field, so a partial capture never
+ * erases a richer one.
+ */
+function mergeCandidates(a: BrandCandidate, b: BrandCandidate): BrandCandidate {
+  return {
+    ...a,
+    name: a.name ?? b.name,
+    websiteUrl: a.websiteUrl ?? b.websiteUrl,
+    logoUrl: a.logoUrl ?? b.logoUrl,
+    // A named capture is better provenance than a bare logo.
+    extractionMethod: a.name ? a.extractionMethod : b.extractionMethod,
+  };
+}
+
 /** True when this URL is a same-domain brand facet / brand landing link. */
 function isBrandFacetUrl(u: URL): boolean {
   for (const [key, value] of u.searchParams) {
@@ -250,10 +265,19 @@ export function extractBrandFacets(
       : null;
     if (!nameKey && !domainKey) continue;
 
-    const existingKey =
-      (nameKey && aliasToKey.get(nameKey)) || (domainKey && aliasToKey.get(domainKey)) || null;
+    // A candidate can match MORE THAN ONE existing record, and that case is the
+    // subtle one: "ROHL" (name only, from a filter bar) and rohl.com (domain
+    // only, from a nameless logo) start as two separate rows under two keys.
+    // A later capture carrying BOTH identities proves they are the same brand —
+    // so collapse every matched record together rather than joining just one and
+    // orphaning the other.
+    const matchedKeys = [
+      nameKey ? aliasToKey.get(nameKey) : undefined,
+      domainKey ? aliasToKey.get(domainKey) : undefined,
+    ].filter((k): k is string => Boolean(k));
+    const uniqueMatched = [...new Set(matchedKeys)];
 
-    if (!existingKey) {
+    if (uniqueMatched.length === 0) {
       const key = nameKey ?? domainKey!;
       byLower.set(key, candidate);
       if (nameKey) aliasToKey.set(nameKey, key);
@@ -261,21 +285,27 @@ export function extractBrandFacets(
       continue;
     }
 
-    // Merge rather than replace: different pages reveal different fields, and
-    // dropping one loses data we already paid to fetch.
-    const prior = byLower.get(existingKey)!;
-    const merged: BrandCandidate = {
-      ...prior,
-      name: prior.name ?? candidate.name,
-      websiteUrl: prior.websiteUrl ?? candidate.websiteUrl,
-      logoUrl: prior.logoUrl ?? candidate.logoUrl,
-      // A named capture is a better provenance record than a bare logo.
-      extractionMethod: prior.name ? prior.extractionMethod : candidate.extractionMethod,
-    };
-    byLower.set(existingKey, merged);
-    // Newly-learned aliases point at the same record.
-    if (nameKey) aliasToKey.set(nameKey, existingKey);
-    if (domainKey) aliasToKey.set(domainKey, existingKey);
+    // Fold every matched record plus the new candidate into one. Merge rather
+    // than replace: different pages reveal different fields, and dropping one
+    // loses data already paid for.
+    const survivorKey = uniqueMatched[0];
+    let merged: BrandCandidate = byLower.get(survivorKey)!;
+    for (const k of uniqueMatched.slice(1)) {
+      const other = byLower.get(k);
+      if (!other) continue;
+      merged = mergeCandidates(merged, other);
+      byLower.delete(k);
+    }
+    merged = mergeCandidates(merged, candidate);
+    byLower.set(survivorKey, merged);
+
+    // EVERY alias — the folded records' and the new candidate's — must now point
+    // at the survivor, or a later capture re-splits the brand we just joined.
+    for (const [alias, target] of aliasToKey) {
+      if (uniqueMatched.includes(target)) aliasToKey.set(alias, survivorKey);
+    }
+    if (nameKey) aliasToKey.set(nameKey, survivorKey);
+    if (domainKey) aliasToKey.set(domainKey, survivorKey);
   }
 
   return [...byLower.values()];

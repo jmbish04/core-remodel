@@ -385,6 +385,26 @@ check("a logo-only anchor still respects the directory page gate", () => {
   );
 });
 
+check("THREE partials of one brand collapse to ONE (Gemini #175)", () => {
+  // The subtle case: "ROHL" (name only, filter bar) and rohl.com (domain only,
+  // nameless logo) start as two SEPARATE records under two different keys. A
+  // third capture carrying BOTH identities proves they are the same brand — it
+  // must fold them together, not join one and orphan the other.
+  const out = extractBrandFacets(
+    DIR,
+    [
+      { href: `https://${SITE}/shop?brand=rohl`, text: "ROHL" },        // name only
+      { href: "https://www.rohl.com", imageUrl: "https://s.com/r.png" }, // domain+logo only
+      { href: "https://www.rohl.com/", text: "ROHL" },                   // BOTH -> must fold
+    ],
+    SITE,
+  );
+  assert.equal(out.length, 1, `expected 1 brand, got ${out.length}: ${JSON.stringify(out)}`);
+  assert.equal(out[0].name, "ROHL");
+  assert.equal(out[0].logoUrl, "https://s.com/r.png", "logo from the nameless capture must survive");
+  assert.ok(out[0].websiteUrl?.includes("rohl.com"));
+});
+
 check("sourceUrl provenance is recorded", () => {
   const [b] = extractBrandFacets(DIR, [{ href: "https://bobrick.com", text: "Bobrick" }], SITE);
   assert.equal(b.sourceUrl, DIR);

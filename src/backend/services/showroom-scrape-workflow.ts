@@ -934,7 +934,6 @@ async function aggregate(
   // structured data we already fetched. This is where the volume is: store #132
   // yields 137 here against the AI's 6.
   const siteByLower = new Map<string, string | null>();
-  const logoByLower = new Map<string, string | null>();
   let unnamedLogoBrands = 0;
   for (const b of facetBrands) {
     // A logo-wall capture can legitimately have NO name — the href is the
@@ -949,7 +948,16 @@ async function aggregate(
     if (!nameByLower.has(key)) nameByLower.set(key, displayName);
     // Record the website/logo even when the AI already supplied the name.
     if (b.websiteUrl && !siteByLower.get(key)) siteByLower.set(key, b.websiteUrl);
-    if (b.logoUrl && !logoByLower.get(key)) logoByLower.set(key, b.logoUrl);
+  }
+  // Logos ARE captured on BrandCandidate.logoUrl, but `brands` has nowhere to
+  // put them yet — `original_logo_url` lands in 0025 P2-03, together with the
+  // decision to serve brand imagery from the source URL instead of CF Images.
+  // Counting them here rather than silently dropping them, so the gap is visible.
+  const withLogo = facetBrands.filter((b) => b.logoUrl).length;
+  if (withLogo > 0) {
+    console.log(
+      `showroom-scrape: showroom ${showroomId} — ${withLogo} brand logo URL(s) captured; persistence lands in 0025 P2-03 (brands.original_logo_url)`,
+    );
   }
   if (unnamedLogoBrands > 0) {
     // Visible, not silent: these are real captures carrying a logo + site but no
