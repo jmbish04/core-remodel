@@ -43,6 +43,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/drive-lists-activation-ui-6f6e47",
+    title: "One active drive list, enforced by D1 — and drive tabs that match real life",
+    summary:
+      "\"Active\" was a value of the `status` enum, so six drive lists claimed it at once and the landing page's Active/Archived tabs bucketed on that same overloaded field. The single-slot pointer is now its own column (`is_active`) under a partial UNIQUE index, so D1 itself refuses a second active drive; the tabs bucket on what actually happened (Pending / In progress / Finished); and each card carries an Active badge plus a toggle.",
+    date: "2026-07-21",
+    status: "staged",
+    prNumber: 177,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/177",
+  },
+  {
     branch: "claude/showroom-soft-delete",
     title: "Showroom soft delete — and the 34 read paths that had to learn about it",
     summary:
@@ -112,6 +122,26 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "drive-lists-single-active",
+    branch: "claude/drive-lists-activation-ui-6f6e47",
+    date: "2026-07-21",
+    tag: "Drives",
+    area: "Showroom Drives",
+    title: "One active drive list — and tabs that match how drives actually go",
+    summary:
+      "Only one drive can be the active one — the drive this device auto-lands on — and D1 now enforces that with a partial unique index rather than trusting app code. The drives page groups by progress instead of by lifecycle label: Pending (nothing visited yet), In progress, Finished. The active drive wears a badge, and every card has a toggle to hand the slot to another drive.",
+    status: "staged",
+    changes: [
+      { kind: "added", text: "drive_lists.is_active — the single-slot pointer, under a partial UNIQUE index so a second active row is rejected by the database, not just by code." },
+      { kind: "added", text: "PATCH /api/drive-lists/:slug { isActive } — set THE active drive, or clear the slot entirely. Backs the per-card toggle." },
+      { kind: "added", text: "Active badge + ring on the active drive's card; list_drive_lists (MCP) now returns isActive." },
+      { kind: "changed", text: "Landing tabs are Pending / In progress / Finished, bucketed on stops visited — replacing Active / Archived, which read the overloaded status enum." },
+      { kind: "removed", text: "The auto-archive-on-read and un-archive-on-check-off status juggling in GET /api/drive-lists and the stop check-off; progress is now the truth, so neither rewrites status." },
+      { kind: "migration", text: "0119_yellow_micromax — drive_lists.is_active + drive_lists_single_active_uniq. Applied to remote; the newest drive (concord-corridor-sat-jul-18-sf-1pm) holds the slot, all 13 others cleared." },
+    ],
+    migrations: ["0119_yellow_micromax"],
+  },
   {
     id: "showroom-soft-delete",
     branch: "claude/showroom-soft-delete",

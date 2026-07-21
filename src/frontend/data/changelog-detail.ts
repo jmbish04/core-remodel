@@ -80,6 +80,142 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "drive-lists-single-active": {
+    slug: "drive-lists-single-active",
+    branch: "claude/drive-lists-activation-ui-6f6e47",
+    prNumber: 177,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/177",
+    problem:
+      "\"The active drive\" is a single slot: it is what an admin device auto-lands on (src/_worker.ts → getActiveDriveLandingPath). But it was stored as one value of the drive_lists.status enum — the same column carrying the lifecycle label, and the column's DEFAULT. Nothing in D1 stopped two rows from holding it, and the app-side guard only ran on two paths (create, and un-archiving via a stop check-off), so six drives were active on production at once. The landing page then bucketed its Active/Archived tabs on that same overloaded field, so a drive that had never been touched, one half-driven, and one demoted by an activation all landed in the same tab — while the auto-archive on read quietly rewrote status behind the user's back.",
+    approach:
+      "Split the pointer from the label. `is_active` is its own boolean column under a PARTIAL unique index (`WHERE is_active = 1`), so a second active row is a database error rather than a bug that shows up six drives later. Writes go through one service function, setActiveDrive(db, id | null), which clears and sets inside a single db.batch() — D1 never observes two active rows, and D1 has no transactions to fall back on. `status` stays as a plain lifecycle label that nothing infers from anymore: the read path and the check-off no longer rewrite it, and the tabs bucket on stops visited (0 → Pending, some → In progress, all → Finished), which is what the user actually asked the page to show.",
+    apiChanges: [
+      "PATCH /api/drive-lists/:slug — NEW. Body { isActive: boolean }. true makes this THE active drive (clearing the previous one in the same batch); false leaves none active. 400 without the flag, 404 on an unknown slug.",
+      "GET /api/drive-lists — now returns `isActive` per drive, and no longer auto-archives fully-visited drives (progress buckets the tabs, so nothing needs the status rewrite).",
+      "PATCH /api/drive-lists/:slug/stops/:stopId — no longer rewrites the drive's status or touches the active slot; returns { ok, visited, stopCount, visitedCount }.",
+      "MCP list_drive_lists — output gains `isActive`.",
+    ],
+    filesTouched: [
+      "src/backend/db/schema/drives/drive_lists.ts",
+      "src/backend/services/drive-lists.ts",
+      "src/backend/api/routes/drive-lists.ts",
+      "src/backend/mcp/tools/drives/list_drive_lists.ts",
+      "src/frontend/components/drives/DriveListsApp.tsx",
+      "scripts/config.mjs",
+      "scripts/qc/pr_177.mjs",
+      "drizzle/0119_yellow_micromax.sql",
+    ],
+    migrations: [
+      {
+        tag: "0119_yellow_micromax",
+        sql: `ALTER TABLE \`drive_lists\` ADD \`is_active\` integer DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX \`drive_lists_single_active_uniq\` ON \`drive_lists\` (\`is_active\`) WHERE "drive_lists"."is_active" = 1;`,
+      },
+    ],
+    code: [
+      {
+        title: "The invariant, enforced by the database",
+        lang: "ts",
+        code: `singleActive: uniqueIndex("drive_lists_single_active_uniq")
+  .on(table.isActive)
+  .where(sql\`\${table.isActive} = 1\`),`,
+      },
+      {
+        title: "One write path — clear + set in a single D1 batch",
+        lang: "ts",
+        code: `export async function setActiveDrive(db: RemodelDb, id: number | null): Promise<void> {
+  const clear = db
+    .update(driveLists)
+    .set({ isActive: false, updatedAt: new Date() })
+    .where(and(eq(driveLists.isActive, true), id == null ? undefined : ne(driveLists.id, id)));
+  if (id == null) {
+    await db.batch([clear]);
+    return;
+  }
+  const set = db
+    .update(driveLists)
+    .set({ isActive: true, updatedAt: new Date() })
+    .where(eq(driveLists.id, id));
+  await db.batch([clear, set]);
+}`,
+      },
+      {
+        title: "Tabs bucket on progress, never on status",
+        lang: "tsx",
+        code: `function bucketOf(d: DriveListSummary): Bucket {
+  if (d.stopCount > 0 && d.visitedCount >= d.stopCount) return "finished";
+  return d.visitedCount > 0 ? "partial" : "pending";
+}`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Activating a drive — the previous holder is cleared in the same batch",
+        code: `sequenceDiagram
+    participant UI as Drives page (toggle)
+    participant API as PATCH /api/drive-lists/:slug
+    participant SVC as setActiveDrive()
+    participant D1 as D1 (drive_lists)
+    UI->>API: { isActive: true }
+    API->>SVC: setActiveDrive(db, id)
+    SVC->>D1: batch[ clear is_active where id <> keep, set is_active on keep ]
+    D1-->>SVC: one row active (partial UNIQUE index holds)
+    SVC-->>API: ok
+    API-->>UI: { ok: true, isActive: true }`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_177.mjs",
+      command: "pnpm run test:pr 177 -- --preview",
+      ranAt: "2026-07-21",
+      source: `const on = await client.patch(\`/api/drive-lists/\${newest.slug}\`, { isActive: true });
+checks.ok(\`PATCH \${newest.slug} {isActive:true} → 200\`, on.status === 200, \`got \${on.status}\`);
+
+if (other) {
+  const swap = await client.patch(\`/api/drive-lists/\${other.slug}\`, { isActive: true });
+  after = await listDrives();
+  checks.ok(
+    "activating a second drive left exactly one active (no unique-index 500)",
+    activeOnes(after.drives).length === 1 && activeOnes(after.drives)[0].id === other.id,
+    activeOnes(after.drives).map((d) => d.slug).join(", "),
+  );
+}`,
+      output: `PR #177 QC → https://wcrp-claude-drive-lists-activation-ui-6f6e47.hacolby.workers.dev
+
+  ✓ target reachable (https://wcrp-claude-drive-lists-activation-ui-6f6e47.hacolby.workers.dev)
+  ✓ drive-lists rejects an unauthenticated read (401)
+  ✓ GET /api/drive-lists → 200
+  ✓ at least one drive exists to test with
+  ✓ every row exposes isActive (migration 0119 applied to remote)
+  ✓ at most ONE drive is active (was 6 before this PR) — now 0
+    tabs → pending=14 partial=0 finished=0
+  ✓ every drive falls in exactly one progress bucket
+  ✓ PATCH concord-corridor-sat-jul-18-sf-1pm {isActive:true} → 200
+  ✓ the newest drive is now THE active one
+  ✓ PATCH saturday-east-bay-slabs-showroom-sweep-jul-18 {isActive:true} → 200
+  ✓ activating a second drive left exactly one active (no unique-index 500)
+  ✓ PATCH saturday-east-bay-slabs-showroom-sweep-jul-18 {isActive:false} → 200
+  ✓ no drive is active after toggling off
+  ✓ PATCH without \`isActive\` → 400
+  ✓ PATCH on an unknown slug → 404
+  ✓ GET /api/drive-lists/:slug → 200
+  ✓ stop check-off still 200
+  ✓ check-off returns live progress counts
+  ✓ stop restored to its original state
+  ✓ checking a stop off never activates a drive
+  ✓ final state — concord-corridor-sat-jul-18-sf-1pm is the active drive
+  ✓ exactly one active drive at rest
+
+22 passed, 0 failed`,
+      migrations: [
+        {
+          tag: "0119_yellow_micromax",
+          appliedRemote: true,
+          note: "Applied 2026-07-21 via pnpm run migrate:remote. Verified on the remote DB: is_active present on all 14 rows; the newest drive (id 14, concord-corridor-sat-jul-18-sf-1pm) holds the slot after the QC run, every other row 0.",
+        },
+      ],
+    },
+  },
   "showroom-soft-delete": {
     slug: "showroom-soft-delete",
     problem:

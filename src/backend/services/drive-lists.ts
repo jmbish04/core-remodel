@@ -129,7 +129,7 @@ export async function createDriveList(
   // Single-active invariant: a newly-active drive supersedes any other active
   // one (only one drive is "the active drive" at a time — it's what admin
   // devices auto-land on).
-  if (status === "active") await demoteOtherActiveDrives(db, drive.id);
+  if (status === "active") await setActiveDrive(db, drive.id);
 
   const stopValues = input.stops.map((s, i) => ({
     driveListId: drive.id,
@@ -163,30 +163,37 @@ export async function createDriveList(
 }
 
 /**
- * Enforce the single-active invariant: archive every OTHER drive currently in
- * `active` status, keeping only `keepId`. Called whenever a drive becomes active
- * (create, or re-open via the stops PATCH). Demoted drives go to `archived` (the
- * same bucket the completion auto-archive uses), so they land in the Archived
- * tab rather than vanishing.
+ * Make `id` THE active drive, or (with `null`) clear the active slot entirely.
+ *
+ * The clear and the set go out as one `db.batch()` so D1 never observes two
+ * active rows — which its partial unique index (`drive_lists_single_active_uniq`)
+ * would reject anyway. This is the ONLY sanctioned way to write `is_active`.
  */
-export async function demoteOtherActiveDrives(db: RemodelDb, keepId: number): Promise<void> {
-  await db
+export async function setActiveDrive(db: RemodelDb, id: number | null): Promise<void> {
+  const clear = db
     .update(driveLists)
-    .set({ status: "archived", updatedAt: new Date() })
-    .where(and(eq(driveLists.status, "active"), ne(driveLists.id, keepId)))
-    .run();
+    .set({ isActive: false, updatedAt: new Date() })
+    .where(and(eq(driveLists.isActive, true), id == null ? undefined : ne(driveLists.id, id)));
+  if (id == null) {
+    await db.batch([clear]);
+    return;
+  }
+  const set = db
+    .update(driveLists)
+    .set({ isActive: true, updatedAt: new Date() })
+    .where(eq(driveLists.id, id));
+  await db.batch([clear, set]);
 }
 
 /**
- * The slug of THE active drive (single-active invariant → at most one), newest
- * first as a tiebreak in case the invariant was ever bypassed. `null` when no
- * drive is active. Backs the admin-device auto-landing in `src/_worker.ts`.
+ * The slug of THE active drive (`is_active = 1`, at most one by index). `null`
+ * when nothing is active. Backs the admin-device auto-landing in `src/_worker.ts`.
  */
 export async function getActiveDriveSlug(db: RemodelDb): Promise<string | null> {
   const [row] = await db
     .select({ slug: driveLists.slug })
     .from(driveLists)
-    .where(eq(driveLists.status, "active"))
+    .where(eq(driveLists.isActive, true))
     .orderBy(desc(driveLists.updatedAt))
     .limit(1);
   return row?.slug ?? null;

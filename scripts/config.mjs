@@ -94,6 +94,7 @@ export function createClient({ base = resolveBase(), cookie = accessCookie() } =
     req,
     get: (path, opts) => req("GET", path, opts),
     post: (path, body, opts) => req("POST", path, { ...opts, body }),
+    patch: (path, body, opts) => req("PATCH", path, { ...opts, body }),
   };
 }
 
