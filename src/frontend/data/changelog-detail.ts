@@ -80,6 +80,283 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "drive-lists-single-active": {
+    slug: "drive-lists-single-active",
+    branch: "claude/drive-lists-activation-ui-6f6e47",
+    prNumber: 178,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/178",
+    problem:
+      "\"The active drive\" is a single slot: it is what an admin device auto-lands on (src/_worker.ts → getActiveDriveLandingPath). But it was stored as one value of the drive_lists.status enum — the same column carrying the lifecycle label, and the column's DEFAULT. Nothing in D1 stopped two rows from holding it, and the app-side guard only ran on two paths (create, and un-archiving via a stop check-off), so six drives were active on production at once. The landing page then bucketed its Active/Archived tabs on that same overloaded field, so a drive that had never been touched, one half-driven, and one demoted by an activation all landed in the same tab — while the auto-archive on read quietly rewrote status behind the user's back.",
+    approach:
+      "Split the pointer from the label. `is_active` is its own boolean column under a PARTIAL unique index (`WHERE is_active = 1`), so a second active row is a database error rather than a bug that shows up six drives later. Writes go through one service function, setActiveDrive(db, id | null), which clears and sets inside a single db.batch() — D1 never observes two active rows, and D1 has no transactions to fall back on. `status` stays as a plain lifecycle label that nothing infers from anymore: the read path and the check-off no longer rewrite it, and the tabs bucket on stops visited (0 → Pending, some → In progress, all → Finished), which is what the user actually asked the page to show.",
+    apiChanges: [
+      "POST /api/tesla/poll — NEW. Forces one vehicle poll (admin); self-gates on an active drive and the 120s throttle.",
+      "GET /api/config/tesla — NEW. Masked credentials + the telemetry-recording flag. Secret values are never returned.",
+      "PATCH /api/config/tesla { telemetryRecording } — NEW. The recording consent switch.",
+      "POST /api/config/tesla/health — NEW. Integration screening: credentials, a live Tessie position, and whether historical events still carry the fields the automation reads. `?live=0` skips the vehicle call.",
+      "POST /api/tesla/telemetry — records only when configured AND recording is on; otherwise returns { recorded: false, reason }.",
+      "MCP: new `tesla` domain — get_tesla_status, get_vehicle_location, list_tesla_events, send_vehicle_navigation (the only write).",
+      "GET /api/drive-lists/home-location — NEW. The project's coordinates as the home-arrival rule sees them, plus the radius and cutoff. Geocoded once from the configured permit address, cached in project_system_variables.",
+      "POST /api/showroom-stores/device-location — response gains `homeArrival` (the rule's verdict for this fix).",
+      "PATCH /api/drive-lists/:slug — NEW. Body { isActive: boolean }. true makes this THE active drive (clearing the previous one in the same batch); false leaves none active. 400 without the flag, 404 on an unknown slug.",
+      "GET /api/drive-lists — now returns `isActive` per drive, and no longer auto-archives fully-visited drives (progress buckets the tabs, so nothing needs the status rewrite).",
+      "PATCH /api/drive-lists/:slug/stops/:stopId — no longer rewrites the drive's status or touches the active slot; returns { ok, visited, stopCount, visitedCount }.",
+      "MCP list_drive_lists — output gains `isActive`.",
+    ],
+    filesTouched: [
+      "src/backend/db/schema/drives/drive_lists.ts",
+      "src/backend/services/drive-home-arrival.ts",
+      "src/backend/services/tesla-integration.ts",
+      "src/backend/services/tesla-poller.ts",
+      "src/_worker.ts",
+      "src/backend/mcp/tools/tesla/*.ts",
+      "src/frontend/components/config/TeslaIntegrationApp.tsx",
+      "src/frontend/pages/admin/config/integrations/tesla.astro",
+      "src/backend/services/drive-home-arrival-rules.ts",
+      "src/backend/api/routes/tesla.ts",
+      "src/backend/api/routes/showroom-stores.ts",
+      "src/backend/services/google/maps.ts",
+      "scripts/tests/test_home_arrival.mjs",
+      "src/backend/services/drive-lists.ts",
+      "src/backend/api/routes/drive-lists.ts",
+      "src/backend/mcp/tools/drives/list_drive_lists.ts",
+      "src/frontend/components/drives/DriveListsApp.tsx",
+      "scripts/config.mjs",
+      "scripts/qc/pr_178.mjs",
+      "drizzle/0119_yellow_micromax.sql",
+    ],
+    migrations: [
+      {
+        tag: "0119_yellow_micromax",
+        sql: `ALTER TABLE \`drive_lists\` ADD \`is_active\` integer DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX \`drive_lists_single_active_uniq\` ON \`drive_lists\` (\`is_active\`) WHERE "drive_lists"."is_active" = 1;`,
+      },
+    ],
+    code: [
+      {
+        title: "The invariant, enforced by the database",
+        lang: "ts",
+        code: `singleActive: uniqueIndex("drive_lists_single_active_uniq")
+  .on(table.isActive)
+  .where(sql\`\${table.isActive} = 1\`),`,
+      },
+      {
+        title: "One write path — clear + set in a single D1 batch",
+        lang: "ts",
+        code: `export async function setActiveDrive(db: RemodelDb, id: number | null): Promise<void> {
+  const clear = db
+    .update(driveLists)
+    .set({ isActive: false, updatedAt: new Date() })
+    .where(and(eq(driveLists.isActive, true), id == null ? undefined : ne(driveLists.id, id)));
+  if (id == null) {
+    await db.batch([clear]);
+    return;
+  }
+  const set = db
+    .update(driveLists)
+    .set({ isActive: true, updatedAt: new Date() })
+    .where(eq(driveLists.id, id));
+  await db.batch([clear, set]);
+}`,
+      },
+      {
+        title: "Tessie does not push — so poll, but only while a drive is running",
+        lang: "ts",
+        code: `// Gate 1: is a drive even running? This is the cheap one, so it goes first.
+const activeSlug = await getActiveDriveSlug(db);
+if (!activeSlug) return { polled: false, reason: "no-active-drive" };
+if (!(await tessieConfigured(env))) return { polled: false, reason: "unconfigured" };
+
+// Gate 2: throttle. KV TTL is the clock — a present key means "polled
+// recently", so no timestamp arithmetic and no clock skew to reason about.
+if (await env.CACHE.get(THROTTLE_KEY)) return { polled: false, reason: "throttled" };
+await env.CACHE.put(THROTTLE_KEY, "1", { expirationTtl: POLL_INTERVAL_SECONDS });
+
+const state = await getVehicleState(env);   // GET /{vin}/state?use_cache=true`,
+      },
+      {
+        title: "Getting home ends the drive — every gate, cheapest first",
+        lang: "ts",
+        code: `export function homeArrivalReason(facts: {
+  hasActiveDrive: boolean;
+  stopped: boolean;
+  at: Date;
+  distanceM: number | null;
+}): HomeArrivalReason {
+  if (!facts.hasActiveDrive) return "no-active-drive";
+  if (!facts.stopped) return "not-stopped";          // driving PAST the house
+  if (localMinutesInLA(facts.at) < HOME_ARRIVAL_AFTER_MINUTES) return "before-cutoff";
+  if (facts.distanceM == null) return "home-unconfigured";  // never guess
+  return facts.distanceM <= HOME_RADIUS_M ? "ended" : "not-home";
+}`,
+      },
+      {
+        title: "Tabs bucket on progress, never on status",
+        lang: "tsx",
+        code: `function bucketOf(d: DriveListSummary): Bucket {
+  if (d.stopCount > 0 && d.visitedCount >= d.stopCount) return "finished";
+  return d.visitedCount > 0 ? "partial" : "pending";
+}`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Ending the drive when the driver gets home",
+        code: `flowchart TD
+    A[Tesla park webhook] --> C{Active drive?}
+    B[Phone / browser location fix] --> C
+    C -- no --> X[no-active-drive]
+    C -- yes --> D{Stopped fix?<br/>park event, P gear, or a phone fix}
+    D -- no --> Y[not-stopped — driving past the house]
+    D -- yes --> E{Local time >= 15:30<br/>America/Los_Angeles, any day}
+    E -- no --> Z[before-cutoff — this is a lunch break]
+    E -- yes --> F{Home coords known?<br/>geocoded from the permit address}
+    F -- no --> W[home-unconfigured — never guess]
+    F -- yes --> G{Within 150m of the house?}
+    G -- no --> V[not-home]
+    G -- yes --> H[setActiveDrive null — drive over]`,
+      },
+      {
+        caption: "Activating a drive — the previous holder is cleared in the same batch",
+        code: `sequenceDiagram
+    participant UI as Drives page (toggle)
+    participant API as PATCH /api/drive-lists/:slug
+    participant SVC as setActiveDrive()
+    participant D1 as D1 (drive_lists)
+    UI->>API: { isActive: true }
+    API->>SVC: setActiveDrive(db, id)
+    SVC->>D1: batch[ clear is_active where id <> keep, set is_active on keep ]
+    D1-->>SVC: one row active (partial UNIQUE index holds)
+    SVC-->>API: ok
+    API-->>UI: { ok: true, isActive: true }`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_178.mjs + scripts/tests/test_home_arrival.mjs",
+      command: "pnpm run test:pr 178 -- --preview  &&  pnpm run test:home-arrival",
+      ranAt: "2026-07-21",
+      source: `const on = await client.patch(\`/api/drive-lists/\${newest.slug}\`, { isActive: true });
+checks.ok(\`PATCH \${newest.slug} {isActive:true} → 200\`, on.status === 200, \`got \${on.status}\`);
+
+if (other) {
+  const swap = await client.patch(\`/api/drive-lists/\${other.slug}\`, { isActive: true });
+  after = await listDrives();
+  checks.ok(
+    "activating a second drive left exactly one active (no unique-index 500)",
+    activeOnes(after.drives).length === 1 && activeOnes(after.drives)[0].id === other.id,
+    activeOnes(after.drives).map((d) => d.slug).join(", "),
+  );
+}`,
+      output: `PR #178 QC → https://wcrp-claude-drive-lists-activation-ui-6f6e47.hacolby.workers.dev
+
+  ✓ target reachable (https://wcrp-claude-drive-lists-activation-ui-6f6e47.hacolby.workers.dev)
+  ✓ drive-lists rejects an unauthenticated read (401)
+  ✓ GET /api/drive-lists → 200
+  ✓ at least one drive exists to test with
+  ✓ every row exposes isActive (migration 0119 applied to remote)
+  ✓ at most ONE drive is active (was 6 before this PR) — now 1
+    tabs → pending=14 partial=0 finished=0
+  ✓ every drive falls in exactly one progress bucket
+  ✓ PATCH concord-corridor-sat-jul-18-sf-1pm {isActive:true} → 200
+  ✓ the newest drive is now THE active one
+  ✓ PATCH saturday-east-bay-slabs-showroom-sweep-jul-18 {isActive:true} → 200
+  ✓ activating a second drive left exactly one active (no unique-index 500)
+  ✓ PATCH saturday-east-bay-slabs-showroom-sweep-jul-18 {isActive:false} → 200
+  ✓ no drive is active after toggling off
+  ✓ PATCH without \`isActive\` → 400
+  ✓ PATCH on an unknown slug → 404
+  ✓ GET /api/drive-lists/:slug → 200
+  ✓ stop check-off still 200
+  ✓ check-off returns live progress counts
+  ✓ stop restored to its original state
+  ✓ checking a stop off never activates a drive
+  ✓ GET /api/drive-lists/home-location → 200
+  ✓ the project address geocoded to real coordinates (cached in project_system_variables)
+      home: 37.728496799999995, -122.41406099999999 (±150m after 930 local minutes)
+  ✓ the coordinates are in the Bay Area, not a null-island fallback
+  ✓ POST device-location → 200
+  ✓ the fix is evaluated against the home-arrival rule
+      reason: before-cutoff
+  ✓ a fix 120km from the house never ends the drive
+  ✓ the active drive survived a far-away fix
+  ✓ final state — concord-corridor-sat-jul-18-sf-1pm is the active drive
+  ✓ exactly one active drive at rest
+  ✓ GET /api/config/tesla → 200
+  ✓ all three credentials are described
+  ✓ credential VALUES never leave the Worker — masks are dots only
+  ✓ the mask still reports a length, so a truncated secret is visible
+      configured=true telemetryRecording=true
+  ✓ PATCH /api/config/tesla {telemetryRecording:false} → 200
+  ✓ recording reads back as off
+  ✓ the off state persisted
+  ✓ recording restored to on
+  ✓ PATCH without \`telemetryRecording\` → 400
+  ✓ POST /api/config/tesla/health → 200
+  ✓ every probe reports a verdict
+      [ok] Credentials present in the Secrets Store — TESSIE_API_TOKEN, TESLA_BETSY_VIN and WORKER_API_KEY are all set.
+      [ok] Live position read from Tessie — Vehicle reported 37.5715, -122.3148.
+      [ok] Recorded vehicle events carry coordinates — 1 of 1 events have a position. Coordinates are what the auto-visit and home-arrival rules read.
+      [warn] Historical telemetry carries position + shift state — Recording is enabled but no frames have arrived. Tessie does not PUSH telemetry — it exposes a WebSocket (streaming.tessie.com/{VIN}) that a client must dial — so nothing will arrive until something pipes that stream into POST /api/tesla/telemetry.
+      [ok] Events are still arriving — Last event 0 day(s) ago (2026-07-21T17:23:47.000Z).
+      [ok] Position updates reach the Worker — Polled from Tessie's cached state every 120s while a drive is active (cached reads never wake the car). Tessie has no webhook product, so nothing is pushed to us.
+  ✓ the screening reads the historical event tables
+  ✓ GET /api/mcp-docs → 200
+  ✓ the tesla tool domain is registered (status, location, events, navigate)
+  ✓ every tesla tool documents an example (registry contract)
+  ✓ only the navigation tool is a write — the rest are read-only
+  ✓ POST /api/tesla/poll → 200
+      polled=false reason=throttled shift=- home=-
+  ✓ the poll ran, or said exactly why it didn't
+  ✓ a second immediate poll is throttled (or there is no active drive)
+  ✓ GET /api/tesla/status → 200
+      tessie configured: true
+
+49 passed, 0 failed
+
+$ pnpm run test:home-arrival
+
+(node:49682) [MODULE_TYPELESS_PACKAGE_JSON] Warning: Module type of file:///Volumes/Projects/workers/core-remodel/.claude/worktrees/showroom-scout-agent-be625a/src/backend/services/drive-home-arrival-rules.ts is not specified and it doesn't parse as CommonJS.
+Reparsing as ES module because module syntax was detected. This incurs a performance overhead.
+To eliminate this warning, add "type": "module" to /Volumes/Projects/workers/core-remodel/.claude/worktrees/showroom-scout-agent-be625a/package.json.
+(Use \`node --trace-warnings ...\` to show where the warning was created)
+
+distanceMeters
+
+  ✓ zero distance to itself
+  ✓ ~111m per 0.001° of latitude
+  ✓ a next-door fix is inside the home radius
+  ✓ a showroom across town is not
+
+localMinutesInLA (must be a real timezone conversion, not an offset)
+
+  ✓ 16:00 PDT (summer, UTC-7) reads as 960
+  ✓ 16:00 PST (winter, UTC-8) also reads as 960
+  ✓ midnight local is 0, not 1440
+
+homeArrivalReason
+
+  ✓ parked at home after the cutoff ends the drive
+  ✓ no active drive short-circuits first
+  ✓ driving PAST the house does not end it
+  ✓ home at lunchtime does not end it
+  ✓ parked somewhere else does not end it
+  ✓ exactly on the radius still counts as home
+  ✓ one metre past the radius does not
+  ✓ an unknown home position never reads as 'home'
+  ✓ the cutoff minute itself qualifies (15:30 exactly)
+  ✓ one minute before the cutoff does not
+  ✓ the rule applies seven days a week (Sunday)
+
+18 passed`,
+      migrations: [
+        {
+          tag: "0119_yellow_micromax",
+          appliedRemote: true,
+          note: "Applied 2026-07-21 via pnpm run migrate:remote. Verified on the remote DB: is_active present on all 14 rows; the newest drive (id 14, concord-corridor-sat-jul-18-sf-1pm) holds the slot after the QC run, every other row 0.",
+        },
+      ],
+    },
+  },
   "showroom-soft-delete": {
     slug: "showroom-soft-delete",
     problem:

@@ -1,0 +1,2 @@
+ALTER TABLE `drive_lists` ADD `is_active` integer DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX `drive_lists_single_active_uniq` ON `drive_lists` (`is_active`) WHERE "drive_lists"."is_active" = 1;

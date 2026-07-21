@@ -1,0 +1,15 @@
+---
+/**
+ * @fileoverview Tesla / Tessie integration — `/admin/config/integrations/tesla`.
+ * Thin shell mounting `<TeslaIntegrationApp>` (ConfigShell inside).
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { TeslaIntegrationApp } from "@/components/config/TeslaIntegrationApp";
+---
+
+<BaseLayout
+  title="Tesla / Tessie — Configuration"
+  description="Vehicle integration credentials, telemetry recording, and integration health."
+>
+  <TeslaIntegrationApp client:only="react" />
+</BaseLayout>

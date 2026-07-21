@@ -151,3 +151,60 @@ export async function sendNavigation(env: Env, dest: string): Promise<SendNavRes
     return { ok: false, error: (e as Error).message };
   }
 }
+
+/** A cached snapshot of the car, as Tessie last saw it. */
+export interface VehicleState {
+  /** "P" | "R" | "N" | "D", or null when the car is asleep / not reported. */
+  shiftState: string | null;
+  latitude: number | null;
+  longitude: number | null;
+  /** mph, when reported. */
+  speed: number | null;
+  /** Tessie's own state word ("asleep" / "online" / …), when present. */
+  state: string | null;
+}
+
+/**
+ * Read the car's cached state — `GET /{vin}/state?use_cache=true`.
+ *
+ * The cache flag is load-bearing: per Tessie's docs a cached read "always
+ * returns a complete set of data and doesn't impact vehicle sleep", where a live
+ * read can wake the car or return `{"state":"asleep"}`. Since this is called on
+ * a schedule while a drive is active, waking the car every couple of minutes
+ * would drain the battery to answer a question the cache already answers.
+ *
+ * Returns `null` when Tessie isn't configured or the call fails.
+ */
+export async function getVehicleState(env: Env): Promise<VehicleState | null> {
+  const cfg = await getTessieConfig(env);
+  if (!cfg) return null;
+  try {
+    const res = await fetch(
+      `${TESSIE_BASE}/${encodeURIComponent(cfg.vin)}/state?use_cache=true`,
+      {
+        headers: { Authorization: `Bearer ${cfg.token}`, Accept: "application/json" },
+        signal: AbortSignal.timeout(10_000),
+      },
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      state?: string;
+      drive_state?: {
+        shift_state?: string | null;
+        latitude?: number;
+        longitude?: number;
+        speed?: number | null;
+      };
+    };
+    const d = data.drive_state ?? {};
+    return {
+      shiftState: typeof d.shift_state === "string" ? d.shift_state : null,
+      latitude: typeof d.latitude === "number" ? d.latitude : null,
+      longitude: typeof d.longitude === "number" ? d.longitude : null,
+      speed: typeof d.speed === "number" ? d.speed : null,
+      state: typeof data.state === "string" ? data.state : null,
+    };
+  } catch {
+    return null;
+  }
+}

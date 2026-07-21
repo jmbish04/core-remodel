@@ -1,19 +1,21 @@
 /**
  * @fileoverview Showroom Drives — landing island.
  *
- * Lists drive sheets newest-first (from `GET /api/drive-lists`) with a per-drive
- * completion bar (showrooms visited vs. total). Each card links to the drive
- * viewport at `/admin/shopping/drives/<slug>`. Drives are created via the
- * `create_drive_list` MCP tool, not the UI.
+ * Lists drive sheets newest-first (from `GET /api/drive-lists`) bucketed by what
+ * actually happened on them: Pending (no stop visited yet), In progress (some),
+ * Finished (all). Exactly one drive can be THE active drive — the one admin
+ * devices auto-land on — shown as a badge and flipped with the per-card toggle
+ * (`PATCH /api/drive-lists/<slug>` with `{isActive}`).
  *
  * Monolith rules: dark theme, theme tokens only, no 1px borders.
  */
 import { useEffect, useMemo, useState } from "react";
-import { AlertCircle, ChevronRight, Loader2, MapPinned, Route } from "lucide-react";
+import { AlertCircle, ChevronRight, Loader2, MapPinned, Route, Zap } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { DriveMapThumb, type LatLng } from "./DriveMapThumb";
@@ -24,15 +26,19 @@ type DriveListSummary = {
   title: string;
   description: string | null;
   status: string;
+  isActive: boolean;
   stopCount: number;
   visitedCount: number;
   createdAt: string | number | null;
   markers: LatLng[];
 };
 
-/** Archived tab = archived or completed drives; Active = everything else. */
-function isArchived(status: string): boolean {
-  return status === "archived" || status === "completed";
+type Bucket = "pending" | "partial" | "finished";
+
+/** Which tab a drive belongs in — decided by progress, never by `status`. */
+function bucketOf(d: DriveListSummary): Bucket {
+  if (d.stopCount > 0 && d.visitedCount >= d.stopCount) return "finished";
+  return d.visitedCount > 0 ? "partial" : "pending";
 }
 
 function fmtDate(t: string | number | null): string {
@@ -84,7 +90,8 @@ export function DriveListsApp() {
         Showroom Drives
       </h1>
       <p className="text-muted-foreground">
-        Planned showroom-visit drive sheets — newest first, with each drive's completion progress.
+        Planned showroom-visit drive sheets, bucketed by progress. Exactly one drive can be active —
+        the one this device auto-lands on — set with the toggle on its card.
       </p>
     </header>
   );
@@ -144,8 +151,28 @@ export function DriveListsApp() {
     );
   }
 
-  const active = drives.filter((d) => !isArchived(d.status));
-  const archived = drives.filter((d) => isArchived(d.status));
+  // Activating one drive deactivates whichever was active — mirror that locally
+  // so the badge/toggle can't show two active drives while the PATCH is in flight.
+  const setActive = async (slug: string, isActive: boolean) => {
+    // Functional updates throughout: two toggles in quick succession must not
+    // let the second one write a snapshot taken before the first landed.
+    const wasActive = drives.find((d) => d.isActive)?.slug ?? null;
+    setDrives((prev) => prev?.map((d) => ({ ...d, isActive: isActive && d.slug === slug })) ?? prev);
+    try {
+      const res = await fetch(`/api/drive-lists/${encodeURIComponent(slug)}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ isActive }),
+      });
+      if (!res.ok) throw new Error(`Save failed (${res.status})`);
+    } catch (e) {
+      // Roll back only the active slot — never a whole-list snapshot, which
+      // would clobber whatever a concurrent toggle already committed.
+      setDrives((prev) => prev?.map((d) => ({ ...d, isActive: d.slug === wasActive })) ?? prev);
+      setError((e as Error).message);
+    }
+  };
 
   const grid = (list: DriveListSummary[], emptyLabel: string) =>
     list.length === 0 ? (
@@ -153,29 +180,45 @@ export function DriveListsApp() {
     ) : (
       <div className="grid gap-4 sm:grid-cols-2">
         {list.map((d) => (
-          <DriveCard key={d.id} drive={d} />
+          <DriveCard key={d.id} drive={d} onSetActive={setActive} />
         ))}
       </div>
     );
 
+  const pending = drives.filter((d) => bucketOf(d) === "pending");
+  const partial = drives.filter((d) => bucketOf(d) === "partial");
+  const finished = drives.filter((d) => bucketOf(d) === "finished");
+
   return (
     <div>
       {header}
-      <Tabs defaultValue="active">
+      <Tabs defaultValue={partial.length ? "partial" : "pending"}>
         <TabsList className="mb-6">
-          <TabsTrigger value="active">Active ({active.length})</TabsTrigger>
-          <TabsTrigger value="archived">Archived ({archived.length})</TabsTrigger>
+          <TabsTrigger value="pending">Pending ({pending.length})</TabsTrigger>
+          <TabsTrigger value="partial">In progress ({partial.length})</TabsTrigger>
+          <TabsTrigger value="finished">Finished ({finished.length})</TabsTrigger>
         </TabsList>
-        <TabsContent value="active">{grid(active, "No active drives.")}</TabsContent>
-        <TabsContent value="archived">
-          {grid(archived, "No archived drives yet — a drive archives when every stop is visited.")}
+        <TabsContent value="pending">
+          {grid(pending, "No pending drives — every planned drive has been started.")}
+        </TabsContent>
+        <TabsContent value="partial">
+          {grid(partial, "No drives part-way through.")}
+        </TabsContent>
+        <TabsContent value="finished">
+          {grid(finished, "No finished drives yet — a drive finishes when every stop is visited.")}
         </TabsContent>
       </Tabs>
     </div>
   );
 }
 
-function DriveCard({ drive }: { drive: DriveListSummary }) {
+function DriveCard({
+  drive,
+  onSetActive,
+}: {
+  drive: DriveListSummary;
+  onSetActive: (slug: string, isActive: boolean) => void;
+}) {
   const pct = useMemo(
     () => (drive.stopCount ? Math.round((drive.visitedCount / drive.stopCount) * 100) : 0),
     [drive.stopCount, drive.visitedCount],
@@ -184,12 +227,19 @@ function DriveCard({ drive }: { drive: DriveListSummary }) {
   const date = fmtDate(drive.createdAt);
 
   return (
-    <a
-      href={`/admin/shopping/drives/${drive.slug}`}
-      className="group block rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    <Card
+      className={cn(
+        "h-full overflow-hidden",
+        drive.isActive && "ring-2 ring-primary/60",
+      )}
     >
-      <Card className="h-full overflow-hidden transition-colors group-hover:bg-card/80">
-        <CardContent className="flex h-full flex-col gap-3 p-5">
+      <CardContent className="flex h-full flex-col gap-3 p-5">
+        {/* The link covers the card body only — the toggle below sits outside it
+            so flipping the active drive never navigates away. */}
+        <a
+          href={`/admin/shopping/drives/${drive.slug}`}
+          className="group flex flex-1 flex-col gap-3 rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
           <DriveMapThumb markers={drive.markers} />
 
           <div className="flex items-start justify-between gap-3">
@@ -197,9 +247,16 @@ function DriveCard({ drive }: { drive: DriveListSummary }) {
               <h2 className="truncate text-xl font-semibold">{drive.title}</h2>
               {date ? <p className="mt-0.5 text-xs text-muted-foreground">Registered {date}</p> : null}
             </div>
-            <Badge variant={complete ? "default" : "outline"} className="shrink-0 capitalize">
-              {complete ? "Complete" : drive.status}
-            </Badge>
+            <div className="flex shrink-0 items-center gap-2">
+              {drive.isActive ? (
+                <Badge className="gap-1">
+                  <Zap className="size-3" aria-hidden /> Active
+                </Badge>
+              ) : null}
+              <Badge variant={complete ? "default" : "outline"} className="capitalize">
+                {complete ? "Complete" : drive.visitedCount > 0 ? "In progress" : "Pending"}
+              </Badge>
+            </div>
           </div>
 
           {drive.description ? (
@@ -221,9 +278,20 @@ function DriveCard({ drive }: { drive: DriveListSummary }) {
             Open drive
             <ChevronRight className={cn("size-4 transition-transform group-hover:translate-x-0.5")} />
           </div>
-        </CardContent>
-      </Card>
-    </a>
+        </a>
+
+        <div className="flex items-center justify-between gap-3 pt-1">
+          <span className="text-sm text-muted-foreground">
+            {drive.isActive ? "This is the active drive" : "Make this the active drive"}
+          </span>
+          <Switch
+            checked={drive.isActive}
+            onCheckedChange={(next) => onSetActive(drive.slug, next)}
+            aria-label={`Set "${drive.title}" as the active drive`}
+          />
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 

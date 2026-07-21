@@ -24,6 +24,11 @@ export const CONFIG_NAV: ConfigNavGroup[] = [
     ],
   },
   {
+    id: "integrations",
+    label: "Integrations",
+    items: [{ href: "/admin/config/integrations/tesla", label: "Tesla / Tessie" }],
+  },
+  {
     id: "platform",
     label: "Platform",
     items: [{ href: "/admin/config/usage", label: "Usage & Cost Ceilings" }],

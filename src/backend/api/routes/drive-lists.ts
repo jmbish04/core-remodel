@@ -11,12 +11,13 @@
  */
 import { driveListStops, driveLists, showroomStores } from "@backend/db";
 import {
-  createDriveList,
-  demoteOtherActiveDrives,
-  parseDriveNotes,
-} from "@backend/services/drive-lists";
+  HOME_ARRIVAL_AFTER_MINUTES,
+  HOME_RADIUS_M,
+} from "@backend/services/drive-home-arrival-rules";
+import { getHomeCoords } from "@backend/services/drive-home-arrival";
+import { createDriveList, parseDriveNotes, setActiveDrive } from "@backend/services/drive-lists";
 import { isRequestAuthenticated } from "@backend/utils/access";
-import { asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { asc, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -61,7 +62,9 @@ driveListsRouter.use("*", async (c, next) => {
 });
 
 /** GET /api/drive-lists — landing list, newest-first, with completion counts,
- * per-drive map marker coords, and lazy auto-archive of fully-visited drives. */
+ * the single-active flag, and per-drive map marker coords. Progress (0 visited /
+ * some / all) is what the landing page tabs bucket on, so nothing here mutates
+ * status. */
 driveListsRouter.get("/", async (c) => {
   const db = drizzle(c.env.DB);
   const rows = await db
@@ -71,6 +74,7 @@ driveListsRouter.get("/", async (c) => {
       title: driveLists.title,
       description: driveLists.description,
       status: driveLists.status,
+      isActive: driveLists.isActive,
       createdAt: driveLists.createdAt,
       updatedAt: driveLists.updatedAt,
       stopCount: sql<number>`count(${driveListStops.id})`,
@@ -101,32 +105,10 @@ driveListsRouter.get("/", async (c) => {
     markersByDrive.set(m.driveListId, list);
   }
 
-  // Auto-archive: any drive whose every stop is visited (and isn't already
-  // archived/completed) moves to the Archived tab. Persist so it stays there.
-  const toArchive = rows
-    .filter(
-      (r) =>
-        Number(r.stopCount) > 0 &&
-        Number(r.visitedCount) === Number(r.stopCount) &&
-        r.status !== "archived" &&
-        r.status !== "completed",
-    )
-    .map((r) => r.id);
-  // Chunk the id list so `inArray` never exceeds D1's 100-bound-param limit.
-  for (let i = 0; i < toArchive.length; i += 90) {
-    await db
-      .update(driveLists)
-      .set({ status: "archived", updatedAt: new Date() })
-      .where(inArray(driveLists.id, toArchive.slice(i, i + 90)))
-      .run();
-  }
-  const archivedNow = new Set(toArchive);
-
   return c.json({
     count: rows.length,
     driveLists: rows.map((r) => ({
       ...r,
-      status: archivedNow.has(r.id) ? "archived" : r.status,
       stopCount: Number(r.stopCount),
       visitedCount: Number(r.visitedCount),
       markers: markersByDrive.get(r.id) ?? [],
@@ -145,6 +127,27 @@ driveListsRouter.post("/", async (c) => {
   return c.json({ ok: true, id, slug, stopCount }, 201);
 });
 
+/**
+ * GET /api/drive-lists/home-location — the project's coordinates, as used by the
+ * home-arrival rule that ends an active drive.
+ *
+ * Resolved from the permit address in `project_system_variables` and cached
+ * there after the first lookup, so this is also how you confirm the geocode
+ * actually worked. `{ home: null }` means the address is unset or the lookup
+ * failed — in which case arriving home ends nothing, by design.
+ *
+ * Declared BEFORE `/:slug` so the literal path wins over the slug pattern.
+ */
+driveListsRouter.get("/home-location", async (c) => {
+  const home = await getHomeCoords(c.env, drizzle(c.env.DB));
+  return c.json({
+    home,
+    radiusM: HOME_RADIUS_M,
+    afterLocalMinutes: HOME_ARRIVAL_AFTER_MINUTES,
+    timezone: "America/Los_Angeles",
+  });
+});
+
 /** GET /api/drive-lists/:slug — one drive + its ordered stops. */
 driveListsRouter.get("/:slug", async (c) => {
   const db = drizzle(c.env.DB);
@@ -160,6 +163,30 @@ driveListsRouter.get("/:slug", async (c) => {
     .all();
 
   return c.json({ ...drive, notes: parseDriveNotes(drive.notes), stops });
+});
+
+/**
+ * PATCH /api/drive-lists/:slug — set/clear THE active drive.
+ *
+ * `{ isActive: true }` makes this the one active drive (clearing whichever was
+ * active before, in the same batch); `{ isActive: false }` leaves NO drive
+ * active. Backs the toggle on each card at `/admin/shopping/drives`.
+ */
+driveListsRouter.patch("/:slug", async (c) => {
+  const db = drizzle(c.env.DB);
+  const body = (await c.req.json().catch(() => ({}))) as { isActive?: boolean };
+  if (typeof body.isActive !== "boolean") {
+    return c.json({ error: "`isActive` (boolean) is required" }, 400);
+  }
+  const [drive] = await db
+    .select({ id: driveLists.id })
+    .from(driveLists)
+    .where(eq(driveLists.slug, c.req.param("slug")))
+    .limit(1);
+  if (!drive) return c.json({ error: "Not found" }, 404);
+
+  await setActiveDrive(db, body.isActive ? drive.id : null);
+  return c.json({ ok: true, isActive: body.isActive });
 });
 
 /** PATCH /api/drive-lists/:slug/stops/:stopId — toggle/set a stop's visited state. */
@@ -197,8 +224,9 @@ driveListsRouter.patch("/:slug/stops/:stopId", async (c) => {
     .where(eq(driveListStops.id, stopId))
     .run();
 
-  // Recompute completion and auto-archive / un-archive: all stops visited →
-  // archived; re-opening a stop on an archived drive brings it back to active.
+  // Recompute completion for the response. Progress alone decides which landing
+  // tab the drive falls in (pending / in progress / finished), so checking a
+  // stop off no longer rewrites `status` and never touches the active slot.
   const [counts] = await db
     .select({
       total: sql<number>`count(${driveListStops.id})`,
@@ -206,30 +234,12 @@ driveListsRouter.patch("/:slug/stops/:stopId", async (c) => {
     })
     .from(driveListStops)
     .where(eq(driveListStops.driveListId, drive.id));
-  const [current] = await db
-    .select({ status: driveLists.status })
-    .from(driveLists)
-    .where(eq(driveLists.id, drive.id))
-    .limit(1);
   const total = Number(counts?.total ?? 0);
-  const visited = Number(counts?.visited ?? 0);
-  let status = current?.status;
-  if (total > 0 && visited === total) status = "archived";
-  else if (current?.status === "archived") status = "active";
+  const visitedCount = Number(counts?.visited ?? 0);
 
-  await db
-    .update(driveLists)
-    .set({ status, updatedAt: new Date() })
-    .where(eq(driveLists.id, drive.id))
-    .run();
+  await db.update(driveLists).set({ updatedAt: new Date() }).where(eq(driveLists.id, drive.id)).run();
 
-  // If this re-opened the drive (archived → active), keep the single-active
-  // invariant by demoting any other active drive.
-  if (status === "active" && current?.status === "archived") {
-    await demoteOtherActiveDrives(db, drive.id);
-  }
-
-  return c.json({ ok: true, visited: body.visited, status });
+  return c.json({ ok: true, visited: body.visited, stopCount: total, visitedCount });
 });
 
 export default driveListsRouter;

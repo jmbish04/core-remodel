@@ -34,10 +34,20 @@ export const driveLists = sqliteTable(
      */
     notes: text("notes"),
 
-    /** Lifecycle: draft → active (drivable) → completed → archived. */
+    /** Lifecycle label: draft → active (drivable) → completed → archived. */
     status: text("status", { enum: ["draft", "active", "completed", "archived"] })
       .notNull()
       .default("active"),
+
+    /**
+     * THE active drive — at most one row in the table may have this true, which
+     * the partial unique index below enforces in D1 itself (not just in app
+     * code). This is what admin devices auto-land on (`getActiveDriveSlug`) and
+     * what the landing page badges + toggles. Separate from `status` on purpose:
+     * `status` is a lifecycle label and several drives can legitimately share a
+     * value, while "active" is a single-slot pointer.
+     */
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(false),
 
     /** Freeform note on where this came from (the chat context). */
     sourceConversation: text("source_conversation"),
@@ -54,6 +64,11 @@ export const driveLists = sqliteTable(
     slugUniq: uniqueIndex("drive_lists_slug_uniq").on(table.slug),
     statusIdx: index("drive_lists_status_idx").on(table.status),
     createdIdx: index("drive_lists_created_idx").on(table.createdAt),
+    // Partial unique index: at most ONE row with is_active = 1. A second
+    // activation must clear the first in the same batch or D1 rejects it.
+    singleActive: uniqueIndex("drive_lists_single_active_uniq")
+      .on(table.isActive)
+      .where(sql`${table.isActive} = 1`),
   }),
 );
 

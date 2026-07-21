@@ -44,6 +44,7 @@ import {
 } from "@backend/db/schema/showroom/index";
 import { deviceLocation } from "@backend/db/schema/system/device-location";
 import { classifyBayAreaRegion } from "@backend/lib/bay-area-region";
+import { maybeEndActiveDriveOnHomeArrival } from "@backend/services/drive-home-arrival";
 import { businessCardService } from "@backend/services/business-card";
 import { faviconService } from "@backend/services/favicon";
 import { GoogleMapsService } from "@backend/services/google/maps";
@@ -2196,7 +2197,13 @@ const deviceLocationSchema = z.object({
   source: z.enum(["browser", "phone", "manual"]).optional(),
 });
 
-/** POST /device-location — record the device's last-known position (best-effort). */
+/**
+ * POST /device-location — record the device's last-known position (best-effort).
+ *
+ * Also ends the active drive when the fix says the phone got HOME for the day
+ * (project address, after 15:30 local) — the same rule the Tesla park webhook
+ * applies, so the drive closes out whether or not the car is the one reporting.
+ */
 showroomStoresRouter.post("/device-location", async (c) => {
   const db = drizzle(c.env.DB);
   const parsed = deviceLocationSchema.safeParse(await c.req.json().catch(() => null));
@@ -2212,7 +2219,17 @@ showroomStoresRouter.post("/device-location", async (c) => {
       address: d.address ?? null,
     })
     .returning({ id: deviceLocation.id });
-  return c.json({ success: true, id: row.id });
+
+  // A device fix is inherently a "where its owner is" reading, so it counts as
+  // stopped. The service itself enforces the active-drive / radius / time gates.
+  const homeArrival = await maybeEndActiveDriveOnHomeArrival(c.env, {
+    latitude: d.latitude,
+    longitude: d.longitude,
+    source: "device",
+    stopped: true,
+  });
+
+  return c.json({ success: true, id: row.id, homeArrival });
 });
 
 // ─── LINKS CRUD ───────────────────────────────────────────────────────────────
