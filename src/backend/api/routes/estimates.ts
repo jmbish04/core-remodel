@@ -728,14 +728,36 @@ estimatesRouter.post("/intake/confirm", async (c) => {
 
     const propValueInserts: BatchItem<"sqlite">[] = [];
     if (Array.isArray(body.propValues)) {
+      // Resolve every prop key type in ONE pass rather than a SELECT per prop.
+      // On D1 each query is a network round trip, so an intake with 40 props
+      // used to cost 40 sequential round trips before a single row was written.
+      const properties = [
+        ...new Set(
+          body.propValues.map((prop) => (prop.property || "").trim()).filter(Boolean),
+        ),
+      ];
+
+      // D1 caps a statement at 100 bound parameters, so an `inArray` over an
+      // unbounded list fails once the intake is large enough — chunk under the
+      // cap rather than discovering the ceiling in production.
+      const CHUNK = 90;
+      const typeRows: (typeof estimatePropKeyTypes.$inferSelect)[] = [];
+      for (let i = 0; i < properties.length; i += CHUNK) {
+        const rows = await db
+          .select()
+          .from(estimatePropKeyTypes)
+          .where(inArray(estimatePropKeyTypes.property, properties.slice(i, i + CHUNK)))
+          .all();
+        typeRows.push(...rows);
+      }
+      const typeByProperty = new Map(typeRows.map((row) => [row.property, row]));
+
       for (const prop of body.propValues) {
         const property = (prop.property || "").trim();
         if (!property) continue;
-        const typeRow = await db
-          .select()
-          .from(estimatePropKeyTypes)
-          .where(eq(estimatePropKeyTypes.property, property))
-          .get();
+        const typeRow = typeByProperty.get(property);
+        // Unknown property — no key type row to reference, so skip it (same
+        // behaviour as before; the per-prop SELECT simply returned nothing).
         if (!typeRow) continue;
         propValueInserts.push(
           db.insert(estimatePropValues).values({

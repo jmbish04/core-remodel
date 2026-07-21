@@ -27,6 +27,9 @@ import { ConfigShell } from "./ConfigShell";
 
 const FIELDS: { key: string; label: string; hint: string }[] = [
   { key: "permits_target_address", label: "Target Address", hint: "Main property address (e.g. 126 Colby Street)" },
+  // City is required by the CDTFA sales-tax lookup (/admin/config/tax), which
+  // rejects an address without all three of street, city and ZIP.
+  { key: "permits_target_city", label: "City", hint: "Property city — also used to resolve the sales tax rate" },
   { key: "permits_target_zip", label: "Target ZIP Code", hint: "Property ZIP code" },
   { key: "permits_block", label: "Block", hint: "Single SF assessor block — variants are handled automatically" },
   { key: "permits_lot", label: "Lot", hint: "Single lot number — zero-padding variants are handled automatically" },
@@ -34,6 +37,7 @@ const FIELDS: { key: string; label: string; hint: string }[] = [
 
 const DEFAULTS: Record<string, string> = {
   permits_target_address: "126 Colby Street",
+  permits_target_city: "San Francisco",
   permits_target_zip: "94134",
   permits_block: "5934",
   permits_lot: "5",

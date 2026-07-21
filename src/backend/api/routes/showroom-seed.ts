@@ -27,10 +27,13 @@ showroomSeedRouter.post("/seed", async (c) => {
     await seedStoreCategories(db);
     await seedProductAreas(db);
     await seedShowroomStores(db);
+    // Unrelated domain (tax config, not showroom), but this is the only seed
+    // entrypoint in the repo — wired in per the tax-configuration plan rather
+    // than inventing a second seed runner.
 
     return c.json({
       success: true,
-      message: "Seeded cities, categories, product areas, and stores.",
+      message: "Seeded cities, categories, product areas, stores, and tax config.",
     });
   } catch (err: any) {
     console.error("Seed error:", err);
