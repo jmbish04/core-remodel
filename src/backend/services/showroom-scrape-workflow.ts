@@ -739,6 +739,26 @@ function normalizeExtraction(
 // ---------------------------------------------------------------------------
 
 /**
+ * A human-ish label from a brand's own domain: `https://www.kohler.com` -> "Kohler".
+ *
+ * Used only when a logo-wall anchor gave no text and no alt. Better than
+ * dropping a capture that already carries the brand's site and logo — 0025's
+ * brand intake resolves the real name from the site later.
+ */
+function domainLabel(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const host = new URL(url).hostname.replace(/^www\./i, "");
+    const root = host.split(".")[0];
+    if (!root || root.length < 2) return null;
+    return root.charAt(0).toUpperCase() + root.slice(1);
+  } catch {
+    return null;
+  }
+}
+
+
+/**
  * Hostname of a URL, or undefined when it will not parse.
  *
  * Tolerates a schemeless value ("rubensteinsupply.com"). `showroom_store_links.url`
@@ -914,11 +934,29 @@ async function aggregate(
   // structured data we already fetched. This is where the volume is: store #132
   // yields 137 here against the AI's 6.
   const siteByLower = new Map<string, string | null>();
+  const logoByLower = new Map<string, string | null>();
+  let unnamedLogoBrands = 0;
   for (const b of facetBrands) {
-    const key = b.name.toLowerCase();
-    if (!nameByLower.has(key)) nameByLower.set(key, b.name);
-    // Record the website even when the AI already supplied the name.
+    // A logo-wall capture can legitimately have NO name — the href is the
+    // brand's site and the img is its logo, which is still worth keeping.
+    // Fall back to the brand's own domain as the display name so the row is
+    // identifiable; 0025's brand intake resolves the real name later.
+    const displayName = b.name ?? domainLabel(b.websiteUrl);
+    if (!displayName) continue;
+    if (!b.name) unnamedLogoBrands++;
+
+    const key = displayName.toLowerCase();
+    if (!nameByLower.has(key)) nameByLower.set(key, displayName);
+    // Record the website/logo even when the AI already supplied the name.
     if (b.websiteUrl && !siteByLower.get(key)) siteByLower.set(key, b.websiteUrl);
+    if (b.logoUrl && !logoByLower.get(key)) logoByLower.set(key, b.logoUrl);
+  }
+  if (unnamedLogoBrands > 0) {
+    // Visible, not silent: these are real captures carrying a logo + site but no
+    // readable name, named from their domain until brand intake resolves them.
+    console.log(
+      `showroom-scrape: showroom ${showroomId} — ${unnamedLogoBrands} logo-only brand(s) named from their domain`,
+    );
   }
 
   let enrichBudget = MAX_BRAND_ENRICHMENTS_PER_SCRAPE;

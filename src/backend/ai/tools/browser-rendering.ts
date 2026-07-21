@@ -8,11 +8,30 @@ import {
 // Public types
 // ---------------------------------------------------------------------------
 
+/**
+ * One `<a>` the crawl saw.
+ *
+ * `imageUrl` / `imageAlt` exist because a brand wall is the single most common
+ * way a showroom lists what it carries, and it is almost always
+ * `<a href="brand.com"><img src="logo.svg" alt="Brand"></a>` — no text at all.
+ * Flattening that anchor to its text yields "", which the brand extractor drops,
+ * throwing away the logo URL, the brand's own site AND the alt text that were
+ * all sitting in the HTML.
+ */
+export type ScrapedLink = {
+  href: string;
+  text?: string;
+  /** Absolute `src` of the first `<img>` inside the anchor, if any. */
+  imageUrl?: string;
+  /** That image's `alt`, which on a logo wall IS the brand name. */
+  imageAlt?: string;
+};
+
 export type ScrapedPage = {
   html: string;
   text: string;
   markdown?: string;
-  links: Array<{ href: string; text?: string }>;
+  links: ScrapedLink[];
   /** Cloudflare Images delivery URL (replaces old R2 key). */
   screenshotUrl?: string;
   /** R2-served URL for the captured PDF of the job posting. */
@@ -296,7 +315,7 @@ export function normalizeCrawlUrl(raw: string, base?: string): string | null {
 export function extractLinksFromHtml(html: string, baseUrl: string): ScrapedPage["links"] {
   if (!html) return [];
 
-  const out: Array<{ href: string; text?: string }> = [];
+  const out: ScrapedLink[] = [];
   const seen = new Set<string>();
 
   HREF_RE.lastIndex = 0;
@@ -306,11 +325,82 @@ export function extractLinksFromHtml(html: string, baseUrl: string): ScrapedPage
     if (!href || seen.has(href)) continue;
     seen.add(href);
 
-    const text = match[2]?.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
-    out.push({ href, text: text || undefined });
+    const inner = match[2] ?? "";
+
+    // Read the <img> BEFORE the tag strip below destroys it. This is the whole
+    // point: a brand wall is `<a href="kohler.com"><img src="k.svg" alt="Kohler">`
+    // and flattening it yields "" — so the link was dropped entirely, discarding
+    // the logo URL, the brand's site and the alt text. Store #132 gave 137 brands
+    // only because Rubenstein happens to use TEXT links; a logo wall gave zero.
+    const img = IMG_IN_ANCHOR_RE.exec(inner);
+    IMG_IN_ANCHOR_RE.lastIndex = 0;
+    const imageUrl = img ? normalizeImageUrl(img[1], baseUrl) : undefined;
+    const imageAlt = img ? decodeEntities(extractAlt(img[0])) : undefined;
+
+    const text = inner.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+    out.push({
+      href,
+      text: text || undefined,
+      imageUrl: imageUrl ?? undefined,
+      imageAlt: imageAlt || undefined,
+    });
   }
 
   return out;
+}
+
+/** First `<img ... src="...">` inside an anchor. Tolerant of attribute order. */
+const IMG_IN_ANCHOR_RE = /<img\b[^>]*?\ssrc\s*=\s*["']([^"']+)["'][^>]*>/i;
+
+/** `alt="..."` out of a matched `<img>` tag. */
+function extractAlt(imgTag: string): string {
+  const m = /\salt\s*=\s*["']([^"']*)["']/i.exec(imgTag);
+  return (m?.[1] ?? "").trim();
+}
+
+/**
+ * Resolve an image `src` against the page.
+ *
+ * Deliberately NOT `normalizeCrawlUrl`: that strips the query string, and image
+ * CDNs routinely carry the sizing/format in the query
+ * (`?w=400&fm=webp`) — dropping it yields a different asset or a 404. Data URIs
+ * are rejected because there is nothing to fetch or store.
+ */
+function normalizeImageUrl(raw: string, baseUrl: string): string | null {
+  const s = (raw ?? "").trim();
+  if (!s || s.toLowerCase().startsWith("data:")) return null;
+  try {
+    const u = new URL(s, baseUrl);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    u.hash = "";
+    return u.toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The regex extractor strips tags but not entities, so alt text arrives as
+ * `AB&amp;A` / `Alson&#8217;s`. Handles named, decimal AND hex forms — many CMS
+ * templates emit hex, and a decimal-only decoder leaves `&#x2019;` sitting raw
+ * inside a brand name.
+ */
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&apos;|&rsquo;/g, "\u2019")
+    .replace(/&quot;/g, '"')
+    .replace(/&nbsp;/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#(?:x([0-9a-f]+)|(\d+));/gi, (_m, hex: string, dec: string) => {
+      const code = hex ? parseInt(hex, 16) : Number(dec);
+      // Guard fromCodePoint: a malformed entity would throw RangeError and take
+      // the whole page's link extraction with it.
+      return Number.isFinite(code) && code >= 0 && code <= 0x10ffff
+        ? String.fromCodePoint(code)
+        : "";
+    });
 }
 
 // ---------------------------------------------------------------------------

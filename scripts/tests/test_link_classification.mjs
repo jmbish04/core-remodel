@@ -160,7 +160,11 @@ check("dedupes on (type, url)", () => {
 console.log("\nbrand facets — pattern 1 (same-domain shop sidebar)");
 
 const SHOP = `https://${SITE}/shop/`;
-const names = (page, links) => extractBrandFacets(page, links, SITE).map((b) => b.name).sort();
+const names = (page, links) =>
+  extractBrandFacets(page, links, SITE)
+    .map((b) => b.name)
+    .filter(Boolean)
+    .sort();
 
 check("reads brands off facet links across platform shapes", () => {
   assert.deepEqual(
@@ -305,6 +309,85 @@ check("skips links with no usable label", () => {
     ]),
     [],
   );
+});
+
+console.log("\nTHE REGRESSION: logo walls used to yield ZERO brands");
+
+check("a logo-only anchor is captured, not dropped", () => {
+  // <a href="kohler.com"><img src="k.svg" alt="Kohler"></a> flattened to text ""
+  // and was dropped entirely — discarding the logo URL, the brand's own site AND
+  // the alt text, all of which were sitting in the HTML.
+  const [b] = extractBrandFacets(
+    DIR,
+    [{ href: "https://www.kohler.com", imageUrl: "https://site.com/logos/k.svg", imageAlt: "Kohler" }],
+    SITE,
+  );
+  assert.ok(b, "logo-only anchor was dropped");
+  assert.equal(b.name, "Kohler", "alt should become the name");
+  assert.equal(b.logoUrl, "https://site.com/logos/k.svg");
+  assert.equal(b.websiteUrl, "https://www.kohler.com");
+  assert.equal(b.extractionMethod, "directory_link");
+});
+
+check("a logo with NO alt is still a capture (site + logo survive)", () => {
+  const [b] = extractBrandFacets(
+    DIR,
+    [{ href: "https://www.grohe.com", imageUrl: "https://site.com/logos/g.png" }],
+    SITE,
+  );
+  assert.ok(b, "nameless logo anchor was dropped");
+  assert.equal(b.name, null, "no name is honest, not a guess");
+  assert.equal(b.logoUrl, "https://site.com/logos/g.png");
+  assert.equal(b.extractionMethod, "logo_link");
+});
+
+check("anchor text still wins over alt when both exist", () => {
+  const [b] = extractBrandFacets(
+    DIR,
+    [{ href: "https://thgparis.com", text: "THG Paris", imageUrl: "https://s.com/l.png", imageAlt: "logo" }],
+    SITE,
+  );
+  assert.equal(b.name, "THG Paris");
+});
+
+check("entity-encoded alt decodes", () => {
+  const [b] = extractBrandFacets(
+    DIR,
+    [{ href: "https://bg.com", imageUrl: "https://s.com/bg.png", imageAlt: "Bell &amp; Gossett" }],
+    SITE,
+  );
+  assert.equal(b.name, "Bell & Gossett");
+});
+
+check("merging across pages fills gaps rather than overwriting", () => {
+  // Page A gives the logo, page B gives the name. Losing either wastes a fetch.
+  const out = extractBrandFacets(
+    DIR,
+    [
+      { href: "https://www.rohl.com", imageUrl: "https://s.com/rohl.png" },
+      { href: "https://www.rohl.com/", text: "ROHL" },
+    ],
+    SITE,
+  );
+  assert.equal(out.length, 1, "same brand should collapse to one candidate");
+  assert.equal(out[0].logoUrl, "https://s.com/rohl.png");
+});
+
+check("a logo-only anchor still respects the directory page gate", () => {
+  // On /blog an outbound logo link is a citation, not a brand.
+  assert.deepEqual(
+    extractBrandFacets(
+      `https://${SITE}/blog/`,
+      [{ href: "https://kohler.com", imageUrl: "https://s.com/k.png", imageAlt: "Kohler" }],
+      SITE,
+    ),
+    [],
+  );
+});
+
+check("sourceUrl provenance is recorded", () => {
+  const [b] = extractBrandFacets(DIR, [{ href: "https://bobrick.com", text: "Bobrick" }], SITE);
+  assert.equal(b.sourceUrl, DIR);
 });
 
 console.log(
