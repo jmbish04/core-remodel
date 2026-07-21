@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /**
  * Sales Tax Rates — the rate that applies to goods delivered to the property.
@@ -64,6 +64,13 @@ export const salesTaxRates = sqliteTable(
   },
   (table) => ({
     effectiveToIdx: index("sales_tax_rates_effective_to_idx").on(table.effectiveTo),
+    // At most ONE open-ended rate may exist. Enforced in the DB, not just in
+    // recordRate(), because two rows with effectiveTo NULL would make "the rate
+    // right now" ambiguous — and every quote check reads that one row.
+    // Indexes a constant so the uniqueness applies to the filtered set itself.
+    oneActiveRate: uniqueIndex("sales_tax_rates_one_active_uniq")
+      .on(sql`(1)`)
+      .where(sql`${table.effectiveTo} IS NULL`),
   }),
 );
 

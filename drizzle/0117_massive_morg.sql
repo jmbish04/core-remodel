@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `sales_tax_rates_one_active_uniq` ON `sales_tax_rates` ((1)) WHERE "sales_tax_rates"."effective_to" IS NULL;
