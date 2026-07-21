@@ -8,6 +8,7 @@ import {
   rooms,
 } from "@backend/db";
 import { publishRealtimeEvent } from "@backend/realtime/publish";
+import type { BatchItem } from "drizzle-orm/batch";
 import { desc, eq, inArray, max, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
@@ -113,116 +114,135 @@ async function replaceBudgetTrackerItemRevision(
   activeItemId: number,
   patch: BudgetTrackerPatch,
 ): Promise<{ previousId: number; nextId: number; trackId: string }> {
-  return db.transaction(async (tx) => {
-    const now = new Date();
-    const current = await tx
-      .select()
-      .from(budgetTrackerItems)
-      .where(eq(budgetTrackerItems.id, activeItemId))
-      .get();
-    if (!current) {
-      throw new Error("Budget tracker item not found");
-    }
-    if (!current.isActive) {
-      throw new Error("Only active revisions can be updated");
-    }
+  // `db.transaction()` doesn't work on D1 (see AGENTS.md — BEGIN is rejected).
+  // Shape here: read (current row, next revision number, existing room
+  // mappings) -> insert the new revision -> writes that need the new
+  // revision's generated id (deactivate the old row, insert its room
+  // mappings). The reads stay outside any atomic unit. The two writes that
+  // consume the new id are independent of each other, so they run as one
+  // db.batch(). If that batch fails, the new revision is a half-linked
+  // orphan (still `isActive`, nothing points the old row at it), so we
+  // compensate by deleting it and rethrowing the original error — same shape
+  // as the promote-to-material fix in wishlist.ts.
+  const now = new Date();
+  const current = await db
+    .select()
+    .from(budgetTrackerItems)
+    .where(eq(budgetTrackerItems.id, activeItemId))
+    .get();
+  if (!current) {
+    throw new Error("Budget tracker item not found");
+  }
+  if (!current.isActive) {
+    throw new Error("Only active revisions can be updated");
+  }
 
-    const nextRevisionNumber = await getNextTrackRevisionNumber(
-      tx as ReturnType<typeof drizzle>,
-      current.trackId,
-    );
-    const inserted = await tx
-      .insert(budgetTrackerItems)
-      .values({
-        trackId: current.trackId,
-        revisionNumber: nextRevisionNumber,
-        isActive: true,
-        isDraft: patch.isDraft ?? current.isDraft,
-        itemType: normalizeString(patch.itemType) || current.itemType,
-        executionClass: normalizeString(patch.executionClass) || current.executionClass,
-        optionGroup:
-          patch.optionGroup === null
-            ? null
-            : normalizeString(patch.optionGroup) || current.optionGroup,
-        optionKey:
-          patch.optionKey === null ? null : normalizeString(patch.optionKey) || current.optionKey,
-        title: normalizeString(patch.title) || current.title,
-        description:
-          patch.description === null
-            ? null
-            : normalizeString(patch.description) || current.description,
-        status: normalizeString(patch.status) || current.status,
-        riskLevel: normalizeString(patch.riskLevel) || current.riskLevel,
-        isBottleneck:
-          typeof patch.isBottleneck === "boolean" ? patch.isBottleneck : current.isBottleneck,
-        bottleneckReason:
-          patch.bottleneckReason === null
-            ? null
-            : normalizeString(patch.bottleneckReason) || current.bottleneckReason,
-        estimatedLowCents:
-          patch.estimatedLowCents === null
-            ? null
-            : (parseCents(patch.estimatedLowCents) ?? current.estimatedLowCents),
-        estimatedHighCents:
-          patch.estimatedHighCents === null
-            ? null
-            : (parseCents(patch.estimatedHighCents) ?? current.estimatedHighCents),
-        scenarioId:
-          patch.scenarioId === null
-            ? null
-            : normalizeString(patch.scenarioId) || current.scenarioId,
-        owner: patch.owner === null ? null : normalizeString(patch.owner) || current.owner,
-        aiRationale:
-          patch.aiRationale === null
-            ? null
-            : normalizeString(patch.aiRationale) || current.aiRationale,
-        changeSource:
-          normalizeString(patch.changeSource) || normalizeString(current.changeSource) || "manual",
-        changedBy:
-          patch.changedBy === null ? null : normalizeString(patch.changedBy) || current.changedBy,
-        datetimeCreated: now,
-        datetimeUpdated: now,
-      })
-      .returning();
-    const next = inserted[0];
+  const nextRevisionNumber = await getNextTrackRevisionNumber(db, current.trackId);
 
-    await tx
-      .update(budgetTrackerItems)
-      .set({
-        isActive: false,
-        replacedByItemId: next.id,
-        replacedAt: now,
-        datetimeUpdated: now,
-      })
-      .where(eq(budgetTrackerItems.id, current.id))
-      .run();
+  const existingRoomMappings = await db
+    .select()
+    .from(budgetTrackerItemRooms)
+    .where(eq(budgetTrackerItemRooms.budgetTrackerItemId, current.id))
+    .all();
 
-    const existingRoomMappings = await tx
-      .select()
-      .from(budgetTrackerItemRooms)
-      .where(eq(budgetTrackerItemRooms.budgetTrackerItemId, current.id))
-      .all();
+  let nextRoomIds = existingRoomMappings.map((row) => row.roomId);
+  if (Array.isArray(patch.roomIds)) {
+    nextRoomIds = patch.roomIds.filter((value) => Number.isFinite(value));
+  }
 
-    let nextRoomIds = existingRoomMappings.map((row) => row.roomId);
-    if (Array.isArray(patch.roomIds)) {
-      nextRoomIds = patch.roomIds.filter((value) => Number.isFinite(value));
-    }
+  const inserted = await db
+    .insert(budgetTrackerItems)
+    .values({
+      trackId: current.trackId,
+      revisionNumber: nextRevisionNumber,
+      isActive: true,
+      isDraft: patch.isDraft ?? current.isDraft,
+      itemType: normalizeString(patch.itemType) || current.itemType,
+      executionClass: normalizeString(patch.executionClass) || current.executionClass,
+      optionGroup:
+        patch.optionGroup === null
+          ? null
+          : normalizeString(patch.optionGroup) || current.optionGroup,
+      optionKey:
+        patch.optionKey === null ? null : normalizeString(patch.optionKey) || current.optionKey,
+      title: normalizeString(patch.title) || current.title,
+      description:
+        patch.description === null
+          ? null
+          : normalizeString(patch.description) || current.description,
+      status: normalizeString(patch.status) || current.status,
+      riskLevel: normalizeString(patch.riskLevel) || current.riskLevel,
+      isBottleneck:
+        typeof patch.isBottleneck === "boolean" ? patch.isBottleneck : current.isBottleneck,
+      bottleneckReason:
+        patch.bottleneckReason === null
+          ? null
+          : normalizeString(patch.bottleneckReason) || current.bottleneckReason,
+      estimatedLowCents:
+        patch.estimatedLowCents === null
+          ? null
+          : (parseCents(patch.estimatedLowCents) ?? current.estimatedLowCents),
+      estimatedHighCents:
+        patch.estimatedHighCents === null
+          ? null
+          : (parseCents(patch.estimatedHighCents) ?? current.estimatedHighCents),
+      scenarioId:
+        patch.scenarioId === null ? null : normalizeString(patch.scenarioId) || current.scenarioId,
+      owner: patch.owner === null ? null : normalizeString(patch.owner) || current.owner,
+      aiRationale:
+        patch.aiRationale === null
+          ? null
+          : normalizeString(patch.aiRationale) || current.aiRationale,
+      changeSource:
+        normalizeString(patch.changeSource) || normalizeString(current.changeSource) || "manual",
+      changedBy:
+        patch.changedBy === null ? null : normalizeString(patch.changedBy) || current.changedBy,
+      datetimeCreated: now,
+      datetimeUpdated: now,
+    })
+    .returning();
+  const next = inserted[0];
+
+  try {
+    const stmts: BatchItem<"sqlite">[] = [
+      db
+        .update(budgetTrackerItems)
+        .set({
+          isActive: false,
+          replacedByItemId: next.id,
+          replacedAt: now,
+          datetimeUpdated: now,
+        })
+        .where(eq(budgetTrackerItems.id, current.id)),
+    ];
     if (nextRoomIds.length > 0) {
-      await tx.insert(budgetTrackerItemRooms).values(
-        nextRoomIds.map((roomId) => ({
-          budgetTrackerItemId: next.id,
-          roomId,
-          datetimeCreated: now,
-        })),
+      stmts.push(
+        db.insert(budgetTrackerItemRooms).values(
+          nextRoomIds.map((roomId) => ({
+            budgetTrackerItemId: next.id,
+            roomId,
+            datetimeCreated: now,
+          })),
+        ),
       );
     }
+    await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
+  } catch (err) {
+    try {
+      await db.delete(budgetTrackerItems).where(eq(budgetTrackerItems.id, next.id));
+    } catch {
+      console.error(
+        `[budget-tracker] orphaned revision ${next.id} — link failed and cleanup failed`,
+      );
+    }
+    throw err;
+  }
 
-    return {
-      previousId: current.id,
-      nextId: next.id,
-      trackId: current.trackId,
-    };
-  });
+  return {
+    previousId: current.id,
+    nextId: next.id,
+    trackId: current.trackId,
+  };
 }
 
 async function getNextExpenseRevisionNumber(
@@ -244,77 +264,76 @@ async function replaceBudgetExpenseRevision(
   activeExpenseId: number,
   patch: BudgetExpensePatch,
 ): Promise<{ previousId: number; nextId: number; trackId: string }> {
-  return db.transaction(async (tx) => {
-    const now = new Date();
-    const current = await tx
-      .select()
-      .from(budgetExpenseEntries)
-      .where(eq(budgetExpenseEntries.id, activeExpenseId))
-      .get();
-    if (!current) {
-      throw new Error("Budget expense item not found");
-    }
-    if (!current.isActive) {
-      throw new Error("Only active expense revisions can be updated");
-    }
+  // Same shape as replaceBudgetTrackerItemRevision above: `db.transaction()`
+  // doesn't work on D1. Read outside, then insert the new revision, then a
+  // single write that needs the new revision's generated id (deactivate the
+  // old row). Only one dependent write here, so no batch is needed — just the
+  // compensating delete if that write fails, so the new revision can't be
+  // left both `isActive` and unlinked from the row it replaced.
+  const now = new Date();
+  const current = await db
+    .select()
+    .from(budgetExpenseEntries)
+    .where(eq(budgetExpenseEntries.id, activeExpenseId))
+    .get();
+  if (!current) {
+    throw new Error("Budget expense item not found");
+  }
+  if (!current.isActive) {
+    throw new Error("Only active expense revisions can be updated");
+  }
 
-    const item = normalizeString(patch.item) || current.item;
-    const category = normalizeString(patch.category) || current.category;
-    const amountCents =
-      patch.amountCents === null
-        ? current.amountCents
-        : (parseCents(patch.amountCents) ?? current.amountCents);
+  const item = normalizeString(patch.item) || current.item;
+  const category = normalizeString(patch.category) || current.category;
+  const amountCents =
+    patch.amountCents === null
+      ? current.amountCents
+      : (parseCents(patch.amountCents) ?? current.amountCents);
 
-    const nextRevisionNumber = await getNextExpenseRevisionNumber(
-      tx as ReturnType<typeof drizzle>,
-      current.trackId,
-    );
-    const inserted = await tx
-      .insert(budgetExpenseEntries)
-      .values({
-        trackId: current.trackId,
-        revisionNumber: nextRevisionNumber,
-        isActive: true,
-        isDraft: patch.isDraft ?? current.isDraft,
-        item,
-        category,
-        amountCents,
-        vendorName:
-          patch.vendorName === null
-            ? null
-            : normalizeString(patch.vendorName) || current.vendorName,
-        scenarioId:
-          patch.scenarioId === null
-            ? null
-            : normalizeString(patch.scenarioId) || current.scenarioId,
-        optionGroup:
-          patch.optionGroup === null
-            ? null
-            : normalizeString(patch.optionGroup) || current.optionGroup,
-        optionKey:
-          patch.optionKey === null ? null : normalizeString(patch.optionKey) || current.optionKey,
-        sourceType:
-          patch.sourceType === null
-            ? current.sourceType
-            : normalizeString(patch.sourceType) || current.sourceType,
-        sourceRef:
-          patch.sourceRef === null ? null : normalizeString(patch.sourceRef) || current.sourceRef,
-        dateIncurred:
-          patch.dateIncurred === null
-            ? null
-            : parseTimestamp(patch.dateIncurred) || current.dateIncurred,
-        notes: patch.notes === null ? null : normalizeString(patch.notes) || current.notes,
-        changeSource:
-          normalizeString(patch.changeSource) || normalizeString(current.changeSource) || "manual",
-        changedBy:
-          patch.changedBy === null ? null : normalizeString(patch.changedBy) || current.changedBy,
-        datetimeCreated: now,
-        datetimeUpdated: now,
-      })
-      .returning();
-    const next = inserted[0];
+  const nextRevisionNumber = await getNextExpenseRevisionNumber(db, current.trackId);
+  const inserted = await db
+    .insert(budgetExpenseEntries)
+    .values({
+      trackId: current.trackId,
+      revisionNumber: nextRevisionNumber,
+      isActive: true,
+      isDraft: patch.isDraft ?? current.isDraft,
+      item,
+      category,
+      amountCents,
+      vendorName:
+        patch.vendorName === null ? null : normalizeString(patch.vendorName) || current.vendorName,
+      scenarioId:
+        patch.scenarioId === null ? null : normalizeString(patch.scenarioId) || current.scenarioId,
+      optionGroup:
+        patch.optionGroup === null
+          ? null
+          : normalizeString(patch.optionGroup) || current.optionGroup,
+      optionKey:
+        patch.optionKey === null ? null : normalizeString(patch.optionKey) || current.optionKey,
+      sourceType:
+        patch.sourceType === null
+          ? current.sourceType
+          : normalizeString(patch.sourceType) || current.sourceType,
+      sourceRef:
+        patch.sourceRef === null ? null : normalizeString(patch.sourceRef) || current.sourceRef,
+      dateIncurred:
+        patch.dateIncurred === null
+          ? null
+          : parseTimestamp(patch.dateIncurred) || current.dateIncurred,
+      notes: patch.notes === null ? null : normalizeString(patch.notes) || current.notes,
+      changeSource:
+        normalizeString(patch.changeSource) || normalizeString(current.changeSource) || "manual",
+      changedBy:
+        patch.changedBy === null ? null : normalizeString(patch.changedBy) || current.changedBy,
+      datetimeCreated: now,
+      datetimeUpdated: now,
+    })
+    .returning();
+  const next = inserted[0];
 
-    await tx
+  try {
+    await db
       .update(budgetExpenseEntries)
       .set({
         isActive: false,
@@ -322,15 +341,23 @@ async function replaceBudgetExpenseRevision(
         replacedAt: now,
         datetimeUpdated: now,
       })
-      .where(eq(budgetExpenseEntries.id, current.id))
-      .run();
+      .where(eq(budgetExpenseEntries.id, current.id));
+  } catch (err) {
+    try {
+      await db.delete(budgetExpenseEntries).where(eq(budgetExpenseEntries.id, next.id));
+    } catch {
+      console.error(
+        `[budget-tracker] orphaned expense revision ${next.id} — link failed and cleanup failed`,
+      );
+    }
+    throw err;
+  }
 
-    return {
-      previousId: current.id,
-      nextId: next.id,
-      trackId: current.trackId,
-    };
-  });
+  return {
+    previousId: current.id,
+    nextId: next.id,
+    trackId: current.trackId,
+  };
 }
 
 budgetTrackerRouter.get("/items", async (c) => {

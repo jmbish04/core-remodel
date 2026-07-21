@@ -506,22 +506,44 @@ wishlistRouter.post("/:id/promote-to-material", async (c) => {
     return c.json({ material: existingMaterial ?? null, item });
   }
 
-  const roomName = await resolveRoomName(db, item.roomId);
+  // `materialScheduleItems.roomId` is NOT NULL — every material is per-room
+  // ("Toilet — Primary Bath"). A wishlist item with no room therefore cannot
+  // become a material, and saying so is better than inserting a broken row.
+  if (item.roomId == null) {
+    return c.json(
+      { error: "Assign this wishlist item to a room before promoting it to a material." },
+      400,
+    );
+  }
 
-  // Atomic: create the material AND flip the wishlist item to "chosen" together,
-  // so a failure can't orphan a material with the item left unlinked.
-  const { material, updatedItem } = await db.transaction(async (tx) => {
-    const [newMaterial] = await tx
-      .insert(materialScheduleItems)
-      .values({
-        title: item.title,
-        roomName,
-        roomId: item.roomId ?? null,
-        isPurchased: false,
-      })
-      .returning();
+  // Create the material, THEN flip the wishlist item to "chosen", so a failure
+  // can't orphan a material with the item left unlinked.
+  //
+  // This was a `db.transaction()`, which does not work on D1 — `BEGIN` is
+  // rejected (error 7500) and drizzle's D1 driver issues it as a standalone
+  // statement, so this threw on its first line and promoting a wishlist item
+  // never worked. `db.batch()` can't replace it either: the update needs the id
+  // the insert generates, and a batch is built before any of it runs.
+  //
+  // Sequential + compensating delete instead. The material is one statement old
+  // and nothing references it yet, so removing it is safe. Same shape as the
+  // best-effort rollback at images.ts:1118.
+  const [newMaterial] = await db
+    .insert(materialScheduleItems)
+    .values({
+      title: item.title,
+      // No `roomName` — the schema deliberately has no denormalized room_name
+      // column; the display name is derived by joining `rooms`. This insert
+      // used to pass one, which would have failed had the surrounding
+      // (non-functional) transaction ever let it run.
+      roomId: item.roomId,
+      isPurchased: false,
+    })
+    .returning();
 
-    const [updated] = await tx
+  let updatedItem;
+  try {
+    [updatedItem] = await db
       .update(wishlistItems)
       .set({
         materialScheduleItemId: newMaterial.id,
@@ -530,9 +552,19 @@ wishlistRouter.post("/:id/promote-to-material", async (c) => {
       })
       .where(eq(wishlistItems.id, id))
       .returning();
-
-    return { material: newMaterial, updatedItem: updated };
-  });
+  } catch (err) {
+    try {
+      await db.delete(materialScheduleItems).where(eq(materialScheduleItems.id, newMaterial.id));
+    } catch {
+      // Compensation failed too — surface the ORIGINAL error, but leave a trace
+      // of the orphan so it can be cleaned up by hand.
+      console.error(
+        `[wishlist] orphaned material ${newMaterial.id} — link failed and cleanup failed`,
+      );
+    }
+    throw err;
+  }
+  const material = newMaterial;
 
   return c.json({ material, item: updatedItem });
 });

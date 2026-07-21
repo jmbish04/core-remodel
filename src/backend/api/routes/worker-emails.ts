@@ -286,8 +286,14 @@ workerEmailsRouter.patch(
 
     // Atomic: link the line item AND mark the material purchased together, so a
     // failure can't leave the line "matched" while the material stays un-purchased.
-    const [updatedLine] = await db.transaction(async (tx) => {
-      const [line] = await tx
+    // `db.batch()`, NOT `db.transaction()`: D1 rejects SQL `BEGIN` (error 7500)
+    // and drizzle's D1 driver issues `begin`/`commit` as separate statements,
+    // so a transaction here threw on its first statement and this endpoint
+    // never worked. Neither update depends on the other's result, so batch
+    // gives real all-or-nothing atomicity — the line item cannot be marked
+    // matched without the material being marked purchased.
+    const [lineRows] = await db.batch([
+      db
         .update(workerEmailInvoiceLineItems)
         .set({
           materialScheduleItemId: materialId,
@@ -295,19 +301,17 @@ workerEmailsRouter.patch(
           updatedAt: new Date(),
         })
         .where(eq(workerEmailInvoiceLineItems.id, lineItemId))
-        .returning();
-
-      await tx
+        .returning(),
+      db
         .update(materialScheduleItems)
         .set({
           isPurchased: true,
           notes: appendNote(material.notes, buildPurchaseNote(invoice, lineItem)),
           updatedAt: new Date(),
         })
-        .where(eq(materialScheduleItems.id, materialId));
-
-      return [line];
-    });
+        .where(eq(materialScheduleItems.id, materialId)),
+    ]);
+    const [updatedLine] = lineRows;
 
     return c.json({ lineItem: updatedLine, materialId });
   },
@@ -339,20 +343,38 @@ workerEmailsRouter.post(
 
     const title = String(body.title || lineItem.description || "Untitled material").slice(0, 200);
 
-    // Atomic: create the material AND link the line item together, so a failure
-    // can't orphan a new material with the line item left unmatched.
-    const { material, updatedLine } = await db.transaction(async (tx) => {
-      const [newMaterial] = await tx
-        .insert(materialScheduleItems)
-        .values({
-          title,
-          roomName: body.roomName || null,
-          isPurchased: true,
-          notes: buildPurchaseNote(invoice, lineItem),
-        })
-        .returning();
+    // `materialScheduleItems.roomId` is a required M:1 FK — there is no
+    // `roomName` column (see the schema comment on `roomId`). A caller that
+    // can't supply a room must be rejected, not silently coerced to a
+    // placeholder; the line item just stays in the HITL queue until a room is
+    // chosen.
+    const roomId = Number(body.roomId);
+    if (!Number.isInteger(roomId) || roomId <= 0) {
+      return c.json(
+        { error: "roomId is required — choose a room before creating a material from this line item." },
+        400,
+      );
+    }
 
-      const [line] = await tx
+    // `db.transaction()` doesn't work on D1 (see AGENTS.md — BEGIN is
+    // rejected), and batch() can't help here either: linking the line item
+    // needs the material's generated id, and a batch is built before any of
+    // it runs. Insert the material, then link the line item, with a
+    // compensating delete if the link fails so a create-material call can't
+    // leave a material behind with nothing pointing at it.
+    const [newMaterial] = await db
+      .insert(materialScheduleItems)
+      .values({
+        title,
+        roomId,
+        isPurchased: true,
+        notes: buildPurchaseNote(invoice, lineItem),
+      })
+      .returning();
+
+    let updatedLine;
+    try {
+      [updatedLine] = await db
         .update(workerEmailInvoiceLineItems)
         .set({
           materialScheduleItemId: newMaterial.id,
@@ -361,9 +383,17 @@ workerEmailsRouter.post(
         })
         .where(eq(workerEmailInvoiceLineItems.id, lineItemId))
         .returning();
-
-      return { material: newMaterial, updatedLine: line };
-    });
+    } catch (err) {
+      try {
+        await db.delete(materialScheduleItems).where(eq(materialScheduleItems.id, newMaterial.id));
+      } catch {
+        console.error(
+          `[worker-emails] orphaned material ${newMaterial.id} — line-item link failed and cleanup failed`,
+        );
+      }
+      throw err;
+    }
+    const material = newMaterial;
 
     return c.json({ lineItem: updatedLine, material });
   },
