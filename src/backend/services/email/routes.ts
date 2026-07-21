@@ -100,7 +100,7 @@ const ROUTE_RULES: readonly RouteRule[] = [
  * The catch-all rule for the base mailbox. No address intent, so the AI
  * classifier drives downstream handling (invoice/contract/estimate/…).
  */
-const CATCH_ALL_PROFILE: HandlingProfile = {
+export const CATCH_ALL_PROFILE: HandlingProfile = {
   expectedType: null,
   analysisDepth: "full",
   trustRouteOverAi: false,
