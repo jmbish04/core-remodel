@@ -362,12 +362,26 @@ brandsRouter.openapi(
       brandRows = await db
         .select()
         .from(brands)
-        .where(or(like(brands.name, `%${search}%`), sql`${brands.id} IN (SELECT brand_id FROM brand_name_variations
-                 WHERE is_active = 1 AND brand_name LIKE ${'%' + search + '%'})`))
+        .where(
+          and(
+            // Retired duplicates are soft-deleted, not removed — they must not
+            // come back as list entries or as search hits.
+            eq(brands.isActive, true),
+            or(
+              like(brands.name, `%${search}%`),
+              sql`${brands.id} IN (SELECT brand_id FROM brand_name_variations
+                 WHERE is_active = 1 AND brand_name LIKE ${'%' + search + '%'})`,
+            ),
+          ),
+        )
         .orderBy(brands.name)
         .limit(20);
     } else {
-      brandRows = await db.select().from(brands).orderBy(brands.name);
+      brandRows = await db
+        .select()
+        .from(brands)
+        .where(eq(brands.isActive, true))
+        .orderBy(brands.name);
     }
 
     if (brandRows.length === 0) {
@@ -483,6 +497,138 @@ brandsRouter.openapi(
  * JSON string type mismatch that the strict `RouteConfigToTypedResponse` check
  * enforces — consistent with the original pattern in this file.
  */
+/**
+ * GET /health — duplicate-brand detector for the brands page.
+ *
+ * Surfaces groups of DISTINCT brand ids that look like the same company, so a
+ * duplicate is caught the moment it appears rather than after it has spent
+ * months splitting a brand's showroom mappings in half.
+ *
+ * Three independent signals, each a normalised EXACT comparison rather than
+ * fuzzy scoring — a false "these are duplicates" prompt costs trust, and a
+ * merge is hard to undo:
+ *   name    lowercased, punctuation and corporate suffixes stripped. Catches
+ *           "NEWPORTBRASS" vs "Newport Brass".
+ *   domain  registrable domain from website_url, scheme/www/trailing-slash
+ *           stripped. REPORTED but never auto-merged: one company publishes many
+ *           distinct brands on one site (Silestone and Dekton are both
+ *           cosentino.com), so this is a question, not a verdict.
+ *   logo    identical icon_cf_images_url — two rows sharing an uploaded logo are
+ *           almost always the same brand.
+ *
+ * Matching runs over `brand_name_variations`, so a duplicate is found through
+ * ANY spelling either row is known by, not just its display name.
+ *
+ * Only `is_active` brands are considered: a merged-away row is retired, not
+ * deleted, and must not keep reappearing as a duplicate of its survivor.
+ */
+brandsRouter.get("/health", async (c) => {
+  const db = drizzle(c.env.DB);
+
+  const rows = await db
+    .select({
+      id: brands.id,
+      name: brands.name,
+      websiteUrl: brands.websiteUrl,
+      iconUrl: brands.iconCfImagesUrl,
+    })
+    .from(brands)
+    .where(eq(brands.isActive, true));
+
+  const variationRows = await db
+    .select({
+      brandId: brandNameVariations.brandId,
+      brandName: brandNameVariations.brandName,
+    })
+    .from(brandNameVariations)
+    .where(eq(brandNameVariations.isActive, true));
+
+  const aliases = new Map<number, string[]>();
+  for (const v of variationRows) {
+    aliases.set(v.brandId, [...(aliases.get(v.brandId) ?? []), v.brandName]);
+  }
+
+  const nameKey = (n: string | null) =>
+    String(n ?? "")
+      .toLowerCase()
+      .replace(/\(.*?\)/g, "")
+      .replace(/\b(inc|llc|ltd|corp|company|usa|group|the)\b/g, "")
+      .replace(/[^a-z0-9]/g, "");
+
+  const domainKey = (u: string | null) => {
+    if (!u) return "";
+    const host = String(u)
+      .replace(/^https?:\/\//i, "")
+      .replace(/^www\./i, "")
+      .split("/")[0]
+      .toLowerCase()
+      .replace(/\/$/, "");
+    const parts = host.split(".");
+    return parts.length >= 2 ? parts.slice(-2).join(".") : host;
+  };
+
+  type Group = {
+    signal: "name" | "domain" | "logo";
+    key: string;
+    autoMergeSafe: boolean;
+    brands: Array<{ id: number; name: string; websiteUrl: string | null; variations: string[] }>;
+  };
+
+  const group = (
+    signal: Group["signal"],
+    keyOf: (r: (typeof rows)[number]) => string,
+    autoMergeSafe: boolean,
+  ): Group[] => {
+    const buckets = new Map<string, typeof rows>();
+    for (const r of rows) {
+      // A brand matches on ANY of its spellings, not just the display name.
+      const keys =
+        signal === "name"
+          ? new Set([keyOf(r), ...(aliases.get(r.id) ?? []).map((a) => nameKey(a))])
+          : new Set([keyOf(r)]);
+      for (const k of keys) {
+        if (!k) continue;
+        buckets.set(k, [...(buckets.get(k) ?? []), r]);
+      }
+    }
+    return [...buckets.entries()]
+      .filter(([, list]) => new Set(list.map((b) => b.id)).size > 1)
+      .map(([key, list]) => ({
+        signal,
+        key,
+        autoMergeSafe,
+        brands: [...new Map(list.map((b) => [b.id, b])).values()].map((b) => ({
+          id: b.id,
+          name: b.name,
+          websiteUrl: b.websiteUrl,
+          variations: aliases.get(b.id) ?? [],
+        })),
+      }));
+  };
+
+  const groups = [
+    ...group("name", (r) => nameKey(r.name), true),
+    ...group("domain", (r) => domainKey(r.websiteUrl), false),
+    ...group("logo", (r) => (r.iconUrl ?? "").trim(), false),
+  ];
+
+  // A brand with no primary variation would render nameless once readers move
+  // off `brands.name`, so it is a health problem in its own right.
+  const missingPrimary = rows.filter((r) => !(aliases.get(r.id) ?? []).length);
+
+  return c.json({
+    activeBrands: rows.length,
+    duplicateGroups: groups,
+    counts: {
+      byName: groups.filter((g) => g.signal === "name").length,
+      byDomain: groups.filter((g) => g.signal === "domain").length,
+      byLogo: groups.filter((g) => g.signal === "logo").length,
+      missingPrimaryName: missingPrimary.length,
+    },
+    healthy: groups.length === 0 && missingPrimary.length === 0,
+  });
+});
+
 brandsRouter.get("/:id", async (c) => {
     const db = drizzle(c.env.DB);
     const brandId = Number(c.req.param("id"));
