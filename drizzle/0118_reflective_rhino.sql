@@ -1,0 +1,1 @@
+ALTER TABLE `gemini_usage_log` ADD `provider` text DEFAULT 'GEMINI' NOT NULL;
