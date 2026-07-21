@@ -132,16 +132,23 @@ export function HealthCheckApp() {
     setError(null);
     try {
       const res = await fetch("/api/health");
+      if (!res.ok) {
+        const errData = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(errData.error || `Failed to load health snapshot (HTTP ${res.status})`);
+      }
       const data = (await res.json()) as HealthSnapshot;
-      const services = Object.values(data.services ?? {}).map((s) => ({
+      // `services`, `status`, `timestamp` are required on a 200 — no `?? {}`/`?? null`
+      // fallbacks (they'd mask a schema regression). `responseTime`/`errorMessage`
+      // are genuinely nullable per the contract, so those keep their null coalesce.
+      const services = Object.values(data.services).map((s) => ({
         serviceName: s.serviceName,
         status: s.status,
         responseTime: s.responseTime ?? null,
         errorMessage: s.errorMessage ?? null,
       }));
       setRows(services);
-      setOverall(data.status ?? null);
-      setCheckedAt(data.timestamp ?? null);
+      setOverall(data.status);
+      setCheckedAt(data.timestamp);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load health snapshot");
     } finally {
@@ -159,6 +166,10 @@ export function HealthCheckApp() {
     setError(null);
     try {
       const res = await fetch("/api/health/run", { method: "POST" });
+      if (!res.ok) {
+        const errData = (await res.json().catch(() => ({}))) as { error?: string };
+        throw new Error(errData.error || `Health screen failed (HTTP ${res.status})`);
+      }
       const data = (await res.json()) as ScreenResult;
       if (!Array.isArray(data.checks)) throw new Error("Unexpected response from health screen");
       setRows(data.checks);
