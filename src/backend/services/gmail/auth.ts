@@ -29,8 +29,25 @@
  */
 
 const TOKEN_URL = "https://oauth2.googleapis.com/token";
-const GMAIL_SCOPES =
-  "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/gmail.send";
+
+/**
+ * Requested scopes. These MUST be a subset of what the service account's client
+ * id is granted under Workspace Admin → Security → API controls → Domain-wide
+ * delegation. Google rejects the whole JWT-bearer exchange with
+ * `unauthorized_client` if even one requested scope is not delegated — there is
+ * no partial grant, so an unlisted scope means no token and every Gmail call
+ * fails, not just the one needing that scope.
+ *
+ * `gmail.modify` supersedes the `gmail.readonly` this previously requested, and
+ * `gmail.compose` supersedes `gmail.send`; both of the old names were dropped
+ * from the delegation list, which is why they had to go.
+ */
+const GMAIL_SCOPES = [
+  "https://www.googleapis.com/auth/gmail.modify",
+  "https://www.googleapis.com/auth/gmail.compose",
+  "https://www.googleapis.com/auth/gmail.labels",
+  "https://www.googleapis.com/auth/gmail.settings.basic",
+].join(" ");
 
 /** Refresh this many seconds before actual expiry to avoid edge-of-window 401s. */
 const REFRESH_SKEW_SECONDS = 5 * 60;

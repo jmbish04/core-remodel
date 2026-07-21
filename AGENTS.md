@@ -237,6 +237,111 @@ transcripts offloaded to R2 `ARTIFACTS_BUCKET`). Admin reads: `/admin/mcp-ops`
 not a tool. Never log the auth token / `WORKER_API_KEY` — the logger caps blob
 sizes and redacts secret-ish keys.
 
+## D1 has no transactions — use `db.batch()` (MANDATORY)
+
+**NEVER call `db.transaction()`. It does not work on D1 and never has.**
+
+D1 rejects SQL `BEGIN` outright — error 7500, *"To execute a transaction, please
+use the state.storage.transaction() ... APIs instead of the SQL BEGIN TRANSACTION
+or SAVEPOINT statements."* Verified against both local and production D1.
+`drizzle-orm@0.33.0`'s D1 driver implements `.transaction()` by issuing raw
+`begin`/`commit` as separate statements, so the call throws on its **first**
+statement. The code inside the callback never runs at all.
+
+This is not a subtle atomicity caveat. It is a dead endpoint that returns 500.
+`POST /api/admin/config` sat broken this way long enough that production had zero
+`permits_*` rows while the config page looked populated — the form was falling
+back to client-side defaults, so nothing looked wrong.
+
+**Use `db.batch([...])`** — D1 runs a batch as one all-or-nothing unit. Build the
+statements into an array, then cast to the non-empty tuple type drizzle wants:
+
+```ts
+const stmts = rows.map((r) => db.insert(table).values(r));
+if (stmts.length > 0) {
+  await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
+}
+```
+
+**When `batch()` cannot work:** a batch is built before any of it executes, so it
+cannot feed one statement's generated id into the next. For insert-then-link,
+write sequentially and add a **compensating delete** on failure, so a half-done
+write cannot leave an orphan. Document the residual gap rather than implying
+atomicity you do not have — see `images.ts` and `wishlist.ts` for the shape.
+
+A read between writes is likewise outside the atomic unit. Say so in a comment;
+do not pretend the batch covers it.
+
+## Foreign keys, never denormalized name columns (MANDATORY)
+
+**This is a relational database. Relate to a row by its id and JOIN for the
+display name. NEVER add, write, or read a denormalized `*_name` column that
+duplicates data owned by another table.**
+
+This is the single most repeated mistake agents make in this repo, it is always
+the same shape, and it is expensive to unwind long after the fact.
+
+The failure looks like this: an agent needs a room's name, does not want to write
+a join, and so invents `roomName` on the child table — or worse, passes a
+`roomName` to an insert on a table that has no such column and never did. It
+compiles-ish, it reads plausibly, and it silently rots: the copy drifts the
+moment the parent is renamed, and nothing reconciles the two ever again.
+
+**Real instance (2026-07-19):** `wishlist.ts` and `worker-emails.ts` both
+inserted into `material_schedule_items` with a `roomName` field. That column does
+not exist and the schema says so out loud —
+
+> Canonical room this material belongs to. HARD relationship: every material is
+> per-room ("Toilet — Primary Bath"), so `roomId` is a required M:1 FK. The
+> display name is derived by joining `rooms` — never stored (no denormalized
+> `room_name`).
+
+Both call sites also passed `null` into that NOT NULL FK. Neither was caught for
+months because the surrounding `db.transaction()` was already dead on D1 (see the
+D1 section), so the broken insert never executed. One shortcut hid behind
+another.
+
+**Rules:**
+- A child row references its parent by `parentId` INTEGER FK. Always.
+- Need the name for display? `JOIN` in the query, or resolve it in the service
+  layer. It is one line. Write the line.
+- If a FK is `.notNull()`, a caller that cannot supply it must **reject the
+  request** (400 with a message saying what is missing) — never insert a
+  placeholder, never coerce to `null`, never invent a default row.
+- Before writing any `.insert()` or `.update()`, read the actual schema file for
+  that table. Do not infer columns from a neighbouring call site; that is how
+  this specific bug propagated across two files.
+- The only sanctioned exception is a deliberate, documented snapshot of a value
+  as it was at a point in time (e.g. a price on an issued quote). Those are
+  named for what they are and carry a comment saying why the copy is correct.
+
+## Resolving an ambiguous parent (rooms, and anything like them)
+
+When an inbound artifact — an emailed receipt, an invoice line, a scraped
+product — plausibly belongs to one of several parent rows, **do not guess and
+write.** Stage it, reason about it, and let a human confirm.
+
+The house has multiple bathrooms. A toilet on a receipt belongs to exactly one of
+them and the email does not say which. The correct handling is:
+
+1. **Stage, don't insert.** The row lands in the HITL queue with `roomId` unset.
+   Nothing enters `material_schedule_items` unconfirmed.
+2. **Reason, and show the reasoning.** Narrow by elimination, not vibes. If the
+   primary bath already has a shower valve sourced, this shower valve is probably
+   not for the primary. Surface the candidates ranked, each with the evidence
+   that supports or eliminates it, so the human is reviewing an argument rather
+   than a guess.
+3. **Confirm in either surface.** The HITL queue is one path. The MCP tools are
+   the other — a chat session must be able to list what is pending, see the
+   reasoning, and set the mapping conversationally. Both write through the same
+   confirm step; neither bypasses it.
+4. **Learn from the confirmation.** Once the primary bath's shower is mapped, that
+   fact is available to eliminate it next time. Deduction gets cheaper as the
+   project fills in — that compounding is the point.
+
+Guessing silently is worse than asking. A wrong mapping propagates into budget,
+takeoffs and comparisons, and nothing downstream can tell it was a guess.
+
 ## Multi-select & config-driven definitions (MANDATORY)
 
 **NEVER store or render a multi-select as a comma-separated string.** Not colors,

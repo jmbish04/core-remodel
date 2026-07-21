@@ -7,3 +7,4 @@ export * from "./photo_colors";
 export * from "./brand_categories";
 export * from "./product_categories";
 export * from "./device_preferences";
+export * from "./sales_tax_rates";

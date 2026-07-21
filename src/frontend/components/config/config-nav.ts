@@ -18,7 +18,10 @@ export const CONFIG_NAV: ConfigNavGroup[] = [
   {
     id: "property",
     label: "Property",
-    items: [{ href: "/admin/config/address", label: "Property Address" }],
+    items: [
+      { href: "/admin/config/address", label: "Property Address" },
+      { href: "/admin/config/tax", label: "Sales Tax" },
+    ],
   },
   {
     id: "device",

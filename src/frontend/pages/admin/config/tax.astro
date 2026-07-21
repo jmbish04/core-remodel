@@ -1,0 +1,15 @@
+---
+/**
+ * @fileoverview Sales Tax config page — `/admin/config/tax`.
+ * Thin shell mounting `<TaxConfigApp>` (ConfigShell inside).
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { TaxConfigApp } from "@/components/config/TaxConfigApp";
+---
+
+<BaseLayout
+  title="Sales Tax — Configuration"
+  description="The delivery tax rate quotes are checked against, resolved from the property address."
+>
+  <TaxConfigApp client:only="react" />
+</BaseLayout>

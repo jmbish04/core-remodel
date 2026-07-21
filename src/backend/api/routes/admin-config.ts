@@ -81,33 +81,42 @@ export const adminConfigRouter = new Hono<{ Bindings: Env }>()
       const db = drizzle(c.env.DB);
       const { variables } = c.req.valid("json");
 
-      await db.transaction(async (tx) => {
-        for (const variable of variables) {
-          const mappingRefKey = variable.mappingRefKey || variable.variableKey;
-          
-          await tx
-            .insert(projectSystemVariables)
-            .values({
-              variableKey: variable.variableKey,
+      // `db.batch()`, NOT `db.transaction()`. D1 rejects SQL `BEGIN` outright
+      // (error 7500 — "please use the state.storage.transaction() ... APIs
+      // instead"), and drizzle's D1 driver implements `.transaction()` by
+      // issuing raw `begin`/`commit` as separate statements. So a
+      // `db.transaction()` here threw on its FIRST statement and this endpoint
+      // never saved anything — the config page looked like it worked because
+      // the form falls back to client-side defaults on reload.
+      // `batch()` is D1's real atomic primitive: one all-or-nothing unit.
+      const upserts = variables.map((variable) => {
+        const mappingRefKey = variable.mappingRefKey || variable.variableKey;
+        return db
+          .insert(projectSystemVariables)
+          .values({
+            variableKey: variable.variableKey,
+            valueText: variable.valueText,
+            unit: variable.unit || null,
+            category: variable.category || null,
+            description: variable.description || null,
+            mappingRefKey,
+          })
+          .onConflictDoUpdate({
+            target: projectSystemVariables.variableKey,
+            set: {
               valueText: variable.valueText,
               unit: variable.unit || null,
               category: variable.category || null,
               description: variable.description || null,
               mappingRefKey,
-            })
-            .onConflictDoUpdate({
-              target: projectSystemVariables.variableKey,
-              set: {
-                valueText: variable.valueText,
-                unit: variable.unit || null,
-                category: variable.category || null,
-                description: variable.description || null,
-                mappingRefKey,
-              },
-            })
-            .run();
-        }
+            },
+          });
       });
+
+      // batch() requires at least one statement; an empty save is a no-op.
+      if (upserts.length > 0) {
+        await db.batch(upserts as [(typeof upserts)[number], ...(typeof upserts)[number][]]);
+      }
 
       const updated = await db.select().from(projectSystemVariables).all();
       return c.json({ success: true, variables: updated });

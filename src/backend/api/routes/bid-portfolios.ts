@@ -15,6 +15,7 @@ import {
 } from "@backend/db";
 import type { PermitIntelligenceAgent } from "@backend/ai/agents/PermitIntelligenceAgent";
 import { getAgentByName } from "agents";
+import type { BatchItem } from "drizzle-orm/batch";
 import { desc, eq, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
@@ -216,37 +217,52 @@ bidPortfoliosRouter.post("/contacts", async (c) => {
 
     const db = drizzle(c.env.DB);
     const now = new Date();
-    
-    // We should do this in a transaction if mapping to a company
-    const contactRecord = await db.transaction(async (tx) => {
-      const result = await tx
-        .insert(contacts)
-        .values({
-          contactName,
-          title: body.title?.trim() || null,
-          email: body.email?.trim() || null,
-          phone: body.phone?.trim() || null,
-          notes: body.notes?.trim() || null,
-          isArchived: false,
-          datetimeCreated: now,
-          datetimeUpdated: now,
-        })
-        .returning();
-        
-      const createdContact = result[0];
-      
-      if (body.companyId) {
-        await tx.insert(companyContacts).values({
+
+    // `db.transaction()` doesn't work on D1 (see AGENTS.md — BEGIN is
+    // rejected), and batch() can't help here either: the company mapping
+    // needs the contact's generated id, and a batch is built before any of
+    // it runs. Insert the contact, then link it to the company if requested,
+    // with a compensating delete if that link fails so a broken mapping
+    // can't be left pointing at nothing (or worse, silently succeed without
+    // us knowing the contact is orphaned).
+    const result = await db
+      .insert(contacts)
+      .values({
+        contactName,
+        title: body.title?.trim() || null,
+        email: body.email?.trim() || null,
+        phone: body.phone?.trim() || null,
+        notes: body.notes?.trim() || null,
+        isArchived: false,
+        datetimeCreated: now,
+        datetimeUpdated: now,
+      })
+      .returning();
+
+    const createdContact = result[0];
+
+    if (body.companyId) {
+      try {
+        await db.insert(companyContacts).values({
           companyId: body.companyId,
           contactId: createdContact.id,
           title: body.title?.trim() || null,
           isPrimary: false,
           datetimeCreated: now,
         });
+      } catch (err) {
+        try {
+          await db.delete(contacts).where(eq(contacts.id, createdContact.id));
+        } catch {
+          console.error(
+            `[bid-portfolios] orphaned contact ${createdContact.id} — company mapping failed and cleanup failed`,
+          );
+        }
+        throw err;
       }
-      
-      return createdContact;
-    });
+    }
+
+    const contactRecord = createdContact;
 
     return c.json({ contact: contactRecord }, 201);
   } catch (error) {
@@ -465,60 +481,79 @@ bidPortfoliosRouter.post("/", async (c) => {
       }
     }
 
-    // Execute in a transaction since we insert across multiple tables
-    const result = await db.transaction(async (tx) => {
-      const insertedPortfolio = await tx
-        .insert(bidPortfolios)
-        .values({
-          companyId,
-          token,
-          title,
-          welcomeMessage: body.welcomeMessage?.trim() || null,
-          overviewStatement: body.overviewStatement?.trim() || null,
-          showBudgetRanges: body.showBudgetRanges ?? false,
-          expirationDate,
-          status: body.status?.trim() || "active",
-          datetimeCreated: now,
-          datetimeUpdated: now,
-        })
-        .returning();
+    // `db.transaction()` doesn't work on D1 (see AGENTS.md — BEGIN is
+    // rejected). The room configs and selected photos both need the
+    // portfolio's generated id, so they can't be batched together with the
+    // portfolio insert itself — but they're independent of EACH OTHER, so
+    // once the portfolio exists, both go in one db.batch() for real
+    // atomicity. If that batch fails, the portfolio is a childless orphan;
+    // delete it (its FKs are ON DELETE CASCADE, so this also cleans up
+    // anything the batch partially inserted before it was reverted, though
+    // batch() itself is all-or-nothing) and rethrow the original error.
+    const insertedPortfolio = await db
+      .insert(bidPortfolios)
+      .values({
+        companyId,
+        token,
+        title,
+        welcomeMessage: body.welcomeMessage?.trim() || null,
+        overviewStatement: body.overviewStatement?.trim() || null,
+        showBudgetRanges: body.showBudgetRanges ?? false,
+        expirationDate,
+        status: body.status?.trim() || "active",
+        datetimeCreated: now,
+        datetimeUpdated: now,
+      })
+      .returning();
 
-      const portfolio = insertedPortfolio[0];
+    const portfolio = insertedPortfolio[0];
 
-      if (body.roomConfigs && body.roomConfigs.length > 0) {
-        const configValues = body.roomConfigs.map((cfg, index) => ({
+    if (body.roomConfigs && body.roomConfigs.length > 0) {
+      const configValues = body.roomConfigs.map((cfg, index) => ({
+        portfolioId: portfolio.id,
+        roomId: cfg.roomId,
+        includePhotos: cfg.includePhotos ?? true,
+        includeDimensions: cfg.includeDimensions ?? true,
+        includeConditionNotes: cfg.includeConditionNotes ?? true,
+        includeScopeItems: cfg.includeScopeItems ?? true,
+        includeInspiration: cfg.includeInspiration ?? true,
+        sortOrder: cfg.sortOrder ?? index,
+        datetimeCreated: now,
+      }));
+
+      const photoValues = body.roomConfigs.flatMap((cfg) => {
+        if (!cfg.selectedPhotos) return [];
+        return cfg.selectedPhotos.map((p, pIndex) => ({
           portfolioId: portfolio.id,
           roomId: cfg.roomId,
-          includePhotos: cfg.includePhotos ?? true,
-          includeDimensions: cfg.includeDimensions ?? true,
-          includeConditionNotes: cfg.includeConditionNotes ?? true,
-          includeScopeItems: cfg.includeScopeItems ?? true,
-          includeInspiration: cfg.includeInspiration ?? true,
-          sortOrder: cfg.sortOrder ?? index,
+          imageId: p.imageId,
+          captionOverride: p.captionOverride?.trim() || null,
+          sortOrder: p.sortOrder ?? pIndex,
           datetimeCreated: now,
         }));
-        await tx.insert(bidPortfolioRoomConfigs).values(configValues);
+      });
 
-        // Also insert selected photos if any
-        const photoValues = body.roomConfigs.flatMap(cfg => {
-          if (!cfg.selectedPhotos) return [];
-          return cfg.selectedPhotos.map((p, pIndex) => ({
-            portfolioId: portfolio.id,
-            roomId: cfg.roomId,
-            imageId: p.imageId,
-            captionOverride: p.captionOverride?.trim() || null,
-            sortOrder: p.sortOrder ?? pIndex,
-            datetimeCreated: now,
-          }));
-        });
-        
+      try {
+        const stmts: BatchItem<"sqlite">[] = [
+          db.insert(bidPortfolioRoomConfigs).values(configValues),
+        ];
         if (photoValues.length > 0) {
-          await tx.insert(bidPortfolioSelectedPhotos).values(photoValues);
+          stmts.push(db.insert(bidPortfolioSelectedPhotos).values(photoValues));
         }
+        await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
+      } catch (err) {
+        try {
+          await db.delete(bidPortfolios).where(eq(bidPortfolios.id, portfolio.id));
+        } catch {
+          console.error(
+            `[bid-portfolios] orphaned portfolio ${portfolio.id} — room config insert failed and cleanup failed`,
+          );
+        }
+        throw err;
       }
+    }
 
-      return portfolio;
-    });
+    const result = portfolio;
 
     return c.json({ portfolio: result }, 201);
   } catch (error) {
