@@ -57,6 +57,20 @@ const MAX_PAGES_PER_RUN = 40;
 const MAX_IMAGES_PER_RUN = 300;
 
 /**
+ * Rows buffered before a `db.batch()` flush.
+ *
+ * Inserting one row per image costs a D1 roundtrip each; batching amortises
+ * that. Flushing PERIODICALLY rather than once at the end is the deliberate
+ * part: this function fetches up to 300 images over many seconds, and a single
+ * end-of-run flush means a timeout at image 280 discards all 280.
+ *
+ * `db.batch()` of single-row inserts, not one multi-row INSERT — D1 caps a
+ * query at 100 bound parameters and these rows carry 12 columns each, so a
+ * multi-row statement would blow that limit at nine rows.
+ */
+const INSERT_BATCH_SIZE = 50;
+
+/**
  * `delivery_url` is NOT NULL and predates this design, when every image really
  * did get a CF Images delivery url. Rather than migrate a column that older
  * rows still legitimately populate, new rows carry this sentinel: it reads as
@@ -278,8 +292,8 @@ export async function harvestBrandImages(
 ): Promise<HarvestResult> {
   const db = drizzle(env.DB);
   const skipped: Record<string, number> = {};
-  const skip = (reason: string) => {
-    skipped[reason] = (skipped[reason] ?? 0) + 1;
+  const skip = (reason: string, count = 1) => {
+    skipped[reason] = (skipped[reason] ?? 0) + count;
   };
 
   // Seed both dedupe sets from D1, not just from this run. The demo script's
@@ -301,6 +315,33 @@ export async function harvestBrandImages(
   let pagesScanned = 0;
   let imagesConsidered = 0;
   let imagesKept = 0;
+
+  const pending: Array<typeof brandImages.$inferInsert> = [];
+
+  /**
+   * Write the buffered rows and return how many were written. Returns 0 and
+   * keeps going on failure — losing one batch of imagery must not abort a
+   * harvest that has already paid for hundreds of image fetches.
+   */
+  const flush = async (): Promise<number> => {
+    if (pending.length === 0) return 0;
+    const chunk = pending.splice(0, pending.length);
+    try {
+      const statements = chunk.map((row) =>
+        db.insert(brandImages).values(row).onConflictDoNothing(),
+      );
+      await db.batch(
+        statements as unknown as [(typeof statements)[number], ...typeof statements],
+      );
+      return chunk.length;
+    } catch (err) {
+      console.error(`[brand-harvest] batch insert failed for brand ${brandId}:`, err);
+      // Count the ROWS lost, not the batch — the histogram is a diagnostic,
+      // and "1 failure" reads very differently from "50 images dropped".
+      skip("insert_failed", chunk.length);
+      return 0;
+    }
+  };
 
   const pages = await discoverPages(websiteUrl);
 
@@ -383,30 +424,29 @@ export async function harvestBrandImages(
         seenHashes.add(hash);
         const group = deriveGroup(imgUrl);
 
-        await db
-          .insert(brandImages)
-          .values({
-            brandId,
-            sourceUrl: imgUrl,
-            sourcePageUrl: pageUrl,
-            deliveryUrl: CF_IMAGES_SKIPPED,
-            mimeType: mime,
-            width,
-            height,
-            byteSize: bytes.byteLength,
-            contentHash: hash,
-            imageGroupKey: group.key,
-            groupSortOrder: group.sortOrder,
-            isActive: true,
-          })
-          .onConflictDoNothing();
+        pending.push({
+          brandId,
+          sourceUrl: imgUrl,
+          sourcePageUrl: pageUrl,
+          deliveryUrl: CF_IMAGES_SKIPPED,
+          mimeType: mime,
+          width,
+          height,
+          byteSize: bytes.byteLength,
+          contentHash: hash,
+          imageGroupKey: group.key,
+          groupSortOrder: group.sortOrder,
+          isActive: true,
+        });
 
-        imagesKept++;
+        if (pending.length >= INSERT_BATCH_SIZE) imagesKept += await flush();
       } catch {
         skip("fetch_failed");
       }
     }
   }
+
+  imagesKept += await flush();
 
   return { brandId, pagesScanned, imagesConsidered, imagesKept, skipped };
 }

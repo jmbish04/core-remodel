@@ -1037,12 +1037,12 @@ brandsRouter.post("/images/:id/deactivate", async (c) => {
     return c.json({ error: "Invalid image id" }, 400);
   }
 
-  const body: { reason?: string } = await c.req
-    .json<{ reason?: string }>()
-    .catch(() => ({}));
+  // `null` is valid JSON, so a bare `null` body parses successfully and then
+  // throws on property access — hence optional chaining, not just the catch.
+  const body = await c.req.json<{ reason?: string } | null>().catch(() => null);
   // Clamped: the reason is client-supplied and only ever read by a human
   // debugging a gallery, so it must not become an unbounded write vector.
-  const reason = (body.reason ?? "frontend detected error on image url").slice(0, 200);
+  const reason = (body?.reason ?? "frontend detected error on image url").slice(0, 200);
 
   const db = drizzle(c.env.DB);
   const rows = await db
