@@ -93,17 +93,35 @@ export async function findBrandIdByAnyName(
   const trimmed = name.trim();
   if (!trimmed) return null;
 
-  const [hit] = await db
-    .select({ brandId: brandNameVariations.brandId })
+  const hits = await db
+    .select({
+      brandId: brandNameVariations.brandId,
+      isPrimary: brandNameVariations.isPrimary,
+    })
     .from(brandNameVariations)
     .where(
       and(
         sql`lower(trim(${brandNameVariations.brandName})) = lower(${trimmed})`,
         eq(brandNameVariations.isActive, true),
       ),
-    )
-    .limit(1);
-  if (hit) return hit.brandId;
+    );
+
+  if (hits.length > 0) {
+    // A spelling can legitimately map to more than one brand while duplicate
+    // brand rows still exist — "DORN BRACHT" is #315's own primary name AND an
+    // alias of #18 Dornbracht. Resolve deterministically by preferring the
+    // brand that actually CALLS ITSELF this, rather than whichever row the DB
+    // happened to return first. Merging the duplicates (agent issue #4) is what
+    // removes the ambiguity for good.
+    const primaryHit = hits.find((h) => h.isPrimary);
+    if (!primaryHit && hits.length > 1) {
+      console.warn(
+        `[brand-names] "${trimmed}" is an alias of ${hits.length} brands ` +
+          `(${hits.map((h) => h.brandId).join(", ")}) — resolving to the lowest id`,
+      );
+    }
+    return primaryHit?.brandId ?? Math.min(...hits.map((h) => h.brandId));
+  }
 
   // Fall back to the legacy column for any brand whose variation row is missing
   // — belt-and-braces, since the 0117 triggers keep the two in step.
