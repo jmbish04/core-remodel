@@ -24,6 +24,11 @@ export const CONFIG_NAV: ConfigNavGroup[] = [
     ],
   },
   {
+    id: "platform",
+    label: "Platform",
+    items: [{ href: "/admin/config/usage", label: "Usage & Cost Ceilings" }],
+  },
+  {
     id: "device",
     label: "This Device",
     items: [{ href: "/admin/config/device", label: "Device" }],

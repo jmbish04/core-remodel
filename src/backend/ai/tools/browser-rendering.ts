@@ -1,4 +1,8 @@
 import { getCloudflareImagesToken } from "../../utils/secrets";
+import {
+  assertCanSpend,
+  recordBrowserRun,
+} from "../../services/usage/metered-ai";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -121,6 +125,11 @@ async function uploadScreenshotToImages(
  * required by the API; we ask for all three we use.
  */
 export async function scrapeUrl(env: Env, url: string): Promise<ScrapedPage> {
+  // Browser Run is the single most expensive binding in the system and the one
+  // most likely to fan out (10 req/s and 120 concurrent browsers ACCOUNT-WIDE,
+  // shared with brand/product research). Gate before the request, not after.
+  await assertCanSpend(env, "BROWSER_RENDERING");
+
   const base = await brBaseUrl(env);
   const headers = await brHeaders(env);
 
@@ -152,10 +161,18 @@ export async function scrapeUrl(env: Env, url: string): Promise<ScrapedPage> {
   });
 
   if (!response.ok) {
-    throw new Error(
-      `Browser Rendering snapshot failed: ${response.status} ${await response.text()}`,
-    );
+    const body = await response.text();
+    // A failed render still consumed a browser session — record it, else a
+    // retry storm is invisible in the ledger.
+    await recordBrowserRun(env, {
+      feature: "scrape_url",
+      url,
+      status: "error",
+      errorMessage: `${response.status} ${body}`.slice(0, 500),
+    });
+    throw new Error(`Browser Rendering snapshot failed: ${response.status} ${body}`);
   }
+  await recordBrowserRun(env, { feature: "scrape_url", url });
 
   const payload = (await response.json()) as {
     success: boolean;

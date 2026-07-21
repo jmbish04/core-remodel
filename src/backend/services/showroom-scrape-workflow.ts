@@ -45,6 +45,7 @@ import { parseStructuredResponse } from "@backend/utils/ai-json";
 import { faviconService } from "@backend/services/favicon";
 import { enrichNewBrand } from "@backend/services/showroom/brand-enrichment";
 import { collectSocialLinks } from "@backend/services/showroom/social-links";
+import { meteredAiRun } from "@backend/services/usage/metered-ai";
 import { extractBrandFacets, type FacetBrand } from "@backend/services/showroom/brand-facets";
 
 // ---------------------------------------------------------------------------
@@ -659,7 +660,8 @@ async function extractPage(
   };
 
   try {
-    const raw = (await env.AI.run(
+    const raw = (await meteredAiRun(
+      env,
       EXTRACT_MODEL as Parameters<typeof env.AI.run>[0],
       {
         messages: [
@@ -676,6 +678,7 @@ async function extractPage(
         },
         gateway: { id: env.AI_GATEWAY_ID },
       } as Parameters<typeof env.AI.run>[1],
+      { feature: "showroom_page_extraction" },
     )) as { response?: unknown } & Partial<PageExtraction>;
 
     // `.response` is a parsed object for some models, a JSON string for others
