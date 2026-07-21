@@ -307,12 +307,25 @@ export async function runBackfillPhotoPipeline(
       return;
     }
 
+    // Places Photo is a billed Places SKU. This loop previously fetched it with
+    // NO quota guard and NO usage log. Gate on the per-API Places quota + log each.
+    const maps = new GoogleMapsService(env);
+    if (!(await maps.isUnderApiQuota("places"))) {
+      console.warn(`[backfill] photos: Places quota exhausted — skipping photos for store ${showroomId}`);
+      return;
+    }
     const capped = photos.slice(0, 5);
     for (let i = 0; i < capped.length; i++) {
       const photo = capped[i];
       try {
         const mediaUrl = `https://places.googleapis.com/v1/${photo.name}/media?maxWidthPx=1600&key=${mapsKey}`;
         const res = await fetch(mediaUrl, { signal: AbortSignal.timeout(8000) });
+        await maps.logUsage(
+          "places:photo",
+          { photoName: photo.name },
+          { statusCode: res.status },
+          { endpoint: "photo", statusCode: res.status },
+        );
         if (!res.ok) {
           console.warn(`[backfill] photos: non-ok ${res.status} for photo ${i} of store ${showroomId}`);
           continue;

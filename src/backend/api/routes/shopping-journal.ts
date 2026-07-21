@@ -54,9 +54,11 @@ shoppingJournalRouter.post("/enrich", async (c) => {
     }
 
     const mapsService = new GoogleMapsService(c.env);
-    const hasQuota = await mapsService.canUseGoogleMaps();
+    // This is a Places Text Search — gate on the per-API Places quota so it blocks
+    // only when Places (not some other Maps SKU) is exhausted.
+    const hasQuota = await mapsService.isUnderApiQuota("places");
     if (!hasQuota) {
-      return c.json({ error: "Google Maps service is rate limited for this month" }, 429);
+      return c.json({ error: "Google Maps Places quota is exhausted for this month" }, 429);
     }
 
     const gmapKey = await getGoogleMapsApiKey(c.env);

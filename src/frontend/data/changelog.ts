@@ -43,6 +43,36 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/tesla-google-quota",
+    title: "Per-API Google Maps quota hard-block",
+    summary:
+      "The Maps quota guard counted one combined total across every API (via two divergent guards, one with a ms-vs-seconds boundary bug). It now blocks PER API — an exhausted Places, Geocoding, or Routes SKU stops on its own while the others keep working — closes the untracked Places-Photo billing bypass, and adds gated reverseGeocode + placesNearby for the location tools.",
+    date: "2026-07-21",
+    status: "staged",
+    prNumber: 185,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/185",
+  },
+  {
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    title: "Durable Object alarm circuit breaker (hard-stop)",
+    summary:
+      "The guard the $700 cf_agents_schedules runaway (#162) never had: a runtime circuit breaker that hard-stops a runaway DO alarm loop — deletes the alarm, flips a global kill-switch, and refuses to run — before it bills into the thousands. Retro-hardens RemodelOrchestrator, bans the append-only this.schedule() in new DOs via a CI guard, and adds an admin Safety tab.",
+    date: "2026-07-21",
+    status: "staged",
+    prNumber: 181,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/181",
+  },
+  {
+    branch: "claude/health-status-page",
+    title: "Public /health page with an on-demand live health screen",
+    summary:
+      "A public /health page with a Run health checks button that actively probes the worker's core bindings (D1, the Tesla telemetry DB, KV, R2, Workers AI) on demand and renders per-service status + latency — not just a table read.",
+    date: "2026-07-21",
+    status: "staged",
+    prNumber: 182,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/182",
+  },
+  {
     branch: "claude/drive-lists-activation-ui-6f6e47",
     title: "One active drive list, enforced by D1 — and drive tabs that match real life",
     summary:
@@ -122,6 +152,57 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "maps-per-api-quota-hardblock",
+    branch: "claude/tesla-google-quota",
+    date: "2026-07-21",
+    tag: "Safety",
+    area: "Google Maps",
+    title: "Per-API Google Maps quota hard-block",
+    summary:
+      "Google Maps billing is now guarded per API, not as one lump. Each SKU — Places, Geocoding, Routes — has its own monthly cap and is blocked independently, so running out of one never blocks the others and nothing spills past the free tier into charges. Two long-standing leaks are closed: a divergent guard with a milliseconds-vs-seconds boundary bug, and Places-Photo fetches that were spending real money with no counter at all.",
+    status: "staged",
+    changes: [
+      { kind: "added", text: "isUnderApiQuota(sku) + per-SKU caps (MAPS_API_QUOTAS) + getUsageBySku() — Places methods gate on 'places', computeRouteMatrix on 'routes'; an exhausted SKU blocks only itself." },
+      { kind: "added", text: "reverseGeocode(lat,lng) (Geocoding SKU) and placesNearby(...) (Places SKU) — gated + logged, fail-soft (null/[]); back the location / what's-near-me tools." },
+      { kind: "fixed", text: "canUseGoogleMaps() recomputed its month window in milliseconds while the timestamp column is Unix seconds (~1000× off) and used a second divergent 8,000 cap — it now delegates to the SARGABLE seconds-correct count, one source of truth." },
+      { kind: "fixed", text: "The Places-Photo media fetches in showroom onboarding + the ShowroomResearchAgent backfill fetched a billed Places SKU with NO quota guard and NO usage log — they now gate on the Places quota and log every fetch." },
+      { kind: "changed", text: "GET /api/admin/integrations/usage returns by_sku + quotas; the Google Maps usage tab shows a 'Per-API hard blocks' row per SKU with the existing blocked badge." },
+    ],
+  },
+  {
+    id: "do-alarm-circuit-breaker",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-21",
+    tag: "Safety",
+    area: "Durable Objects",
+    title: "Durable Object alarm circuit breaker — a hard stop before billing runs away",
+    summary:
+      "A $700 bill came from one Durable Object whose alarm kept re-scheduling itself: the append-only this.schedule() grew an internal table to ~1M rows and every alarm full-scanned it (537 billion row reads). #162 fixed that path; this is the guard so it — or any future alarm DO — can never silently recur. On every alarm fire a cheap self-check runs, and on any runaway signal the breaker hard-stops: deletes the alarm, flips a global kill-switch, and refuses to run. Deliberate downtime over runaway billing.",
+    status: "staged",
+    changes: [
+      { kind: "added", text: "services/safety/do-circuit-breaker.ts — a D1-backed global kill-switch (project_system_variables.do_circuit_breaker_tripped), a pure fire-rate window, and a schedule-table-bound check. All cheap (single-row read, SARGABLE count) so the guard never becomes the cost." },
+      { kind: "changed", text: "RemodelOrchestrator runs the guard at the top of every alarm fire (kill-switch → schedule-table bound → fire-rate); on a trip it deletes the alarm and hard-stops with no reschedule. onStart() respects the switch too." },
+      { kind: "added", text: "scripts/check-do-alarms.mjs (wired into `pnpm check`) — bans the append-only this.schedule() in new DOs; native ctx.storage.setAlarm() only." },
+      { kind: "added", text: "GET/POST /api/admin/integrations/circuit-breaker(/clear) + a Safety tab on /admin/integrations/usage to see the tripped reason and clear it." },
+    ],
+  },
+  {
+    id: "public-health-page",
+    branch: "claude/health-status-page",
+    date: "2026-07-21",
+    tag: "Ops",
+    area: "Health",
+    title: "A /health page you can actually run checks from",
+    summary:
+      "The bare /health URL used to 404, and the only health surface just pinged D1 and re-read a table. There is now a public /health page with a Run health checks button that actively probes the worker's core bindings — D1, the Tesla telemetry DB, KV, R2 and Workers AI — times each, and renders per-service status + latency with an overall roll-up.",
+    status: "staged",
+    changes: [
+      { kind: "added", text: "services/health/screen.ts runHealthScreen(env) — probes each binding with a bounded, free op (SELECT 1, a KV put/get, an R2 head, an AI binding-presence check), writes one health_checks row per service via db.batch, rolls up overall (down > degraded > healthy)." },
+      { kind: "added", text: "POST /api/health/run — on-demand trigger (public, like GET /api/health); 200 even when a service is down." },
+      { kind: "added", text: "/health public page + HealthCheckApp island — snapshot on mount, Run button, per-service cards (healthy/degraded/down + latency), overall roll-up." },
+    ],
+  },
   {
     id: "drive-lists-single-active",
     branch: "claude/drive-lists-activation-ui-6f6e47",

@@ -42,14 +42,28 @@ import {
   SectionLoading,
 } from "./shared";
 
+interface SkuCounts {
+  places: number;
+  geocoding: number;
+  routes: number;
+}
+
 interface UsageResponse {
   month: string;
   limit: number;
   total_requests: number;
   percentage_used: number;
   by_endpoint: Record<string, number> & { autocomplete: number; details: number };
+  by_sku?: SkuCounts;
+  quotas?: SkuCounts;
   plan: string;
 }
+
+const SKU_LABELS: Record<keyof SkuCounts, string> = {
+  places: "Places API",
+  geocoding: "Geocoding API",
+  routes: "Routes API",
+};
 
 interface QuotaRow {
   key: string;
@@ -242,6 +256,13 @@ export function MapsUsageSection() {
     ];
   }, [data]);
 
+  const skuRows = useMemo<QuotaRow[]>(() => {
+    if (!data?.by_sku || !data?.quotas) return [];
+    return (Object.keys(SKU_LABELS) as (keyof SkuCounts)[]).map((sku) =>
+      makeRow(sku, SKU_LABELS[sku], data.by_sku![sku] ?? 0, data.quotas![sku] ?? 0),
+    );
+  }, [data]);
+
   const otherEntries = useMemo(() => {
     if (!data) return [] as { key: string; value: number }[];
     return Object.entries(data.by_endpoint)
@@ -320,6 +341,21 @@ export function MapsUsageSection() {
               <QuotaCard key={row.key} row={row} />
             ))}
           </div>
+
+          {skuRows.length > 0 && (
+            <div>
+              <h3 className="mb-2 text-sm font-medium text-foreground">Per-API hard blocks</h3>
+              <p className="mb-3 text-xs text-muted-foreground">
+                Each Google Maps SKU is capped and blocked independently — an exhausted API stops on
+                its own while the others keep working.
+              </p>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                {skuRows.map((row) => (
+                  <QuotaCard key={row.key} row={row} />
+                ))}
+              </div>
+            </div>
+          )}
 
           {otherEntries.length > 0 && (
             <Card>
