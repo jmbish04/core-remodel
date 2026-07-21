@@ -156,6 +156,50 @@ function expectedTypeHint(profile: HandlingProfile): string {
 }
 
 /**
+ * How much email body reaches the model. Gemini 2.5 Flash carries a ~1M-token
+ * context, so this is a cost/abuse ceiling rather than a model limit — 24k
+ * characters is roughly 6k tokens, and a retail order confirmation is ~12k.
+ */
+const BODY_CHAR_BUDGET = 24_000;
+/** Same idea for attachment text, which is usually the larger of the two. */
+const ATTACHMENT_CHAR_BUDGET = 48_000;
+
+/**
+ * Clamp long text for a prompt while KEEPING THE END.
+ *
+ * A naive `.slice(0, n)` is the wrong shape for commerce email. The order
+ * summary — subtotal, discount, shipping, tax, total — is always at the BOTTOM,
+ * under a long header of tracking links, marketing blocks and image alt text.
+ * Cutting the tail throws away precisely the numbers the extractor exists to
+ * read, and the model then (correctly) reports that no total was present.
+ *
+ * That is not hypothetical: a 12,481-char Costco receipt was cut at 8,000, and
+ * "Subtotal" began at 8,098 — 98 characters past the knife. The model returned
+ * `invoiceData: null` and flagged "the email does not explicitly state the
+ * total amount paid", while `Total  $5,105.33` sat in the untransmitted tail.
+ *
+ * So keep a generous head for context and a fixed tail for the totals, with an
+ * explicit marker between them so the model knows material was removed rather
+ * than inferring the document simply ends mid-sentence.
+ */
+export function clampForPrompt(text: string, budget: number): string {
+  const value = text || "";
+  if (value.length <= budget) return value;
+
+  // Weighted toward the tail: order summaries, signatures and totals live
+  // there, while the head is mostly boilerplate once past the first screenful.
+  const headChars = Math.floor(budget * 0.6);
+  const tailChars = budget - headChars;
+  const omitted = value.length - budget;
+
+  return (
+    value.slice(0, headChars) +
+    `\n\n[... ${omitted.toLocaleString()} characters omitted from the middle of this email ...]\n\n` +
+    value.slice(-tailChars)
+  );
+}
+
+/**
  * Build the full analysis prompt for a given route profile + email content.
  */
 function buildPrompt(
@@ -227,9 +271,9 @@ Subject: ${subject || "No Subject"}
 From: ${from}
 Date: ${new Date().toISOString()}
 Body:
-${(bodyText || "").slice(0, 8000)}
+${clampForPrompt(bodyText, BODY_CHAR_BUDGET)}
 
-${attachmentText ? `ATTACHMENT CONTENT (extracted text):\n${attachmentText.slice(0, 16000)}` : ""}`;
+${attachmentText ? `ATTACHMENT CONTENT (extracted text):\n${clampForPrompt(attachmentText, ATTACHMENT_CHAR_BUDGET)}` : ""}`;
 }
 
 /**

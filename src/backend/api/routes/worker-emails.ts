@@ -122,6 +122,32 @@ workerEmailsRouter.get("/:id", async (c) => {
   });
 });
 
+/**
+ * POST /:id/reprocess — re-run AI analysis + extraction on a stored email.
+ *
+ * Inbound processing is one-shot: a live message cannot be replayed, so an
+ * email whose extraction failed (truncated body, provider outage, prompt bug)
+ * was stuck with no recovery short of asking the sender to resend. This
+ * re-drives the current code over the stored row.
+ *
+ * Replaces prior derived rows rather than appending, so re-running is safe.
+ */
+workerEmailsRouter.post("/:id/reprocess", async (c) => {
+  const db = drizzle(c.env.DB);
+  const id = parseInt(c.req.param("id"), 10);
+  if (Number.isNaN(id)) return c.json({ error: "Invalid id" }, 400);
+
+  const { reprocessEmail } = await import("@backend/services/email/pipeline");
+  const result = await reprocessEmail(db, c.env, id);
+  if (!result) return c.json({ error: "Email not found" }, 404);
+
+  return c.json({
+    emailId: id,
+    classification: result.classification,
+    invoiceCount: result.invoiceCount,
+  });
+});
+
 workerEmailsRouter.patch("/:id/status", async (c) => {
   const db = drizzle(c.env.DB);
   const id = parseInt(c.req.param("id"));

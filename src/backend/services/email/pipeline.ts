@@ -30,7 +30,12 @@ import { companies } from "@backend/db/schema/directory/companies";
 import { parsePdfToMarkdown } from "@backend/services/documents/liteparse";
 import { analyzeWithGemini, type AiAnalysis } from "./classify";
 import { registerShowroomContactFromEmail } from "./showroom-contact-autopopulate";
-import { ROUTE_OVERRIDE_CONFIDENCE_FLOOR } from "./routes";
+import {
+  buildMatchContext,
+  CATCH_ALL_PROFILE,
+  resolveRoute,
+  ROUTE_OVERRIDE_CONFIDENCE_FLOOR,
+} from "./routes";
 import type { RouteDecision } from "./types";
 
 /** Arguments handed from the router to the pipeline. */
@@ -394,8 +399,56 @@ export async function processEmail(args: ProcessEmailArgs): Promise<void> {
       .where(eq(workerEmails.id, insertedEmail.id));
   }
 
+  await analyzeAndPersist({
+    db,
+    env,
+    emailId: insertedEmail.id,
+    decision,
+    subject: email.subject || "",
+    realSenderEmail,
+    realSenderName,
+    bodyText,
+    attachments: attachmentRecords,
+    companyMatch,
+  });
+}
+
+
+/**
+ * Context an analysis pass needs, independent of how the email arrived.
+ *
+ * Split out from {@link processEmail} so the same phases can run again later
+ * against an already-persisted row — an extraction that failed (bad prompt,
+ * provider outage, truncated body) used to be permanently stuck, because the
+ * only path into analysis was a live inbound message that cannot be replayed.
+ */
+export interface AnalyzeArgs {
+  db: ReturnType<typeof drizzle>;
+  env: Env;
+  emailId: number;
+  decision: RouteDecision;
+  subject: string;
+  realSenderEmail: string;
+  realSenderName: string | null;
+  bodyText: string;
+  attachments: AttachmentRecord[];
+  companyMatch: { companyId: number | null };
+}
+
+/**
+ * Phases 5-6 plus downstream persistence: classify, extract, stage a company,
+ * and materialize invoice/receipt line items.
+ *
+ * Idempotent enough to re-run: callers that re-analyze an email should clear
+ * its prior invoice/contract rows first (see {@link reprocessEmail}).
+ */
+export async function analyzeAndPersist(args: AnalyzeArgs): Promise<void> {
+  const {
+    db, env, emailId, decision, subject,
+    realSenderEmail, realSenderName, bodyText, attachments, companyMatch,
+  } = args;
   // ── Phase 5: AI classification + extraction (depth per route) ────────────
-  const attachmentText = await extractAttachmentText(attachmentRecords, env);
+  const attachmentText = await extractAttachmentText(attachments, env);
 
   // Graceful degradation: if the AI call fails outright (e.g. provider auth /
   // outage), do NOT strand the email at "pending". Fall back to the
@@ -406,14 +459,14 @@ export async function processEmail(args: ProcessEmailArgs): Promise<void> {
     analysis = await analyzeWithGemini(
       env,
       decision.profile,
-      email.subject || "",
+      subject,
       realSenderEmail,
       bodyText,
       attachmentText,
     );
   } catch (err) {
     console.error(
-      `[email-pipeline] AI analysis failed for email ${insertedEmail.id} ` +
+      `[email-pipeline] AI analysis failed for email ${emailId} ` +
         `(route=${decision.routeId}):`,
       err,
     );
@@ -477,7 +530,7 @@ export async function processEmail(args: ProcessEmailArgs): Promise<void> {
   // If no company match was found, stage one using AI-extracted info.
   if (!companyMatch.companyId && analysis.senderCompanyName) {
     await db.insert(workerEmailStagedCompanies).values({
-      emailId: insertedEmail.id,
+      emailId: emailId,
       suggestedName: analysis.senderCompanyName,
       suggestedEmail: realSenderEmail,
       suggestedPhone: analysis.senderPhone,
@@ -518,7 +571,7 @@ export async function processEmail(args: ProcessEmailArgs): Promise<void> {
   await db
     .update(workerEmails)
     .set(updatePayload)
-    .where(eq(workerEmails.id, insertedEmail.id));
+    .where(eq(workerEmails.id, emailId));
 
   // ── Downstream: invoice / receipt extraction + line-item staging ─────────
   // Both invoices (bills to pay) and receipts (completed purchases) carry line
@@ -534,8 +587,8 @@ export async function processEmail(args: ProcessEmailArgs): Promise<void> {
     const [insertedInvoice] = await db
       .insert(workerEmailInvoices)
       .values({
-        emailId: insertedEmail.id,
-        attachmentId: attachmentRecords[0]?.id || null,
+        emailId: emailId,
+        attachmentId: attachments[0]?.id || null,
         kind: effectiveClassification === "receipt" ? "receipt" : "invoice",
         vendorName: inv.vendorName,
         invoiceNumber: inv.invoiceNumber,
@@ -580,7 +633,7 @@ export async function processEmail(args: ProcessEmailArgs): Promise<void> {
     await db
       .update(workerEmails)
       .set({ status: "processed" })
-      .where(eq(workerEmails.id, insertedEmail.id));
+      .where(eq(workerEmails.id, emailId));
   }
 
   // ── Downstream: contract extraction ──────────────────────────────────────
@@ -591,8 +644,8 @@ export async function processEmail(args: ProcessEmailArgs): Promise<void> {
   ) {
     const c = analysis.contractData;
     await db.insert(workerEmailContracts).values({
-      emailId: insertedEmail.id,
-      attachmentId: attachmentRecords[0]?.id || null,
+      emailId: emailId,
+      attachmentId: attachments[0]?.id || null,
       contractType: c.contractType,
       partyName: c.partyName,
       counterpartyName: c.counterpartyName,
@@ -611,13 +664,116 @@ export async function processEmail(args: ProcessEmailArgs): Promise<void> {
     await db
       .update(workerEmails)
       .set({ status: "processed" })
-      .where(eq(workerEmails.id, insertedEmail.id));
+      .where(eq(workerEmails.id, emailId));
   }
 
   console.log(
-    `[email-pipeline] processed email ${insertedEmail.id}: ` +
+    `[email-pipeline] processed email ${emailId}: ` +
       `route=${decision.routeId}, classification=${effectiveClassification}, ` +
       `company=${companyMatch.companyId || "staged"}, ` +
-      `forward=${forward.isForwarded}, flags=${flags.length}`,
+      `flags=${flags.length}`,
   );
+}
+
+/**
+ * Re-run analysis + extraction against an email already stored in D1.
+ *
+ * Inbound processing is one-shot: {@link processEmail} consumes a live message
+ * that cannot be replayed, so an email whose extraction failed — a truncated
+ * body, a provider outage, a prompt bug — stayed stuck forever with no way to
+ * recover it short of asking the sender to send it again.
+ *
+ * That is not hypothetical. Three Costco receipts sat classified but with zero
+ * extracted line items because the prompt truncated the body 98 characters
+ * before the order summary; the fix was one line, but nothing could re-drive
+ * the fixed code over the stored rows.
+ *
+ * Prior invoice/contract/staged-company rows for the email are deleted first so
+ * a re-run REPLACES its output instead of accumulating duplicate line items on
+ * every attempt. Line items cascade from `worker_email_invoices`.
+ *
+ * @param db     Drizzle client.
+ * @param env    Worker env (AI + R2 bindings).
+ * @param emailId `worker_emails.id` to re-analyze.
+ * @returns The classification recorded, or null if the email does not exist.
+ */
+export async function reprocessEmail(
+  db: ReturnType<typeof drizzle>,
+  env: Env,
+  emailId: number,
+): Promise<{ classification: string | null; invoiceCount: number } | null> {
+  const [email] = await db
+    .select()
+    .from(workerEmails)
+    .where(eq(workerEmails.id, emailId))
+    .limit(1);
+  if (!email) return null;
+
+  const attachments = await db
+    .select()
+    .from(workerEmailAttachments)
+    .where(eq(workerEmailAttachments.emailId, emailId));
+
+  // Clear prior derived rows so a re-run replaces rather than duplicates.
+  //
+  // Line items are NOT deleted explicitly: `worker_email_invoice_line_items`
+  // declares `onDelete: "cascade"` on its invoice FK and D1 reports
+  // `PRAGMA foreign_keys = 1`, so removing the invoice removes them. Verified
+  // rather than assumed — inserting an invoice with 2 line items and deleting
+  // only the invoice leaves 0 line items behind.
+  //
+  // Staged companies are re-created by the analysis pass when the sender still
+  // matches nothing in the directory.
+  await db.batch([
+    db.delete(workerEmailInvoices).where(eq(workerEmailInvoices.emailId, emailId)),
+    db.delete(workerEmailContracts).where(eq(workerEmailContracts.emailId, emailId)),
+    db.delete(workerEmailStagedCompanies).where(eq(workerEmailStagedCompanies.emailId, emailId)),
+  ]);
+
+  // Re-derive the route from the stored recipient so the same handling profile
+  // (expected type, analysis depth) applies as on first receipt.
+  const ctx = buildMatchContext(
+    email.toAddress || "",
+    email.fromAddress || "",
+    email.subject || "",
+  );
+  // resolveRoute returns null for a recipient we do not own. The email is
+  // already stored, so re-analysis must still be possible — fall back to the
+  // catch-all profile (AI-driven classification, no route intent).
+  const decision: RouteDecision = resolveRoute(ctx) ?? {
+    routeId: "general",
+    reason: "reprocess: original recipient no longer matches a known route",
+    profile: CATCH_ALL_PROFILE,
+  };
+
+  await analyzeAndPersist({
+    db,
+    env,
+    emailId,
+    decision,
+    subject: email.subject || "",
+    realSenderEmail: email.originalFromAddress || email.fromAddress || "",
+    realSenderName: email.originalFromName || null,
+    bodyText: email.bodyText || "",
+    attachments: attachments.map((a) => ({
+      id: a.id,
+      filename: a.filename || "",
+      mimeType: a.mimeType || "",
+      r2Key: a.r2Key,
+      sizeBytes: a.sizeBytes ?? 0,
+    })),
+    companyMatch: { companyId: email.matchedCompanyId ?? null },
+  });
+
+  const [after] = await db
+    .select()
+    .from(workerEmails)
+    .where(eq(workerEmails.id, emailId))
+    .limit(1);
+  const invoices = await db
+    .select({ id: workerEmailInvoices.id })
+    .from(workerEmailInvoices)
+    .where(eq(workerEmailInvoices.emailId, emailId));
+
+  return { classification: after?.classification ?? null, invoiceCount: invoices.length };
 }
