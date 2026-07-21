@@ -80,6 +80,101 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "maps-per-api-quota-hardblock": {
+    slug: "maps-per-api-quota-hardblock",
+    branch: "claude/tesla-google-quota",
+    prNumber: 185,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/185",
+    problem:
+      "Google Maps billing was guarded as one combined total, not per API. Two divergent guards disagreed: isUnderMonthlyQuota() (limit 10,000, seconds-correct) and canUseGoogleMaps() (limit 8,000, but computing the month window with .getTime() MILLISECONDS against a Unix-SECONDS column — a ~1000× boundary error). Worse, several billed calls bypassed the counter entirely: the Places-Photo media fetches in showroom onboarding + the ShowroomResearchAgent backfill fetched a Places SKU with no quota check and no usage log, so they spent real money invisibly. There was also no reverse-geocode or nearby-search method for the location tools.",
+    approach:
+      "Bucket the already-logged google_maps_usage_log rows into billed SKUs (places / geocoding / routes) via skuForUsageBucket(), sum them with getUsageBySku(), and gate each call with isUnderApiQuota(sku) — an exhausted SKU blocks ONLY itself, and the caps are conservative proxies for the shared $200 free tier so the sum stays under it. canUseGoogleMaps() now delegates to the SARGABLE seconds-correct count (killing the ms bug and the divergent cap). New reverseGeocode + placesNearby methods are gated on their SKU, logged, and fail soft (null/[]) so the location tools degrade instead of throwing. The photo-fetch bypasses now gate + log. The admin usage endpoint + tab surface per-SKU counts and caps.",
+    apiChanges: [
+      "GET /api/admin/integrations/usage — response gains by_sku { places, geocoding, routes } + quotas (the per-API caps).",
+      "GoogleMapsService.isUnderApiQuota(sku) / getUsageBySku() — NEW per-API guard + rollup.",
+      "GoogleMapsService.reverseGeocode(lat,lng) / placesNearby(lat,lng,radiusM) — NEW, gated + logged, fail-soft.",
+      "canUseGoogleMaps() — reimplemented to delegate to isUnderMonthlyQuota() (bug fix; same signature).",
+    ],
+    filesTouched: [
+      "src/backend/services/google/maps.ts",
+      "src/backend/api/routes/admin-integrations.ts",
+      "src/frontend/components/admin/usage/MapsUsageSection.tsx",
+      "src/backend/services/showroom/onboarding.ts",
+      "src/backend/ai/agents/ShowroomResearchAgent/methods/backfill.ts",
+      "src/backend/api/routes/shopping-journal.ts",
+    ],
+    migrations: [],
+    code: [],
+    diagrams: [],
+    verification: {
+      qcScript: "scripts/qc/pr_185.mjs",
+      command: "pnpm run test:pr 185 -- --preview",
+      output:
+        "Not yet executed — the authoring sandbox has no toolchain (no node_modules) and the proxy blocks direct HTTP to the worker. Run in a toolchain env against the preview, then production after deploy. tsc --noEmit is clean on all touched files (4 pre-existing repo-wide env/config errors only).",
+    },
+  },
+  "do-alarm-circuit-breaker": {
+    slug: "do-alarm-circuit-breaker",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    prNumber: 181,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/181",
+    problem:
+      "RemodelOrchestrator used the @cloudflare/agents SDK this.schedule(), which is append-only — every call inserts a row into the SDK's internal cf_agents_schedules table. Re-armed unconditionally from onStart() (fires on every DO wake) and audit()'s finally, pending schedules compounded to ~1M rows; every alarm then full-scanned the table, billing 537 BILLION Durable Object row reads in 30 days (~$512+). #162 fixed that code path, but nothing in the running system would catch a recurrence — on that DO or any future alarm DO — until the next invoice.",
+    approach:
+      "A reusable runtime circuit breaker checked on every alarm fire, before any work: a D1-backed global kill-switch (project_system_variables.do_circuit_breaker_tripped), a schedule-table-bound check (the exact #162 signature), and a fire-rate window. On any runaway signal it TRIPS — deletes the alarm, flips the kill-switch, and hard-stops with no reschedule (deliberate downtime over billing). All checks are cheap (single-row read, SARGABLE count, O(1) compare) so the guard never becomes the cost. New alarm DOs are required to use native ctx.storage.setAlarm() (one self-replacing slot — cannot grow a table); a CI guard bans this.schedule() in DOs.",
+    apiChanges: [
+      "GET /api/admin/integrations/circuit-breaker — NEW. Current kill-switch state (tripped, reason, doName, at).",
+      "POST /api/admin/integrations/circuit-breaker/clear — NEW. Admin clears the breaker.",
+      "services/safety/do-circuit-breaker.ts — NEW reusable module (readCircuitBreaker / tripCircuitBreaker / clearCircuitBreaker / evaluateFireWindow / scheduleTableExceeded).",
+    ],
+    filesTouched: [
+      "src/backend/services/safety/do-circuit-breaker.ts",
+      "src/backend/ai/agents/RemodelOrchestrator/index.ts",
+      "src/backend/api/routes/admin-integrations.ts",
+      "src/frontend/components/admin/usage/CircuitBreakerSection.tsx",
+      "src/frontend/components/admin/AdminIntegrationsUsageApp.tsx",
+      "scripts/check-do-alarms.mjs",
+      "package.json",
+    ],
+    migrations: [],
+    code: [],
+    diagrams: [],
+    verification: {
+      qcScript: "scripts/qc/pr_181.mjs",
+      command: "pnpm run test:pr 181 -- --preview",
+      output:
+        "Local checks passed: node scripts/check-do-alarms.mjs → OK (RemodelOrchestrator allowlisted, comment-mentions ignored); fire-window trip logic verified (6 fires in-window ok → 7th trips → resets after window). tsc --noEmit clean on touched files. HTTP QC pending a toolchain env (no node_modules / proxy blocks the worker here).",
+    },
+  },
+  "public-health-page": {
+    slug: "public-health-page",
+    branch: "claude/health-status-page",
+    prNumber: 182,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/182",
+    problem:
+      "https://core-remodel.hacolby.workers.dev/health returned 404, and the only health surface (GET /api/health) merely pinged D1 and re-read the health_checks table — it never exercised the other bindings, and there was no human-facing page to run a check on demand.",
+    approach:
+      "A runHealthScreen(env) service that probes each core binding with a real, bounded, free op — D1 + the Tesla telemetry DB (SELECT 1), KV (put/get a short-TTL probe), R2 (head a sentinel), Workers AI (binding presence only; running a model costs) — times each, writes one health_checks row per service via db.batch (D1 has no transactions), and rolls up overall. No probe throws out (a failure is a down result); a persistence failure is logged, not fatal. A public POST /api/health/run triggers it, and a public /health page + island shows per-service cards + latency with an overall roll-up.",
+    apiChanges: [
+      "POST /api/health/run — NEW. On-demand health screen; 200 even when a service is down (read status from the body).",
+      "services/health/screen.ts runHealthScreen(env) — NEW.",
+    ],
+    filesTouched: [
+      "src/backend/services/health/screen.ts",
+      "src/backend/api/routes/health.ts",
+      "src/frontend/pages/health.astro",
+      "src/frontend/components/health/HealthCheckApp.tsx",
+    ],
+    migrations: [],
+    code: [],
+    diagrams: [],
+    verification: {
+      qcScript: "scripts/qc/pr_182.mjs",
+      command: "pnpm run test:pr 182 -- --preview",
+      output:
+        "Not yet executed in a toolchain env (no node_modules / proxy blocks the worker in the authoring sandbox). tsc --noEmit clean on touched files. QC asserts GET /api/health regression, POST /run shape + service coverage, history, and /health HTML.",
+    },
+  },
   "drive-lists-single-active": {
     slug: "drive-lists-single-active",
     branch: "claude/drive-lists-activation-ui-6f6e47",
