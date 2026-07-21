@@ -106,6 +106,13 @@ interface ProductLine {
 
 interface BrandImage {
   id: number;
+  /**
+   * The BRAND'S OWN url — harvested imagery is hotlinked, not copied into CF
+   * Images, so `deliveryUrl` on those rows is a sentinel string and rendering
+   * it yields a broken image. Older CF-uploaded rows still have a real one,
+   * hence the fallback at the render site rather than a schema change.
+   */
+  sourceUrl: string | null;
   deliveryUrl: string;
   altText: string | null;
   imageKind: string | null;
@@ -307,8 +314,35 @@ function SectionCard({
 
 // ─── Photo w/ fallback (research imagery strip) ─────────────────────────────────
 
+/**
+ * One harvested photo.
+ *
+ * Because these are hotlinked from the brand's own CDN, a dead url only ever
+ * surfaces HERE — the worker fetched it successfully at harvest time and has no
+ * way to learn it later 404'd or started blocking referers. So the browser is
+ * the detector, and it reports back: the row is flagged `is_active = 0` and
+ * every future page load filters it out server-side rather than re-rendering a
+ * broken tile for every visitor forever.
+ *
+ * Fire-and-forget on purpose. The user is looking at a gallery; a failed
+ * bookkeeping call must not produce a toast, and the tile has already been
+ * hidden locally either way.
+ */
 function BrandPhoto({ image, brandName }: { image: BrandImage; brandName: string }) {
   const [broken, setBroken] = useState(false);
+
+  const reportBroken = useCallback(() => {
+    setBroken(true);
+    void fetch(`/api/brands/images/${image.id}/deactivate`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason: "frontend detected error on image url" }),
+    }).catch(() => {
+      // Reporting is best-effort; the tile is hidden regardless.
+    });
+  }, [image.id]);
+
   if (broken) {
     return (
       <div className="flex size-28 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border/40">
@@ -318,10 +352,10 @@ function BrandPhoto({ image, brandName }: { image: BrandImage; brandName: string
   }
   return (
     <img
-      src={image.deliveryUrl}
+      src={image.sourceUrl ?? image.deliveryUrl}
       alt={image.altText ?? brandName}
       loading="lazy"
-      onError={() => setBroken(true)}
+      onError={reportBroken}
       className="size-28 shrink-0 rounded-lg bg-muted object-cover ring-1 ring-border/40"
     />
   );

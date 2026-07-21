@@ -50,7 +50,42 @@ export const brandImages = sqliteTable(
     metadataJson: text("metadata_json"),
 
     /** HITL review: pending | approved | rejected. */
-    reviewStatus: text("review_status", {
+    // ── Harvest metadata (0025 P2) ─────────────────────────────────────────────
+
+  /** Byte size of the fetched image. Below threshold = spacer/tracking junk. */
+  byteSize: integer("byte_size"),
+
+  /**
+   * SHA-256 of the image bytes. THE cross-run dedupe key: the same asset is
+   * routinely served under several URLs, so a URL-only check re-stores it.
+   * Indexed because every harvest seeds its dedupe set from this column.
+   */
+  contentHash: text("content_hash"),
+
+  /**
+   * False once the image is known-bad. Brand imagery is served from the BRAND'S
+   * OWN server (no CF Images), so a URL can 404, hotlink-block or rot at any
+   * time — and the failure surfaces in the browser, not on the worker. The
+   * frontend reports it; every read path filters on this.
+   */
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+
+  /** Why it was deactivated, e.g. "frontend detected error on image url". */
+  inactiveReason: text("inactive_reason"),
+
+  /**
+   * Groups an image with its siblings so previews stay cohesive rather than a
+   * shuffled wall. Derived from the filename stem — real gessi.com set:
+   * `Collezione_Origini_warm_Gessi_HERO_<hash>.jpg` +
+   * `Collezione_Origini_warm_Gessi_gallery_1..11_<hash>.jpg` all share the stem.
+   * Computed ONCE on insert, never parsed on read.
+   */
+  imageGroupKey: text("image_group_key"),
+
+  /** Order within the group: HERO = 0, gallery_N = N, unrecognised = 999. */
+  groupSortOrder: integer("group_sort_order"),
+
+  reviewStatus: text("review_status", {
       enum: ["pending", "approved", "rejected"],
     })
       .notNull()
@@ -71,6 +106,20 @@ export const brandImages = sqliteTable(
       table.sourceUrl,
     ),
     brandIdx: index("brand_images_brand_idx").on(table.brandId),
+    /**
+     * Cross-run dedupe: every harvest seeds its "already seen" set from this,
+     * so it must not be a table scan.
+     */
+    brandHashIdx: index("brand_images_brand_hash_idx").on(
+      table.brandId,
+      table.contentHash,
+    ),
+    /** The read path is always "this brand's live images, grouped". */
+    brandGroupIdx: index("brand_images_brand_group_idx").on(
+      table.brandId,
+      table.imageGroupKey,
+      table.groupSortOrder,
+    ),
   }),
 );
 
