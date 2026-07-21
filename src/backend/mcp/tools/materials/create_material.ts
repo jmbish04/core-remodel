@@ -31,10 +31,12 @@ export const createMaterial = defineTool({
       notes: z.string().optional(),
       categoryIds: z
         .array(z.number().int().positive())
+        .max(50)
         .optional()
         .describe("Category ids from list_material_categories — must exist and be active"),
       subcategoryIds: z
         .array(z.number().int().positive())
+        .max(50)
         .optional()
         .describe("Subcategory ids from list_material_categories — must exist and be active"),
     },

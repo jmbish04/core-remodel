@@ -30,10 +30,12 @@ export const updateMaterial = defineTool({
       isPurchased: z.boolean().optional(),
       categoryIds: z
         .array(z.number().int().positive())
+        .max(50)
         .optional()
         .describe("REPLACES the material's category mappings. Ids from list_material_categories."),
       subcategoryIds: z
         .array(z.number().int().positive())
+        .max(50)
         .optional()
         .describe("REPLACES the material's subcategory mappings. Ids from list_material_categories."),
     },
