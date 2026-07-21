@@ -1,0 +1,163 @@
+/**
+ * @fileoverview Brand display names + aliases, backed by `brand_name_variations`.
+ *
+ * The variations table is the source of truth for what a brand is CALLED:
+ * exactly one `is_primary` row per brand is the display name, and every other
+ * active row is a spelling the system has encountered and will match on later.
+ *
+ * `brands.name` still exists and is kept in sync by `setPrimaryBrandName`. It is
+ * NOT yet removable: 36 call sites across 15 files still read it, and dropping a
+ * column in SQLite rebuilds the table — which on D1 fires `ON DELETE CASCADE`
+ * (PRAGMA foreign_keys=OFF is a no-op through wrangler) across the 7 tables that
+ * reference `brands`, including 552 showroom mappings. Migrate the readers to
+ * `primaryName` first, then drop the column with the backup -> rebuild -> restore
+ * pattern.
+ */
+
+import { and, eq, inArray, ne } from "drizzle-orm";
+import type { DrizzleD1Database } from "drizzle-orm/d1";
+
+import { brands } from "@backend/db/schema/brands/brands";
+import { brandNameVariations } from "@backend/db/schema/brands/brand_name_variations";
+
+/** Any drizzle D1 handle — MCP tools and routes type theirs differently. */
+type Db =
+  | DrizzleD1Database<Record<string, never>>
+  | DrizzleD1Database<Record<string, unknown>>;
+
+export interface BrandWithNames {
+  id: number;
+  /** The `is_primary` variation, falling back to `brands.name` if none exists. */
+  primaryName: string;
+  /** Active non-primary spellings, deduped. */
+  variations: string[];
+  websiteUrl: string | null;
+}
+
+/**
+ * Load brands with their display name and aliases attached.
+ *
+ * Two queries, not N+1: one for brands, one for every variation, joined in JS.
+ */
+export async function loadBrandsWithNames(
+  db: Db,
+  brandIds?: number[],
+): Promise<BrandWithNames[]> {
+  const brandRows = brandIds?.length
+    ? await db.select().from(brands).where(inArray(brands.id, brandIds))
+    : await db.select().from(brands);
+  if (brandRows.length === 0) return [];
+
+  const variationRows = await db
+    .select()
+    .from(brandNameVariations)
+    .where(eq(brandNameVariations.isActive, true));
+
+  const primary = new Map<number, string>();
+  const aliases = new Map<number, Set<string>>();
+  for (const row of variationRows) {
+    if (row.isPrimary) primary.set(row.brandId, row.brandName);
+    else {
+      const set = aliases.get(row.brandId) ?? new Set<string>();
+      set.add(row.brandName);
+      aliases.set(row.brandId, set);
+    }
+  }
+
+  return brandRows.map((brand) => ({
+    id: brand.id,
+    // Fall back to the legacy column so a brand created before this table
+    // existed — or by a path not yet migrated — still renders a name.
+    primaryName: primary.get(brand.id) ?? brand.name,
+    variations: [...(aliases.get(brand.id) ?? [])],
+    websiteUrl: brand.websiteUrl ?? null,
+  }));
+}
+
+/**
+ * Record a spelling for a brand, without disturbing which one is primary.
+ *
+ * Called whenever a new spelling is encountered — a scrape, an import, a quote.
+ * Silently no-ops when the spelling is already recorded, so callers can fire it
+ * on every sighting.
+ */
+export async function addBrandNameVariation(
+  db: Db,
+  brandId: number,
+  name: string,
+): Promise<boolean> {
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+
+  const existing = await db
+    .select()
+    .from(brandNameVariations)
+    .where(
+      and(
+        eq(brandNameVariations.brandId, brandId),
+        eq(brandNameVariations.brandName, trimmed),
+      ),
+    );
+  if (existing.length > 0) return false;
+
+  await db
+    .insert(brandNameVariations)
+    .values({ brandId, brandName: trimmed, isActive: true, isPrimary: false });
+  return true;
+}
+
+/**
+ * Make `name` the brand's display name.
+ *
+ * Demotes the current primary rather than deleting it — the old spelling stays
+ * a valid lookup key, which is the point: renaming "DORN BRACHT" to
+ * "Dornbracht" must not stop the former from matching.
+ *
+ * Order matters. The partial unique index permits only one primary per brand,
+ * so the demote MUST land before the promote or the write is rejected.
+ */
+export async function setPrimaryBrandName(
+  db: Db,
+  brandId: number,
+  name: string,
+): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) return;
+
+  // 1. Demote any other primary first — see the ordering note above.
+  await db
+    .update(brandNameVariations)
+    .set({ isPrimary: false })
+    .where(
+      and(
+        eq(brandNameVariations.brandId, brandId),
+        eq(brandNameVariations.isPrimary, true),
+        ne(brandNameVariations.brandName, trimmed),
+      ),
+    );
+
+  // 2. Promote, inserting the row if this spelling is new to the brand.
+  const existing = await db
+    .select()
+    .from(brandNameVariations)
+    .where(
+      and(
+        eq(brandNameVariations.brandId, brandId),
+        eq(brandNameVariations.brandName, trimmed),
+      ),
+    );
+
+  if (existing.length > 0) {
+    await db
+      .update(brandNameVariations)
+      .set({ isPrimary: true, isActive: true })
+      .where(eq(brandNameVariations.id, existing[0].id));
+  } else {
+    await db
+      .insert(brandNameVariations)
+      .values({ brandId, brandName: trimmed, isActive: true, isPrimary: true });
+  }
+
+  // 3. Keep the legacy column in step until its 36 readers are migrated.
+  await db.update(brands).set({ name: trimmed }).where(eq(brands.id, brandId));
+}

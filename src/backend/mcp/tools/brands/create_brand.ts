@@ -1,6 +1,8 @@
 import { brands } from "@backend/db";
 import { z } from "zod";
 
+import { setPrimaryBrandName } from "@backend/services/brand-names";
+
 import { looseObject, urlField } from "../../schemas";
 import { brandsUrl } from "../../urls";
 import { defineTool, WRITE } from "../../types";
@@ -35,6 +37,9 @@ export const createBrand = defineTool({
         .insert(brands)
         .values(patch as unknown as typeof brands.$inferInsert)
         .returning();
+      // Seed the primary name variation so the new brand is immediately
+      // resolvable by alias lookup, not just by its `brands.name` column.
+      await setPrimaryBrandName(db, created.id, created.name);
       return { created: true, brand: brandDto(created), url: brandsUrl(env, created.id) };
     },
   });

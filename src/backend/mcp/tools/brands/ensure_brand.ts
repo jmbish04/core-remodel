@@ -2,10 +2,12 @@ import { brands } from "@backend/db";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
+import { reconcileBrandNames } from "@backend/services/brand-reconcile";
 import {
-  applyBrandCleanups,
-  reconcileBrandNames,
-} from "@backend/services/brand-reconcile";
+  addBrandNameVariation,
+  loadBrandsWithNames,
+  setPrimaryBrandName,
+} from "@backend/services/brand-names";
 import { looseObject, urlField } from "../../schemas";
 import { brandsUrl } from "../../urls";
 import { defineTool, WRITE_IDEMPOTENT } from "../../types";
@@ -41,26 +43,38 @@ export const ensureBrand = defineTool({
       },
     ],
     handler: async ({ env, db }, input) => {
-      const all = await db.select().from(brands).all();
+      // Load display names AND every recorded alias. Matching against the alias
+      // set is what stops a known-but-differently-spelled brand from forking a
+      // new row — an exact lowercase compare is how "DORN BRACHT" landed beside
+      // "Dornbracht" and split that brand's showroom mappings in half.
+      const known = await loadBrandsWithNames(db);
 
-      // Reconcile rather than compare. An exact lowercase match was what let
-      // "DORN BRACHT" land beside "Dornbracht" and split that brand's showroom
-      // mappings across two rows; this resolves spelling variants first and
-      // only inserts when the brand is genuinely new.
       const plan = await reconcileBrandNames(
         env,
-        all.map((b) => ({ id: b.id, name: b.name, websiteUrl: b.websiteUrl })),
+        known.map((b) => ({
+          id: b.id,
+          name: b.primaryName,
+          websiteUrl: b.websiteUrl,
+          aliases: b.variations,
+        })),
         [{ name: input.name.trim(), websiteUrl: input.websiteUrl ?? null }],
       );
 
       const skip = plan.newBrandNamesToSkip[0];
       if (skip) {
+        // Record the spelling we were handed, even though it matched. THIS is
+        // what makes the registry self-improving: the next caller using this
+        // spelling resolves deterministically, with no model call at all.
+        await addBrandNameVariation(db, skip.matchedBrandId, input.name);
+
         // Fold in any rename the reconciler proposed for the matched row, so a
         // degraded stored name gets repaired the first time it is touched.
         const cleanup = plan.existingBrandNamesToCleanup.find(
           (c) => c.brandId === skip.matchedBrandId,
         );
-        if (cleanup) await applyBrandCleanups(db, [cleanup]);
+        if (cleanup) {
+          await setPrimaryBrandName(db, cleanup.brandId, cleanup.newCleanupBrandName);
+        }
 
         const [existing] = await db
           .select()
@@ -82,6 +96,12 @@ export const ensureBrand = defineTool({
         .insert(brands)
         .values(patch as unknown as typeof brands.$inferInsert)
         .returning();
+
+      // Seed the primary variation. Without this a freshly created brand has no
+      // `is_primary` row, so it would render nameless once readers move off
+      // `brands.name` — and it would be invisible to alias lookups.
+      await setPrimaryBrandName(db, created.id, created.name);
+
       return {
         created: true,
         brand: brandDto(created),

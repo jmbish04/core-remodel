@@ -33,31 +33,13 @@ import { eq } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
 
 import { brands } from "@backend/db/schema/brands/brands";
-import { parseStructuredResponse } from "@backend/utils/ai-json";
-
-/**
- * Pinned deliberately rather than taken from the model registry.
- *
- * NOTE the version — k2.6 and k2.7-code behave completely differently here, so
- * this is not interchangeable with whatever else says "kimi":
- *   kimi-k2.6       spends the whole budget on reasoning and returns
- *                   `content: ""` with finish_reason "length". ~59s for nothing.
- *                   This is what silently produced all-null extractions for
- *                   months. It is still what `getModelRegistry(env).extract`
- *                   points at — see agent issue #6.
- *   kimi-k2.7-code  ~10s, valid JSON, finish_reason "stop". Verified on this
- *                   exact prompt: 3/3 identical runs, and it correctly split
- *                   "Visual Comfort & Co." (same company -> skip) from
- *                   "Kohler Signature Store" (distinct entity -> create).
- *
- * gpt-oss-120b is the measured fallback if this ever regresses: same answers,
- * ~2s, but it also carries a `reasoning` field and will return empty content if
- * `max_tokens` is tight.
- */
-const RECONCILE_MODEL = "@cf/moonshotai/kimi-k2.7-code" as const;
+import { generateStructured } from "@backend/services/structured-output";
 
 /** Enough for a full decision set; short of this the JSON truncates mid-object. */
 const MAX_TOKENS = 4096;
+
+/** Cost-attribution label for the Gemini usage ledger. */
+const FEATURE = "brand_reconcile";
 
 /** Existing brands offered to the model per candidate. */
 const SHORTLIST_SIZE = 6;
@@ -73,8 +55,17 @@ export interface BrandCandidate {
 
 export interface ExistingBrand {
   id: number;
+  /** Display name — the `is_primary` variation. */
   name: string;
   websiteUrl?: string | null;
+  /**
+   * Every other spelling this brand is known by, from `brand_name_variations`.
+   *
+   * These are lookup keys, and they are why the table exists: once "DORN
+   * BRACHT" is recorded as an alias of Dornbracht, the next scrape that spells
+   * it that way matches instead of forking a new brand. The set only improves.
+   */
+  aliases?: string[];
 }
 
 export interface SkippedBrand {
@@ -220,7 +211,7 @@ const RECONCILE_SCHEMA = {
     },
   },
   required: ["decisions"],
-} as const;
+};
 
 interface ModelDecision {
   candidateName?: unknown;
@@ -271,28 +262,16 @@ async function askModel(
   env: Env,
   batch: Array<{ candidate: BrandCandidate; options: ExistingBrand[] }>,
 ): Promise<ModelDecision[]> {
-  const raw = (await env.AI.run(
-    RECONCILE_MODEL as Parameters<typeof env.AI.run>[0],
-    {
-      messages: [
-        {
-          role: "system",
-          content:
-            "You reconcile brand registries. You are precise about company identity and respond only with JSON.",
-        },
-        { role: "user", content: buildPrompt(batch) },
-      ],
-      response_format: { type: "json_schema", json_schema: RECONCILE_SCHEMA },
-      max_tokens: MAX_TOKENS,
-      gateway: { id: env.AI_GATEWAY_ID },
-    } as Parameters<typeof env.AI.run>[1],
-  )) as { response?: unknown };
+  const { data } = await generateStructured<{ decisions?: ModelDecision[] }>(env, {
+    feature: FEATURE,
+    system:
+      "You reconcile brand registries. You are precise about company identity and respond only with JSON.",
+    prompt: buildPrompt(batch),
+    schema: RECONCILE_SCHEMA,
+    maxTokens: MAX_TOKENS,
+  });
 
-  const parsed = parseStructuredResponse<{ decisions?: ModelDecision[] }>(
-    raw,
-    "brand reconciliation",
-  );
-  return Array.isArray(parsed.decisions) ? parsed.decisions : [];
+  return Array.isArray(data.decisions) ? data.decisions : [];
 }
 
 /**
@@ -314,10 +293,14 @@ export async function reconcileBrandNames(
   };
 
   const byId = new Map(existing.map((b) => [b.id, b]));
+  // Index the display name AND every recorded alias, so a candidate spelled the
+  // way some other source spells it resolves without ever reaching the model.
   const byKey = new Map<string, ExistingBrand>();
   for (const row of existing) {
-    const key = brandNameKey(row.name);
-    if (key && !byKey.has(key)) byKey.set(key, row);
+    for (const name of [row.name, ...(row.aliases ?? [])]) {
+      const key = brandNameKey(name);
+      if (key && !byKey.has(key)) byKey.set(key, row);
+    }
   }
 
   // Dedupe the input itself — a roster can list the same brand twice, and two
@@ -418,12 +401,25 @@ export async function reconcileBrandNames(
       const better =
         typeof decision.betterName === "string" ? decision.betterName.trim() : "";
       if (better && better !== matched.name) {
-        out.existingBrandNamesToCleanup.push({
-          brandId: matchedId,
-          existingBrandName: matched.name,
-          newCleanupBrandName: better,
-          reason: typeof decision.reason === "string" ? decision.reason : "model rename",
-        });
+        // Model-proposed renames go through the SAME quality gate as the
+        // deterministic path. Gemini, asked about "Visual Comfort & Co.",
+        // proposed renaming the existing "Visual Comfort" to it — a fine name
+        // rewritten for no gain. A rename is only worth it when the stored form
+        // is genuinely degraded (ALL CAPS, squashed), never merely different.
+        // Rejections are recorded rather than dropped: a silent no-op is the
+        // failure mode this module exists to eliminate.
+        if (isDegradedName(matched.name, better)) {
+          out.existingBrandNamesToCleanup.push({
+            brandId: matchedId,
+            existingBrandName: matched.name,
+            newCleanupBrandName: better,
+            reason: typeof decision.reason === "string" ? decision.reason : "model rename",
+          });
+        } else {
+          out.rejected.push(
+            `rename #${matchedId} "${matched.name}" -> "${better}" is not an improvement`,
+          );
+        }
       }
     }
   }

@@ -1,3 +1,4 @@
+import { setPrimaryBrandName } from "@backend/services/brand-names";
 // src/backend/services/image-processor/intake-helpers.ts
 /**
  * @fileoverview Shared showroom-photo-ingest helpers, lifted out of
@@ -49,6 +50,9 @@ export async function resolveBrandId(db: Db, name: string | null | undefined): P
 
   try {
     const [created] = await db.insert(brands).values({ name: trimmed }).returning();
+    // Record the spelling as this brand's primary so later scrapes that use the
+    // same wording resolve to it instead of forking a new brand.
+    await setPrimaryBrandName(db, created.id, trimmed);
     return created.id;
   } catch {
     // A concurrent ingest created the same brand between our select and insert —

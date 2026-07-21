@@ -158,7 +158,9 @@ assert.equal(brandDomain("https://www.dornbracht.com/en/x"), "dornbracht.com");
     [{ name: "Dornbracht Deutschland", websiteUrl: "https://www.dornbracht.com" }],
   );
   assert.equal(r.existingBrandNamesToCleanup.length, 0);
-  assert.match(r.rejected.join(" "), /would collide with brand #65/);
+  // Blocked as "not an improvement" before the collision check even runs —
+  // either guard is fine, but it must be REPORTED, never silently dropped.
+  assert.match(r.rejected.join(" "), /not an improvement|would collide with brand #65/);
 }
 
 // --- duplicate candidates collapse ---------------------------------------
@@ -183,4 +185,89 @@ assert.equal(brandDomain("https://www.dornbracht.com/en/x"), "dornbracht.com");
   assert.equal(accounted, candidates.length, "no candidate may be dropped or double-counted");
 }
 
+// --- a model-proposed rename must still pass the quality gate -------------
+// Gemini, asked about "Visual Comfort & Co.", proposes renaming the existing
+// "Visual Comfort" to it — a fine name rewritten for no gain. Renames are only
+// worth it when the stored form is genuinely degraded.
+{
+  const r = await reconcileBrandNames(
+    envWith([
+      {
+        candidateName: "Visual Comfort & Co.",
+        verdict: "skip",
+        matchedBrandId: 184,
+        betterName: "Visual Comfort & Co.",
+        reason: "fuller legal name",
+      },
+    ]),
+    EXISTING,
+    [{ name: "Visual Comfort & Co." }],
+  );
+  assert.equal(r.newBrandNamesToSkip[0].matchedBrandId, 184);
+  assert.equal(
+    r.existingBrandNamesToCleanup.length,
+    0,
+    "renaming a well-formed name to another well-formed name is not an improvement",
+  );
+  assert.match(r.rejected.join(" "), /not an improvement/, "rejection must be reported");
+}
+
+// ...but a genuinely degraded stored name IS renamed on the model path.
+{
+  const stored = [{ id: 302, name: "NEWPORTBRASS", websiteUrl: null }];
+  const r = await reconcileBrandNames(
+    envWith([
+      {
+        candidateName: "Newport Brass Co",
+        verdict: "skip",
+        matchedBrandId: 302,
+        betterName: "Newport Brass",
+        reason: "degraded stored name",
+      },
+    ]),
+    stored,
+    [{ name: "Newport Brass Co" }],
+  );
+  assert.equal(r.existingBrandNamesToCleanup[0].newCleanupBrandName, "Newport Brass");
+}
+
 console.log("brand reconcile guards: OK");
+
+// --- Gemini schema conversion --------------------------------------------
+// Gemini takes an OpenAPI-3.0 subset, not JSON Schema. Type unions and
+// additionalProperties are the two differences that fail the whole request
+// rather than erroring usefully, so they are converted/dropped here.
+{
+  const { toGeminiSchema } = await import("../../src/backend/services/structured-output.ts");
+
+  const g = toGeminiSchema({
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      matchedBrandId: { type: ["number", "null"] },
+      betterName: { type: ["string", "null"] },
+      verdict: { type: "string", enum: ["create", "skip"] },
+      rows: { type: "array", items: { type: "object", properties: { id: { type: "number" } } } },
+    },
+    required: ["name", "verdict", "nonexistent"],
+    additionalProperties: false,
+  });
+
+  // ["number","null"] must collapse to a concrete type + nullable.
+  assert.equal(g.properties.matchedBrandId.type, "number");
+  assert.equal(g.properties.matchedBrandId.nullable, true);
+  assert.equal(g.properties.betterName.type, "string");
+  assert.equal(g.properties.betterName.nullable, true);
+  // Plain types are untouched and carry no stray nullable.
+  assert.equal(g.properties.name.type, "string");
+  assert.equal(g.properties.name.nullable, undefined);
+  // enum and nested items survive.
+  assert.deepEqual(g.properties.verdict.enum, ["create", "skip"]);
+  assert.equal(g.properties.rows.items.properties.id.type, "number");
+  // additionalProperties is rejected by Gemini — must be dropped.
+  assert.equal("additionalProperties" in g, false);
+  // A `required` entry with no matching property is rejected by Gemini.
+  assert.deepEqual(g.required, ["name", "verdict"]);
+}
+
+console.log("gemini schema conversion: OK");

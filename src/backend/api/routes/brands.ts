@@ -27,6 +27,8 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq, and, or, isNull, inArray, like, desc, ne, sql } from "drizzle-orm";
 
 import { brands } from "@backend/db/schema/brands/brands";
+import { brandNameVariations } from "@backend/db/schema/brands/brand_name_variations";
+import { setPrimaryBrandName } from "@backend/services/brand-names";
 import { brandTypesDef } from "@backend/db/schema/brands/brand_types_def";
 import { brandTypeMappings } from "@backend/db/schema/brands/brand_type_mappings";
 import { showroomBrandMappings } from "@backend/db/schema/brands/showroom_brand_mappings";
@@ -148,6 +150,17 @@ const brandSchema = z.object({
  */
 const brandListItemSchema = brandSchema.extend({
   productCount: z.number(),
+  /**
+   * Display name — the `is_primary` row in `brand_name_variations`, falling
+   * back to `brands.name` for rows predating that table.
+   */
+  primaryName: z.string(),
+  /**
+   * Every other active spelling this brand is known by. Served alongside the
+   * brand so consumers match on the full alias set rather than one name —
+   * which is what stops a differently-spelled sighting forking a new brand.
+   */
+  nameVariations: z.array(z.string()),
   types: z
     .array(
       z.object({
@@ -380,6 +393,25 @@ brandsRouter.openapi(
       .where(scopeToBrandIds ? inArray(showroomStoreProducts.brandId, brandIds) : undefined)
       .groupBy(showroomStoreProducts.brandId);
 
+    // Names come from brand_name_variations: the is_primary row is the display
+    // name, the rest ride along as aliases. One query for the whole page — not
+    // per brand — mirroring the productCount aggregate below.
+    const variationRows = await db
+      .select({
+        brandId: brandNameVariations.brandId,
+        brandName: brandNameVariations.brandName,
+        isPrimary: brandNameVariations.isPrimary,
+      })
+      .from(brandNameVariations)
+      .where(eq(brandNameVariations.isActive, true));
+
+    const primaryNameMap = new Map<number, string>();
+    const variationMap = new Map<number, string[]>();
+    for (const row of variationRows) {
+      if (row.isPrimary) primaryNameMap.set(row.brandId, row.brandName);
+      else variationMap.set(row.brandId, [...(variationMap.get(row.brandId) ?? []), row.brandName]);
+    }
+
     const productCountMap = new Map<number, number>();
     for (const r of productCountRows) {
       if (r.brandId !== null) {
@@ -392,6 +424,8 @@ brandsRouter.openapi(
       const enriched = brandRows.map((b) => ({
         ...b,
         productCount: productCountMap.get(b.id) ?? 0,
+        primaryName: primaryNameMap.get(b.id) ?? b.name,
+        nameVariations: variationMap.get(b.id) ?? [],
       }));
       return c.json({ brands: enriched });
     }
@@ -419,6 +453,8 @@ brandsRouter.openapi(
       ...b,
       productCount: productCountMap.get(b.id) ?? 0,
       types: typesMap.get(b.id) ?? [],
+      primaryName: primaryNameMap.get(b.id) ?? b.name,
+      nameVariations: variationMap.get(b.id) ?? [],
     }));
 
     return c.json({ brands: enriched });
@@ -676,6 +712,11 @@ brandsRouter.openapi(
 
     try {
       const [inserted] = await db.insert(brands).values(brandValues).returning();
+
+      // Seed the primary name variation. Without it the brand has no
+      // `is_primary` row, so it is invisible to alias lookups and renders
+      // nameless once readers move off `brands.name`.
+      await setPrimaryBrandName(db, inserted.id, inserted.name);
 
       // Insert brand type mappings when typeIds provided — dedupe + batch.
       if (typeIds && typeIds.length > 0) {
