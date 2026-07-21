@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * @fileoverview QC for PR #177 — one active drive list, enforced in D1.
+ * @fileoverview QC for PR #178 — one active drive list, enforced in D1.
  *
  * Migrations: 0119_yellow_micromax (drive_lists.is_active + the partial unique
  * index `drive_lists_single_active_uniq`).
  *
- * Run:  pnpm run test:pr 177 -- --preview     (while the PR is open)
- *       pnpm run test:pr 177                  (production, after merge)
+ * Run:  pnpm run test:pr 178 -- --preview     (while the PR is open)
+ *       pnpm run test:pr 178                  (production, after merge)
  *
  * What was broken: "active" was a `status` enum value, so nothing stopped six
  * drives from claiming it at once, and the landing page's Active/Archived tabs
@@ -30,7 +30,7 @@ async function listDrives() {
 }
 
 async function main() {
-  console.log(`\nPR #177 QC → ${client.base}\n`);
+  console.log(`\nPR #178 QC → ${client.base}\n`);
   await assertReachable(client, checks);
 
   const noAuth = await client.get("/api/drive-lists", { auth: false });

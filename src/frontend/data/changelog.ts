@@ -49,8 +49,8 @@ export const BRANCHES: ChangelogBranch[] = [
       "\"Active\" was a value of the `status` enum, so six drive lists claimed it at once and the landing page's Active/Archived tabs bucketed on that same overloaded field. The single-slot pointer is now its own column (`is_active`) under a partial UNIQUE index, so D1 itself refuses a second active drive; the tabs bucket on what actually happened (Pending / In progress / Finished); and each card carries an Active badge plus a toggle.",
     date: "2026-07-21",
     status: "staged",
-    prNumber: 177,
-    prUrl: "https://github.com/jmbish04/core-remodel/pull/177",
+    prNumber: 178,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/178",
   },
   {
     branch: "claude/showroom-soft-delete",

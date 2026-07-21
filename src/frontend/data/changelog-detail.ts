@@ -83,8 +83,8 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
   "drive-lists-single-active": {
     slug: "drive-lists-single-active",
     branch: "claude/drive-lists-activation-ui-6f6e47",
-    prNumber: 177,
-    prUrl: "https://github.com/jmbish04/core-remodel/pull/177",
+    prNumber: 178,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/178",
     problem:
       "\"The active drive\" is a single slot: it is what an admin device auto-lands on (src/_worker.ts → getActiveDriveLandingPath). But it was stored as one value of the drive_lists.status enum — the same column carrying the lifecycle label, and the column's DEFAULT. Nothing in D1 stopped two rows from holding it, and the app-side guard only ran on two paths (create, and un-archiving via a stop check-off), so six drives were active on production at once. The landing page then bucketed its Active/Archived tabs on that same overloaded field, so a drive that had never been touched, one half-driven, and one demoted by an activation all landed in the same tab — while the auto-archive on read quietly rewrote status behind the user's back.",
     approach:
@@ -102,7 +102,7 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
       "src/backend/mcp/tools/drives/list_drive_lists.ts",
       "src/frontend/components/drives/DriveListsApp.tsx",
       "scripts/config.mjs",
-      "scripts/qc/pr_177.mjs",
+      "scripts/qc/pr_178.mjs",
       "drizzle/0119_yellow_micromax.sql",
     ],
     migrations: [
@@ -165,8 +165,8 @@ CREATE UNIQUE INDEX \`drive_lists_single_active_uniq\` ON \`drive_lists\` (\`is_
       },
     ],
     verification: {
-      qcScript: "scripts/qc/pr_177.mjs",
-      command: "pnpm run test:pr 177 -- --preview",
+      qcScript: "scripts/qc/pr_178.mjs",
+      command: "pnpm run test:pr 178 -- --preview",
       ranAt: "2026-07-21",
       source: `const on = await client.patch(\`/api/drive-lists/\${newest.slug}\`, { isActive: true });
 checks.ok(\`PATCH \${newest.slug} {isActive:true} → 200\`, on.status === 200, \`got \${on.status}\`);
@@ -180,7 +180,7 @@ if (other) {
     activeOnes(after.drives).map((d) => d.slug).join(", "),
   );
 }`,
-      output: `PR #177 QC → https://wcrp-claude-drive-lists-activation-ui-6f6e47.hacolby.workers.dev
+      output: `PR #178 QC → https://wcrp-claude-drive-lists-activation-ui-6f6e47.hacolby.workers.dev
 
   ✓ target reachable (https://wcrp-claude-drive-lists-activation-ui-6f6e47.hacolby.workers.dev)
   ✓ drive-lists rejects an unauthenticated read (401)
