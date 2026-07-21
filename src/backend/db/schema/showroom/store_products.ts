@@ -76,6 +76,17 @@ export const showroomStoreProducts = sqliteTable(
     msrp: text("msrp"),
     msrpCents: integer("msrp_cents"),
 
+    /**
+     * Canonical product page URL — the exact page for THIS product, not the
+     * brand homepage.
+     *
+     * The intake pipeline starts here: it is what the add-product-by-URL flow
+     * writes, and what the scraper opens. Without it the scraper could only
+     * fall back to the brand's website, which lands on a homepage — fine for
+     * imagery, useless for specs.
+     */
+    sourceUrl: text("source_url"),
+
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),
