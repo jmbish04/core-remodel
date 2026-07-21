@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "cc4f5848-b680-4b4d-89cd-5bd0ce489178",
-  "prevId": "94959d02-a607-479e-bdfc-aa9f981a87d1",
+  "id": "074a4bd6-5d73-4e51-af50-58808f71ffb6",
+  "prevId": "fa0c3f6c-c0ac-411f-b136-4bf428ac8d66",
   "tables": {
     "users": {
       "name": "users",
@@ -13769,6 +13769,14 @@
           "autoincrement": false,
           "default": "(unixepoch())"
         },
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'GEMINI'"
+        },
         "model": {
           "name": "model",
           "type": "text",
@@ -24260,6 +24268,14 @@
             "effective_to"
           ],
           "isUnique": false
+        },
+        "sales_tax_rates_one_active_uniq": {
+          "name": "sales_tax_rates_one_active_uniq",
+          "columns": [
+            "(1)"
+          ],
+          "isUnique": true,
+          "where": "\"sales_tax_rates\".\"effective_to\" IS NULL"
         }
       },
       "foreignKeys": {},
@@ -25070,6 +25086,14 @@
     "columns": {}
   },
   "internal": {
-    "indexes": {}
+    "indexes": {
+      "sales_tax_rates_one_active_uniq": {
+        "columns": {
+          "(1)": {
+            "isExpression": true
+          }
+        }
+      }
+    }
   }
 }
