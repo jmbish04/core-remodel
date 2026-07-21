@@ -1,0 +1,22 @@
+-- Drift repair (catch-up), not a schema change.
+--
+-- `material_schedule_items.notes` is declared in the drizzle schema and present
+-- in 0000_baseline.sql, but is ABSENT from the production table:
+--
+--   PRAGMA table_info(material_schedule_items)  ->  no `notes`
+--   SELECT notes FROM material_schedule_items   ->  no such column: notes [7500]
+--
+-- Every SELECT drizzle builds names the column, so GET /api/materials returned
+-- 500 and the whole materials schedule page was unusable. The write path was
+-- broken too: worker-emails stamps a purchase note onto a material when a
+-- receipt line item is linked.
+--
+-- `pnpm run db:generate` CANNOT produce this migration — drizzle's snapshot
+-- already contains the column, so it sees no diff. Only production drifted.
+-- Hand-written for that reason, following the precedent of
+-- 0114_device_location_and_changelog_proposals_catchup.sql.
+--
+-- ADD COLUMN is safe on D1: it does not rebuild the table, so no ON DELETE
+-- CASCADE fires and no child rows are touched. The migration runner tolerates
+-- "duplicate column" idempotently, so this is safe to re-apply.
+ALTER TABLE `material_schedule_items` ADD COLUMN `notes` text;
