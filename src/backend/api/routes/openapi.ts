@@ -270,6 +270,164 @@ const openApiSpec = {
         },
       },
     },
+    // Showroom Scout (agent). This document is hand-maintained rather than
+    // generated from the OpenAPIHono `createRoute` registrations, so routes
+    // added in `routes/showroom-scout.ts` must be mirrored here or they are
+    // absent from /openapi.json, /scalar and /swagger.
+    "/showroom-scout/{session}/start": {
+      post: {
+        operationId: "startShowroomScout",
+        summary: "Start a showroom scouting run",
+        description:
+          "Discover, vet, score and route remodel showrooms for a shopping day. Big-box retailers " +
+          "and showrooms already in the directory are excluded unless explicitly requested. Time " +
+          "phrases are resolved in California time.",
+        tags: ["Showroom Scout"],
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "session",
+            in: "path",
+            required: true,
+            description: "Session id — one scouting day per session.",
+            schema: { type: "string", pattern: "^[a-zA-Z0-9_-]+$", maxLength: 64 },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ShowroomScoutStartRequest" },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Run complete",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ShowroomScoutReply" },
+              },
+            },
+          },
+          "400": { description: "Invalid request" },
+          "401": { description: "Unauthorized" },
+          "502": { description: "Agent or model failure" },
+        },
+      },
+    },
+    "/showroom-scout/{session}/update": {
+      post: {
+        operationId: "updateShowroomScout",
+        summary: "Replan live while on the road",
+        description:
+          "Send a mid-drive update — skip a stop, running behind, only N hours left, prioritize a " +
+          "category. The agent re-sequences the route, updates timing, preserves business-hour " +
+          "realism and explains the tradeoff.",
+        tags: ["Showroom Scout"],
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "session",
+            in: "path",
+            required: true,
+            schema: { type: "string", pattern: "^[a-zA-Z0-9_-]+$", maxLength: 64 },
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["message"],
+                properties: {
+                  message: {
+                    type: "string",
+                    minLength: 1,
+                    maxLength: 2000,
+                    example: "Skip the next stop, I'm running 40 min behind.",
+                  },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Replan complete",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ShowroomScoutReply" },
+              },
+            },
+          },
+          "401": { description: "Unauthorized" },
+          "409": { description: "No active run in this session" },
+          "502": { description: "Agent or model failure" },
+        },
+      },
+    },
+    "/showroom-scout/{session}": {
+      get: {
+        operationId: "getShowroomScoutState",
+        summary: "Get scouting session state",
+        description:
+          "Current status, tool timeline, published candidates and route. Use to resume after a " +
+          "reconnect; for live updates prefer the agent WebSocket at /agents/showroom-scout.",
+        tags: ["Showroom Scout"],
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "session",
+            in: "path",
+            required: true,
+            schema: { type: "string", pattern: "^[a-zA-Z0-9_-]+$", maxLength: 64 },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Session state",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ShowroomScoutState" },
+              },
+            },
+          },
+          "401": { description: "Unauthorized" },
+          "502": { description: "Agent unavailable" },
+        },
+      },
+    },
+    "/showroom-scout/{session}/reset": {
+      post: {
+        operationId: "resetShowroomScout",
+        summary: "Reset a scouting session",
+        description: "Clear goal, timeline, candidates and route for this session.",
+        tags: ["Showroom Scout"],
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "session",
+            in: "path",
+            required: true,
+            schema: { type: "string", pattern: "^[a-zA-Z0-9_-]+$", maxLength: 64 },
+          },
+        ],
+        responses: {
+          "200": {
+            description: "Cleared state",
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ShowroomScoutState" },
+              },
+            },
+          },
+          "401": { description: "Unauthorized" },
+          "502": { description: "Agent unavailable" },
+        },
+      },
+    },
     "/showroom-stores/{storeId}/research/deep-sweep": {
       post: {
         operationId: "runShowroomStoreResearchDeepSweep",
@@ -1014,6 +1172,99 @@ const openApiSpec = {
       },
     },
     schemas: {
+      ShowroomScoutStartRequest: {
+        type: "object",
+        required: ["goal"],
+        properties: {
+          goal: {
+            type: "string",
+            minLength: 3,
+            maxLength: 2000,
+            description: "Natural-language sourcing goal.",
+            example:
+              "Find high-end bathroom and plumbing fixture showrooms in Orange County open today.",
+          },
+          geography: { type: "string", maxLength: 200, example: "Orange County, CA" },
+          homeBase: {
+            type: "string",
+            maxLength: 300,
+            description: "Where the day starts — the routing origin.",
+            example: "126 Colby St, San Francisco, CA",
+          },
+          when: {
+            type: "string",
+            maxLength: 100,
+            description:
+              "Time phrase, resolved in California time. A window that has already passed rolls " +
+              "forward to the next occurrence and is flagged.",
+            example: "saturday morning",
+          },
+          includeKnown: {
+            type: "boolean",
+            description: "Include showrooms already in the directory (default false).",
+          },
+          includeBigBox: {
+            type: "boolean",
+            description: "Include big-box retailers (default false).",
+          },
+        },
+      },
+      ShowroomScoutState: {
+        type: "object",
+        required: ["status", "timeline", "updatedAt"],
+        description:
+          "Agent session state. `result` holds the published candidates, route, exclusions and " +
+          "degraded tools; its nested shape follows the agent's structured output contract.",
+        properties: {
+          status: {
+            type: "string",
+            enum: ["idle", "planning", "running", "complete", "error"],
+          },
+          goal: { type: "string", nullable: true },
+          window: {
+            type: "object",
+            nullable: true,
+            description: "Resolved California time window.",
+            properties: {
+              date: { type: "string", example: "2026-07-25" },
+              day: { type: "string", example: "saturday" },
+              startMinute: { type: "integer", description: "Minutes from midnight, CA wall clock" },
+              endMinute: { type: "integer" },
+              label: { type: "string" },
+              rolledForward: {
+                type: "boolean",
+                description: "True when the requested window had passed and was rolled forward.",
+              },
+            },
+          },
+          timeline: {
+            type: "array",
+            description: "Progress + tool events, newest last (bounded to the most recent 200).",
+            items: {
+              type: "object",
+              properties: {
+                at: { type: "integer" },
+                kind: { type: "string", enum: ["status", "tool", "error", "result"] },
+                message: { type: "string" },
+                tool: { type: "string" },
+                durationMs: { type: "number" },
+              },
+            },
+          },
+          result: { type: "object", nullable: true },
+          driveListSlug: { type: "string", nullable: true },
+          lastError: { type: "string", nullable: true },
+          updatedAt: { type: "integer" },
+        },
+      },
+      ShowroomScoutReply: {
+        type: "object",
+        required: ["reply", "state"],
+        properties: {
+          reply: { type: "string", description: "The agent's prose response." },
+          state: { $ref: "#/components/schemas/ShowroomScoutState" },
+        },
+      },
       ShowroomDeepSweepRequest: {
         type: "object",
         properties: {

@@ -29,6 +29,7 @@ import { z } from "zod";
 import { getAllTools } from "@backend/mcp/registry";
 import type { McpProps } from "@backend/mcp/types";
 
+import { extractOfferableDetours, findMissedDetours, type OfferableDetour } from "./detours";
 import { buildInstructions } from "./instructions";
 import { bridgeTools, type ToolEvent } from "./mcp-bridge";
 import { createScoutModel, resolveScoutModelConfig } from "./model";
@@ -119,10 +120,7 @@ export class ShowroomScout extends Agent<Env, ScoutState> {
    * +6 minute option available — the same "instructions fade" pattern that made
    * publishing itself unreliable.
    */
-  private pendingDetours: Array<{ name: string; extraMinutes: number }> = [];
-
-  /** Worth offering: a short diversion that is not known to be closed. */
-  static readonly DETOUR_MAX_MINUTES = 15;
+  private pendingDetours: OfferableDetour[] = [];
 
   static docsMetadata() {
     return {
@@ -428,10 +426,10 @@ export class ShowroomScout extends Agent<Env, ScoutState> {
         // the hours it was handed, so the contradiction has to be caught here,
         // against what the agent already told us about each showroom.
         // Cheap, open detours the planner surfaced but the route ignored.
-        const offered = new Set(payload.route.detours.map((d) => d.name.toLowerCase().trim()));
-        const routed = new Set(payload.route.stops.map((s) => s.name.toLowerCase().trim()));
-        const missedDetours = this.pendingDetours.filter(
-          (d) => !offered.has(d.name.toLowerCase().trim()) && !routed.has(d.name.toLowerCase().trim()),
+        const missedDetours = findMissedDetours(
+          this.pendingDetours,
+          payload.route.detours.map((d) => d.name),
+          payload.route.stops.map((s) => s.name),
         );
         if (missedDetours.length > 0) {
           const listed = missedDetours.map((d) => `${d.name} (+${d.extraMinutes} min)`).join(", ");
@@ -479,30 +477,5 @@ export class ShowroomScout extends Agent<Env, ScoutState> {
         return `Published a ${payload.route.stops.length}-stop route.`;
       },
     });
-  }
-}
-
-/**
- * Pull the detour options worth offering out of a `plan_drive_route` result.
- *
- * "Worth offering" = a short diversion that is not known to be closed on
- * arrival. Parsing defensively: a malformed result must not break publishing.
- */
-function extractOfferableDetours(rawResult: string): Array<{ name: string; extraMinutes: number }> {
-  try {
-    const parsed = JSON.parse(rawResult) as {
-      detourOptions?: Array<{ name?: string; extraMinutes?: number; openAtArrival?: string }>;
-    };
-    return (parsed.detourOptions ?? [])
-      .filter(
-        (d) =>
-          typeof d.name === "string" &&
-          typeof d.extraMinutes === "number" &&
-          d.extraMinutes <= ShowroomScout.DETOUR_MAX_MINUTES &&
-          d.openAtArrival !== "no",
-      )
-      .map((d) => ({ name: d.name as string, extraMinutes: d.extraMinutes as number }));
-  } catch {
-    return [];
   }
 }
