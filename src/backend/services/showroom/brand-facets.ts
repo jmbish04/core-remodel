@@ -34,12 +34,28 @@
  * The anchor text is the name the store itself uses.
  */
 
-/** A brand recovered from a page, with its website when the link revealed one. */
-export interface FacetBrand {
-  name: string;
-  /** The manufacturer's own site (pattern 2), else null (pattern 1). */
+/**
+ * A brand recovered from a page.
+ *
+ * ANY SUBSET OF THE THREE DATA FIELDS IS A VALID CAPTURE. A logo wall yields a
+ * logo + a website but often no readable name; a shop filter bar yields a name
+ * and nothing else. Requiring a name — as this type used to — is exactly why a
+ * wall of brand logos produced zero rows.
+ */
+export interface BrandCandidate {
+  /** Null when the anchor was a bare logo with no text and no alt. */
+  name: string | null;
+  /** The manufacturer's own site, when the link revealed one. */
   websiteUrl: string | null;
+  /** The logo image as found on the SOURCE page. */
+  logoUrl: string | null;
+  /** Provenance — which page this came from. */
+  sourceUrl: string;
+  extractionMethod: "text_list" | "logo_link" | "filter_bar" | "directory_link";
 }
+
+/** @deprecated Use {@link BrandCandidate}. Kept so existing imports compile. */
+export type FacetBrand = BrandCandidate;
 
 /**
  * Query params carrying a brand facet across the common platforms:
@@ -84,6 +100,21 @@ const TRAILING_COUNT_RE = /\s*[([]?\s*\d+\s*[)\]]?\s*$/;
 
 const MIN_LEN = 2;
 const MAX_LEN = 60;
+
+/**
+ * Field-wise merge: first non-null wins per field, so a partial capture never
+ * erases a richer one.
+ */
+function mergeCandidates(a: BrandCandidate, b: BrandCandidate): BrandCandidate {
+  return {
+    ...a,
+    name: a.name ?? b.name,
+    websiteUrl: a.websiteUrl ?? b.websiteUrl,
+    logoUrl: a.logoUrl ?? b.logoUrl,
+    // A named capture is better provenance than a bare logo.
+    extractionMethod: a.name ? a.extractionMethod : b.extractionMethod,
+  };
+}
 
 /** True when this URL is a same-domain brand facet / brand landing link. */
 function isBrandFacetUrl(u: URL): boolean {
@@ -155,9 +186,9 @@ function isSameSite(host: string, base: string): boolean {
  */
 export function extractBrandFacets(
   pageUrl: string,
-  links: Iterable<{ href: string; text?: string }>,
+  links: Iterable<{ href: string; text?: string; imageUrl?: string; imageAlt?: string }>,
   siteHost: string,
-): FacetBrand[] {
+): BrandCandidate[] {
   const base = siteHost.replace(/^www\./i, "").toLowerCase();
 
   let isDirectory = false;
@@ -167,7 +198,9 @@ export function extractBrandFacets(
     /* unparseable page url — pattern 1 only */
   }
 
-  const byLower = new Map<string, FacetBrand>();
+  const byLower = new Map<string, BrandCandidate>();
+  /** name OR domain -> the key under which that brand is stored in `byLower`. */
+  const aliasToKey = new Map<string, string>();
 
   for (const link of links) {
     if (!link?.href) continue;
@@ -184,27 +217,95 @@ export function extractBrandFacets(
     const host = u.hostname.replace(/^www\./i, "").toLowerCase();
     const sameSite = isSameSite(host, base);
 
-    let candidate: FacetBrand | null = null;
+    let candidate: BrandCandidate | null = null;
+
+    // Anchor text first, then the image's alt. On a logo wall the alt IS the
+    // brand name and costs nothing — it was being thrown away with the <img>.
+    const label = cleanBrandText(link.text) ?? cleanBrandText(link.imageAlt);
+    const logoUrl = link.imageUrl ?? null;
 
     if (sameSite) {
-      // Pattern 1 — the ?brand= param is its own proof, any page.
+      // Pattern 1 — the ?brand= param is its own proof, on any page.
       if (isBrandFacetUrl(u)) {
-        const name = cleanBrandText(link.text);
-        if (name) candidate = { name, websiteUrl: null };
+        if (label) {
+          candidate = {
+            name: label,
+            websiteUrl: null,
+            logoUrl,
+            sourceUrl: pageUrl,
+            extractionMethod: "filter_bar",
+          };
+        }
       }
     } else if (isDirectory) {
       // Pattern 2 — off-domain link ON a brand-directory page.
       if (NON_BRAND_HOST_RE.test(host)) continue;
-      const name = cleanBrandText(link.text);
-      if (name) candidate = { name, websiteUrl: brandHomepage(u) };
+      // A logo with no label is STILL a capture: the href is the brand's site
+      // and the img is its logo. Naming it later is cheap; re-finding it is not.
+      if (label || logoUrl) {
+        candidate = {
+          name: label,
+          websiteUrl: brandHomepage(u),
+          logoUrl,
+          sourceUrl: pageUrl,
+          extractionMethod: label ? "directory_link" : "logo_link",
+        };
+      }
     }
 
     if (!candidate) continue;
-    const key = candidate.name.toLowerCase();
-    const prior = byLower.get(key);
-    if (!prior) byLower.set(key, candidate);
-    // Prefer the entry that carries a website over one that doesn't.
-    else if (!prior.websiteUrl && candidate.websiteUrl) byLower.set(key, candidate);
+
+    // A brand can be seen twice with DIFFERENT fields — once as a bare logo
+    // (site + logo, no name) and once as a text link (name, no logo). Keying on
+    // only one of those means the two never merge and the brand lands twice.
+    // So index under BOTH identities and resolve through an alias map.
+    const nameKey = candidate.name?.toLowerCase() ?? null;
+    const domainKey = candidate.websiteUrl
+      ? new URL(candidate.websiteUrl).hostname.replace(/^www\./i, "").toLowerCase()
+      : null;
+    if (!nameKey && !domainKey) continue;
+
+    // A candidate can match MORE THAN ONE existing record, and that case is the
+    // subtle one: "ROHL" (name only, from a filter bar) and rohl.com (domain
+    // only, from a nameless logo) start as two separate rows under two keys.
+    // A later capture carrying BOTH identities proves they are the same brand —
+    // so collapse every matched record together rather than joining just one and
+    // orphaning the other.
+    const matchedKeys = [
+      nameKey ? aliasToKey.get(nameKey) : undefined,
+      domainKey ? aliasToKey.get(domainKey) : undefined,
+    ].filter((k): k is string => Boolean(k));
+    const uniqueMatched = [...new Set(matchedKeys)];
+
+    if (uniqueMatched.length === 0) {
+      const key = nameKey ?? domainKey!;
+      byLower.set(key, candidate);
+      if (nameKey) aliasToKey.set(nameKey, key);
+      if (domainKey) aliasToKey.set(domainKey, key);
+      continue;
+    }
+
+    // Fold every matched record plus the new candidate into one. Merge rather
+    // than replace: different pages reveal different fields, and dropping one
+    // loses data already paid for.
+    const survivorKey = uniqueMatched[0];
+    let merged: BrandCandidate = byLower.get(survivorKey)!;
+    for (const k of uniqueMatched.slice(1)) {
+      const other = byLower.get(k);
+      if (!other) continue;
+      merged = mergeCandidates(merged, other);
+      byLower.delete(k);
+    }
+    merged = mergeCandidates(merged, candidate);
+    byLower.set(survivorKey, merged);
+
+    // EVERY alias — the folded records' and the new candidate's — must now point
+    // at the survivor, or a later capture re-splits the brand we just joined.
+    for (const [alias, target] of aliasToKey) {
+      if (uniqueMatched.includes(target)) aliasToKey.set(alias, survivorKey);
+    }
+    if (nameKey) aliasToKey.set(nameKey, survivorKey);
+    if (domainKey) aliasToKey.set(domainKey, survivorKey);
   }
 
   return [...byLower.values()];
