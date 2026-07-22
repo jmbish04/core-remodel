@@ -153,7 +153,10 @@
     // AI extraction, so this must not ride the per-minute tick. Weekly matches
     // how often showrooms actually change a clearance page, and the sweep skips
     // any page whose content hash is unchanged — so a quiet week is cheap.
-    "crons": ["0 14 * * *", "* * * * *", "15 */4 * * *", "30 13 * * 1"],
+    // 0 9 * * 1 — weekly provider price refresh (0029). Published list prices
+// change without notice; without a refreshed catalog every cost number on
+// /admin/system/agents/usage is a guess.
+    "crons": ["0 14 * * *", "* * * * *", "15 */4 * * *", "30 13 * * 1", "0 9 * * 1"],
   },
   "kv_namespaces": [
     {

@@ -183,6 +183,20 @@
       "when": 1784736753773,
       "tag": "0125_supreme_dust",
       "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "6",
+      "when": 1784743765187,
+      "tag": "0126_striped_frog_thor",
+      "breakpoints": true
+    },
+    {
+      "idx": 127,
+      "version": "6",
+      "when": 1784743782546,
+      "tag": "0127_square_carnage",
+      "breakpoints": true
     }
   ]
 }

@@ -26,6 +26,7 @@
 
 import { drizzle } from "drizzle-orm/d1";
 import { currentAgentRunId } from "../agent-run-context";
+import { estimateCostUsd } from "../pricing/catalog";
 import { and, eq, gte, sql } from "drizzle-orm";
 
 import { geminiUsage } from "@backend/db/schema/system/gemini-usage";
@@ -189,6 +190,8 @@ export interface UsageRecord {
   cachedTokens?: number | null;
   totalTokens?: number | null;
   costUsd?: number | null;
+  /** Wall-clock duration of the provider call, when the caller timed it. */
+  latencyMs?: number | null;
   status?: "ok" | "error";
   errorMessage?: string | null;
   meta?: Record<string, unknown> | null;
@@ -201,8 +204,33 @@ export interface UsageRecord {
 export async function recordUsage(env: Env, rec: UsageRecord): Promise<void> {
   try {
     const db = drizzle(env.DB);
+
+    // Cost the call from the weekly price catalog when the caller did not
+    // supply one. Input and output are priced SEPARATELY inside
+    // estimateCostUsd — output runs 3-5x input at every major vendor, so a
+    // blended rate would be wrong by a different amount for every workload.
+    //
+    // A catalog miss returns null, and null is what gets stored. Never 0:
+    // "we do not know what this cost" and "this was free" must stay
+    // distinguishable, or the reconciliation banner on the usage page means
+    // nothing. The miss reason is folded into request_meta so it is debuggable.
+    let costUsd = rec.costUsd ?? null;
+    let pricingNote: string | null = null;
+    if (costUsd === null) {
+      const est = await estimateCostUsd(
+        env,
+        rec.provider,
+        rec.model,
+        rec.promptTokens,
+        rec.outputTokens,
+      ).catch(() => ({ costUsd: null, note: "pricing lookup failed" }));
+      costUsd = est.costUsd;
+      pricingNote = est.note;
+    }
+
     await db.insert(geminiUsage).values({
       agentRunId: rec.agentRunId ?? currentAgentRunId(),
+      latencyMs: rec.latencyMs ?? null,
       provider: rec.provider,
       model: rec.model,
       feature: rec.feature ?? "unknown",
@@ -216,9 +244,9 @@ export async function recordUsage(env: Env, rec: UsageRecord): Promise<void> {
       totalTokens:
         rec.totalTokens ??
         ((rec.promptTokens ?? 0) + (rec.outputTokens ?? 0) || null),
-      estimatedCostUsd: rec.costUsd ?? null,
+      estimatedCostUsd: costUsd,
       errorMessage: rec.errorMessage ?? null,
-      requestMeta: rec.meta ?? null,
+      requestMeta: pricingNote ? { ...(rec.meta ?? {}), pricing: pricingNote } : (rec.meta ?? null),
     });
   } catch (err) {
     console.error(`[metering] FAILED to record ${rec.provider}/${rec.model} usage:`, err);

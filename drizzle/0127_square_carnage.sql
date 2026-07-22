@@ -1,0 +1,1 @@
+ALTER TABLE `gemini_usage_log` ADD `latency_ms` integer;
