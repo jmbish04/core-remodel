@@ -30,6 +30,7 @@ import {
   StepProgressRing,
   SurfaceBadge,
   adminGet,
+  formatCount,
   formatDuration,
   formatRelative,
   type RunStatus,
@@ -394,7 +395,7 @@ function Stat({
           tone === "warn" && "border-warning/25 bg-warning/10 text-warning",
         )}
       >
-        {value}
+        {formatCount(value)}
       </Badge>
     </div>
   );
