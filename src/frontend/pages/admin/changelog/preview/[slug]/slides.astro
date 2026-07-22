@@ -1,0 +1,17 @@
+---
+/**
+ * @fileoverview Slide deck for one PROPOSED change — the presentable form of
+ * /admin/changelog/preview/[slug]. Nothing here has deployed yet.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import ChangelogDeckView from "@/components/changelog/ChangelogDeckView.astro";
+
+const slug = Astro.params.slug as string;
+---
+
+<BaseLayout
+  title={`${slug} - Slides - Preview - 126 Colby - Remodel Mission Control`}
+  description="A proposed change, presented as slides. Not yet deployed."
+>
+  <ChangelogDeckView slug={slug} stage="staged" />
+</BaseLayout>

@@ -145,6 +145,7 @@
     "remark-gfm": "^4.0.1",
     "replicate": "^1.4.0",
     "shadcn": "^4.8.0",
+    "shiki": "3.23.0",
     "slate": "^0.124.1",
     "slate-history": "^0.113.1",
     "slate-react": "^0.124.0",

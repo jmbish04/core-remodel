@@ -29,6 +29,8 @@
     "@systaliko-ui": "https://systaliko-ui.vercel.app/r/{name}.json",
     "@mapcn": "https://mapcn.dev/r/{name}.json",
     "@bklit": "https://ui.bklit.com/r/{name}.json",
-    "@coss": "https://coss.com/ui/r/{name}.json"
+    "@coss": "https://coss.com/ui/r/{name}.json",
+    "@kibo-ui": "https://www.kibo-ui.com/r/{name}.json",
+    "@slide-cn": "https://slide-cn.com/r/{name}.json"
   }
 }

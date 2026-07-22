@@ -6,7 +6,15 @@
  * the problem, the approach, the exact API surface touched, the files, the
  * migration SQL, representative code, and (where useful) a Mermaid diagram.
  * Seeded/fallback here, then persisted to D1 (changelog_entries.detail_json).
+ *
+ * Long-form fields are typed `Prose` = `string | string[]`, where an array is
+ * one element per PARAGRAPH. Everything written before 2026-07-22 is a plain
+ * string and keeps rendering as a single paragraph; new entries should use the
+ * array so the text breaks where the author meant it to.
  */
+import type { Prose } from "@/lib/changelog-prose";
+
+export type { Prose };
 
 export interface CodeCard {
   title: string;
@@ -15,7 +23,15 @@ export interface CodeCard {
 }
 
 export interface DiagramCard {
+  /**
+   * Short label under the diagram. Retained as the required field because every
+   * pre-existing entry sets it; `title` supersedes it for new entries.
+   */
   caption: string;
+  /** Heading above the diagram. Falls back to `caption` when absent. */
+  title?: string;
+  /** What the diagram shows and what to look for in it. */
+  description?: Prose;
   code: string; // Mermaid source
 }
 
@@ -58,8 +74,23 @@ export interface Verification {
 
 export interface PhaseDetail {
   slug: string;
-  problem: string;
-  approach: string;
+
+  /**
+   * One-line qualifier under the title, set in smaller italic type. The title
+   * says what changed; the subtitle says which surface or which phase.
+   */
+  subtitle?: string;
+  /**
+   * Opening orientation, before the problem statement — who this is for, why
+   * they are reading it, what changes for them. Paragraph array.
+   */
+  introduction?: Prose;
+
+  /** Why this change had to happen. Paragraph array (a plain string still works). */
+  problem: Prose;
+  /** How it was solved. Paragraph array (a plain string still works). */
+  approach: Prose;
+
   apiChanges: string[];
   filesTouched: string[];
   migrations: { tag: string; sql: string }[];

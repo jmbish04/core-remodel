@@ -3,32 +3,37 @@
  * Changelog entry viewport — shared by /admin/changelog/[slug] (shipped) and
  * /admin/changelog/preview/[slug] (staged/proposed).
  *
- * Page order per the product spec — one entry seen from multiple angles:
- *   1. Header + problem/approach (why this exists)
- *   2. Diagrams (mermaidcn, zoom/pan) — the visuals
- *   3. changelog19 → Developer Changelog + code snippets (ts/sql/…)
- *   4. changelog21 → conclusion recap: Features / Fixes / Improvements
- *   5. Migrations + files touched (the receipts)
+ * Reading order, narrow to wide:
+ *   1. Title · subtitle · introduction   — orientation, before any detail
+ *   2. Problem                            — full width
+ *   3. Approach                           — full width, STACKED under problem
+ *   4. Diagrams                           — each with its own title + description
+ *   5. Developer: API surface · code · migrations · files touched
+ *   6. Verification                       — what was run, verbatim
+ *   7. Recap (changelog21)                — Features / Fixes / Improvements
  *
- * The blocks render server-side (presentational); only the mermaid diagrams
- * hydrate (`client:load` — see the note at the Diagrams section) since they
- * render in the browser.
+ * Problem and Approach are full-width and stacked rather than side by side: they
+ * are prose, they are frequently of very different lengths, and a two-column
+ * layout forced the longer one into a narrow column while the shorter left half
+ * a screen of white space. Reading order also matters here — the approach only
+ * makes sense after the problem, and columns invite reading them in parallel.
+ *
+ * Hydration is per-island and deliberate: mermaid diagrams, the shiki code
+ * blocks and the file tree each render in the browser; everything else is static
+ * server-rendered markup.
  */
-import { eq } from "drizzle-orm";
-import { drizzle } from "drizzle-orm/d1";
-import { Changelog19 } from "../../../components/beste/block/changelog19";
 import { Changelog21 } from "../../../components/beste/block/changelog21";
 import { MermaidCn } from "@/components/mermaidcn/MermaidCn";
-import { changelogBranches, changelogEntries } from "@backend/db/schema/changelog/changelog";
-import { BRANCHES, CHANGELOG, type ChangelogEntry } from "@/data/changelog";
+import { ApiEndpoints } from "@/components/changelog/ApiEndpoints";
+import { CodeHighlight } from "@/components/changelog/CodeHighlight";
+import { FilesTouchedTree } from "@/components/changelog/FilesTouchedTree";
 import {
   detailHref,
-  resolveDetail,
-  toDevChangelog,
-  toDiagrams,
+  loadEntry,
   toRecap,
   type ChangelogStage,
 } from "@/lib/changelog-blocks";
+import { toParagraphs } from "@/lib/changelog-prose";
 
 interface Props {
   slug: string;
@@ -38,65 +43,15 @@ interface Props {
 const { slug, stage } = Astro.props;
 const staged = stage === "staged";
 
-// Source of truth is D1; fall back to the bundled seed (AGENTS.md changelog rule).
-let entry: ChangelogEntry | undefined;
-let detailJson: unknown;
-/**
- * PR metadata lives on the BRANCH row, not the entry — so reading it here makes
- * the PR number render for every entry ever written, instead of only the ones
- * whose author remembered to duplicate it into `detail_json`.
- */
-let branchRow: { prNumber: number | null; prUrl: string | null } | undefined;
-try {
-  // Guard explicitly rather than relying on a TypeError being caught below —
-  // the Cloudflare runtime is absent during a static build / local tests.
-  const env = Astro.locals.runtime?.env;
-  if (!env?.DB) throw new Error("D1 binding unavailable — using bundled seed");
-  const db = drizzle(env.DB);
-  const [row] = await db
-    .select()
-    .from(changelogEntries)
-    .where(eq(changelogEntries.slug, slug))
-    .limit(1);
-  if (row) {
-    entry = {
-      id: row.slug,
-      branch: row.branch,
-      date: row.date,
-      tag: row.tag ?? undefined,
-      area: row.area,
-      title: row.title,
-      summary: row.summary,
-      status: row.status as ChangelogEntry["status"],
-      changes: (row.changesJson as ChangelogEntry["changes"]) ?? [],
-      migrations: (row.migrationsJson as string[]) ?? [],
-    };
-    detailJson = row.detailJson;
-    const [b] = await db
-      .select({ prNumber: changelogBranches.prNumber, prUrl: changelogBranches.prUrl })
-      .from(changelogBranches)
-      .where(eq(changelogBranches.branch, row.branch))
-      .limit(1);
-    branchRow = b;
-  }
-} catch {
-  entry = undefined;
-}
-if (!entry) entry = CHANGELOG.find((e) => e.id === slug);
-
-const detail = entry ? resolveDetail(slug, detailJson) : undefined;
+// Source of truth is D1; falls back to the bundled seed (AGENTS.md changelog
+// rule). `loadEntry` owns that fallback so the deck view cannot drift from it.
+const { entry, detail, prNumber, prUrl } = await loadEntry(Astro.locals.runtime?.env, slug);
 const notFound = !entry;
 
 // Branch + PR + tests + remote migration status are mandatory on every entry
 // (AGENTS.md "Changelog discipline") — they are how a reader answers "is this
 // actually live and actually verified?" without leaving the page.
 const branchName = detail?.branch ?? entry?.branch;
-const prNumber = detail?.prNumber ?? branchRow?.prNumber ?? BRANCHES.find((b) => b.branch === entry?.branch)?.prNumber;
-const prUrl =
-  detail?.prUrl ??
-  branchRow?.prUrl ??
-  BRANCHES.find((b) => b.branch === entry?.branch)?.prUrl ??
-  (prNumber ? `https://github.com/jmbish04/core-remodel/pull/${prNumber}` : undefined);
 const verification = detail?.verification;
 // Prefer the verification block's per-tag remote state; otherwise list the tags
 // the entry declares with their status explicitly UNKNOWN rather than implying
@@ -106,12 +61,26 @@ const migrationStatus =
   (entry?.migrations ?? []).map((tag) => ({ tag, appliedRemote: false, note: "Not recorded" }));
 const migrationStatusKnown = Boolean(verification?.migrations?.length);
 
-// `{}` (not null) so the blocks can be spread without a non-null assertion —
-// the notFound branch means these are only ever spread when `entry` exists.
-const dev = entry ? toDevChangelog(entry, detail) : {};
+// Prose fields normalize to paragraph arrays. Entries written before these were
+// arrays are plain strings and come back as a single paragraph — see
+// `lib/changelog-prose.ts` for why we do not guess breaks inside them.
+const introduction = toParagraphs(detail?.introduction);
+const problem = toParagraphs(detail?.problem);
+const approach = toParagraphs(detail?.approach);
+
+const diagrams = detail?.diagrams ?? [];
+const apiChanges = detail?.apiChanges ?? [];
+const codeCards = detail?.code ?? [];
+const filesTouched = detail?.filesTouched ?? [];
+const hasDeveloperSection =
+  apiChanges.length > 0 ||
+  codeCards.length > 0 ||
+  (detail?.migrations?.length ?? 0) > 0 ||
+  filesTouched.length > 0;
+
 const recap = entry ? toRecap(entry, stage) : {};
-const diagrams = toDiagrams(detail);
 const backHref = staged ? "/admin/changelog/preview" : "/admin/changelog";
+const slidesHref = `${detailHref(slug, stage)}/slides`;
 // An entry viewed from the wrong stage (e.g. a shipped row under /preview) still
 // renders, but we link across so the reader lands on the canonical one.
 const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.status) : null;
@@ -130,9 +99,37 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
     </main>
   ) : (
     <main class="container mx-auto max-w-5xl px-4 py-10">
-      <a href={backHref} class="text-xs text-muted-foreground underline underline-offset-4">
-        ← {staged ? "All proposed changes" : "All releases"}
-      </a>
+      <div class="flex flex-wrap items-center justify-between gap-3">
+        <a href={backHref} class="text-xs text-muted-foreground underline underline-offset-4">
+          ← {staged ? "All proposed changes" : "All releases"}
+        </a>
+        {/*
+          Slides view. Placed at the top because it is an alternative way to read
+          THIS page, not a footnote to it — someone walking a contractor or a
+          reviewer through the change wants it before they start scrolling.
+        */}
+        <a
+          href={slidesHref}
+          class="inline-flex items-center gap-1.5 rounded-md bg-violet-500/12 px-2.5 py-1 text-xs font-medium text-violet-300 ring-1 ring-violet-500/25 transition-colors hover:bg-violet-500/20"
+        >
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            class="size-3.5"
+            aria-hidden="true"
+          >
+            <path d="M2 3h20v12H2z" />
+            <path d="m12 15 4 6" />
+            <path d="m12 15-4 6" />
+          </svg>
+          Present as slides →
+        </a>
+      </div>
 
       <header class="mt-4">
         <div class="flex flex-wrap items-center gap-2">
@@ -145,6 +142,11 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
           >
             {entry!.status === "shipped" ? "Shipped" : "Proposed — not yet deployed"}
           </span>
+          {entry!.entryNo ? (
+            <span class="rounded-md bg-card px-2 py-0.5 font-mono text-[11px] text-muted-foreground ring-1 ring-border/40">
+              #{entry!.entryNo}
+            </span>
+          ) : null}
           {entry!.tag ? (
             <span class="rounded-md bg-card px-2 py-0.5 text-[11px] text-muted-foreground ring-1 ring-border/40">
               {entry!.tag}
@@ -169,8 +171,22 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
           )}
           <span class="text-[11px] text-muted-foreground">{entry!.date}</span>
         </div>
-        <h1 class="mt-3 text-2xl font-semibold tracking-tight">{entry!.title}</h1>
-        <p class="mt-1 max-w-3xl text-sm text-muted-foreground">{entry!.summary}</p>
+
+        <h1 class="mt-3 text-3xl font-semibold tracking-tight">
+          {entry!.entryNo ? (
+            <span class="mr-2 font-mono text-2xl font-normal text-muted-foreground">
+              #{entry!.entryNo}
+            </span>
+          ) : null}
+          {entry!.title}
+        </h1>
+
+        {detail?.subtitle ? (
+          <p class="mt-1.5 max-w-3xl text-sm italic text-muted-foreground">{detail.subtitle}</p>
+        ) : null}
+
+        <p class="mt-2 max-w-3xl text-sm text-muted-foreground">{entry!.summary}</p>
+
         {crossHref ? (
           <p class="mt-2 text-xs text-muted-foreground">
             This entry is {entry!.status}.{" "}
@@ -181,30 +197,51 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
         ) : null}
       </header>
 
-      {detail?.problem || detail?.approach ? (
-        <section class="mt-6 grid gap-4 md:grid-cols-2">
-          {detail?.problem ? (
-            <div class="rounded-xl bg-card p-5 ring-1 ring-rose-500/20">
-              <h2 class="text-xs font-semibold uppercase tracking-widest text-rose-300">Problem</h2>
-              <p class="mt-2 text-sm leading-relaxed text-muted-foreground">{detail.problem}</p>
+      {introduction.length > 0 ? (
+        <section id="introduction" class="mt-8 max-w-3xl scroll-mt-24">
+          <div class="space-y-4">
+            {introduction.map((p) => (
+              <p class="text-[15px] leading-7 text-foreground/85">{p}</p>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {problem.length > 0 ? (
+        <section id="problem" class="mt-8 scroll-mt-24">
+          <div class="rounded-xl bg-card p-6 ring-1 ring-rose-500/20">
+            <h2 class="text-xs font-semibold uppercase tracking-widest text-rose-300">Problem</h2>
+            <div class="mt-3 space-y-4">
+              {problem.map((p) => (
+                <p class="text-sm leading-7 text-muted-foreground">{p}</p>
+              ))}
             </div>
-          ) : null}
-          {detail?.approach ? (
-            <div class="rounded-xl bg-card p-5 ring-1 ring-emerald-500/20">
-              <h2 class="text-xs font-semibold uppercase tracking-widest text-emerald-300">Approach</h2>
-              <p class="mt-2 text-sm leading-relaxed text-muted-foreground">{detail.approach}</p>
+          </div>
+        </section>
+      ) : null}
+
+      {approach.length > 0 ? (
+        <section id="approach" class="mt-6 scroll-mt-24">
+          <div class="rounded-xl bg-card p-6 ring-1 ring-emerald-500/20">
+            <h2 class="text-xs font-semibold uppercase tracking-widest text-emerald-300">
+              Approach
+            </h2>
+            <div class="mt-3 space-y-4">
+              {approach.map((p) => (
+                <p class="text-sm leading-7 text-muted-foreground">{p}</p>
+              ))}
             </div>
-          ) : null}
+          </div>
         </section>
       ) : null}
 
       {diagrams.length > 0 ? (
-        <section class="mt-8">
+        <section id="diagrams" class="mt-10 scroll-mt-24">
           <h2 class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
             Diagrams
           </h2>
           <p class="mt-1 text-xs text-muted-foreground">Scroll to zoom, drag to pan.</p>
-          <div class="mt-4 space-y-6">
+          <div class="mt-4 space-y-8">
             {
               /*
                * client:load (not client:visible) on purpose. The mermaidcn
@@ -212,81 +249,86 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
                * "No diagram code provided" — which is FALSE here (the code is
                * passed as a prop) and is what a reader would see for any diagram
                * still below the fold. Diagrams are the whole point of this page,
-               * so we hydrate eagerly rather than flash a wrong message. These
-               * are low-traffic admin pages; mermaid's weight is an acceptable
-               * trade for not lying to the reader.
+               * so we hydrate eagerly rather than flash a wrong message.
                */
             }
             {diagrams.map((d) => (
-              <div class="rounded-xl bg-card p-4 ring-1 ring-border/40">
-                <MermaidCn code={d.code} caption={d.caption} client:load />
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      <section class="mt-8 border-t border-border/40 pt-4">
-        <Changelog19 {...dev} />
-      </section>
-
-      {detail?.migrations && detail.migrations.length > 0 ? (
-        <section class="mt-8">
-          <h2 class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            Migrations
-          </h2>
-          <div class="mt-4 space-y-4">
-            {detail.migrations.map((m) => (
-              <figure class="overflow-hidden rounded-xl bg-card ring-1 ring-border/40">
-                <figcaption class="bg-muted/30 px-4 py-2 font-mono text-[11px] text-muted-foreground">
-                  {m.tag}
+              <figure class="rounded-xl bg-card p-5 ring-1 ring-border/40">
+                <figcaption class="mb-3">
+                  <h3 class="text-sm font-medium">{d.title ?? d.caption}</h3>
+                  {toParagraphs(d.description).map((p) => (
+                    <p class="mt-1 text-xs leading-6 text-muted-foreground">{p}</p>
+                  ))}
                 </figcaption>
-                <pre class="overflow-x-auto px-4 py-3 text-xs leading-relaxed"><code>{m.sql}</code></pre>
+                <MermaidCn code={d.code} caption={d.caption} client:load />
               </figure>
             ))}
           </div>
         </section>
       ) : null}
 
-      {detail?.verification ? (
-        <section class="mt-8">
-          <h2 class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            Verification
-          </h2>
-          <p class="mt-2 text-sm text-muted-foreground">
-            <code class="font-mono text-[11px]">{detail.verification.command}</code>
-            {" — "}
-            <code class="font-mono text-[11px]">{detail.verification.script}</code>
+      {hasDeveloperSection ? (
+        <section class="mt-12 border-t border-border/40 pt-8">
+          <h2 class="text-sm font-semibold tracking-tight">Developer</h2>
+          <p class="mt-1 text-xs text-muted-foreground">
+            The implementation: API surface, code, migrations and files touched.
           </p>
-          {detail.verification.migrationsApplied &&
-          detail.verification.migrationsApplied.length > 0 ? (
-            <div class="mt-3 flex flex-wrap gap-2">
-              {detail.verification.migrationsApplied.map((m) => (
-                <span class="rounded-md bg-card px-2 py-1 font-mono text-[11px] ring-1 ring-border/40">
-                  {m.tag} ·{" "}
-                  <span class={m.appliedToRemote ? "text-emerald-400" : "text-rose-400"}>
-                    {m.appliedToRemote ? "applied to remote" : "NOT applied to remote"}
-                  </span>
-                </span>
-              ))}
+
+          {apiChanges.length > 0 ? (
+            <div id="api" class="mt-6 scroll-mt-24">
+              <h3 class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                API surface
+              </h3>
+              <div class="mt-3">
+                <ApiEndpoints changes={apiChanges} />
+              </div>
             </div>
           ) : null}
-          <pre class="mt-3 overflow-x-auto rounded-xl bg-card px-4 py-3 text-xs leading-relaxed ring-1 ring-border/40"><code>{detail.verification.output}</code></pre>
-        </section>
-      ) : null}
 
-      {detail?.filesTouched && detail.filesTouched.length > 0 ? (
-        <section class="mt-8">
-          <h2 class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-            Files touched
-          </h2>
-          <div class="mt-3 flex flex-wrap gap-2">
-            {detail.filesTouched.map((f) => (
-              <code class="rounded-md bg-card px-2 py-1 font-mono text-[11px] text-muted-foreground ring-1 ring-border/40">
-                {f}
-              </code>
-            ))}
-          </div>
+          {codeCards.length > 0 ? (
+            <div id="code" class="mt-8 scroll-mt-24">
+              <h3 class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                Code
+              </h3>
+              <div class="mt-3 space-y-4">
+                {codeCards.map((c) => (
+                  <CodeHighlight
+                    code={c.code}
+                    lang={c.lang}
+                    filename={c.title}
+                    client:visible
+                  />
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {detail?.migrations && detail.migrations.length > 0 ? (
+            <div id="migrations" class="mt-8 scroll-mt-24">
+              <h3 class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                Migrations
+              </h3>
+              <div class="mt-3 space-y-4">
+                {detail.migrations.map((m) => (
+                  <CodeHighlight code={m.sql} lang="sql" filename={m.tag} client:visible />
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          {filesTouched.length > 0 ? (
+            <div id="files" class="mt-8 scroll-mt-24">
+              <h3 class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+                Files touched
+                <span class="ml-2 font-mono text-[10px] normal-case tracking-normal text-muted-foreground/70">
+                  {filesTouched.length}
+                </span>
+              </h3>
+              <div class="mt-3">
+                <FilesTouchedTree files={filesTouched} client:visible />
+              </div>
+            </div>
+          ) : null}
         </section>
       ) : null}
 
@@ -295,10 +337,8 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
         than rendering nothing: an absent section is indistinguishable from a
         change nobody tested, and the reader cannot tell which they are looking at.
       */}
-      <section class="mt-8">
-        <h2 class="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-          Verification
-        </h2>
+      <section id="verification" class="mt-12 scroll-mt-24 border-t border-border/40 pt-8">
+        <h2 class="text-sm font-semibold tracking-tight">Verification</h2>
 
         {verification ? (
           <div class="mt-4 space-y-4">
@@ -315,20 +355,22 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
             </div>
 
             {verification.source ? (
-              <figure class="overflow-hidden rounded-xl bg-card ring-1 ring-border/40">
-                <figcaption class="bg-muted/30 px-4 py-2 font-mono text-[11px] text-muted-foreground">
-                  {verification.qcScript}
-                </figcaption>
-                <pre class="max-h-96 overflow-auto px-4 py-3 text-xs leading-relaxed"><code>{verification.source}</code></pre>
-              </figure>
+              <CodeHighlight
+                code={verification.source}
+                lang="ts"
+                filename={verification.qcScript}
+                maxHeightClass="max-h-96"
+                client:visible
+              />
             ) : null}
 
-            <figure class="overflow-hidden rounded-xl bg-card ring-1 ring-border/40">
-              <figcaption class="bg-muted/30 px-4 py-2 font-mono text-[11px] text-muted-foreground">
-                output — verbatim
-              </figcaption>
-              <pre class="max-h-96 overflow-auto px-4 py-3 text-xs leading-relaxed"><code>{verification.output}</code></pre>
-            </figure>
+            <CodeHighlight
+              code={verification.output}
+              lang="bash"
+              filename="output — verbatim"
+              maxHeightClass="max-h-96"
+              client:visible
+            />
           </div>
         ) : (
           <p class="mt-3 rounded-xl bg-rose-500/8 px-4 py-3 text-xs leading-relaxed text-rose-200/90 ring-1 ring-rose-500/25">
@@ -372,7 +414,7 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
         ) : null}
       </section>
 
-      <section class="mt-8 border-t border-border/40 pt-4">
+      <section class="mt-12 border-t border-border/40 pt-8">
         <Changelog21 {...recap} />
       </section>
     </main>

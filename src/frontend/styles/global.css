@@ -271,3 +271,27 @@
     @apply relative touch-manipulation after:absolute after:-inset-2;
   }
 }
+/*
+ * Shiki syntax highlighting (changelog code + migration SQL).
+ *
+ * Blocks are generated with `defaultColor: false`, so every token carries BOTH
+ * a `--shiki-light` and a `--shiki-dark` custom property and no baked-in color.
+ * These rules pick which one applies. Without them the code renders with no
+ * color at all, because nothing resolves the variables.
+ *
+ * The background is forced transparent so the block inherits the surrounding
+ * card surface instead of shiki's own theme background, which would sit at a
+ * different value than every other panel on the page.
+ */
+.shiki,
+.shiki span {
+  color: var(--shiki-light);
+  background-color: transparent !important;
+}
+
+.dark .shiki,
+.dark .shiki span,
+html.dark .shiki,
+html.dark .shiki span {
+  color: var(--shiki-dark);
+}
