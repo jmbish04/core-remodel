@@ -80,6 +80,147 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "0026-agent-ops-transparency": {
+    slug: "0026-agent-ops-transparency",
+    problem:
+      "This Worker runs 27 things that can start work on their own — 9 Workflows, 10 Durable Object agents, 7 cron jobs and MCP — and none of them could be watched. The agent_runs ledger already existed on main with exactly ONE writer and ZERO readers. The cost of that silence is documented: 49 of 145 showroom scrapes sat in `failed` with no reason; RemodelOrchestrator burned roughly $50/day for weeks and was found on a billing invoice; Workers AI 3040 capacity errors land in image_upload_staging.processing_error and are read by nothing. Every failure was discovered by its bill or by a user, days late.",
+    approach:
+      "A wire-up, not a new monitoring system. P0 closed the writer gap by WRAPPING call sites rather than rewriting them — `startRun` is best-effort by contract and returns a no-op recorder instead of throwing, so instrumentation can never break the work it measures. A `ledgerSteps(step, run)` bridge made instrumenting a Workflow a 3-line change instead of hand-wrapping ~60 `step.do` calls. P1 added one additive nullable column (gemini_usage_log.agent_run_id) plus a read-only query service and a Hono router under the existing /api/admin/* auth gate. Spend attribution uses AsyncLocalStorage rather than a module-level variable, because the image batch coordinator interleaves runs with Promise.all in one isolate and a shared mutable would have misattributed a whole batch's cost to one arbitrary image. P2-P5 retrofitted four shadcn templates onto real columns, cutting every invented field (owner avatars, environment badges, fictional model providers, an editable settings form with nowhere to persist) and adding three things the templates lacked: retry lineage, a runaway detector, and an uninstrumented-surface banner so an empty queue can never read as a healthy one.",
+    apiChanges: [
+      "GET  /api/admin/agents/overview — counts, cycle spend, breaker state, runaway flags, coverage",
+      "GET  /api/admin/agents/runs — status/agent/since/limit, with steps_done + steps_total",
+      "GET  /api/admin/agents/runs/:id — run + steps + tool calls + retry lineage + attributed cost",
+      "POST /api/admin/agents/runs/:id/retry — inserts a NEW run with parent_run_id; never mutates the failed row",
+      "POST /api/admin/agents/runs/:id/cancel — refused (409) for an already-settled run",
+      "POST /api/admin/agents/runs/:id/approve — needs_approval → running (HITL)",
+      "GET  /api/admin/agents/failures — grouped by (error_code, agent, operation)",
+      "GET  /api/admin/agents/usage — spend by agent/provider/model + AI Gateway reconciliation",
+      "GET  /api/admin/agents/coverage — which of the 27 declared surfaces are wired",
+    ],
+    filesTouched: [
+      "src/backend/services/agent-registry.ts (new — 27 surfaces)",
+      "src/backend/services/agent-run-workflow.ts (new — ledgerSteps bridge)",
+      "src/backend/services/agent-run-context.ts (new — AsyncLocalStorage run context)",
+      "src/backend/services/agent-runs-query.ts (new — read-only queries)",
+      "src/backend/services/agent-run-retention.ts (new — 30d/90d prune)",
+      "src/backend/api/routes/admin-agents.ts (new — 9 endpoints)",
+      "src/frontend/components/system/agents/{shared,AgentQueueApp,AgentRunDetailApp,AgentFailuresApp,AgentUsageApp}.tsx (new)",
+      "src/frontend/pages/admin/system/agents/{queue,failed,usage}.astro + queue/[id].astro (new)",
+      "src/frontend/components/ui/{table,progress,collapsible,skeleton}.tsx (shadcn CLI)",
+      "instrumented: brand-research, product-research, deep-research-job, image-processor/workflow, image-processor/batch-workflow, checklist-rationale, showroom-onboarding, render/blank-canvas-batch, RemodelOrchestrator, ShowroomResearchAgent",
+      "src/backend/db/schema/system/gemini-usage.ts, src/backend/services/usage/metering.ts, src/backend/services/agent-runs.ts, src/_worker.ts, src/frontend/components/sidebar/nav-groups.ts",
+      "scripts/qc/pr_193.mjs (new)",
+    ],
+    migrations: [
+      {
+        tag: "0123_stormy_sersi",
+        sql: "ALTER TABLE `gemini_usage_log` ADD `agent_run_id` integer;--> statement-breakpoint\nCREATE INDEX `gemini_usage_log_agent_run_idx` ON `gemini_usage_log` (`agent_run_id`);",
+      },
+    ],
+    code: [
+      {
+        title: "The instrumentation contract — wrap, never rewrite",
+        lang: "ts",
+        code: `const run = await startRun(env, {
+  agent: "brand-research",
+  operation: "research_brand",
+  targetType: "brand",
+  targetId: String(brandId),
+  triggeredBy: "cron",
+});
+// Every step.do below now also writes an agent_run_steps row.
+const step = ledgerSteps(rawStep, run);
+
+// Do NOT wrap startRun in try/catch. It never throws — on a ledger failure it
+// returns a no-op recorder and the real work proceeds unrecorded. Losing real
+// work to a telemetry bug is unacceptable; that asymmetry is deliberate.`,
+      },
+      {
+        title: "Why AsyncLocalStorage, not a module-level run id",
+        lang: "ts",
+        code: `// image-processor/batch-workflow.ts runs a wave of images under Promise.all —
+// several runs interleaved in ONE isolate. A shared mutable \`currentRunId\`
+// would hand every AI call the id of whichever image started last, and the cost
+// page would confidently attribute the whole batch to one arbitrary image.
+//
+// A wrong number on a cost page is worse than no number, because nobody
+// double-checks a number that looks plausible.
+export function currentAgentRunId(): number | null {
+  return storage.getStore()?.runId ?? null;
+}`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Data model — the existing ledger plus one additive column",
+        code: `erDiagram
+    agent_runs ||--o{ agent_run_steps : "run_id cascade"
+    agent_runs ||--o{ agent_run_tool_calls : "run_id cascade"
+    agent_runs ||--o{ agent_runs : "parent_run_id retry chain"
+    agent_runs ||--o{ gemini_usage_log : "agent_run_id NEW"
+
+    agent_runs {
+        integer id PK
+        text    agent "showroom-research, remodel-orchestrator"
+        text    operation
+        text    status "queued running needs_approval succeeded failed cancelled"
+        integer attempt
+        integer parent_run_id
+        text    error_code "groupable: MAPS_QUOTA_EXCEEDED 3040 503"
+        text    error_message
+        integer duration_ms
+    }
+    gemini_usage_log {
+        integer id PK
+        integer agent_run_id "NEW nullable, not a FK"
+        text    provider
+        integer total_tokens
+        real    estimated_cost_usd
+    }`,
+      },
+      {
+        caption: "An instrumented run, end to end",
+        code: `sequenceDiagram
+    autonumber
+    participant CR as Cron / User / MCP
+    participant WF as Workflow or DO Agent
+    participant RR as startRun recorder
+    participant D1 as D1 agent_runs
+    participant AI as Workers AI / Gemini
+    participant UI as /admin/system/agents
+
+    CR->>WF: trigger
+    WF->>RR: startRun(...)
+    RR->>D1: INSERT agent_runs status=running
+    Note over RR: insert fails then nullRecorder,<br/>real work proceeds unrecorded
+    WF->>RR: run.step("scrape site")
+    RR->>AI: env.AI.run(...)
+    AI-->>RR: result + usage
+    RR->>D1: INSERT agent_run_tool_calls + gemini_usage_log(agent_run_id)
+    WF->>RR: run.succeed(digest) or run.fail(err)
+    UI->>D1: GET /api/admin/agents/runs (poll 10s)`,
+      },
+    ],
+    branch: "claude/agent-ops-monitoring-plan-957a42",
+    prNumber: 193,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/193",
+    verification: {
+      qcScript: "scripts/qc/pr_193.mjs",
+      command: "pnpm run test:pr 193",
+      source:
+        "49 assertions across reads, input validation, the auth gate, the retry/cancel/approve state machine, all four pages and a regression guard on plans / mcp-ops / integrations.",
+      ranAt: "2026-07-22T14:40:00Z",
+      output:
+        "49 passed, 0 failed — against production (https://core-remodel.hacolby.workers.dev). Full transcript on the D1-backed entry, which is the source of truth; this bundled copy is the SSR fallback and carries an abridged diagram set.",
+      migrations: [
+        {
+          tag: "0123_stormy_sersi",
+          appliedRemote: true,
+          note: "Applied with pnpm run migrate:remote and verified on the remote DB — pragma_table_info returned [{'name': 'agent_run_id'}].",
+        },
+      ],
+    },
+  },
   "markdown-mermaid-render": {
     slug: "markdown-mermaid-render",
     branch: "claude/markdown-mermaid",
