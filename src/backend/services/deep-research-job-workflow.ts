@@ -37,6 +37,8 @@ import { showroomStoreProducts } from "@backend/db/schema/showroom/store_product
 import { brands } from "@backend/db/schema/brands/brands";
 import { runDeepResearch, type DeepResearchSource } from "@backend/ai/deep-research";
 import { parseStructuredResponse } from "@backend/utils/ai-json";
+import { startRun } from "@backend/services/agent-runs";
+import { ledgerSteps } from "@backend/services/agent-run-workflow";
 import {
   beginStep,
   completeJob,
@@ -125,9 +127,22 @@ export class DeepResearchJobWorkflow extends WorkflowEntrypoint<
   Env,
   DeepResearchJobParams
 > {
-  async run(event: WorkflowEvent<DeepResearchJobParams>, step: WorkflowStep) {
+  async run(event: WorkflowEvent<DeepResearchJobParams>, rawStep: WorkflowStep) {
     const jobId = event.payload.researchJobId;
     const env = this.env;
+
+    // `research_jobs.error` already stores the final message, but not which of
+    // the five phases produced it, nor what the upstream actually returned. The
+    // ledger adds that per-step and per-tool detail.
+    const run = await startRun(env, {
+      agent: "deep-research-job",
+      operation: "run_research_job",
+      targetType: "research_job",
+      targetId: String(jobId),
+      input: { researchJobId: jobId },
+      triggeredBy: "agent",
+    });
+    const step = ledgerSteps(rawStep, run);
 
     // ── 1. load-job ─────────────────────────────────────────────────────────
     const job = await step.do("load-job", async () => {
@@ -245,7 +260,14 @@ export class DeepResearchJobWorkflow extends WorkflowEntrypoint<
         });
         await completeJob(env, jobId, finals);
       });
+
+      await run.succeed({
+        researchJobId: jobId,
+        candidates: candidates?.length ?? 0,
+        sources: Object.keys(research.sources ?? {}).length,
+      });
     } catch (error) {
+      await run.fail(error);
       await failJob(env, jobId, error);
       throw error;
     }

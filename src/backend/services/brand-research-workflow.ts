@@ -53,6 +53,8 @@ import { ImageProcessorService } from "@backend/services/image-processor";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { parseStructuredResponse } from "@backend/utils/ai-json";
 import { faviconService } from "@backend/services/favicon";
+import { startRun } from "@backend/services/agent-runs";
+import { ledgerSteps } from "@backend/services/agent-run-workflow";
 import { ingestRemoteDocument } from "@backend/services/documents/fetch-remote";
 import {
   beginStep,
@@ -271,10 +273,26 @@ export class BrandResearchWorkflow extends WorkflowEntrypoint<
   Env,
   BrandResearchParams
 > {
-  async run(event: WorkflowEvent<BrandResearchParams>, step: WorkflowStep) {
+  async run(event: WorkflowEvent<BrandResearchParams>, rawStep: WorkflowStep) {
     const { brandId } = event.payload;
     const env = this.env;
     const db = drizzle(env.DB);
+
+    // Durable, agent-agnostic run record. `brand_intel.research_status` is a
+    // bare enum — it says "failed" without saying which of the ten steps died
+    // or what the upstream returned. The ledger records the WHY somewhere
+    // queryable, so a retry is an informed decision rather than a coin flip.
+    const run = await startRun(env, {
+      agent: "brand-research",
+      operation: "research_brand",
+      targetType: "brand",
+      targetId: String(brandId),
+      input: { brandId, researchJobId: event.payload.researchJobId ?? null },
+      triggeredBy: "agent",
+    });
+    // Every `step.do` below now also writes an agent_run_steps row. Delegates
+    // to the real step and returns its exact value — execution is unchanged.
+    const step = ledgerSteps(rawStep, run);
 
     // Research-console job id — pre-created by the API when `researchJobId`
     // is supplied, otherwise created inside mark-running (job creation lives
@@ -585,10 +603,17 @@ export class BrandResearchWorkflow extends WorkflowEntrypoint<
         sources: research.sources,
         result: extracted,
       });
+
+      await run.succeed({
+        brandId,
+        sources: research.sources?.length ?? 0,
+        reportChars: research.report?.length ?? 0,
+      });
     } catch (error) {
       // Any unrecoverable failure flips status to "failed" then re-throws so
       // Workflows records the error for observability. The console job is
       // failed alongside (failJob never throws).
+      await run.fail(error);
       await failJob(env, jobId, error);
       try {
         await db

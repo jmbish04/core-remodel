@@ -24,6 +24,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { clickupSystemAlerts, clickupTaskFlags } from "@backend/db";
 import { ClickUpClient } from "@backend/services/clickup-client";
+import { startRun } from "@backend/services/agent-runs";
 import {
   evaluateFireWindow,
   readCircuitBreaker,
@@ -287,11 +288,27 @@ export class RemodelOrchestrator extends Agent<Env, RemodelOrchestratorState> {
       return;
     }
 
+    // Record every audit in the shared ledger. This surface generated ~1M
+    // cf_agents_schedules rows and roughly $50/day before the circuit breaker
+    // above existed — and the only reason it ran that long is that nothing
+    // counted how often it fired. The breaker now hard-stops a loop; this makes
+    // the run rate *visible* beforehand, on /admin/system/agents/queue, instead
+    // of on an invoice weeks later.
+    const run = await startRun(this.env, {
+      agent: "remodel-orchestrator",
+      operation: "audit",
+      targetType: "clickup_list",
+      targetId: this.state.clickupListId ?? undefined,
+      triggeredBy: "cron",
+    });
+
     try {
-      await this.runAuditCycle();
+      const result = await run.step("audit cycle", () => this.runAuditCycle());
+      await run.succeed(result ?? { status: "completed" });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("RemodelOrchestrator audit failed:", message);
+      await run.fail(err);
       this.setState({
         ...this.state,
         status: "error",
