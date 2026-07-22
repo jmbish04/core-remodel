@@ -43,6 +43,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/agent-ops-monitoring-plan-957a42",
+    title: "0026 · Agent Ops Transparency",
+    summary:
+      "Finished the agent_runs instrumentation, added /api/admin/agents, and shipped the four Agent Ops screens.",
+    date: "2026-07-22",
+    status: "shipped",
+    prNumber: 193,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/193",
+  },
+  {
     branch: "claude/markdown-mermaid",
     title: "Render mermaid diagrams in markdown (not raw code)",
     summary:
@@ -162,6 +172,28 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "0026-agent-ops-transparency",
+    branch: "claude/agent-ops-monitoring-plan-957a42",
+    date: "2026-07-22",
+    tag: "0026",
+    area: "System / Agents",
+    title: "Agent Ops Transparency — 27 autonomous surfaces, one ledger, four screens",
+    summary:
+      "Every agent execution now records what it did, why it failed and what it cost — visible at /admin/system/agents. Instrumentation went from 1 surface to 12, spend attributes to the run that caused it, and the AI Gateway cross-check immediately exposed a -54% reporting gap.",
+    changes: [
+      { kind: "added", text: "/admin/system/agents/queue — every run grouped by status in triage order, with a banner naming every surface that is NOT reporting." },
+      { kind: "added", text: "/admin/system/agents/queue/[id] — step trace, collapsible tool calls, retry lineage, attributed cost, retry/cancel/approve." },
+      { kind: "added", text: "/admin/system/agents/failed — failures grouped by (error_code, agent, operation)." },
+      { kind: "added", text: "/admin/system/agents/usage — AI spend per agent and per run, with live breaker state for all 7 metered providers." },
+      { kind: "added", text: "9 endpoints under /api/admin/agents — the first readers of the agent_runs ledger." },
+      { kind: "added", text: "agent-registry.ts — all 27 execution surfaces declared once; the denominator that stops an empty queue reading as a healthy one." },
+      { kind: "changed", text: "Instrumentation went from 1 writer to 12; AI spend attributes to its run via AsyncLocalStorage, leaving ~130 env.AI.run call sites untouched." },
+      { kind: "migration", text: "0123_stormy_sersi — gemini_usage_log.agent_run_id + index (additive, nullable, applied and verified on remote)." },
+    ],
+    migrations: ["0123_stormy_sersi"],
+    status: "shipped",
+  },
   {
     id: "markdown-mermaid-render",
     branch: "claude/markdown-mermaid",
