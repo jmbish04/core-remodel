@@ -1,5 +1,6 @@
 import { ArrowLeft, Home, LogOut, Menu, Settings } from "lucide-react";
 import { useEffect, useState } from "react";
+import { HealthStatusBadge } from "@/components/health/HealthStatusBadge";
 import { Icons } from "@/components/Icons";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -243,18 +244,19 @@ export function AdminSidebar({ currentPath: currentPathProp }: { currentPath?: s
           {siteConfig.name}
         </a>
 
-        <a
-          href="/admin/config"
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Configuration"
-          className={cn(
-            buttonVariants({ variant: "ghost", size: "icon-sm" }),
-            "ml-auto shrink-0",
-          )}
-        >
-          <Settings className="size-4" />
-        </a>
+        <div className="ml-auto flex shrink-0 items-center gap-1">
+          {/* Same health pip as the desktop header — mobile gets it too. */}
+          <HealthStatusBadge />
+          <a
+            href="/admin/config"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Configuration"
+            className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "shrink-0")}
+          >
+            <Settings className="size-4" />
+          </a>
+        </div>
       </div>
 
       {/* iOS-safe mobile nav slide-over */}

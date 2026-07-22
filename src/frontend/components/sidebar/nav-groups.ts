@@ -126,6 +126,8 @@ export const NAV_GROUPS: NavGroupDef[] = [
       { href: "/admin/system/agents/failed", label: "Agent Failures" },
       { href: "/admin/system/agents/usage", label: "Agent Cost" },
       { href: "/admin/mcp-ops", label: "MCP Ops" },
+      // Every backend module's self-declared probes, run on demand.
+      { href: "/admin/health", label: "System Health" },
       { href: "/admin/integrations/usage", label: "Integrations Usage" },
       // Config is reached via the cog wheel in the top header (opens /admin/config
       // in its own tab with the dedicated config sidebar) — not a sidebar item.

@@ -12,6 +12,7 @@
  */
 import { Settings } from "lucide-react";
 
+import { HealthStatusBadge } from "@/components/health/HealthStatusBadge";
 import { buttonVariants } from "@/components/ui/button";
 import { siteConfig } from "@/lib/config";
 import { cn } from "@/lib/utils";
@@ -25,16 +26,20 @@ export function AppHeader() {
       >
         {siteConfig.name}
       </a>
-      <a
-        href="/admin/config"
-        target="_blank"
-        rel="noopener noreferrer"
-        aria-label="Configuration"
-        title="Configuration"
-        className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "shrink-0")}
-      >
-        <Settings className="size-5" />
-      </a>
+      <div className="flex items-center gap-1">
+        {/* Last known health, one pip wide — click to the full dashboard. */}
+        <HealthStatusBadge />
+        <a
+          href="/admin/config"
+          target="_blank"
+          rel="noopener noreferrer"
+          aria-label="Configuration"
+          title="Configuration"
+          className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }), "shrink-0")}
+        >
+          <Settings className="size-5" />
+        </a>
+      </div>
     </header>
   );
 }
