@@ -80,6 +80,32 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "markdown-mermaid-render": {
+    slug: "markdown-mermaid-render",
+    branch: "claude/markdown-mermaid",
+    prNumber: 187,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/187",
+    problem:
+      "AGENTS.md now mandates that planning artifacts be dense with Mermaid diagrams, and the preview-changelog PRD is authored with ```mermaid fences. But the renderer behind it — MarkdownProse (react-markdown) — mapped fenced code blocks to a plain styled <pre><code>, so every diagram showed as its raw source text. The changelog DETAIL page already rendered diagrams (via MermaidCn), but the proposal/preview PRD did not.",
+    approach:
+      "Override MarkdownProse's `pre` renderer: when the fenced block's <code> carries class `language-mermaid`, flatten its text and render <MermaidCn code={…} /> — the same client renderer the changelog detail page uses — instead of the code block. Non-mermaid fences render unchanged. Both mermaid components dynamic-import `mermaid`, so importing MermaidCn stays SSR-safe; the SVG paints on the client wherever MarkdownProse is hydrated (the preview mounts ProposalBundle with client:load). One change fixes every MarkdownProse surface (research, brands, products, changelog, mcp-ops).",
+    apiChanges: [],
+    filesTouched: ["src/frontend/components/research/MarkdownProse.tsx"],
+    migrations: [],
+    code: [],
+    diagrams: [
+      {
+        caption: "Where a fenced mermaid block gets turned into a diagram",
+        code: "flowchart LR\n    MD[\"prdMarkdown / any markdown\"] --> RM[\"ReactMarkdown\"]\n    RM --> PRE{\"pre block:\\nlanguage-mermaid?\"}\n    PRE -->|no| CODE[\"styled pre/code block\"]\n    PRE -->|yes| MC[\"MermaidCn -> import('mermaid') -> SVG\"]",
+      },
+    ],
+    verification: {
+      qcScript: "(none — client-only render change)",
+      command: "open /admin/changelog/preview/tesla-telemetry-webhooks",
+      output:
+        "tsc --noEmit clean on the touched file (4 pre-existing repo-wide env/config errors only). Visual: the diagram-dense 0023 preview changelog renders diagrams instead of raw ```mermaid code. Pure client-render change; no API/QC-script surface.",
+    },
+  },
   "maps-per-api-quota-hardblock": {
     slug: "maps-per-api-quota-hardblock",
     branch: "claude/tesla-google-quota",

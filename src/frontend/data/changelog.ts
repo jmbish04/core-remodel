@@ -43,6 +43,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/markdown-mermaid",
+    title: "Render mermaid diagrams in markdown (not raw code)",
+    summary:
+      "The preview-changelog PRD — and every MarkdownProse surface — showed ```mermaid blocks as raw code instead of rendered diagrams. MarkdownProse now renders mermaid fences through the same client renderer the changelog detail page uses, so the diagram-dense plans the AGENTS.md rule mandates are actually readable.",
+    date: "2026-07-21",
+    status: "staged",
+    prNumber: 187,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/187",
+  },
+  {
     branch: "claude/tesla-google-quota",
     title: "Per-API Google Maps quota hard-block",
     summary:
@@ -152,6 +162,21 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "markdown-mermaid-render",
+    branch: "claude/markdown-mermaid",
+    date: "2026-07-21",
+    tag: "UI",
+    area: "Changelog / Markdown",
+    title: "Mermaid diagrams render everywhere markdown does",
+    summary:
+      "Plans and preview changelogs are supposed to be dense with Mermaid diagrams — but the markdown renderer showed the raw ```mermaid code instead of the picture. It now renders the diagram, on every markdown surface at once.",
+    status: "staged",
+    changes: [
+      { kind: "fixed", text: "MarkdownProse's `pre` renderer detects a `language-mermaid` code fence and renders it via MermaidCn (the changelog detail page's renderer) instead of raw code — so the diagram-dense preview-changelog PRD actually shows diagrams." },
+      { kind: "changed", text: "Fixes every MarkdownProse surface at once (research, brands, products, changelog, mcp-ops). SSR-safe — mermaid is dynamic-imported; the diagram paints client-side where MarkdownProse is hydrated (the preview mounts the proposal bundle client:load)." },
+    ],
+  },
   {
     id: "maps-per-api-quota-hardblock",
     branch: "claude/tesla-google-quota",
