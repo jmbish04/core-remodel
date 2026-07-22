@@ -402,6 +402,41 @@ atomicity you do not have — see `images.ts` and `wishlist.ts` for the shape.
 A read between writes is likewise outside the atomic unit. Say so in a comment;
 do not pretend the batch covers it.
 
+## D1 caps a statement at 100 bound parameters — CHUNK unbounded lists (MANDATORY)
+
+**D1 rejects any single statement with more than 100 bound values:**
+`D1_ERROR: too many SQL variables at offset <n>: SQLITE_ERROR`. The offset is a
+character position in the generated SQL, so it points *into the VALUES list*, not
+at a named column — easy to misread as a schema problem.
+
+It bites two shapes, both where the list length is not yours to control:
+
+- a multi-row insert — `db.insert(t).values(bigArray.map(...))` — where
+  `rows × columns_per_row` exceeds 100 (a 5-column row caps at ~20 rows);
+- an `inArray(col, list)` / big `IN (...)` over a list you did not bound.
+
+The danger is that it only fails at real scale, and the throw usually surfaces
+far from the query — a whole Workflow, upload, or batch job fails with the error
+stashed in some `*_error` column — so it reads like an unrelated outage. It cost
+us the image-upload pipeline once: a photo that produced ~25 AI tags blew the cap
+and failed every upload silently (see `image-processor/service.ts`,
+`replaceAiPrefillTagMappings`).
+
+**Chunk before you write or query anything whose length you don't control.** 20
+rows per statement is a safe default for typical rows; size down for wider rows.
+This composes with the `db.batch()` rule above — chunk, then batch each chunk.
+
+```ts
+function chunk<T>(values: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < values.length; i += size) out.push(values.slice(i, i + size));
+  return out;
+}
+for (const part of chunk(rows, 20)) {
+  await db.insert(t).values(part).onConflictDoNothing().run();
+}
+```
+
 ## Foreign keys, never denormalized name columns (MANDATORY)
 
 **This is a relational database. Relate to a row by its id and JOIN for the

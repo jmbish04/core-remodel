@@ -23,6 +23,7 @@ import {
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { advanceEmailLoopback } from "./email-loopback";
 import { ALL_HEALTH_PROBES, HEALTH_MODULE_GROUPS, PROBE_GROUP_BY_NAME } from "./probes";
 import type { HealthProbe, HealthResult } from "./types";
 
@@ -276,6 +277,21 @@ export async function runHealthSession(
   } catch (e) {
     console.error("[health/run] catalogue sync failed:", e);
     defIdByName = new Map();
+  }
+
+  // Advance the email round-trip BEFORE probing, so the two loopback probes
+  // read the state this run just moved. Never on the per-minute cron (nothing
+  // there calls this) — only human/MCP/API screens send mail. Time-boxed and
+  // swallowed: a slow Gmail call must not delay or sink the whole session.
+  if (triggeredBy !== "cron") {
+    try {
+      await Promise.race([
+        advanceEmailLoopback(env),
+        new Promise((resolve) => setTimeout(resolve, 15_000)),
+      ]);
+    } catch (e) {
+      console.error("[health/run] email loopback advance failed:", e);
+    }
   }
 
   const runs = await Promise.all(ALL_HEALTH_PROBES.map((p) => runProbe(p, env)));
