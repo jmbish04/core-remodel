@@ -52,6 +52,17 @@ export const NAV_GROUPS: NavGroupDef[] = [
     ],
   },
   {
+    id: "system",
+    label: "System",
+    admin: true,
+    items: [
+      { href: "/admin/system/health", label: "Health" },
+      { href: "/admin/system/audit", label: "Audit Log" },
+      { href: "/admin/system/logs", label: "Logs" },
+      { href: "/admin/system/integration/usage", label: "Integration Usage" },
+    ],
+  },
+  {
     id: "shopping",
     label: "Shopping & Sourcing",
     admin: true,

@@ -69,6 +69,14 @@ export const brands = sqliteTable("brands", {
    * when a newly-discovered brand is first inserted. Nullable — not all brands
    * have enough public signal to classify.
    */
+  /**
+   * Soft delete. A duplicate brand is deactivated, never DELETEd: every FK into
+   * `brands` is ON DELETE CASCADE, so removing the row would take its showroom
+   * mappings, type mappings, product links and intel with it. Deactivating
+   * hides it from every list while the merge repoints those rows.
+   */
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+
   pricePoint: text("price_point"),
 
   createdAt: integer("created_at", { mode: "timestamp" })

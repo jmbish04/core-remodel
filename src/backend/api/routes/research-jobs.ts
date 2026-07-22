@@ -567,7 +567,11 @@ researchJobsRouter.openapi(
         const [existing] = await db
           .select({ id: brands.id, name: brands.name })
           .from(brands)
-          .where(sql`lower(${brands.name}) = ${lower}`)
+          .where(
+        sql`lower(${brands.name}) = ${lower} OR ${brands.id} IN (
+              SELECT brand_id FROM brand_name_variations
+               WHERE is_active = 1 AND lower(trim(brand_name)) = ${lower})`,
+      )
           .limit(1);
         if (existing) {
           await persistCandidate({
@@ -616,7 +620,11 @@ researchJobsRouter.openapi(
           const [existingBrand] = await db
             .select({ id: brands.id })
             .from(brands)
-            .where(sql`lower(${brands.name}) = ${lower}`)
+            .where(
+        sql`lower(${brands.name}) = ${lower} OR ${brands.id} IN (
+              SELECT brand_id FROM brand_name_variations
+               WHERE is_active = 1 AND lower(trim(brand_name)) = ${lower})`,
+      )
             .limit(1);
           if (existingBrand) {
             brandId = existingBrand.id;

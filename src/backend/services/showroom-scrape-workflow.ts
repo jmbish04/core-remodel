@@ -1050,7 +1050,11 @@ async function upsertBrandMapping(
       websiteUrl: brands.websiteUrl,
     })
     .from(brands)
-    .where(sql`lower(${brands.name}) = lower(${name})`)
+    .where(
+        sql`lower(${brands.name}) = lower(${name}) OR ${brands.id} IN (
+              SELECT brand_id FROM brand_name_variations
+               WHERE is_active = 1 AND lower(trim(brand_name)) = lower(${name}))`,
+      )
     .limit(1);
 
   let brandId: number;

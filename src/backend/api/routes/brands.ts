@@ -24,15 +24,19 @@
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { drizzle } from "drizzle-orm/d1";
+import type { SQLiteTable } from "drizzle-orm/sqlite-core";
 import { eq, and, or, isNull, inArray, like, desc, ne, sql } from "drizzle-orm";
 
 import { brands } from "@backend/db/schema/brands/brands";
+import { brandNameVariations } from "@backend/db/schema/brands/brand_name_variations";
+import { setPrimaryBrandName } from "@backend/services/brand-names";
 import { brandTypesDef } from "@backend/db/schema/brands/brand_types_def";
 import { brandTypeMappings } from "@backend/db/schema/brands/brand_type_mappings";
 import { showroomBrandMappings } from "@backend/db/schema/brands/showroom_brand_mappings";
 import { brandIntel } from "@backend/db/schema/brands/brand_intel";
 import { brandImages } from "@backend/db/schema/brands/brand_images";
 import { brandProductLines } from "@backend/db/schema/brands/brand_product_lines";
+import { brandCategories } from "@backend/db/schema/config/brand_categories";
 import { showroomStoreProducts } from "@backend/db/schema/showroom/store_products";
 import { showroomProductMappings } from "@backend/db/schema/showroom/product_mappings";
 import { showroomStores } from "@backend/db/schema/showroom/stores";
@@ -148,6 +152,17 @@ const brandSchema = z.object({
  */
 const brandListItemSchema = brandSchema.extend({
   productCount: z.number(),
+  /**
+   * Display name — the `is_primary` row in `brand_name_variations`, falling
+   * back to `brands.name` for rows predating that table.
+   */
+  primaryName: z.string(),
+  /**
+   * Every other active spelling this brand is known by. Served alongside the
+   * brand so consumers match on the full alias set rather than one name —
+   * which is what stops a differently-spelled sighting forking a new brand.
+   */
+  nameVariations: z.array(z.string()),
   types: z
     .array(
       z.object({
@@ -349,11 +364,26 @@ brandsRouter.openapi(
       brandRows = await db
         .select()
         .from(brands)
-        .where(like(brands.name, `%${search}%`))
+        .where(
+          and(
+            // Retired duplicates are soft-deleted, not removed — they must not
+            // come back as list entries or as search hits.
+            eq(brands.isActive, true),
+            or(
+              like(brands.name, `%${search}%`),
+              sql`${brands.id} IN (SELECT brand_id FROM brand_name_variations
+                 WHERE is_active = 1 AND brand_name LIKE ${'%' + search + '%'})`,
+            ),
+          ),
+        )
         .orderBy(brands.name)
         .limit(20);
     } else {
-      brandRows = await db.select().from(brands).orderBy(brands.name);
+      brandRows = await db
+        .select()
+        .from(brands)
+        .where(eq(brands.isActive, true))
+        .orderBy(brands.name);
     }
 
     if (brandRows.length === 0) {
@@ -380,6 +410,25 @@ brandsRouter.openapi(
       .where(scopeToBrandIds ? inArray(showroomStoreProducts.brandId, brandIds) : undefined)
       .groupBy(showroomStoreProducts.brandId);
 
+    // Names come from brand_name_variations: the is_primary row is the display
+    // name, the rest ride along as aliases. One query for the whole page — not
+    // per brand — mirroring the productCount aggregate below.
+    const variationRows = await db
+      .select({
+        brandId: brandNameVariations.brandId,
+        brandName: brandNameVariations.brandName,
+        isPrimary: brandNameVariations.isPrimary,
+      })
+      .from(brandNameVariations)
+      .where(eq(brandNameVariations.isActive, true));
+
+    const primaryNameMap = new Map<number, string>();
+    const variationMap = new Map<number, string[]>();
+    for (const row of variationRows) {
+      if (row.isPrimary) primaryNameMap.set(row.brandId, row.brandName);
+      else variationMap.set(row.brandId, [...(variationMap.get(row.brandId) ?? []), row.brandName]);
+    }
+
     const productCountMap = new Map<number, number>();
     for (const r of productCountRows) {
       if (r.brandId !== null) {
@@ -392,6 +441,8 @@ brandsRouter.openapi(
       const enriched = brandRows.map((b) => ({
         ...b,
         productCount: productCountMap.get(b.id) ?? 0,
+        primaryName: primaryNameMap.get(b.id) ?? b.name,
+        nameVariations: variationMap.get(b.id) ?? [],
       }));
       return c.json({ brands: enriched });
     }
@@ -419,6 +470,8 @@ brandsRouter.openapi(
       ...b,
       productCount: productCountMap.get(b.id) ?? 0,
       types: typesMap.get(b.id) ?? [],
+      primaryName: primaryNameMap.get(b.id) ?? b.name,
+      nameVariations: variationMap.get(b.id) ?? [],
     }));
 
     return c.json({ brands: enriched });
@@ -446,6 +499,243 @@ brandsRouter.openapi(
  * JSON string type mismatch that the strict `RouteConfigToTypedResponse` check
  * enforces — consistent with the original pattern in this file.
  */
+/**
+ * GET /health — duplicate-brand detector for the brands page.
+ *
+ * Surfaces groups of DISTINCT brand ids that look like the same company, so a
+ * duplicate is caught the moment it appears rather than after it has spent
+ * months splitting a brand's showroom mappings in half.
+ *
+ * Three independent signals, each a normalised EXACT comparison rather than
+ * fuzzy scoring — a false "these are duplicates" prompt costs trust, and a
+ * merge is hard to undo:
+ *   name    lowercased, punctuation and corporate suffixes stripped. Catches
+ *           "NEWPORTBRASS" vs "Newport Brass".
+ *   domain  registrable domain from website_url, scheme/www/trailing-slash
+ *           stripped. REPORTED but never auto-merged: one company publishes many
+ *           distinct brands on one site (Silestone and Dekton are both
+ *           cosentino.com), so this is a question, not a verdict.
+ *   logo    identical icon_cf_images_url — two rows sharing an uploaded logo are
+ *           almost always the same brand.
+ *
+ * Matching runs over `brand_name_variations`, so a duplicate is found through
+ * ANY spelling either row is known by, not just its display name.
+ *
+ * Only `is_active` brands are considered: a merged-away row is retired, not
+ * deleted, and must not keep reappearing as a duplicate of its survivor.
+ */
+brandsRouter.get("/health", async (c) => {
+  const db = drizzle(c.env.DB);
+
+  // ALL brands, retired included. A duplicate group is only resolved when
+  // exactly one of its members is still active, and that is unknowable if the
+  // retired ones are filtered out before grouping.
+  const rows = await db
+    .select({
+      id: brands.id,
+      name: brands.name,
+      websiteUrl: brands.websiteUrl,
+      iconUrl: brands.iconCfImagesUrl,
+      isActive: brands.isActive,
+    })
+    .from(brands);
+
+  const variationRows = await db
+    .select({
+      brandId: brandNameVariations.brandId,
+      brandName: brandNameVariations.brandName,
+    })
+    .from(brandNameVariations);
+
+  const aliases = new Map<number, string[]>();
+  for (const v of variationRows) {
+    aliases.set(v.brandId, [...(aliases.get(v.brandId) ?? []), v.brandName]);
+  }
+
+  // ── Orphan scan ──────────────────────────────────────────────────────────
+  // A retired brand must hold NO rows in any table keyed on brand_id: the merge
+  // repoints them to the survivor before flagging is_active=0. Anything left is
+  // an interrupted or hand-rolled merge, and it is invisible without this check
+  // because the rows still resolve — they just point at a brand nobody lists.
+  //
+  // Every table with a brand_id FK is scanned. Adding a new one and forgetting
+  // it here would silently shrink this check, so the list is asserted against
+  // the live schema in scripts/qc/pr_169.mjs.
+  const retiredIds = rows.filter((r) => !r.isActive).map((r) => r.id);
+  const orphansByBrand = new Map<number, Record<string, number>>();
+  let orphanedRowTotal = 0;
+
+  if (retiredIds.length > 0) {
+    const FK_TABLES: Array<[string, SQLiteTable]> = [
+      ["showroom_store_products", showroomStoreProducts],
+      ["brand_categories", brandCategories],
+      ["brand_images", brandImages],
+      ["brand_intel", brandIntel],
+      ["brand_product_lines", brandProductLines],
+      ["brand_type_mappings", brandTypeMappings],
+      ["showroom_brand_mappings", showroomBrandMappings],
+      ["brand_name_variations", brandNameVariations],
+    ];
+
+    for (const [label, table] of FK_TABLES) {
+      const counts = await db
+        .select({
+          brandId: sql<number>`brand_id`,
+          n: sql<number>`count(*)`,
+        })
+        .from(table)
+        .where(inArray(sql`brand_id`, retiredIds))
+        .groupBy(sql`brand_id`);
+
+      for (const row of counts) {
+        if (!row.n) continue;
+        orphanedRowTotal += row.n;
+        const entry = orphansByBrand.get(row.brandId) ?? {};
+        entry[label] = row.n;
+        orphansByBrand.set(row.brandId, entry);
+      }
+    }
+  }
+
+  const nameKey = (n: string | null) =>
+    String(n ?? "")
+      .toLowerCase()
+      .replace(/\(.*?\)/g, "")
+      .replace(/\b(inc|llc|ltd|corp|company|usa|group|the)\b/g, "")
+      .replace(/[^a-z0-9]/g, "");
+
+  const domainKey = (u: string | null) => {
+    if (!u) return "";
+    const host = String(u)
+      .replace(/^https?:\/\//i, "")
+      .replace(/^www\./i, "")
+      .split("/")[0]
+      .toLowerCase()
+      .replace(/\/$/, "");
+    const parts = host.split(".");
+    return parts.length >= 2 ? parts.slice(-2).join(".") : host;
+  };
+
+  type GroupBrand = {
+    id: number;
+    name: string;
+    websiteUrl: string | null;
+    isActive: boolean;
+    variations: string[];
+    /** FK rows still pointing here, per table. Only counted for retired brands. */
+    orphanedMappings?: Record<string, number>;
+  };
+
+  type Group = {
+    signal: "name" | "domain" | "logo";
+    key: string;
+    autoMergeSafe: boolean;
+    activeCount: number;
+    retiredCount: number;
+    /**
+     * More than one active member means the duplicate is UNRESOLVED — the
+     * group is still splitting its data across live rows.
+     */
+    unresolved: boolean;
+    brands: GroupBrand[];
+  };
+
+  const group = (
+    signal: Group["signal"],
+    keyOf: (r: (typeof rows)[number]) => string,
+    autoMergeSafe: boolean,
+  ): Group[] => {
+    const buckets = new Map<string, typeof rows>();
+    for (const r of rows) {
+      // A brand matches on ANY of its spellings, not just the display name.
+      const keys =
+        signal === "name"
+          ? new Set([keyOf(r), ...(aliases.get(r.id) ?? []).map((a) => nameKey(a))])
+          : new Set([keyOf(r)]);
+      for (const k of keys) {
+        if (!k) continue;
+        buckets.set(k, [...(buckets.get(k) ?? []), r]);
+      }
+    }
+    return [...buckets.entries()]
+      .filter(([, list]) => new Set(list.map((b) => b.id)).size > 1)
+      .map(([key, list]) => {
+        const members = [...new Map(list.map((b) => [b.id, b])).values()];
+        const activeCount = members.filter((b) => b.isActive).length;
+        return {
+          signal,
+          key,
+          autoMergeSafe,
+          activeCount,
+          retiredCount: members.length - activeCount,
+          // Only a NAME group can be "unresolved": two active brands sharing a
+          // domain or a logo is a review candidate, not a defect.
+          unresolved: autoMergeSafe && activeCount > 1,
+          brands: members.map((b) => ({
+            id: b.id,
+            name: b.name,
+            websiteUrl: b.websiteUrl,
+            isActive: Boolean(b.isActive),
+            variations: aliases.get(b.id) ?? [],
+            ...(b.isActive ? {} : { orphanedMappings: orphansByBrand.get(b.id) ?? {} }),
+          })),
+        };
+      });
+  };
+
+  const groups = [
+    ...group("name", (r) => nameKey(r.name), true),
+    ...group("domain", (r) => domainKey(r.websiteUrl), false),
+    ...group("logo", (r) => (r.iconUrl ?? "").trim(), false),
+  ];
+
+  // A brand with no primary variation would render nameless once readers move
+  // off `brands.name`, so it is a health problem in its own right.
+  // Retired brands legitimately hold no variations — the merge moved them to
+  // the survivor — so only ACTIVE brands can be "missing" a name.
+  const missingPrimary = rows.filter(
+    (r) => r.isActive && !(aliases.get(r.id) ?? []).length,
+  );
+
+  const unresolved = groups.filter((g) => g.unresolved);
+
+  return c.json({
+    activeBrands: rows.filter((r) => r.isActive).length,
+    retiredBrands: retiredIds.length,
+    duplicateGroups: groups,
+    /** Retired brands still referenced by other tables — should always be empty. */
+    retiredBrandsWithMappings: [...orphansByBrand.entries()].map(([brandId, tables]) => ({
+      brandId,
+      name: rows.find((r) => r.id === brandId)?.name ?? null,
+      tables,
+      total: Object.values(tables).reduce((a, b) => a + b, 0),
+    })),
+    counts: {
+      /** Name groups with >1 ACTIVE member — a live duplicate. Resolved pairs
+       *  (one active survivor + retired losers) are history, not a defect. */
+      byName: groups.filter((g) => g.signal === "name" && g.activeCount > 1).length,
+      /** Name groups already merged — reported so the history stays visible. */
+      resolvedNameGroups: groups.filter(
+        (g) => g.signal === "name" && g.activeCount <= 1,
+      ).length,
+      byDomain: groups.filter((g) => g.signal === "domain").length,
+      byLogo: groups.filter((g) => g.signal === "logo").length,
+      missingPrimaryName: missingPrimary.length,
+      /** Groups with >1 active member — the duplicate is still live. */
+      unresolvedDuplicateGroups: unresolved.length,
+      /** Retired brands still holding FK rows, and how many rows in total. */
+      retiredBrandsWithMappings: orphansByBrand.size,
+      orphanedMappingRows: orphanedRowTotal,
+    },
+    // "Healthy" deliberately ignores domain/logo groups: those are review
+    // candidates, not defects (Silestone and Dekton share a domain and are
+    // different brands). Only a live duplicate, an orphaned mapping or a
+    // nameless brand is an actual problem.
+    healthy:
+      unresolved.length === 0 && orphansByBrand.size === 0 && missingPrimary.length === 0,
+  });
+});
+
 brandsRouter.get("/:id", async (c) => {
     const db = drizzle(c.env.DB);
     const brandId = Number(c.req.param("id"));
@@ -676,6 +966,11 @@ brandsRouter.openapi(
 
     try {
       const [inserted] = await db.insert(brands).values(brandValues).returning();
+
+      // Seed the primary name variation. Without it the brand has no
+      // `is_primary` row, so it is invisible to alias lookups and renders
+      // nameless once readers move off `brands.name`.
+      await setPrimaryBrandName(db, inserted.id, inserted.name);
 
       // Insert brand type mappings when typeIds provided — dedupe + batch.
       if (typeIds && typeIds.length > 0) {

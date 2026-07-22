@@ -58,6 +58,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { HealthBadge } from "@/components/system/HealthBadge";
 import {
   Dialog,
   DialogContent,
@@ -841,10 +842,16 @@ export function BrandsDirectoryApp() {
             Brand directory grouped by category, with auto-scraped icons, ratings, and product counts.
           </p>
         </div>
-        <Button size="sm" className="gap-1.5" onClick={openCreate}>
-          <Plus className="size-3.5" />
-          New Brand
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Data-quality status for this vertical, from the same endpoint the
+              system health page reads. Clicking through goes to the full list
+              of checks. */}
+          <HealthBadge title="Brands Data Quality" vertical="brands" />
+          <Button size="sm" className="gap-1.5" onClick={openCreate}>
+            <Plus className="size-3.5" />
+            New Brand
+          </Button>
+        </div>
       </div>
 
       {/* Controls */}
