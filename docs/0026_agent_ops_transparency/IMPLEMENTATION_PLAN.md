@@ -24,7 +24,7 @@ in this plan hangs off closing that gap.
 
 ## 1. Instrumentation coverage map
 
-24 surfaces. Ordered by value = (blast radius × failure rate × cost).
+27 surfaces. Ordered by value = (blast radius × failure rate × cost).
 
 ```mermaid
 graph LR
@@ -219,7 +219,7 @@ classDiagram
         +POST /runs/:id/approve   ~needs_approval → running~
         +GET  /failures  ~grouped by error_code~
         +GET  /usage     ~by agent, provider, model, day~
-        +GET  /coverage  ~which of 24 surfaces are wired~
+        +GET  /coverage  ~which of 27 surfaces are wired~
     }
     class AgentRunsService {
         <<services/agent-runs.ts · EXISTS>>
@@ -242,7 +242,7 @@ classDiagram
         <<services/agent-registry.ts · NEW>>
         +AGENT_SURFACES: SurfaceDef[]
         +surfaceOf(agent) workflow|durable-object|cron|mcp
-        ~the 24 surfaces, declared once~
+        ~the 27 surfaces, declared once~
     }
     class Metering {
         <<services/usage/metering.ts · EXISTS>>
@@ -350,7 +350,7 @@ Each phase = one PR, one QC script, one changelog entry. Task keys match the
 Close the writer gap. No UI. Value lands immediately because the ledger starts
 filling.
 
-- `P0-INST-01` `agent-registry.ts` — declare all 24 surfaces once (slug,
+- `P0-INST-01` `agent-registry.ts` — declare all 27 surfaces once (slug,
   display name, surface kind, expected cadence). Coverage + labels read from it.
 - `P0-INST-02..07` — wrap the six highest-value surfaces (brand research,
   product research, image processing, showroom backfill queue task,

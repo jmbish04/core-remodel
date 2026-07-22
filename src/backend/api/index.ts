@@ -93,6 +93,7 @@ import { researchJobsRouter } from "./routes/research-jobs";
 import { placesRouter } from "./routes/places";
 import { adminIntegrationsRouter } from "./routes/admin-integrations";
 import { adminPlansRouter } from "./routes/admin-plans";
+import { adminAgentsRouter } from "./routes/admin-agents";
 import { clickupRouter } from "./routes/clickup";
 import { companyCrmRouter } from "./routes/company-crm";
 import { notesSharedRouter } from "./routes/notes-shared";
@@ -301,6 +302,9 @@ app.route("/api/places", placesRouter);
 // by the /api/admin/* requireAccessAuth middleware above.
 app.route("/api/admin/integrations", adminIntegrationsRouter);
 app.route("/api/admin/plans", adminPlansRouter);
+// Agent Ops — the first readers of the agent_runs ledger. Inherits
+// requireAccessAuth from the /api/admin/* middleware registered above.
+app.route("/api/admin/agents", adminAgentsRouter);
 app.route("/api/clickup", clickupRouter);
 app.route("/api/companies", companyCrmRouter);
 app.route("/api/notes", notesSharedRouter);

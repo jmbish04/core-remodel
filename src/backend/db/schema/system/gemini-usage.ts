@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { index, sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
 import { randomUUID } from "node:crypto";
 
 /**
@@ -85,7 +85,27 @@ export const geminiUsage = sqliteTable("gemini_usage_log", {
 
   /** Small JSON blob of call metadata (model, feature, input sizes) for audit. */
   requestMeta: text("request_meta", { mode: "json" }),
-});
+
+  /**
+   * The `agent_runs.id` this call belongs to, when it was made inside an
+   * instrumented agent run.
+   *
+   * Deliberately NOT a foreign key: the run ledger is pruned on a retention
+   * schedule (30d settled / 90d failed) while this usage log is append-only and
+   * never deleted, so a real FK with cascade would silently destroy spend
+   * history every time a run aged out. A dangling id renders as
+   * "(unattributed)" — the correct outcome.
+   *
+   * Nullable because most calls still happen outside a run, and because a
+   * backfill of historic rows is impossible: nothing recorded the association
+   * at the time.
+   */
+  agentRunId: integer("agent_run_id"),
+}, (t) => ({
+  // Powers the cost-by-agent join on /admin/system/agents/usage without
+  // scanning an append-only table that only ever grows.
+  agentRunIdx: index("gemini_usage_log_agent_run_idx").on(t.agentRunId),
+}));
 
 // ── Table-level metadata ──────────────────────────────────────────────────────
 
@@ -107,6 +127,8 @@ export const GEMINI_USAGE_COLUMN_DESCRIPTIONS: Record<string, string> = {
   estimated_cost_usd: "Optional pre-computed USD cost estimate. Nullable.",
   error_message: "Error message when status='error'. Nullable.",
   request_meta: "Small JSON blob of call metadata for audit. Nullable.",
+  agent_run_id:
+    "agent_runs.id this call belongs to, when made inside an instrumented run. Nullable, not a FK (the run ledger is pruned, this log is not).",
 };
 
 // ── TypeScript inferred types ─────────────────────────────────────────────────

@@ -9,7 +9,7 @@
 
 ## 1. Problem
 
-This Worker runs **24 distinct autonomous execution surfaces** — 15 Durable
+This Worker runs **27 distinct autonomous execution surfaces** — 15 Durable
 Object agents, 9 Cloudflare Workflows, 4 cron triggers, an MCP server, and an
 Agents-SDK task queue. Every one of them can fail. None of them can be watched.
 
@@ -169,7 +169,7 @@ rots the first time a caller spells `feature` differently.
 
 | Risk | Mitigation |
 |---|---|
-| Instrumenting 24 surfaces is a huge diff | Phased. P0 covers the 6 highest-value surfaces; the rest is mechanical and lands per-phase. |
+| Instrumenting 27 surfaces is a huge diff | Phased. P0 covers the 6 highest-value surfaces; the rest is mechanical and lands per-phase. |
 | Ledger writes slow down or break real work | Already solved: `startRun` never throws, returns a `nullRecorder` on failure (`agent-runs.ts:81-103`). Do not weaken this. |
 | `agent_runs` grows unbounded | Retention sweep in the existing `* * * * *` cron; runs older than 30d pruned, `failed` kept 90d. |
 | D1 has no transactions | All multi-row writes via `db.batch()`. Never `db.transaction()` — it is a dead endpoint on D1. |

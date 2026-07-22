@@ -37,6 +37,7 @@ import { drizzle } from "drizzle-orm/d1";
 import { eq } from "drizzle-orm";
 
 import { errorCodeOf, messageOf, safeJson } from "./agent-run-format";
+import { withAgentRunContext } from "./agent-run-context";
 
 export { errorCodeOf, safeJson } from "./agent-run-format";
 
@@ -176,7 +177,11 @@ export async function startRun(env: Env, input: StartRunInput): Promise<RunRecor
       };
 
       try {
-        const result = await fn(scoped);
+        // Bind the run/step to this callback's async chain so any AI call made
+        // inside it attributes its spend without the call site knowing about
+        // the ledger at all. See agent-run-context.ts for why this is an
+        // AsyncLocalStorage and not a module-level variable.
+        const result = await withAgentRunContext({ runId, stepId }, () => fn(scoped));
         if (stepId !== null) {
           const endedAt = new Date();
           await db
@@ -210,7 +215,9 @@ export async function startRun(env: Env, input: StartRunInput): Promise<RunRecor
     },
 
     async tool(name, args, fn) {
-      return recordTool(name, args, fn, null);
+      return withAgentRunContext({ runId, stepId: null }, () =>
+        recordTool(name, args, fn, null),
+      );
     },
 
     succeed: (output) => finish("succeeded", { output }),
