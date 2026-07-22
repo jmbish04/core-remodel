@@ -191,6 +191,58 @@ You are an elite Senior Engineer operating within the Google Antigravity IDE fra
 - **Data Persistence:** Drizzle ORM + D1 Serverless SQL Storage Core
 - **Cognitive Orchestration:** @cloudflare/agents SDK Layer
 
+## Third-party CLIs — read `--help` BEFORE you run it (MANDATORY)
+
+Applies to `shadcn`, `wrangler`, `drizzle-kit`, `npx <anything>` — any CLI that
+writes files or touches infrastructure.
+
+**Every time, in this order:**
+
+1. `<cli> help <subcommand>` (or `--help`). Every time, not once per project —
+   flags and defaults change between versions, and the version here is whatever
+   `npx` resolved today.
+2. **Note what is DEFAULT.** Destructive behaviour is almost always opt-in. If
+   you are passing a flag, you are choosing to leave the safe path, and you own
+   the consequences.
+3. **Use `--dry-run` when it exists.** Read what it says it will do, then run it.
+4. Only then run for real, and `git status` / `git diff --stat` immediately after
+   to see what it ACTUALLY touched, which is routinely more than it announced.
+
+### `shadcn add` — the specific trap
+
+`shadcn add` does NOT limit itself to the component you asked for. It rewrites
+shared primitives to whatever version the registry expects.
+
+On 2026-07-19, `shadcn add --overwrite` for four new pages rewrote **eight**
+existing primitives — button, input, input-group, scroll-area, separator,
+textarea, avatar, badge — 338 insertions / 223 deletions. `button.tsx` became a
+full reimplementation on a different Base UI API with renamed variants and
+sizes; the new `badge.tsx` dropped the `ghost` variant that five live components
+use. It would have broken buttons and badges across the whole app.
+
+```bash
+shadcn add <url> --dry-run      # ALWAYS first — shows every file it will touch
+shadcn add <url>                # -o/--overwrite defaults to FALSE. Leave it that way.
+git diff --stat src/frontend/components/ui/   # then check what it really did
+```
+
+**`--overwrite` is never the right default here.** If a component genuinely
+needs a newer primitive, take the new files, revert the shared ones, and adapt
+the new component to THIS repo's primitives — that is a small, reviewable diff
+instead of an invisible app-wide rewrite. Concretely, this repo's primitives are
+**Base UI, not Radix**: buttons take `render={<a/>}`, not `asChild`, and `Badge`
+has no `size` prop.
+
+**Verify with a diff, not a count.** `tsc --noEmit` here has a large
+pre-existing baseline, so "the number did not change" proves nothing. Stash,
+capture the error list, restore, capture again, and diff the two:
+
+```bash
+npx tsc --noEmit 2>&1 | grep -E "\.tsx?\(" | sort > /tmp/after.txt
+git stash -u && npx tsc --noEmit 2>&1 | grep -E "\.tsx?\(" | sort > /tmp/before.txt
+git stash pop && diff /tmp/before.txt /tmp/after.txt | grep "^>"   # must be empty
+```
+
 ## Page styling — consistent shell for EVERY page (MANDATORY)
 
 Every admin/app page is a **thin Astro shell** mounting one React island, wrapped

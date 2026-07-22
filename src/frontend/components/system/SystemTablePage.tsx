@@ -4,8 +4,7 @@ import { ArrowLeft, Filter, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { TableAuditLogShowcasePage } from "@/components/table-audit-log";
-import { TableLogsShowcasePage } from "@/components/table-logs";
+import { ObservabilityTable } from "@/components/system/ObservabilityTable";
 
 /**
  * Audit / logs viewport, optionally scoped to one health service.
@@ -79,16 +78,8 @@ export function SystemTablePage({
         </Card>
       )}
 
-      {/* NOTE: these registry tables currently render their own bundled sample
-          rows — they are not yet reading `audit_log` / application logs from
-          D1. The page, routing and filter-reset behaviour are real; the DATA is
-          not. Wiring them to live sources is a separate piece of work.
-          Remount on slug change so no filter state leaks between services. */}
-      {kind === "audit" ? (
-        <TableAuditLogShowcasePage key={serviceSlug ?? "all"} />
-      ) : (
-        <TableLogsShowcasePage key={serviceSlug ?? "all"} />
-      )}
+      {/* Remount on slug change so no filter state leaks between services. */}
+      <ObservabilityTable key={serviceSlug ?? "all"} kind={kind} serviceSlug={serviceSlug} />
     </div>
   );
 }
