@@ -57,7 +57,7 @@ export const HEALTH_PROBES: HealthProbe[] = [
     troubleshootingSteps:
       "1. Confirm the binding exists on the LIVE worker: `npx wrangler deployments list` then check `wrangler.jsonc` has the `d1_databases` entry named `DB` with the right `database_id`. 2. Query the DB directly, outside the worker: `npx wrangler d1 execute core-remodel --remote --command \"SELECT 1\"`. If that also fails the fault is D1/account-side, not code. 3. If only the worker fails, the last deploy shipped without the binding — re-run `pnpm run deploy` from `main`. 4. If the query succeeds but is slow, check whether a probe is competing with a large backfill or cron sweep that is holding D1 busy.",
     devOpsPlaybook:
-      "1. This is a hard outage — nothing else on /admin/health matters until it is green. 2. Check the Cloudflare status page for D1 in the account's region before touching code. 3. If the last deploy correlates with onset, roll back: `npx wrangler deployments list`, take the previous version id, `npx wrangler rollback <version-id>`. 4. Once restored, re-run `pnpm run test:pr <n>` for the most recent PR to confirm the API surface recovered.",
+      "1. This is a hard outage — nothing else on /admin/system/health matters until it is green. 2. Check the Cloudflare status page for D1 in the account's region before touching code. 3. If the last deploy correlates with onset, roll back: `npx wrangler deployments list`, take the previous version id, `npx wrangler rollback <version-id>`. 4. Once restored, re-run `pnpm run test:pr <n>` for the most recent PR to confirm the API surface recovered.",
     isBillingRisk: false,
     severity: "HIGH",
     run: async (env) => {

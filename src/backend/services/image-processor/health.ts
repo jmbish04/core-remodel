@@ -100,7 +100,7 @@ export const HEALTH_PROBES: HealthProbe[] = [
     devOpsPlaybook:
       "Credential rotation is the usual cause. After rotating, redeploy — the binding resolves at request time " +
       "but a stale deploy can still reference a deleted secret name. Verify with `npx wrangler deployments list | tail -20` " +
-      "and re-run this probe from /admin/health. If a secret must be replaced urgently, prefer a plain Worker " +
+      "and re-run this probe from /admin/system/health. If a secret must be replaced urgently, prefer a plain Worker " +
       "secret over adding a new secrets_store binding, because the binding form fails the deploy when the secret " +
       "does not yet exist.",
     isBillingRisk: false,

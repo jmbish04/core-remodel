@@ -1,7 +1,7 @@
 /**
  * @fileoverview The header health pip.
  *
- * Deliberately tiny: a coloured dot plus one word, linking to `/admin/health`.
+ * Deliberately tiny: a coloured dot plus one word, linking to `/admin/system/health`.
  * It reads the LAST PERSISTED session (`GET /api/health/badge`) — it never
  * triggers a probe, so putting it in the global header costs one cheap grouped
  * D1 read per page load and nothing else.
@@ -53,7 +53,7 @@ export function HealthStatusBadge({ className }: { className?: string }) {
 
   return (
     <a
-      href="/admin/health"
+      href="/admin/system/health"
       title={
         payload.timestamp
           ? `System health · last run ${new Date(payload.timestamp).toLocaleString()}`

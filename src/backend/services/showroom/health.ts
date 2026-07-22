@@ -125,7 +125,7 @@ export const HEALTH_PROBES: HealthProbe[] = [
     devOpsPlaybook:
       "Fix the writer first, then the data — cleaning up before the bug is fixed just refills the table. " +
       "Any cleanup is a data change: do it deliberately from a migration or an explicit one-off, note the " +
-      "row counts before and after in the changelog entry, and re-run this probe from /admin/health to confirm zero.",
+      "row counts before and after in the changelog entry, and re-run this probe from /admin/system/health to confirm zero.",
     isBillingRisk: false,
     severity: "MEDIUM",
     run: async (env) => {

@@ -9,7 +9,7 @@
  *
  * The probe object is BOTH the executable check and its documentation: the
  * literal fields on it are what get upserted into `health_test_def`, so the
- * runbook a human reads on `/admin/health` is generated from the same object
+ * runbook a human reads on `/admin/system/health` is generated from the same object
  * that ran the test. There is no second place to keep in sync.
  *
  * Cost discipline (this is a Cloudflare Worker and every probe runs on demand):

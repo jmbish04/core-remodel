@@ -99,7 +99,7 @@ export const HEALTH_PROBES: HealthProbe[] = [
       "declares `binding: \"ASSETS\"`. 2. Confirm the build ran: `pnpm run build` and check the output directory " +
       "exists and is non-empty before deploying — `pnpm run deploy` runs build first for this reason. " +
       "3. Redeploy: `pnpm run deploy` from `main`. " +
-      "4. Verify a real page loads: `curl -sI https://core-remodel.hacolby.workers.dev/admin/health`. " +
+      "4. Verify a real page loads: `curl -sI https://core-remodel.hacolby.workers.dev/admin/system/health`. " +
       "5. If pages 404 but the API works, this binding (or an empty assets directory) is the cause.",
     devOpsPlaybook:
       "Deploy fault. Never hand-patch the live worker; fix the config or the build, then `pnpm run deploy` and " +
@@ -211,7 +211,7 @@ export const HEALTH_PROBES: HealthProbe[] = [
     devOpsPlaybook:
       "Low blast radius — the API keeps serving while its documentation is broken — but fix it in the same PR that " +
       "broke it, because a stale or dead spec is how agents start guessing at endpoints. Deploy with " +
-      "`pnpm run deploy` from `main` and re-run this probe from /admin/health.",
+      "`pnpm run deploy` from `main` and re-run this probe from /admin/system/health.",
     isBillingRisk: false,
     severity: "LOW",
     run: async (env) => {
@@ -270,7 +270,7 @@ export const HEALTH_PROBES: HealthProbe[] = [
       "2. Confirm the ids still exist: `npx wrangler kv namespace list`. " +
       "3. If an id is not in that list, the namespace was deleted — recreate it, update the id, and expect the " +
       "cached/session contents to be gone. 4. Redeploy: `pnpm run deploy` from `main`. " +
-      "5. Re-run this probe from https://core-remodel.hacolby.workers.dev/admin/health and tail live traffic with " +
+      "5. Re-run this probe from https://core-remodel.hacolby.workers.dev/admin/system/health and tail live traffic with " +
       "`npx wrangler tail` if requests are still erroring.",
     devOpsPlaybook:
       "Config/deploy fault. Previews share these namespaces by id, so a preview failing here means the config is " +

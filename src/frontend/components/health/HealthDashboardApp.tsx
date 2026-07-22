@@ -1,5 +1,5 @@
 /**
- * @fileoverview `/admin/health` — the health dashboard island.
+ * @fileoverview `/admin/system/health` — the health dashboard island.
  *
  * Shape: a vertical timeline, one section per module group (Storage, API,
  * Durable Objects & Workflows, AI, Cost, Media, Integrations, MCP, Domain data).

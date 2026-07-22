@@ -6,7 +6,7 @@ import { siteUrl } from "../../urls";
 import { defineTool, WRITE } from "../../types";
 
 /**
- * The third trigger for a health session, alongside the `/admin/health` button
+ * The third trigger for a health session, alongside the `/admin/system/health` button
  * and `POST /api/health/session`. Same runner, same `session_uuid` grouping —
  * only `triggered_by` differs, so a chat-initiated run is indistinguishable in
  * the ledger except for its provenance.
@@ -76,7 +76,7 @@ export const runHealthSessionTool = defineTool({
       overall: session.overall,
       counts: session.counts,
       totalDurationMs: session.totalDurationMs,
-      url: siteUrl(env, "/admin/health"),
+      url: siteUrl(env, "/admin/system/health"),
       results,
     };
   },

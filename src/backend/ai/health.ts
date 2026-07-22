@@ -7,7 +7,7 @@
  * presence check, a Secrets Store read, or one aggregate `SELECT` against D1.
  * If you are tempted to add `env.AI.run(...)` here to "really prove it works" —
  * don't. A probe that costs money every time an operator refreshes
- * `/admin/health` is a worse outage than the one it detects.
+ * `/admin/system/health` is a worse outage than the one it detects.
  */
 
 import { modelRegistry } from "./models";
@@ -50,7 +50,7 @@ export const HEALTH_PROBES: HealthProbe[] = [
     troubleshootingSteps:
       "1. Open `wrangler.jsonc` and confirm the top-level `ai` block exists with `\"binding\": \"AI\"`. 2. Confirm you are looking at the deployed worker, not a preview: `npx wrangler deployments list | tail -20` and match the newest entry to your commit. 3. If the binding is in config but missing at runtime, the running code is older than the config — redeploy with `pnpm run deploy` from `main`. 4. If this fires on a preview worker only, check `scripts/deploy-preview.mjs` — the preview config is derived from the top-level one and a binding it fails to carry across will look exactly like this.",
     devOpsPlaybook:
-      "1. Treat as a P1 deploy fault; AI features are entirely offline. 2. Verify the config: `npx wrangler deployments list` then inspect the live worker's bindings in the Cloudflare dashboard under Workers & Pages > core-remodel > Settings > Bindings. 3. Re-run `pnpm run deploy` from a clean `main` checkout. 4. Re-run this probe from /admin/health and confirm SUCCESS. 5. If it still fails after a successful deploy, the account may have lost Workers AI entitlement — check the Cloudflare dashboard AI > Workers AI page for account-level status before escalating.",
+      "1. Treat as a P1 deploy fault; AI features are entirely offline. 2. Verify the config: `npx wrangler deployments list` then inspect the live worker's bindings in the Cloudflare dashboard under Workers & Pages > core-remodel > Settings > Bindings. 3. Re-run `pnpm run deploy` from a clean `main` checkout. 4. Re-run this probe from /admin/system/health and confirm SUCCESS. 5. If it still fails after a successful deploy, the account may have lost Workers AI entitlement — check the Cloudflare dashboard AI > Workers AI page for account-level status before escalating.",
     isBillingRisk: false,
     severity: "HIGH",
     run: async (env) => {
@@ -198,7 +198,7 @@ export const HEALTH_PROBES: HealthProbe[] = [
     troubleshootingSteps:
       "1. Check the Secrets Store in the Cloudflare dashboard (Workers & Pages > Secrets Store) for the ANTHROPIC_API_KEY entry and `npx wrangler secret list`. 2. Confirm the `secrets_store_secrets` binding for it in `wrangler.jsonc`. 3. Mint a replacement key at console.anthropic.com, store it, then `pnpm run deploy` — bindings only refresh on deploy. 4. If the key exists but calls 401, this probe is green and the truth is in the calling service's error logs; use `npx wrangler tail` on the live worker while triggering the path.",
     devOpsPlaybook:
-      "1. Confirm the target is production, not local. 2. Recreate the secret in the Secrets Store, then `pnpm run deploy`. 3. Since Anthropic is not on the critical path for the core pipelines, this can be handled in business hours unless a specific feature is reported down. 4. Re-run the probe from /admin/health to confirm.",
+      "1. Confirm the target is production, not local. 2. Recreate the secret in the Secrets Store, then `pnpm run deploy`. 3. Since Anthropic is not on the critical path for the core pipelines, this can be handled in business hours unless a specific feature is reported down. 4. Re-run the probe from /admin/system/health to confirm.",
     isBillingRisk: false,
     severity: "MEDIUM",
     run: async (env) => {

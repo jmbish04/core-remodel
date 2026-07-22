@@ -1,7 +1,7 @@
 /**
  * @fileoverview The health session runner.
  *
- * One "session" = one click of Run on `/admin/health`, one `POST /api/health/run`,
+ * One "session" = one click of Run on `/admin/system/health`, one `POST /api/health/run`,
  * or one MCP invocation. A session:
  *   1. syncs the catalogue — every probe's self-description is upserted into
  *      `health_test_def` (and its binding types into the vocabulary + mapping
@@ -23,7 +23,7 @@ import {
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { ALL_HEALTH_PROBES, HEALTH_MODULE_GROUPS, PROBE_GROUP_BY_NAME } from "./registry";
+import { ALL_HEALTH_PROBES, HEALTH_MODULE_GROUPS, PROBE_GROUP_BY_NAME } from "./probes";
 import type { HealthProbe, HealthResult } from "./types";
 
 /** A probe that hangs must not hang the session. */

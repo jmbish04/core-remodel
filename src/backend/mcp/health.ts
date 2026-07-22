@@ -60,7 +60,7 @@ export const HEALTH_PROBES: HealthProbe[] = [
       "This is a code defect, not an infrastructure fault — no migration or binding change will fix it. " +
       "Fix the tool file, open a PR, and after merge run `pnpm run deploy` from `main` (nothing deploys itself; " +
       "Workers Builds auto-deploy is off). Verify with `curl -s https://core-remodel.hacolby.workers.dev/api/mcp-docs | jq 'length'` " +
-      "and re-run this probe from /admin/health. If the connector is hard-down while you work, " +
+      "and re-run this probe from /admin/system/health. If the connector is hard-down while you work, " +
       "`npx wrangler tail` will show the module-load throw on every request to /mcp.",
     isBillingRisk: false,
     severity: "HIGH",
@@ -139,7 +139,7 @@ export const HEALTH_PROBES: HealthProbe[] = [
     devOpsPlaybook:
       "A missing KV binding is a config/deploy fault. Never hand-edit the live worker — fix wrangler.jsonc, " +
       "merge, then `pnpm run deploy` and check `npx wrangler deployments list | tail -20` shows your deploy " +
-      "as newest. Re-run this probe from /admin/health, then have the user re-add the connector in claude.ai " +
+      "as newest. Re-run this probe from /admin/system/health, then have the user re-add the connector in claude.ai " +
       "settings and confirm the tool list loads at /connect.",
     isBillingRisk: false,
     severity: "HIGH",
