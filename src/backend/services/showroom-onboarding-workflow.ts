@@ -22,6 +22,8 @@ import {
   type WorkflowEvent,
   type WorkflowStep,
 } from "cloudflare:workers";
+import { startRun } from "@backend/services/agent-runs";
+import { ledgerSteps } from "@backend/services/agent-run-workflow";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -40,9 +42,19 @@ export class ShowroomOnboardingWorkflow extends WorkflowEntrypoint<
   Env,
   ShowroomOnboardingParams
 > {
-  async run(event: WorkflowEvent<ShowroomOnboardingParams>, step: WorkflowStep) {
+  async run(event: WorkflowEvent<ShowroomOnboardingParams>, rawStep: WorkflowStep) {
     const { showroomId, enrichment } = event.payload;
     const env = this.env;
+
+    const run = await startRun(env, {
+      agent: "showroom-onboarding",
+      operation: "onboard_showroom",
+      targetType: "showroom_store",
+      targetId: String(showroomId),
+      input: { showroomId },
+      triggeredBy: "agent",
+    });
+    const step = ledgerSteps(rawStep, run);
 
     // scheduleShowroomEnrichment guards every unit internally, so allSettled
     // never rejects → this step succeeds and runs exactly once (no retry that
@@ -66,5 +78,7 @@ export class ShowroomOnboardingWorkflow extends WorkflowEntrypoint<
           .where(eq(showroomStores.id, showroomId));
       });
     }
+
+    await run.succeed({ showroomId, hadWebsite: Boolean(enrichment.websiteUrl) });
   }
 }
