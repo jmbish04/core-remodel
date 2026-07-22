@@ -41,6 +41,11 @@ export const geminiUsage = sqliteTable("gemini_usage_log", {
     enum: [
       "GEMINI",
       "WORKERS_AI",
+      // Declared before anything writes them: the 0029 price catalog fetches
+      // OpenAI and Anthropic rates weekly, and a provider with prices but no
+      // enum value would be unwritable the day it is first used.
+      "OPENAI",
+      "ANTHROPIC",
       "BROWSER_RENDERING",
       "DURABLE_OBJECT",
       "VECTORIZE",
@@ -101,6 +106,15 @@ export const geminiUsage = sqliteTable("gemini_usage_log", {
    * at the time.
    */
   agentRunId: integer("agent_run_id"),
+
+  /**
+   * Wall-clock duration of the provider call, in milliseconds.
+   *
+   * Added by 0029 for the per-provider latency column. Nullable because most
+   * historic rows predate it and because a call site that does not time itself
+   * should record "unknown" rather than a fabricated 0.
+   */
+  latencyMs: integer("latency_ms"),
 }, (t) => ({
   // Powers the cost-by-agent join on /admin/system/agents/usage without
   // scanning an append-only table that only ever grows.
@@ -129,9 +143,13 @@ export const GEMINI_USAGE_COLUMN_DESCRIPTIONS: Record<string, string> = {
   request_meta: "Small JSON blob of call metadata for audit. Nullable.",
   agent_run_id:
     "agent_runs.id this call belongs to, when made inside an instrumented run. Nullable, not a FK (the run ledger is pruned, this log is not).",
+  latency_ms: "Wall-clock duration of the provider call in ms. Nullable — historic rows predate it.",
 };
 
 // ── TypeScript inferred types ─────────────────────────────────────────────────
+
+/** The provider column's allowed values — the join key with the price catalog. */
+export type UsageProvider = NonNullable<typeof geminiUsage.$inferSelect["provider"]>;
 
 export type GeminiUsage = typeof geminiUsage.$inferSelect;
 export type GeminiUsageInsert = typeof geminiUsage.$inferInsert;

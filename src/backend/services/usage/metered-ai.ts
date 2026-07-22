@@ -69,6 +69,7 @@ export async function meteredAiRun(
   opts: { feature: string },
 ): Promise<unknown> {
   await assertCanSpend(env, "WORKERS_AI");
+  const startedAt = Date.now();
   try {
     const raw = await env.AI.run(model, input);
     const usage = readWorkersAiUsage(raw);
@@ -77,16 +78,20 @@ export async function meteredAiRun(
       model: String(model),
       feature: opts.feature,
       ...usage,
+      latencyMs: Date.now() - startedAt,
       status: "ok",
     });
     return raw;
   } catch (err) {
     // A failed call still consumed quota on the provider side — record it, else
     // a retry storm is invisible in the ledger.
+    // A failed call still took time and still consumed provider quota — record
+    // both, else a slow-failure storm is invisible in the latency column.
     await recordUsage(env, {
       provider: "WORKERS_AI",
       model: String(model),
       feature: opts.feature,
+      latencyMs: Date.now() - startedAt,
       status: "error",
       errorMessage: err instanceof Error ? err.message.slice(0, 500) : String(err).slice(0, 500),
     });
