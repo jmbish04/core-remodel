@@ -1,0 +1,76 @@
+---
+/**
+ * Slide deck viewport for one changelog entry — shared by
+ * /admin/changelog/[slug]/slides and /admin/changelog/preview/[slug]/slides.
+ *
+ * Reads the same row the detail page reads (via `loadEntry`, so the D1-then-seed
+ * fallback lives in exactly one place) and hands it to the deck island. The deck
+ * is `client:only` because it is entirely interactive — keyboard navigation, a
+ * slide index, mermaid rendering — and a server pass would only emit the first
+ * slide before hydration replaced it.
+ */
+import { ChangelogDeck } from "@/components/changelog/ChangelogDeck";
+import { detailHref, loadEntry, type ChangelogStage } from "@/lib/changelog-blocks";
+
+
+interface Props {
+  slug: string;
+  stage: ChangelogStage;
+}
+
+const { slug, stage } = Astro.props;
+const { entry, detail, prNumber, prUrl } = await loadEntry(Astro.locals.runtime?.env, slug);
+const href = detailHref(slug, stage);
+
+// Same rule the detail page uses: prefer the verification block's per-tag remote
+// state, and never imply "applied" for a tag nobody recorded.
+const migrations =
+  detail?.verification?.migrations?.map((m) => ({ tag: m.tag, appliedRemote: m.appliedRemote })) ??
+  (entry?.migrations ?? []).map((tag) => ({ tag, appliedRemote: false }));
+
+const diagrams = (detail?.diagrams ?? []).map((d) => ({
+  title: d.title ?? d.caption,
+  description: d.description,
+  code: d.code,
+}));
+---
+
+{
+  entry ? (
+    <ChangelogDeck
+      client:only="react"
+      entryNo={entry.entryNo}
+      title={entry.title}
+      subtitle={detail?.subtitle}
+      summary={entry.summary}
+      date={entry.date}
+      branch={detail?.branch ?? entry.branch}
+      status={entry.status}
+      prNumber={prNumber}
+      prUrl={prUrl}
+      detailHref={href}
+      introduction={detail?.introduction}
+      problem={detail?.problem}
+      approach={detail?.approach}
+      diagrams={diagrams}
+      apiChanges={detail?.apiChanges ?? []}
+      migrations={migrations}
+      verification={
+        detail?.verification
+          ? { command: detail.verification.command, ranAt: detail.verification.ranAt }
+          : null
+      }
+      changes={entry.changes}
+    />
+  ) : (
+    <main class="container mx-auto max-w-3xl px-4 py-16">
+      <a href={href} class="text-xs text-muted-foreground underline underline-offset-4">
+        ← Back
+      </a>
+      <div class="mt-6 rounded-xl bg-card px-6 py-12 text-center ring-1 ring-border/40">
+        <p class="text-sm font-medium">No changelog entry at this slug.</p>
+        <p class="mt-1 font-mono text-xs text-muted-foreground">{slug}</p>
+      </div>
+    </main>
+  )
+}

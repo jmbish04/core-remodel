@@ -1,0 +1,737 @@
+[
+  {
+    "taskKey": "P0-FND-01",
+    "workstream": "foundation",
+    "phase": 0,
+    "title": "WorkItem contract in src/shared/pmo/types.ts",
+    "description": "Define WorkSource, WorkStatus, WorkHealth, WorkPriority, WorkPerson, WorkLink and the WorkItem interface. Placed under src/shared so both backend services and frontend islands import the same types with no duplication.",
+    "changeType": "new",
+    "sortOrder": 1
+  },
+  {
+    "taskKey": "P0-FND-02",
+    "workstream": "foundation",
+    "phase": 0,
+    "title": "Migration: extend plan_tasks with schedule + assignment columns",
+    "description": "Add start_date, due_date, progress_pct, effort_points, priority, assignee_participant_id (FK planning_participants.id), pr_number, changelog_slug. Extend the status enum with 'in_review'. Additive and nullable only. pnpm run db:generate then migrate:remote; verify on remote before merge.",
+    "changeType": "update",
+    "dependsOn": [
+      "P0-FND-01"
+    ],
+    "sortOrder": 2
+  },
+  {
+    "taskKey": "P0-FND-03",
+    "workstream": "foundation",
+    "phase": 0,
+    "title": "Migration: plans gains domain, start_date, target_date",
+    "description": "domain TEXT enum software|remodel NOT NULL DEFAULT 'software'. This is what lets one /admin/plans surface carry both projects.",
+    "changeType": "update",
+    "dependsOn": [
+      "P0-FND-01"
+    ],
+    "sortOrder": 3
+  },
+  {
+    "taskKey": "P0-FND-04",
+    "workstream": "foundation",
+    "phase": 0,
+    "title": "Migration: work_item_watchers table",
+    "description": "The permission substrate. (source, item_native_id, participant_id FK, role owner|assignee|cc|approver, can_edit default 1, added_by_participant_id). UNIQUE on (source, item_native_id, participant_id, role); indexes on participant_id and (source, item_native_id).",
+    "changeType": "new",
+    "dependsOn": [
+      "P0-FND-01"
+    ],
+    "sortOrder": 4
+  },
+  {
+    "taskKey": "P0-FND-05",
+    "workstream": "foundation",
+    "phase": 0,
+    "title": "plan_tasks -> WorkItem adapter",
+    "description": "src/backend/services/pmo/adapters/plan.ts. read/list with filters, updateStatus, setDates, reorder, assign, watchers. Health is DERIVED at read time (blocked status, past due date, late dependency), never stored.",
+    "changeType": "new",
+    "dependsOn": [
+      "P0-FND-01",
+      "P0-FND-02"
+    ],
+    "sortOrder": 5
+  },
+  {
+    "taskKey": "P0-FND-06",
+    "workstream": "foundation",
+    "phase": 0,
+    "title": "planning_tasks -> WorkItem adapter",
+    "description": "src/backend/services/pmo/adapters/planning.ts. Same interface as the plan adapter. Maps RACI participants into WorkPerson[], room_id and material links into WorkLink[], depends_on_task_ids into dependsOn.",
+    "changeType": "new",
+    "dependsOn": [
+      "P0-FND-01"
+    ],
+    "sortOrder": 6
+  },
+  {
+    "taskKey": "P0-FND-07",
+    "workstream": "foundation",
+    "phase": 0,
+    "title": "viewerContext() + visibleWorkItemFilter() seam",
+    "description": "src/backend/services/pmo/viewer.ts. Today returns { isAdmin: true } because the shared-password cookie means every caller is the homeowner; the filter is a no-op. Documented as THE single authorization decision point so 0029 changes only this file.",
+    "changeType": "new",
+    "dependsOn": [
+      "P0-FND-04"
+    ],
+    "sortOrder": 7
+  },
+  {
+    "taskKey": "P0-FND-08",
+    "workstream": "foundation",
+    "phase": 0,
+    "title": "GET /api/pmo/work-items — source-agnostic read endpoint",
+    "description": "Query params: source, container, status, health, assignee, phase. Routes to the right adapter, applies visibleWorkItemFilter, returns WorkItem[]. Registered with @hono/zod-openapi; hand-written Zod v4 schemas (never drizzle-zod).",
+    "changeType": "new",
+    "dependsOn": [
+      "P0-FND-05",
+      "P0-FND-06",
+      "P0-FND-07"
+    ],
+    "sortOrder": 8
+  },
+  {
+    "taskKey": "P0-FND-09",
+    "workstream": "foundation",
+    "phase": 0,
+    "title": "PATCH /api/pmo/work-items/:id — source-agnostic write endpoint",
+    "description": "status, dates, progress, priority, assignee, sortOrder. Dispatches to the owning adapter. Uses db.batch() where multiple statements are needed — never db.transaction(), which is dead on D1.",
+    "changeType": "new",
+    "dependsOn": [
+      "P0-FND-08"
+    ],
+    "sortOrder": 9
+  },
+  {
+    "taskKey": "P0-FND-10",
+    "workstream": "foundation",
+    "phase": 0,
+    "title": "CLAUDE.md: task hygiene is MANDATORY",
+    "description": "Add the rule next to the deploy contract: a turn completing plan work MUST close its plan_tasks row via close_plan_task with the PR number; a turn discovering work MUST file it with create_plan_task. 'Done' without a closed task row is not done.",
+    "changeType": "update",
+    "sortOrder": 10
+  },
+  {
+    "taskKey": "P0-FND-11",
+    "workstream": "foundation",
+    "phase": 0,
+    "title": "QC script for P0",
+    "description": "scripts/qc/pr_<n>.mjs using scripts/config.mjs and scripts/tokens.mjs. Asserts: both adapters return a valid WorkItem for a known row; new columns exist on remote D1; visibleWorkItemFilter is undefined for admin. Run against --preview and production.",
+    "changeType": "new",
+    "dependsOn": [
+      "P0-FND-09"
+    ],
+    "sortOrder": 11
+  },
+  {
+    "taskKey": "P1-CMP-01",
+    "workstream": "components",
+    "phase": 1,
+    "title": "Shared atoms: badges, progress, avatars, eyebrow",
+    "description": "src/frontend/components/pmo/atoms/: StatusBadge, HealthBadge, PriorityBadge, ProgressRing (threshold-colored: rose <40, amber 40-74, emerald >=75), ProgressBar, AssigneeGroup, DependencyChips, Eyebrow, KpiTile. Priority is a filled tonal badge; status is a neutral outline badge with a colored dot — the loudness asymmetry is deliberate.",
+    "changeType": "new",
+    "dependsOn": [
+      "P0-FND-01"
+    ],
+    "sortOrder": 1
+  },
+  {
+    "taskKey": "P1-CMP-02",
+    "workstream": "components",
+    "phase": 1,
+    "title": "WorkItemCard",
+    "description": "The kanban card body: title + category badge, clamped description, meta line, footer with progress bar, state label, percent, and assignee group. Used by WorkBoard and reused in the Gantt tooltip.",
+    "changeType": "new",
+    "dependsOn": [
+      "P1-CMP-01"
+    ],
+    "sortOrder": 2
+  },
+  {
+    "taskKey": "P1-CMP-03",
+    "workstream": "components",
+    "phase": 1,
+    "title": "WorkBoard — generalize ClickUpKanban to WorkItem[]",
+    "description": "Lift src/frontend/components/clickup/ClickUpKanban.tsx off the ClickUp type onto WorkItem, with a configurable column set (software vs remodel). Keep the dnd-kit setup; add column reorder and keyboard dnd. Drop the votes/ARR chrome; that slot carries the assignee group.",
+    "changeType": "update",
+    "dependsOn": [
+      "P1-CMP-02"
+    ],
+    "sortOrder": 3
+  },
+  {
+    "taskKey": "P1-CMP-04",
+    "workstream": "components",
+    "phase": 1,
+    "title": "WorkGrid — grouped data grid with sub-tasks",
+    "description": "KPI strip, filter bar, optional tabs, collapsible group header rows, h-9 task rows, one level of sub-task nesting with round completion checkboxes, radial progress, avatar groups, overdue dates in destructive. No visible thead — group rows carry the structure.",
+    "changeType": "new",
+    "dependsOn": [
+      "P1-CMP-01"
+    ],
+    "sortOrder": 4
+  },
+  {
+    "taskKey": "P1-CMP-05",
+    "workstream": "components",
+    "phase": 1,
+    "title": "WorkBacklog — rank-ordered drag list",
+    "description": "Panel header with a Reset order button disabled until dirty; rank #1 gets primary color + FlagIcon and nothing else is emphasized; type-icon tile + title over KEY-dot-type; status as text color in a neutral outline badge; effort as N + muted 'pts'. Keyboard reorder required.",
+    "changeType": "new",
+    "dependsOn": [
+      "P1-CMP-01"
+    ],
+    "sortOrder": 5
+  },
+  {
+    "taskKey": "P1-CMP-06",
+    "workstream": "components",
+    "phase": 1,
+    "title": "WorkGantt — WorkItem adapter over kibo-ui/gantt",
+    "description": "Wrap the EXISTING src/frontend/components/kibo-ui/gantt (drag-move, edge resize, today marker, markers, sidebar groups, daily/monthly/quarterly). Map WorkItem[] to GanttFeature[] with a stable per-item hue from the Tailwind-500 ramp. Do not rewrite the timeline engine.",
+    "changeType": "new",
+    "dependsOn": [
+      "P1-CMP-01"
+    ],
+    "sortOrder": 6
+  },
+  {
+    "taskKey": "P1-CMP-07",
+    "workstream": "components",
+    "phase": 1,
+    "title": "WorkGantt tree pane",
+    "description": "Left pane with a draggable splitter (180-640px, default 520). Columns Name / Status / Assignee / Due date / actions. Group rows with a radial progress ring; two levels of indent; hover-revealed grips and checkboxes; undated items appear in the tree with no bar rather than being hidden.",
+    "changeType": "new",
+    "dependsOn": [
+      "P1-CMP-06"
+    ],
+    "sortOrder": 7
+  },
+  {
+    "taskKey": "P1-CMP-08",
+    "workstream": "components",
+    "phase": 1,
+    "title": "WorkGantt dependency arrows + critical path highlight",
+    "description": "Draw arrows from WorkItem.dependsOn and highlight the critical path. BOTH toggleable and off by default — a dense Gantt with every arrow drawn is unreadable. Reuse the Kahn topological sort already in RemodelOrchestrator/critical-path.ts rather than writing a second one.",
+    "changeType": "new",
+    "dependsOn": [
+      "P1-CMP-07"
+    ],
+    "sortOrder": 8
+  },
+  {
+    "taskKey": "P1-CMP-09",
+    "workstream": "components",
+    "phase": 1,
+    "title": "VelocityDashboard shell + DORA tiles",
+    "description": "max-w-6xl column, mono uppercase eyebrows, 4 KPI tiles each with value, signed trend, rating word and an 80x18 SVG polyline sparkline. Trend polarity is per-metric — only Deploy frequency is higher-is-better. Hand-rolled SVG/div charts, no chart library.",
+    "changeType": "new",
+    "dependsOn": [
+      "P1-CMP-01"
+    ],
+    "sortOrder": 9
+  },
+  {
+    "taskKey": "P1-CMP-10",
+    "workstream": "components",
+    "phase": 1,
+    "title": "VelocityDashboard throughput bars, CI rail, contributor list",
+    "description": "Stacked weekly bars with a 3-swatch legend (merged/open/closed), a CI health rail with label/value rows plus slowest jobs, and a contributor leaderboard on a [2rem_auto_1fr_auto_auto] grid with an emerald bar scaled to the max.",
+    "changeType": "new",
+    "dependsOn": [
+      "P1-CMP-09"
+    ],
+    "sortOrder": 10
+  },
+  {
+    "taskKey": "P1-CMP-11",
+    "workstream": "components",
+    "phase": 1,
+    "title": "Empty, loading, unassigned, locked and stale states",
+    "description": "Plan with no tasks; Gantt where nothing has dates (offer 'add dates', not a blank timeline); empty board column; unassigned renders '--' with sr-only text; no progress renders '-' not '0%'; can_edit=0 shows a LockIcon; skeletons at correct row height; a ClickUp-offline banner naming the last sync time.",
+    "changeType": "new",
+    "dependsOn": [
+      "P1-CMP-03",
+      "P1-CMP-04",
+      "P1-CMP-05",
+      "P1-CMP-07"
+    ],
+    "sortOrder": 11
+  },
+  {
+    "taskKey": "P1-CMP-12",
+    "workstream": "components",
+    "phase": 1,
+    "title": "/admin/pmo/components gallery page",
+    "description": "Thin .astro shell (class, never className) mounting a gallery island that renders every PMO component against fixture data, so a change can be eyeballed without hunting for a consuming page.",
+    "targetRoute": "/admin/pmo/components",
+    "changeType": "new",
+    "dependsOn": [
+      "P1-CMP-11"
+    ],
+    "sortOrder": 12
+  },
+  {
+    "taskKey": "P1-CMP-13",
+    "workstream": "components",
+    "phase": 1,
+    "title": "Keyboard drag-and-drop + a11y pass",
+    "description": "aria-roledescription=sortable with screen-reader instructions on every draggable; aria-live on the Gantt period title; aria-expanded plus child count on collapse toggles; aria-sort on the active header; aria-label on every icon-only button. Every drag interaction needs a keyboard path.",
+    "changeType": "new",
+    "dependsOn": [
+      "P1-CMP-12"
+    ],
+    "sortOrder": 13
+  },
+  {
+    "taskKey": "P2-SW-01",
+    "workstream": "software-pmo",
+    "phase": 2,
+    "title": "Rebuild /admin/plans/[slug] with Board/Grid/Backlog/Gantt tabs",
+    "description": "Replace the PlanBoardApp accordion with the shared components over the plan adapter. Keep what works today: URL-mirrored filters, optimistic PATCH with rollback, 10s polling with a post-edit quiet window.",
+    "targetRoute": "/admin/plans/[slug]",
+    "changeType": "update",
+    "dependsOn": [
+      "P1-CMP-13",
+      "P0-FND-09"
+    ],
+    "sortOrder": 1
+  },
+  {
+    "taskKey": "P2-SW-02",
+    "workstream": "software-pmo",
+    "phase": 2,
+    "title": "/admin/plans overview gains schedule + health rollup",
+    "description": "Extend the plan card grid with target date, schedule variance and a health chip, now that plans carry dates. Split by domain so software and remodel plans are separately scannable.",
+    "targetRoute": "/admin/plans",
+    "changeType": "update",
+    "dependsOn": [
+      "P0-FND-03",
+      "P2-SW-01"
+    ],
+    "sortOrder": 2
+  },
+  {
+    "taskKey": "P2-SW-03",
+    "workstream": "software-pmo",
+    "phase": 2,
+    "title": "MCP tools: create_plan_task, update_plan_task, list_plan_tasks",
+    "description": "src/backend/mcp/tools/pmo/, one file per tool, filename equal to the tool name. Bare snake_case names, hand-written Zod v4 inputShape, correct annotations, at least one example each. Export from tools/pmo/index.ts and add the array to ALL_TOOL_GROUPS.",
+    "changeType": "new",
+    "dependsOn": [
+      "P0-FND-09"
+    ],
+    "sortOrder": 3
+  },
+  {
+    "taskKey": "P2-SW-04",
+    "workstream": "software-pmo",
+    "phase": 2,
+    "title": "MCP tool: close_plan_task — REQUIRES prNumber",
+    "description": "Sets status=done, writes pr_number and completed_at. Rejects with a clear error when prNumber is missing. This refusal is the mechanism the whole task-hygiene rule rests on; it is schema-enforced habit, not a reminder.",
+    "changeType": "new",
+    "dependsOn": [
+      "P2-SW-03"
+    ],
+    "sortOrder": 4
+  },
+  {
+    "taskKey": "P2-SW-05",
+    "workstream": "software-pmo",
+    "phase": 2,
+    "title": "MCP tool: list_my_open_tasks",
+    "description": "The session-start backlog read. Returns open tasks across active plans with phase, dependencies and blocking status, so an agent can pick up where the last one stopped.",
+    "changeType": "new",
+    "dependsOn": [
+      "P2-SW-03"
+    ],
+    "sortOrder": 5
+  },
+  {
+    "taskKey": "P2-SW-06",
+    "workstream": "software-pmo",
+    "phase": 2,
+    "title": "Verify the /connect/tools catalog renders the new tools",
+    "description": "The catalog page auto-renders from the registry via /api/mcp-docs, so no manual doc edit is needed — but confirm each card looks right and update the /connect prose if the connection flow or concepts changed. A tool with a stale description or missing example is a defect.",
+    "targetRoute": "/connect/tools",
+    "changeType": "update",
+    "dependsOn": [
+      "P2-SW-04",
+      "P2-SW-05"
+    ],
+    "sortOrder": 6
+  },
+  {
+    "taskKey": "P2-SW-07",
+    "workstream": "software-pmo",
+    "phase": 2,
+    "title": "QC script for P2",
+    "description": "Asserts close_plan_task REJECTS a call with no prNumber; a status change round-trips through the board endpoint; list_my_open_tasks returns the expected shape. Run against --preview and production.",
+    "changeType": "new",
+    "dependsOn": [
+      "P2-SW-06"
+    ],
+    "sortOrder": 7
+  },
+  {
+    "taskKey": "P3-VEL-01",
+    "workstream": "velocity",
+    "phase": 3,
+    "title": "Migration: github_pr_stats table",
+    "description": "pr_number UNIQUE, title, author_login, state, branch, created/merged/closed timestamps, additions, deletions, changed_files, review_comment_count, first_review_at, lead_time_seconds, ci_conclusion, fetched_at. Indexes on merged_at_utc and author_login.",
+    "changeType": "new",
+    "sortOrder": 1
+  },
+  {
+    "taskKey": "P3-VEL-02",
+    "workstream": "velocity",
+    "phase": 3,
+    "title": "GitHub PR sync service + cron",
+    "description": "Server-side fetch of PR list, review timestamps and check conclusions into github_pr_stats. The token never reaches the browser — the client only ever reads our own table. Backfill on first run, incremental after.",
+    "changeType": "new",
+    "dependsOn": [
+      "P3-VEL-01"
+    ],
+    "sortOrder": 2
+  },
+  {
+    "taskKey": "P3-VEL-03",
+    "workstream": "velocity",
+    "phase": 3,
+    "title": "GET /api/pmo/velocity",
+    "description": "Computes the DORA tiles (deploy frequency, lead time, change failure rate, MTTR), 8-week PR throughput, CI health and the contributor leaderboard from github_pr_stats joined with plan_tasks completion data.",
+    "changeType": "new",
+    "dependsOn": [
+      "P3-VEL-02"
+    ],
+    "sortOrder": 3
+  },
+  {
+    "taskKey": "P3-VEL-04",
+    "workstream": "velocity",
+    "phase": 3,
+    "title": "/admin/pmo/velocity page",
+    "description": "Thin .astro shell mounting VelocityDashboard against the real endpoint. Team and date-range filters wired.",
+    "targetRoute": "/admin/pmo/velocity",
+    "changeType": "new",
+    "dependsOn": [
+      "P3-VEL-03",
+      "P1-CMP-10"
+    ],
+    "sortOrder": 4
+  },
+  {
+    "taskKey": "P3-VEL-05",
+    "workstream": "velocity",
+    "phase": 3,
+    "title": "Remodel metric variant of VelocityDashboard",
+    "description": "Same component, different metric config: tasks completed per week, average task cycle time, schedule variance in days, blocked task count. Contributors become trades.",
+    "changeType": "new",
+    "dependsOn": [
+      "P3-VEL-04"
+    ],
+    "sortOrder": 5
+  },
+  {
+    "taskKey": "P4-CHG-01",
+    "workstream": "changelog",
+    "phase": 4,
+    "title": "Migration: domain + plan_slug on changelog tables",
+    "description": "changelog_entries gains domain (software|remodel, default software) and plan_slug; changelog_proposals gains domain. No new tables — a remodel phase narrative is a changelog entry, rendered by the same machinery.",
+    "changeType": "update",
+    "sortOrder": 1
+  },
+  {
+    "taskKey": "P4-CHG-02",
+    "workstream": "changelog",
+    "phase": 4,
+    "title": "Domain filter on the changelog list and preview surfaces",
+    "description": "Split /admin/changelog and /admin/changelog/preview by domain so software history and remodel phases are separately readable without two page trees.",
+    "targetRoute": "/admin/changelog",
+    "changeType": "update",
+    "dependsOn": [
+      "P4-CHG-01"
+    ],
+    "sortOrder": 2
+  },
+  {
+    "taskKey": "P4-CHG-03",
+    "workstream": "changelog",
+    "phase": 4,
+    "title": "Plan <-> proposal <-> entry cross-links",
+    "description": "Surface the linked plan on a proposal, the proposal on a plan, and the closing entry on a task. Today changelog_entries.branch and changelog_proposals.plan_slug are soft links nothing renders; make them navigable in both directions.",
+    "changeType": "update",
+    "dependsOn": [
+      "P4-CHG-01"
+    ],
+    "sortOrder": 3
+  },
+  {
+    "taskKey": "P4-CHG-04",
+    "workstream": "changelog",
+    "phase": 4,
+    "title": "Remodel phase narrative generator",
+    "description": "From the tasks, dates, rooms, materials and renders in a phase, draft the preview-changelog narrative: what happens, who is involved, what the space looks like when it is done, what is being waited on. Structured output with an explicit JSON schema; returns row ids, never display names; validated against the live set before insert; a failed parse is logged, never degraded to {}.",
+    "changeType": "new",
+    "dependsOn": [
+      "P4-CHG-03"
+    ],
+    "sortOrder": 4
+  },
+  {
+    "taskKey": "P4-CHG-05",
+    "workstream": "changelog",
+    "phase": 4,
+    "title": "Images and mermaid in remodel entries",
+    "description": "Remodel phase entries carry room renders, floorplan highlights of the affected area, and a mermaid sequence of the phase. The entry detail page already renders mermaid — extend it to the image blocks.",
+    "changeType": "update",
+    "dependsOn": [
+      "P4-CHG-04"
+    ],
+    "sortOrder": 5
+  },
+  {
+    "taskKey": "P5-RM-01",
+    "workstream": "remodel-pmo",
+    "phase": 5,
+    "title": "Rebuild /admin/pmo/operations on the shared components",
+    "description": "Replace the bespoke views inside PlanningApp.tsx (761 lines) with WorkBoard/WorkGrid/WorkBacklog/WorkGantt over the planning adapter. Preserve the approval-based task-update flow and voice-note capture — those are real features, not scaffolding.",
+    "targetRoute": "/admin/pmo/operations",
+    "changeType": "update",
+    "dependsOn": [
+      "P1-CMP-13",
+      "P0-FND-06"
+    ],
+    "sortOrder": 1
+  },
+  {
+    "taskKey": "P5-RM-02",
+    "workstream": "remodel-pmo",
+    "phase": 5,
+    "title": "Replace ContractorScheduleApp hardcoded data with real WorkItems",
+    "description": "/admin/pmo/schedule/contractor currently renders a hardcoded scenario array through the kibo Gantt. Point it at the planning adapter so it shows the actual schedule.",
+    "targetRoute": "/admin/pmo/schedule/contractor",
+    "changeType": "update",
+    "dependsOn": [
+      "P5-RM-01"
+    ],
+    "sortOrder": 2
+  },
+  {
+    "taskKey": "P5-RM-03",
+    "workstream": "remodel-pmo",
+    "phase": 5,
+    "title": "Work item links to room, material and budget rows",
+    "description": "Populate WorkLink[] from room_id, material_schedule_items and budget_tracker_items. Resolve display names by JOIN at read time — no denormalized name columns anywhere, per the schema rules.",
+    "changeType": "new",
+    "dependsOn": [
+      "P5-RM-01"
+    ],
+    "sortOrder": 3
+  },
+  {
+    "taskKey": "P5-RM-04",
+    "workstream": "remodel-pmo",
+    "phase": 5,
+    "title": "MCP tools: create_work_item, update_work_item, add_work_item_watcher",
+    "description": "Remodel-side task management over planning_tasks, including room and material links and watcher attachment. Same registry conventions as the P2 tools.",
+    "changeType": "new",
+    "dependsOn": [
+      "P5-RM-03"
+    ],
+    "sortOrder": 4
+  },
+  {
+    "taskKey": "P5-RM-05",
+    "workstream": "remodel-pmo",
+    "phase": 5,
+    "title": "Phase rollup: micro tasks aggregate to a macro view",
+    "description": "Percent complete, schedule variance and blocked count roll from discrete tasks up through phases to a program view, and drill back down. This is the micro-to-macro requirement and it must work in both directions.",
+    "changeType": "new",
+    "dependsOn": [
+      "P5-RM-03"
+    ],
+    "sortOrder": 5
+  },
+  {
+    "taskKey": "P6-CU-01",
+    "workstream": "clickup",
+    "phase": 6,
+    "title": "Migration: clickup_task_mirror",
+    "description": "clickup_task_id PK, clickup_list_id, planning_task_id FK (nullable), name, status, assignees_json, due_date, start_date, priority, url, date_updated_remote, sync_hash, last_pulled_at, last_pushed_at, sync_state enum synced|local_ahead|remote_ahead|conflict.",
+    "changeType": "new",
+    "sortOrder": 1
+  },
+  {
+    "taskKey": "P6-CU-02",
+    "workstream": "clickup",
+    "phase": 6,
+    "title": "Pull sync: ClickUp -> mirror -> planning_tasks",
+    "description": "Cron-driven reconciliation. ClickUp is master: remote wins on conflict, and the discarded local value is written to planning_task_updates so nothing is silently lost. Reuse the existing 429/Retry-After handling in clickup-client.ts.",
+    "changeType": "new",
+    "dependsOn": [
+      "P6-CU-01"
+    ],
+    "sortOrder": 2
+  },
+  {
+    "taskKey": "P6-CU-03",
+    "workstream": "clickup",
+    "phase": 6,
+    "title": "Push sync: local writes propagate to ClickUp",
+    "description": "A task created or edited in our UI writes to BOTH D1 and the ClickUp API. If ClickUp is unreachable the write is queued and sync_state goes local_ahead; the UI shows the pending state rather than pretending it synced.",
+    "changeType": "new",
+    "dependsOn": [
+      "P6-CU-02"
+    ],
+    "sortOrder": 3
+  },
+  {
+    "taskKey": "P6-CU-04",
+    "workstream": "clickup",
+    "phase": 6,
+    "title": "ClickUp webhook endpoint",
+    "description": "POST /api/clickup/webhook with signature verification, so remote edits land in near real time instead of waiting for the cron. No webhook handler exists today — this is net new.",
+    "changeType": "new",
+    "dependsOn": [
+      "P6-CU-02"
+    ],
+    "sortOrder": 4
+  },
+  {
+    "taskKey": "P6-CU-05",
+    "workstream": "clickup",
+    "phase": 6,
+    "title": "Wire CLICKUP_LIST_ID into the orchestrator",
+    "description": "The RemodelOrchestrator audit loop bails with status 'skipped' because configureList() is never called — the CLICKUP_LIST_ID var is read by a route but never reaches the DO. Wire it, and keep the D1-backed circuit breaker from incident #162 fully in place as a precondition.",
+    "changeType": "recover",
+    "dependsOn": [
+      "P6-CU-02"
+    ],
+    "sortOrder": 5
+  },
+  {
+    "taskKey": "P6-CU-06",
+    "workstream": "clickup",
+    "phase": 6,
+    "title": "Mobile-friendly attachment upload on a task",
+    "description": "Photo capture from a phone attached to a task. The existing client only appends a link to the description — implement real attachment upload, storing to R2 and referencing from the task.",
+    "changeType": "update",
+    "dependsOn": [
+      "P6-CU-03"
+    ],
+    "sortOrder": 6
+  },
+  {
+    "taskKey": "P7-SIG-01",
+    "workstream": "signals",
+    "phase": 7,
+    "title": "Migration: shipments table",
+    "description": "carrier, tracking_number, status, eta_date, delivered_at, material_schedule_item_id FK, worker_email_id FK, blocking_task_id FK, last_checked_at. UNIQUE on (carrier, tracking_number).",
+    "changeType": "new",
+    "sortOrder": 1
+  },
+  {
+    "taskKey": "P7-SIG-02",
+    "workstream": "signals",
+    "phase": 7,
+    "title": "Extract tracking numbers from inbound email",
+    "description": "The email pipeline already classifies 'shipping' but nothing downstream consumes it. Extend the extraction schema to pull carrier and tracking number, and stage a shipment row for confirmation rather than inserting blind.",
+    "changeType": "update",
+    "dependsOn": [
+      "P7-SIG-01"
+    ],
+    "sortOrder": 2
+  },
+  {
+    "taskKey": "P7-SIG-03",
+    "workstream": "signals",
+    "phase": 7,
+    "title": "Tracking poll cron -> blocking task start date",
+    "description": "Poll carrier status; when eta_date moves, move the blocking task's start_date with it and flag the downstream impact. This is the whole real-time schedule mechanic and it is three columns plus a cron.",
+    "changeType": "new",
+    "dependsOn": [
+      "P7-SIG-02"
+    ],
+    "sortOrder": 3
+  },
+  {
+    "taskKey": "P7-SIG-04",
+    "workstream": "signals",
+    "phase": 7,
+    "title": "Permit status -> schedule impact",
+    "description": "permits_records is already synced daily by a live cron. When a permit tied to a phase changes status, propose a date shift on the dependent tasks. Propose only — nothing auto-applies over a date a human set.",
+    "changeType": "new",
+    "dependsOn": [
+      "P5-RM-05"
+    ],
+    "sortOrder": 4
+  },
+  {
+    "taskKey": "P7-SIG-05",
+    "workstream": "signals",
+    "phase": 7,
+    "title": "Contract -> work breakdown structure",
+    "description": "On contract upload, generate tasks from contract_payment_milestones and contract_timeline_milestones, linked back to the milestone rows by FK. Every acceptance criterion in the contract becomes a discrete, unambiguous task.",
+    "changeType": "new",
+    "dependsOn": [
+      "P5-RM-05"
+    ],
+    "sortOrder": 5
+  },
+  {
+    "taskKey": "P7-SIG-06",
+    "workstream": "signals",
+    "phase": 7,
+    "title": "Contract gap analysis, pre-signature",
+    "description": "Report every payment milestone with no task, every task with no acceptance criterion, every date that conflicts with the critical path, and every scope item present in the estimate but absent from the contract. This runs BEFORE signing — that is the entire point.",
+    "changeType": "new",
+    "dependsOn": [
+      "P7-SIG-05"
+    ],
+    "sortOrder": 6
+  },
+  {
+    "taskKey": "P7-SIG-07",
+    "workstream": "signals",
+    "phase": 7,
+    "title": "Program Manager agent — revive RemodelOrchestrator",
+    "description": "Feed it WorkItem[] from the adapters instead of raw ClickUp. It already implements Kahn topological sort and critical-path analysis; have it write findings against work items — slipping critical path, dependency violations, unassigned blockers. Circuit breaker stays in place.",
+    "changeType": "recover",
+    "dependsOn": [
+      "P6-CU-05",
+      "P1-CMP-08"
+    ],
+    "sortOrder": 7
+  },
+  {
+    "taskKey": "P7-SIG-08",
+    "workstream": "signals",
+    "phase": 7,
+    "title": "NagBot: draft-only status-request messages",
+    "description": "Detect overdue updates and downstream impacts, and stage DRAFT messages for homeowner review. Drafts only — there is no outbound transport today, and choosing one (wire up the unused send_email binding, or add Twilio for SMS) is a spend decision requiring explicit approval before any build.",
+    "changeType": "new",
+    "dependsOn": [
+      "P7-SIG-03"
+    ],
+    "sortOrder": 8
+  },
+  {
+    "taskKey": "P7-SIG-09",
+    "workstream": "signals",
+    "phase": 7,
+    "title": "Per-audience report views",
+    "description": "A contractor-facing report (their tasks, upcoming milestones, delivery ETAs, what is blocking them) and the full homeowner report. Participation is earned by reports worth logging in for — this is the task that earns it.",
+    "changeType": "new",
+    "dependsOn": [
+      "P5-RM-05",
+      "P3-VEL-05"
+    ],
+    "sortOrder": 9
+  }
+]

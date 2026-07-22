@@ -29,6 +29,10 @@
     "@systaliko-ui": "https://systaliko-ui.vercel.app/r/{name}.json",
     "@mapcn": "https://mapcn.dev/r/{name}.json",
     "@bklit": "https://ui.bklit.com/r/{name}.json",
-    "@coss": "https://coss.com/ui/r/{name}.json"
+    "@coss": "https://coss.com/ui/r/{name}.json",
+    "@kibo-ui": "https://www.kibo-ui.com/r/{name}.json",
+    "@slidecn": "https://slidecn.vercel.app/r/{name}.json",
+    "@code-blocks": "https://code-blocks.pheralb.dev/r/{name}.json",
+    "@termcn": "https://termcn.vercel.app/r/{name}.json"
   }
 }

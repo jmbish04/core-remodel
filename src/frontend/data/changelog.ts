@@ -28,7 +28,17 @@ export interface ChangelogBranch {
 }
 
 export interface ChangelogEntry {
+  /** Slug — the detail-page URL segment. Stable, author-chosen, human-readable. */
   id: string;
+  /**
+   * `changelog_entries.id` — the D1 autoincrement, shown as `#N` beside the
+   * title so two similarly-named entries can be told apart at a glance and
+   * referred to in conversation.
+   *
+   * Optional because the bundled seed is the SSR fallback and has no row ids;
+   * when it is serving, the number is omitted rather than invented.
+   */
+  entryNo?: number;
   branch: string;
   date: string;
   tag?: string;
