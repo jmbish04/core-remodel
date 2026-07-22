@@ -20,12 +20,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MermaidCn } from "@/components/mermaidcn/MermaidCn";
-import { toParagraphs, type Prose } from "@/lib/changelog-prose";
+import { MarkdownProse } from "@/components/research/MarkdownProse";
+import { AutoScaleContainer } from "@/components/ui/auto-scale-container";
+import { toMarkdown, type Prose } from "@/lib/markdown-normalize";
 import { cn } from "@/lib/utils";
 
 interface DeckDiagram {
   title: string;
-  description: string[];
+  description?: Prose;
   code: string;
 }
 
@@ -61,23 +63,20 @@ interface Slide {
   render: () => React.ReactNode;
 }
 
-/** Paragraph list capped for a slide, with the remainder acknowledged out loud. */
-function SlideProse({ paragraphs, max = 3 }: { paragraphs: string[]; max?: number }) {
-  const shown = paragraphs.slice(0, max);
-  const hidden = paragraphs.length - shown.length;
+/**
+ * Slide body.
+ *
+ * Nothing is truncated any more. The previous version showed the first three
+ * paragraphs and printed "+N more on the detail page", because a fixed font size
+ * on a fixed-height slide had no other option. AutoScaleContainer removes the
+ * constraint — the full text is rendered and the type shrinks to fit — so the
+ * reader is presenting the actual content rather than an excerpt of it.
+ */
+function SlideBody({ markdown }: { markdown: string }) {
   return (
-    <div className="space-y-4">
-      {shown.map((p, i) => (
-        <p key={i} className="text-lg leading-8 text-foreground/85 md:text-xl md:leading-9">
-          {p}
-        </p>
-      ))}
-      {hidden > 0 ? (
-        <p className="text-sm italic text-muted-foreground">
-          + {hidden} more paragraph{hidden === 1 ? "" : "s"} on the detail page
-        </p>
-      ) : null}
-    </div>
+    <AutoScaleContainer contentKey={markdown} min={12} max={26}>
+      <MarkdownProse className="prose-p:mb-5">{markdown}</MarkdownProse>
+    </AutoScaleContainer>
   );
 }
 
@@ -108,9 +107,9 @@ export function ChangelogDeck(props: ChangelogDeckProps) {
     changes = [],
   } = props;
 
-  const introduction = useMemo(() => toParagraphs(props.introduction), [props.introduction]);
-  const problem = useMemo(() => toParagraphs(props.problem), [props.problem]);
-  const approach = useMemo(() => toParagraphs(props.approach), [props.approach]);
+  const introduction = useMemo(() => toMarkdown(props.introduction), [props.introduction]);
+  const problem = useMemo(() => toMarkdown(props.problem), [props.problem]);
+  const approach = useMemo(() => toMarkdown(props.approach), [props.approach]);
 
   const slides = useMemo<Slide[]>(() => {
     const out: Slide[] = [];
@@ -144,33 +143,33 @@ export function ChangelogDeck(props: ChangelogDeckProps) {
       ),
     });
 
-    if (introduction.length > 0) {
+    if (introduction) {
       out.push({
         key: "introduction",
         anchor: "introduction",
         eyebrow: "Introduction",
         heading: "What this is",
-        render: () => <SlideProse paragraphs={introduction} />,
+        render: () => <SlideBody markdown={introduction} />,
       });
     }
 
-    if (problem.length > 0) {
+    if (problem) {
       out.push({
         key: "problem",
         anchor: "problem",
         eyebrow: "Problem",
         heading: "Why this had to change",
-        render: () => <SlideProse paragraphs={problem} />,
+        render: () => <SlideBody markdown={problem} />,
       });
     }
 
-    if (approach.length > 0) {
+    if (approach) {
       out.push({
         key: "approach",
         anchor: "approach",
         eyebrow: "Approach",
         heading: "How it was solved",
-        render: () => <SlideProse paragraphs={approach} />,
+        render: () => <SlideBody markdown={approach} />,
       });
     }
 
@@ -181,13 +180,13 @@ export function ChangelogDeck(props: ChangelogDeckProps) {
         eyebrow: `Diagram ${i + 1} of ${diagrams.length}`,
         heading: d.title,
         render: () => (
-          <div className="space-y-4">
-            {d.description.slice(0, 2).map((p, j) => (
-              <p key={j} className="text-base leading-7 text-muted-foreground">
-                {p}
-              </p>
-            ))}
-            <div className="rounded-xl bg-card p-4 ring-1 ring-border/40">
+          <div className="flex h-full min-h-0 flex-col gap-4">
+            {d.description ? (
+              <MarkdownProse className="shrink-0 text-sm prose-p:mb-3">
+                {d.description}
+              </MarkdownProse>
+            ) : null}
+            <div className="min-h-0 flex-1 rounded-xl bg-card p-4 ring-1 ring-border/40">
               <MermaidCn code={d.code} caption={d.title} />
             </div>
           </div>
@@ -372,20 +371,33 @@ export function ChangelogDeck(props: ChangelogDeckProps) {
   if (!slide) return null;
 
   return (
+    /*
+      `fixed inset-0`, and both halves of that matter.
+
+      FIXED: the deck is a presentation, so it takes the whole viewport instead
+      of sitting inside the admin shell. Nested in the shell it inherited a
+      ~64px header, pushing its own footer — the arrows and slide dots — below
+      the fold on the one view whose entire job is stepping through slides.
+      "Back to the full entry" is the way out.
+
+      DEFINITE HEIGHT: AutoScaleContainer measures its own clientHeight. Under an
+      auto-height ancestor that measurement is just the content's own height, so
+      everything trivially "fits" and nothing ever scales. inset-0 — plus min-h-0
+      on every flex child down to the slide body — is what makes the fit mean
+      something.
+    */
     <div
-      className="flex min-h-svh flex-col bg-background"
+      className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-background"
       onTouchStart={onTouchStart}
       onTouchEnd={onTouchEnd}
     >
       {/*
-        Header and footer are sticky rather than merely first/last in the flow.
-        The deck renders INSIDE the admin shell, which already has its own top
-        chrome, so a full-height slide pushes the navigation controls past the
-        bottom of the viewport — the arrows and slide dots were unreachable
-        without scrolling, on the one view whose entire job is stepping through
-        slides.
+        shrink-0 so the header and footer keep their height while the slide body
+        absorbs whatever is left. They used to be sticky, which was a workaround
+        for the root having no definite height — with h-svh above, the column
+        bounds itself and the controls are always on screen.
       */}
-      <header className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-border/40 bg-background/95 px-6 py-3 backdrop-blur">
+      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border/40 bg-background/95 px-6 py-3 backdrop-blur">
         <a
           href={detailHref}
           className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
@@ -398,7 +410,7 @@ export function ChangelogDeck(props: ChangelogDeckProps) {
         </span>
       </header>
 
-      <section className="mx-auto flex w-full max-w-5xl flex-1 flex-col justify-center px-6 py-10">
+      <section className="mx-auto flex w-full min-h-0 max-w-5xl flex-1 flex-col justify-center px-6 py-8">
         <p className="font-mono text-[11px] uppercase tracking-[0.3em] text-muted-foreground">
           {slide.eyebrow}
         </p>
@@ -410,7 +422,7 @@ export function ChangelogDeck(props: ChangelogDeckProps) {
           ) : null}
           {slide.heading}
         </h1>
-        <div className="mt-8">{slide.render()}</div>
+        <div className="mt-6 min-h-0 flex-1">{slide.render()}</div>
 
         {slide.anchor ? (
           <a
@@ -422,7 +434,7 @@ export function ChangelogDeck(props: ChangelogDeckProps) {
         ) : null}
       </section>
 
-      <footer className="sticky bottom-0 z-10 flex items-center justify-between gap-4 border-t border-border/40 bg-background/95 px-6 py-3 backdrop-blur">
+      <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-border/40 bg-background/95 px-6 py-3 backdrop-blur">
         <button
           type="button"
           onClick={() => go(index - 1)}

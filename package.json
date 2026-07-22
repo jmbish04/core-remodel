@@ -93,6 +93,7 @@
     "@react-three/fiber": "^9.6.1",
     "@react-three/postprocessing": "^3.0.4",
     "@scalar/hono-api-reference": "^0.10.13",
+    "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.2.4",
     "@tiptap/pm": "^3.27.1",
     "@tiptap/react": "^3.27.1",

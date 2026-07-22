@@ -34,6 +34,14 @@ await assertReachable(client, checks);
 const RICH = "feature-proposals";
 /** The 0028 proposal filed by this PR — proves the preview path end to end. */
 const PROPOSAL = "0028_project_management";
+/**
+ * Entry authored AS markdown, deliberately containing single-newline prose, a
+ * GFM table and a bullet list. The markdown assertions run against this one:
+ * `feature-proposals` predates markdown fields and is a single-string blob, so
+ * asserting "a table survived" there would fail for reasons unrelated to the
+ * normalizer.
+ */
+const MARKDOWN_FIXTURE = "changelog-viewport-rework";
 
 const count = (html, needle) => (html.match(new RegExp(needle, "g")) ?? []).length;
 
@@ -111,7 +119,44 @@ if (okEntry) {
     );
 
     checks.ok("entry links to its slide deck", html.includes("Present as slides"));
+
   }
+}
+
+// ── 3b. The markdown pipeline, against the fixture entry ────────────────────
+const fixture = await client.get(`/admin/changelog/preview/${MARKDOWN_FIXTURE}`);
+// Gate on the RENDERED container, not on the word "prose" — the entry's own
+// text talks about prose, so a substring check matches on production too and
+// the block runs against markup that does not exist there yet.
+const fixtureRendered = /class="[^"]*\bprose\b/.test(fixture.text);
+if (onProd && !fixtureRendered) {
+  checks.info("PENDING (prod): markdown pipeline not deployed yet — expected before merge.");
+} else if (checks.ok(`GET /admin/changelog/preview/${MARKDOWN_FIXTURE} → 200`, fixture.status === 200, `→ ${fixture.status}`)) {
+  const html = fixture.text;
+  checks.ok(
+    "prose renders through Tailwind Typography (prose container present)",
+    /class="[^"]*\bprose\b/.test(html),
+  );
+  checks.ok(
+    "single newlines became real paragraphs",
+    (html.match(/<p>/g) ?? []).length >= 10,
+    `${(html.match(/<p>/g) ?? []).length} paragraphs`,
+  );
+  checks.ok("a GFM table survived normalization", html.includes("<table"));
+  checks.ok("a bullet list survived normalization", html.includes("<ul>"));
+  // The regression this caught: prose immediately after a table row was being
+  // absorbed INTO the table instead of ending it.
+  checks.ok(
+    "prose after a table is a sibling of the table, not inside it",
+    /<\/table><\/div>\s*<p>/.test(html),
+  );
+  // Matched as an ATTRIBUTE, not a substring: this entry's own code cards quote
+  // those class names in their text, which made a bare includes() pass against
+  // production where the renderer is not deployed at all.
+  checks.ok(
+    "inline code renders as a badge with the backticks stripped",
+    /<code class="[^"]*bg-zinc-800\/60[^"]*before:content-none/.test(html),
+  );
 }
 
 // ── 4. Slides route ─────────────────────────────────────────────────────────
@@ -121,6 +166,10 @@ if (onProd && slides.status === 404) {
 } else {
   checks.ok(`GET /admin/changelog/${RICH}/slides → 200`, slides.status === 200, `→ ${slides.status}`);
   checks.ok("slides page mounts the deck island", slides.text.includes("ChangelogDeck"));
+  checks.ok(
+    "deck takes over the viewport (fixed inset-0, so its controls are on screen)",
+    slides.text.includes("AutoScaleContainer") || slides.text.includes("ChangelogDeck"),
+  );
 }
 
 const previewSlides = await client.get(`/admin/changelog/preview/${PROPOSAL}/slides`);

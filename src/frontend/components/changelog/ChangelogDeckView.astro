@@ -11,7 +11,7 @@
  */
 import { ChangelogDeck } from "@/components/changelog/ChangelogDeck";
 import { detailHref, loadEntry, type ChangelogStage } from "@/lib/changelog-blocks";
-import { toParagraphs } from "@/lib/changelog-prose";
+
 
 interface Props {
   slug: string;
@@ -30,7 +30,7 @@ const migrations =
 
 const diagrams = (detail?.diagrams ?? []).map((d) => ({
   title: d.title ?? d.caption,
-  description: toParagraphs(d.description),
+  description: d.description,
   code: d.code,
 }));
 ---

@@ -6,6 +6,13 @@
 
 @import "@fontsource-variable/inter";
 
+/*
+ * Tailwind v4 registers plugins from CSS — there is no tailwind.config.js in
+ * this project. Without this line every `prose` class is a silent no-op, which
+ * is why MarkdownProse used to hand-map each element instead.
+ */
+@plugin "@tailwindcss/typography";
+
 @custom-variant dark (&:is(.dark *));
 @custom-variant fixed (&:is(.layout-fixed *));
 

@@ -7,12 +7,14 @@
  * migration SQL, representative code, and (where useful) a Mermaid diagram.
  * Seeded/fallback here, then persisted to D1 (changelog_entries.detail_json).
  *
- * Long-form fields are typed `Prose` = `string | string[]`, where an array is
- * one element per PARAGRAPH. Everything written before 2026-07-22 is a plain
- * string and keeps rendering as a single paragraph; new entries should use the
- * array so the text breaks where the author meant it to.
+ * Long-form fields are typed `Prose` and hold MARKDOWN — headings, lists,
+ * tables, `code`, and ```mermaid fences all render. Author them as one string;
+ * single newlines between prose lines are expanded into paragraph breaks by the
+ * renderer, so dense model output does not arrive as a wall of text. A few rows
+ * store an array of paragraphs from a brief earlier iteration and are folded
+ * back into markdown on read.
  */
-import type { Prose } from "@/lib/changelog-prose";
+import type { Prose } from "@/lib/markdown-normalize";
 
 export type { Prose };
 
@@ -82,13 +84,13 @@ export interface PhaseDetail {
   subtitle?: string;
   /**
    * Opening orientation, before the problem statement — who this is for, why
-   * they are reading it, what changes for them. Paragraph array.
+   * they are reading it, what changes for them. Markdown.
    */
   introduction?: Prose;
 
-  /** Why this change had to happen. Paragraph array (a plain string still works). */
+  /** Why this change had to happen. Markdown. */
   problem: Prose;
-  /** How it was solved. Paragraph array (a plain string still works). */
+  /** How it was solved. Markdown. */
   approach: Prose;
 
   apiChanges: string[];

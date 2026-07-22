@@ -33,7 +33,8 @@ import {
   toRecap,
   type ChangelogStage,
 } from "@/lib/changelog-blocks";
-import { toParagraphs } from "@/lib/changelog-prose";
+import { toMarkdown } from "@/lib/markdown-normalize";
+import { MarkdownProse } from "@/components/research/MarkdownProse";
 
 interface Props {
   slug: string;
@@ -61,12 +62,14 @@ const migrationStatus =
   (entry?.migrations ?? []).map((tag) => ({ tag, appliedRemote: false, note: "Not recorded" }));
 const migrationStatusKnown = Boolean(verification?.migrations?.length);
 
-// Prose fields normalize to paragraph arrays. Entries written before these were
-// arrays are plain strings and come back as a single paragraph — see
-// `lib/changelog-prose.ts` for why we do not guess breaks inside them.
-const introduction = toParagraphs(detail?.introduction);
-const problem = toParagraphs(detail?.problem);
-const approach = toParagraphs(detail?.approach);
+// Long-form fields are MARKDOWN and render through the shared MarkdownProse —
+// the same renderer the proposal bundle and the research pages use. It is
+// server-rendered here (no client directive): the markup is static, and only a
+// ```mermaid fence inside one of these fields would need the client, which is
+// what the dedicated Diagrams section below is for.
+const introduction = toMarkdown(detail?.introduction);
+const problem = toMarkdown(detail?.problem);
+const approach = toMarkdown(detail?.approach);
 
 const diagrams = detail?.diagrams ?? [];
 const apiChanges = detail?.apiChanges ?? [];
@@ -197,40 +200,28 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
         ) : null}
       </header>
 
-      {introduction.length > 0 ? (
+      {introduction ? (
         <section id="introduction" class="mt-8 max-w-3xl scroll-mt-24">
-          <div class="space-y-4">
-            {introduction.map((p) => (
-              <p class="text-[15px] leading-7 text-foreground/85">{p}</p>
-            ))}
-          </div>
+          <MarkdownProse className="text-[15px]" markdown={introduction} />
         </section>
       ) : null}
 
-      {problem.length > 0 ? (
+      {problem ? (
         <section id="problem" class="mt-8 scroll-mt-24">
           <div class="rounded-xl bg-card p-6 ring-1 ring-rose-500/20">
             <h2 class="text-xs font-semibold uppercase tracking-widest text-rose-300">Problem</h2>
-            <div class="mt-3 space-y-4">
-              {problem.map((p) => (
-                <p class="text-sm leading-7 text-muted-foreground">{p}</p>
-              ))}
-            </div>
+            <MarkdownProse className="mt-3 text-sm" markdown={problem} />
           </div>
         </section>
       ) : null}
 
-      {approach.length > 0 ? (
+      {approach ? (
         <section id="approach" class="mt-6 scroll-mt-24">
           <div class="rounded-xl bg-card p-6 ring-1 ring-emerald-500/20">
             <h2 class="text-xs font-semibold uppercase tracking-widest text-emerald-300">
               Approach
             </h2>
-            <div class="mt-3 space-y-4">
-              {approach.map((p) => (
-                <p class="text-sm leading-7 text-muted-foreground">{p}</p>
-              ))}
-            </div>
+            <MarkdownProse className="mt-3 text-sm" markdown={approach} />
           </div>
         </section>
       ) : null}
@@ -256,9 +247,9 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
               <figure class="rounded-xl bg-card p-5 ring-1 ring-border/40">
                 <figcaption class="mb-3">
                   <h3 class="text-sm font-medium">{d.title ?? d.caption}</h3>
-                  {toParagraphs(d.description).map((p) => (
-                    <p class="mt-1 text-xs leading-6 text-muted-foreground">{p}</p>
-                  ))}
+                  {d.description ? (
+                    <MarkdownProse className="mt-1 text-xs" markdown={d.description} />
+                  ) : null}
                 </figcaption>
                 <MermaidCn code={d.code} caption={d.caption} client:load />
               </figure>
