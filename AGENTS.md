@@ -151,6 +151,37 @@ implementation (feature code, migrations, PRs) begin. The changelog *entries* wr
 during/after the build (see "Changelog discipline") are a separate, later obligation;
 they do not replace the preview-changelog **proposal** produced here in planning.
 
+### Diagram everything with Mermaid — prose alone is a FAILED plan (MANDATORY)
+
+**Every planning artifact must be dense with Mermaid diagrams, not just prose.** A plan,
+a preview-changelog PRD, a `DESIGN_SPEC`, or a changelog detail page that explains an
+architecture, a flow, a state machine, a data model, or a decision in words alone is
+**incomplete** — send it back and diagram it. The user reviews these visually; a wall of
+text is not reviewable and hides exactly the structure a reviewer needs to catch problems.
+
+**Use the right diagram for the thing — and use MANY of them (aim for one per section that
+describes structure or behavior):**
+
+- **`flowchart`** — component/architecture maps, request pipelines, "what exists vs what's
+  missing", decision trees (park→home/stop/showroom/scan), build-order + dependency graphs.
+- **`sequenceDiagram`** — anything with actors over time: a webhook/poll round-trip, a
+  real-time WebSocket fix flowing to the UI + AI, a multi-service call chain.
+- **`stateDiagram-v2`** — lifecycles and state machines: a drive's status, a visit/park
+  session (driving → parked/soft-arrival → settled/finalized), a discovery slug.
+- **`erDiagram`** — EVERY schema change or new table. Show the FKs, the new/changed columns,
+  and the cardinality. Never describe a data model in a bullet list when an ERD will do.
+- **`journey`** — the user's day-in-the-life when UX is in scope.
+
+**Where they render:** ```mermaid fenced blocks in the preview-changelog `prdMarkdown` /
+`promptMarkdown` / `designBriefMarkdown`, in the `docs/####_*` markdown bundle, and in the
+changelog detail page's `diagrams[]` (`{ caption, code }`, `PhaseDetail` in
+`src/frontend/data/changelog-detail.ts`) — which renders via the shadcn-registry mermaid
+(zoom/pan). A schema-changing changelog entry with an empty `diagrams[]` is a defect.
+
+**Colour-code state** where it aids the read (done vs pending vs risk), e.g.
+`classDef done fill:#1f4d2e,stroke:#4ade80`. Keep node labels short; let the shapes and
+arrows carry the structure. If a section can be a diagram, it should be one.
+
 ## System Identity & Role Enforcements
 You are an elite Senior Engineer operating within the Google Antigravity IDE framework. Your primary objective is shipping high-performance, self-healing architectures across the Cloudflare Ecosystem.
 
