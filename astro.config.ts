@@ -2,6 +2,8 @@
 import cloudflare from "@astrojs/cloudflare";
 import react from "@astrojs/react";
 import tailwindcss from "@tailwindcss/vite";
+import { fileURLToPath } from "node:url";
+
 import { inkWebPlugin } from "ink-web/vite";
 import { defineConfig } from "astro/config";
 
@@ -26,9 +28,27 @@ function clientOnlyInkWeb() {
     name: "ink-web-client-only",
     config(config: unknown, env: { isSsrBuild?: boolean }) {
       if (env?.isSsrBuild) return undefined;
-      return typeof inner.config === "function"
-        ? (inner.config as (c: unknown, e: unknown) => unknown)(config, env)
-        : undefined;
+      const patched = (
+        typeof inner.config === "function"
+          ? (inner.config as (c: unknown, e: unknown) => unknown)(config, env)
+          : undefined
+      ) as { resolve?: { alias?: Record<string, string> } } | undefined;
+
+      /**
+       * Override ink-web's own chalk shim.
+       *
+       * Theirs implements the 16 named ANSI colors and nothing else — no `hex`,
+       * `rgb` or `ansi256`. Ink renders a `#rrggbb` color prop by calling
+       * `chalk.hex(color)(text)`, so any component with a hex theme (all of
+       * termcn's) throws `chalk.hex is not a function` and takes the whole Ink
+       * render down with it. Ours adds the truecolor methods.
+       */
+      if (patched?.resolve?.alias) {
+        patched.resolve.alias.chalk = fileURLToPath(
+          new URL("./src/frontend/lib/shims/chalk.ts", import.meta.url),
+        );
+      }
+      return patched;
     },
   };
 }

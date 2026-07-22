@@ -31,11 +31,16 @@ import { useEffect, useMemo, useState } from "react";
 
 import type { TreeNode } from "@/components/termcn/tree";
 
-// xterm's stylesheet, imported STATICALLY. As a dynamic `import("ink-web/css")`
-// it sits in a Promise.all with the JS modules and rejects, which silently
-// dropped the whole terminal to the fallback list; Vite also handles a static
-// CSS import properly by extracting it into this island's chunk, so it loads
-// exactly when the island does.
+// Both stylesheets, and both are needed. `ink-web/css` styles the terminal
+// content; xterm's OWN stylesheet styles its chrome — without it the scrollbar
+// element paints its glyphs as literal characters, which showed up as a row of
+// "]]]]]]tttttt" pinned above the tree.
+//
+// Imported STATICALLY: as a dynamic `import("ink-web/css")` it sat in a
+// Promise.all with the JS modules and rejected, silently dropping the whole
+// terminal to the fallback list. Vite extracts a static CSS import into this
+// island's chunk, so it still loads exactly when the island does.
+import "@xterm/xterm/css/xterm.css";
 import "ink-web/css";
 
 interface Building {
