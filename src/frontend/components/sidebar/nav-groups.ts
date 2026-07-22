@@ -107,6 +107,13 @@ export const NAV_GROUPS: NavGroupDef[] = [
       // on the deployed worker before it lands.
       { href: "/admin/changelog/preview", label: "Changelog Preview" },
       { href: "/admin/studio", label: "Studio" },
+      // Agent Ops — the run ledger made visible. The queue is the entry point;
+      // failures and cost are reachable from it, but listed here too because
+      // "what broke" and "what did it cost" are how you arrive, not what you
+      // drill into.
+      { href: "/admin/system/agents/queue", label: "Agent Runs" },
+      { href: "/admin/system/agents/failed", label: "Agent Failures" },
+      { href: "/admin/system/agents/usage", label: "Agent Cost" },
       { href: "/admin/mcp-ops", label: "MCP Ops" },
       { href: "/admin/integrations/usage", label: "Integrations Usage" },
       // Config is reached via the cog wheel in the top header (opens /admin/config
