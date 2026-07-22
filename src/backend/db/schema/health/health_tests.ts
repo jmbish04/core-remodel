@@ -2,7 +2,7 @@ import { sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /**
- * Health test catalogue + result ledger (0028).
+ * Health test catalogue + result ledger (0029).
  *
  * `health_checks` (the 0027 table) recorded five hardcoded binding pings with no
  * description, no runbook and no session grouping — you could see that KV was

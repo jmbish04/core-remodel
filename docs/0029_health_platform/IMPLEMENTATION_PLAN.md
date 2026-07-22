@@ -1,7 +1,7 @@
-# 0028 — Health platform: per-module probes, D1 catalogue, admin dashboard
+# 0029 — Health platform: per-module probes, D1 catalogue, admin dashboard
 
 **Status:** in build · **Branch:** `claude/backend-health-checks-d1-d6df78`
-**Plan slug (D1):** `0028_health_platform`
+**Plan slug (D1):** `0029_health_platform`
 **Supersedes the UI of:** `0027_health_status_page`
 
 ## Context / problem

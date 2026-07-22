@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * @fileoverview QC for PR #195 — the health platform (0028).
+ * @fileoverview QC for PR #195 — the health platform (0029).
  *
  * Covers the new admin-gated surface (`/api/health/session`, `/session/latest`,
  * `/sessions`, `/catalogue`, `/badge`), the page move to `/admin/system/health`,

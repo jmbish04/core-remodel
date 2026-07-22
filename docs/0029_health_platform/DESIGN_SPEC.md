@@ -1,4 +1,4 @@
-# 0028 — DESIGN_SPEC: `/admin/health`
+# 0029 — DESIGN_SPEC: `/admin/health`
 
 Monolith rules apply: dark theme, tokens only, no traditional 1px borders beyond the existing
 `border-border/60` hairlines, mono micro-labels at `text-[10px]` with wide tracking.

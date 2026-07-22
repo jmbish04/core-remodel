@@ -18,7 +18,7 @@ import { Hono } from "hono";
 const healthRouter = new Hono<{ Bindings: Env }>();
 
 /**
- * The full-catalogue endpoints (0028) are ADMIN-ONLY.
+ * The full-catalogue endpoints (0029) are ADMIN-ONLY.
  *
  * Unlike the bare `GET /api/health` liveness ping — which stays public so
  * external uptime monitors keep working — a session runs ~50 probes and its

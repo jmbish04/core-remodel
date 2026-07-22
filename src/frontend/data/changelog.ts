@@ -44,7 +44,7 @@ export interface ChangelogEntry {
 export const BRANCHES: ChangelogBranch[] = [
   {
     branch: "claude/backend-health-checks-d1-d6df78",
-    title: "0028 · Health platform — every module declares its own checks",
+    title: "0029 · Health platform — every module declares its own checks",
     summary:
       "88 probes across 17 backend modules, each carrying its own runbook, catalogued in D1 and run as one session from /admin/system/health, the API or MCP. Includes 16 cost watchers and the data-quality checks from #169, bridged into the same ledger.",
     date: "2026-07-22",
@@ -183,10 +183,10 @@ export const BRANCHES: ChangelogBranch[] = [
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    id: "0028-health-platform",
+    id: "0029-health-platform",
     branch: "claude/backend-health-checks-d1-d6df78",
     date: "2026-07-22",
-    tag: "0028",
+    tag: "0029",
     area: "System / Health",
     title: "Health platform — 88 probes, a D1 catalogue, and a runbook per test",
     summary:

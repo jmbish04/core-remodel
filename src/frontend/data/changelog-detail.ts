@@ -80,8 +80,8 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
-  "0028-health-platform": {
-    slug: "0028-health-platform",
+  "0029-health-platform": {
+    slug: "0029-health-platform",
     branch: "claude/backend-health-checks-d1-d6df78",
     prNumber: 195,
     prUrl: "https://github.com/jmbish04/core-remodel/pull/195",
