@@ -7,6 +7,7 @@ import { resolveAgentIssue } from "./resolve_agent_issue";
 import { requestFeature } from "./request_feature";
 import { listFeatureRequests } from "./list_feature_requests";
 import { getRecentActivity } from "./get_recent_activity";
+import { runHealthSessionTool } from "./run_health_session";
 
 export const opsTools: RemodelTool[] = [
   exportConversation,
@@ -16,4 +17,5 @@ export const opsTools: RemodelTool[] = [
   requestFeature,
   listFeatureRequests,
   getRecentActivity,
+  runHealthSessionTool,
 ];

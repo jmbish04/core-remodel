@@ -52,17 +52,6 @@ export const NAV_GROUPS: NavGroupDef[] = [
     ],
   },
   {
-    id: "system",
-    label: "System",
-    admin: true,
-    items: [
-      { href: "/admin/system/health", label: "Health" },
-      { href: "/admin/system/audit", label: "Audit Log" },
-      { href: "/admin/system/logs", label: "Logs" },
-      { href: "/admin/system/integration/usage", label: "Integration Usage" },
-    ],
-  },
-  {
     id: "shopping",
     label: "Shopping & Sourcing",
     admin: true,
@@ -126,7 +115,13 @@ export const NAV_GROUPS: NavGroupDef[] = [
       { href: "/admin/system/agents/failed", label: "Agent Failures" },
       { href: "/admin/system/agents/usage", label: "Agent Cost" },
       { href: "/admin/mcp-ops", label: "MCP Ops" },
+      // Every backend module's self-declared probes, run on demand, plus the
+      // scored data-quality checks — and the audit trail / logs they link into.
+      { href: "/admin/system/health", label: "System Health" },
+      { href: "/admin/system/audit", label: "Audit Log" },
+      { href: "/admin/system/logs", label: "Logs" },
       { href: "/admin/integrations/usage", label: "Integrations Usage" },
+      { href: "/admin/system/integration/usage", label: "Integration Usage" },
       // Config is reached via the cog wheel in the top header (opens /admin/config
       // in its own tab with the dedicated config sidebar) — not a sidebar item.
     ],

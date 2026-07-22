@@ -80,6 +80,379 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "0029-health-platform": {
+    slug: "0029-health-platform",
+    branch: "claude/backend-health-checks-d1-d6df78",
+    prNumber: 195,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/195",
+    problem:
+      "The health surface shipped in 0027 was five hardcoded binding pings written into one file: D1, TESLA_DB, KV, R2, and a presence check on the AI binding. Everything else this Worker depends on was unwatched — three Vectorize indexes, nine Workflows, fourteen Durable Object namespaces, roughly thirty Secrets Store credentials, Cloudflare Images, the MCP tool registry, the inbound email pipeline, the Tesla telemetry database, and every relational invariant in the sourcing data. Nothing watched cost at all, on an account that had already burned about $50/day for weeks on a Durable Object doing full table scans and only found out from an invoice. And the output was undiagnosable: a row reading `kv_cache: down` told a reader nothing about what that meant, where the code lived, or what to do next — that knowledge existed only in somebody's head. There was also no notion of a session, so `health_checks` could not answer what the system looked like at a particular moment, and the whole thing was served publicly while being, in substance, a map of internal infrastructure.",
+    approach:
+      "Ownership moved to the modules. Each backend module now exports HEALTH_PROBES from its own health.ts, and a probe is BOTH the executable check and its own documentation — whatSuccessMeans, whatFailureMeans, troubleshootingSteps, devOpsPlaybook, the bindings it touches, its severity, and whether it watches spend are literal fields on the object. The runner upserts those literals into health_test_def on every run, so the runbook a human reads is generated from the code that ran; there is no seed SQL and no second copy to drift. Cost discipline is a hard rule rather than a preference: a probe may read a binding, read a secret, run a D1 aggregate, do one tiny KV round trip, or head an R2 key — it may never invoke a model, call a paid API, create a Workflow instance, or enumerate a bucket. The whole 88-probe screen costs nothing and finishes in about two seconds, which is what makes it clickable rather than ceremonial. Reconciling with #169, which landed a competing health surface mid-flight, was done by bridging rather than replacing: its data-quality registry keeps its own shape and endpoint, and its checks are wrapped as probes so one run covers both and everything lands in one ledger.",
+    apiChanges: [
+      "POST /api/health/session — run every registered probe, persist one row per probe under a shared session_uuid (admin)",
+      "GET  /api/health/session/latest — the last persisted session, for first paint and the header pip (admin)",
+      "GET  /api/health/sessions — recent sessions, newest first, rolled up (admin)",
+      "GET  /api/health/catalogue — every test with its full runbook, grouped for the dashboard (admin)",
+      "GET  /api/health/badge — status + counts only; returns null rather than 401 for an unauthed request (admin-aware)",
+      "MCP run_health_session — the third trigger, with failuresOnly and billingOnly filters",
+      "UNCHANGED: GET /api/health and POST /api/health/run stay public — external uptime monitors read them",
+    ],
+    filesTouched: [
+      "src/backend/services/health/types.ts",
+      "src/backend/services/health/probes.ts",
+      "src/backend/services/health/run.ts",
+      "src/backend/db/schema/health/health_tests.ts",
+      "src/backend/{db,api,ai,mcp,realtime}/health.ts",
+      "src/backend/services/{workflows,ai-gateway,usage,render,email,gmail,google,google-photos,tesla,showroom,documents,image-processor}/health.ts",
+      "src/backend/api/routes/health.ts",
+      "src/backend/mcp/tools/ops/run_health_session.ts",
+      "src/frontend/components/health/HealthDashboardApp.tsx",
+      "src/frontend/components/health/HealthStatusBadge.tsx",
+      "src/frontend/pages/admin/system/health.astro",
+      "src/frontend/components/AppHeader.tsx",
+      "src/frontend/components/sidebar/AdminSidebar.tsx",
+      "src/frontend/components/sidebar/nav-groups.ts",
+      "src/_worker.ts",
+      "scripts/qc/pr_195.mjs",
+    ],
+    migrations: [
+      {
+        tag: "0125_supreme_dust",
+        sql: `CREATE TABLE \`health_test_def\` (
+\tid integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+\tname text NOT NULL,
+\tdisplay_name text NOT NULL,
+\tdescription text NOT NULL,
+\thealth_ts_filepath text NOT NULL,
+\twhat_success_means text NOT NULL,
+\twhat_failure_means text NOT NULL,
+\ttroubleshooting_steps text NOT NULL,
+\tdev_ops_playbook text NOT NULL,
+\tis_billing_risk integer DEFAULT false NOT NULL,
+\tseverity text DEFAULT 'MEDIUM' NOT NULL,
+\tis_active integer DEFAULT true NOT NULL,
+\tcreated_at integer DEFAULT (unixepoch()) NOT NULL,
+\tupdated_at integer DEFAULT (unixepoch()) NOT NULL
+);
+CREATE UNIQUE INDEX \`health_test_def_name_idx\` ON \`health_test_def\` (\`name\`);
+
+CREATE TABLE \`health_results\` (
+\tid integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+\ttimestamp integer DEFAULT (unixepoch()) NOT NULL,
+\tsession_uuid text NOT NULL,
+\thealth_test_def_id integer NOT NULL,
+\thealth_test_result text NOT NULL,
+\thealth_test_result_details text,
+\tduration_ms integer,
+\ttriggered_by text DEFAULT 'api' NOT NULL,
+\tFOREIGN KEY (health_test_def_id) REFERENCES health_test_def(id)
+);
+CREATE INDEX \`health_results_session_idx\` ON \`health_results\` (\`session_uuid\`);
+
+-- The binding-type vocabulary is a definition + mapping pair, never a
+-- comma-separated column: the dashboard filters by it.
+CREATE TABLE \`health_binding_types\` (
+\tid integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+\tname text NOT NULL,
+\tdescription text,
+\tis_active integer DEFAULT true NOT NULL
+);
+CREATE TABLE \`health_test_binding_types\` (
+\tid integer PRIMARY KEY AUTOINCREMENT NOT NULL,
+\thealth_test_def_id integer NOT NULL,
+\thealth_binding_type_id integer NOT NULL,
+\tFOREIGN KEY (health_test_def_id) REFERENCES health_test_def(id) ON DELETE cascade,
+\tFOREIGN KEY (health_binding_type_id) REFERENCES health_binding_types(id) ON DELETE cascade
+);
+CREATE UNIQUE INDEX \`health_test_binding_types_pair_idx\` ON \`health_test_binding_types\` (\`health_test_def_id\`,\`health_binding_type_id\`);`,
+      },
+    ],
+    code: [
+      {
+        title: "The probe is the runbook — services/health/types.ts",
+        lang: "ts",
+        code: `export interface HealthProbe {
+  /** Stable snake_case id. Also the natural key of \`health_test_def\`. */
+  name: string;
+  displayName: string;
+  description: string;
+  /** Repo path of the health.ts that owns this probe — "where do I fix it". */
+  healthTsFilepath: string;
+  bindingTypesTested: string[];
+  whatSuccessMeans: string;
+  whatFailureMeans: string;
+  troubleshootingSteps: string;
+  devOpsPlaybook: string;
+  /** True when the probe exists to catch a sudden jump in spend. */
+  isBillingRisk: boolean;
+  severity: "HIGH" | "MEDIUM" | "LOW";
+  /** May throw — the runner turns a throw into FAILURE, so one probe
+      can never sink the session. */
+  run: (env: Env) => Promise<HealthProbeOutcome>;
+}`,
+      },
+      {
+        title: "A spend watcher — last 24h vs the 7 days BEFORE it",
+        lang: "ts",
+        code: `// The baseline deliberately EXCLUDES the last 24h. Including it would let a
+// spike inflate its own baseline and hide itself.
+const recent = await scalar(env.DB,
+  "SELECT COALESCE(SUM(estimated_cost_usd),0) FROM gemini_usage_log WHERE timestamp >= ?",
+  now - 86400);
+const baseline = await scalar(env.DB,
+  "SELECT COALESCE(SUM(estimated_cost_usd),0)/7 FROM gemini_usage_log WHERE timestamp >= ? AND timestamp < ?",
+  now - 8 * 86400, now - 86400);
+
+const ratio = baseline > 0 ? recent / baseline : null;
+if (ratio === null) return degraded("NO BASELINE — cannot judge this as normal or not");
+if (ratio >= 5) return failure(\`AI spend \${recent.toFixed(2)} USD is \${ratio.toFixed(1)}x the 7-day average\`);
+if (ratio >= 2) return degraded(\`AI spend \${recent.toFixed(2)} USD is \${ratio.toFixed(1)}x the 7-day average\`);
+return ok(\`AI spend \${recent.toFixed(2)} USD, within \${ratio.toFixed(1)}x of baseline\`);`,
+      },
+      {
+        title: "Persisting a session — db.batch(), never db.transaction()",
+        lang: "ts",
+        code: `const runs = await Promise.all(ALL_HEALTH_PROBES.map((p) => runProbe(p, env)));
+
+// D1 rejects BEGIN (error 7500), so a batch is the only atomic unit available.
+// A persistence failure is logged, never thrown: a broken audit trail must not
+// hide a working — or broken — system.
+const stmts = runs.map((r) =>
+  db.insert(healthResults).values({
+    timestamp, sessionUuid,
+    healthTestDefId: defIdByName.get(r.name) as number,
+    healthTestResult: r.result,
+    healthTestResultDetails: r.details.slice(0, 4000),
+    durationMs: r.durationMs,
+    triggeredBy,
+  }),
+);
+if (stmts.length > 0) {
+  await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
+}`,
+      },
+      {
+        title: "Bridging the #169 data-quality checks into the same ledger",
+        lang: "ts",
+        code: `const dataQualityProbes: HealthProbe[] = HEALTH_CHECKS.map((check) =>
+  defineProbe({
+    name: \`data_quality_\${check.slug.replace(/-/g, "_")}\`,
+    // …
+    run: async (env: Env) => {
+      const r = await check.run(env);
+      const stats = r.stats.map((s) => \`\${s.label}=\${s.value}\`).join(", ");
+      const details = \`\${r.summary} — score \${r.score}/100; \${stats}\`;
+      if (r.status === "healthy") return ok(details);
+      if (r.status === "degraded") return degraded(details);
+      // "unhealthy" AND "unknown" both fail. A check that THREW must never be
+      // mistaken for an all-clear.
+      return failure(details);
+    },
+  }),
+);`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Ownership: each module declares its own probes; one registry, one runner, one ledger.",
+        code: `flowchart LR
+  subgraph modules["17 backend modules — each owns a health.ts"]
+    db["db"]
+    api["api"]
+    ai["ai"]
+    rt["realtime"]
+    wf["workflows"]
+    usage["usage (cost)"]
+    integ["email · gmail · google · photos · tesla"]
+    media["images · render · documents"]
+    mcp["mcp"]
+    show["showroom"]
+  end
+  quality["registry.ts — #169 data-quality checks"]
+  modules --> reg["probes.ts<br/>ALL_HEALTH_PROBES (88)"]
+  quality -->|bridged as a group| reg
+  reg --> run["run.ts — runHealthSession()"]
+  run --> d1[("health_test_def<br/>health_results")]
+  run --> apis["/api/health/*"]
+  apis --> ui["/admin/system/health"]
+  apis --> pip["header pip"]
+  classDef done fill:#1f4d2e,stroke:#4ade80,color:#e8ffe8
+  class reg,run done`,
+      },
+      {
+        caption: "The catalogue: definitions, a binding-type vocabulary, and one result row per probe per session.",
+        code: `erDiagram
+  health_test_def ||--o{ health_results : "records"
+  health_test_def ||--o{ health_test_binding_types : "touches"
+  health_binding_types ||--o{ health_test_binding_types : "is used by"
+
+  health_test_def {
+    int id PK
+    text name UK "snake_case, natural key"
+    text health_ts_filepath
+    text what_success_means
+    text what_failure_means
+    text troubleshooting_steps
+    text dev_ops_playbook
+    bool is_billing_risk
+    text severity "HIGH|MEDIUM|LOW"
+    bool is_active "soft delete"
+  }
+  health_binding_types {
+    int id PK
+    text name UK "d1, kv, r2, workflow, ..."
+  }
+  health_test_binding_types {
+    int id PK
+    int health_test_def_id FK
+    int health_binding_type_id FK
+  }
+  health_results {
+    int id PK
+    int timestamp "session start, shared"
+    text session_uuid "shared by one run"
+    int health_test_def_id FK
+    text health_test_result "SUCCESS|FAILURE|DEGRADED"
+    text health_test_result_details
+    int duration_ms
+    text triggered_by "ui|api|mcp|cron"
+  }`,
+      },
+      {
+        caption: "One session, end to end.",
+        code: `sequenceDiagram
+  actor U as Admin
+  participant UI as /admin/system/health
+  participant API as POST /api/health/session
+  participant R as runHealthSession()
+  participant D1 as D1
+  U->>UI: click "Run health checks"
+  UI->>UI: every row becomes a skeleton, button spins
+  UI->>API: POST (admin cookie required)
+  API->>R: runHealthSession(env, "ui")
+  R->>D1: syncHealthCatalogue() — upsert 88 defs + binding vocab (db.batch)
+  par 88 probes, concurrent, each time-boxed at 10s
+    R->>R: probe.run(env)
+  end
+  R->>D1: 88 health_results rows, one session_uuid (db.batch)
+  R-->>UI: {overall, counts, runs[]}
+  UI->>U: timeline repaints, grouped by module`,
+      },
+      {
+        caption: "Outcome states — DEGRADED is a real state, not a soft failure.",
+        code: `stateDiagram-v2
+  [*] --> Running
+  Running --> SUCCESS: within envelope
+  Running --> DEGRADED: up but outside its envelope<br/>(stale data, backlog, 2x spend, optional credential missing)
+  Running --> FAILURE: unreachable, throws, required credential absent, 5x spend
+  Running --> FAILURE: timed out after 10s
+  SUCCESS --> [*]
+  DEGRADED --> [*]
+  FAILURE --> [*]`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_195.mjs",
+      command: "pnpm run test:pr 195 -- --preview",
+      ranAt: "2026-07-22",
+      source: `// The runbook fields are the whole point — an empty one is a defect, not a nit.
+const FIELDS = ["description", "whatSuccessMeans", "whatFailureMeans",
+  "troubleshootingSteps", "devOpsPlaybook", "healthTsFilepath"];
+const bare = catalogueTests.filter((t) => FIELDS.some((f) => !t[f] || String(t[f]).length < 20));
+checks.ok("every test has a populated runbook", bare.length === 0, bare.map((t) => t.name).join(", "));
+
+// The session must be PERSISTED, not just returned.
+checks.ok("the run we just made is the latest persisted session",
+  r.json?.session?.sessionUuid === session.sessionUuid);
+
+// The badge must never leak the system map to an unauthed reader.
+checks.ok("badge is null for an unauthed request",
+  anon.status === 200 && anon.json?.status === null);`,
+      output: `QC pr_195 — health platform
+target: https://wcrp-claude-backend-health-checks-d1-d6df78.hacolby.workers.dev
+
+  ✓ target reachable (…) 
+
+Regression — public health endpoints (uptime monitors read these)
+  ✓ GET /api/health is public and 200
+  ✓ GET /api/health still returns status + services
+  ✓ POST /api/health/run (0027 screen) still works
+  ✓ …and still returns per-binding checks
+
+Regression — #169 data-quality registry (bridged, must still stand alone)
+  ✓ GET /api/system/health/checks → 200
+  ✓ …registry is non-empty
+
+Auth — the catalogue is a map of internal infrastructure, so it is gated
+  ✓ POST /api/health/session unauthed → 401
+  ✓ GET /api/health/catalogue unauthed → 401
+
+Catalogue — every test carries its own runbook
+  ✓ GET /api/health/catalogue → 200
+  ✓ catalogue is grouped
+  ✓ catalogue is substantial
+    storage:10 api:5 compute:10 ai:9 cost:7 media:14 integrations:20 connector:5 domain:5 quality:3
+  ✓ every test has a populated runbook
+  ✓ severity is always a valid enum value
+  ✓ test names are unique
+  ✓ cost watchers exist
+  ✓ the #169 data-quality checks are bridged in
+
+Session — run every probe for real
+  ✓ POST /api/health/session → 200 even when probes fail
+  ✓ session returns a uuid
+  ✓ every catalogued test ran
+  ✓ overall is a valid roll-up
+  ✓ counts sum to the run count
+  ✓ every run carries details
+  ✓ the screen is fast (< 20s wall)
+    overall=FAILURE counts={"success":74,"degraded":12,"failure":2} wall=2424ms
+    FAILURE tesla_telemetry_freshness :: tesla_telemetry_events is empty — no telemetry frame has EVER been recorded.
+    FAILURE mcp_tool_registry_integrity :: 100 tools registered, but — no examples[]: create_render_session, list_room_angles, run_render_stage, …
+    DEGRADED showroom_scrape_failures :: scrape_status — failed: 49, running: 0, pending: 10, complete: 25.
+    DEGRADED showroom_geo_coverage :: 72 of 215 active stores (33.5%) have no latitude/longitude; 72 of those DO have an address.
+    DEGRADED image_processor_staging_errors :: 7 staging row(s) with processing_status='failed'; most recent: D1_ERROR: too many SQL variables
+    (…8 more DEGRADED)
+
+Ledger — the session must be persisted, not just returned
+  ✓ GET /api/health/session/latest → 200
+  ✓ the run we just made is the latest persisted session
+  ✓ …with every row persisted
+  ✓ GET /api/health/sessions → 200
+  ✓ history is grouped by session
+  ✓ sessions are distinct
+
+Badge — cheap, and never triggers a probe
+  ✓ GET /api/health/badge → 200
+  ✓ badge reports the latest session's status
+  ✓ badge is null for an unauthed request (renders nothing, never leaks)
+
+Pages — the dashboard moved behind the admin gate
+  ✓ /admin/system/health renders for an admin
+  ✓ …and mounts the dashboard island
+  ✓ /health → /admin/system/health
+  ✓ /admin/health → /admin/system/health
+
+37 passed, 0 failed
+
+--- production run (pnpm run test:pr 195), pre-merge regression guard ---
+  ✓ GET /api/health is public and 200
+  ✓ POST /api/health/run (0027 screen) still works
+  ✓ GET /api/system/health/checks → 200
+  ✓ /admin/system/health renders for an admin
+    ⏳ POST /api/health/session — pending merge/deploy (HTTP 404 on production)
+    ⏳ /health redirect — pending merge/deploy (HTTP 200)
+9 passed, 0 failed`,
+      migrations: [
+        {
+          tag: "0125_supreme_dust",
+          appliedRemote: true,
+          note: "Applied with `pnpm run migrate:remote` and verified: SELECT name FROM sqlite_master WHERE name LIKE 'health%' returns health_binding_types, health_checks, health_results, health_test_binding_types, health_test_def. First real session then wrote 88 health_results rows under one session_uuid and 88 health_test_def rows with 12 binding types and 91 mappings. Renumbered from 0124 to 0125 after #169 took 0124 — re-applying is safe, the migrate script tolerates \"already exists\".",
+        },
+      ],
+    },
+  },
   "0026-agent-ops-transparency": {
     slug: "0026-agent-ops-transparency",
     problem:

@@ -1,11 +1,11 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
-import { SystemHealthApp } from "@/components/system/SystemHealthApp";
+import { HealthDashboardApp } from "@/components/health/HealthDashboardApp";
 ---
 
 <BaseLayout
   title="System Health — The Monolith"
-  description="Every registered health check across the platform, with the stats behind each status."
+  description="Run every registered health probe against the worker — D1, KV, R2, Vectorize, Durable Objects, Workflows, AI, cost watchers, external integrations and the scored data-quality checks."
 >
   <main class="container mx-auto px-4 py-8 pb-12">
     <div class="mb-8">
@@ -18,9 +18,9 @@ import { SystemHealthApp } from "@/components/system/SystemHealthApp";
         System Health
       </h1>
       <p class="text-muted-foreground">
-        Every registered health check, the stats behind its status, and a route into the audit trail and logs.
+        Every backend module declares its own checks. Run them all on demand, see what broke, and read the runbook for each test — including the scored data-quality checks, which keep their route into the audit trail and logs.
       </p>
     </div>
-    <SystemHealthApp client:only="react" />
+    <HealthDashboardApp client:only="react" />
   </main>
 </BaseLayout>

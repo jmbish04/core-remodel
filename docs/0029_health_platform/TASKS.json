@@ -1,0 +1,132 @@
+{
+  "planSlug": "0029_health_platform",
+  "title": "Health platform: per-module probes, D1 catalogue, admin dashboard",
+  "tasks": [
+    {
+      "taskKey": "P0-01",
+      "workstream": "backend",
+      "phase": "P0 — Contract",
+      "changeType": "added",
+      "title": "HealthProbe contract + helpers (services/health/types.ts)",
+      "dependsOn": [],
+      "status": "done"
+    },
+    {
+      "taskKey": "P0-02",
+      "workstream": "database",
+      "phase": "P0 — Contract",
+      "changeType": "migration",
+      "title": "health_test_def, health_binding_types, health_test_binding_types, health_results",
+      "dependsOn": ["P0-01"],
+      "status": "done"
+    },
+    {
+      "taskKey": "P1-01",
+      "workstream": "backend",
+      "phase": "P1 — Probes",
+      "changeType": "added",
+      "title": "Infrastructure probes: db, realtime, workflows",
+      "dependsOn": ["P0-01"],
+      "status": "done"
+    },
+    {
+      "taskKey": "P1-02",
+      "workstream": "backend",
+      "phase": "P1 — Probes",
+      "changeType": "added",
+      "title": "AI + cost probes: ai, ai-gateway, usage (billing watchers), render",
+      "dependsOn": ["P0-01"],
+      "status": "done"
+    },
+    {
+      "taskKey": "P1-03",
+      "workstream": "backend",
+      "phase": "P1 — Probes",
+      "changeType": "added",
+      "title": "Integration probes: email, gmail, google, google-photos, tesla",
+      "dependsOn": ["P0-01"],
+      "status": "done"
+    },
+    {
+      "taskKey": "P1-04",
+      "workstream": "backend",
+      "phase": "P1 — Probes",
+      "changeType": "added",
+      "title": "Platform/data probes: api, mcp, showroom, documents, image-processor",
+      "dependsOn": ["P0-01"],
+      "status": "done"
+    },
+    {
+      "taskKey": "P2-01",
+      "workstream": "backend",
+      "phase": "P2 — Runner",
+      "changeType": "added",
+      "title": "Registry (module groups + ALL_HEALTH_PROBES)",
+      "dependsOn": ["P1-01", "P1-02", "P1-03", "P1-04"],
+      "status": "done"
+    },
+    {
+      "taskKey": "P2-02",
+      "workstream": "backend",
+      "phase": "P2 — Runner",
+      "changeType": "added",
+      "title": "runHealthSession + syncHealthCatalogue + session readers (db.batch only)",
+      "dependsOn": ["P2-01", "P0-02"],
+      "status": "done"
+    },
+    {
+      "taskKey": "P2-03",
+      "workstream": "api",
+      "phase": "P2 — Runner",
+      "changeType": "added",
+      "title": "Admin-gated /api/health/{session,session/latest,sessions,catalogue,badge}",
+      "dependsOn": ["P2-02"],
+      "status": "done"
+    },
+    {
+      "taskKey": "P3-01",
+      "workstream": "frontend",
+      "phase": "P3 — Dashboard",
+      "changeType": "added",
+      "title": "/admin/health page + HealthDashboardApp timeline (mobile-first, skeleton run state)",
+      "dependsOn": ["P2-03"],
+      "status": "done"
+    },
+    {
+      "taskKey": "P3-02",
+      "workstream": "frontend",
+      "phase": "P3 — Dashboard",
+      "changeType": "added",
+      "title": "HealthStatusBadge in AppHeader + mobile sidebar bar",
+      "dependsOn": ["P2-03"],
+      "status": "done"
+    },
+    {
+      "taskKey": "P3-03",
+      "workstream": "frontend",
+      "phase": "P3 — Dashboard",
+      "changeType": "changed",
+      "title": "Nav entry (System → System Health) + /health 301 + delete the public page",
+      "dependsOn": ["P3-01"],
+      "status": "done"
+    },
+    {
+      "taskKey": "P4-01",
+      "workstream": "ops",
+      "phase": "P4 — Ship",
+      "changeType": "changed",
+      "title": "migrate:remote + verify tables, deploy preview, run a real session",
+      "dependsOn": ["P3-03"],
+      "status": "in_progress"
+    },
+    {
+      "taskKey": "P4-02",
+      "workstream": "ops",
+      "phase": "P4 — Ship",
+      "changeType": "added",
+      "title": "QC script (preview + production) and changelog entry with verification block",
+      "dependsOn": ["P4-01"],
+      "status": "pending"
+    }
+  ]
+}

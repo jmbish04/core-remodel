@@ -109,6 +109,12 @@ const LEGACY_REDIRECTS: ReadonlyArray<readonly [string, string]> = [
   // Brands live under the shopping suite (SITEMAP target). Registered AFTER the
   // /admin/brands/types entry above so the prefix loop resolves types first.
   ["/admin/brands", "/admin/shopping/brands"],
+  // The health page now maps the whole backend (tables, bindings, failure modes)
+  // and so moved behind the /admin gate, onto the /admin/system/* IA next to the
+  // audit trail and logs. `GET /api/health` stays public for external uptime
+  // monitors — only the human page moved.
+  ["/health", "/admin/system/health"],
+  ["/admin/health", "/admin/system/health"],
   ["/listing-photos", "/photos/listing"],
   ["/inspiration-photos", "/photos/inspiration"],
   ["/daily-log", "/log/daily"],
