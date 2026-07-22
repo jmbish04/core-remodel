@@ -1,0 +1,40 @@
+---
+/**
+ * @fileoverview AI cost dashboard — spend attributed to the agent that caused it.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { AgentUsageApp } from "@/components/system/agents/AgentUsageApp";
+---
+
+<BaseLayout
+  title="Agent Cost — The Monolith"
+  description="AI spend for the current billing cycle, attributed per agent and per run, with live circuit-breaker state for every metered provider."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 flex items-center gap-2 text-3xl font-bold tracking-tight">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="size-6 text-muted-foreground"
+          aria-hidden="true"
+        >
+          <line x1="12" x2="12" y1="2" y2="22"></line>
+          <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+        </svg>
+        Agent Cost
+      </h1>
+      <p class="text-muted-foreground">
+        What the agents are spending, and which one is spending it.
+      </p>
+    </div>
+    <AgentUsageApp client:only="react" />
+  </main>
+</BaseLayout>
