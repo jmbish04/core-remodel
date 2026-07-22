@@ -302,3 +302,41 @@ html.dark .shiki,
 html.dark .shiki span {
   color: var(--shiki-dark);
 }
+
+/*
+ * Shiki transformers from the code-blocks registry.
+ *
+ * `showLineNumbers` and `wordWrapContent` only ATTACH the classes below — the
+ * registry ships no CSS — so without these rules both transformers are silent
+ * no-ops.
+ */
+.shiki.shiki-line-numbers {
+  counter-reset: shiki-line;
+}
+
+.shiki.shiki-line-numbers .line::before {
+  counter-increment: shiki-line;
+  content: counter(shiki-line);
+  display: inline-block;
+  width: 2.25rem;
+  margin-right: 1rem;
+  text-align: right;
+  /* Numbers are scaffolding, not content: dim, and never selectable, so copying
+     a block yields runnable code rather than code with line numbers glued on. */
+  color: color-mix(in oklch, currentColor 35%, transparent);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.shiki.shiki-word-wrap code {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Wrapped continuation lines indent past the gutter so the number column stays
+   a clean vertical rule instead of colliding with wrapped text. */
+.shiki.shiki-word-wrap.shiki-line-numbers .line {
+  display: block;
+  padding-left: 3.25rem;
+  text-indent: -3.25rem;
+}

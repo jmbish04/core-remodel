@@ -25,6 +25,12 @@
 
 import { Check, Copy } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import {
+  addLanguageProperty,
+  addTitleProperty,
+} from "@/lib/shiki/transformers/add-to-pre-element";
+import { showLineNumbers } from "@/lib/shiki/transformers/show-line-numbers";
+import { wordWrapContent } from "@/lib/shiki/transformers/word-wrap";
 import { cn } from "@/lib/utils";
 
 /** Languages the changelog actually stores — see `CodeCard["lang"]` plus SQL migrations. */
@@ -132,6 +138,17 @@ export function CodeHighlight({
           // token colors off `--shiki-dark`, so the block follows the app theme
           // rather than baking one in.
           defaultColor: false,
+          meta: { __raw: filename ? `title="${filename.replace(/"/g, "")}"` : "" },
+          transformers: [
+            // Line numbers and wrapping are ALWAYS on. Changelog code is read,
+            // not run: a reader referring to "the guard on line 12" needs the
+            // numbers, and a long line that scrolls off the right edge of a
+            // slide or a narrow card is a line nobody reads.
+            showLineNumbers({ activateByDefault: true }),
+            wordWrapContent(),
+            addTitleProperty(),
+            addLanguageProperty(),
+          ],
         }),
       )
       .then((out) => {

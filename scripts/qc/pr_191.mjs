@@ -108,6 +108,13 @@ if (okEntry) {
     );
 
     checks.ok("files touched render as a tree island", html.includes("FilesTouchedTree"));
+  // termcn's Tree cannot run in a browser (both of its bases are terminal
+  // renderers), so this is a DOM component with termcn's API and glyphs. The
+  // kibo tree it replaced must be gone, not merely unused.
+  checks.ok(
+    "kibo tree is gone (replaced by the terminal-styled tree)",
+    !html.includes("TreeProvider") && !html.includes("kibo-ui/tree"),
+  );
     checks.ok("code/SQL render through the shiki island", html.includes("CodeHighlight"));
 
     // The duplicate Verification block read fields that do not exist on the
@@ -166,9 +173,11 @@ if (onProd && slides.status === 404) {
 } else {
   checks.ok(`GET /admin/changelog/${RICH}/slides → 200`, slides.status === 200, `→ ${slides.status}`);
   checks.ok("slides page mounts the deck island", slides.text.includes("ChangelogDeck"));
+  // The deck runs on reveal.js via the slidecn registry. Its stylesheet is the
+  // observable proof from the server side — the deck itself is client:only.
   checks.ok(
-    "deck takes over the viewport (fixed inset-0, so its controls are on screen)",
-    slides.text.includes("AutoScaleContainer") || slides.text.includes("ChangelogDeck"),
+    "deck ships the reveal.js stylesheet",
+    /ChangelogDeck\.[A-Za-z0-9_-]+\.css/.test(slides.text),
   );
 }
 

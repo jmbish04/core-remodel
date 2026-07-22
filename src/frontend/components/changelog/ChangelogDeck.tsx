@@ -1,29 +1,43 @@
 "use client";
 
 /**
- * @fileoverview Slide deck view of one changelog entry.
+ * @fileoverview Slide deck view of one changelog entry, on reveal.js.
  *
  * Same content as the detail page, paced for presenting rather than reading —
  * walking a reviewer or a contractor through a change without asking them to
  * scroll a long document while you talk.
  *
- * Every slide that summarizes a section carries a link back to that section's
- * anchor on the detail page, because a deck necessarily truncates: slides show
- * the first few paragraphs and the reader follows the link for the rest. The
- * truncation is stated on the slide ("+N more paragraphs") rather than silently
- * dropping text, so nobody presents from a deck believing they have seen it all.
+ * Built from the slidecn registry (`TitleSlide`, `SectionSlide`, `ContentSlide`,
+ * `ListSlide`, `SplitSlide`) over `@revealjs/react`. That replaces a hand-rolled
+ * deck and, with it, hand-rolled keyboard navigation, touch swiping, the slide
+ * counter, the overview grid, fullscreen and speaker notes — reveal.js ships all
+ * of that and does it better than a bespoke implementation will.
  *
- * Hand-rolled rather than pulled from a slide registry: the registry package
- * wanted Next.js and a second syntax highlighter as dependencies, which is a
- * large permanent cost for keyboard navigation and a counter.
+ * Two things reveal does NOT do, which is why the pieces below survive:
+ *
+ *   - Reveal scales a slide UNIFORMLY from a fixed design size. It does not
+ *     shrink text to fit a variable amount of content, so a nine-paragraph
+ *     problem statement still overflows its slide. `AutoScaleContainer` is what
+ *     handles that.
+ *   - Every content slide links back to its section anchor on the detail page,
+ *     because a deck is a summary and the reader needs the way back.
  */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Deck } from "@revealjs/react";
+import { useMemo } from "react";
+
 import { MermaidCn } from "@/components/mermaidcn/MermaidCn";
 import { MarkdownProse } from "@/components/research/MarkdownProse";
+import { ContentSlide } from "@/components/slides/content-slide";
+import { ListSlide } from "@/components/slides/list-slide";
+import { SectionSlide } from "@/components/slides/section-slide";
+import { SplitSlide } from "@/components/slides/split-slide";
+import { TitleSlide } from "@/components/slides/title-slide";
 import { AutoScaleContainer } from "@/components/ui/auto-scale-container";
 import { toMarkdown, type Prose } from "@/lib/markdown-normalize";
-import { cn } from "@/lib/utils";
+
+import "reveal.js/reveal.css";
+import "@/components/slides/themes/theme-dark.css";
 
 interface DeckDiagram {
   title: string;
@@ -54,32 +68,6 @@ export interface ChangelogDeckProps {
   changes?: { kind: string; text: string }[];
 }
 
-interface Slide {
-  key: string;
-  /** Section anchor on the detail page, or null for slides with no counterpart. */
-  anchor: string | null;
-  eyebrow: string;
-  heading: string;
-  render: () => React.ReactNode;
-}
-
-/**
- * Slide body.
- *
- * Nothing is truncated any more. The previous version showed the first three
- * paragraphs and printed "+N more on the detail page", because a fixed font size
- * on a fixed-height slide had no other option. AutoScaleContainer removes the
- * constraint — the full text is rendered and the type shrinks to fit — so the
- * reader is presenting the actual content rather than an excerpt of it.
- */
-function SlideBody({ markdown }: { markdown: string }) {
-  return (
-    <AutoScaleContainer contentKey={markdown} min={12} max={26}>
-      <MarkdownProse className="prose-p:mb-5">{markdown}</MarkdownProse>
-    </AutoScaleContainer>
-  );
-}
-
 const KIND_LABEL: Record<string, string> = {
   added: "Features",
   fixed: "Fixes",
@@ -87,6 +75,53 @@ const KIND_LABEL: Record<string, string> = {
   removed: "Removed",
   migration: "Migrations",
 };
+
+/**
+ * Markdown body that shrinks to fit the slide.
+ *
+ * Nothing is truncated. An earlier version showed the first three paragraphs and
+ * printed "+N more on the detail page", because a fixed font size on a
+ * fixed-height slide had no other option. The scaler removes the constraint, so
+ * the presenter is showing the actual content rather than an excerpt of it.
+ */
+function SlideBody({ markdown, anchorHref }: { markdown: string; anchorHref?: string }) {
+  return (
+    <div className="flex h-full min-h-0 flex-col text-left">
+      <AutoScaleContainer contentKey={markdown} min={12} max={24} className="flex-1">
+        <MarkdownProse className="prose-p:mb-5" markdown={markdown} />
+      </AutoScaleContainer>
+      {anchorHref ? (
+        <a
+          href={anchorHref}
+          className="mt-3 shrink-0 self-start text-sm text-sky-400 underline underline-offset-4"
+        >
+          Read the full section →
+        </a>
+      ) : null}
+    </div>
+  );
+}
+
+function RecapColumns({ entries }: { entries: [string, string[]][] }) {
+  return (
+    <div className="space-y-5 text-left">
+      {entries.map(([label, items]) => (
+        <div key={label}>
+          <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+            {label}
+          </h3>
+          <ul className="mt-2 space-y-1.5">
+            {items.map((t) => (
+              <li key={t} className="text-sm leading-6 text-foreground/85">
+                {t}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export function ChangelogDeck(props: ChangelogDeckProps) {
   const {
@@ -98,7 +133,6 @@ export function ChangelogDeck(props: ChangelogDeckProps) {
     branch,
     status,
     prNumber,
-    prUrl,
     detailHref,
     diagrams = [],
     apiChanges = [],
@@ -111,364 +145,155 @@ export function ChangelogDeck(props: ChangelogDeckProps) {
   const problem = useMemo(() => toMarkdown(props.problem), [props.problem]);
   const approach = useMemo(() => toMarkdown(props.approach), [props.approach]);
 
-  const slides = useMemo<Slide[]>(() => {
-    const out: Slide[] = [];
-
-    out.push({
-      key: "title",
-      anchor: null,
-      eyebrow: status === "shipped" ? "Shipped" : "Proposed — not yet deployed",
-      heading: title,
-      render: () => (
-        <div className="space-y-6">
-          {subtitle ? (
-            <p className="text-xl italic text-muted-foreground md:text-2xl">{subtitle}</p>
-          ) : null}
-          <p className="max-w-3xl text-lg leading-8 text-foreground/80">{summary}</p>
-          <div className="flex flex-wrap items-center gap-2 pt-2 font-mono text-xs text-muted-foreground">
-            <span className="rounded-md bg-card px-2 py-1 ring-1 ring-border/40">{branch}</span>
-            {prNumber ? (
-              <a
-                href={prUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="rounded-md bg-sky-500/12 px-2 py-1 text-sky-300 ring-1 ring-sky-500/25"
-              >
-                PR #{prNumber} ↗
-              </a>
-            ) : null}
-            <span>{date}</span>
-          </div>
-        </div>
-      ),
-    });
-
-    if (introduction) {
-      out.push({
-        key: "introduction",
-        anchor: "introduction",
-        eyebrow: "Introduction",
-        heading: "What this is",
-        render: () => <SlideBody markdown={introduction} />,
-      });
+  const recapColumns = useMemo(() => {
+    const buckets = new Map<string, string[]>();
+    for (const c of changes) {
+      const label = KIND_LABEL[c.kind] ?? c.kind;
+      buckets.set(label, [...(buckets.get(label) ?? []), c.text]);
     }
+    return [...buckets.entries()];
+  }, [changes]);
 
-    if (problem) {
-      out.push({
-        key: "problem",
-        anchor: "problem",
-        eyebrow: "Problem",
-        heading: "Why this had to change",
-        render: () => <SlideBody markdown={problem} />,
-      });
-    }
-
-    if (approach) {
-      out.push({
-        key: "approach",
-        anchor: "approach",
-        eyebrow: "Approach",
-        heading: "How it was solved",
-        render: () => <SlideBody markdown={approach} />,
-      });
-    }
-
-    diagrams.forEach((d, i) => {
-      out.push({
-        key: `diagram-${i}`,
-        anchor: "diagrams",
-        eyebrow: `Diagram ${i + 1} of ${diagrams.length}`,
-        heading: d.title,
-        render: () => (
-          <div className="flex h-full min-h-0 flex-col gap-4">
-            {d.description ? (
-              <MarkdownProse className="shrink-0 text-sm prose-p:mb-3">
-                {d.description}
-              </MarkdownProse>
-            ) : null}
-            <div className="min-h-0 flex-1 rounded-xl bg-card p-4 ring-1 ring-border/40">
-              <MermaidCn code={d.code} caption={d.title} />
-            </div>
-          </div>
-        ),
-      });
-    });
-
-    if (apiChanges.length > 0) {
-      out.push({
-        key: "api",
-        anchor: "api",
-        eyebrow: "Developer",
-        heading: "API surface",
-        render: () => (
-          <ul className="space-y-2">
-            {apiChanges.slice(0, 8).map((a) => (
-              <li key={a} className="font-mono text-base leading-7 text-foreground/85">
-                {a}
-              </li>
-            ))}
-            {apiChanges.length > 8 ? (
-              <li className="text-sm italic text-muted-foreground">
-                + {apiChanges.length - 8} more on the detail page
-              </li>
-            ) : null}
-          </ul>
-        ),
-      });
-    }
-
-    if (changes.length > 0) {
-      const buckets = new Map<string, string[]>();
-      for (const c of changes) {
-        const label = KIND_LABEL[c.kind] ?? c.kind;
-        buckets.set(label, [...(buckets.get(label) ?? []), c.text]);
-      }
-      out.push({
-        key: "recap",
-        anchor: null,
-        eyebrow: "Recap",
-        heading: status === "shipped" ? "What this introduced" : "What this will introduce",
-        render: () => (
-          <div className="grid gap-6 md:grid-cols-2">
-            {[...buckets.entries()].map(([label, items]) => (
-              <div key={label}>
-                <h3 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                  {label}
-                </h3>
-                <ul className="mt-2 space-y-1.5">
-                  {items.map((t) => (
-                    <li key={t} className="text-sm leading-6 text-foreground/85">
-                      {t}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        ),
-      });
-    }
-
-    out.push({
-      key: "verification",
-      anchor: "verification",
-      eyebrow: "Verification",
-      heading: verification ? "What was run" : "Nothing was verified",
-      render: () =>
-        verification ? (
-          <div className="space-y-4">
-            <code className="inline-block rounded-md bg-emerald-500/10 px-3 py-1.5 font-mono text-base text-emerald-300 ring-1 ring-emerald-500/25">
-              {verification.command}
-            </code>
-            {verification.ranAt ? (
-              <p className="text-sm text-muted-foreground">ran {verification.ranAt}</p>
-            ) : null}
-            {migrations.length > 0 ? (
-              <ul className="space-y-1.5 pt-2">
-                {migrations.map((m) => (
-                  <li key={m.tag} className="flex items-center gap-2 font-mono text-sm">
-                    <span
-                      className={cn(
-                        "rounded-md px-2 py-0.5 text-[10px] font-medium",
-                        m.appliedRemote
-                          ? "bg-emerald-500/12 text-emerald-300"
-                          : "bg-rose-500/12 text-rose-300",
-                      )}
-                    >
-                      {m.appliedRemote ? "applied to remote" : "NOT applied"}
-                    </span>
-                    <span className="text-muted-foreground">{m.tag}</span>
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
-        ) : (
-          <p className="max-w-2xl rounded-xl bg-rose-500/8 px-5 py-4 text-base leading-7 text-rose-200/90 ring-1 ring-rose-500/25">
-            No QC run was recorded for this entry. Nothing here has been verified against the
-            deployed worker — treat the change as unproven, not as passing.
-          </p>
-        ),
-    });
-
-    return out;
-  }, [
-    approach,
-    apiChanges,
-    branch,
-    changes,
-    date,
-    diagrams,
-    introduction,
-    migrations,
-    problem,
-    prNumber,
-    prUrl,
-    status,
-    subtitle,
-    summary,
-    title,
-    verification,
-  ]);
-
-  const [index, setIndex] = useState(0);
-  const last = slides.length - 1;
-
-  const go = useCallback(
-    (next: number) => setIndex((i) => Math.min(last, Math.max(0, typeof next === "number" ? next : i))),
-    [last],
-  );
-
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      // Ignore while the reader is typing somewhere — the deck is not modal.
-      const target = e.target as HTMLElement | null;
-      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
-
-      switch (e.key) {
-        case "ArrowRight":
-        case "PageDown":
-        case " ":
-          e.preventDefault();
-          go(index + 1);
-          break;
-        case "ArrowLeft":
-        case "PageUp":
-          e.preventDefault();
-          go(index - 1);
-          break;
-        case "Home":
-          e.preventDefault();
-          go(0);
-          break;
-        case "End":
-          e.preventDefault();
-          go(last);
-          break;
-        case "Escape":
-          window.location.href = detailHref;
-          break;
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [detailHref, go, index, last]);
-
-  // Touch swipe. 60px threshold so a slightly-diagonal scroll on a diagram slide
-  // does not fire a slide change.
-  const [touchX, setTouchX] = useState<number | null>(null);
-  function onTouchStart(e: React.TouchEvent) {
-    setTouchX(e.changedTouches[0]?.clientX ?? null);
-  }
-  function onTouchEnd(e: React.TouchEvent) {
-    if (touchX == null) return;
-    const dx = (e.changedTouches[0]?.clientX ?? touchX) - touchX;
-    if (Math.abs(dx) > 60) go(dx < 0 ? index + 1 : index - 1);
-    setTouchX(null);
-  }
-
-  const slide = slides[index];
-  if (!slide) return null;
+  const half = Math.ceil(recapColumns.length / 2);
 
   return (
     /*
-      `fixed inset-0`, and both halves of that matter.
-
-      FIXED: the deck is a presentation, so it takes the whole viewport instead
-      of sitting inside the admin shell. Nested in the shell it inherited a
-      ~64px header, pushing its own footer — the arrows and slide dots — below
-      the fold on the one view whose entire job is stepping through slides.
-      "Back to the full entry" is the way out.
-
-      DEFINITE HEIGHT: AutoScaleContainer measures its own clientHeight. Under an
-      auto-height ancestor that measurement is just the content's own height, so
-      everything trivially "fits" and nothing ever scales. inset-0 — plus min-h-0
-      on every flex child down to the slide body — is what makes the fit mean
-      something.
+      `text-foreground` is load-bearing, not decoration. Importing reveal.css
+      brings a reset that sets the document's inherited color to black, and the
+      slidecn slide components carry no color class of their own — their headings
+      INHERIT. Without this the title renders black-on-black and only the
+      elements with an explicit `text-muted-foreground` survive. Setting it once
+      on the deck root fixes the entire subtree.
     */
-    <div
-      className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-background"
-      onTouchStart={onTouchStart}
-      onTouchEnd={onTouchEnd}
-    >
+    <div className="fixed inset-0 z-50 bg-background text-foreground">
       {/*
-        shrink-0 so the header and footer keep their height while the slide body
-        absorbs whatever is left. They used to be sticky, which was a workaround
-        for the root having no definite height — with h-svh above, the column
-        bounds itself and the controls are always on screen.
+        The way out, layered above reveal rather than inside it. Reveal owns the
+        whole viewport once it initializes and its chrome has no concept of "back
+        to the page this came from" — a presentation with no exit is a trap.
       */}
-      <header className="flex shrink-0 items-center justify-between gap-4 border-b border-border/40 bg-background/95 px-6 py-3 backdrop-blur">
-        <a
-          href={detailHref}
-          className="text-xs text-muted-foreground underline underline-offset-4 hover:text-foreground"
-        >
-          ← Back to the full entry
-        </a>
-        <span className="font-mono text-xs text-muted-foreground">
-          {entryNo ? `#${entryNo} · ` : ""}
-          {index + 1} / {slides.length}
-        </span>
-      </header>
+      <a
+        href={detailHref}
+        className="absolute top-3 left-4 z-[60] rounded-md bg-background/80 px-2.5 py-1 text-xs text-muted-foreground underline underline-offset-4 backdrop-blur transition-colors hover:text-foreground"
+      >
+        ← Back to the full entry
+      </a>
 
-      <section className="mx-auto flex w-full min-h-0 max-w-5xl flex-1 flex-col justify-center px-6 py-8">
-        <p className="font-mono text-[11px] uppercase tracking-[0.3em] text-muted-foreground">
-          {slide.eyebrow}
-        </p>
-        <h1 className="mt-3 text-3xl font-semibold tracking-tight md:text-5xl">
-          {index === 0 && entryNo ? (
-            <span className="mr-3 font-mono text-2xl font-normal text-muted-foreground md:text-4xl">
-              #{entryNo}
-            </span>
-          ) : null}
-          {slide.heading}
-        </h1>
-        <div className="mt-6 min-h-0 flex-1">{slide.render()}</div>
+      <Deck
+        className="h-full w-full"
+        config={{
+          // A 16:9 design surface. Reveal scales it uniformly to whatever the
+          // window is, so the deck looks the same on a laptop and a projector.
+          width: 1280,
+          height: 720,
+          margin: 0.06,
+          controls: true,
+          progress: true,
+          slideNumber: "c/t",
+          // No URL hash: this is an admin route, and rewriting the address bar
+          // on every arrow press makes the browser Back button useless for
+          // getting out of the deck.
+          hash: false,
+          // Not embedded, so reveal binds the arrow keys document-wide — a
+          // presenter should not have to click the slide first.
+          embedded: false,
+          transition: "slide",
+          transitionSpeed: "fast",
+        }}
+      >
+        <TitleSlide
+          eyebrow={status === "shipped" ? "Shipped" : "Proposed — not yet deployed"}
+          title={entryNo ? `#${entryNo} · ${title}` : title}
+          subtitle={subtitle ?? summary}
+          author={branch}
+          date={prNumber ? `PR #${prNumber} · ${date}` : date}
+        />
 
-        {slide.anchor ? (
-          <a
-            href={`${detailHref}#${slide.anchor}`}
-            className="mt-8 inline-flex w-fit items-center gap-1.5 text-sm text-sky-300 underline underline-offset-4 hover:text-sky-200"
-          >
-            Read the full {slide.eyebrow.toLowerCase()} section →
-          </a>
+        {introduction ? (
+          <ContentSlide title="What this is">
+            <SlideBody markdown={introduction} anchorHref={`${detailHref}#introduction`} />
+          </ContentSlide>
         ) : null}
-      </section>
 
-      <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-border/40 bg-background/95 px-6 py-3 backdrop-blur">
-        <button
-          type="button"
-          onClick={() => go(index - 1)}
-          disabled={index === 0}
-          className="rounded-md px-3 py-1.5 text-xs text-muted-foreground ring-1 ring-border/40 transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          ← Previous
-        </button>
+        {problem ? (
+          <>
+            <SectionSlide label="Problem" title="Why this had to change" />
+            <ContentSlide>
+              <SlideBody markdown={problem} anchorHref={`${detailHref}#problem`} />
+            </ContentSlide>
+          </>
+        ) : null}
 
-        <nav aria-label="Slides" className="flex flex-wrap items-center justify-center gap-1.5">
-          {slides.map((s, i) => (
-            <button
-              key={s.key}
-              type="button"
-              onClick={() => go(i)}
-              aria-label={`Slide ${i + 1}: ${s.heading}`}
-              aria-current={i === index ? "true" : undefined}
-              className={cn(
-                "size-2 rounded-full transition-colors",
-                i === index ? "bg-foreground" : "bg-muted-foreground/30 hover:bg-muted-foreground/60",
-              )}
-            />
-          ))}
-        </nav>
+        {approach ? (
+          <>
+            <SectionSlide label="Approach" title="How it was solved" variant="accent" />
+            <ContentSlide>
+              <SlideBody markdown={approach} anchorHref={`${detailHref}#approach`} />
+            </ContentSlide>
+          </>
+        ) : null}
 
-        <button
-          type="button"
-          onClick={() => go(index + 1)}
-          disabled={index === last}
-          className="rounded-md px-3 py-1.5 text-xs text-muted-foreground ring-1 ring-border/40 transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Next →
-        </button>
-      </footer>
+        {diagrams.map((d, i) => (
+          <ContentSlide key={`diagram-${i}`} title={d.title}>
+            <div className="flex h-full min-h-0 flex-col gap-3 text-left">
+              {d.description ? (
+                <MarkdownProse className="shrink-0 text-sm prose-p:mb-2" markdown={d.description} />
+              ) : null}
+              <div className="min-h-0 flex-1">
+                <MermaidCn code={d.code} caption={d.title} />
+              </div>
+            </div>
+          </ContentSlide>
+        ))}
+
+        {apiChanges.length > 0 ? (
+          <ListSlide title="API surface" items={apiChanges.map((a) => ({ text: a }))} animated />
+        ) : null}
+
+        {recapColumns.length > 0 ? (
+          <SplitSlide
+            title={status === "shipped" ? "What this introduced" : "What this will introduce"}
+            divider
+            left={<RecapColumns entries={recapColumns.slice(0, half)} />}
+            right={<RecapColumns entries={recapColumns.slice(half)} />}
+          />
+        ) : null}
+
+        <ContentSlide title={verification ? "Verification" : "Nothing was verified"}>
+          {verification ? (
+            <div className="space-y-4 text-left">
+              <code className="inline-block rounded-md bg-emerald-500/10 px-3 py-1.5 font-mono text-base text-emerald-300 ring-1 ring-emerald-500/25">
+                {verification.command}
+              </code>
+              {verification.ranAt ? (
+                <p className="text-sm text-muted-foreground">ran {verification.ranAt}</p>
+              ) : null}
+              {migrations.length > 0 ? (
+                <ul className="space-y-1.5 pt-2">
+                  {migrations.map((m) => (
+                    <li key={m.tag} className="flex items-center gap-2 font-mono text-sm">
+                      <span
+                        className={
+                          m.appliedRemote
+                            ? "rounded-md bg-emerald-500/12 px-2 py-0.5 text-[10px] font-medium text-emerald-300"
+                            : "rounded-md bg-rose-500/12 px-2 py-0.5 text-[10px] font-medium text-rose-300"
+                        }
+                      >
+                        {m.appliedRemote ? "applied to remote" : "NOT applied"}
+                      </span>
+                      <span className="text-muted-foreground">{m.tag}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : (
+            <p className="mx-auto max-w-2xl rounded-xl bg-rose-500/8 px-5 py-4 text-base leading-7 text-rose-200/90 ring-1 ring-rose-500/25">
+              No QC run was recorded for this entry. Nothing here has been verified against the
+              deployed worker — treat the change as unproven, not as passing.
+            </p>
+          )}
+        </ContentSlide>
+      </Deck>
     </div>
   );
 }
