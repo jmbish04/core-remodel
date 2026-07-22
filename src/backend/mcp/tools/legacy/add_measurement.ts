@@ -41,6 +41,26 @@ export const addMeasurement = defineTool({
       notes: z.string().optional(),
     },
     annotations: WRITE,
+    examples: [
+      {
+        title: "Tape-measured window",
+        args: {
+          roomId: 3,
+          elementType: "window",
+          label: "Bay window",
+          widthFeet: 9,
+          widthInches: 11,
+          heightFeet: 4,
+          heightInches: 11,
+          source: "measured",
+          isApproximate: false,
+        },
+      },
+      {
+        title: "Estimated room footprint",
+        args: { roomId: 3, elementType: "room", lengthFeet: 14, widthFeet: 11, areaSqFt: 154 },
+      },
+    ],
     // Envelope the measurement DTO under `measurement` (passthrough) so this
     // tool carries an object outputSchema.
     outputShape: {

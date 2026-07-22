@@ -17,6 +17,10 @@ export const createRenderSession = defineTool({
         .describe("Optional room id this session belongs to."),
     },
     annotations: WRITE,
+    examples: [
+      { title: "Start a kitchen render session", args: { name: "Kitchen — walnut frame", roomId: 3 } },
+      { title: "Session with no room attached", args: { name: "Scratch renders" } },
+    ],
     outputShape: {
       sessionId: z.string().describe("The created render session id"),
     },

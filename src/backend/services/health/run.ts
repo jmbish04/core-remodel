@@ -350,12 +350,17 @@ export async function getHealthCatalogue(env: Env) {
  * The most recent persisted session, reshaped like a live run. Used to paint the
  * dashboard on load and to answer the header badge without probing anything.
  */
-export async function getLatestHealthSession(env: Env): Promise<HealthSessionResult | null> {
+export async function getLatestHealthSession(
+  env: Env,
+  /** Read one specific session instead of the newest (used by `get_health_results`). */
+  sessionUuid?: string,
+): Promise<HealthSessionResult | null> {
   const db = drizzle(env.DB);
 
   const [latest] = await db
     .select({ sessionUuid: healthResults.sessionUuid, timestamp: healthResults.timestamp })
     .from(healthResults)
+    .where(sessionUuid ? eq(healthResults.sessionUuid, sessionUuid) : undefined)
     .orderBy(desc(healthResults.timestamp), desc(healthResults.id))
     .limit(1);
   if (!latest) return null;

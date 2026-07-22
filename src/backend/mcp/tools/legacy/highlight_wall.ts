@@ -16,6 +16,13 @@ export const highlightWall = defineTool({
       room: z.string().optional().describe("Floor-plan room key. Defaults to '126-colby'."),
     },
     annotations: WRITE,
+    examples: [
+      { title: "Point at an upper-floor wall segment", args: { elementId: "upper_wall_segment_12" } },
+      {
+        title: "Point at a segment on a specific floor plan",
+        args: { elementId: "lower_wall_segment_3", room: "126-colby" },
+      },
+    ],
     outputShape: {
       room: z.string().describe("The floor-plan room key that was signalled"),
       elementId: z.string().describe("The wall segment id that flashed"),

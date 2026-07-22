@@ -13,6 +13,15 @@
  * broken `undefined/...` string.
  */
 
+/**
+ * The source repository for this Worker.
+ *
+ * Attached to EVERY MCP tool response (see `agent.ts`) so an agent that hits a
+ * bug — or a human reading the transcript — always has the one link that leads
+ * to the code, without having to ask which repo backs the connector.
+ */
+export const GITHUB_REPO_URL = "https://github.com/jmbish04/core-remodel";
+
 /** Normalize the configured origin: trim, drop any trailing slash. */
 function origin(env: Env): string {
   return (env.WORKER_URL ?? "").trim().replace(/\/+$/, "");

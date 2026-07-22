@@ -60,6 +60,26 @@ export const runRenderStage = defineTool({
       prompt: z.string().describe("The render prompt."),
     },
     annotations: WRITE,
+    examples: [
+      {
+        title: "Base render from a listing photo",
+        args: {
+          sessionId: "a1b2c3d4-0000-0000-0000-000000000000",
+          listingPhotoId: 12,
+          actionType: "INITIAL_BASE",
+          prompt: "Matte finished-concrete floor, warm white walls",
+        },
+      },
+      {
+        title: "Material tweak on a prior canvas",
+        args: {
+          sessionId: "a1b2c3d4-0000-0000-0000-000000000000",
+          canvasId: "canvas_9f2",
+          actionType: "MATERIAL_TWEAK",
+          prompt: "Swap the island to Calacatta Viola",
+        },
+      },
+    ],
     // Envelope the opaque runStage result under `canvas` (passthrough) so the
     // tool carries an object outputSchema without enumerating every field.
     outputShape: {

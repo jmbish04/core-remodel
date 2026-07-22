@@ -15,6 +15,10 @@ export const listMoodBoards = defineTool({
       roomId: z.number().optional().describe("Filter to a single room id."),
     },
     annotations: READ_ONLY,
+    examples: [
+      { title: "All mood boards", args: {} },
+      { title: "Kitchen mood boards", args: { roomId: 3, q: "kitchen" } },
+    ],
     outputShape: {
       items: z.array(
         looseObject({

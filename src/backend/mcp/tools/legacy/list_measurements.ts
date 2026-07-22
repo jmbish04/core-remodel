@@ -23,6 +23,10 @@ export const listMeasurementsTool = defineTool({
       limit: z.number().optional().describe("Max rows to return."),
     },
     annotations: READ_ONLY,
+    examples: [
+      { title: "Everything measured so far", args: { limit: 50 } },
+      { title: "Windows and doors in one room", args: { roomId: 3, elementType: "window,door" } },
+    ],
     outputShape: {
       items: z.array(looseObject({ id: z.number().int() })),
     },
