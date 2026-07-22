@@ -140,11 +140,11 @@ export function CodeHighlight({
           defaultColor: false,
           meta: { __raw: filename ? `title="${filename.replace(/"/g, "")}"` : "" },
           transformers: [
-            // Line numbers and wrapping are ALWAYS on. Changelog code is read,
-            // not run: a reader referring to "the guard on line 12" needs the
-            // numbers, and a long line that scrolls off the right edge of a
-            // slide or a narrow card is a line nobody reads.
-            showLineNumbers({ activateByDefault: true }),
+            // Line numbers on SOURCE only. A reader referring to "the guard on
+            // line 12" needs them in a code card, but a shell block is usually
+            // command output — QC results, a deploy log — where numbering every
+            // line is noise and, worse, invites reading it as a numbered list.
+            showLineNumbers({ activateByDefault: lang !== "bash" }),
             wordWrapContent(),
             addTitleProperty(),
             addLanguageProperty(),
@@ -182,7 +182,10 @@ export function CodeHighlight({
   return (
     <figure
       className={cn(
-        "overflow-hidden rounded-xl bg-card ring-1 ring-border/40",
+        // `my-6` here, not only on the container that stacks them: a code block
+        // rendered inside prose (a markdown fence) has no stacking parent to
+        // space it, and used to sit flush against the paragraph above it.
+        "my-6 overflow-hidden rounded-xl bg-card ring-1 ring-border/40",
         className,
       )}
     >

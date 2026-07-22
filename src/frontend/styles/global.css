@@ -309,8 +309,19 @@ html.dark .shiki span {
  * `showLineNumbers` and `wordWrapContent` only ATTACH the classes below — the
  * registry ships no CSS — so without these rules both transformers are silent
  * no-ops.
+ *
+ * `code { display: grid }` is the load-bearing part, and it is not cosmetic.
+ * Shiki emits `<span class="line">…</span>` separated by literal newline TEXT
+ * NODES. Making `.line` a block leaves both the block break and the newline, so
+ * every row renders with a blank row under it — the doubled line spacing this
+ * replaces. Grid makes each `.line` a row and collapses the stray whitespace
+ * nodes, which also gives wrapped lines a clean hanging indent for free.
  */
-.shiki.shiki-line-numbers {
+.shiki code {
+  display: grid;
+}
+
+.shiki.shiki-line-numbers code {
   counter-reset: shiki-line;
 }
 
@@ -318,8 +329,8 @@ html.dark .shiki span {
   counter-increment: shiki-line;
   content: counter(shiki-line);
   display: inline-block;
-  width: 2.25rem;
-  margin-right: 1rem;
+  width: 2rem;
+  margin-right: 1.25rem;
   text-align: right;
   /* Numbers are scaffolding, not content: dim, and never selectable, so copying
      a block yields runnable code rather than code with line numbers glued on. */
@@ -328,15 +339,7 @@ html.dark .shiki span {
   -webkit-user-select: none;
 }
 
-.shiki.shiki-word-wrap code {
+.shiki.shiki-word-wrap .line {
   white-space: pre-wrap;
   word-break: break-word;
-}
-
-/* Wrapped continuation lines indent past the gutter so the number column stays
-   a clean vertical rule instead of colliding with wrapped text. */
-.shiki.shiki-word-wrap.shiki-line-numbers .line {
-  display: block;
-  padding-left: 3.25rem;
-  text-indent: -3.25rem;
 }

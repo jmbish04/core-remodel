@@ -160,6 +160,21 @@ if (onProd && !fixtureRendered) {
   // Matched as an ATTRIBUTE, not a substring: this entry's own code cards quote
   // those class names in their text, which made a bare includes() pass against
   // production where the renderer is not deployed at all.
+  // The reflow: legacy entries store problem/approach as one unbroken string,
+  // and the renderer now breaks them into paragraphs on its own. Asserted on the
+  // LEGACY entry, since the fixture entry is authored with its own breaks and
+  // would pass without the reflow doing anything.
+  const legacy = await client.get(`/admin/changelog/${RICH}`);
+  const problemSeg = legacy.text.slice(
+    legacy.text.indexOf('id="problem"'),
+    legacy.text.indexOf('id="approach"'),
+  );
+  checks.ok(
+    "an unbroken legacy blob is auto-split into paragraphs",
+    (problemSeg.match(/<p>/g) ?? []).length >= 2,
+    `${(problemSeg.match(/<p>/g) ?? []).length} paragraph(s)`,
+  );
+
   checks.ok(
     "inline code renders as a badge with the backticks stripped",
     /<code class="[^"]*bg-zinc-800\/60[^"]*before:content-none/.test(html),

@@ -136,7 +136,38 @@ export function normalizeMarkdown(markdown: string): string {
     out.push("");
   }
 
-  return out.join("\n");
+  return reflowParagraphs(out.join("\n"));
+}
+
+/**
+ * Second pass: break up any block that is still one unbroken wall of prose.
+ *
+ * Runs on the OUTPUT of the line pass, so by here every block construct is
+ * already separated by blank lines and can be identified and skipped whole. A
+ * block is reflowed only when every one of its lines is ordinary prose — a
+ * table, list, quote or fence is passed through untouched.
+ */
+function reflowParagraphs(markdown: string): string {
+  const blocks = markdown.split(/\n{2,}/);
+  let inFence = false;
+
+  return blocks
+    .map((block) => {
+      // Track fences across blocks: a fenced region can contain blank lines,
+      // which means it can be split across several "blocks" here.
+      const fenceTicks = (block.match(/^\s{0,3}(`{3,}|~{3,})/gm) ?? []).length;
+      const wasInFence = inFence;
+      if (fenceTicks % 2 === 1) inFence = !inFence;
+      if (wasInFence || inFence || fenceTicks > 0) return block;
+
+      const lines = block.split("\n");
+      if (lines.some((l) => isStructural(l))) return block;
+
+      // Join soft-wrapped lines before measuring: a blob that arrived
+      // hard-wrapped at 80 columns is still a blob.
+      return reflowBlob(lines.map((l) => l.trim()).join(" "));
+    })
+    .join("\n\n");
 }
 
 /**
@@ -176,3 +207,130 @@ export function markdownLede(value: unknown): string {
  * those back into markdown. Do not author new content as an array.
  */
 export type Prose = string | string[];
+
+// ── Paragraph inference for text blobs ──────────────────────────────────────
+
+/**
+ * Sentence-final punctuation followed by the start of a new sentence.
+ *
+ * Abbreviations, decimals and ellipses are handled by the scanner rather than
+ * by lookarounds, because the ones that matter here (`e.g.`, `i.e.`, `vs.`,
+ * `No.`, version numbers, `0.5`) all break naive regex splitting.
+ */
+const ABBREVIATIONS = new Set([
+  "e.g", "i.e", "vs", "etc", "cf", "no", "fig", "approx", "al", "inc", "ltd",
+  "mr", "mrs", "ms", "dr", "st", "jr", "sr", "vol", "ch", "pp",
+]);
+
+/**
+ * Openers that reliably start a NEW thought rather than continue one.
+ *
+ * Kept deliberately short and high-confidence. Words like "When" or "Because"
+ * are omitted on purpose — they introduce subordinate clauses mid-argument at
+ * least as often as they start a paragraph, and a wrong break reads worse than
+ * a missing one.
+ */
+const PARAGRAPH_OPENERS = [
+  "So ", "But ", "Then ", "Worse", "Instead", "Now ", "Also ", "Second", "Third",
+  "Finally", "However", "Meanwhile", "In practice", "In its place", "That is why",
+  "The result", "The fix", "The problem", "The point", "Crucially", "Critically",
+  "Rather than", "Conversely", "Additionally", "Separately", "Note that",
+  "There was", "There is", "This is why", "Which is", "Neither", "Both ",
+];
+
+/** Roughly a comfortable paragraph. Past this, break at the next sentence. */
+const TARGET_PARAGRAPH_CHARS = 320;
+/** Never reflow anything shorter than this — it is already a paragraph. */
+const MIN_BLOB_CHARS = 420;
+/** Fewer sentences than this and there is nothing to group. */
+const MIN_BLOB_SENTENCES = 4;
+
+/**
+ * Split prose into sentences, respecting inline code and parentheses.
+ *
+ * A `.` inside `` `foo.bar()` `` or inside a parenthetical is not a sentence
+ * boundary, and splitting there produces fragments that read as errors.
+ */
+function splitSentences(text: string): string[] {
+  const out: string[] = [];
+  let start = 0;
+  let inCode = false;
+  let depth = 0;
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === "`") inCode = !inCode;
+    if (inCode) continue;
+    if (ch === "(" || ch === "[") depth++;
+    else if (ch === ")" || ch === "]") depth = Math.max(0, depth - 1);
+    if (depth > 0) continue;
+    if (ch !== "." && ch !== "?" && ch !== "!") continue;
+
+    // "…" and "?!" — consume the whole run before deciding.
+    let end = i;
+    while (end + 1 < text.length && ".?!".includes(text[end + 1])) end++;
+
+    const next = text.slice(end + 1);
+    // A boundary needs whitespace then something that can open a sentence.
+    const boundary = /^\s+["'`(\[]?[A-Z0-9]/.test(next);
+    if (!boundary) { i = end; continue; }
+
+    // Abbreviation or an initial? Then the period is not terminal.
+    const word = text.slice(start, i).split(/[\s(]/).pop()?.toLowerCase() ?? "";
+    if (ABBREVIATIONS.has(word) || /^[a-z]$/.test(word)) { i = end; continue; }
+    // A decimal like "0.5" — digit on both sides.
+    if (/\d$/.test(text.slice(0, i)) && /^\d/.test(text.slice(end + 1))) { i = end; continue; }
+
+    out.push(text.slice(start, end + 1).trim());
+    start = end + 1;
+    i = end;
+  }
+
+  const tail = text.slice(start).trim();
+  if (tail) out.push(tail);
+  return out.filter(Boolean);
+}
+
+/**
+ * Turn one long unbroken paragraph into several.
+ *
+ * This is a HEURISTIC, and it is opt-in by length: only a blob past
+ * `MIN_BLOB_CHARS` with at least `MIN_BLOB_SENTENCES` sentences is touched, so
+ * text somebody actually shaped is left exactly as written. Within a blob a
+ * break is taken when the next sentence opens a new thought, or when the
+ * current paragraph has grown past a comfortable reading length.
+ *
+ * The alternative — leaving it alone — is what produced the wall of text this
+ * exists to fix. A break in a slightly wrong place costs a reader nothing close
+ * to what an unbroken 900-character paragraph costs them.
+ */
+export function reflowBlob(text: string): string {
+  if (text.length < MIN_BLOB_CHARS) return text;
+
+  const sentences = splitSentences(text);
+  if (sentences.length < MIN_BLOB_SENTENCES) return text;
+
+  const paragraphs: string[] = [];
+  let current: string[] = [];
+  let currentLength = 0;
+
+  for (const sentence of sentences) {
+    const opensNewThought = PARAGRAPH_OPENERS.some((m) => sentence.startsWith(m));
+    const longEnough = currentLength >= TARGET_PARAGRAPH_CHARS;
+
+    // An opener only breaks once the current paragraph is substantial enough to
+    // stand alone — otherwise a run of short sentences that each begin with
+    // "So"/"But" would shatter into one-line paragraphs.
+    if (current.length > 0 && (longEnough || (opensNewThought && currentLength >= 100))) {
+      paragraphs.push(current.join(" "));
+      current = [];
+      currentLength = 0;
+    }
+
+    current.push(sentence);
+    currentLength += sentence.length + 1;
+  }
+  if (current.length > 0) paragraphs.push(current.join(" "));
+
+  return paragraphs.join("\n\n");
+}
