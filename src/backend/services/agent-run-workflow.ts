@@ -27,43 +27,14 @@
  *    internally re-enters this wrapper, so a retried phase produces one ledger
  *    step per attempt. That is intended — an expensive step retried three times
  *    should look like three steps, not one.
- * 3. **The step-scoped tool recorder is exposed, not hidden.** Callers that
- *    want per-tool attribution use `ledgerTool` inside the callback; attribution
- *    is passed as an argument so concurrent steps cannot steal each other's
- *    tool calls.
+ * 3. **Spend attribution is automatic.** `run.step` binds the run/step to the
+ *    callback's async chain (see `agent-run-context.ts`), so any AI call made
+ *    inside a wrapped step records its `agent_run_id` without the call site
+ *    knowing the ledger exists.
  */
 import type { WorkflowStep } from "cloudflare:workers";
 
-import type { RunRecorder, StepRecorder } from "./agent-runs";
-
-/**
- * Async-local handle to the step recorder for the `step.do` currently
- * executing, so `ledgerTool` can attribute a tool call without every helper
- * signature growing a parameter.
- *
- * A plain module-level variable is safe here ONLY because it is set and cleared
- * synchronously around a single awaited callback per wrapper instance, and
- * because a Workflow instance executes its steps sequentially. Any code that
- * fans out with `Promise.all` inside one step must pass the recorder explicitly
- * instead — which is exactly what `run.step((step) => ...)` already offers.
- */
-let activeStep: StepRecorder | null = null;
-
-/**
- * Record a tool call inside the currently executing wrapped step.
- *
- * Falls through to a bare invocation when there is no active step, so a helper
- * using this is safe to call from an uninstrumented path.
- */
-export async function ledgerTool<T>(
-  name: string,
-  args: unknown,
-  fn: () => Promise<T>,
-): Promise<T> {
-  const step = activeStep;
-  if (!step) return fn();
-  return step.tool(name, args, fn);
-}
+import type { RunRecorder } from "./agent-runs";
 
 /**
  * Wrap a `WorkflowStep` so every `step.do` also writes an `agent_run_steps` row.
@@ -82,17 +53,7 @@ export function ledgerSteps(step: WorkflowStep, run: RunRecorder): WorkflowStep 
     ...step,
 
     do: ((name: string, ...rest: unknown[]) =>
-      run.step(name, async (stepRecorder) => {
-        const previous = activeStep;
-        activeStep = stepRecorder;
-        try {
-          return await originalDo(name, ...rest);
-        } finally {
-          // Restore rather than null out: a nested wrapped step must not blind
-          // its parent's remaining tool calls.
-          activeStep = previous;
-        }
-      })) as WorkflowStep["do"],
+      run.step(name, () => originalDo(name, ...rest))) as WorkflowStep["do"],
 
     sleep: step.sleep.bind(step),
     sleepUntil: step.sleepUntil.bind(step),

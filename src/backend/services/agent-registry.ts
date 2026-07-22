@@ -4,7 +4,7 @@
  *
  * WHY THIS EXISTS
  * ---------------
- * This Worker runs 24 things that can start work on their own: 15 Durable
+ * This Worker runs 27 things that can start work on their own: 10 Durable
  * Object agents, 9 Workflows, 7 cron jobs and an MCP server. Each one writes to
  * the shared `agent_runs` ledger via `services/agent-runs.ts`, keyed by a free
  * `agent` slug. A free-text key is right for the ledger — a retired agent's
@@ -13,7 +13,7 @@
  *
  *   1. What KIND of thing is this? A workflow, a cron job and a chat agent fail
  *      differently and are retried differently, so the UI badges them
- *      differently. That fact lives here, not in 24 call sites.
+ *      differently. That fact lives here, not in 27 call sites.
  *   2. What ISN'T reporting? A ledger can only show what wrote to it. Without a
  *      declared denominator, an empty queue is indistinguishable from a healthy
  *      one — which is the exact failure this whole feature exists to kill.
@@ -50,7 +50,7 @@ export interface SurfaceDef {
 }
 
 /**
- * All 24 surfaces.
+ * All 27 surfaces.
  *
  * Sourced from `wrangler.jsonc` (workflows :93-139, durable objects :370-439,
  * cron triggers :156) and the `scheduled()` handler in `src/_worker.ts`.

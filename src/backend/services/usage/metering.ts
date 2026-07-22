@@ -25,6 +25,7 @@
  */
 
 import { drizzle } from "drizzle-orm/d1";
+import { currentAgentRunId } from "../agent-run-context";
 import { and, eq, gte, sql } from "drizzle-orm";
 
 import { geminiUsage } from "@backend/db/schema/system/gemini-usage";
@@ -173,6 +174,12 @@ export async function setConfigValue(
 // ---------------------------------------------------------------------------
 
 export interface UsageRecord {
+  /**
+   * The `agent_runs.id` this call belongs to. Defaults to the ambient run
+   * context, so an AI call inside `run.step(...)` attributes itself with no
+   * change at the call site (~130 `env.AI.run` sites stay untouched).
+   */
+  agentRunId?: number | null;
   provider: MeteredProvider;
   model: string;
   feature?: string;
@@ -195,6 +202,7 @@ export async function recordUsage(env: Env, rec: UsageRecord): Promise<void> {
   try {
     const db = drizzle(env.DB);
     await db.insert(geminiUsage).values({
+      agentRunId: rec.agentRunId ?? currentAgentRunId(),
       provider: rec.provider,
       model: rec.model,
       feature: rec.feature ?? "unknown",
