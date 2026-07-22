@@ -10,7 +10,18 @@
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { MermaidCn } from "@/components/mermaidcn/MermaidCn";
 import { cn } from "@/lib/utils";
+
+/** Flatten a react-markdown children tree to its raw text (for code fences). */
+function nodeText(children: unknown): string {
+  if (typeof children === "string") return children;
+  if (Array.isArray(children)) return children.map(nodeText).join("");
+  if (children && typeof children === "object" && "props" in children) {
+    return nodeText((children as { props?: { children?: unknown } }).props?.children);
+  }
+  return "";
+}
 
 const components: Components = {
   h1: ({ children }) => (
@@ -68,9 +79,27 @@ const components: Components = {
       </code>
     );
   },
-  pre: ({ children }) => (
-    <pre className="my-4 overflow-x-auto rounded-lg bg-muted/40 p-4 ring-1 ring-border/40">{children}</pre>
-  ),
+  pre: ({ children }) => {
+    // A fenced ```mermaid block arrives as <pre><code class="language-mermaid">…</code></pre>.
+    // Render it as an actual diagram (MermaidCn — the same renderer the changelog
+    // detail page uses) instead of a raw code block. Both mermaid components
+    // dynamic-import `mermaid`, so this stays SSR-safe; the diagram paints on the
+    // client where MarkdownProse is hydrated (e.g. the client:load proposal bundle).
+    const child = Array.isArray(children) ? children[0] : children;
+    const className =
+      child && typeof child === "object" && "props" in child
+        ? ((child as { props?: { className?: string } }).props?.className ?? "")
+        : "";
+    if (typeof className === "string" && className.includes("language-mermaid")) {
+      const code = nodeText(
+        (child as { props?: { children?: unknown } }).props?.children,
+      ).replace(/\n$/, "");
+      return <MermaidCn code={code} />;
+    }
+    return (
+      <pre className="my-4 overflow-x-auto rounded-lg bg-muted/40 p-4 ring-1 ring-border/40">{children}</pre>
+    );
+  },
   table: ({ children }) => (
     <div className="my-4 overflow-x-auto rounded-lg ring-1 ring-border/40">
       <table className="w-full text-sm">{children}</table>
