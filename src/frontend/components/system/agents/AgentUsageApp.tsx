@@ -40,6 +40,15 @@ interface UsageResponse {
   totalCostUsd: number;
   totalTokens: number;
   unitCostPerMillion: number | null;
+  ledgerCalls: number;
+  gateway: {
+    available: boolean;
+    reason: string | null;
+    month: string;
+    totalRequests: number;
+    erroredRequests: number;
+    driftPct: number | null;
+  };
   rows: UsageRow[];
 }
 
@@ -350,6 +359,59 @@ export function AgentUsageApp() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Reconciliation. A silent 20% gap between our ledger and Cloudflare's
+          own rollup means instrumentation is missing, and that has to be
+          visible on the page that claims to know what things cost. */}
+      {usage && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Reconciliation</CardTitle>
+            <p className="text-muted-foreground text-xs">
+              Our ledger against Cloudflare&apos;s independent AI Gateway rollup.
+            </p>
+          </CardHeader>
+          <CardContent>
+            {!usage.gateway.available ? (
+              <p className="text-muted-foreground text-sm">
+                Gateway rollup unavailable{usage.gateway.reason ? ` — ${usage.gateway.reason}` : ""}.
+                The ledger total stands alone and cannot be cross-checked right now.
+              </p>
+            ) : (
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+                <span>
+                  <span className="text-muted-foreground">Ledger calls</span>{" "}
+                  <span className="tabular-nums">{usage.ledgerCalls.toLocaleString()}</span>
+                </span>
+                <span>
+                  <span className="text-muted-foreground">Gateway requests ({usage.gateway.month})</span>{" "}
+                  <span className="tabular-nums">
+                    {usage.gateway.totalRequests.toLocaleString()}
+                  </span>
+                </span>
+                <span>
+                  <span className="text-muted-foreground">Drift</span>{" "}
+                  {usage.gateway.driftPct === null ? (
+                    <span className="text-muted-foreground">unknown</span>
+                  ) : (
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "tabular-nums",
+                        Math.abs(usage.gateway.driftPct) > 20 &&
+                          "border-warning/25 bg-warning/10 text-warning",
+                      )}
+                    >
+                      {usage.gateway.driftPct > 0 ? "+" : ""}
+                      {usage.gateway.driftPct}%
+                    </Badge>
+                  )}
+                </span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <p className="text-muted-foreground text-xs">
         Google Maps free-tier quota lives on{" "}

@@ -14,6 +14,7 @@ import {
   type WorkflowStep,
 } from "cloudflare:workers";
 
+import { startRun } from "@backend/services/agent-runs";
 import {
   runImageProcessingSteps,
   type ImageProcessingWorkflowParams,
@@ -49,9 +50,22 @@ export class ImageBatchProcessingWorkflow extends WorkflowEntrypoint<
     event: WorkflowEvent<ImageBatchProcessingWorkflowParams>,
     step: WorkflowStep,
   ): Promise<{ success: true; processed: number; failed: number }> {
+    // Run-level only. Each image already opens its own run inside
+    // runImageProcessingSteps, so wrapping `step` here would record every
+    // item's steps twice — once against the coordinator, once against the
+    // image — and make both traces unreadable.
     const allItems = event.payload.items ?? [];
     const items = allItems.slice(0, MAX_COORDINATOR_ITEMS);
     const overflow = allItems.slice(MAX_COORDINATOR_ITEMS);
+
+    const run = await startRun(this.env, {
+      agent: "image-batch",
+      operation: "process_batch",
+      targetType: "image_batch",
+      targetId: String(allItems.length),
+      input: { items: allItems.length },
+      triggeredBy: "agent",
+    });
 
     let processed = 0;
     let failed = 0;
@@ -91,6 +105,7 @@ export class ImageBatchProcessingWorkflow extends WorkflowEntrypoint<
       });
     }
 
+    await run.succeed({ processed, failed, overflow: overflow.length });
     return { success: true, processed, failed };
   }
 }

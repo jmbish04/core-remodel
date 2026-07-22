@@ -35,6 +35,7 @@ import {
   spendByAgent,
 } from "@backend/services/agent-runs-query";
 import { countRunsByStatus } from "@backend/services/agent-run-retention";
+import { getAiGatewayUsage } from "@backend/services/ai-gateway/analytics";
 import {
   METERED_PROVIDERS,
   canSpend,
@@ -172,9 +173,26 @@ adminAgentsRouter.get("/usage", async (c) => {
     ? parseSince(c.req.query("since"))
     : cycleStart(config.cycleAnchorDay);
 
-  const rows = await spendByAgent(c.env, since);
+  // Reconciliation source. Cloudflare's own AI Gateway rollup is independent
+  // of our ledger, so a large gap between the two means instrumentation is
+  // missing — which is exactly the failure this page must not hide. It
+  // degrades to {available:false, reason} rather than throwing.
+  const [rows, gateway] = await Promise.all([
+    spendByAgent(c.env, since),
+    getAiGatewayUsage(c.env).catch((err) => ({
+      available: false as const,
+      reason: err instanceof Error ? err.message : String(err),
+      gatewayId: c.env.AI_GATEWAY_ID ?? "",
+      month: "",
+      totalRequests: 0,
+      cachedRequests: 0,
+      erroredRequests: 0,
+      byModel: [],
+    })),
+  ]);
   const totalCostUsd = rows.reduce((n, r) => n + r.costUsd, 0);
   const totalTokens = rows.reduce((n, r) => n + r.tokens, 0);
+  const ledgerCalls = rows.reduce((n, r) => n + r.calls, 0);
 
   return c.json({
     success: true,
@@ -184,6 +202,21 @@ adminAgentsRouter.get("/usage", async (c) => {
     // Dollars per million tokens. Null rather than a divide-by-zero 0 when no
     // tokens were reported — "unknown" and "free" must stay distinguishable.
     unitCostPerMillion: totalTokens > 0 ? (totalCostUsd / totalTokens) * 1_000_000 : null,
+    ledgerCalls,
+    // Independent second opinion. `driftPct` is null when the gateway is
+    // unavailable or reports nothing — an unknown drift must stay
+    // distinguishable from a zero drift.
+    gateway: {
+      available: gateway.available,
+      reason: gateway.reason ?? null,
+      month: gateway.month,
+      totalRequests: gateway.totalRequests,
+      erroredRequests: gateway.erroredRequests,
+      driftPct:
+        gateway.available && gateway.totalRequests > 0
+          ? Math.round(((ledgerCalls - gateway.totalRequests) / gateway.totalRequests) * 100)
+          : null,
+    },
     rows,
   });
 });

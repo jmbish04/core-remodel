@@ -14,6 +14,7 @@
  */
 
 import { and, eq } from "drizzle-orm";
+import { startRun } from "@backend/services/agent-runs";
 import { drizzle } from "drizzle-orm/d1";
 import {
   WorkflowEntrypoint,
@@ -245,6 +246,19 @@ export class BlankCanvasBatchWorkflow extends WorkflowEntrypoint<
   ): Promise<{ success: true; jobId: string; done: number; failed: number }> {
     const { jobId, leaveOutline, items } = event.payload;
 
+    // Run-level only: this workflow fans out over items with Promise.all, and
+    // each item's own progress is already tracked in
+    // blank_canvas_generation_job_items. Wrapping `step` here would fold every
+    // item's steps into one coordinator trace and tell you nothing.
+    const run = await startRun(this.env, {
+      agent: "blank-canvas-batch",
+      operation: "generate_batch",
+      targetType: "blank_canvas_job",
+      targetId: String(jobId),
+      input: { jobId, leaveOutline, items: items.length },
+      triggeredBy: "agent",
+    });
+
     let done = 0;
     let failed = 0;
 
@@ -272,6 +286,7 @@ export class BlankCanvasBatchWorkflow extends WorkflowEntrypoint<
       return { jobId, finalStatus };
     });
 
+    await run.succeed({ jobId, done, failed });
     return { success: true, jobId, done, failed };
   }
 }

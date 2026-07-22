@@ -28,6 +28,8 @@ import {
   rooms,
   workflowRunHistory,
 } from "@backend/db";
+import { startRun } from "@backend/services/agent-runs";
+import { ledgerSteps } from "@backend/services/agent-run-workflow";
 import { publishRealtimeEvent } from "@backend/realtime/publish";
 import {
   WorkflowEntrypoint,
@@ -69,9 +71,21 @@ export class ChecklistRationaleWorkflow extends WorkflowEntrypoint<
   Env,
   ChecklistRationaleParams
 > {
-  async run(event: WorkflowEvent<ChecklistRationaleParams>, step: WorkflowStep) {
+  async run(event: WorkflowEvent<ChecklistRationaleParams>, rawStep: WorkflowStep) {
     const { workflowInstanceId, triggerSource } = event.payload;
     const env = this.env;
+
+    // The only cron-dispatched workflow. workflow_run_history records THAT it
+    // ran; the ledger records what it did inside.
+    const run = await startRun(env, {
+      agent: "checklist-rationale",
+      operation: "draft_rationale",
+      targetType: "workflow_run",
+      targetId: String(workflowInstanceId),
+      input: event.payload,
+      triggeredBy: triggerSource === "cron" ? "cron" : "user",
+    });
+    const step = ledgerSteps(rawStep, run);
     const db = drizzle(env.DB);
 
     await publishRealtimeEvent(env, ROOM, {
@@ -171,6 +185,7 @@ export class ChecklistRationaleWorkflow extends WorkflowEntrypoint<
         upserted: 0,
         bypassed: true,
       });
+      await run.succeed({ bypassed: true });
       return;
     }
 
@@ -233,6 +248,12 @@ export class ChecklistRationaleWorkflow extends WorkflowEntrypoint<
     });
 
     await finalize(db, env, workflowInstanceId, "success", {
+      candidates: candidates.length,
+      inferred: inferences.length,
+      ...upsertResult,
+    });
+
+    await run.succeed({
       candidates: candidates.length,
       inferred: inferences.length,
       ...upsertResult,
