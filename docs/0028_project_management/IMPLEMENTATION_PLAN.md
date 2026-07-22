@@ -21,6 +21,32 @@ what is already here.
 | **Remodel delivery** | `planning_tasks`, `planning_epics`, `planning_participants`, `planning_task_updates` | ✅ `start_date`, `due_date` | `depends_on_task_ids` JSON | `/admin/pmo/operations` (`PlanningApp.tsx`, 761 lines) |
 | **ClickUp** | `clickup_revision_log`, `clickup_task_flags`, `clickup_system_alerts` | live from API | — | `/admin/tasks` (read-through proxy) |
 
+```mermaid
+flowchart TB
+  subgraph SW["Software roadmap"]
+    P[(plans)] --> PT[(plan_tasks)]
+    PT -.->|no dates<br/>no assignee<br/>no progress| GAP1{{"cannot feed<br/>a Gantt"}}
+    PT -.->|depends_on rendered<br/>as chips only| GAP2{{"never graphed"}}
+  end
+  subgraph RM["Remodel delivery"]
+    PE[(planning_epics)] --> PLT[(planning_tasks)]
+    PLT --> PP[(planning_participants)]
+    PLT --> RO[(rooms)]
+  end
+  subgraph CU["ClickUp"]
+    API["ClickUp API v2"] --> PROXY["read-through proxy"]
+    PROXY -.->|no mirror<br/>no webhook| GAP3{{"0% synced"}}
+  end
+  SW x-.-x RM
+  RM x-.-x CU
+  KIBO["kibo-ui/gantt<br/>(complete, unused)"] -.->|hardcoded data| SCEN["ContractorScheduleApp"]
+
+  classDef gap fill:#4d1f1f,stroke:#f87171,color:#fecaca
+  class GAP1,GAP2,GAP3 gap
+```
+
+*Three systems, no shared keys, and the one finished Gantt is fed a hardcoded array.*
+
 Already built and **reusable as-is**:
 
 - `src/frontend/components/kibo-ui/gantt/` — a complete Gantt: drag-move, edge
@@ -69,24 +95,23 @@ seeder — before a single new pixel ships. That is the expensive wrong move.
 
 Instead:
 
-```
-                    ┌──────────────────────────────────────┐
-                    │  Reusable component layer (React)    │
-                    │  WorkBoard · WorkGrid · WorkBacklog  │
-                    │  WorkGantt · VelocityDashboard       │
-                    │  (consume WorkItem[], source-blind)  │
-                    └───────────────┬──────────────────────┘
-                                    │ WorkItem contract
-                    ┌───────────────┴──────────────────────┐
-                    │        WorkItemAdapter (per source)  │
-                    │  read() · updateStatus() · reorder() │
-                    │  setDates() · assign() · watchers()  │
-                    └──┬─────────────────┬──────────────┬──┘
-                       │                 │              │
-             ┌─────────▼──────┐ ┌────────▼───────┐ ┌────▼──────────┐
-             │  plan_tasks    │ │ planning_tasks │ │ clickup mirror│
-             │  (software)    │ │  (remodel)     │ │  (P6)         │
-             └────────────────┘ └────────────────┘ └───────────────┘
+```mermaid
+flowchart TB
+  subgraph VIEW["Reusable component layer (source-blind)"]
+    WB[WorkBoard] & WG[WorkGrid] & WBL[WorkBacklog] & WGT[WorkGantt] & VD[VelocityDashboard]
+  end
+  WB & WG & WBL & WGT & VD --> CONTRACT[["WorkItem contract"]]
+  CONTRACT --> ADAPT["WorkItemAdapter<br/>read · updateStatus · reorder<br/>setDates · assign · watchers"]
+  ADAPT --> A1["plan adapter"] & A2["planning adapter"] & A3["clickup adapter (P6)"]
+  A1 --> D1[(plan_tasks)]
+  A2 --> D2[(planning_tasks)]
+  A3 --> D3[(clickup_task_mirror)]
+  D3 <-->|ClickUp is master| CUAPI[/ClickUp API/]
+  ADAPT --> VC{{"viewerContext()<br/>the ONLY authz decision"}}
+  VC --> WW[(work_item_watchers)]
+
+  classDef seam fill:#3b2f10,stroke:#fbbf24,color:#fde68a
+  class VC seam
 ```
 
 `WorkItem` is the normalized shape every view renders. Each source owns its own
@@ -155,6 +180,30 @@ plus a health axis `On track`/`At risk`). We model **both axes**, and map:
 | `deferred` | `delayed` | `deferred` |
 | `done` | `done` | `done` |
 
+```mermaid
+stateDiagram-v2
+  [*] --> todo
+  todo --> in_progress
+  in_progress --> in_review
+  in_review --> done
+  in_progress --> blocked
+  in_review --> blocked
+  blocked --> in_progress : unblocked
+  todo --> deferred
+  blocked --> deferred
+  deferred --> todo : picked back up
+  done --> [*]
+
+  note right of blocked
+    health is a SEPARATE axis,
+    derived at read time:
+    blocked status -> blocked
+    past dueAt + not done -> at_risk
+    late dependency -> at_risk
+    otherwise -> on_track
+  end note
+```
+
 `health` is **derived**, not stored: `blocked` status → `blocked`; `dueAt` in the
 past and not done → `at_risk`; a dependency that is late → `at_risk`; else `on_track`.
 Deriving it means it can never go stale, which a stored column always does.
@@ -165,6 +214,69 @@ Deriving it means it can never go stale, which a stored column always does.
 
 Additive only. Every migration must keep every other branch's preview worker
 working against the shared production D1.
+
+
+```mermaid
+erDiagram
+  plans ||--o{ plan_tasks : "slug (cascade)"
+  planning_participants ||--o{ plan_tasks : "assignee_participant_id (NEW)"
+  planning_participants ||--o{ work_item_watchers : participant_id
+  planning_tasks ||--o{ work_item_watchers : "item_native_id (source=planning)"
+  plan_tasks ||--o{ work_item_watchers : "item_native_id (source=plan)"
+  planning_tasks ||--o| clickup_task_mirror : planning_task_id
+  planning_tasks ||--o{ shipments : blocking_task_id
+  material_schedule_items ||--o{ shipments : material_schedule_item_id
+  worker_emails ||--o{ shipments : worker_email_id
+  plans ||--o{ changelog_entries : "plan_slug (NEW, soft)"
+
+  plans {
+    text slug PK
+    text domain "NEW software|remodel"
+    text start_date "NEW"
+    text target_date "NEW"
+  }
+  plan_tasks {
+    int id PK
+    text plan_slug FK
+    text task_key
+    text status "GAINS in_review"
+    text start_date "NEW"
+    text due_date "NEW"
+    int progress_pct "NEW"
+    int effort_points "NEW"
+    text priority "NEW"
+    int assignee_participant_id FK "NEW"
+    int pr_number "NEW"
+    text changelog_slug "NEW"
+  }
+  work_item_watchers {
+    int id PK
+    text source "plan|planning|clickup"
+    text item_native_id
+    int participant_id FK
+    text role "owner|assignee|cc|approver"
+    int can_edit "default 1"
+  }
+  shipments {
+    int id PK
+    text carrier
+    text tracking_number
+    text status
+    text eta_date "drives blocking task start_date"
+    text blocking_task_id FK
+  }
+  clickup_task_mirror {
+    text clickup_task_id PK
+    text planning_task_id FK
+    text sync_state "synced|local_ahead|remote_ahead|conflict"
+  }
+  github_pr_stats {
+    int pr_number PK
+    text state
+    int lead_time_seconds
+    text author_login
+  }
+```
 
 ### 3.1 Extend `plan_tasks` (software roadmap gains a schedule)
 
@@ -377,6 +489,56 @@ changes: shipment ETA moves, DBI permit status changes (`permits_records` is alr
 synced daily by a live cron), contract milestone dates. It **proposes**; nothing
 auto-applies to a date a human set.
 
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant CAR as Carrier API
+  participant CRON as Tracking cron
+  participant D1 as shipments
+  participant TASK as planning_tasks
+  participant PM as Program Manager (RemodelOrchestrator)
+  participant H as Homeowner
+
+  CRON->>CAR: poll tracking_number
+  CAR-->>CRON: status + new ETA
+  CRON->>D1: update status, eta_date
+  alt ETA moved
+    CRON->>TASK: shift blocking task start_date
+    TASK->>PM: recompute critical path (Kahn + CPM)
+    PM-->>H: flag downstream slip
+    H->>H: approve or override
+  else unchanged
+    CRON-->>D1: touch last_checked_at only
+  end
+```
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant CU as ClickUp (MASTER)
+  participant WH as /api/clickup/webhook
+  participant M as clickup_task_mirror
+  participant T as planning_tasks
+  participant UI as Our UI
+
+  CU->>WH: task.updated
+  WH->>M: upsert, compare sync_hash
+  alt remote and local both changed
+    M->>T: remote wins
+    M->>T: write discarded local value to planning_task_updates
+    Note over M,T: nothing is silently lost
+  else remote only
+    M->>T: apply
+  end
+  UI->>T: local edit
+  T->>CU: push
+  alt ClickUp unreachable
+    T->>M: sync_state = local_ahead, queue
+    M-->>UI: show pending, never "synced"
+  end
+```
+
 **Contract review → tasks** — the contract tables already exist and are rich
 (`contract_payment_milestones`, `contract_timeline_milestones`, `contract_clause_findings`
 with risk levels). P7 wires them: on contract upload, generate a work-breakdown of
@@ -405,6 +567,25 @@ everything else.
 | **P5** | Remodel PMO | `/admin/pmo/operations` rebuilt on the same components over `planning_tasks`; room/material/budget links |
 | **P6** | ClickUp sync | mirror table, webhook endpoint, reconciliation cron, conflict handling |
 | **P7** | Signals & automation | `shipments` + tracking cron, permit-driven date shifts, contract review → WBS + gap analysis, Program Manager revival, NagBot **drafts** |
+
+
+```mermaid
+flowchart LR
+  P0["P0 Foundation<br/>WorkItem + adapters<br/>+ watchers + seam"] --> P1["P1 Component layer"]
+  P0 --> P3["P3 Velocity"]
+  P1 --> P2["P2 Software PMO"]
+  P1 --> P5["P5 Remodel PMO"]
+  P2 --> P4["P4 Changelog unification"]
+  P5 --> P6["P6 ClickUp sync"]
+  P5 --> P7["P7 Signals & AI"]
+  P6 --> P7
+  P3 --> P7
+  P0 -.->|hooks only| N29["0029 Multi-user auth<br/>(separate plan)"]
+  P7 -.->|needs a transport<br/>SPEND DECISION| TRANS{{"send_email vs Twilio"}}
+
+  classDef out fill:#2b2b33,stroke:#8b8b9a,color:#c9c9d4,stroke-dasharray:4 3
+  class N29,TRANS out
+```
 
 ### Explicitly out of scope for 0028 (each needs its own plan)
 

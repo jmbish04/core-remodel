@@ -33,6 +33,23 @@ grid, a progress rollup, and a written narrative of what is coming.
 | **Subcontractor / trade professional** | Only the tasks they are attached to, plus the schedule context around them. | Reads. Occasionally confirms a date or posts a photo. |
 | **Coding agent** | A machine-readable backlog and a way to close a task against a PR. | Creates and closes tasks via MCP as a required part of every turn. |
 
+```mermaid
+journey
+  title A week on site, today vs with 0028
+  section Today
+    Homeowner asks GC for status: 2: Homeowner
+    GC replies days later: 2: GC
+    Drywall delivery slips silently: 1: Supplier
+    Sub arrives, cannot work: 1: Sub
+    Homeowner finds out on site: 1: Homeowner
+  section With 0028
+    Tracking ETA moves: 4: System
+    Blocking task start date shifts: 5: System
+    Sub sees the change in their report: 4: Sub
+    Homeowner approves a heads-up note: 5: Homeowner
+    Sub reschedules before driving over: 5: Sub
+```
+
 ## 3. Why anyone outside the household uses it
 
 A tool nobody updates is worth nothing, and a contractor can always refuse to use
@@ -47,6 +64,22 @@ it — or price the annoyance into the bid. So participation has to be *earned*:
 3. **Fewer disputes.** A written, agreed, illustrated description of what each phase
    delivers is protection for the contractor as much as the homeowner. Payment
    milestones argued about in advance are not argued about at invoice time.
+
+```mermaid
+flowchart LR
+  REP["Reports worth logging in for<br/>milestones · blockers · ETAs"] --> USE["People actually open it"]
+  LOW["Lowest-friction updates<br/>reply by text, keep using ClickUp"] --> USE
+  USE --> DATA["Current data in D1"]
+  DATA --> AI["AI can see slips early"]
+  AI --> REP
+  DATA --> VAL["Fewer disputes<br/>fewer change orders<br/>budget holds"]
+  VAL --> HO(("Homeowner<br/>value"))
+
+  classDef loop fill:#12352a,stroke:#4ade80,color:#bbf7d0
+  class USE,DATA,AI loop
+```
+
+*The loop only closes if the outside participants get something back. That is why reporting is a requirement, not a nice-to-have.*
 
 ## 4. Goals
 

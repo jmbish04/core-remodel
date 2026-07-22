@@ -59,6 +59,23 @@ dark:border-<tone>/25 dark:bg-<tone>/15 dark:text-<tone>
 
 ## 3. Components
 
+```mermaid
+flowchart TB
+  ATOMS["Shared atoms<br/>StatusBadge · HealthBadge · PriorityBadge<br/>ProgressRing · ProgressBar · AssigneeGroup<br/>DependencyChips · Eyebrow · KpiTile"]
+  ATOMS --> CARD[WorkItemCard]
+  CARD --> BOARD[WorkBoard]
+  ATOMS --> GRID[WorkGrid]
+  ATOMS --> BACK[WorkBacklog]
+  ATOMS --> TREE["WorkGantt tree pane"]
+  TREE --> GANTT[WorkGantt]
+  KIBO[("kibo-ui/gantt<br/>ALREADY BUILT")] --> GANTT
+  ATOMS --> VEL[VelocityDashboard]
+  BOARD & GRID & BACK & GANTT & VEL --> GAL["/admin/pmo/components<br/>fixture gallery"]
+
+  classDef reuse fill:#12352a,stroke:#4ade80,color:#bbf7d0
+  class KIBO reuse
+```
+
 ### 3.1 `<WorkBoard>` — kanban
 
 Source: `roadmap_kanban.html`. Generalize the existing `ClickUpKanban.tsx`.
@@ -204,6 +221,28 @@ collapses to the top-left. Inside `.tsx` islands `className` is correct.
 | `/admin/pmo/operations` | `HardHat` | Same tabs over `planning_tasks` |
 | `/admin/pmo/schedule` | `CalendarRange` | `<WorkGantt>` across both sources |
 | `/admin/pmo/components` | `Component` | Gallery of every component on fixture data |
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  [*] --> Loading
+  Loading --> Empty : no tasks
+  Loading --> Populated : tasks returned
+  Loading --> Stale : ClickUp unreachable
+  Populated --> Undated : has tasks, none have dates
+  Undated --> Populated : dates added
+  Stale --> Populated : sync recovers
+  Empty --> Populated : first task created
+
+  note right of Stale
+    Banner names the last sync time.
+    NEVER render mirror data as live.
+  end note
+  note right of Undated
+    Gantt offers "add dates"
+    rather than a blank timeline.
+  end note
+```
 
 ## 5. States that must be designed, not skipped
 
