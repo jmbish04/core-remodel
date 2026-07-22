@@ -23,8 +23,8 @@
  *     because a deck is a summary and the reader needs the way back.
  */
 
-import { Deck } from "@revealjs/react";
-import { useMemo } from "react";
+import { Deck, useReveal } from "@revealjs/react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { MermaidCn } from "@/components/mermaidcn/MermaidCn";
 import { MarkdownProse } from "@/components/research/MarkdownProse";
@@ -98,6 +98,50 @@ function SlideBody({ markdown, anchorHref }: { markdown: string; anchorHref?: st
           Read the full section →
         </a>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Render children only once their slide is actually on screen.
+ *
+ * Reveal keeps every slide in the DOM and hides the inactive ones, so anything
+ * that MEASURES itself at mount measures zero. Mermaid does exactly that, and
+ * its failure is not a blank diagram but a rendered error on the slide:
+ *
+ *   Syntax Error — Could not find a suitable point for the given distance
+ *
+ * which reads as a problem with the diagram source and is not one. Deferring the
+ * mount until the slide is present gives mermaid a laid-out box to measure.
+ *
+ * Once shown, it stays mounted: re-rendering a diagram every time the presenter
+ * steps back through it is wasted work and visibly re-flashes the SVG.
+ */
+function WhenSlideActive({ children }: { children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [hasBeenActive, setHasBeenActive] = useState(false);
+  const deck = useReveal();
+
+  useEffect(() => {
+    if (!deck || hasBeenActive) return;
+
+    const update = () => {
+      const section = ref.current?.closest("section");
+      if (section?.classList.contains("present")) setHasBeenActive(true);
+    };
+
+    update();
+    deck.on("slidechanged", update);
+    deck.on("ready", update);
+    return () => {
+      deck.off("slidechanged", update);
+      deck.off("ready", update);
+    };
+  }, [deck, hasBeenActive]);
+
+  return (
+    <div ref={ref} className="h-full min-h-0">
+      {hasBeenActive ? children : null}
     </div>
   );
 }
@@ -234,12 +278,28 @@ export function ChangelogDeck(props: ChangelogDeckProps) {
 
         {diagrams.map((d, i) => (
           <ContentSlide key={`diagram-${i}`} title={d.title}>
-            <div className="flex h-full min-h-0 flex-col gap-3 text-left">
+            <div className="flex h-full flex-col gap-3 text-left">
               {d.description ? (
                 <MarkdownProse className="shrink-0 text-sm prose-p:mb-2" markdown={d.description} />
               ) : null}
-              <div className="min-h-0 flex-1">
-                <MermaidCn code={d.code} caption={d.title} />
+              {/*
+                An EXPLICIT height, not `flex-1`. Dagre lays a flowchart out
+                against the box it is given; in a content-sized flex column that
+                box resolves to zero height, so every node lands on the same
+                coordinate and the edges between them have zero length. Mermaid
+                then throws while positioning an edge LABEL:
+
+                  Could not find a suitable point for the given distance
+
+                which renders on the slide as a syntax error and reads as a
+                problem with the diagram source. It is not — the same diagram
+                renders correctly on the detail page, where the container has a
+                natural height.
+              */}
+              <div className="h-[430px] w-full overflow-auto">
+                <WhenSlideActive>
+                  <MermaidCn code={d.code} caption={d.title} />
+                </WhenSlideActive>
               </div>
             </div>
           </ContentSlide>
