@@ -7,6 +7,7 @@
 import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import { app as honoApp } from "./backend/api/index";
 import { runPermitSync } from "./backend/services/dbi/permits-sync.js";
+import { pruneAgentRuns } from "./backend/services/agent-run-retention.js";
 import { dispatchDueWorkflows } from "./backend/services/workflow-dispatcher";
 import { autoHealImageUploads } from "./backend/services/image-processor/auto-heal";
 import { monitorShowroomSourcingCoverage } from "./backend/services/showroom-sourcing-monitor";
@@ -281,6 +282,11 @@ const legacyHandler: ExportedHandler<Env> = {
     // "* * * * *" reads `system_cron_schedules` and fires any due workflows.
     if (event.cron === "0 14 * * *") {
       ctx.waitUntil(runPermitSync(env));
+      // Prune the agent run ledger. Daily, not per-minute: a sweep that finds
+      // nothing 1,439 times a day is pure waste, and an append-only ledger
+      // written by every instrumented surface is exactly how a cost-monitoring
+      // feature would otherwise become its own D1 row-read cost story.
+      ctx.waitUntil(pruneAgentRuns(env));
       return;
     }
     if (event.cron === "* * * * *") {

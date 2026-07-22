@@ -35,6 +35,7 @@ import {
   type BackfillEnrichPayload,
 } from "./methods";
 import { faviconService } from "@backend/services/favicon";
+import { startRun } from "@backend/services/agent-runs";
 import { getStoreWebsiteUrl } from "@backend/utils/showroom-links";
 import type {
   DeepSweepCategoryInput,
@@ -360,6 +361,20 @@ export class ShowroomResearchAgent extends AIChatAgent<
     const { showroomId } = payload;
     this.reportProgress(`Backfilling showroom ${showroomId}`);
 
+    // Every sub-step below is independently guarded so one failure never aborts
+    // the rest — which is correct for throughput and terrible for visibility:
+    // the console.error is the ONLY trace, and nothing reads it. Wrapping each
+    // guarded call in `run.step` keeps the guard (the step rethrows, the
+    // existing catch still swallows) while recording which step failed and why.
+    const run = await startRun(this.env, {
+      agent: "showroom-backfill",
+      operation: "backfill_enrich",
+      targetType: "showroom_store",
+      targetId: String(showroomId),
+      input: { showroomId, placeId: payload.placeId ?? null, photos: payload.photos?.length ?? 0 },
+      triggeredBy: "agent",
+    });
+
     const db = drizzle(this.env.DB);
     const [store] = await db
       .select()
@@ -367,6 +382,7 @@ export class ShowroomResearchAgent extends AIChatAgent<
       .where(eq(showroomStores.id, showroomId))
       .limit(1);
     if (!store) {
+      await run.succeed({ skipped: "store not found" });
       this.markComplete();
       return;
     }
@@ -376,7 +392,9 @@ export class ShowroomResearchAgent extends AIChatAgent<
     // 1. Gemini review insight (fill-blanks) + brand mapping.
     if (placeId) {
       try {
-        await fillBlanksFromPlacesAI(this.env, showroomId, placeId);
+        await run.step("gemini review insight", () =>
+          fillBlanksFromPlacesAI(this.env, showroomId, placeId),
+        );
       } catch (err) {
         console.error(`[backfill] Gemini insight failed for store ${showroomId}:`, err);
       }
@@ -385,7 +403,7 @@ export class ShowroomResearchAgent extends AIChatAgent<
     // 2. Deep-sweep research — only when the store has no findings yet.
     try {
       if (!(await hasExistingFindings(this.env, showroomId))) {
-        await this.researchStore(showroomId);
+        await run.step("deep-sweep research", () => this.researchStore(showroomId));
       }
     } catch (err) {
       console.error(`[backfill] research failed for store ${showroomId}:`, err);
@@ -401,19 +419,26 @@ export class ShowroomResearchAgent extends AIChatAgent<
     if (websiteUrl) {
       if (!store.iconCfImagesUrl) {
         try {
-          await faviconService.hydrateShowroomIcon(this.env, showroomId, websiteUrl);
+          await run.step("favicon", () =>
+            faviconService.hydrateShowroomIcon(this.env, showroomId, websiteUrl),
+          );
         } catch (err) {
           console.error(`[backfill] favicon failed for store ${showroomId}:`, err);
         }
       }
-      await triggerBackfillScrape(this.env, showroomId, websiteUrl);
+      await run.step("website scrape", () =>
+        triggerBackfillScrape(this.env, showroomId, websiteUrl),
+      );
     }
 
     // 5. Places photo pipeline → CF Images + hero.
     if (payload.photos?.length) {
-      await runBackfillPhotoPipeline(this.env, showroomId, payload.photos);
+      await run.step("places photo pipeline", () =>
+        runBackfillPhotoPipeline(this.env, showroomId, payload.photos ?? []),
+      );
     }
 
+    await run.succeed({ showroomId, website: Boolean(websiteUrl) });
     this.markComplete();
   }
 

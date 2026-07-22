@@ -44,6 +44,8 @@ import { chunkMarkdown } from "@backend/ai/agents/ResearchAgent/methods/chunk-ma
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import { parseStructuredResponse } from "@backend/utils/ai-json";
+import { startRun } from "@backend/services/agent-runs";
+import { ledgerSteps } from "@backend/services/agent-run-workflow";
 import {
   beginStep,
   completeJob,
@@ -272,10 +274,24 @@ export class ProductResearchWorkflow extends WorkflowEntrypoint<
   Env,
   ProductResearchParams
 > {
-  async run(event: WorkflowEvent<ProductResearchParams>, step: WorkflowStep) {
+  async run(event: WorkflowEvent<ProductResearchParams>, rawStep: WorkflowStep) {
     const { storeProductId } = event.payload;
     const env = this.env;
     const db = drizzle(env.DB);
+
+    // Durable run record — see brand-research-workflow for the rationale. The
+    // product pipeline is the more expensive of the two (deep research plus a
+    // page scrape plus photo ingest), so an unattributed failure here is also
+    // an unattributed bill.
+    const run = await startRun(env, {
+      agent: "product-research",
+      operation: "research_product",
+      targetType: "store_product",
+      targetId: String(storeProductId),
+      input: { storeProductId, researchJobId: event.payload.researchJobId ?? null },
+      triggeredBy: "agent",
+    });
+    const step = ledgerSteps(rawStep, run);
 
     // Research-console job id — pre-created by the API when `researchJobId`
     // is supplied, otherwise created inside mark-running (job creation lives
@@ -503,7 +519,14 @@ export class ProductResearchWorkflow extends WorkflowEntrypoint<
         sources: research.sources,
         result: intel,
       });
+
+      await run.succeed({
+        storeProductId,
+        sources: research.sources?.length ?? 0,
+        reportChars: research.report?.length ?? 0,
+      });
     } catch (error) {
+      await run.fail(error);
       // Any unrecoverable failure flips status to "failed" then re-throws so
       // Workflows records the error for observability. The console job is
       // failed alongside (failJob never throws).

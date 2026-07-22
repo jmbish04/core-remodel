@@ -12,6 +12,8 @@ import {
   inspirationalImageRooms,
 } from "@backend/db";
 import { publishRealtimeEvent } from "@backend/realtime/publish";
+import { startRun } from "@backend/services/agent-runs";
+import { ledgerSteps } from "@backend/services/agent-run-workflow";
 import {
   ImageProcessorService,
   type PhotoCategory,
@@ -153,10 +155,28 @@ const AI_STEP_RETRY: WorkflowStepConfig = {
 };
 
 export async function runImageProcessingSteps(
-  step: WorkflowStep,
+  rawStep: WorkflowStep,
   env: Env,
   params: ImageProcessingWorkflowParams,
 ): Promise<{ imageId: string; status: "processed" | "failed" }> {
+  // Instrumented HERE rather than in the workflow entrypoint so the batch
+  // coordinator gets it too — batch-workflow.ts calls this function directly,
+  // and instrumenting only the entrypoint would leave every batched image
+  // invisible, which is the bulk of the volume.
+  //
+  // This is also the surface that hides Workers AI 3040 capacity errors: they
+  // are written to image_upload_staging.processing_error and read by nothing,
+  // so a capacity storm currently looks like silence.
+  const run = await startRun(env, {
+    agent: "image-processing",
+    operation: "process_image",
+    targetType: "image",
+    targetId: params.imageId,
+    input: { imageId: params.imageId },
+    triggeredBy: "agent",
+  });
+  const step = ledgerSteps(rawStep, run);
+
   try {
     await step.do(`mark-processing-started:${params.imageId}`, async () => {
       const db = drizzle(env.DB);
@@ -479,9 +499,14 @@ export async function runImageProcessingSteps(
       return { imageId: params.imageId };
     });
 
+    await run.succeed({ imageId: params.imageId });
     return { imageId: params.imageId, status: "processed" };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+    // Record the reason BEFORE the swallow below. This function is contracted
+    // never to reject, so without this the failure leaves no trace the
+    // monitoring UI can group, explain or retry from.
+    await run.fail(error);
     try {
       await step.do(`mark-failed:${params.imageId}`, async () => {
         const db = drizzle(env.DB);
