@@ -41,6 +41,57 @@ interface GeminiUsageMetadata {
 }
 
 /**
+ * Per-model token pricing, USD per 1,000,000 tokens.
+ *
+ * WHY THIS EXISTS: `gemini_usage_log.estimated_cost_usd` was never written —
+ * the logger recorded tokens but no cost — so the integration-usage page could
+ * only report "not tracked" across ~1,400 calls. Tokens alone do not answer
+ * "what are we spending".
+ *
+ * VERIFY BEFORE TRUSTING FOR BILLING. These are list rates noted 2026-07-22 from
+ * Google's published Gemini API pricing; they change, and they do not account
+ * for context-length tiers, batch discounts or free-tier allowances. This is a
+ * first-party ESTIMATE for spotting runaway usage early — the provider's invoice
+ * remains authoritative.
+ *
+ * A model absent from this table records NULL cost rather than 0. Zero would
+ * read as "this was free", which is a worse lie than "unknown".
+ */
+const MODEL_PRICING_PER_MTOK: Record<string, { input: number; output: number }> = {
+  "gemini-2.5-flash": { input: 0.3, output: 2.5 },
+  "gemini-2.5-flash-lite": { input: 0.1, output: 0.4 },
+  "gemini-2.5-pro": { input: 1.25, output: 10.0 },
+  "gemini-3-pro-preview": { input: 1.25, output: 10.0 },
+  "gemini-3-flash-preview": { input: 0.3, output: 2.5 },
+};
+
+/**
+ * Estimate the USD cost of one call. Returns null when the model is unpriced or
+ * no token counts were reported, so the caller stores NULL and the UI can say
+ * "not tracked" instead of implying the call was free.
+ */
+function estimateCostUsd(
+  model: string,
+  usage: GeminiUsageMetadata,
+): number | null {
+  // Match on a prefix so dated variants ("gemini-2.5-flash-002") still price.
+  const key = Object.keys(MODEL_PRICING_PER_MTOK).find((k) => model.startsWith(k));
+  if (!key) return null;
+
+  const rate = MODEL_PRICING_PER_MTOK[key];
+  const inputTokens = usage.promptTokenCount ?? 0;
+  // Thinking tokens are billed as output on the 2.5 line.
+  const outputTokens =
+    (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0);
+  if (inputTokens === 0 && outputTokens === 0) return null;
+
+  const cost =
+    (inputTokens / 1_000_000) * rate.input + (outputTokens / 1_000_000) * rate.output;
+  // Six decimals: a single cheap call rounds to zero at four.
+  return Number(cost.toFixed(6));
+}
+
+/**
  * Append a row to `gemini_usage_log`. Best-effort and self-contained: a logging
  * failure NEVER propagates to (or breaks) the underlying AI call. This is our
  * independent, first-party token ledger for spend reconciliation.
@@ -68,6 +119,8 @@ export async function logGeminiUsage(
         thoughtsTokens: u.thoughtsTokenCount ?? null,
         cachedTokens: u.cachedContentTokenCount ?? null,
         totalTokens: u.totalTokenCount ?? null,
+        // Null (not 0) when unpriced — see estimateCostUsd.
+        estimatedCostUsd: entry.status === "ok" ? estimateCostUsd(entry.model, u) : null,
         errorMessage: entry.error ? String(entry.error).slice(0, 1000) : null,
         requestMeta: { model: entry.model, feature: entry.feature },
       });
