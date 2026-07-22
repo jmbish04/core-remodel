@@ -43,6 +43,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/backend-health-checks-d1-d6df78",
+    title: "0028 · Health platform — every module declares its own checks",
+    summary:
+      "88 probes across 17 backend modules, each carrying its own runbook, catalogued in D1 and run as one session from /admin/system/health, the API or MCP. Includes 16 cost watchers and the data-quality checks from #169, bridged into the same ledger.",
+    date: "2026-07-22",
+    status: "staged",
+    prNumber: 195,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/195",
+  },
+  {
     branch: "claude/agent-ops-monitoring-plan-957a42",
     title: "0026 · Agent Ops Transparency",
     summary:
@@ -172,6 +182,30 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "0028-health-platform",
+    branch: "claude/backend-health-checks-d1-d6df78",
+    date: "2026-07-22",
+    tag: "0028",
+    area: "System / Health",
+    title: "Health platform — 88 probes, a D1 catalogue, and a runbook per test",
+    summary:
+      "The health surface went from 5 hardcoded binding pings to 88 probes contributed by 17 backend modules. Each probe carries its own documentation — what success means, what failure means, how to troubleshoot it — which is upserted into health_test_def on every run, so the runbook on the page is generated from the code that ran. The first real session found two genuine faults nobody was watching.",
+    changes: [
+      { kind: "added", text: "17 module health.ts files (db, api, ai, mcp, realtime, workflows, ai-gateway, usage, render, email, gmail, google, google-photos, tesla, showroom, documents, image-processor) contributing 85 infrastructure probes." },
+      { kind: "added", text: "16 cost watchers comparing the last 24h against the trailing 7-day daily average — AI spend, tokens, Maps calls, agent runs, Durable Object volume — DEGRADED at 2x, FAILURE at 5x." },
+      { kind: "added", text: "/admin/system/health rebuilt as a grouped timeline: sticky section per module group, a runbook inside every row, skeleton rows and a spinner while a session runs, filters for problems and cost watchers. Mobile-first." },
+      { kind: "added", text: "Admin-gated POST /api/health/session, GET /api/health/{session/latest,sessions,catalogue,badge}, and the run_health_session MCP tool." },
+      { kind: "added", text: "A minimal health pip in the desktop header and the mobile sidebar bar, linking to the dashboard. Reads the last persisted session; never triggers a probe." },
+      { kind: "changed", text: "The three data-quality checks from #169 are bridged into the probe pipeline as a Data Quality group, so one run covers both and their scores land in the same session ledger. `unknown` maps to FAILURE, never SUCCESS." },
+      { kind: "changed", text: "/health and /admin/health 301 to /admin/system/health, behind the admin gate. The public GET /api/health is unchanged, so external uptime monitors keep working." },
+      { kind: "removed", text: "The public /health page, the HealthCheckApp island, SystemHealthApp, and two dead non-compiling health.ts files under src/backend/ai." },
+      { kind: "fixed", text: "The sidebar had two nav groups with id \"system\" after #169; folded into one." },
+      { kind: "migration", text: "0125_supreme_dust — health_test_def, health_binding_types, health_test_binding_types, health_results (additive; applied and verified on remote)." },
+    ],
+    migrations: ["0125_supreme_dust"],
+    status: "staged",
+  },
   {
     id: "0026-agent-ops-transparency",
     branch: "claude/agent-ops-monitoring-plan-957a42",
