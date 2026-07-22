@@ -2,7 +2,36 @@
 import cloudflare from "@astrojs/cloudflare";
 import react from "@astrojs/react";
 import tailwindcss from "@tailwindcss/vite";
+import { inkWebPlugin } from "ink-web/vite";
 import { defineConfig } from "astro/config";
+
+/**
+ * `ink-web` runs Ink (React for terminals) in the browser through xterm.js, which
+ * is what lets the termcn components render on a web page at all. Its Vite plugin
+ * does that by aliasing Node built-ins — `node:stream`, `node:events`,
+ * `node:buffer`, `node:fs`, `node:path`, `process`, `tty` — to browser shims.
+ *
+ * Those aliases MUST NOT reach the server build. This Worker's SSR bundle and its
+ * dependencies genuinely use several of them (Astro's asset utils import
+ * `node:fs/promises` and `node:path`; the agents SDK imports `node:async_hooks`
+ * and `node:stream`), and swapping them for browser shims would break the
+ * deployed Worker in ways that only show up at runtime.
+ *
+ * So the plugin is delegated to only for the CLIENT build. Astro runs Vite twice
+ * and flags the server pass with `isSsrBuild`, which is the seam used here.
+ */
+function clientOnlyInkWeb() {
+  const inner = inkWebPlugin();
+  return {
+    name: "ink-web-client-only",
+    config(config: unknown, env: { isSsrBuild?: boolean }) {
+      if (env?.isSsrBuild) return undefined;
+      return typeof inner.config === "function"
+        ? (inner.config as (c: unknown, e: unknown) => unknown)(config, env)
+        : undefined;
+    },
+  };
+}
 
 const site = process.env.SITE ?? "http://localhost:4321";
 const base = process.env.BASE || "/";
@@ -33,6 +62,6 @@ export default defineConfig({
   // self-referential `_redirects` splat rule for dynamic destinations, which
   // wrangler rejects at deploy time ("infinite loop detected").
   vite: {
-    plugins: [tailwindcss()],
+    plugins: [tailwindcss(), clientOnlyInkWeb()],
   },
 });

@@ -316,7 +316,7 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
                 </span>
               </h3>
               <div class="mt-3">
-                <FilesTouchedTree files={filesTouched} client:visible />
+                <FilesTouchedTree files={filesTouched} client:load />
               </div>
             </div>
           ) : null}
