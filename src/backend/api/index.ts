@@ -54,6 +54,7 @@ import teslaRouter from "./routes/tesla";
 import { portalRouter } from "./routes/portal";
 import { planningRouter } from "./routes/planning";
 import { planningExtendedRouter } from "./routes/planning-extended";
+import { pmoRouter } from "./routes/pmo";
 import { roomsRouter } from "./routes/rooms";
 import { roomsExtendedRouter } from "./routes/rooms-extended";
 import { syncRouter } from "./routes/sync";
@@ -126,6 +127,8 @@ app.use("/api/images/upload-urls", requireAccessAuth);
 app.use("/api/images/inspiration/scoped", requireAccessAuth);
 app.use("/api/images/:id/inspiration-category", requireAccessAuth);
 app.use("/api/images/:id/suggest-category", requireAccessAuth);
+app.use("/api/pmo", requireAccessAuth);
+app.use("/api/pmo/*", requireAccessAuth);
 app.use("/api/planning", requireAccessAuth);
 app.use("/api/planning/*", requireAccessAuth);
 app.use("/api/truth-table", requireAccessAuth);
@@ -310,6 +313,7 @@ app.route("/api/places", placesRouter);
 // by the /api/admin/* requireAccessAuth middleware above.
 app.route("/api/admin/integrations", adminIntegrationsRouter);
 app.route("/api/admin/plans", adminPlansRouter);
+app.route("/api/pmo", pmoRouter);
 // Agent Ops — the first readers of the agent_runs ledger. Inherits
 // requireAccessAuth from the /api/admin/* middleware registered above.
 app.route("/api/admin/agents", adminAgentsRouter);
