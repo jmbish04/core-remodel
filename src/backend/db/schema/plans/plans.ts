@@ -15,9 +15,21 @@ export const plans = sqliteTable("plans", {
   description: text("description"),
   /** Repo-relative path to the plan's docs folder. */
   docPath: text("doc_path"),
+  /**
+   * Which project this plan belongs to (0028). `software` plans are the coding
+   * roadmap; `remodel` plans are house-renovation phases. Lets one `/admin/plans`
+   * surface carry both, split by domain. Defaulted so every existing plan is
+   * `software` without a backfill.
+   */
+  domain: text("domain", { enum: ["software", "remodel"] })
+    .notNull()
+    .default("software"),
   status: text("status", { enum: ["planning", "active", "done", "archived"] })
     .notNull()
     .default("planning"),
+  /** Plan-level schedule (0028). ISO date (YYYY-MM-DD). Nullable. */
+  startDate: text("start_date"),
+  targetDate: text("target_date"),
   /** Display order on the overview page (lower = first). */
   sortOrder: integer("sort_order").notNull().default(0),
   createdAt: integer("created_at", { mode: "timestamp" })

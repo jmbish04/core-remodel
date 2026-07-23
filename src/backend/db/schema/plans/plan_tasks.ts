@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { sqliteTable, text, integer, uniqueIndex, index } from "drizzle-orm/sqlite-core";
 
+import { planningParticipants } from "../home/planning_participants";
 import { plans } from "./plans";
 
 /**
@@ -44,13 +45,35 @@ export const planTasks = sqliteTable(
       .default("new"),
 
     status: text("status", {
-      enum: ["pending", "in_progress", "blocked", "deferred", "done"],
+      // `in_review` added in 0028 so the software board can model code review.
+      enum: ["pending", "in_progress", "in_review", "blocked", "deferred", "done"],
     })
       .notNull()
       .default("pending"),
 
     /** JSON array of taskKeys this task depends on (stringified). */
     dependsOn: text("depends_on", { mode: "json" }).$type<string[]>(),
+
+    // ── 0028: schedule + assignment ──────────────────────────────────────────
+    // Additive and nullable. These are what let a plan_task feed a Gantt, a
+    // burndown, and a velocity metric — none of which the roadmap tracker had.
+
+    /** ISO date (YYYY-MM-DD). */
+    startDate: text("start_date"),
+    dueDate: text("due_date"),
+    /** 0–100. Null = unknown, distinct from 0. */
+    progressPct: integer("progress_pct"),
+    effortPoints: integer("effort_points"),
+    priority: text("priority", { enum: ["urgent", "high", "medium", "low"] }),
+    /** Who is doing it. FK → planning_participants (the shared people table). */
+    assigneeParticipantId: integer("assignee_participant_id").references(
+      () => planningParticipants.id,
+      { onDelete: "set null" },
+    ),
+    /** The PR that closed this task. Written by `close_plan_task` (P2). */
+    prNumber: integer("pr_number"),
+    /** Soft link → changelog_entries.slug — the entry that documents this task. */
+    changelogSlug: text("changelog_slug"),
 
     /** Display order within a phase (lower = first). */
     sortOrder: integer("sort_order").notNull().default(0),
