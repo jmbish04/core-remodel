@@ -16,7 +16,7 @@
  *   - stageProposal    — persist the proposal; auto-confirm a single survivor
  *   - resolveProposal  — a human confirms/overrides; the ONE write of roomId
  */
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import type { drizzle } from "drizzle-orm/d1";
 import { Type, type Schema } from "@google/genai";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -625,4 +625,78 @@ export async function stageProposalsForReceipt(
   }
 
   return { staged, autoConfirmed, skipped };
+}
+
+// ─── read: proposals for review ─────────────────────────────────────────────────
+
+/** Parse the frozen `candidatesJson` snapshot; a bad blob reads as no candidates. */
+function parseCandidates(json: string | null): RoomCandidate[] {
+  if (!json) return [];
+  try {
+    const v = JSON.parse(json);
+    return Array.isArray(v) ? (v as RoomCandidate[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** One proposal shaped for review — names JOINed, never stored (AGENTS.md FK rule). */
+export interface RoomProposalView {
+  id: number;
+  /** Line-item description, falling back to the material title. */
+  title: string;
+  subcategoryId: number | null;
+  subcategoryName: string | null;
+  status: string;
+  confidence: number | null;
+  proposedRoomId: number | null;
+  proposedRoomName: string | null;
+  candidates: RoomCandidate[];
+  reasoningMarkdown: string | null;
+}
+
+type ProposalStatus = "staged" | "auto_confirmed" | "confirmed" | "overridden" | "dismissed";
+
+/**
+ * Pending (or otherwise filtered) proposals for the review surfaces — one query
+ * behind both the MCP `list_room_proposals` tool and the REST endpoint, so the
+ * two can never drift. Display names are joined at read time; `candidatesJson`
+ * is parsed back into the ranked candidate list.
+ */
+export async function listRoomProposals(
+  db: Db,
+  status: ProposalStatus = "staged",
+): Promise<RoomProposalView[]> {
+  const rows = await db
+    .select({
+      p: materialRoomProposals,
+      lineDesc: workerEmailInvoiceLineItems.description,
+      matTitle: materialScheduleItems.title,
+      subName: subcategories.name,
+      roomName: rooms.roomName,
+    })
+    .from(materialRoomProposals)
+    .leftJoin(
+      workerEmailInvoiceLineItems,
+      eq(materialRoomProposals.lineItemId, workerEmailInvoiceLineItems.id),
+    )
+    .leftJoin(materialScheduleItems, eq(materialRoomProposals.materialId, materialScheduleItems.id))
+    .leftJoin(subcategories, eq(materialRoomProposals.subcategoryId, subcategories.id))
+    .leftJoin(rooms, eq(materialRoomProposals.proposedRoomId, rooms.id))
+    .where(eq(materialRoomProposals.status, status))
+    .orderBy(desc(materialRoomProposals.createdAt))
+    .all();
+
+  return rows.map((r) => ({
+    id: r.p.id,
+    title: (r.lineDesc ?? r.matTitle ?? "Material").trim() || "Material",
+    subcategoryId: r.p.subcategoryId,
+    subcategoryName: r.subName ?? null,
+    status: r.p.status,
+    confidence: r.p.confidence,
+    proposedRoomId: r.p.proposedRoomId,
+    proposedRoomName: r.roomName ?? null,
+    candidates: parseCandidates(r.p.candidatesJson),
+    reasoningMarkdown: r.p.reasoningMarkdown,
+  }));
 }

@@ -23,7 +23,10 @@ import { linkMaterialToBudgetItem } from "./link_material_to_budget_item";
 import { linkMaterialToRoom } from "./link_material_to_room";
 import { listMaterialCategories } from "./list_material_categories";
 import { listMaterials } from "./list_materials";
+import { listRoomProposalsTool } from "./list_room_proposals";
 import { markMaterialPurchased } from "./mark_material_purchased";
+import { promoteLineItemTool } from "./promote_line_item";
+import { resolveRoomProposalTool } from "./resolve_room_proposal";
 import { setMaterialSpecs } from "./set_material_specs";
 import { updateMaterial } from "./update_material";
 
@@ -37,4 +40,7 @@ export const materialTools: RemodelTool[] = [
   linkMaterialToRoom,
   linkMaterialToBudgetItem,
   markMaterialPurchased,
+  listRoomProposalsTool,
+  resolveRoomProposalTool,
+  promoteLineItemTool,
 ];
