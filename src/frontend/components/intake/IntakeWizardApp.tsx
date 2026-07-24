@@ -28,6 +28,7 @@ import { toast } from "sonner";
 import { api } from "@/components/products/types";
 import { GooglePhotosButton } from "@/components/google-photos/GooglePhotosButton";
 import { MultiProductMasker } from "./MultiProductMasker";
+import { EntitySearchSelect } from "@/components/research-console/EntitySearchSelect";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -73,6 +74,160 @@ interface Bucket {
   label: string | null;
   status: string;
   photos: BucketPhoto[];
+  // Per-stack hints (Phase A′) — round-tripped from the API.
+  brandId: number | null;
+  brandNameRaw: string | null;
+  productName: string | null;
+  modelNumber: string | null;
+  sku: string | null;
+  productUrl: string | null;
+  /** Derived server-side: has a brand (matched or raw) OR a product URL. */
+  readyForWorkflow: boolean;
+}
+
+/**
+ * The optional identity hints a user can attach to a stack while grouping, so
+ * the intake workflow (Phase C) starts warm. Held as one object in the create /
+ * edit dialogs and rendered by `BucketHintFields`.
+ */
+interface BucketHints {
+  /** Matched existing brand: {id, name}. Null when unset or free-typed. */
+  brand: { id: number; name: string } | null;
+  /** Free-typed brand when no existing match — mutually exclusive with `brand`. */
+  brandNameRaw: string;
+  productName: string;
+  modelNumber: string;
+  sku: string;
+  productUrl: string;
+}
+
+const EMPTY_HINTS: BucketHints = {
+  brand: null,
+  brandNameRaw: "",
+  productName: "",
+  modelNumber: "",
+  sku: "",
+  productUrl: "",
+};
+
+/** True when the hints carry enough to start a scrape — mirrors the server's
+ *  `readyForWorkflow`, so the dialog can preview readiness live. */
+function hintsReady(h: BucketHints): boolean {
+  return h.brand != null || h.brandNameRaw.trim().length > 0 || h.productUrl.trim().length > 0;
+}
+
+/** Serialise hints into the API body shape (brand id / raw / product fields). */
+function hintsToBody(h: BucketHints) {
+  return {
+    brandId: h.brand?.id ?? null,
+    // Only send a raw brand name when NO existing brand was matched.
+    brandNameRaw: h.brand ? null : h.brandNameRaw.trim() || null,
+    productName: h.productName.trim() || null,
+    modelNumber: h.modelNumber.trim() || null,
+    sku: h.sku.trim() || null,
+    productUrl: h.productUrl.trim() || null,
+  };
+}
+
+/** Hydrate hints from a bucket DTO (for the edit dialog). Brand name isn't on
+ *  the DTO, so a matched brand shows as its id until re-searched; we keep the
+ *  raw name visible when present. */
+function hintsFromBucket(b: Bucket): BucketHints {
+  return {
+    brand: b.brandId != null ? { id: b.brandId, name: b.brandNameRaw ?? `Brand #${b.brandId}` } : null,
+    brandNameRaw: b.brandId == null ? (b.brandNameRaw ?? "") : "",
+    productName: b.productName ?? "",
+    modelNumber: b.modelNumber ?? "",
+    sku: b.sku ?? "",
+    productUrl: b.productUrl ?? "",
+  };
+}
+
+// ─── Components ─────────────────────────────────────────────────────────────
+
+/**
+ * The optional per-stack identity fields, shared by the create and edit
+ * dialogs. All optional; a live "ready / needs brand or URL" hint mirrors the
+ * server rule so the user sees when a stack is workflow-ready.
+ *
+ * Brand uses the existing `EntitySearchSelect` (brand catalog → /api/brands).
+ * When no existing brand matches, the user types a raw name in the "brand not
+ * listed?" field — kept separate so the workflow knows to scrape it fresh.
+ */
+function BucketHintFields({
+  hints,
+  onChange,
+}: {
+  hints: BucketHints;
+  onChange: (next: BucketHints) => void;
+}) {
+  const set = <K extends keyof BucketHints>(key: K, val: BucketHints[K]) =>
+    onChange({ ...hints, [key]: val });
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-1.5">
+        <Label>Brand</Label>
+        <EntitySearchSelect
+          catalog="brand"
+          value={hints.brand ? { id: hints.brand.id, name: hints.brand.name } : null}
+          onChange={(hit) =>
+            onChange({
+              ...hints,
+              brand: hit ? { id: hit.id, name: hit.name } : null,
+              // Picking a matched brand clears any free-typed name.
+              brandNameRaw: hit ? "" : hints.brandNameRaw,
+            })
+          }
+        />
+        {!hints.brand && (
+          <Input
+            value={hints.brandNameRaw}
+            onChange={(e) => set("brandNameRaw", e.target.value)}
+            placeholder="Brand not listed? Type it here"
+          />
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label>Product name</Label>
+          <Input
+            value={hints.productName}
+            onChange={(e) => set("productName", e.target.value)}
+            placeholder="e.g. Goccia"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Model #</Label>
+          <Input
+            value={hints.modelNumber}
+            onChange={(e) => set("modelNumber", e.target.value)}
+            placeholder="e.g. 33686"
+          />
+        </div>
+        <div className="space-y-1.5">
+          <Label>SKU</Label>
+          <Input value={hints.sku} onChange={(e) => set("sku", e.target.value)} placeholder="Optional" />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Product URL</Label>
+          <Input
+            value={hints.productUrl}
+            onChange={(e) => set("productUrl", e.target.value)}
+            placeholder="brand.com/product/…"
+          />
+        </div>
+      </div>
+
+      {/* Live readiness mirror of the server rule — a nudge, never a block. */}
+      <p className={cn("text-xs", hintsReady(hints) ? "text-emerald-500" : "text-amber-500")}>
+        {hintsReady(hints)
+          ? "Ready for the intake workflow."
+          : "Add a brand or a product URL to make this stack workflow-ready (optional)."}
+      </p>
+    </div>
+  );
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -121,7 +276,12 @@ export function IntakeWizardApp() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [bucketKind, setBucketKind] = useState<"single" | "multi">("multi");
   const [bucketLabel, setBucketLabel] = useState("");
+  const [bucketHints, setBucketHints] = useState<BucketHints>(EMPTY_HINTS);
   const [savingBucket, setSavingBucket] = useState(false);
+  // Edit-details dialog for an EXISTING bucket (Phase A′).
+  const [editBucket, setEditBucket] = useState<Bucket | null>(null);
+  const [editHints, setEditHints] = useState<BucketHints>(EMPTY_HINTS);
+  const [savingEdit, setSavingEdit] = useState(false);
 
   // ── Load showrooms once (reuses the directory feed) ──────────────────────
   useEffect(() => {
@@ -239,11 +399,13 @@ export function IntakeWizardApp() {
           kind: bucketKind,
           label: bucketLabel.trim() || undefined,
           photoIds: [...selectedPhotoIds],
+          ...hintsToBody(bucketHints),
         }),
       });
       await Promise.all([refreshPhotos(focusedId), refreshBuckets(focusedId)]);
       setSelectedPhotoIds(new Set());
       setBucketLabel("");
+      setBucketHints(EMPTY_HINTS);
       setDialogOpen(false);
       toast.success("Bucket created");
     } catch (e) {
@@ -251,7 +413,26 @@ export function IntakeWizardApp() {
     } finally {
       setSavingBucket(false);
     }
-  }, [focusedId, selectedPhotoIds, bucketKind, bucketLabel, refreshPhotos, refreshBuckets]);
+  }, [focusedId, selectedPhotoIds, bucketKind, bucketLabel, bucketHints, refreshPhotos, refreshBuckets]);
+
+  /** Save edited hint fields to an existing bucket via PATCH. */
+  const saveEditBucket = useCallback(async () => {
+    if (!editBucket || focusedId == null) return;
+    setSavingEdit(true);
+    try {
+      await api<{ bucket: Bucket }>(`/api/intake/buckets/${editBucket.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(hintsToBody(editHints)),
+      });
+      await refreshBuckets(focusedId);
+      setEditBucket(null);
+      toast.success("Stack details saved");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save details");
+    } finally {
+      setSavingEdit(false);
+    }
+  }, [editBucket, editHints, focusedId, refreshBuckets]);
 
   const removeFromBucket = useCallback(
     async (bucketId: number, photoId: number) => {
@@ -639,7 +820,27 @@ export function IntakeWizardApp() {
                                 {b.photos.length} photo{b.photos.length === 1 ? "" : "s"}
                               </span>
                               {done && <Badge variant="secondary">processed</Badge>}
+                              {/* Workflow-readiness — a nudge to add a brand or URL, never a block. */}
+                              {!done &&
+                                (b.readyForWorkflow ? (
+                                  <Badge className="bg-emerald-500/10 text-emerald-500">ready</Badge>
+                                ) : (
+                                  <Badge className="bg-amber-500/10 text-amber-500">needs brand or URL</Badge>
+                                ))}
                             </div>
+                            <div className="flex items-center gap-2">
+                              {!done && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  onClick={() => {
+                                    setEditHints(hintsFromBucket(b));
+                                    setEditBucket(b);
+                                  }}
+                                >
+                                  Details
+                                </Button>
+                              )}
                             <Button
                               size="sm"
                               variant={done ? "ghost" : "default"}
@@ -657,6 +858,7 @@ export function IntakeWizardApp() {
                                 </>
                               )}
                             </Button>
+                            </div>
                           </div>
                         );
                       })}
@@ -714,6 +916,7 @@ export function IntakeWizardApp() {
                 placeholder="e.g. Calacatta Viola slab"
               />
             </div>
+            <BucketHintFields hints={bucketHints} onChange={setBucketHints} />
           </div>
           <DialogFooter>
             <Button variant="ghost" onClick={() => setDialogOpen(false)} disabled={savingBucket}>
@@ -721,6 +924,28 @@ export function IntakeWizardApp() {
             </Button>
             <Button onClick={() => void createBucket()} disabled={savingBucket}>
               {savingBucket ? <Loader2 className="size-4 animate-spin" /> : "Create bucket"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit-details dialog for an existing stack (Phase A′). */}
+      <Dialog open={editBucket != null} onOpenChange={(open) => !savingEdit && !open && setEditBucket(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Stack details</DialogTitle>
+            <DialogDescription>
+              Brand and product hints for {editBucket?.label ? `"${editBucket.label}"` : "this stack"}. All optional —
+              they give the intake workflow a warm start.
+            </DialogDescription>
+          </DialogHeader>
+          <BucketHintFields hints={editHints} onChange={setEditHints} />
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setEditBucket(null)} disabled={savingEdit}>
+              Cancel
+            </Button>
+            <Button onClick={() => void saveEditBucket()} disabled={savingEdit}>
+              {savingEdit ? <Loader2 className="size-4 animate-spin" /> : "Save details"}
             </Button>
           </DialogFooter>
         </DialogContent>

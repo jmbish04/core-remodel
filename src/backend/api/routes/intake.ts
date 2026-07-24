@@ -177,6 +177,61 @@ intakeRouter.get("/photos", async (c) => {
  * photos to it. Guard: only photos already belonging to `showroomId` are
  * assigned — stray ids from another showroom are silently ignored.
  */
+/**
+ * Per-stack hints a user optionally fills in while grouping (Phase A′). Shared
+ * by POST and PATCH so the two paths accept exactly the same fields.
+ */
+interface BucketHintInput {
+  brandId?: number | null;
+  brandNameRaw?: string | null;
+  productName?: string | null;
+  modelNumber?: string | null;
+  sku?: string | null;
+  productUrl?: string | null;
+}
+
+/** Pull the hint fields from a request body into a Drizzle-ready patch,
+ *  trimming strings to null. Only keys present on `body` are included, so a
+ *  PATCH that omits a field leaves it untouched. */
+function readBucketHints(body: BucketHintInput): Partial<typeof productPhotoBuckets.$inferInsert> {
+  const patch: Partial<typeof productPhotoBuckets.$inferInsert> = {};
+  const str = (v: string | null | undefined) =>
+    typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
+  if ("brandId" in body) patch.brandId = Number.isFinite(body.brandId) ? Number(body.brandId) : null;
+  if ("brandNameRaw" in body) patch.brandNameRaw = str(body.brandNameRaw);
+  if ("productName" in body) patch.productName = str(body.productName);
+  if ("modelNumber" in body) patch.modelNumber = str(body.modelNumber);
+  if ("sku" in body) patch.sku = str(body.sku);
+  if ("productUrl" in body) patch.productUrl = str(body.productUrl);
+  return patch;
+}
+
+/**
+ * A bucket is "ready for workflow" (Phase C) once it carries enough to start a
+ * scrape: a brand (matched OR free-typed) OR a direct product URL. This is a
+ * derived signal only — nothing is blocked at grouping time.
+ */
+function bucketReadyForWorkflow(b: {
+  brandId: number | null;
+  brandNameRaw: string | null;
+  productUrl: string | null;
+}): boolean {
+  return b.brandId != null || !!b.brandNameRaw || !!b.productUrl;
+}
+
+/** Hint fields echoed back in every bucket DTO, so the UI round-trips them. */
+function bucketHintDto(b: typeof productPhotoBuckets.$inferSelect) {
+  return {
+    brandId: b.brandId,
+    brandNameRaw: b.brandNameRaw,
+    productName: b.productName,
+    modelNumber: b.modelNumber,
+    sku: b.sku,
+    productUrl: b.productUrl,
+    readyForWorkflow: bucketReadyForWorkflow(b),
+  };
+}
+
 intakeRouter.post("/buckets", async (c) => {
   try {
     const body = await c.req.json<{
@@ -184,7 +239,7 @@ intakeRouter.post("/buckets", async (c) => {
       kind?: "single" | "multi";
       label?: string;
       photoIds?: number[];
-    }>();
+    } & BucketHintInput>();
 
     const showroomId = Number(body.showroomId);
     if (!Number.isFinite(showroomId)) return c.json({ error: "showroomId is required (integer)" }, 400);
@@ -197,7 +252,13 @@ intakeRouter.post("/buckets", async (c) => {
     const db = drizzle(c.env.DB);
     const [bucket] = await db
       .insert(productPhotoBuckets)
-      .values({ showroomId, kind: body.kind, label: body.label?.trim() || null, status: "draft" })
+      .values({
+        showroomId,
+        kind: body.kind,
+        label: body.label?.trim() || null,
+        status: "draft",
+        ...readBucketHints(body),
+      })
       .returning();
 
     await db
@@ -212,7 +273,14 @@ intakeRouter.post("/buckets", async (c) => {
       .where(eq(productShowroomPhotos.bucketId, bucket.id));
 
     return c.json({
-      bucket: { id: bucket.id, kind: bucket.kind, label: bucket.label, status: bucket.status, photoIds: assigned.map((p) => p.id) },
+      bucket: {
+        id: bucket.id,
+        kind: bucket.kind,
+        label: bucket.label,
+        status: bucket.status,
+        photoIds: assigned.map((p) => p.id),
+        ...bucketHintDto(bucket),
+      },
     });
   } catch (error) {
     console.error("Create bucket error:", error);
@@ -239,13 +307,14 @@ intakeRouter.patch("/buckets/:id", async (c) => {
       kind?: "single" | "multi";
       addPhotoIds?: number[];
       removePhotoIds?: number[];
-    }>();
+    } & BucketHintInput>();
 
     const db = drizzle(c.env.DB);
     const [bucket] = await db.select().from(productPhotoBuckets).where(eq(productPhotoBuckets.id, bucketId)).limit(1);
     if (!bucket) return c.json({ error: "Bucket not found" }, 404);
 
-    const fieldUpdates: Partial<typeof productPhotoBuckets.$inferInsert> = {};
+    // Hint fields first, then label/kind on top — same object, one update.
+    const fieldUpdates: Partial<typeof productPhotoBuckets.$inferInsert> = readBucketHints(body);
     if (body.label !== undefined) fieldUpdates.label = body.label?.trim() || null;
     if (body.kind !== undefined) {
       if (body.kind !== "single" && body.kind !== "multi") return c.json({ error: "kind must be 'single' or 'multi'" }, 400);
@@ -295,6 +364,7 @@ intakeRouter.patch("/buckets/:id", async (c) => {
         label: updatedBucket.label,
         status: updatedBucket.status,
         photoIds: photos.map((p) => p.id),
+        ...bucketHintDto(updatedBucket),
       },
     });
   } catch (error) {
@@ -345,6 +415,7 @@ intakeRouter.get("/buckets", async (c) => {
         status: b.status,
         productId: b.productId,
         photos: photosByBucket.get(b.id) ?? [],
+        ...bucketHintDto(b),
       })),
     });
   } catch (error) {
