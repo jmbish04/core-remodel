@@ -127,6 +127,11 @@
       "class_name": "ProductResearchWorkflow",
     },
     {
+      "name": "bucket-intake-workflow",
+      "binding": "BUCKET_INTAKE_WORKFLOW",
+      "class_name": "BucketIntakeWorkflow",
+    },
+    {
       "name": "deep-research-job-workflow",
       "binding": "DEEP_RESEARCH_JOB_WORKFLOW",
       "class_name": "DeepResearchJobWorkflow",

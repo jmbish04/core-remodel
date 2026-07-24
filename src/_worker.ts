@@ -43,6 +43,7 @@ export { ShowroomScrapeWorkflow } from "./backend/services/showroom-scrape-workf
 export { ShowroomOnboardingWorkflow } from "./backend/services/showroom-onboarding-workflow";
 export { BrandResearchWorkflow } from "./backend/services/brand-research-workflow";
 export { ProductResearchWorkflow } from "./backend/services/product-research-workflow";
+export { BucketIntakeWorkflow } from "./backend/services/bucket-intake-workflow";
 export { DeepResearchJobWorkflow } from "./backend/services/deep-research-job-workflow";
 export { BlankCanvasBatchWorkflow } from "./backend/services/render/blank-canvas-batch-workflow";
 export { ResearchAgent } from "./backend/ai/agents/ResearchAgent";

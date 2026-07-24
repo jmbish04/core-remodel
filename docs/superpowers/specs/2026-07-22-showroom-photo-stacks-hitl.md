@@ -56,3 +56,55 @@ Each phase is its own commit + preview + PR. A′ ships first — smallest, high
 ### Explicitly out of scope for A′
 
 Candidate matching, the workflow, voice/reaction, sitemap table, product files, style profile. Those are Phases B–F, each its own changelist.
+
+---
+
+## Phase C1 — Candidate table + intake workflow (THIS CHANGELIST)
+
+**Goal:** replace the inline single-product `/process` path with a durable
+Workflow that yields **0-N candidate matches** into a dedicated table for later
+human review. Design forks confirmed by the owner:
+- **Dedicated candidate table** (`bucket_product_candidates`) — real
+  `brands` / `showroom_store_products` rows are created ONLY on HITL confirm, so
+  unconfirmed junk never touches the products table.
+- **Keep every candidate + reaction** — including rejected/disliked ones
+  (`status = "rejected"`, never deleted). That's the style-training signal.
+
+### Tasks (done)
+
+- **C1.1 Schema** — `bucket_product_candidates` (`product_photo_candidates.ts`):
+  bucket FK (cascade), rank, confidence, extracted identity (brand id/raw,
+  product/model/sku/url, category/style, price texts), staged
+  `image_source_urls` / `pdf_source_urls` (JSON, NOT downloaded), colors JSON,
+  rationale, raw extraction blob, reaction layer (is_match/liked/stars/
+  transcript/summary — all nullable, filled in D/E), status enum, confirmed
+  product FK. Migration `0130_solid_gunslinger.sql` (single additive CREATE
+  TABLE — applied to remote).
+- **C1.2 Extraction** — `extractShowroomProductCandidates` +
+  `PRODUCT_CANDIDATES_SCHEMA` in `product-extraction.ts`: same two-stage vision
+  pipeline, returns `{ candidates: [...] }`, hint-narrowed, `[]` never throws.
+- **C1.3 Workflow** — `BucketIntakeWorkflow` (`bucket-intake-workflow.ts`):
+  mark-running → describe-photos → extract-candidates → persist-candidates →
+  mark-complete. Records into a research-console job + an agent-run. Bound as
+  `BUCKET_INTAKE_WORKFLOW` (wrangler + `_worker.ts` re-export).
+- **C1.4 API** — `POST /buckets/:id/intake` (pre-creates a research job, kicks
+  the workflow, returns `{ queued, researchJobId }`); `GET
+  /buckets/:id/candidates` (rank-ASC, JSON columns parsed back). Live status via
+  the existing `GET /api/research-jobs/{id}`.
+
+### Deliberately deferred (ponytail)
+
+- **Web scrape per candidate** (grab product-page images/PDFs, stage source
+  URLs) — needs Phase B's `scraping_sitemap` table to cache per-brand sitemaps;
+  the `*_source_urls` columns exist and stay null until then.
+- **HITL walkthrough UI**, voice reaction, star rating, style summary — Phase D/E.
+- The inline `/process` endpoint stays for now; the wizard migrates to `/intake`
+  when the D/E walkthrough lands.
+
+### Acceptance
+
+- Migration applies clean (no table rebuilds). `tsc --noEmit` adds **0** errors
+  vs baseline. `pnpm run build` bundles.
+- QC on the preview worker: kick `/buckets/:id/intake` on a seeded bucket, poll
+  the research job to completion, assert `/buckets/:id/candidates` returns ≥1
+  ranked candidate with a raw extraction.
