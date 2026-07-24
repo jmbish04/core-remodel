@@ -20,6 +20,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
       { href: "/admin/designs/workshop", label: "Design Workshop" },
       { href: "/admin/designs/moodboards", label: "Mood Boards" },
       { href: "/admin/designs/decision-room", label: "Decision Room" },
+      { href: "/admin/pmo/components", label: "PMO Components" },
     ],
   },
   {
@@ -47,7 +48,6 @@ export const NAV_GROUPS: NavGroupDef[] = [
       { href: "/admin/bids", label: "Bid Portfolios" },
       { href: "/admin/pmo/schedule/contractor", label: "Schedule" },
       { href: "/admin/tasks", label: "Tasks" },
-      { href: "/admin/pmo/components", label: "PMO Components" },
       { href: "/admin/permits", label: "Permits" },
       { href: "/admin/dialer", label: "Prospect Dialer" },
     ],
