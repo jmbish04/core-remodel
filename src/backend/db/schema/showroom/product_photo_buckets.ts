@@ -4,6 +4,7 @@ import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 
 import { showroomStores } from "./stores";
 import { showroomStoreProducts } from "./store_products";
+import { brands } from "../brands/brands";
 
 /**
  * Product Photo Buckets — the C2 intake-wizard grouping unit. A bucket is a
@@ -44,6 +45,31 @@ export const productPhotoBuckets = sqliteTable(
 
     /** Optional human note, e.g. "Kohler faucet display". */
     label: text("label"),
+
+    // ── Per-stack hints (Phase A′) ───────────────────────────────────────────
+    // Captured at GROUPING time so the intake workflow starts warm. All
+    // optional. The workflow gate (Phase C) treats a bucket as ready when it
+    // has a brand (id OR raw) OR a product URL — but nothing is blocked here.
+
+    /** Matched existing brand, when the user picked one from autocomplete. */
+    brandId: integer("brand_id").references(() => brands.id, {
+      onDelete: "set null",
+    }),
+    /**
+     * Free-typed brand the user entered via "other" when no existing brand
+     * matched. Kept separate from `brandId` so the workflow knows it must scrape
+     * this brand fresh rather than reuse a registered one.
+     */
+    brandNameRaw: text("brand_name_raw"),
+
+    /** Product/model name as the user recalls it — may be misspelled; the
+     *  workflow fuzzy-matches it against the brand sitemap. */
+    productName: text("product_name"),
+    modelNumber: text("model_number"),
+    sku: text("sku"),
+    /** Direct product-listing URL. When present, the workflow can skip
+     *  brand deduction and scrape this page directly. */
+    productUrl: text("product_url"),
 
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
