@@ -32,10 +32,19 @@ export const materialRoomProposals = sqliteTable(
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
 
-    /** The material this proposal places. */
-    materialId: integer("material_id")
-      .notNull()
-      .references(() => materialScheduleItems.id, { onDelete: "cascade" }),
+    /**
+     * The material this proposal placed — NULL until the room is resolved.
+     *
+     * `material_schedule_items.roomId` is NOT NULL (a material is always
+     * per-room), and inventing a placeholder room just to hold an unplaced
+     * material would be exactly the lie the FK rule forbids. So the material is
+     * NOT created while the room is ambiguous: the proposal carries the line
+     * item + type, and the material is minted into the confirmed room the moment
+     * a human resolves it (or, for the single-survivor case, immediately).
+     */
+    materialId: integer("material_id").references(() => materialScheduleItems.id, {
+      onDelete: "cascade",
+    }),
 
     /** The receipt line item it was promoted from — provenance, may be cleared. */
     lineItemId: integer("line_item_id").references(() => workerEmailInvoiceLineItems.id, {
