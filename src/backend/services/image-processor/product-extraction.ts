@@ -154,6 +154,103 @@ export async function extractShowroomProductFromDescriptions(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Candidate extraction (Phase C) — 0-N candidate matches instead of one product
+// ---------------------------------------------------------------------------
+
+/** One candidate product the bucket photos MIGHT depict. Superset of the
+ *  single-product fields + a match rationale. */
+export const PRODUCT_CANDIDATE_SCHEMA = z.object({
+  brand: z.string().nullable().optional().catch(null).describe("Manufacturer/brand name, verbatim as printed"),
+  modelNumber: z.string().nullable().optional().catch(null).describe("Model/SKU number, verbatim as printed"),
+  itemName: z.string().nullable().optional().catch(null).describe("Product name/title as printed or visually described"),
+  colors: z
+    .array(z.object({ name: z.string(), hexCode: z.string().nullable().optional() }))
+    .nullable()
+    .optional()
+    .catch(null)
+    .describe("Named colors/finishes, each { name, hexCode }"),
+  style: z.string().nullable().optional().catch(null).describe("Design style, e.g. 'modern', 'transitional'"),
+  category: z.string().nullable().optional().catch(null).describe("Coarse material category — prefer a provided category name when it matches"),
+  price: z.string().nullable().optional().catch(null).describe("Regular/list price, verbatim as printed"),
+  salePrice: z.string().nullable().optional().catch(null).describe("Sale/discounted price, verbatim"),
+  discountInfo: z.string().nullable().optional().catch(null).describe("Discount/promo text, verbatim"),
+  productUrl: z.string().nullable().optional().catch(null).describe("Direct product-listing URL if one is printed/visible in the photo"),
+  rationale: z.string().nullable().optional().catch(null).describe("Why this is a plausible match for the photos — 1-2 sentences"),
+  confidence: z.number().int().min(0).max(100).nullable().optional().catch(null).describe("Confidence 0-100 this candidate is the depicted product"),
+});
+
+export type ProductCandidate = z.infer<typeof PRODUCT_CANDIDATE_SCHEMA>;
+
+export const PRODUCT_CANDIDATES_SCHEMA = z.object({
+  candidates: z
+    .array(PRODUCT_CANDIDATE_SCHEMA)
+    .nullable()
+    .optional()
+    .catch(null)
+    .describe("0-N distinct candidate products the photos might depict, most-likely first"),
+});
+
+/** Per-stack hints the grouping wizard captured (Phase A′) — narrows the model. */
+export interface CandidateHints {
+  brandName?: string | null;
+  productName?: string | null;
+  modelNumber?: string | null;
+  sku?: string | null;
+  productUrl?: string | null;
+}
+
+function hintsBlock(hints?: CandidateHints): string {
+  if (!hints) return "";
+  const lines = [
+    hints.brandName && `- Brand: ${hints.brandName}`,
+    hints.productName && `- Product name: ${hints.productName}`,
+    hints.modelNumber && `- Model number: ${hints.modelNumber}`,
+    hints.sku && `- SKU: ${hints.sku}`,
+    hints.productUrl && `- Product URL: ${hints.productUrl}`,
+  ].filter(Boolean);
+  if (lines.length === 0) return "";
+  return `\n\nThe person who took these photos supplied these hints — trust them over your own reading when they conflict:\n${lines.join("\n")}`;
+}
+
+/**
+ * Candidate pass: same two-stage pipeline as `extractShowroomProductFromDescriptions`,
+ * but returns 0-N candidates instead of one. Use when a bucket's photos might
+ * depict more than one product, or when identity is uncertain and the human
+ * should pick (HITL, Phase D/E). Returns `[]` — never throws — when the model
+ * finds nothing.
+ */
+export async function extractShowroomProductCandidates(
+  env: Env,
+  visionDescriptions: string[],
+  hints?: CandidateHints,
+  ctx?: ExtractionVocabContext,
+): Promise<ProductCandidate[]> {
+  const combined =
+    visionDescriptions.length === 1
+      ? visionDescriptions[0]
+      : visionDescriptions.map((d, i) => `Photo ${i + 1} of ${visionDescriptions.length}:\n${d}`).join("\n\n");
+
+  const intro =
+    visionDescriptions.length === 1
+      ? "Vision model's description of the showroom photo:"
+      : `Vision model's descriptions of ${visionDescriptions.length} photos taken together:`;
+
+  const result = await generateStructuredOutput(env, {
+    messages: [
+      { role: "system", content: buildSystemPrompt(ctx) },
+      {
+        role: "user",
+        content: `${intro}\n\n${combined}${hintsBlock(hints)}\n\nList the distinct product(s) these photo(s) might depict as candidates, most-likely first. If the photos clearly show ONE product, return one candidate. If identity is ambiguous, return each plausible match. If you cannot identify any product, return an empty candidates array.`,
+      },
+    ],
+    schema: PRODUCT_CANDIDATES_SCHEMA,
+    schemaName: "ShowroomProductCandidates",
+  });
+
+  return result.candidates ?? [];
+}
+
 /**
  * Describe the photo with the vision model, then parse that description into a
  * structured `ProductExtraction` via gpt-oss-120b json_schema output.

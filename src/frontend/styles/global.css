@@ -6,6 +6,13 @@
 
 @import "@fontsource-variable/inter";
 
+/*
+ * Tailwind v4 registers plugins from CSS — there is no tailwind.config.js in
+ * this project. Without this line every `prose` class is a silent no-op, which
+ * is why MarkdownProse used to hand-map each element instead.
+ */
+@plugin "@tailwindcss/typography";
+
 @custom-variant dark (&:is(.dark *));
 @custom-variant fixed (&:is(.layout-fixed *));
 
@@ -270,4 +277,69 @@
   @media (pointer: coarse) {
     @apply relative touch-manipulation after:absolute after:-inset-2;
   }
+}
+/*
+ * Shiki syntax highlighting (changelog code + migration SQL).
+ *
+ * Blocks are generated with `defaultColor: false`, so every token carries BOTH
+ * a `--shiki-light` and a `--shiki-dark` custom property and no baked-in color.
+ * These rules pick which one applies. Without them the code renders with no
+ * color at all, because nothing resolves the variables.
+ *
+ * The background is forced transparent so the block inherits the surrounding
+ * card surface instead of shiki's own theme background, which would sit at a
+ * different value than every other panel on the page.
+ */
+.shiki,
+.shiki span {
+  color: var(--shiki-light);
+  background-color: transparent !important;
+}
+
+.dark .shiki,
+.dark .shiki span,
+html.dark .shiki,
+html.dark .shiki span {
+  color: var(--shiki-dark);
+}
+
+/*
+ * Shiki transformers from the code-blocks registry.
+ *
+ * `showLineNumbers` and `wordWrapContent` only ATTACH the classes below — the
+ * registry ships no CSS — so without these rules both transformers are silent
+ * no-ops.
+ *
+ * `code { display: grid }` is the load-bearing part, and it is not cosmetic.
+ * Shiki emits `<span class="line">…</span>` separated by literal newline TEXT
+ * NODES. Making `.line` a block leaves both the block break and the newline, so
+ * every row renders with a blank row under it — the doubled line spacing this
+ * replaces. Grid makes each `.line` a row and collapses the stray whitespace
+ * nodes, which also gives wrapped lines a clean hanging indent for free.
+ */
+.shiki code {
+  display: grid;
+}
+
+.shiki.shiki-line-numbers code {
+  counter-reset: shiki-line;
+}
+
+.shiki.shiki-line-numbers .line::before {
+  counter-increment: shiki-line;
+  content: counter(shiki-line);
+  display: inline-block;
+  width: 2rem;
+  margin-right: 1.25rem;
+  text-align: right;
+  /* Numbers are scaffolding, not content: dim, and never selectable, so copying
+     a block yields runnable code rather than code with line numbers glued on. */
+  color: color-mix(in oklch, currentColor 35%, transparent);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.shiki.shiki-word-wrap .line {
+  white-space: pre-wrap;
+  word-break: break-word;
 }

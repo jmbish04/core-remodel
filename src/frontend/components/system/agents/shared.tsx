@@ -281,17 +281,106 @@ export function formatDuration(ms: number | null): string {
 }
 
 /** USD with enough precision that sub-cent agent spend is not rendered as $0.00. */
-export function formatUsd(n: number): string {
-  if (n === 0) return "$0";
-  if (n < 0.01) return `$${n.toFixed(4)}`;
-  if (n < 1000) return `$${n.toFixed(2)}`;
-  return `$${(n / 1000).toFixed(1)}K`;
+/**
+ * Currency, rendered as `$ 100.00` — with a space after the symbol, per the
+ * house convention.
+ *
+ * Small values keep 4 decimals rather than collapsing to `$ 0.00`: per-call AI
+ * spend is genuinely sub-cent, and rounding it to zero on a cost page is how a
+ * real number becomes an invisible one.
+ */
+export function formatUsd(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  if (n === 0) return "$ 0.00";
+  if (Math.abs(n) < 0.01) {
+    return `$ ${n.toLocaleString("en-US", { minimumFractionDigits: 4, maximumFractionDigits: 4 })}`;
+  }
+  return `$ ${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-export function formatCount(n: number): string {
-  if (n < 1000) return String(n);
-  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}K`;
-  return `${(n / 1_000_000).toFixed(1)}M`;
+/** A rate, e.g. `$ 2.50 /1M`. Four decimals — many rates are fractions of a cent. */
+export function formatRate(n: number | null | undefined, per = "1M"): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  return `$ ${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 4 })} /${per}`;
+}
+
+/**
+ * Integers with thousands separators — `1,398`, never `1398`.
+ *
+ * Exact, not abbreviated: on an operational table "1,398 calls" is a fact and
+ * "1.4K calls" is a rounding that hides the last 398.
+ */
+export function formatCount(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  return Math.round(n).toLocaleString("en-US");
+}
+
+/** Abbreviated magnitude, for headline tiles where exactness is not the point. */
+export function formatCompact(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n)) return "—";
+  if (Math.abs(n) < 1000) return formatCount(n);
+  return n.toLocaleString("en-US", { notation: "compact", maximumFractionDigits: 1 });
+}
+
+/**
+ * Uptime as a compact duration: seconds under a minute, then minutes, hours,
+ * days. `null` renders as "—" rather than "0s", because "no data" and "just
+ * broke" are opposite meanings.
+ */
+export function formatUptime(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined || !Number.isFinite(seconds)) return "—";
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const mins = seconds / 60;
+  if (mins < 60) return `${Math.round(mins)}m`;
+  const hours = mins / 60;
+  if (hours < 48) return `${hours.toFixed(hours < 10 ? 1 : 0)}h`;
+  const days = hours / 24;
+  return `${days.toFixed(days < 10 ? 1 : 0)}d`;
+}
+
+/** Latency in ms, or "—" when nothing was timed. */
+export function formatLatency(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms)) return "—";
+  if (ms < 1000) return `${Math.round(ms)} ms`;
+  return `${(ms / 1000).toFixed(2)} s`;
+}
+
+// ── Provider health ─────────────────────────────────────────────────────────
+
+export type ProviderHealth = "SUCCESS" | "PARTIAL" | "FAILURE" | "OFFLINE";
+
+const HEALTH_META: Record<ProviderHealth, { label: string; cls: string; hint: string }> = {
+  SUCCESS: {
+    label: "SUCCESS",
+    cls: "border-success/25 bg-success/10 text-success",
+    hint: "Every call in the window succeeded",
+  },
+  PARTIAL: {
+    label: "PARTIAL RUN",
+    cls: "border-warning/25 bg-warning/10 text-warning",
+    hint: "Some calls succeeded and some failed",
+  },
+  FAILURE: {
+    label: "FAILURE",
+    cls: "border-destructive/25 bg-destructive/10 text-destructive",
+    hint: "Every call in the window failed",
+  },
+  // Neutral, deliberately. OFFLINE means no traffic, which is not the same as
+  // down — an idle provider rendered in red trains people to ignore the colour.
+  OFFLINE: {
+    label: "OFFLINE",
+    cls: "border-border bg-transparent text-muted-foreground",
+    hint: "No calls in this window — idle, not necessarily down",
+  },
+};
+
+export function ProviderHealthBadge({ health }: { health: ProviderHealth }) {
+  const meta = HEALTH_META[health] ?? HEALTH_META.OFFLINE;
+  return (
+    <Badge variant="outline" className={cn("font-mono text-[11px]", meta.cls)} title={meta.hint}>
+      {meta.label}
+    </Badge>
+  );
 }
 
 // ── Fetch helper ─────────────────────────────────────────────────────────────

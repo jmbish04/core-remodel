@@ -22,7 +22,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
-import { adminGet, formatCount, formatUsd } from "./shared";
+import {
+  ProviderHealthBadge,
+  adminGet,
+  formatCompact,
+  formatCount,
+  formatLatency,
+  formatUptime,
+  formatUsd,
+  type ProviderHealth,
+} from "./shared";
 
 interface UsageRow {
   agent: string;
@@ -52,6 +61,48 @@ interface UsageResponse {
   rows: UsageRow[];
 }
 
+interface ProviderRow {
+  provider: string;
+  label: string;
+  short: string;
+  group: string;
+  unit: string;
+  priced: boolean;
+  health: ProviderHealth;
+  calls: number;
+  errors: number;
+  latencyMsP50: number | null;
+  uptimeSeconds: number | null;
+  lastCallAt: string | null;
+  costUsd: number;
+  tokens: number;
+}
+
+interface ProvidersResponse {
+  windowHours: number;
+  groups: Array<{
+    group: string;
+    label: string;
+    blurb: string;
+    costUsd: number;
+    calls: number;
+    tokens: number;
+    providers: ProviderRow[];
+  }>;
+}
+
+interface PricingResponse {
+  staleAfterDays: number;
+  count: number;
+  freshness: Array<{
+    provider: string;
+    models: number;
+    fetchedAt: string | null;
+    stale: boolean;
+    lastRun: { status: string; errorMessage: string | null; at: string } | null;
+  }>;
+}
+
 interface OverviewResponse {
   cycleStart: string;
   providers: Array<{
@@ -73,7 +124,39 @@ const WINDOWS = [
 ];
 
 /** Stable colour per provider so the bar and the legend always agree. */
+/** Friendly name for a provider id, falling back to a title-cased form. */
+function providerLabelOf(id: string): string {
+  return (
+    PROVIDER_LABEL[id] ??
+    id
+      .toLowerCase()
+      .split("_")
+      .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+      .join(" ")
+  );
+}
+
+/**
+ * Mirrors `services/usage/provider-registry.ts`. Kept in sync by the
+ * /providers endpoint, which is the source of truth — this map only covers the
+ * two places (the mix bar and the breaker chips) that render a provider id
+ * without having the row to hand.
+ */
+const PROVIDER_LABEL: Record<string, string> = {
+  WORKERS_AI: "Workers AI",
+  GEMINI: "Google Gemini",
+  OPENAI: "OpenAI",
+  ANTHROPIC: "Anthropic Claude",
+  BROWSER_RENDERING: "Browser Rendering",
+  CF_IMAGES: "Cloudflare Images",
+  VECTORIZE: "Vectorize",
+  DURABLE_OBJECT: "Durable Objects",
+  GOOGLE_PLACES: "Google Places",
+};
+
 const PROVIDER_COLOR: Record<string, string> = {
+  OPENAI: "bg-cyan-500",
+  ANTHROPIC: "bg-orange-500",
   GEMINI: "bg-violet-500",
   WORKERS_AI: "bg-sky-500",
   BROWSER_RENDERING: "bg-amber-500",
@@ -87,17 +170,23 @@ export function AgentUsageApp() {
   const [window, setWindow] = React.useState("cycle");
   const [usage, setUsage] = React.useState<UsageResponse | null>(null);
   const [overview, setOverview] = React.useState<OverviewResponse | null>(null);
+  const [providers, setProviders] = React.useState<ProvidersResponse | null>(null);
+  const [pricing, setPricing] = React.useState<PricingResponse | null>(null);
   const [error, setError] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
     try {
       const qs = window === "cycle" ? "" : `?since=${window}`;
-      const [u, o] = await Promise.all([
+      const [u, o, pr, pc] = await Promise.all([
         adminGet<UsageResponse>(`/api/admin/agents/usage${qs}`),
         adminGet<OverviewResponse>("/api/admin/agents/overview"),
+        adminGet<ProvidersResponse>("/api/admin/agents/providers?hours=24"),
+        adminGet<PricingResponse>("/api/admin/agents/pricing"),
       ]);
       setUsage(u);
       setOverview(o);
+      setProviders(pr);
+      setPricing(pc);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -184,10 +273,10 @@ export function AgentUsageApp() {
       {/* ── KPI cards ──────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Kpi label="Spend" value={usage ? formatUsd(totalCost) : "—"} hint={windowLabel(window, usage?.since)} />
-        <Kpi label="Tokens" value={usage ? formatCount(usage.totalTokens) : "—"} hint="Across every metered provider" />
+        <Kpi label="Tokens" value={usage ? formatCompact(usage.totalTokens) : "—"} hint="Across every metered provider" />
         <Kpi
           label="Unit cost"
-          value={usage?.unitCostPerMillion != null ? `$${usage.unitCostPerMillion.toFixed(2)}/1M` : "—"}
+          value={usage?.unitCostPerMillion != null ? `${formatUsd(usage.unitCostPerMillion)} /1M` : "—"}
           hint={usage?.unitCostPerMillion == null ? "No tokens reported yet" : "Dollars per million tokens"}
         />
         <Kpi
@@ -202,12 +291,13 @@ export function AgentUsageApp() {
         />
       </div>
 
-      {/* ── Provider mix ───────────────────────────────────────────────── */}
+      {/* ── Provider mix, grouped by what kind of thing the provider is ── */}
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">Provider mix</CardTitle>
           <p className="text-muted-foreground text-xs">
-            Share of spend, with each provider&apos;s breaker state.
+            Grouped by kind — a Cloudflare binding, a model vendor and a third-party API fail in
+            different ways. Health, latency and uptime are over the last 24 hours.
           </p>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -215,71 +305,171 @@ export function AgentUsageApp() {
             <Skeleton className="h-2.5 w-full" />
           ) : totalCost === 0 ? (
             <p className="text-muted-foreground text-sm">
-              No cost recorded in this window. Note that `estimated_cost_usd` is null until a rate
-              table exists for a provider — token counts are still real.
+              No priced spend in this window yet. Token counts are still real — cost appears once
+              the price catalog has an entry for the models being called.
             </p>
           ) : (
             <div className="bg-muted flex h-2.5 w-full items-center gap-0.5 overflow-hidden rounded-full">
-              {byProvider.map(([p, cost]) => (
+              {byProvider.map(([prov, cost]) => (
                 <div
-                  key={p}
-                  className={cn("h-full", PROVIDER_COLOR[p] ?? "bg-muted-foreground")}
+                  key={prov}
+                  className={cn("h-full", PROVIDER_COLOR[prov] ?? "bg-muted-foreground")}
                   style={{ width: `${(cost / totalCost) * 100}%` }}
-                  title={`${p}: ${formatUsd(cost)}`}
+                  title={`${providerLabelOf(prov)}: ${formatUsd(cost)}`}
                 />
               ))}
             </div>
           )}
 
-          <div className="flex flex-col gap-2">
+          {providers === null ? (
+            <div className="space-y-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-10 w-full" />
+              ))}
+            </div>
+          ) : (
+            <div className="w-full overflow-x-auto">
+              <Table className="min-w-[860px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Service</TableHead>
+                    <TableHead>Health</TableHead>
+                    <TableHead className="text-right">Latency</TableHead>
+                    <TableHead className="text-right">Uptime</TableHead>
+                    <TableHead className="text-right">Calls</TableHead>
+                    <TableHead className="text-right">Tokens</TableHead>
+                    <TableHead className="text-right">Cost</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {providers.groups.map((g) => (
+                    <React.Fragment key={g.group}>
+                      <TableRow className="bg-muted/45 hover:bg-muted/45">
+                        <TableCell colSpan={4} className="h-10">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="text-foreground text-sm font-medium">{g.label}</span>
+                            <span className="text-muted-foreground hidden truncate text-xs lg:inline">
+                              {g.blurb}
+                            </span>
+                          </div>
+                        </TableCell>
+                        {/* Group subtotals, so a group reads without adding up its rows. */}
+                        <TableCell className="text-muted-foreground text-right text-xs tabular-nums">
+                          {formatCount(g.calls)}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-right text-xs tabular-nums">
+                          {formatCompact(g.tokens)}
+                        </TableCell>
+                        <TableCell className="text-foreground text-right text-xs font-medium tabular-nums">
+                          {formatUsd(g.costUsd)}
+                        </TableCell>
+                      </TableRow>
+
+                      {g.providers.map((row) => (
+                        <TableRow key={row.provider}>
+                          <TableCell>
+                            <div className="flex min-w-0 items-center gap-2.5">
+                              <span
+                                className={cn(
+                                  "size-2 shrink-0 rounded-full",
+                                  PROVIDER_COLOR[row.provider] ?? "bg-muted-foreground",
+                                )}
+                                aria-hidden
+                              />
+                              <div className="min-w-0">
+                                {/* Friendly name, never the raw enum. */}
+                                <div className="text-foreground truncate text-sm">{row.label}</div>
+                                <div className="text-muted-foreground truncate text-xs">
+                                  billed per {row.unit}
+                                  {row.priced ? "" : " · not in the price catalog"}
+                                </div>
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <ProviderHealthBadge health={row.health} />
+                          </TableCell>
+                          <TableCell className="text-muted-foreground text-right text-sm tabular-nums">
+                            {formatLatency(row.latencyMsP50)}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground text-right text-sm tabular-nums">
+                            {formatUptime(row.uptimeSeconds)}
+                          </TableCell>
+                          <TableCell className="text-right text-sm tabular-nums">
+                            {formatCount(row.calls)}
+                            {row.errors > 0 && (
+                              <span className="text-destructive ml-1 text-xs">({row.errors} err)</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-muted-foreground text-right text-sm tabular-nums">
+                            {formatCompact(row.tokens)}
+                          </TableCell>
+                          <TableCell className="text-right text-sm tabular-nums">
+                            {formatUsd(row.costUsd)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </React.Fragment>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+
+          {/* Breaker state stays visible; it can block calls today. */}
+          <div className="flex flex-wrap items-center gap-2">
             {(overview?.providers ?? []).map((p) => {
-              const cost = byProvider.find(([n]) => n === p.provider)?.[1] ?? 0;
               const state = !p.allowed
                 ? { label: "Blocked", cls: "border-destructive/25 bg-destructive/10 text-destructive" }
                 : p.percent !== null && p.percent >= 80
                   ? { label: "Nearing cap", cls: "border-warning/25 bg-warning/10 text-warning" }
-                  : { label: "Within budget", cls: "border-success/25 bg-success/10 text-success" };
+                  : null;
+              if (!state) return null;
               return (
-                <div
-                  key={p.provider}
-                  className="bg-muted/30 flex items-center justify-between gap-3 rounded-md border px-3 py-2"
-                >
-                  <div className="flex min-w-0 items-center gap-2.5">
-                    <span
-                      className={cn(
-                        "size-2 shrink-0 rounded-full",
-                        PROVIDER_COLOR[p.provider] ?? "bg-muted-foreground",
-                      )}
-                      aria-hidden
-                    />
-                    <div className="min-w-0">
-                      <div className="text-foreground truncate font-mono text-xs font-medium">
-                        {p.provider}
-                      </div>
-                      <div className="text-muted-foreground truncate text-xs">
-                        {formatUsd(p.spendUsd)} of {formatUsd(p.ceilingUsd)} ceiling
-                        {p.percent !== null ? ` · ${p.percent}%` : ""}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <span className="text-foreground text-sm tabular-nums">{formatUsd(cost)}</span>
-                    <Badge variant="outline" className={state.cls}>
-                      {state.label}
-                    </Badge>
-                  </div>
-                </div>
+                <Badge key={p.provider} variant="outline" className={state.cls}>
+                  {providerLabelOf(p.provider)}: {state.label} — {formatUsd(p.spendUsd)} of{" "}
+                  {formatUsd(p.ceilingUsd)}
+                </Badge>
               );
             })}
           </div>
-
-          {nearing.length > 0 && blocked.length === 0 && (
-            <p className="text-warning text-xs">
-              {nearing.map((p) => p.provider).join(", ")} above 80% of ceiling.
-            </p>
-          )}
         </CardContent>
       </Card>
+
+      {/* ── Price catalog freshness ─────────────────────────────────────── */}
+      {pricing && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Price catalog</CardTitle>
+            <p className="text-muted-foreground text-xs">
+              Published list prices, refreshed weekly. A silently broken parser looks exactly like
+              accurate pricing unless staleness is shown, so it is shown.
+            </p>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center gap-2">
+            <Badge variant="outline">{formatCount(pricing.count)} models priced</Badge>
+            {pricing.freshness.map((f) => (
+              <Badge
+                key={f.provider}
+                variant="outline"
+                className={cn(
+                  f.stale || f.lastRun?.status === "error"
+                    ? "border-warning/25 bg-warning/10 text-warning"
+                    : "border-success/25 bg-success/10 text-success",
+                )}
+                title={
+                  f.lastRun?.errorMessage ??
+                  (f.fetchedAt ? `last refreshed ${new Date(f.fetchedAt).toLocaleString()}` : "never refreshed")
+                }
+              >
+                {providerLabelOf(f.provider)}: {formatCount(f.models)}
+                {f.stale ? " · stale" : ""}
+                {f.lastRun?.status === "error" ? " · last fetch failed" : ""}
+              </Badge>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* ── Cost by agent ──────────────────────────────────────────────── */}
       <Card>
@@ -331,10 +521,10 @@ export function AgentUsageApp() {
                         {formatUsd(a.cost)}
                       </TableCell>
                       <TableCell className="text-muted-foreground text-right text-sm tabular-nums">
-                        {formatCount(a.tokens)}
+                        {formatCompact(a.tokens)}
                       </TableCell>
                       <TableCell className="text-muted-foreground text-right text-sm tabular-nums">
-                        {a.calls}
+                        {formatCount(a.calls)}
                       </TableCell>
                       <TableCell className="text-right text-sm tabular-nums">
                         {a.errors > 0 ? (

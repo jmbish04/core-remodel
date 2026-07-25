@@ -13,8 +13,12 @@ import { brands } from "../brands/brands";
 /**
  * Store Products — individual items sourced or tracked at a showroom location.
  */
+// Table renamed to `products` (2026-07-24). The Drizzle export stays
+// `showroomStoreProducts` — renaming the identifier across 51 files would
+// collide with the many local `products` variables in route handlers, a large
+// risk for a cosmetic gain. The DB table is `products`.
 export const showroomStoreProducts = sqliteTable(
-  "showroom_store_products",
+  "products",
   {
     id: integer("id").primaryKey({ autoIncrement: true }),
 

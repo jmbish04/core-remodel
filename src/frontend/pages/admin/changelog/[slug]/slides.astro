@@ -1,0 +1,17 @@
+---
+/**
+ * @fileoverview Slide deck for one SHIPPED change — the presentable form of
+ * /admin/changelog/[slug]. Same data, paced for walking someone through it.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import ChangelogDeckView from "@/components/changelog/ChangelogDeckView.astro";
+
+const slug = Astro.params.slug as string;
+---
+
+<BaseLayout
+  title={`${slug} - Slides - Changelog - 126 Colby - Remodel Mission Control`}
+  description="A shipped change, presented as slides."
+>
+  <ChangelogDeckView slug={slug} stage="shipped" />
+</BaseLayout>

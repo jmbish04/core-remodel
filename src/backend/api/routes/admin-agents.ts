@@ -36,6 +36,11 @@ import {
 } from "@backend/services/agent-runs-query";
 import { countRunsByStatus } from "@backend/services/agent-run-retention";
 import { getAiGatewayUsage } from "@backend/services/ai-gateway/analytics";
+import { modelPricing, pricingFetchRuns } from "@backend/db";
+import { desc } from "drizzle-orm";
+import { STALE_AFTER_DAYS, refreshPricingCatalog } from "@backend/services/pricing/catalog";
+import { providerHealth } from "@backend/services/usage/provider-health";
+import { GROUP_META, PROVIDER_GROUPS } from "@backend/services/usage/provider-registry";
 import {
   METERED_PROVIDERS,
   canSpend,
@@ -229,6 +234,102 @@ adminAgentsRouter.get("/coverage", async (c) => {
     total: surfaces.length,
     surfaces,
   });
+});
+
+/**
+ * Per-provider health, latency and uptime, grouped by what kind of thing the
+ * provider is. Everything is derived from the usage ledger — nothing polls a
+ * vendor status page, which would report the vendor's health rather than ours.
+ */
+adminAgentsRouter.get("/providers", async (c) => {
+  const hours = Math.min(Math.max(Number(c.req.query("hours")) || 24, 1), 24 * 30);
+  const rows = await providerHealth(c.env, hours);
+
+  const groups = PROVIDER_GROUPS.map((g) => {
+    const providers = rows.filter((r) => r.group === g);
+    return {
+      group: g,
+      label: GROUP_META[g].label,
+      blurb: GROUP_META[g].blurb,
+      order: GROUP_META[g].order,
+      // Group subtotals, so a group can be read without adding up its rows.
+      costUsd: providers.reduce((n, p) => n + p.costUsd, 0),
+      calls: providers.reduce((n, p) => n + p.calls, 0),
+      tokens: providers.reduce((n, p) => n + p.tokens, 0),
+      providers,
+    };
+  })
+    .filter((g) => g.providers.length > 0)
+    .sort((a, b) => a.order - b.order);
+
+  return c.json({ success: true, windowHours: hours, groups });
+});
+
+/**
+ * The price catalog, so a surprising cost number is checkable against the row
+ * and the source URL that produced it.
+ */
+adminAgentsRouter.get("/pricing", async (c) => {
+  const db = drizzle(c.env.DB);
+  const [rows, runs] = await Promise.all([
+    db
+      .select()
+      .from(modelPricing)
+      .where(eq(modelPricing.isActive, true))
+      .orderBy(modelPricing.provider, modelPricing.model),
+    db.select().from(pricingFetchRuns).orderBy(desc(pricingFetchRuns.at)).limit(40),
+  ]);
+
+  // Freshness per provider. A silently broken parser looks exactly like
+  // accurate pricing unless staleness is surfaced, so it is computed here
+  // rather than left to the UI to notice.
+  const staleCutoff = Date.now() - STALE_AFTER_DAYS * 24 * 60 * 60 * 1000;
+  const byProvider = new Map<string, { provider: string; models: number; fetchedAt: Date | null; stale: boolean }>();
+  for (const r of rows) {
+    const cur = byProvider.get(r.provider) ?? { provider: r.provider, models: 0, fetchedAt: null, stale: true };
+    cur.models += 1;
+    if (!cur.fetchedAt || r.fetchedAt > cur.fetchedAt) cur.fetchedAt = r.fetchedAt;
+    byProvider.set(r.provider, cur);
+  }
+  for (const v of byProvider.values()) {
+    v.stale = !v.fetchedAt || v.fetchedAt.getTime() < staleCutoff;
+  }
+
+  const lastRunByProvider = new Map<string, (typeof runs)[number]>();
+  for (const run of runs) {
+    if (!lastRunByProvider.has(run.provider)) lastRunByProvider.set(run.provider, run);
+  }
+
+  return c.json({
+    success: true,
+    staleAfterDays: STALE_AFTER_DAYS,
+    freshness: [...byProvider.values()].map((v) => ({
+      ...v,
+      lastRun: lastRunByProvider.get(v.provider) ?? null,
+    })),
+    count: rows.length,
+    rows,
+    runs,
+  });
+});
+
+/**
+ * Force a refresh. The cron owns the schedule; this exists so a fix to a parser
+ * can be verified without waiting a week.
+ */
+adminAgentsRouter.post("/pricing/refresh", async (c) => {
+  const results = await refreshPricingCatalog(c.env);
+  const failed = results.filter((r) => r.status === "error");
+  return c.json(
+    {
+      success: failed.length < results.length,
+      results,
+      note: failed.length
+        ? `${failed.length} provider(s) failed; their existing prices were retained.`
+        : undefined,
+    },
+    failed.length === results.length ? 502 : 200,
+  );
 });
 
 // ── Writes ───────────────────────────────────────────────────────────────────

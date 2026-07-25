@@ -29,14 +29,23 @@ import { z } from "zod";
 
 import {
   brandCategories,
+  bucketProductCandidates,
   photoCategories,
   photoColors,
   photoSubcategories,
   productPhotoBuckets,
   productPriceObservations,
   productShowroomPhotos,
+  scrapingSitemap,
   showroomStoreProducts,
 } from "@backend/db";
+import { createResearchJob } from "@backend/services/research-jobs";
+import {
+  cacheSitemap,
+  getFreshSitemap,
+  type SitemapContext,
+} from "@backend/services/scraping/sitemap-cache";
+import { discoverSitemap } from "@backend/services/brands/brand-image-harvest";
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { cropAndUploadCfImage } from "@backend/services/render/cf-images";
 import { extractShowroomProductFromDescriptions } from "@backend/services/image-processor/product-extraction";
@@ -177,6 +186,61 @@ intakeRouter.get("/photos", async (c) => {
  * photos to it. Guard: only photos already belonging to `showroomId` are
  * assigned — stray ids from another showroom are silently ignored.
  */
+/**
+ * Per-stack hints a user optionally fills in while grouping (Phase A′). Shared
+ * by POST and PATCH so the two paths accept exactly the same fields.
+ */
+interface BucketHintInput {
+  brandId?: number | null;
+  brandNameRaw?: string | null;
+  productName?: string | null;
+  modelNumber?: string | null;
+  sku?: string | null;
+  productUrl?: string | null;
+}
+
+/** Pull the hint fields from a request body into a Drizzle-ready patch,
+ *  trimming strings to null. Only keys present on `body` are included, so a
+ *  PATCH that omits a field leaves it untouched. */
+function readBucketHints(body: BucketHintInput): Partial<typeof productPhotoBuckets.$inferInsert> {
+  const patch: Partial<typeof productPhotoBuckets.$inferInsert> = {};
+  const str = (v: string | null | undefined) =>
+    typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
+  if ("brandId" in body) patch.brandId = Number.isFinite(body.brandId) ? Number(body.brandId) : null;
+  if ("brandNameRaw" in body) patch.brandNameRaw = str(body.brandNameRaw);
+  if ("productName" in body) patch.productName = str(body.productName);
+  if ("modelNumber" in body) patch.modelNumber = str(body.modelNumber);
+  if ("sku" in body) patch.sku = str(body.sku);
+  if ("productUrl" in body) patch.productUrl = str(body.productUrl);
+  return patch;
+}
+
+/**
+ * A bucket is "ready for workflow" (Phase C) once it carries enough to start a
+ * scrape: a brand (matched OR free-typed) OR a direct product URL. This is a
+ * derived signal only — nothing is blocked at grouping time.
+ */
+function bucketReadyForWorkflow(b: {
+  brandId: number | null;
+  brandNameRaw: string | null;
+  productUrl: string | null;
+}): boolean {
+  return b.brandId != null || !!b.brandNameRaw || !!b.productUrl;
+}
+
+/** Hint fields echoed back in every bucket DTO, so the UI round-trips them. */
+function bucketHintDto(b: typeof productPhotoBuckets.$inferSelect) {
+  return {
+    brandId: b.brandId,
+    brandNameRaw: b.brandNameRaw,
+    productName: b.productName,
+    modelNumber: b.modelNumber,
+    sku: b.sku,
+    productUrl: b.productUrl,
+    readyForWorkflow: bucketReadyForWorkflow(b),
+  };
+}
+
 intakeRouter.post("/buckets", async (c) => {
   try {
     const body = await c.req.json<{
@@ -184,7 +248,7 @@ intakeRouter.post("/buckets", async (c) => {
       kind?: "single" | "multi";
       label?: string;
       photoIds?: number[];
-    }>();
+    } & BucketHintInput>();
 
     const showroomId = Number(body.showroomId);
     if (!Number.isFinite(showroomId)) return c.json({ error: "showroomId is required (integer)" }, 400);
@@ -197,7 +261,13 @@ intakeRouter.post("/buckets", async (c) => {
     const db = drizzle(c.env.DB);
     const [bucket] = await db
       .insert(productPhotoBuckets)
-      .values({ showroomId, kind: body.kind, label: body.label?.trim() || null, status: "draft" })
+      .values({
+        showroomId,
+        kind: body.kind,
+        label: body.label?.trim() || null,
+        status: "draft",
+        ...readBucketHints(body),
+      })
       .returning();
 
     await db
@@ -212,7 +282,14 @@ intakeRouter.post("/buckets", async (c) => {
       .where(eq(productShowroomPhotos.bucketId, bucket.id));
 
     return c.json({
-      bucket: { id: bucket.id, kind: bucket.kind, label: bucket.label, status: bucket.status, photoIds: assigned.map((p) => p.id) },
+      bucket: {
+        id: bucket.id,
+        kind: bucket.kind,
+        label: bucket.label,
+        status: bucket.status,
+        photoIds: assigned.map((p) => p.id),
+        ...bucketHintDto(bucket),
+      },
     });
   } catch (error) {
     console.error("Create bucket error:", error);
@@ -239,13 +316,14 @@ intakeRouter.patch("/buckets/:id", async (c) => {
       kind?: "single" | "multi";
       addPhotoIds?: number[];
       removePhotoIds?: number[];
-    }>();
+    } & BucketHintInput>();
 
     const db = drizzle(c.env.DB);
     const [bucket] = await db.select().from(productPhotoBuckets).where(eq(productPhotoBuckets.id, bucketId)).limit(1);
     if (!bucket) return c.json({ error: "Bucket not found" }, 404);
 
-    const fieldUpdates: Partial<typeof productPhotoBuckets.$inferInsert> = {};
+    // Hint fields first, then label/kind on top — same object, one update.
+    const fieldUpdates: Partial<typeof productPhotoBuckets.$inferInsert> = readBucketHints(body);
     if (body.label !== undefined) fieldUpdates.label = body.label?.trim() || null;
     if (body.kind !== undefined) {
       if (body.kind !== "single" && body.kind !== "multi") return c.json({ error: "kind must be 'single' or 'multi'" }, 400);
@@ -295,6 +373,7 @@ intakeRouter.patch("/buckets/:id", async (c) => {
         label: updatedBucket.label,
         status: updatedBucket.status,
         photoIds: photos.map((p) => p.id),
+        ...bucketHintDto(updatedBucket),
       },
     });
   } catch (error) {
@@ -345,6 +424,7 @@ intakeRouter.get("/buckets", async (c) => {
         status: b.status,
         productId: b.productId,
         photos: photosByBucket.get(b.id) ?? [],
+        ...bucketHintDto(b),
       })),
     });
   } catch (error) {
@@ -461,6 +541,203 @@ intakeRouter.post("/buckets/:id/process", async (c) => {
       500,
     );
   }
+});
+
+// ─── POST /buckets/:id/intake ────────────────────────────────────────────────
+
+/**
+ * POST /api/intake/buckets/:id/intake — Phase C.
+ *
+ * Kick the durable BucketIntakeWorkflow: it describes the bucket's photos,
+ * extracts 0-N product *candidates* (using the per-stack hints), and writes
+ * `bucket_product_candidates` for later human review — instead of the inline
+ * `/process` path that force-creates exactly one product.
+ *
+ * Pre-creates a research-console job so the UI can poll `GET
+ * /api/research-jobs/{id}` immediately. Returns `{ queued, researchJobId }`.
+ */
+intakeRouter.post("/buckets/:id/intake", async (c) => {
+  const bucketId = Number(c.req.param("id"));
+  if (!Number.isFinite(bucketId)) return c.json({ error: "Invalid bucket id" }, 400);
+
+  const db = drizzle(c.env.DB);
+  const [bucket] = await db
+    .select()
+    .from(productPhotoBuckets)
+    .where(eq(productPhotoBuckets.id, bucketId))
+    .limit(1);
+  if (!bucket) return c.json({ error: "Bucket not found" }, 404);
+  if (bucket.status === "processing") return c.json({ error: "Bucket is already processing" }, 409);
+
+  const photoCount = (
+    await db
+      .select({ id: productShowroomPhotos.id })
+      .from(productShowroomPhotos)
+      .where(eq(productShowroomPhotos.bucketId, bucketId))
+  ).length;
+  if (photoCount === 0) return c.json({ error: "Bucket has no photos" }, 400);
+
+  const researchJobId = await createResearchJob(c.env, {
+    kind: "product",
+    title: `Bucket intake — ${bucket.label ?? `#${bucketId}`}`,
+    topic: bucket.productName ?? bucket.brandNameRaw ?? bucket.label ?? null,
+    entityId: bucketId,
+    totalSteps: 5,
+  });
+
+  await c.env.BUCKET_INTAKE_WORKFLOW.create({
+    params: { bucketId, researchJobId: researchJobId ?? undefined },
+  });
+
+  return c.json({ queued: true, bucketId, researchJobId });
+});
+
+// ─── GET /buckets/:id/candidates ─────────────────────────────────────────────
+
+/**
+ * GET /api/intake/buckets/:id/candidates — Phase C.
+ * The candidate rows the workflow produced, rank-ASC. `colors` / `rawExtraction`
+ * are parsed back from their stored JSON. Feeds the HITL walkthrough (Phase D/E).
+ */
+intakeRouter.get("/buckets/:id/candidates", async (c) => {
+  const bucketId = Number(c.req.param("id"));
+  if (!Number.isFinite(bucketId)) return c.json({ error: "Invalid bucket id" }, 400);
+
+  const db = drizzle(c.env.DB);
+  const rows = await db
+    .select()
+    .from(bucketProductCandidates)
+    .where(eq(bucketProductCandidates.bucketId, bucketId))
+    .orderBy(asc(bucketProductCandidates.rank));
+
+  const parseJson = (s: string | null): unknown => {
+    if (!s) return null;
+    try {
+      return JSON.parse(s);
+    } catch {
+      return null;
+    }
+  };
+
+  const candidates = rows.map((r) => ({
+    ...r,
+    colors: parseJson(r.colors),
+    imageSourceUrls: parseJson(r.imageSourceUrls),
+    pdfSourceUrls: parseJson(r.pdfSourceUrls),
+    rawExtraction: parseJson(r.rawExtraction),
+  }));
+
+  return c.json({ bucketId, candidates });
+});
+
+// ─── Sitemaps (Phase B) ──────────────────────────────────────────────────────
+
+/** Build a SitemapContext from a body/query, or return an error string. */
+function readSitemapContext(input: {
+  scrapeJobType?: unknown;
+  brandId?: unknown;
+  showroomId?: unknown;
+  productId?: unknown;
+}): SitemapContext | { error: string } {
+  const type = input.scrapeJobType;
+  if (type !== "brand" && type !== "showroom" && type !== "product") {
+    return { error: "scrapeJobType must be one of brand|showroom|product" };
+  }
+  const num = (v: unknown): number | null => (Number.isFinite(Number(v)) ? Number(v) : null);
+  const ctx: SitemapContext = {
+    scrapeJobType: type,
+    brandId: num(input.brandId),
+    showroomId: num(input.showroomId),
+    productId: num(input.productId),
+  };
+  const ownerId =
+    type === "brand" ? ctx.brandId : type === "showroom" ? ctx.showroomId : ctx.productId;
+  if (ownerId == null) return { error: `${type}Id is required for scrapeJobType='${type}'` };
+  return ctx;
+}
+
+/**
+ * POST /api/intake/sitemaps/discover — Phase B.
+ * Discover a site's page list, reusing a fresh cached row when present. Persists
+ * a `scraping_sitemap` row on a miss. Body: { scrapeJobType, brandId|showroomId|
+ * productId, websiteUrl }. Returns { cached, pageUrls, count, sitemapUrl, status }.
+ */
+intakeRouter.post("/sitemaps/discover", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const ctx = readSitemapContext(body);
+  if ("error" in ctx) return c.json({ error: ctx.error }, 400);
+  const websiteUrl = typeof body.websiteUrl === "string" ? body.websiteUrl.trim() : "";
+  if (!websiteUrl) return c.json({ error: "websiteUrl is required" }, 400);
+
+  const db = drizzle(c.env.DB);
+
+  const cached = await getFreshSitemap(db, ctx, websiteUrl).catch(() => null);
+  if (cached) {
+    let pageUrls: string[] = [];
+    try {
+      pageUrls = JSON.parse(cached.pageUrls ?? "[]");
+    } catch {
+      pageUrls = [];
+    }
+    return c.json({
+      cached: true,
+      pageUrls,
+      count: cached.pageCount,
+      sitemapUrl: cached.sitemapUrl,
+      status: cached.status,
+    });
+  }
+
+  const discovery = await discoverSitemap(websiteUrl);
+  await cacheSitemap(db, ctx, websiteUrl, discovery).catch((err) =>
+    console.error("[intake] sitemap cache persist failed:", err),
+  );
+  return c.json({
+    cached: false,
+    pageUrls: discovery.pageUrls,
+    count: discovery.pageUrls.length,
+    sitemapUrl: discovery.sitemapUrl,
+    status: discovery.status,
+  });
+});
+
+/**
+ * GET /api/intake/sitemaps?scrapeJobType=&brandId=&showroomId=&productId= — Phase B.
+ * Cached sitemap rows for one entity, newest-first, `page_urls` parsed back.
+ */
+intakeRouter.get("/sitemaps", async (c) => {
+  const ctx = readSitemapContext({
+    scrapeJobType: c.req.query("scrapeJobType"),
+    brandId: c.req.query("brandId"),
+    showroomId: c.req.query("showroomId"),
+    productId: c.req.query("productId"),
+  });
+  if ("error" in ctx) return c.json({ error: ctx.error }, 400);
+
+  const db = drizzle(c.env.DB);
+  const ownerCol =
+    ctx.scrapeJobType === "brand"
+      ? eq(scrapingSitemap.brandId, ctx.brandId!)
+      : ctx.scrapeJobType === "showroom"
+        ? eq(scrapingSitemap.showroomId, ctx.showroomId!)
+        : eq(scrapingSitemap.productId, ctx.productId!);
+
+  const rows = await db
+    .select()
+    .from(scrapingSitemap)
+    .where(and(eq(scrapingSitemap.scrapeJobType, ctx.scrapeJobType), ownerCol))
+    .orderBy(desc(scrapingSitemap.fetchedAt));
+
+  const sitemaps = rows.map((r) => {
+    let pageUrls: string[] = [];
+    try {
+      pageUrls = JSON.parse(r.pageUrls ?? "[]");
+    } catch {
+      pageUrls = [];
+    }
+    return { ...r, pageUrls };
+  });
+  return c.json({ sitemaps });
 });
 
 // ─── GET /review-queue ──────────────────────────────────────────────────────

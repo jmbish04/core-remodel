@@ -14,8 +14,12 @@
  * Block assignment (per the product spec):
  *   LIST     changelog24 → release highlights (the quick summary up top)
  *            changelog3  → release feed (every entry, compact)
- *   VIEWPORT changelog19 → developer changelog + code snippets (ts/sql/…)
- *            changelog21 → conclusion recap board: Features / Fixes / Improvements
+ *   VIEWPORT changelog21 → conclusion recap board: Features / Fixes / Improvements
+ *
+ * The viewport's developer section (API surface, code, migrations, files) is
+ * rendered directly by `ChangelogEntryView.astro` rather than through a block:
+ * changelog19 accepts one code block per entry while a `PhaseDetail` carries
+ * many, so every code card had to become a fake "entry" to fit.
  *
  * Source of truth is D1 (`changelog_branches` + `changelog_entries`); the bundled
  * `data/changelog*.ts` files are the seed + SSR fallback (see AGENTS.md
@@ -23,7 +27,7 @@
  * once so every page behaves identically.
  */
 import { drizzle } from "drizzle-orm/d1";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { changelogBranches, changelogEntries } from "@backend/db/schema/changelog/changelog";
 import { BRANCHES, CHANGELOG, type ChangeKind, type ChangelogBranch, type ChangelogEntry } from "@/data/changelog";
 import { CHANGELOG_DETAIL, type PhaseDetail } from "@/data/changelog-detail";
@@ -83,6 +87,7 @@ export async function loadChangelog(
       .filter((r) => (stage === "staged" ? r.status === "staged" : true))
       .map((r) => ({
         id: r.slug,
+        entryNo: r.id,
         branch: r.branch,
         date: r.date,
         tag: r.tag ?? undefined,
@@ -120,9 +125,94 @@ export function resolveDetail(slug: string, detailJson: unknown): PhaseDetail | 
   return CHANGELOG_DETAIL[slug];
 }
 
+export interface LoadedEntry {
+  entry: ChangelogEntry | undefined;
+  detail: PhaseDetail | undefined;
+  prNumber?: number;
+  prUrl?: string;
+}
+
+/**
+ * Read ONE entry with its detail and PR metadata — the shape every viewport of a
+ * single entry needs (the detail page and the slide deck).
+ *
+ * PR metadata is read from the BRANCH row rather than the entry, so it renders
+ * for every entry ever written instead of only the ones whose author remembered
+ * to duplicate it into `detail_json`.
+ *
+ * @param env  Worker env. Absent during a static build, in which case the
+ *             bundled seed answers — same contract as `loadChangelog`.
+ */
+export async function loadEntry(env: Env | undefined, slug: string): Promise<LoadedEntry> {
+  let entry: ChangelogEntry | undefined;
+  let detailJson: unknown;
+  let branchPr: { prNumber: number | null; prUrl: string | null } | undefined;
+
+  try {
+    if (!env?.DB) throw new Error("D1 binding unavailable — using bundled seed");
+    const db = drizzle(env.DB);
+    const [row] = await db
+      .select()
+      .from(changelogEntries)
+      .where(eq(changelogEntries.slug, slug))
+      .limit(1);
+    if (row) {
+      entry = {
+        id: row.slug,
+        entryNo: row.id,
+        branch: row.branch,
+        date: row.date,
+        tag: row.tag ?? undefined,
+        area: row.area,
+        title: row.title,
+        summary: row.summary,
+        status: row.status as ChangelogEntry["status"],
+        changes: (row.changesJson as ChangelogEntry["changes"]) ?? [],
+        migrations: (row.migrationsJson as string[]) ?? [],
+      };
+      detailJson = row.detailJson;
+      const [b] = await db
+        .select({ prNumber: changelogBranches.prNumber, prUrl: changelogBranches.prUrl })
+        .from(changelogBranches)
+        .where(eq(changelogBranches.branch, row.branch))
+        .limit(1);
+      branchPr = b;
+    }
+  } catch {
+    entry = undefined;
+  }
+
+  if (!entry) entry = CHANGELOG.find((e) => e.id === slug);
+  const detail = entry ? resolveDetail(slug, detailJson) : undefined;
+  const seedBranch = BRANCHES.find((b) => b.branch === entry?.branch);
+
+  const prNumber = detail?.prNumber ?? branchPr?.prNumber ?? seedBranch?.prNumber ?? undefined;
+  const prUrl =
+    detail?.prUrl ??
+    branchPr?.prUrl ??
+    seedBranch?.prUrl ??
+    (prNumber ? `https://github.com/jmbish04/core-remodel/pull/${prNumber}` : undefined);
+
+  return { entry, detail, prNumber: prNumber ?? undefined, prUrl: prUrl ?? undefined };
+}
+
 /** The `version` chip an entry shows in every block. */
 function versionOf(entry: ChangelogEntry): string {
   return entry.tag ?? entry.area;
+}
+
+/**
+ * Title with the entry's D1 row number prefixed — `#42 · Some change`.
+ *
+ * Titles alone are a poor identifier on a list page: several entries describe
+ * the same subsystem and read almost identically at a glance. The number is
+ * short, unique, and stable, so it is prefixed rather than tucked into a corner.
+ *
+ * Falls back to the bare title when the bundled seed is serving, since those
+ * rows have no id and a made-up number would be worse than none.
+ */
+export function entryTitle(entry: ChangelogEntry): string {
+  return entry.entryNo ? `#${entry.entryNo} · ${entry.title}` : entry.title;
 }
 
 /** Status → badge, so a staged (preview) row is never mistaken for shipped. */
@@ -160,7 +250,7 @@ export function toHighlights(
       version: versionOf(e),
       date: e.date,
       badge: statusBadge(e.status),
-      heading: e.title,
+      heading: entryTitle(e),
       description: e.summary,
       // The first `added` change is the headline; fall back to the first change.
       callout: pickCallout(e),
@@ -192,57 +282,11 @@ export function toFeed(entries: ChangelogEntry[], stage: ChangelogStage): Record
       version: versionOf(e),
       date: e.date,
       badge: statusBadge(e.status),
-      heading: e.title,
+      heading: entryTitle(e),
       summary: e.summary,
       changes: e.changes.map((c) => `${KIND_LABEL[c.kind]}: ${c.text}`),
       button: { label: "Details", href: detailHref(e.id, stage) },
     })),
-  };
-}
-
-// ── VIEWPORT: changelog19 — developer changelog + code ──────────────────────
-
-/**
- * Developer changelog (changelog19). changelog19 takes ONE `codeBlock` per
- * entry, while a `PhaseDetail` carries many `code[]` cards — so each code card
- * becomes its own entry, titled by its language. When a phase has no code, we
- * still emit one entry so the API changes are shown.
- */
-export function toDevChangelog(
-  entry: ChangelogEntry,
-  detail: PhaseDetail | undefined,
-): Record<string, unknown> {
-  const code = detail?.code ?? [];
-  const apiChanges = detail?.apiChanges ?? [];
-
-  const entries =
-    code.length > 0
-      ? code.map((c, i) => ({
-          version: versionOf(entry),
-          date: entry.date,
-          badge: { label: LANG_LABEL[c.lang] ?? c.lang.toUpperCase(), variant: "outline" as const },
-          heading: c.title,
-          // Attach the API surface to the first card so it reads as context.
-          description: i === 0 ? detail?.approach : undefined,
-          codeBlock: { title: c.title, code: c.code },
-          changes: i === 0 ? apiChanges : undefined,
-        }))
-      : [
-          {
-            version: versionOf(entry),
-            date: entry.date,
-            badge: { label: entry.area, variant: "outline" as const },
-            heading: entry.title,
-            description: detail?.approach ?? entry.summary,
-            changes: apiChanges.length > 0 ? apiChanges : entry.changes.map((c) => c.text),
-          },
-        ];
-
-  return {
-    badge: { label: "Developer", variant: "secondary" as const },
-    heading: "Developer Changelog",
-    description: "The implementation: API surface, code, and migrations touched by this change.",
-    entries,
   };
 }
 

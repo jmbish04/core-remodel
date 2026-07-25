@@ -649,6 +649,29 @@ export async function analyzeAndPersist(args: AnalyzeArgs): Promise<void> {
       .update(workerEmails)
       .set({ status: "processed" })
       .where(eq(workerEmails.id, emailId));
+
+    // ── Material-room deduction (0030) ─────────────────────────────────────
+    // Only when line items were actually created: promote each unmatched line
+    // to a typed material and stage a room proposal (auto-confirming the
+    // unambiguous ones). Best-effort — a deduction failure must never break
+    // email processing, mirroring the showroom-contact guard above.
+    if (lineItems.length > 0) {
+      try {
+        const { stageProposalsForReceipt } = await import(
+          "@backend/services/materials/deduction"
+        );
+        const res = await stageProposalsForReceipt(db, env, emailId);
+        console.log(
+          `[email-pipeline] deduction for email ${emailId}: ` +
+            `staged=${res.staged}, auto=${res.autoConfirmed}, skipped=${res.skipped}`,
+        );
+      } catch (err) {
+        console.error(
+          `[email-pipeline] material-room deduction failed for email ${emailId}:`,
+          err,
+        );
+      }
+    }
   }
 
   // ── Downstream: contract extraction ──────────────────────────────────────

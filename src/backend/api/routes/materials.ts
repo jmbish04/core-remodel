@@ -112,6 +112,64 @@ materialsRouter.get("/", async (c) => {
   return c.json({ materials });
 });
 
+// ─── Room proposals (0030) ──────────────────────────────────────────────────────
+// Receipt line item → material, with a staged room deduction awaiting a human.
+// Registered BEFORE GET /:id so the literal "/room-proposals" segment is not
+// swallowed by the /:id param route.
+
+const proposalStatusSchema = z
+  .enum(["staged", "auto_confirmed", "confirmed", "overridden", "dismissed"])
+  .default("staged");
+
+const resolveProposalSchema = z.object({ roomId: z.number().int().positive() });
+
+/**
+ * GET /room-proposals?status=staged — pending material→room deduction proposals,
+ * each with its ranked candidates + reasoning (the same shape as the
+ * list_room_proposals MCP tool; both call listRoomProposals()).
+ */
+materialsRouter.get("/room-proposals", async (c) => {
+  const db = drizzle(c.env.DB);
+  const parsedStatus = proposalStatusSchema.safeParse(c.req.query("status") ?? "staged");
+  if (!parsedStatus.success) {
+    return c.json({ error: "Invalid status", details: parsedStatus.error.issues }, 400);
+  }
+  const { listRoomProposals } = await import("@backend/services/materials/deduction");
+  const proposals = await listRoomProposals(db, parsedStatus.data);
+  return c.json({ proposals });
+});
+
+/**
+ * POST /room-proposals/:id/resolve — confirm a proposal onto a room. 404 if the
+ * proposal does not exist, 400 if the room is unknown/inactive.
+ */
+materialsRouter.post("/room-proposals/:id/resolve", async (c) => {
+  const id = parseId(c.req.param("id"));
+  if (id === null) return c.json({ error: "Invalid proposal id" }, 400);
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const parsed = resolveProposalSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: "Validation failed", details: parsed.error.issues }, 400);
+  }
+
+  const db = drizzle(c.env.DB);
+  const { resolveProposal } = await import("@backend/services/materials/deduction");
+  try {
+    const result = await resolveProposal(db, id, parsed.data.roomId);
+    if (!result) return c.json({ error: `Proposal ${id} not found` }, 404);
+    return c.json(result);
+  } catch (err) {
+    // resolveProposal throws only for a bad/inactive room.
+    return c.json({ error: (err as Error).message }, 400);
+  }
+});
+
 /**
  * GET /:id — Material detail with required specs and the linked purchased product.
  */

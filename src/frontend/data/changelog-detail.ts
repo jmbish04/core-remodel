@@ -6,7 +6,17 @@
  * the problem, the approach, the exact API surface touched, the files, the
  * migration SQL, representative code, and (where useful) a Mermaid diagram.
  * Seeded/fallback here, then persisted to D1 (changelog_entries.detail_json).
+ *
+ * Long-form fields are typed `Prose` and hold MARKDOWN — headings, lists,
+ * tables, `code`, and ```mermaid fences all render. Author them as one string;
+ * single newlines between prose lines are expanded into paragraph breaks by the
+ * renderer, so dense model output does not arrive as a wall of text. A few rows
+ * store an array of paragraphs from a brief earlier iteration and are folded
+ * back into markdown on read.
  */
+import type { Prose } from "@/lib/markdown-normalize";
+
+export type { Prose };
 
 export interface CodeCard {
   title: string;
@@ -15,7 +25,15 @@ export interface CodeCard {
 }
 
 export interface DiagramCard {
+  /**
+   * Short label under the diagram. Retained as the required field because every
+   * pre-existing entry sets it; `title` supersedes it for new entries.
+   */
   caption: string;
+  /** Heading above the diagram. Falls back to `caption` when absent. */
+  title?: string;
+  /** What the diagram shows and what to look for in it. */
+  description?: Prose;
   code: string; // Mermaid source
 }
 
@@ -58,8 +76,23 @@ export interface Verification {
 
 export interface PhaseDetail {
   slug: string;
-  problem: string;
-  approach: string;
+
+  /**
+   * One-line qualifier under the title, set in smaller italic type. The title
+   * says what changed; the subtitle says which surface or which phase.
+   */
+  subtitle?: string;
+  /**
+   * Opening orientation, before the problem statement — who this is for, why
+   * they are reading it, what changes for them. Markdown.
+   */
+  introduction?: Prose;
+
+  /** Why this change had to happen. Markdown. */
+  problem: Prose;
+  /** How it was solved. Markdown. */
+  approach: Prose;
+
   apiChanges: string[];
   filesTouched: string[];
   migrations: { tag: string; sql: string }[];

@@ -58,6 +58,26 @@ its claims against `origin/main` before acting — those notes reflect the tree 
 it was, and the named files, routes, and components may have moved or been
 replaced.
 
+## Task hygiene — keep the D1 board current (MANDATORY)
+
+**The plan tables are only worth anything if they reflect reality, and they only
+reflect reality if every session updates them.** They have been seeded and then
+left to rot before; that is the exact failure this rule exists to stop.
+
+- **Before starting plan work,** read your phase's open tasks — `list_plan_tasks`
+  (MCP), or `GET /api/admin/plans/<slug>`. Mark what you begin `in_progress`.
+- **Finish a task → close it with the PR number that shipped it.** Use
+  `close_plan_task` (MCP, once P2 lands it) or `PATCH /api/admin/plans/tasks/:id`
+  with `status: "done"` and the PR in `notes`. A `plan_tasks` row left at
+  `pending` after its work merged is a lie the next session will trust.
+- **Discover new work → file it** (`create_plan_task`) rather than leaving it in
+  prose. Prose is not a backlog.
+- **"Done" is not a status.** A phase is complete when its task rows say so —
+  each `done` and PR-linked, or explicitly `blocked`/`deferred` with a reason.
+
+This is not bookkeeping for its own sake: `/admin/plans`, the velocity dashboard,
+and the AI program-manager (0028) all read these rows as ground truth.
+
 ## LAST ACTION OF EVERY TURN — you own the deploy (MANDATORY)
 
 **Nothing deploys itself.** Workers Builds auto-deploy is off, so merging to

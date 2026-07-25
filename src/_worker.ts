@@ -8,6 +8,7 @@ import OAuthProvider from "@cloudflare/workers-oauth-provider";
 import { app as honoApp } from "./backend/api/index";
 import { runPermitSync } from "./backend/services/dbi/permits-sync.js";
 import { pruneAgentRuns } from "./backend/services/agent-run-retention.js";
+import { refreshPricingCatalog } from "./backend/services/pricing/catalog";
 import { dispatchDueWorkflows } from "./backend/services/workflow-dispatcher";
 import { autoHealImageUploads } from "./backend/services/image-processor/auto-heal";
 import { monitorShowroomSourcingCoverage } from "./backend/services/showroom-sourcing-monitor";
@@ -43,6 +44,7 @@ export { ShowroomScrapeWorkflow } from "./backend/services/showroom-scrape-workf
 export { ShowroomOnboardingWorkflow } from "./backend/services/showroom-onboarding-workflow";
 export { BrandResearchWorkflow } from "./backend/services/brand-research-workflow";
 export { ProductResearchWorkflow } from "./backend/services/product-research-workflow";
+export { BucketIntakeWorkflow } from "./backend/services/bucket-intake-workflow";
 export { DeepResearchJobWorkflow } from "./backend/services/deep-research-job-workflow";
 export { BlankCanvasBatchWorkflow } from "./backend/services/render/blank-canvas-batch-workflow";
 export { ResearchAgent } from "./backend/ai/agents/ResearchAgent";
@@ -287,6 +289,13 @@ const legacyHandler: ExportedHandler<Env> = {
     // Gate by cron expression so each registered trigger fires its own job.
     // The existing 14:00 UTC trigger runs the permit sync; the new master-tick
     // "* * * * *" reads `system_cron_schedules` and fires any due workflows.
+    // Weekly provider price refresh. Its own trigger rather than a rider on the
+    // daily job: it hits four external endpoints and must not share a failure
+    // budget with the permit sync.
+    if (event.cron === "0 9 * * 1") {
+      ctx.waitUntil(refreshPricingCatalog(env).then(() => undefined));
+      return;
+    }
     if (event.cron === "0 14 * * *") {
       ctx.waitUntil(runPermitSync(env));
       // Prune the agent run ledger. Daily, not per-minute: a sweep that finds

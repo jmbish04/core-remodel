@@ -28,4 +28,6 @@ export * from "./contacts";
 export * from "./product_intel";
 export * from "./product_photos";
 export * from "./product_photo_buckets";
+export * from "./product_photo_candidates";
+export * from "./scraping_sitemap";
 export * from "./price_observations";
