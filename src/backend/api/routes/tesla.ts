@@ -23,7 +23,7 @@
  * shared `WORKER_API_KEY` instead (see `verifyWebhookSecret`). Event rows land in
  * the dedicated `TESLA_DB` D1, separate from the app DB read for drive matching.
  */
-import { driveListStops, driveLists, showroomStores } from "@backend/db";
+import { driveListStops, driveLists, showroomStores, showroomVisitLog } from "@backend/db";
 import { teslaTelemetryEvents, teslaWebhookEvents } from "@backend/db/schema/tesla";
 import { matchAndMarkVisited } from "@backend/services/drive-geo-match";
 import {
@@ -51,7 +51,7 @@ import { evaluateAutomations } from "@backend/services/tesla-automations";
 import { telemetryRecordingAllowed } from "@backend/services/tesla-integration";
 import { pollVehicleForActiveDrive } from "@backend/services/tesla-poller";
 import { isRequestAuthenticated } from "@backend/utils/access";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -261,6 +261,49 @@ teslaRouter.get("/stream/banner", async (c) => {
     windowLabel: `${to12h(control.windowStartHour)}–${to12h(control.windowEndHour)}`,
     vehicleImageUrl,
   });
+});
+
+/**
+ * GET /api/tesla/visits — recent visit-log rows (0023 P1), newest first.
+ *
+ * The two-row soft-arrival → staged model written by the telemetry pipeline. The
+ * store name is JOINed from `showroom_stores` (never denormalized). `?status=` and
+ * `?limit=` narrow the list. Admin-gated by the router middleware.
+ */
+const VISIT_STATUSES = ["AI_STAGED", "TESLA_SOFT_ARRIVAL", "TESLA_STAGED", "SUBMITTED"] as const;
+type VisitStatus = (typeof VISIT_STATUSES)[number];
+
+teslaRouter.get("/visits", async (c) => {
+  const db = drizzle(c.env.DB);
+  const rawStatus = c.req.query("status");
+  // Whitelist against the enum — an unknown status is ignored, not cast/queried.
+  const status: VisitStatus | undefined = VISIT_STATUSES.includes(rawStatus as VisitStatus)
+    ? (rawStatus as VisitStatus)
+    : undefined;
+  const limit = Math.min(Math.max(parseInt(c.req.query("limit") || "100", 10) || 100, 1), 500);
+  const base = db
+    .select({
+      id: showroomVisitLog.id,
+      storeId: showroomVisitLog.storeId,
+      storeName: showroomStores.name,
+      driveListId: showroomVisitLog.driveListId,
+      status: showroomVisitLog.status,
+      type: showroomVisitLog.type,
+      arrivalAt: showroomVisitLog.arrivalAt,
+      departureAt: showroomVisitLog.departureAt,
+      dwellSeconds: showroomVisitLog.dwellSeconds,
+      rating: showroomVisitLog.rating,
+      softArrivalId: showroomVisitLog.softArrivalId,
+      latitude: showroomVisitLog.latitude,
+      longitude: showroomVisitLog.longitude,
+      createdAt: showroomVisitLog.createdAt,
+    })
+    .from(showroomVisitLog)
+    .leftJoin(showroomStores, eq(showroomVisitLog.storeId, showroomStores.id))
+    .orderBy(desc(showroomVisitLog.createdAt))
+    .limit(limit);
+  const rows = status ? await base.where(eq(showroomVisitLog.status, status)) : await base;
+  return c.json({ count: rows.length, visits: rows });
 });
 
 /**

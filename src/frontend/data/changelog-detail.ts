@@ -113,6 +113,56 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "tesla-visit-sessions": {
+    slug: "tesla-visit-sessions",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0023 Ingest · the IFTTT core (park → soft arrival → finalize)",
+    problem:
+      "The whole point of the telemetry stream was to capture visits without any manual logging: when the car parks at a showroom on an active drive, record that a visit started; when it drives away, close it with the real start/stop times. The stream DO already detected the shift-into-P, but there was nowhere to write a visit and no drive-away handling.",
+    approach:
+      "A new showroom_visit_log table holds visits as a two-row model. On park, stageSoftArrival finds the nearest registered showroom within 250 m (haversine over showroom_stores, behind one module so the anticipated locations move is a one-file change) and, if a drive is active, inserts a TESLA_SOFT_ARRIVAL draft with arrivalAt — deduped, so a repeated frame or a re-park can't stack drafts. On drive-away (shift P → moving), finalizeSoftArrivals closes every still-open soft arrival into a TESLA_STAGED row that copies the arrival, adds departureAt + dwellSeconds, and points softArrivalId back at the draft. That column is a partial UNIQUE, so a second finalize (onConflictDoNothing) inserts nothing — idempotent. Both entry points live in the DO's frame handler and are safe for the poller to reuse. A GET /api/tesla/visits endpoint lists the log with the store name JOINed (never denormalized).",
+    apiChanges: [
+      "GET /api/tesla/visits?status=&limit= — visit-log rows, newest first, store name JOINed.",
+    ],
+    filesTouched: [
+      "src/backend/db/schema/showroom/visit_log.ts (new) + migration drizzle/0140",
+      "src/backend/services/tesla/visit-sessions.ts (new)",
+      "src/backend/durable-objects/tesla-stream.ts (onPark stage + drive-away finalize; connect→connectStream)",
+      "src/backend/api/routes/tesla.ts (GET /visits)",
+      "worker-configuration.d.ts (regenerated — TESLA_STREAM in Env)",
+    ],
+    migrations: [
+      {
+        tag: "0140",
+        sql: "CREATE TABLE showroom_visit_log ( id ..., store_id integer, drive_list_id integer, stop_id integer, arrival_at integer, departure_at integer, dwell_seconds integer, status text DEFAULT 'TESLA_SOFT_ARRIVAL' NOT NULL, type text DEFAULT 'SHOWROOM_IN_PERSON' NOT NULL, rating integer, notes_markdown text, notes_html text, gps_source text, latitude real, longitude real, soft_arrival_id integer, created_at ..., updated_at ..., FKs → showroom_stores/drive_lists/drive_list_stops/self ); CREATE UNIQUE INDEX showroom_visit_log_soft_arrival_uniq ON showroom_visit_log(soft_arrival_id) WHERE soft_arrival_id IS NOT NULL;",
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Two-row model over a drive",
+        code: `stateDiagram-v2
+  [*] --> Driving
+  Driving --> SoftArrival: park at showroom (active drive)
+  SoftArrival --> Staged: drive-away (+ departure + dwell)
+  Staged --> Driving
+  SoftArrival --> Driving: home (drive ends)`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_258.mjs",
+      command: "pnpm run migrate:remote  &&  pnpm run test:pr 258 -- --preview",
+      ranAt: "2026-07-25",
+      output:
+        "Migration 0140 applied to LOCAL D1 (wrangler d1 execute --local): table + 4\n" +
+        "indexes created; two-row soft→staged insert succeeded; a duplicate soft_arrival_id\n" +
+        "was rejected by the partial UNIQUE index while multiple NULL-soft_arrival_id soft\n" +
+        "rows were allowed. `npx tsc --noEmit` — touched files clean (DO connect collision\n" +
+        "fixed; no additions to the pre-existing baseline). `pnpm run build` — Complete\n" +
+        "(server built in ~130s, prerender OK). REMOTE migration + preview QC pending a\n" +
+        "toolchain env / deploy.",
+      migrations: [{ tag: "0140", applied: false }],
+    },
+  },
   "tesla-admin-alert": {
     slug: "tesla-admin-alert",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",

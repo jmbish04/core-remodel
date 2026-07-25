@@ -255,6 +255,25 @@ export const CHANGELOG: ChangelogEntry[] = [
     status: "staged",
   },
   {
+    id: "tesla-visit-sessions",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-25",
+    tag: "0023",
+    area: "Tesla / Ingest",
+    title: "Visit sessions — park → soft arrival, drive-away → finalize",
+    summary:
+      "The IFTTT core: a new showroom_visit_log table (two-row model) and the pipeline wired into the stream DO. On a park at a registered showroom during an active drive, a TESLA_SOFT_ARRIVAL draft is staged; on drive-away it's finalized into a TESLA_STAGED row with departure + dwell, linked by a UNIQUE soft_arrival_id so finalize is idempotent.",
+    migrations: ["0140"],
+    changes: [
+      { kind: "migration", text: "0140 — showroom_visit_log: store_id/drive_list_id/stop_id FKs, arrival/departure/dwell, status + type enums, rating, notes_markdown+html, GPS provenance, and a partial-UNIQUE soft_arrival_id self-reference. Validated on local D1." },
+      { kind: "added", text: "services/tesla/visit-sessions.ts — stageSoftArrival (park, deduped) + finalizeSoftArrivals (drive-away, idempotent via onConflictDoNothing on the unique index)." },
+      { kind: "changed", text: "TeslaStreamDO: onPark stages a soft arrival (unless home); the shift P→moving transition finalizes. Private connect() renamed connectStream() (fixes a latent DO-RPC tsc collision from #242)." },
+      { kind: "added", text: "GET /api/tesla/visits — list the visit log with the store name JOINed (?status/?limit)." },
+      { kind: "fixed", text: "worker-configuration.d.ts regenerated so Env carries the TESLA_STREAM binding (#242 added it but never regenerated types)." },
+    ],
+    status: "staged",
+  },
+  {
     id: "tesla-admin-alert",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-25",
