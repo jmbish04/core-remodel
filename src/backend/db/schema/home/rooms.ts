@@ -89,6 +89,19 @@ export const rooms = sqliteTable("rooms", {
   floorplanXPct: real("floorplan_x_pct"), // 0–100, null = no dot
   floorplanYPct: real("floorplan_y_pct"), // 0–100, null = no dot
 
+  /**
+   * Floorplan region bounding box (0005 → 0014 workshop) — the room's rectangle
+   * on the floorplan image, in percent (0–100). Set via /admin/designs/floorplan-
+   * regions. When present, the Workshop crops the floorplan to this region and
+   * furnish-this-plan runs per-room instead of whole-house.
+   */
+  floorplanBboxXPct: real("floorplan_bbox_x_pct"),
+  floorplanBboxYPct: real("floorplan_bbox_y_pct"),
+  floorplanBboxWPct: real("floorplan_bbox_w_pct"),
+  floorplanBboxHPct: real("floorplan_bbox_h_pct"),
+  /** Cloudflare Images token of the cropped per-room floorplan region (if cropped). */
+  floorplanCropCfImageId: text("floorplan_crop_cf_image_id"),
+
   datetimeCreated: integer("datetime_created", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),

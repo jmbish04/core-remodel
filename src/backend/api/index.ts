@@ -57,6 +57,7 @@ import { planningExtendedRouter } from "./routes/planning-extended";
 import { pmoRouter } from "./routes/pmo";
 import { roomsRouter } from "./routes/rooms";
 import { roomsExtendedRouter } from "./routes/rooms-extended";
+import { floorplanRegionsRouter } from "./routes/floorplan-regions";
 import { syncRouter } from "./routes/sync";
 import { threadsRouter } from "./routes/threads";
 import { supportingDocumentsRouter } from "./routes/supporting-documents";
@@ -200,6 +201,8 @@ app.use("/api/gmail/*", requireAccessAuth);
 // AI Photo Design Workshop (0014 Slice 1) — admin-only canvas/piles/clippings/recipes.
 app.use("/api/workshop", requireAccessAuth);
 app.use("/api/workshop/*", requireAccessAuth);
+app.use("/api/floorplan-regions", requireAccessAuth);
+app.use("/api/floorplan-regions/*", requireAccessAuth);
 app.use("/api/bid-portfolios/*", async (c, next) => {
   // Public routes do not require auth
   const path = new URL(c.req.url).pathname;
@@ -254,6 +257,7 @@ app.route("/api/planning", planningExtendedRouter);
 // /code/:roomCode/options-summary take priority over the broader /:id catch-all.
 app.route("/api/rooms", roomsExtendedRouter);
 app.route("/api/rooms", roomsRouter);
+app.route("/api/floorplan-regions", floorplanRegionsRouter);
 app.route("/api/measurements", measurementsRouter);
 app.route("/api/estimate-statuses", estimateStatusesRouter);
 app.route("/api/estimate-companies", estimateCompaniesRouter);

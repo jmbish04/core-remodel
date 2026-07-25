@@ -1,0 +1,21 @@
+---
+import { FloorplanRegionsApp } from "@/components/FloorplanRegionsApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Admin - Designs / Floorplan Regions - 126 Colby - Remodel Mission Control"
+  description="Draw each room's rectangle on the floorplan so the Workshop can furnish per-room plans."
+>
+  <main class="container mx-auto px-4 py-8">
+    <div class="mb-8">
+      <h1 class="mb-2 text-3xl font-semibold tracking-tight">Floorplan Regions</h1>
+      <p class="text-muted-foreground">
+        Draw each room's rectangle on the floor plan. Saving crops that region and
+        lets the Workshop furnish the plan per room instead of the whole house.
+      </p>
+    </div>
+
+    <FloorplanRegionsApp client:only="react" />
+  </main>
+</BaseLayout>
