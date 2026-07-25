@@ -30,6 +30,26 @@ export const materialScheduleItems = sqliteTable("material_schedule_items", {
   model: text("model"),
   notes: text("notes"),
 
+  /**
+   * How many identical units this material represents in its one room. Null = 1.
+   *
+   * A receipt line can allocate as a GROUP into a single room — two sinks in a
+   * double-vanity primary bath, three identical pendants over one island. That
+   * is one material carrying `quantity`, distinct from the same line SPLIT across
+   * rooms (which mints one material per room). The allocation plan decides which.
+   */
+  quantity: integer("quantity"),
+
+  /**
+   * The receipt line item this material was promoted from, when it came from an
+   * emailed receipt. Nullable (materials also exist without a receipt) and NOT a
+   * denormalized copy — provenance only. Lives here rather than relying on
+   * `worker_email_invoice_line_items.material_schedule_item_id` because one line
+   * (qty 2, split across two baths) mints MANY materials, and that single FK on
+   * the line cannot point at all of them.
+   */
+  sourceLineItemId: integer("source_line_item_id"),
+
   isPurchased: integer("is_purchased", { mode: "boolean" }).default(false),
   /**
    * The showroom product this material was ultimately purchased as (if any).
