@@ -1087,6 +1087,9 @@ showroomStoresRouter.get("/", async (c) => {
   const priceFilter = c.req.query("pricePoint");
   const search = c.req.query("search");
   const hubFilter = c.req.query("hub");
+  // Inactive (soft-deleted) stores are hidden by default; pass
+  // ?includeInactive=true to include them (admin/cleanup views only).
+  const includeInactive = c.req.query("includeInactive") === "true";
   const includeParam = c.req.query("include") ?? "";
   const includes = new Set(
     includeParam
@@ -1107,9 +1110,10 @@ showroomStoresRouter.get("/", async (c) => {
     .orderBy(desc(showroomStores.createdAt))
     .$dynamic();
 
-  // Soft-deleted stores never appear in the directory / map / list. Pushed in
-  // first so `conditions` is never empty and the and(...) below always applies.
-  const conditions = [eq(showroomStores.isActive, true)];
+  // Soft-deleted stores are hidden by default (directory / map / list). Only an
+  // explicit ?includeInactive=true surfaces them. Pushed in first so
+  // `conditions` is never empty and the and(...) below always applies.
+  const conditions = includeInactive ? [] : [eq(showroomStores.isActive, true)];
   if (priceFilter) {
     conditions.push(eq(showroomStores.pricePoint, priceFilter as "$" | "$$" | "$$$" | "$$$$"));
   }
