@@ -83,7 +83,12 @@ export function TypeEditor({
         setLoadingOptions(false);
       }
     })();
-  }, [open, typeId]);
+    // typeId intentionally omitted: savedAtOpen must be FROZEN at the moment the
+    // modal opens (the yellow row). Re-running on a parent typeId change would
+    // shift the highlight mid-session, which is exactly what the spec forbids —
+    // it may only move on close+reopen (a fresh open re-snapshots the new value).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const dirty = selected !== savedAtOpen;
 
