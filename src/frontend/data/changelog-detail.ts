@@ -113,6 +113,43 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "tesla-stream-ui": {
+    slug: "tesla-stream-ui",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0023 Ingest · the operator's on/off switch + live mode",
+    problem:
+      "The streaming lifecycle (#241) and the DO (#242) are entirely backend — the operator had no way to turn live streaming on/off, and no way to see whether ingest was streaming, polling, or idle at a glance. The spec called for a toggle on the drive-list UI, with polling as the explicit fallback when the toggle is off.",
+    approach:
+      "A small header card on the Showroom Drives page. A Switch writes the toggle through POST /api/tesla/stream/control; a status pill reads /control + /status every 15s and derives the mode — Streaming when the DO reports connected, Polling when a drive is active but the stream isn't carrying (toggle off / outside window / socket down), Idle otherwise, and Tripped when the circuit breaker is set. Every state carries a one-line reason (the 07:00–20:00 window, the fallback cadence, or 'no active drive') so the mode is self-explanatory. The widget removes itself when the routes 404, so a worker that predates the ingest deploy shows nothing rather than a broken card.",
+    apiChanges: ["(none — consumes /api/tesla/stream/control + /status from #241/#242)"],
+    filesTouched: [
+      "src/frontend/components/drives/TeslaStreamControl.tsx (new)",
+      "src/frontend/components/drives/DriveListsApp.tsx",
+    ],
+    migrations: [],
+    diagrams: [
+      {
+        caption: "The pill's three (plus one) states",
+        code: `stateDiagram-v2
+  [*] --> Idle
+  Idle --> Streaming: toggle ON · drive active · 07-20 · connected
+  Streaming --> Polling: toggle OFF (drive active)
+  Polling --> Streaming: toggle ON (in window)
+  Streaming --> Idle: drive ended / window closed
+  Streaming --> Tripped: circuit breaker`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_247.mjs",
+      command: "pnpm run test:pr 247 -- --preview   # and prod (regression)",
+      ranAt: undefined,
+      output:
+        "AUTHORED, NOT YET RUN. Regression guard: the drives page serves (200) and the\n" +
+        "two endpoints the widget reads are reachable and shaped as the component expects.\n" +
+        "Read-only; runs against preview and prod.",
+      migrations: [],
+    },
+  },
   "tesla-stream-do": {
     slug: "tesla-stream-do",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",

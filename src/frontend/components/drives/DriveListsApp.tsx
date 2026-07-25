@@ -19,6 +19,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { DriveMapThumb, type LatLng } from "./DriveMapThumb";
+import { TeslaStreamControl } from "./TeslaStreamControl";
 
 type DriveListSummary = {
   id: number;
@@ -58,6 +59,11 @@ function ProgressBar({ pct }: { pct: number }) {
   );
 }
 
+/**
+ * Showroom Drives landing island: the stream-ingest control, then drive sheets
+ * bucketed into Pending / In progress / Finished with a per-card active toggle.
+ * @returns The drives dashboard (no props).
+ */
 export function DriveListsApp() {
   const [drives, setDrives] = useState<DriveListSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -192,6 +198,7 @@ export function DriveListsApp() {
   return (
     <div>
       {header}
+      <TeslaStreamControl />
       <Tabs defaultValue={partial.length ? "partial" : "pending"}>
         <TabsList className="mb-6">
           <TabsTrigger value="pending">Pending ({pending.length})</TabsTrigger>
