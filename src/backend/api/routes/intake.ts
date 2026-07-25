@@ -47,6 +47,8 @@ import {
   type SitemapContext,
 } from "@backend/services/scraping/sitemap-cache";
 import { discoverSitemap } from "@backend/services/brands/brand-image-harvest";
+import { transcribeAudioBase64 } from "@backend/services/estimate-intake";
+import { summarizeStyleReaction } from "@backend/services/reaction-summary";
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { cropAndUploadCfImage } from "@backend/services/render/cf-images";
 import { extractShowroomProductFromDescriptions } from "@backend/services/image-processor/product-extraction";
@@ -625,6 +627,7 @@ intakeRouter.get("/buckets/:id/candidates", async (c) => {
     colors: parseJson(r.colors),
     imageSourceUrls: parseJson(r.imageSourceUrls),
     pdfSourceUrls: parseJson(r.pdfSourceUrls),
+    reactionSummary: parseJson(r.reactionSummary),
     rawExtraction: parseJson(r.rawExtraction),
   }));
 
@@ -765,6 +768,47 @@ intakeRouter.post("/candidates/:id/confirm", async (c) => {
     productCreated: created,
     candidate: await loadCandidate(db, id),
   });
+});
+
+/**
+ * POST /api/intake/candidates/:id/voice-reaction — Phase D2.
+ * Attach a spoken (or typed) reaction to a candidate: transcribe the audio with
+ * Whisper (or accept a `transcript` directly), distill it into a compact style
+ * summary, and store both on the candidate. Body: { audioBase64 } | { transcript }.
+ */
+intakeRouter.post("/candidates/:id/voice-reaction", async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isFinite(id)) return c.json({ error: "Invalid candidate id" }, 400);
+  const body = await c.req.json().catch(() => ({}));
+
+  const db = drizzle(c.env.DB);
+  const cand = await loadCandidate(db, id);
+  if (!cand) return c.json({ error: "Candidate not found" }, 404);
+
+  // Accept a direct transcript (typed reaction / retry) or transcribe audio.
+  let transcript = typeof body.transcript === "string" ? body.transcript.trim() : "";
+  if (!transcript) {
+    const audioBase64 = typeof body.audioBase64 === "string" ? body.audioBase64.trim() : "";
+    if (!audioBase64) return c.json({ error: "audioBase64 or transcript is required" }, 400);
+    try {
+      transcript = (await transcribeAudioBase64(c.env, audioBase64)).trim();
+    } catch (err) {
+      return c.json({ error: "Transcription failed", details: err instanceof Error ? err.message : "Unknown" }, 502);
+    }
+  }
+  if (!transcript) return c.json({ error: "Empty transcript" }, 400);
+
+  const summary = await summarizeStyleReaction(c.env, transcript, {
+    productName: cand.productName,
+    brandName: cand.brandNameRaw,
+  });
+
+  await db
+    .update(bucketProductCandidates)
+    .set({ reactionTranscript: transcript, reactionSummary: JSON.stringify(summary) })
+    .where(eq(bucketProductCandidates.id, id));
+
+  return c.json({ candidate: await loadCandidate(db, id), transcript, summary });
 });
 
 // ─── Sitemaps (Phase B) ──────────────────────────────────────────────────────

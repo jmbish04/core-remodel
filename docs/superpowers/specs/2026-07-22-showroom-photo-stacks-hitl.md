@@ -200,3 +200,30 @@ per-candidate reaction and promote a candidate into a real product.
 - QC (`pr_candidate_reaction.mjs`): reaction persists, out-of-range stars 400,
   reject keeps the row, confirm mints product+brand+mapping and links the bucket,
   second confirm 409 — 15/15 on preview.
+
+---
+
+## Phase D2 — Voice reaction → transcript + style summary (THIS CHANGELIST)
+
+**Goal:** capture a spoken (or typed) reaction to a candidate and distill it into
+a compact style record — the raw signal Phase F's style profile reads.
+
+### Tasks (done)
+
+- **D2.1** `services/reaction-summary.ts` — `summarizeStyleReaction(env,
+  transcript, ctx)` → `{ summary, likes[], dislikes[], sentiment }` via
+  gpt-oss-120b; faithful-only prompt (never invents a preference).
+- **D2.2** `POST /api/intake/candidates/:id/voice-reaction` — accepts
+  `{ audioBase64 }` (Whisper via reused `transcribeAudioBase64`) OR
+  `{ transcript }`; stores `reaction_transcript` + `reaction_summary` (JSON).
+- **D2.3** `GET /buckets/:id/candidates` now parses `reaction_summary` back to an
+  object for the UI.
+
+### Acceptance
+
+- `tsc --noEmit` adds 0 errors; `pnpm run build` bundles.
+- QC (`pr_voice_reaction.mjs`): transcript path stores transcript + a parseable
+  non-empty AI summary; missing body 400 — 7/7 on preview.
+
+> Note: a fresh preview/prod deploy needs ~10-15s to propagate before new routes
+> answer; QC immediately after deploy can see a transient Astro 404.
