@@ -144,20 +144,43 @@ export async function fillMissingStopCoords<
   return stops;
 }
 
+/**
+ * Decode the handful of HTML entities that leak into drive-list display text
+ * when a drive is created from the MCP tools (e.g. "Wall &amp; Floor" stored for
+ * "Wall & Floor"). Drive titles/notes/stop fields are plain text, never HTML, so
+ * an entity here is always wrong. `&amp;` is decoded LAST so a double-encoded
+ * "&amp;lt;" resolves to "<". null/undefined pass through unchanged.
+ */
+export function decodeHtmlEntities<T extends string | null | undefined>(s: T): T {
+  if (s == null) return s;
+  return (s as string)
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&") as T;
+}
+
 /** Insert a drive list + its ordered stops. Returns the new id/slug/stopCount. */
 export async function createDriveList(
   db: RemodelDb,
   input: DriveListCreateInput,
 ): Promise<{ id: number; slug: string; stopCount: number }> {
-  const slug = await uniqueSlug(db, slugify(input.title));
+  // Decode HTML entities up front so neither the stored title nor the derived
+  // slug carries "&amp;"/"amp" — MCP-created drives were storing raw entities.
+  const title = decodeHtmlEntities(input.title);
+  const description = decodeHtmlEntities(input.description);
+  const notes = input.notes?.map((n) => decodeHtmlEntities(n));
+  const slug = await uniqueSlug(db, slugify(title));
   const status = input.status ?? "active";
   const [drive] = await db
     .insert(driveLists)
     .values({
       slug,
-      title: input.title,
-      description: input.description,
-      notes: serializeDriveNotes(input.notes),
+      title,
+      description,
+      notes: serializeDriveNotes(notes),
       status,
       sourceConversation: input.sourceConversation,
     })
@@ -172,19 +195,20 @@ export async function createDriveList(
     driveListId: drive.id,
     showroomStoreId: s.showroomStoreId,
     sortOrder: i,
-    leg: s.leg,
-    legWindow: s.legWindow,
-    name: s.name,
-    city: s.city,
-    address: s.address,
+    leg: decodeHtmlEntities(s.leg),
+    legWindow: decodeHtmlEntities(s.legWindow),
+    name: decodeHtmlEntities(s.name),
+    city: decodeHtmlEntities(s.city),
+    address: decodeHtmlEntities(s.address),
     phone: s.phone,
-    hours: s.hours,
-    note: s.note,
-    pick: s.pick,
+    hours: decodeHtmlEntities(s.hours),
+    note: decodeHtmlEntities(s.note),
+    pick: decodeHtmlEntities(s.pick),
     websiteUrl: s.websiteUrl,
     latitude: s.latitude,
     longitude: s.longitude,
     isOptional: s.isOptional ?? false,
+    kind: (s.isOptional ?? false) ? ("optional" as const) : ("core" as const),
   }));
   // Write via db.batch() of single-row inserts, chunked, so we never approach
   // Cloudflare D1's 100-bound-parameter-per-query limit on large drives.

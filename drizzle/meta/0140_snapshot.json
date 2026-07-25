@@ -1,8 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "83140bee-c401-481c-966d-f60eb6feb210",
-  "prevId": "ec3fed93-f9e1-4b4f-87ad-acb3aaabe71e",
+  "id": "707466e2-debd-44d7-bc21-773e170ce096",
+  "prevId": "7dd37b26-36f2-4318-8660-e39010238a6c",
   "tables": {
     "users": {
       "name": "users",
@@ -4831,14 +4831,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "datetime_created": {
-          "name": "datetime_created",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(unixepoch())"
-        },
         "floorplan_bbox_x_pct": {
           "name": "floorplan_bbox_x_pct",
           "type": "real",
@@ -4873,6 +4865,14 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "datetime_created": {
+          "name": "datetime_created",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
         }
       },
       "indexes": {
@@ -15322,6 +15322,20 @@
           "notNull": false,
           "autoincrement": false
         },
+        "quantity": {
+          "name": "quantity",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "source_line_item_id": {
+          "name": "source_line_item_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "is_purchased": {
           "name": "is_purchased",
           "type": "integer",
@@ -15615,6 +15629,21 @@
         "subcategory_id": {
           "name": "subcategory_id",
           "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "unit_index": {
+          "name": "unit_index",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "application": {
+          "name": "application",
+          "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
@@ -26064,6 +26093,22 @@
           "autoincrement": false,
           "default": false
         },
+        "kind": {
+          "name": "kind",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'core'"
+        },
+        "suggested": {
+          "name": "suggested",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
         "visited": {
           "name": "visited",
           "type": "integer",
@@ -26074,6 +26119,21 @@
         },
         "visited_at": {
           "name": "visited_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "skipped": {
+          "name": "skipped",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "skipped_at": {
+          "name": "skipped_at",
           "type": "integer",
           "primaryKey": false,
           "notNull": false,
@@ -26129,6 +26189,108 @@
             "id"
           ],
           "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
+    "drive_list_notes": {
+      "name": "drive_list_notes",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "drive_list_id": {
+          "name": "drive_list_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "drive_list_stop_id": {
+          "name": "drive_list_stop_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "source": {
+          "name": "source",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'user'"
+        },
+        "read_at": {
+          "name": "read_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        }
+      },
+      "indexes": {
+        "drive_list_notes_drive_idx": {
+          "name": "drive_list_notes_drive_idx",
+          "columns": [
+            "drive_list_id"
+          ],
+          "isUnique": false
+        },
+        "drive_list_notes_stop_idx": {
+          "name": "drive_list_notes_stop_idx",
+          "columns": [
+            "drive_list_stop_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "drive_list_notes_drive_list_id_drive_lists_id_fk": {
+          "name": "drive_list_notes_drive_list_id_drive_lists_id_fk",
+          "tableFrom": "drive_list_notes",
+          "tableTo": "drive_lists",
+          "columnsFrom": [
+            "drive_list_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "drive_list_notes_drive_list_stop_id_drive_list_stops_id_fk": {
+          "name": "drive_list_notes_drive_list_stop_id_drive_list_stops_id_fk",
+          "tableFrom": "drive_list_notes",
+          "tableTo": "drive_list_stops",
+          "columnsFrom": [
+            "drive_list_stop_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
           "onUpdate": "no action"
         }
       },

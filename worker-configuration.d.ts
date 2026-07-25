@@ -63,6 +63,7 @@ interface __BaseEnv_Env {
 	REMODEL_ORCHESTRATOR: DurableObjectNamespace<import("./src/_worker").RemodelOrchestrator>;
 	ADMIN_CHAT_AGENT: DurableObjectNamespace<import("./src/_worker").AdminChatAgent>;
 	REMODEL_MCP: DurableObjectNamespace<import("./src/_worker").RemodelMcpAgent>;
+	TESLA_STREAM: DurableObjectNamespace<import("./src/_worker").TeslaStreamDO>;
 	IMAGE_PROCESSING_WORKFLOW: Workflow<Parameters<import("./src/_worker").ImageProcessingWorkflow['run']>[0]['payload']>;
 	CHECKLIST_RATIONALE_WORKFLOW: Workflow<Parameters<import("./src/_worker").ChecklistRationaleWorkflow['run']>[0]['payload']>;
 	IMAGE_BATCH_WORKFLOW: Workflow<Parameters<import("./src/_worker").ImageBatchProcessingWorkflow['run']>[0]['payload']>;
