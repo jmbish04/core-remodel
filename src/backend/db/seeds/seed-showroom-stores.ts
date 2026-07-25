@@ -423,6 +423,23 @@ function getStoreData(): SeedStoreRow[] {
 
 export async function seedShowroomStores(db: DrizzleD1Database) {
   const stores = getStoreData();
+
+  // Bootstrap-only + idempotent. This seed inserts a FIXED list with no natural
+  // key (seed rows carry no placeId), so re-running it on a populated table just
+  // clones every store — a repeat POST /api/showroom-stores/seed did exactly
+  // that, producing a second and third "Whole Wood" etc. The seed exists only to
+  // bootstrap an EMPTY directory, so bail the moment any store already exists.
+  const [existing] = await db
+    .select({ id: showroomStores.id })
+    .from(showroomStores)
+    .limit(1);
+  if (existing) {
+    console.log(
+      "Showroom stores already present — skipping seed (bootstrap-only; re-seeding would duplicate rows).",
+    );
+    return { inserted: 0, skipped: stores.length };
+  }
+
   console.log(`Seeding ${stores.length} showroom store locations...`);
 
   // City name → bayAreaCityId lookup
