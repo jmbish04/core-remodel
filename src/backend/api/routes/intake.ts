@@ -29,6 +29,7 @@ import { z } from "zod";
 
 import {
   brandCategories,
+  bucketProductCandidates,
   photoCategories,
   photoColors,
   photoSubcategories,
@@ -37,6 +38,7 @@ import {
   productShowroomPhotos,
   showroomStoreProducts,
 } from "@backend/db";
+import { createResearchJob } from "@backend/services/research-jobs";
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { cropAndUploadCfImage } from "@backend/services/render/cf-images";
 import { extractShowroomProductFromDescriptions } from "@backend/services/image-processor/product-extraction";
@@ -532,6 +534,93 @@ intakeRouter.post("/buckets/:id/process", async (c) => {
       500,
     );
   }
+});
+
+// ─── POST /buckets/:id/intake ────────────────────────────────────────────────
+
+/**
+ * POST /api/intake/buckets/:id/intake — Phase C.
+ *
+ * Kick the durable BucketIntakeWorkflow: it describes the bucket's photos,
+ * extracts 0-N product *candidates* (using the per-stack hints), and writes
+ * `bucket_product_candidates` for later human review — instead of the inline
+ * `/process` path that force-creates exactly one product.
+ *
+ * Pre-creates a research-console job so the UI can poll `GET
+ * /api/research-jobs/{id}` immediately. Returns `{ queued, researchJobId }`.
+ */
+intakeRouter.post("/buckets/:id/intake", async (c) => {
+  const bucketId = Number(c.req.param("id"));
+  if (!Number.isFinite(bucketId)) return c.json({ error: "Invalid bucket id" }, 400);
+
+  const db = drizzle(c.env.DB);
+  const [bucket] = await db
+    .select()
+    .from(productPhotoBuckets)
+    .where(eq(productPhotoBuckets.id, bucketId))
+    .limit(1);
+  if (!bucket) return c.json({ error: "Bucket not found" }, 404);
+  if (bucket.status === "processing") return c.json({ error: "Bucket is already processing" }, 409);
+
+  const photoCount = (
+    await db
+      .select({ id: productShowroomPhotos.id })
+      .from(productShowroomPhotos)
+      .where(eq(productShowroomPhotos.bucketId, bucketId))
+  ).length;
+  if (photoCount === 0) return c.json({ error: "Bucket has no photos" }, 400);
+
+  const researchJobId = await createResearchJob(c.env, {
+    kind: "product",
+    title: `Bucket intake — ${bucket.label ?? `#${bucketId}`}`,
+    topic: bucket.productName ?? bucket.brandNameRaw ?? bucket.label ?? null,
+    entityId: bucketId,
+    totalSteps: 5,
+  });
+
+  await c.env.BUCKET_INTAKE_WORKFLOW.create({
+    params: { bucketId, researchJobId: researchJobId ?? undefined },
+  });
+
+  return c.json({ queued: true, bucketId, researchJobId });
+});
+
+// ─── GET /buckets/:id/candidates ─────────────────────────────────────────────
+
+/**
+ * GET /api/intake/buckets/:id/candidates — Phase C.
+ * The candidate rows the workflow produced, rank-ASC. `colors` / `rawExtraction`
+ * are parsed back from their stored JSON. Feeds the HITL walkthrough (Phase D/E).
+ */
+intakeRouter.get("/buckets/:id/candidates", async (c) => {
+  const bucketId = Number(c.req.param("id"));
+  if (!Number.isFinite(bucketId)) return c.json({ error: "Invalid bucket id" }, 400);
+
+  const db = drizzle(c.env.DB);
+  const rows = await db
+    .select()
+    .from(bucketProductCandidates)
+    .where(eq(bucketProductCandidates.bucketId, bucketId))
+    .orderBy(asc(bucketProductCandidates.rank));
+
+  const parseJson = (s: string | null): unknown => {
+    if (!s) return null;
+    try {
+      return JSON.parse(s);
+    } catch {
+      return null;
+    }
+  };
+
+  const candidates = rows.map((r) => ({
+    ...r,
+    colors: parseJson(r.colors),
+    imageSourceUrls: parseJson(r.imageSourceUrls),
+    pdfSourceUrls: parseJson(r.pdfSourceUrls),
+    rawExtraction: parseJson(r.rawExtraction),
+  }));
+
+  return c.json({ bucketId, candidates });
 });
 
 // ─── GET /review-queue ──────────────────────────────────────────────────────
