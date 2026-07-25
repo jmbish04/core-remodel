@@ -43,21 +43,30 @@ import type { RunRecorder } from "./agent-runs";
  * are not work, and recording them would bloat the trace with rows nobody reads.
  */
 export function ledgerSteps(step: WorkflowStep, run: RunRecorder): WorkflowStep {
-  // `step.do` is overloaded — (name, cb) and (name, config, cb) — and its
-  // callback type is constrained to `Serializable<T>`. Rather than restate
-  // those generics (and drift the moment the runtime types change), forward the
-  // arguments verbatim and re-assert the public type once at the boundary.
-  const originalDo = step.do.bind(step) as (...args: unknown[]) => Promise<unknown>;
-
+  // The runtime now delivers `WorkflowStep` as a JsRPC stub, not a plain object.
+  // On a stub, property access is a method-call proxy: `step.do.bind(step)`
+  // reads `.bind` off the `do` proxy, which JsRPC dispatches as a call to a
+  // remote method named "bind" — and throws "The RPC receiver does not
+  // implement the method 'bind'". Spreading `{...step}` fails the same way.
+  // This silently broke EVERY workflow (all route through here).
+  //
+  // Fix: never touch `.bind` or spread the stub. Forward each method by calling
+  // it directly through an arrow — a JsRPC stub carries its own `this`, so the
+  // plain `step.do(...)` call (which works fine, unwrapped) needs no binding.
+  // `step.do` is overloaded — (name, cb) and (name, config, cb); `...rest`
+  // forwards either shape verbatim.
   const wrapped: WorkflowStep = {
-    ...step,
-
     do: ((name: string, ...rest: unknown[]) =>
-      run.step(name, () => originalDo(name, ...rest))) as WorkflowStep["do"],
+      run.step(name, () =>
+        (step.do as (...args: unknown[]) => Promise<unknown>)(name, ...rest),
+      )) as WorkflowStep["do"],
 
-    sleep: step.sleep.bind(step),
-    sleepUntil: step.sleepUntil.bind(step),
-    waitForEvent: step.waitForEvent.bind(step),
+    sleep: ((...args: Parameters<WorkflowStep["sleep"]>) =>
+      step.sleep(...args)) as WorkflowStep["sleep"],
+    sleepUntil: ((...args: Parameters<WorkflowStep["sleepUntil"]>) =>
+      step.sleepUntil(...args)) as WorkflowStep["sleepUntil"],
+    waitForEvent: ((...args: Parameters<WorkflowStep["waitForEvent"]>) =>
+      step.waitForEvent(...args)) as WorkflowStep["waitForEvent"],
   };
 
   return wrapped;
