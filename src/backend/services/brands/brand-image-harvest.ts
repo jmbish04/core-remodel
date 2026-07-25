@@ -233,6 +233,70 @@ async function collectImageUrls(pageUrl: string): Promise<Set<string>> {
   return found;
 }
 
+/**
+ * Scrape one page for staged product assets (Phase C2): `<img>` sources and
+ * `<a href>` links ending in `.pdf`. One cheap fetch + HTMLRewriter (no Browser
+ * Rendering) — the candidate pipeline stages SOURCE URLs only; nothing is
+ * downloaded until a human confirms the candidate. Never throws; returns empty
+ * arrays on any fetch/parse failure.
+ */
+export async function scrapePageAssets(
+  pageUrl: string,
+  opts: { maxImages?: number; maxPdfs?: number } = {},
+): Promise<{ imageUrls: string[]; pdfUrls: string[] }> {
+  const maxImages = opts.maxImages ?? 20;
+  const maxPdfs = opts.maxPdfs ?? 10;
+  const images = new Set<string>();
+  const pdfs = new Set<string>();
+
+  try {
+    const res = await fetch(pageUrl, {
+      headers: { accept: "text/html", "user-agent": "core-remodel-brand-harvester" },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) return { imageUrls: [], pdfUrls: [] };
+
+    const abs = (raw: string | null): string | null => {
+      if (!raw) return null;
+      try {
+        const u = new URL(raw.trim(), pageUrl).href;
+        return u.startsWith("http") ? u : null;
+      } catch {
+        return null;
+      }
+    };
+
+    await new HTMLRewriter()
+      .on("img", {
+        element(el) {
+          for (const attr of ["src", "data-src"]) {
+            const u = abs(el.getAttribute(attr));
+            if (u) images.add(u);
+          }
+          const srcset = el.getAttribute("srcset") ?? el.getAttribute("data-srcset");
+          if (srcset) {
+            for (const part of srcset.split(",")) {
+              const u = abs(part.trim().split(/\s+/)[0]);
+              if (u) images.add(u);
+            }
+          }
+        },
+      })
+      .on("a", {
+        element(el) {
+          const u = abs(el.getAttribute("href"));
+          if (u && u.split("?")[0].toLowerCase().endsWith(".pdf")) pdfs.add(u);
+        },
+      })
+      .transform(res)
+      .arrayBuffer();
+  } catch {
+    return { imageUrls: [...images].slice(0, maxImages), pdfUrls: [...pdfs].slice(0, maxPdfs) };
+  }
+
+  return { imageUrls: [...images].slice(0, maxImages), pdfUrls: [...pdfs].slice(0, maxPdfs) };
+}
+
 // ---------------------------------------------------------------------------
 // Grouping
 // ---------------------------------------------------------------------------
