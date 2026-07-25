@@ -113,6 +113,79 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "showroom-seed-bootstrap-only": {
+    slug: "showroom-seed-bootstrap-only",
+    branch: "claude/showroom-listing-500-map-6kvtm9",
+    subtitle: "Showrooms · seed hygiene",
+    problem:
+      "`seedShowroomStores` inserts a FIXED list of ~146 stores straight into `showroom_stores`. The seed rows carry no natural key — no `placeId`, no unique slug — and the function had no guard, so it inserted unconditionally every time it ran. `POST /api/showroom-stores/seed` is meant as a one-shot bootstrap for an empty database, but nothing stopped it being called twice. It was, and production ended up with 213 store rows where there should be 146: 'Whole Wood' appeared three times, dozens of others twice. Because the duplicates are byte-identical to the originals, the directory list and map silently doubled up, and every downstream join (links, hours, visits, ratings) fanned out across the clones.",
+    approach:
+      "The seed's contract is 'populate an EMPTY directory', so it now enforces that contract. Before inserting anything it does a `SELECT id ... LIMIT 1`; if any store already exists it logs and returns `{ inserted: 0, skipped }` without writing a row. Re-running the seed against a populated table is now a safe no-op instead of a duplication event. This is deliberately the smallest possible change — it stops the bleeding. Removing the rows already duplicated is a destructive operation (choose the best row per store, reparent every child FK, delete the rest) and is held as a separate, sign-off-gated step rather than bundled into this fix.",
+    apiChanges: [
+      "UNCHANGED surface: POST /api/showroom-stores/seed still returns 200, but on a populated DB it now inserts nothing (was: cloned every store).",
+    ],
+    filesTouched: ["src/backend/db/seeds/seed-showroom-stores.ts"],
+    migrations: [],
+    code: [
+      {
+        title: "Bootstrap-only guard — seed-showroom-stores.ts",
+        lang: "ts",
+        code: `export async function seedShowroomStores(db: DrizzleD1Database) {
+  const stores = getStoreData();
+
+  // Bootstrap-only + idempotent. This seed inserts a FIXED list with no natural
+  // key (seed rows carry no placeId), so re-running it on a populated table just
+  // clones every store — a repeat POST /api/showroom-stores/seed did exactly
+  // that, producing a second and third "Whole Wood" etc. The seed exists only to
+  // bootstrap an EMPTY directory, so bail the moment any store already exists.
+  const [existing] = await db
+    .select({ id: showroomStores.id })
+    .from(showroomStores)
+    .limit(1);
+  if (existing) {
+    console.log(
+      "Showroom stores already present — skipping seed (bootstrap-only; re-seeding would duplicate rows).",
+    );
+    return { inserted: 0, skipped: stores.length };
+  }
+  // …unchanged insert loop below…
+}`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Seed decision — the guard turns a re-run into a no-op",
+        code: `flowchart TD
+  A[POST /api/showroom-stores/seed] --> B{any showroom_stores row exists?}
+  B -- "no (empty DB)" --> C[insert fixed list<br/>~146 stores + WEBSITE links]
+  C --> D[return inserted: 146]
+  B -- "yes (populated)" --> E[skip — return inserted: 0, skipped]
+  classDef ok fill:#1f4d2e,stroke:#4ade80,color:#e6ffe6
+  classDef stop fill:#4d1f1f,stroke:#f87171,color:#ffe6e6
+  class C,D ok
+  class E stop`,
+      },
+    ],
+    prNumber: 221,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/221",
+    verification: {
+      qcScript: "scripts/qc/pr_221.mjs",
+      command: "pnpm run test:pr 221",
+      source:
+        "const before = d1('SELECT COUNT(*) n FROM showroom_stores;')[0]?.n;\n" +
+        "const res = await c.post('/api/showroom-stores/seed', {});\n" +
+        "const after = d1('SELECT COUNT(*) n FROM showroom_stores;')[0]?.n;\n" +
+        "check('re-seed did NOT add rows (bootstrap-only guard held)', after === before);",
+      ranAt: "2026-07-25",
+      output:
+        "npx tsc --noEmit — 0 new errors in seed-showroom-stores.ts.\n" +
+        "pnpm run build — Complete (server built, prerender OK).\n" +
+        "pnpm run test:pr 221 — AUTHORED, NOT YET RUN. This session runs in a remote\n" +
+        "container with no `tokens` CLI and no CLOUDFLARE_API_TOKEN, so it cannot reach\n" +
+        "the deployed worker or remote D1. The idempotency regression guard must be run\n" +
+        "against prod from a toolchain-equipped environment before merge; result pending.",
+    },
+  },
   "0029-health-platform": {
     slug: "0029-health-platform",
     branch: "claude/backend-health-checks-d1-d6df78",
