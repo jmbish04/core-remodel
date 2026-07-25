@@ -252,3 +252,75 @@ for a full card to react + confirm.
 - `tsc --noEmit` adds 0 errors; `pnpm run build` bundles.
 - QC (`pr_hitl_queue.mjs`): candidate-queue aggregates counts + showroom, page
   returns 200 — 6/6 on preview. Action endpoints covered by the D1/D2 QCs.
+
+---
+
+## Phase F — Style profile ("Spotify wrapped") + chat (PLANNED — NOT BUILT)
+
+**Status:** staged plan only (this changelist adds the plan; no code). Build when
+there is real reaction data to profile — F is empty until buckets have been
+reviewed on the Phase E screen.
+
+**Goal:** turn the accumulated HITL reactions into a personal design-taste
+profile — a visual "wrapped" card + a chat that answers "what's my style?" —
+grounded in real signal, never invented.
+
+### Data it reads (all already produced by A′–E, no new capture)
+
+From `bucket_product_candidates` across ALL buckets:
+- `reaction_summary` (JSON `{ summary, likes[], dislikes[], sentiment }`) — the D2
+  distillations. Parse in JS (it's TEXT), not SQL.
+- `stars` (1-5), `liked` (bool), `is_match` (bool), `status`
+  (pending/confirmed/rejected).
+- Identity of confirmed picks: `brand_name_raw` / `brand_id`, `category`, `style`,
+  `price_text`, and the confirmed `products` row (via `confirmed_product_id`).
+
+Signal rules: liked/high-star/confirmed = positive taste; disliked/rejected =
+negative taste (kept deliberately — the retention decision in C1). Both feed the
+profile.
+
+### Tasks (traditional, dependency-ordered — each its own PR when built)
+
+- **F1 — Aggregation backend.** `GET /api/intake/style-profile`:
+  - Pull all candidate rows with a reaction (`reaction_summary IS NOT NULL` OR
+    `stars`/`liked`/`is_match` set OR `status != 'pending'`).
+  - Compute, in the handler:
+    - `likes` / `dislikes` frequency tallies (flatten the JSON arrays, normalize
+      case, top-N with counts).
+    - `sentiment` distribution; `stars` avg + histogram; like/dislike ratio;
+      match + confirm conversion rates.
+    - Top brands / categories / styles among confirmed + liked picks (with counts).
+    - Price-band lean (parse `price_text` → cents via `@backend/lib/money`,
+      bucket into ranges).
+    - `reviewedCount`, `confirmedCount`, date range.
+  - Optional AI narrative: one `generateStructuredOutput` pass (gpt-oss-120b) over
+    the aggregates → `{ headline, paragraphs[] }`, faithful-only prompt. Never
+    degrade a failed parse to `{}` (see [[workers-ai-structured-output-gotchas]]).
+  - QC: seed candidates with reactions, assert tallies + conversion math exact;
+    clean up.
+
+- **F2 — "Wrapped" card UI.** Page `/admin/shopping/style-profile` (+ shopping
+  nav). `StyleProfileApp.tsx`: stat cards + a few recharts (sentiment donut, stars
+  histogram, top-finishes bar), the AI headline, top brands/styles chips. Monolith
+  dark, `api` helper, shadcn. Empty state when `reviewedCount === 0` that points to
+  the review screen. QC: page 200 + renders with seeded data.
+
+- **F3 — Style chat.** `POST /api/intake/style-chat { message }` → LLM grounded in
+  the F1 aggregates + the raw `reaction_summary` corpus (feed as context; small
+  enough to inline, no Vectorize needed at first). Answers "what finishes do I keep
+  picking?", "am I drifting modern?", etc. — must cite only what the data shows.
+  Chat surface on the F2 page. QC: a canned question returns a grounded,
+  non-empty answer.
+
+### Acceptance (when built)
+
+- `tsc --noEmit` adds 0 errors; `pnpm run build` bundles.
+- F1 tallies/conversion math verified exact against seeded data (deterministic —
+  the AI narrative is the only non-deterministic part, asserted non-empty only).
+- No new migration expected (reads existing columns).
+
+### Deliberately deferred within F
+
+- Vectorize-backed semantic chat over a large reaction corpus — inline context is
+  enough until the corpus is big.
+- Cross-room / per-room profiles — start with one global profile.
