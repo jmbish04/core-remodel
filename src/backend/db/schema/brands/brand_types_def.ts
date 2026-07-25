@@ -20,6 +20,13 @@ export const brandTypesDef = sqliteTable("brand_types_def", {
   description: text("description"),
 
   /**
+   * Why the description reads as it does — the model's reasoning behind the
+   * classification, kept next to the prose so a human auditing the taxonomy
+   * sees the justification, not just the output.
+   */
+  aiRationale: text("ai_rationale"),
+
+  /**
    * Whether this type is actively used in the UI.
    * Set to false to retire a type without cascading deletes to mappings.
    */

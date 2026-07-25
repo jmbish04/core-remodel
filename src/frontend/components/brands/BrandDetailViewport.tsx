@@ -122,6 +122,8 @@ interface BrandImage {
 interface BrandTypeRow {
   typeId: number;
   typeName: string;
+  /** The one type that best represents the brand — rendered as a lit badge. */
+  isPrimary: boolean;
 }
 
 interface ShowroomRow {
@@ -870,8 +872,12 @@ export function BrandDetailViewport({ brandId }: { brandId: number }) {
                   {types.map((t) => (
                     <Badge
                       key={t.typeId}
-                      variant="secondary"
-                      className="rounded-full text-[10px] font-medium"
+                      variant={t.isPrimary ? "default" : "secondary"}
+                      className={
+                        t.isPrimary
+                          ? "rounded-full text-[10px] font-semibold bg-amber-400/15 text-amber-300 ring-1 ring-amber-400/30 hover:bg-amber-400/20"
+                          : "rounded-full text-[10px] font-medium"
+                      }
                     >
                       {t.typeName}
                     </Badge>

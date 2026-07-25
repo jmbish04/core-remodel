@@ -31,6 +31,7 @@ import { brands } from "@backend/db/schema/brands/brands";
 import { brandNameVariations } from "@backend/db/schema/brands/brand_name_variations";
 import { setPrimaryBrandName } from "@backend/services/brand-names";
 import { brandTypesDef } from "@backend/db/schema/brands/brand_types_def";
+import { consolidateBrandTypes } from "@backend/services/brands/type-consolidation";
 import { brandTypeMappings } from "@backend/db/schema/brands/brand_type_mappings";
 import { showroomBrandMappings } from "@backend/db/schema/brands/showroom_brand_mappings";
 import { brandIntel } from "@backend/db/schema/brands/brand_intel";
@@ -197,6 +198,7 @@ const brandDetailSchema = z.object({
       typeId: z.number(),
       typeName: z.string(),
       typeDescription: z.string().nullable(),
+      isPrimary: z.boolean(),
       brandIconCfImagesUrl: z.string().nullable(),
     }),
   ),
@@ -267,6 +269,24 @@ brandsRouter.post("/types", async (c) => {
 
   const [inserted] = await db.insert(brandTypesDef).values(parsed.data).returning();
   return c.json({ type: inserted }, 201);
+});
+
+/**
+ * POST /types/consolidate — merge duplicate brand types, backfill AI
+ * descriptions + rationale, and flag single-type brands' primary type.
+ *
+ * Idempotent admin operation, run on demand rather than in a migration (it
+ * calls the model, which has no place in a migration). Safe to re-run: absent
+ * losers are skipped and only still-undescribed types are sent to the model.
+ */
+brandsRouter.post("/types/consolidate", async (c) => {
+  try {
+    const report = await consolidateBrandTypes(c.env);
+    return c.json({ success: true, report });
+  } catch (err) {
+    console.error("[brands] POST /types/consolidate failed:", err);
+    return c.json({ success: false, error: "Consolidation failed" }, 500);
+  }
 });
 
 /**
@@ -766,11 +786,14 @@ brandsRouter.get("/:id", async (c) => {
             typeId: brandTypesDef.id,
             typeName: brandTypesDef.name,
             typeDescription: brandTypesDef.description,
+            isPrimary: brandTypeMappings.isPrimary,
             brandIconCfImagesUrl: brandTypeMappings.brandIconCfImagesUrl,
           })
           .from(brandTypeMappings)
           .innerJoin(brandTypesDef, eq(brandTypeMappings.typeId, brandTypesDef.id))
-          .where(eq(brandTypeMappings.brandId, brandId)),
+          // Primary first, so the highlighted type leads the row.
+          .where(eq(brandTypeMappings.brandId, brandId))
+          .orderBy(desc(brandTypeMappings.isPrimary), brandTypesDef.name),
 
         // (2a) Showrooms via direct brand mapping
         db
