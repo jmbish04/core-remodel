@@ -9,8 +9,8 @@
  * legacy rows that still hold one freeform chunk, splits on blank lines so old
  * drives also render as a stack of cards.
  */
-import { driveListStops, driveLists } from "@backend/db";
-import { and, desc, eq, ne } from "drizzle-orm";
+import { driveListStops, driveLists, showroomStores } from "@backend/db";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 /** Drizzle D1 client (matches the MCP registry's `RemodelDb`). */
@@ -105,6 +105,43 @@ export interface DriveListCreateInput {
   status?: "draft" | "active" | "completed" | "archived";
   sourceConversation?: string;
   stops: DriveStopInput[];
+}
+
+/**
+ * Backfill missing stop coordinates from each stop's linked showroom, in place.
+ *
+ * A stop can be created without lat/lng yet still link a geocoded showroom; the
+ * drive map and per-stop navigation both key off the stop's OWN coords, so
+ * without this the whole map falls back to an empty pin even though the
+ * coordinates exist on the linked showroom. Mutates and returns the same array.
+ * Stop counts are bounded (the planner caps a drive at 24 stops), so the id
+ * list needs no chunking.
+ */
+export async function fillMissingStopCoords<
+  T extends { showroomStoreId: number | null; latitude: number | null; longitude: number | null },
+>(db: RemodelDb, stops: T[]): Promise<T[]> {
+  const need = stops.filter(
+    (s) => (s.latitude == null || s.longitude == null) && s.showroomStoreId != null,
+  );
+  if (need.length === 0) return stops;
+  const ids = Array.from(new Set(need.map((s) => s.showroomStoreId as number)));
+  const coords = await db
+    .select({
+      id: showroomStores.id,
+      latitude: showroomStores.latitude,
+      longitude: showroomStores.longitude,
+    })
+    .from(showroomStores)
+    .where(inArray(showroomStores.id, ids));
+  const byId = new Map(coords.map((r) => [r.id, r]));
+  for (const s of stops) {
+    if (s.showroomStoreId == null) continue;
+    const sr = byId.get(s.showroomStoreId);
+    if (!sr) continue;
+    if (s.latitude == null) s.latitude = sr.latitude;
+    if (s.longitude == null) s.longitude = sr.longitude;
+  }
+  return stops;
 }
 
 /** Insert a drive list + its ordered stops. Returns the new id/slug/stopCount. */

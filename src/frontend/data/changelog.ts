@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/drive-list-ui-improvements-b58ece",
+    title: "Drives · render route map + tighten stop-card actions (PR-A quick fixes)",
+    summary:
+      "First slice of the drive-list UI overhaul. Fixes the blank route map (it fell back to an empty pin whenever a drive's stops had null lat/lng, even though they linked geocoded showrooms — GET /api/drive-lists/:slug now backfills each stop's missing coords from its linked showroom, 9/23 → 23/23 drives mappable). Also folds the Tesla control into the same rounded container as the address + Navigate bar at matched height, and enlarges the hours badge + turns the phone into a large tap-to-dial button for Tesla/phone touch targets. Larger phases (per-stop notes/ratings/skip, active-drive banner + start-time feasibility, showroom modal, proximity pitstops) follow as separate PRs.",
+    date: "2026-07-25",
+    status: "staged",
+    prNumber: 244,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/244",
+  },
+  {
     branch: "claude/showroom-location-tagging-ex2ik5",
     title: "Brands · finish ops #4 dedup + durable name-key unique index",
     summary:
@@ -265,6 +275,21 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "added", text: "New page /admin/shopping/receipt-review (thin Astro shell + ReceiptReviewApp island), plus a sidebar link under Shopping & Sourcing." },
       { kind: "added", text: "Per-line room dropdown of eligible candidates, and an \"Other room…\" entry opening a full-room RoomSelect modal for way-wrong guesses." },
       { kind: "changed", text: "Confirm resolves each staged proposal against a roomId FK (never a denormalized room name) via the #236 resolve endpoint; nothing commits to the materials schedule until the owner confirms." },
+    ],
+    status: "staged",
+  },
+  {
+    id: "drives-map-fix-card-actions",
+    branch: "claude/drive-list-ui-improvements-b58ece",
+    date: "2026-07-25",
+    area: "Drives",
+    title: "Route map renders again + tighter stop-card action strip",
+    summary:
+      "The drive route map (MapLibre, no API key) renders only when a shown stop has coordinates, and falls back to an empty pin icon otherwise. The landing list already coalesced a stop's coords from its linked showroom for markers, but GET /api/drive-lists/:slug did not — so a drive whose stops were created without their own lat/lng showed a blank map even though the linked showrooms are geocoded. Added fillMissingStopCoords (service) and call it in the :slug handler: 9/23 → 23/23 drives now render a map (28 → 94 linked stops carry coords). Also: Tesla control moved inside the same rounded bg-muted container as the address + Navigate bar at matched height (one control strip), and the hours badge enlarged + phone turned into a large min-h-12 tap-to-dial button.",
+    changes: [
+      { kind: "fixed", text: "GET /api/drive-lists/:slug now backfills each stop's missing lat/lng from its linked showroom (fillMissingStopCoords). Previously only the landing-list markers did this, so 14 of 23 drives rendered a blank pin icon instead of a route map despite linking geocoded showrooms." },
+      { kind: "changed", text: "Stop-card action row: the Tesla button now sits inside the same rounded bg-muted container as the address + Navigate bar, at matched min-h-14 height, reading as one control strip (was a separate raised secondary button outside the background)." },
+      { kind: "changed", text: "Hours badge enlarged to text-base; phone number is now a large min-h-12 rounded tap-to-dial button (tel:) sized for Tesla / phone touch targets, not a small ghost badge." },
     ],
     status: "staged",
   },

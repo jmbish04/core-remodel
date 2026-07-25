@@ -438,13 +438,18 @@ export function DriveViewportApp({ slug }: { slug: string }) {
 
                     {stop.hours || stop.phone ? (
                       <div className="mt-3 flex flex-wrap items-center gap-2">
-                        {stop.hours ? <Badge variant="secondary">{stop.hours}</Badge> : null}
+                        {stop.hours ? (
+                          <span className="inline-flex min-h-12 items-center rounded-lg bg-secondary px-3.5 text-base font-semibold text-secondary-foreground">
+                            {stop.hours}
+                          </span>
+                        ) : null}
                         {stop.phone ? (
-                          <a href={`tel:${stop.phone.replace(/[^0-9+]/g, "")}`}>
-                            <Badge variant="ghost" className="gap-1.5">
-                              <Phone className="size-3.5" />
-                              {stop.phone}
-                            </Badge>
+                          <a
+                            href={`tel:${stop.phone.replace(/[^0-9+]/g, "")}`}
+                            className="inline-flex min-h-12 items-center gap-2 rounded-lg bg-muted px-4 text-base font-semibold text-foreground transition-colors hover:bg-accent active:scale-[0.98]"
+                          >
+                            <Phone className="size-5 text-primary" />
+                            {stop.phone}
                           </a>
                         ) : null}
                       </div>
@@ -453,13 +458,16 @@ export function DriveViewportApp({ slug }: { slug: string }) {
                     {hasNav || showTesla ? (
                       <>
                         <Separator className="my-3" />
-                        <div className="flex flex-wrap items-center gap-2">
+                        {/* Address + Navigate + Tesla share one rounded bg-muted
+                            container; the Tesla control matches the Navigate bar's
+                            height so both read as one control strip. */}
+                        <div className="flex items-stretch overflow-hidden rounded-xl bg-muted">
                           {hasNav ? (
                             <a
                               href={navUrl(stop)}
                               target="_blank"
                               rel="noopener noreferrer"
-                              className="flex min-h-14 flex-1 items-center gap-3 rounded-xl bg-muted px-4 text-sm font-semibold transition-colors hover:bg-accent"
+                              className="flex min-h-14 flex-1 items-center gap-3 px-4 text-sm font-semibold transition-colors hover:bg-accent"
                             >
                               <MapPin className="size-5 shrink-0 text-primary" />
                               <span className="flex-1 leading-snug">{stop.address}</span>
@@ -469,13 +477,18 @@ export function DriveViewportApp({ slug }: { slug: string }) {
                               </span>
                             </a>
                           ) : null}
+                          {hasNav && showTesla ? (
+                            <span aria-hidden className="my-2 w-px shrink-0 bg-border" />
+                          ) : null}
                           {showTesla ? (
-                            <Button
+                            <button
                               type="button"
-                              size="sm"
-                              variant="secondary"
                               disabled={navigatingStopId === stop.id}
                               onClick={() => sendToTesla(stop)}
+                              className={cn(
+                                "flex min-h-14 shrink-0 items-center gap-2 px-5 text-sm font-bold text-primary transition-colors hover:bg-accent active:scale-[0.98] disabled:opacity-60",
+                                !hasNav && "flex-1 justify-center",
+                              )}
                             >
                               {navigatingStopId === stop.id ? (
                                 <Loader2 className="size-4 animate-spin" />
@@ -483,7 +496,7 @@ export function DriveViewportApp({ slug }: { slug: string }) {
                                 <TeslaIcon className="size-4" />
                               )}
                               Tesla
-                            </Button>
+                            </button>
                           ) : null}
                         </div>
                       </>

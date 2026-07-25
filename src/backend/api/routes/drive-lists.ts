@@ -15,7 +15,12 @@ import {
   HOME_RADIUS_M,
 } from "@backend/services/drive-home-arrival-rules";
 import { getHomeCoords } from "@backend/services/drive-home-arrival";
-import { createDriveList, parseDriveNotes, setActiveDrive } from "@backend/services/drive-lists";
+import {
+  createDriveList,
+  fillMissingStopCoords,
+  parseDriveNotes,
+  setActiveDrive,
+} from "@backend/services/drive-lists";
 import { getStreamControl, isWithinStreamWindow } from "@backend/services/tesla/gating";
 import { isRequestAuthenticated } from "@backend/utils/access";
 import { asc, desc, eq, sql } from "drizzle-orm";
@@ -162,6 +167,9 @@ driveListsRouter.get("/:slug", async (c) => {
     .where(eq(driveListStops.driveListId, drive.id))
     .orderBy(asc(driveListStops.sortOrder), asc(driveListStops.id))
     .all();
+  // Fill any missing stop coords from the linked showroom so the map plots and
+  // navigation works even for stops created without their own lat/lng.
+  await fillMissingStopCoords(db, stops);
 
   return c.json({ ...drive, notes: parseDriveNotes(drive.notes), stops });
 });
