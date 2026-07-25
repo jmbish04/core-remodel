@@ -45,7 +45,8 @@ import {
 } from "@backend/db";
 
 import { cropAndUploadCfImage, probeCfImageDimensions } from "../../services/render/cf-images";
-import { nearestAspectRatio, PRESERVATION_BLOCK, referenceScopingNote } from "../../services/render/prompt-kit";
+import { nearestAspectRatio } from "../../services/render/prompt-kit";
+import { RECIPES, buildRecipePrompt } from "../../services/render/recipes";
 import { runStage } from "../../services/render/stage-runner";
 import {
   resolveInspirationDrawer,
@@ -1170,31 +1171,18 @@ workshopRouter.openapi(
 
       let stageResult;
       if (body.recipe === "material-swap") {
+        const recipe = RECIPES["material-swap"];
         const { referenceCfImageUrls, prompt } = body.params;
         const references = referenceCfImageUrls.map((url, index) => ({
           url,
           label: `reference ${index + 1}`,
         }));
-        const userRequest = prompt || "Apply the referenced material/finish to this room.";
-        const composedPrompt = [
-          "You are an expert architectural photo editor. Perform a natural, localized, photorealistic finish edit on the provided room image based on the user's request.",
-          "",
-          `User Request: ${userRequest}`,
-          "",
-          "Editing Guidelines:",
-          "- The edit must be photorealistic and blend seamlessly with the surrounding area.",
-          PRESERVATION_BLOCK,
-          "",
-          "Reference images (material/form only):",
-          ...references.map((ref) => `- ${referenceScopingNote(ref.label)}`),
-          "",
-          "Output: return ONLY the final edited image. Do not return text.",
-        ].join("\n");
+        const composedPrompt = buildRecipePrompt(recipe, { userRequest: prompt, references });
 
         stageResult = await runStage({
           env: c.env,
           sessionId,
-          type: "stage_3_LP_finish",
+          type: recipe.stageType,
           inputImageUrl: node.cfImageUrl,
           prompt: composedPrompt,
           parentCanvasId: node.renderCanvasId ?? null,
@@ -1217,29 +1205,17 @@ workshopRouter.openapi(
           return c.json({ error: "No resolvable clippings" }, 400);
         }
 
+        const references = foundClippings.map((clip, index) => ({
+          url: clip.clippingCfImageUrl,
+          label: clip.label || `sample ${index + 1}`,
+        }));
         const imageUrls = [node.cfImageUrl, ...foundClippings.map((clip) => clip.clippingCfImageUrl)];
-        const userRequest = prompt || "Mix these samples into the room, keeping the result photorealistic.";
-        const composedPrompt = [
-          "You are an expert architectural photo editor. Synthesize the referenced samples into the base room image based on the user's request.",
-          "",
-          `User Request: ${userRequest}`,
-          "",
-          "Editing Guidelines:",
-          "- The edit must be photorealistic and blend seamlessly with the surrounding area.",
-          PRESERVATION_BLOCK,
-          "",
-          "Reference images (material/form only, in @image order after the base):",
-          ...foundClippings.map((clip, index) =>
-            `- ${referenceScopingNote(clip.label || `sample ${index + 1}`)}`,
-          ),
-          "",
-          "Output: return ONLY the final edited image. Do not return text.",
-        ].join("\n");
+        const composedPrompt = buildRecipePrompt(RECIPES.mix, { userRequest: prompt, references });
 
         stageResult = await runStage({
           env: c.env,
           sessionId,
-          type: "stage_5_LP_synthesis",
+          type: RECIPES.mix.stageType,
           inputImageUrl: node.cfImageUrl,
           prompt: composedPrompt,
           parentCanvasId: node.renderCanvasId ?? null,
