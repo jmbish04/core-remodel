@@ -173,3 +173,30 @@ sitemap cache to resolve the page.
 - QC (`pr_candidate_enrich.mjs`): bucket with a hint productUrl → workflow
   completes → top candidate has a non-empty `imageSourceUrls` array of http
   source links (not downloaded) + `product_url` recorded — 8/8 on preview.
+
+---
+
+## Phase D1 — Candidate reactions + confirm/reject (THIS CHANGELIST)
+
+**Goal:** the backend the HITL walkthrough (Phase E UI) drives — record a
+per-candidate reaction and promote a candidate into a real product.
+
+### Tasks (done)
+
+- **D1.1** `PATCH /api/intake/candidates/:id/reaction` — match (y/n), like (y/n),
+  stars (1-5 or null); only supplied fields updated. Reactions kept on
+  non-matches (style signal).
+- **D1.2** `POST /api/intake/candidates/:id/reject` — status 'rejected', kept
+  (not deleted).
+- **D1.3** `POST /api/intake/candidates/:id/confirm` — the ONLY place the intake
+  pipeline creates a product/brand: `ensureProductFromExtraction` (find-or-create
+  brand + product) from the candidate fields, map product→showroom, link
+  bucket (`product_id`, status 'reviewed'), set `confirmed_product_id` + status
+  'confirmed'. 409 if already confirmed.
+
+### Acceptance
+
+- `tsc --noEmit` adds 0 errors; `pnpm run build` bundles.
+- QC (`pr_candidate_reaction.mjs`): reaction persists, out-of-range stars 400,
+  reject keeps the row, confirm mints product+brand+mapping and links the bucket,
+  second confirm 409 — 15/15 on preview.
