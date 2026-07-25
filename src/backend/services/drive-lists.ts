@@ -277,6 +277,19 @@ export async function updateDriveList(
   }
   if (input.status !== undefined) patch.status = input.status;
   await db.update(driveLists).set(patch).where(eq(driveLists.id, drive.id)).run();
+
+  // Labeling a drive completed/archived/draft should not leave it as THE active
+  // drive. Deactivation is always allowed (only ACTIVATION is window-gated), so
+  // clearing the active pointer here can't bypass the 07:00–20:00 rule. We never
+  // ACTIVATE from a label change — that stays on the gated path.
+  if (input.status !== undefined && input.status !== "active") {
+    const [row] = await db
+      .select({ isActive: driveLists.isActive })
+      .from(driveLists)
+      .where(eq(driveLists.id, drive.id))
+      .limit(1);
+    if (row?.isActive) await setActiveDrive(db, null);
+  }
   return drive;
 }
 
