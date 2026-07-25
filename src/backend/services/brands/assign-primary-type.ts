@@ -18,7 +18,7 @@
  */
 
 import { drizzle } from "drizzle-orm/d1";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 
 import { brands } from "@backend/db/schema/brands/brands";
 import { brandTypesDef } from "@backend/db/schema/brands/brand_types_def";
@@ -156,17 +156,17 @@ Return one assignment per brand, using the brand's numeric id and the numeric id
         report.invalidPicks++;
         continue;
       }
-      // Exactly one primary per brand: clear all, then set the chosen one.
+      // Exactly one primary per brand, in ONE atomic statement: the chosen
+      // type's flag goes to 1, every other row for the brand to 0. Two
+      // sequential updates would risk a brand with zero primaries if the second
+      // failed — and D1 has no interactive `transaction()` to wrap them, so a
+      // single CASE update is both the correct and the only clean fix.
       await db
         .update(brandTypeMappings)
-        .set({ isPrimary: false })
+        .set({
+          isPrimary: sql`CASE WHEN ${brandTypeMappings.typeId} = ${pick} THEN 1 ELSE 0 END`,
+        })
         .where(eq(brandTypeMappings.brandId, b.id));
-      await db
-        .update(brandTypeMappings)
-        .set({ isPrimary: true })
-        .where(
-          and(eq(brandTypeMappings.brandId, b.id), eq(brandTypeMappings.typeId, pick)),
-        );
       report.assigned++;
     }
   }
