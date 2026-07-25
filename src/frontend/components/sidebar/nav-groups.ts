@@ -68,6 +68,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
       { href: "/admin/shopping/photo-intake", label: "Showroom Intake" },
       { href: "/admin/shopping/photo-review", label: "Price-Card Review" },
       { href: "/admin/shopping/product-photo-hitl", label: "Product-Photo Review" },
+      { href: "/admin/shopping/receipt-review", label: "Receipt Review" },
       { href: "/admin/shopping/wishlist", label: "Wishlist" },
       { href: "/admin/shopping/sales", label: "Sales & Clearance" },
       { href: "/admin/shopping/journal", label: "Shopping Journal" },

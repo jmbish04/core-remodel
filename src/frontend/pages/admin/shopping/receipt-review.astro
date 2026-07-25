@@ -1,0 +1,43 @@
+---
+/**
+ * @fileoverview Receipt → room review — `/admin/shopping/receipt-review`.
+ *
+ * Thin shell mounting <ReceiptReviewApp>. The HITL queue where the owner
+ * confirms (or corrects) the rooms the deduction engine placed a receipt's
+ * materials into.
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ReceiptReviewApp } from "@/components/materials/ReceiptReviewApp";
+---
+
+<BaseLayout
+  title="Receipt Review — The Monolith"
+  description="Confirm the rooms your receipts' materials were placed into."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 flex items-center gap-2 text-3xl font-bold tracking-tight">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="size-6 text-muted-foreground"
+          aria-hidden="true"
+        >
+          <path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1-2-1Z" />
+          <path d="M8 8h8M8 12h8M8 16h5" />
+        </svg>
+        Receipt Review
+      </h1>
+      <p class="text-muted-foreground">
+        Materials the system placed from your receipts, best-guess. Swap any room the system got wrong — the rest hold.
+        Nothing is committed until you confirm.
+      </p>
+    </div>
+    <ReceiptReviewApp client:only="react" />
+  </main>
+</BaseLayout>
