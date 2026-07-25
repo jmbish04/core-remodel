@@ -19,6 +19,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { DriveMapThumb, type LatLng } from "./DriveMapThumb";
+import { TeslaStreamControl } from "./TeslaStreamControl";
 
 type DriveListSummary = {
   id: number;
@@ -192,6 +193,7 @@ export function DriveListsApp() {
   return (
     <div>
       {header}
+      <TeslaStreamControl />
       <Tabs defaultValue={partial.length ? "partial" : "pending"}>
         <TabsList className="mb-6">
           <TabsTrigger value="pending">Pending ({pending.length})</TabsTrigger>
