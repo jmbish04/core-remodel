@@ -16,6 +16,7 @@ import {
 } from "@backend/services/drive-home-arrival-rules";
 import { getHomeCoords } from "@backend/services/drive-home-arrival";
 import { createDriveList, parseDriveNotes, setActiveDrive } from "@backend/services/drive-lists";
+import { getStreamControl, isWithinStreamWindow } from "@backend/services/tesla/gating";
 import { isRequestAuthenticated } from "@backend/utils/access";
 import { asc, desc, eq, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -184,6 +185,23 @@ driveListsRouter.patch("/:slug", async (c) => {
     .where(eq(driveLists.slug, c.req.param("slug")))
     .limit(1);
   if (!drive) return c.json({ error: "Not found" }, 404);
+
+  // A drive list may only be ACTIVATED inside the daytime streaming window
+  // (default 07:00–20:00 Pacific) — the streaming DO is time-boxed, so activation
+  // outside it would only ever poll. Deactivation is always allowed.
+  if (body.isActive) {
+    const control = await getStreamControl(c.env);
+    if (!isWithinStreamWindow(new Date(), control)) {
+      return c.json(
+        {
+          error: `A drive can only be made active between ${String(control.windowStartHour).padStart(2, "0")}:00 and ${String(control.windowEndHour).padStart(2, "0")}:00 Pacific.`,
+          windowStartHour: control.windowStartHour,
+          windowEndHour: control.windowEndHour,
+        },
+        409,
+      );
+    }
+  }
 
   await setActiveDrive(db, body.isActive ? drive.id : null);
   return c.json({ ok: true, isActive: body.isActive });

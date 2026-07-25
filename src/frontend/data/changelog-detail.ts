@@ -167,6 +167,52 @@ await db.batch(batch); // D1 runs a batch as one all-or-nothing unit`,
         "without approval.",
     },
   },
+  "tesla-stream-lifecycle-control": {
+    slug: "tesla-stream-lifecycle-control",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0023 Ingest · lifecycle gating before the socket exists",
+    problem:
+      "The next PR adds TeslaStreamDO, which holds an OUTBOUND WebSocket to streaming.tessie.com. Unlike an inbound hibernatable socket, an outbound one the worker dials is DURATION-BILLED the whole time it's held — a DO left connected 24/7 is exactly the always-on cost the $700 incident taught us to fear. So before the DO exists, the lifecycle rules that keep it from running unnecessarily have to be in place and testable, and the poller that #178 shipped (a cron fallback) has to know when to stand down so the two paths never double-process one drive.",
+    approach:
+      "One decision surface — services/tesla/gating.ts — answers 'should the stream be connected now?' and 'should the poller run instead?' so the DO, the control routes, and the scheduled tick all agree. The stream is alive only when ALL hold: a drive is active, local time is inside the daytime window (default 07:00–20:00 Pacific, computed with Intl so DST is correct on a UTC worker), telemetry recording is on, and the UI toggle is on. shouldStreamNow / shouldPollNow are complementary — exactly one covers an active drive, so there's no gap and no overlap. The frame extractors were lifted verbatim out of routes/tesla.ts into services/tesla/frames.ts so the DO and the compat webhook parse identically. Config lives in project_system_variables (one batched read), the poller stands down on a DO-set connected flag and throttles on a configurable cadence, drive activation is 409'd outside the window, and enforceStreamWindow (run each scheduled minute) deactivates a drive once the window closes.",
+    apiChanges: [
+      "GET /api/tesla/stream/control — { control, shouldStream, shouldPoll } (admin).",
+      "POST /api/tesla/stream/control — set { enabled?, windowStartHour?, windowEndHour?, pollFallbackSeconds? }; inverted window → 400.",
+      "PATCH /api/drive-lists/:slug { isActive:true } now → 409 outside the 07:00–20:00 window.",
+    ],
+    filesTouched: [
+      "src/backend/services/tesla/frames.ts (new)",
+      "src/backend/services/tesla/gating.ts (new)",
+      "src/backend/services/tesla-poller.ts",
+      "src/backend/api/routes/tesla.ts",
+      "src/backend/api/routes/drive-lists.ts",
+      "src/_worker.ts",
+    ],
+    migrations: [],
+    diagrams: [
+      {
+        caption: "When the streaming DO is alive vs when the poller takes over",
+        code: `stateDiagram-v2
+  [*] --> Idle
+  Idle --> Streaming: drive active AND 07:00-20:00 AND recording AND toggle ON
+  Streaming --> Polling: toggle OFF (drive still active)
+  Polling --> Streaming: toggle ON (inside window)
+  Streaming --> Idle: car home OR 20:00 close
+  Polling --> Idle: car home OR 20:00 close`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_241.mjs",
+      command: "pnpm run test:pr 241 -- --preview   # and against prod (regression)",
+      ranAt: undefined,
+      output:
+        "AUTHORED, NOT YET RUN. This container has no node_modules / tokens CLI and\n" +
+        "cannot reach the deployed worker, so QC runs in a toolchain env against the\n" +
+        "branch preview AND prod. The control routes are new, so the prod run reports\n" +
+        "them PENDING until this merges and the manual Deploy action runs.",
+      migrations: [],
+    },
+  },
   "showroom-store-dedup-tool": {
     slug: "showroom-store-dedup-tool",
     branch: "claude/showroom-listing-500-map-6kvtm9",

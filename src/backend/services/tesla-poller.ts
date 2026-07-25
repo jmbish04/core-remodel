@@ -31,6 +31,7 @@ import { matchAndMarkVisited } from "@backend/services/drive-geo-match";
 import { maybeEndActiveDriveOnHomeArrival } from "@backend/services/drive-home-arrival";
 import { getActiveDriveSlug } from "@backend/services/drive-lists";
 import { getVehicleState, sendNavigation, tessieConfigured } from "@backend/services/tesla";
+import { getStreamControl, isWithinStreamWindow } from "@backend/services/tesla/gating";
 import { drizzle } from "drizzle-orm/d1";
 
 /** KV key holding the last poll timestamp, used as the throttle. */
@@ -42,7 +43,7 @@ export const POLL_INTERVAL_SECONDS = 120;
 export interface PollResult {
   polled: boolean;
   /** Why a poll was skipped, when it was. */
-  reason?: "no-active-drive" | "unconfigured" | "throttled" | "no-state";
+  reason?: "no-active-drive" | "unconfigured" | "throttled" | "no-state" | "stream-active";
   shiftState?: string | null;
   latitude?: number | null;
   longitude?: number | null;
@@ -67,10 +68,29 @@ export async function pollVehicleForActiveDrive(env: Env): Promise<PollResult> {
 
   if (!(await tessieConfigured(env))) return { polled: false, reason: "unconfigured" };
 
+  // Gate 1b: the poller is the FALLBACK ingest path. When the streaming DO is
+  // carrying the load (toggle on, socket connected, inside the daytime window)
+  // it stands down so the two paths never double-process the same drive. The
+  // configured cadence also becomes the throttle interval below.
+  //
+  // A failure reading stream-control must NOT take the fallback down — default to
+  // "stream not carrying" and the built-in cadence so ingest keeps flowing.
+  let streamCarrying = false;
+  let throttleTtl = POLL_INTERVAL_SECONDS;
+  try {
+    const control = await getStreamControl(env);
+    streamCarrying =
+      control.enabled && control.connected && isWithinStreamWindow(new Date(), control);
+    throttleTtl = control.pollFallbackSeconds;
+  } catch (err) {
+    console.error("[tesla-poller] stream-control read failed; using default cadence:", err);
+  }
+  if (streamCarrying) return { polled: false, reason: "stream-active" };
+
   // Gate 2: throttle. KV TTL is the clock — a present key means "polled
   // recently", so no timestamp arithmetic and no clock skew to reason about.
   if (await env.CACHE.get(THROTTLE_KEY)) return { polled: false, reason: "throttled" };
-  await env.CACHE.put(THROTTLE_KEY, "1", { expirationTtl: POLL_INTERVAL_SECONDS });
+  await env.CACHE.put(THROTTLE_KEY, "1", { expirationTtl: throttleTtl });
 
   const state = await getVehicleState(env);
   if (!state || state.latitude == null || state.longitude == null) {
