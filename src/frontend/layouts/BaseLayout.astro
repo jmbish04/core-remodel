@@ -5,6 +5,7 @@ import HeadSEO from "@/components/HeadSEO.astro";
 import { AdminSidebar } from "@/components/sidebar/AdminSidebar";
 import { PublicSidebar } from "@/components/sidebar/PublicSidebar";
 import { AppHeader } from "@/components/AppHeader";
+import { AdminTeslaAlert } from "@/components/AdminTeslaAlert";
 import { Footer } from "@/components/Footer";
 import { VisitorActivityTracker } from "@/components/VisitorActivityTracker";
 import { Toaster } from "sonner";
@@ -54,6 +55,7 @@ const isAdmin = currentPath === "/admin" || currentPath.startsWith("/admin/");
       <div class="flex min-h-svh w-full min-w-0 md:pl-64">
         <div class="flex min-h-svh min-w-0 flex-1 flex-col">
           <AppHeader client:load />
+          {isAdmin && <AdminTeslaAlert client:only="react" />}
           <div class="min-w-0 flex-1">
             <slot />
           </div>

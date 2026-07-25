@@ -231,6 +231,22 @@ export const BRANCHES: ChangelogBranch[] = [
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "tesla-admin-alert",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-25",
+    tag: "0023",
+    area: "Tesla / Ingest",
+    title: "Global admin telemetry alert + vehicle compositor image",
+    summary:
+      "A banner across every /admin page that appears only when a drive list is active. It shows whether telemetry is live, offers a one-click Enable button when a drive is active and it's inside the 7 AM–8 PM window with the toggle off, and — when the stream is live — renders the compositor image of the actual car from Tessie's vehicle_config.",
+    changes: [
+      { kind: "added", text: "services/tesla/vehicle-image.ts — builds Tesla's public compositor URL from vehicle_config (car/paint/wheel option-code maps ported from the operator's iOS app), Model 3/Y only, cached in KV for a day." },
+      { kind: "added", text: "GET /api/tesla/stream/banner — one cheap aggregate (D1/KV, no DO round-trip): activeDrive, telemetryActive, withinWindow + a 12-hour window label, canEnable, and vehicleImageUrl when live." },
+      { kind: "added", text: "components/AdminTeslaAlert.tsx mounted in BaseLayout (admin-only) after AppHeader: 'Drive list active' + telemetry state, an Enable-telemetry button, and the car image; polls every 20s, self-hides on 404 / no active drive." },
+    ],
+    status: "staged",
+  },
+  {
     id: "showroom-dedup-merge-and-guards",
     branch: "claude/showroom-listing-500-map-6kvtm9",
     date: "2026-07-25",
