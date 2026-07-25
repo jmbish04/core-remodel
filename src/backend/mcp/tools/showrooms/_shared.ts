@@ -8,10 +8,51 @@ import {
   type MappedPlaceStore,
 } from "@backend/services/showroom/onboarding";
 import { collectSocialLinks } from "@backend/services/showroom/social-links";
+import { and, isNotNull } from "drizzle-orm";
 
 import type { RemodelDb } from "../../types";
 
 import { toolError } from "../../format";
+
+/** A registered showroom with a usable coordinate, for proximity queries. */
+export interface ShowroomCoord {
+  id: number;
+  name: string;
+  latitude: number;
+  longitude: number;
+  address: string | null;
+  hubName: string | null;
+}
+
+/**
+ * Load every registered showroom that has a coordinate.
+ *
+ * THIS IS THE SINGLE coordinate-source seam for showroom proximity. Location
+ * data lives on `showroom_stores.{latitude,longitude}` today; a move to a
+ * dedicated `showroom_stores_locations` table is anticipated (see
+ * docs/0023_tesla_telemetry_webhooks). When that lands, change the query HERE
+ * and every proximity caller (whats_near_me, and the P4 park-scan) follows —
+ * no scattered coordinate reads to hunt down.
+ */
+export async function loadShowroomCoords(db: RemodelDb): Promise<ShowroomCoord[]> {
+  const rows = await db
+    .select({
+      id: showroomStores.id,
+      name: showroomStores.name,
+      latitude: showroomStores.latitude,
+      longitude: showroomStores.longitude,
+      address: showroomStores.locationAddress,
+      hubName: showroomStores.hubName,
+    })
+    .from(showroomStores)
+    .where(and(isNotNull(showroomStores.latitude), isNotNull(showroomStores.longitude)))
+    .all();
+
+  // The isNotNull filter guarantees both are present; narrow for the type.
+  return rows.filter(
+    (r): r is ShowroomCoord => r.latitude != null && r.longitude != null,
+  );
+}
 
 /**
  * Turn a `MAPS_QUOTA_EXCEEDED` service error into an actionable tool error, and

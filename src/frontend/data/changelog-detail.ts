@@ -275,6 +275,128 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
         "against prod from a toolchain-equipped environment before merge; result pending.",
     },
   },
+  "tesla-location-ai-p6": {
+    slug: "tesla-location-ai-p6",
+    subtitle: "0023 Phase P6 — the in-car assistant's location tools",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    prNumber: 220,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/220",
+    introduction:
+      "For an AI riding along in the car. These are the two MCP tools it calls to know where the driver is and what's worth a stop — enriched by the worker so the model gets a heading, a street address and a freshness stamp rather than bare coordinates, and gated so a 'what's near me?' can never quietly spend past Google's free tier.",
+    problem:
+      "`get_vehicle_location` returned four fields — latitude, longitude, a raw Tessie address, and a map URL. An in-car assistant can't say 'you're heading north-west on El Camino' from that: there was no heading (Tessie reports it, but `getLocation` never parsed it), no way to fill an address when Tessie omitted one, and no freshness signal, so a minutes-old fix read exactly like a live one. And there was no tool at all for the core on-the-road question — 'which showrooms are near me right now, and which way?' — even though the coordinates to answer it already sit on `showroom_stores` and the quota-safe Places/Geocoding methods shipped in #185.",
+    approach:
+      "get_vehicle_location is enriched in place rather than forked into a second tool. `getLocation` now parses Tessie's `heading` and fix `timestamp` (fail-soft, normalizing the seconds-or-ms the firmware varies on); the tool converts heading to a 16-point compass, fills a missing address via the quota-gated `reverseGeocode` (Geocoding SKU, degrades to null — never bills past free tier, never fails the call), derives the Bay Area region, and stamps serverTime + ageSeconds + isStale, treating an unknown age as stale so a possibly-old fix is never narrated as live. whats_near_me is new: it resolves the origin the same way get_user_location does (explicit coords → live Tesla GPS → last phone fix), then ranks registered showrooms by haversine distance with a bearing + compass to each, and on request sweeps quota-gated placesNearby for undiscovered nearby spots (de-duped against known showrooms by proximity). Crucially, every showroom coordinate is read through ONE helper, loadShowroomCoords — the single seam that survives the anticipated move of location data off showroom_stores. A prior audit confirmed that move is not yet in flight (no such table in any schema, PR, or branch), so reading showroom_stores today is correct, and isolating it means the future move is a one-line change.",
+    apiChanges: [
+      "MCP get_vehicle_location — enriched output: heading, headingCompass, address (reverse-geocoded fallback), region, serverTime, ageSeconds, isStale, note (was: latitude, longitude, address, mapUrl)",
+      "MCP whats_near_me (NEW) — inputs latitude?/longitude?/radiusMeters?/limit?/includeUndiscovered?; returns origin, showrooms[{distance, bearing, compass}], undiscovered[], note",
+      "No REST or schema change; both Google paths are the already-shipped quota-gated reverseGeocode/placesNearby",
+    ],
+    filesTouched: [
+      "src/backend/mcp/tools/tesla/get_vehicle_location.ts",
+      "src/backend/mcp/tools/showrooms/whats_near_me.ts",
+      "src/backend/mcp/tools/showrooms/_shared.ts",
+      "src/backend/mcp/tools/showrooms/index.ts",
+      "src/backend/services/tesla.ts",
+      "src/backend/services/drive-geo-match.ts",
+      "scripts/qc/pr_220.mjs",
+    ],
+    migrations: [],
+    code: [
+      {
+        title: "The single coordinate-source seam (survives the showroom_stores_locations move)",
+        lang: "ts",
+        code: `// _shared.ts — THE only place showroom coordinates are read for proximity.
+// When location data moves off showroom_stores, change this query and every
+// proximity caller (whats_near_me, the P4 park-scan) follows automatically.
+export async function loadShowroomCoords(db: RemodelDb): Promise<ShowroomCoord[]> {
+  const rows = await db
+    .select({
+      id: showroomStores.id,
+      name: showroomStores.name,
+      latitude: showroomStores.latitude,
+      longitude: showroomStores.longitude,
+      address: showroomStores.locationAddress,
+      hubName: showroomStores.hubName,
+    })
+    .from(showroomStores)
+    .where(and(isNotNull(showroomStores.latitude), isNotNull(showroomStores.longitude)))
+    .all();
+  return rows.filter((r): r is ShowroomCoord => r.latitude != null && r.longitude != null);
+}`,
+      },
+      {
+        title: "Freshness: an unknown age is treated as stale, never narrated as live",
+        lang: "ts",
+        code: `const ageSeconds =
+  loc.timestampMs != null ? Math.max(0, Math.round((nowMs - loc.timestampMs) / 1000)) : null;
+// Unknown age ⇒ stale — better to under-promise freshness than to imply a live fix.
+const isStale = ageSeconds == null || ageSeconds > STALE_AFTER_SECONDS;`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Enrichment round-trip",
+        title: "get_vehicle_location — enrich, quota-safe, freshness-stamped",
+        description:
+          "The reverse-geocode only fires when Tessie omitted an address, and it is on the Geocoding SKU so a blown quota degrades to a null address instead of failing the call.",
+        code: `sequenceDiagram
+  participant AI as In-car AI
+  participant V as get_vehicle_location
+  participant Tess as Tessie /location
+  participant G as GoogleMaps (geocoding SKU)
+  AI->>V: where am I / which way?
+  V->>Tess: getLocation (fresh)
+  Tess-->>V: lat/lng, heading, fix-time
+  alt no address on the fix
+    V->>G: reverseGeocode (quota-gated)
+    G-->>V: address | null (fail-soft)
+  end
+  V-->>AI: coords + compass + address + region + serverTime/ageSeconds/isStale`,
+      },
+      {
+        caption: "whats_near_me flow",
+        title: "whats_near_me — origin resolution, ranking, and the coordinate seam",
+        description:
+          "Origin falls back explicit → Tesla → phone. Registered showrooms are read through loadShowroomCoords (the one seam); the optional Places sweep is quota-gated and de-duped against known showrooms.",
+        code: `flowchart TD
+  A(["whats_near_me"]) --> O{"explicit coords?"}
+  O -->|yes| ORIG["origin = explicit"]
+  O -->|no| T{"live Tesla GPS?"}
+  T -->|yes| ORIG2["origin = tesla (+heading)"]
+  T -->|no| P{"last phone fix?"}
+  P -->|yes| ORIG3["origin = phone"]
+  P -->|no| ERR["clean tool error"]:::bad
+  ORIG --> LC["loadShowroomCoords(db)<br/>THE coordinate seam"]:::seam
+  ORIG2 --> LC
+  ORIG3 --> LC
+  LC --> RANK["haversine + bearing → sort → limit"]:::ok
+  RANK --> U{"includeUndiscovered?"}
+  U -->|yes| PLACES["placesNearby (quota-gated)<br/>dedupe vs known"]:::ok
+  U -->|no| OUT["showrooms + note"]:::ok
+  PLACES --> OUT
+  classDef ok fill:#1f4d2e,stroke:#4ade80,color:#e6ffe6
+  classDef bad fill:#4d1f1f,stroke:#f87171,color:#ffe6e6
+  classDef seam fill:#1f2f4d,stroke:#60a5fa,color:#e6f0ff`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_220.mjs",
+      command: "pnpm run test:pr 220 -- --preview  &&  pnpm run test:pr 220",
+      source: `// Registry-catalog integrity (the tools are OAuth-gated MCP; the public
+// /api/mcp-docs catalog is the honest wire check per AGENTS.md).
+const wnm = byName("whats_near_me");
+checks.ok("whats_near_me outputs origin/showrooms/undiscovered/note",
+  has(fieldNames(wnm), "origin", "showrooms", "undiscovered", "note"));
+const gvl = byName("get_vehicle_location");
+checks.ok("get_vehicle_location exposes the enriched output fields",
+  has(fieldNames(gvl), "heading","headingCompass","address","region","serverTime","ageSeconds","isStale"));`,
+      output:
+        "NOT YET RUN in this environment — the session container has no node_modules/toolchain (WORKER_API_KEY is a remote-only secrets-store binding with no local fallback). QC must run in a toolchain env against --preview AND prod; the whats_near_me + enriched-field checks report PENDING against prod until this merges and `pnpm run deploy` runs. Real output will be pasted here once executed.",
+      ranAt: undefined,
+      migrations: [],
+    },
+  },
   "0029-health-platform": {
     slug: "0029-health-platform",
     branch: "claude/backend-health-checks-d1-d6df78",

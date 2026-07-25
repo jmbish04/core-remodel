@@ -79,11 +79,19 @@ export interface TeslaLocation {
   latitude: number;
   longitude: number;
   address?: string | null;
+  /** Compass bearing the car is pointing, 0–359° (0 = North). Null when Tessie omits it. */
+  heading?: number | null;
+  /** When Tessie captured this fix (ms epoch), when reported — lets a caller judge staleness. */
+  timestampMs?: number | null;
 }
 
 /**
  * Read the vehicle's current coordinates via `GET /{vin}/location`.
  * Returns `null` when Tessie isn't configured or the call fails.
+ *
+ * `heading` and `timestamp` are captured when Tessie reports them (both are
+ * fail-soft — an older firmware or an asleep car may omit either), so a caller
+ * can render which way the car faces and how fresh the fix is.
  */
 export async function getLocation(env: Env): Promise<TeslaLocation | null> {
   const cfg = await getTessieConfig(env);
@@ -98,12 +106,34 @@ export async function getLocation(env: Env): Promise<TeslaLocation | null> {
       latitude?: number;
       longitude?: number;
       address?: string;
+      heading?: number;
+      // Tessie has reported the fix time under a few keys across firmware; accept
+      // whichever is present. `timestamp` is seconds on some payloads, ms on others.
+      timestamp?: number;
+      timestamp_ms?: number;
     };
     if (typeof data.latitude !== "number" || typeof data.longitude !== "number") return null;
-    return { latitude: data.latitude, longitude: data.longitude, address: data.address ?? null };
+    return {
+      latitude: data.latitude,
+      longitude: data.longitude,
+      address: data.address ?? null,
+      heading: typeof data.heading === "number" ? data.heading : null,
+      timestampMs: normalizeTessieTimestamp(data.timestamp_ms ?? data.timestamp),
+    };
   } catch {
     return null;
   }
+}
+
+/**
+ * Tessie stamps a fix in either seconds or milliseconds depending on firmware.
+ * Normalize to ms; anything below year-2001-in-ms is treated as seconds. Returns
+ * null for a missing/implausible value rather than a wrong one.
+ */
+function normalizeTessieTimestamp(raw: number | undefined): number | null {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return null;
+  // 1e12 ms ≈ 2001-09; a value smaller than that is seconds, so scale it up.
+  return raw < 1_000_000_000_000 ? Math.round(raw * 1000) : Math.round(raw);
 }
 
 /** Outcome of a navigation hand-off. */

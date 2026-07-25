@@ -49,6 +49,37 @@ export function haversineMeters(
   return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
+/**
+ * Initial great-circle bearing FROM point `a` TO point `b`, in degrees 0–359
+ * (0 = due North, 90 = East). Used to tell a driver which way a showroom is.
+ */
+export function initialBearing(
+  a: { lat: number; lng: number },
+  b: { lat: number; lng: number },
+): number {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  return (((Math.atan2(y, x) * 180) / Math.PI) + 360) % 360;
+}
+
+/**
+ * Turn a 0–359° bearing into a 16-point compass label ("N", "NNE", "SW", …).
+ * Null-safe: a null/NaN bearing yields null so callers can omit it cleanly.
+ */
+export function compassFromBearing(deg: number | null | undefined): string | null {
+  if (typeof deg !== "number" || !Number.isFinite(deg)) return null;
+  const points = [
+    "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE",
+    "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW",
+  ];
+  const idx = Math.round((((deg % 360) + 360) % 360) / 22.5) % 16;
+  return points[idx];
+}
+
 /** Default match radius: a stop counts as "here" within 250 m of the parked car. */
 export const DEFAULT_MATCH_RADIUS_M = 250;
 
