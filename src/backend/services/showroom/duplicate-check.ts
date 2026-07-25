@@ -11,14 +11,23 @@ type AnyD1Db = DrizzleD1Database<any>;
  * Duplicate detection for showroom_stores, shared by the create endpoint and the
  * MCP create/import tools so NO path can add a store that already exists.
  *
- * Matches (in priority order) an ACTIVE store by:
+ * Matches (in the order checked) an ACTIVE store by:
  *   1. Google `place_id`   — exact (also enforced by a unique index)
  *   2. phone number        — compared digits-only
- *   3. website URL         — compared by hostname (via showroom_store_links)
- *   4. street address      — compared normalized (lowercased, alphanumerics only)
+ *   3. street address      — compared normalized (lowercased, alphanumerics only)
+ *   4. website URL         — compared by hostname (via showroom_store_links)
+ * Address is checked before website because it needs no extra query; website
+ * requires loading the links table. Empty/blank inputs are ignored (guarded by
+ * minimum-length checks), so a missing phone/address can't match a blank column.
  *
  * The table is small (~160 rows), so this loads the candidate columns once and
  * compares in memory rather than fighting SQL normalization.
+ *
+ * NOTE: this is a best-effort pre-check, not a hard constraint. Only `place_id`
+ * has a DB unique index; two truly-concurrent inserts sharing only a phone/
+ * website/address could still both pass. That is acceptable here (single-user
+ * intake) and preferable to unique indexes on those columns, which would wrongly
+ * reject legitimate distinct suites at one address / shared call-center numbers.
  */
 export type DuplicateMatch = {
   id: number;
@@ -46,6 +55,13 @@ function host(u: string | null | undefined): string {
   }
 }
 
+/**
+ * Find an existing ACTIVE showroom store that duplicates the given input.
+ * Checks place_id, phone, address, then website (see module doc for ordering).
+ * @param db - A Drizzle D1 client (schema-typed or bare).
+ * @param input - Candidate fields to match against existing stores.
+ * @returns The matching store `{ id, name, reason }`, or null if none.
+ */
 export async function findDuplicateStore(
   db: AnyD1Db,
   input: DuplicateCheckInput,
