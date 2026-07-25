@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/drive-list-ops-b-notes-rating-skip",
+    title: "Drives · schema foundation + drizzle meta repair + HTML-entity cleanup (0031 PR-B0)",
+    summary:
+      "Foundation for the 0031 drive-list ops overhaul, plus two standalone fixes. HTML-entity cleanup: createDriveList decodes entities (and slugifies the decoded title) so new MCP drives no longer store 'Wall &amp; Floor', and migration 0140 backfills existing rows (0 encoded titles remain). Schema: a drive_list_notes table (drive-global or per-stop, source, read_at) migrating the legacy notes JSON, and drive_list_stops kind/suggested/skipped columns. Cost-safety: enforceStreamWindow now proactively stops the Tesla stream DO at the 20:00 window boundary. Also repaired a forked drizzle meta chain (0137/0138 both off 0136; 0139 missing 0137's rooms columns) that was breaking db:generate repo-wide.",
+    date: "2026-07-25",
+    status: "staged",
+    prNumber: 253,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/253",
+  },
+  {
     branch: "claude/drive-list-ui-improvements-b58ece",
     title: "Drives · render route map + tighten stop-card actions (PR-A quick fixes)",
     summary:
@@ -244,6 +254,25 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "added", text: "GET /api/tesla/stream/banner — one cheap aggregate (D1/KV, no DO round-trip): activeDrive, telemetryActive, withinWindow + a 12-hour window label, canEnable, and vehicleImageUrl when live." },
       { kind: "added", text: "components/AdminTeslaAlert.tsx mounted in BaseLayout (admin-only) after AppHeader: 'Drive list active' + telemetry state, an Enable-telemetry button, and the car image; polls every 20s, self-hides on 404 / no active drive." },
     ],
+    status: "staged",
+  },
+  {
+    id: "drives-schema-foundation-entity-cleanup",
+    branch: "claude/drive-list-ops-b-notes-rating-skip",
+    date: "2026-07-25",
+    area: "Drives",
+    title: "Drive schema foundation + HTML-entity cleanup + meta repair",
+    summary:
+      "Adds the schema the 0031 ops overhaul builds on and fixes the reported 'Wall &amp; Floor' rendering. createDriveList now decodes HTML entities in title/description/notes/stop fields and slugifies the decoded title; migration 0140 backfills existing rows (0 encoded titles remain) and adds the drive_list_notes table (backfilled from the legacy notes JSON) plus drive_list_stops kind/suggested/skipped columns. enforceStreamWindow proactively stops the Tesla stream DO at the 20:00 window close. Also repaired a forked drizzle meta chain that was breaking db:generate repo-wide, and regenerated the TESLA_STREAM binding into worker-configuration.d.ts.",
+    changes: [
+      { kind: "fixed", text: "HTML entities in MCP-created drives (e.g. 'Wall &amp; Floor') are decoded at create time and backfilled on existing rows; slugs derive from the decoded title. 0 encoded titles remain on remote." },
+      { kind: "added", text: "drive_list_notes table (drive-global or per-stop; source user|ai; read_at collapse state) — migrates the legacy drive_lists.notes JSON into rows (113)." },
+      { kind: "added", text: "drive_list_stops.kind (core|optional|pitstop, backfilled from is_optional), suggested, skipped, skipped_at." },
+      { kind: "changed", text: "enforceStreamWindow proactively POSTs TeslaStreamDO /stop when it deactivates a drive at the 20:00 boundary, closing the duration-billed-socket gap." },
+      { kind: "fixed", text: "Repaired a forked drizzle meta chain (0137/0138 both off 0136; 0139 missing 0137's rooms columns) that broke db:generate repo-wide, and added the TESLA_STREAM binding to worker-configuration.d.ts (#242 missed it)." },
+      { kind: "migration", text: "0140_useful_psylocke — drive_list_notes + drive_list_stops columns + entity/notes/kind backfill. Applied to remote." },
+    ],
+    migrations: ["0140_useful_psylocke"],
     status: "staged",
   },
   {
