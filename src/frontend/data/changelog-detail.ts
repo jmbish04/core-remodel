@@ -113,6 +113,77 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "showroom-dedup-merge-and-guards": {
+    slug: "showroom-dedup-merge-and-guards",
+    branch: "claude/showroom-listing-500-map-6kvtm9",
+    subtitle: "Showrooms · merge dedup + creation guards + config",
+    problem:
+      "Two gaps remained after the bootstrap-only seed guard. (1) The dedup tool DELETED duplicates and dropped/reparented children inconsistently; the ask was a true MERGE — keep one canonical row and move the duplicate's support data onto it, soft-deleting (not hard-deleting) the loser so it stays restorable and every is_active-filtered read path hides it. (2) Nothing stopped a NEW duplicate being created: the create endpoint only checked place_id, and the MCP create/import tools could add a store that already existed under a different place_id but the same phone/website/address. Separately, newer wrangler rejects a `remote` field on secrets_store_secrets, which broke every wrangler command (d1 execute, deploy).",
+    approach:
+      "dedup_showroom_stores is now a merge: per (name, city) group it picks the most-enriched keeper, remaps every child row from the duplicates onto it, and soft-deletes the duplicate store (is_active = 0). Tables with a (store, key) identity — links (url+type), hours (day), and the tag/category/product-area/product/brand mappings — are dedup-merged: a duplicate's row moves only if the keeper lacks that key, else it is dropped, so the merge never creates a second website link or trips a unique index. A shared findDuplicateStore(db, {placeId, phoneNumber, websiteUrl, locationAddress}) matches an active store by place_id, phone (digits-only), website hostname, or normalized address; it is wired into POST /api/showroom-stores (409) and the create_showroom + import_showroom_from_place MCP tools (return the existing row). And the unsupported `remote` field was stripped from the 24 secret-store bindings, with wrangler bumped to 4.114.0.",
+    apiChanges: [
+      "MCP dedup_showroom_stores — now MERGE + soft-delete (was delete). Dry-run reports rowsToMerge + per-table child counts.",
+      "POST /api/showroom-stores — 409 now fires on place_id / phone / website / address match (was place_id only), with matchedOn.",
+      "MCP create_showroom / import_showroom_from_place — return the existing store (created:false, 'exists (matched by …)') instead of creating a duplicate.",
+    ],
+    filesTouched: [
+      "src/backend/mcp/tools/showrooms/dedup_showroom_stores.ts",
+      "src/backend/services/showroom/duplicate-check.ts",
+      "src/backend/api/routes/showroom-stores.ts",
+      "src/backend/mcp/tools/showrooms/create_showroom.ts",
+      "src/backend/mcp/tools/showrooms/import_showroom_from_place.ts",
+      "wrangler.jsonc",
+      "package.json",
+      "scripts/0119-soft-delete-showroom-duplicates.sql",
+    ],
+    migrations: [],
+    code: [
+      {
+        title: "Merge: move a duplicate's rows onto the keeper, then soft-delete",
+        lang: "ts",
+        code: `// DEDUP MOVE — move only rows the keeper lacks (by url+type / day / mapping id);
+// drop the rest so the merge never duplicates the keeper's data.
+if (keeperKeys.has(keyOf(row, t.keyCols))) toDrop.push(id);
+else { toMove.push(id); keeperKeys.add(keyOf(row, t.keyCols)); }
+// SIMPLE MOVE — repoint per-event child rows (notes, ratings, sales…) to keeper.
+await db.update(t.table).set({ [t.key]: keepId }).where(inArray(t.col, dupeIds));
+// then SOFT-DELETE the emptied duplicate store — never a hard delete.
+await db.update(showroomStores).set({ isActive: false, updatedAt: new Date() })
+  .where(inArray(showroomStores.id, dupeIds));`,
+      },
+      {
+        title: "Creation guard shared by the endpoint + MCP tools",
+        lang: "ts",
+        code: `const dup = await findDuplicateStore(db, {
+  placeId, phoneNumber, websiteUrl, locationAddress,
+});           // matches active store by place_id | phone-digits | website host | normalized address
+if (dup) return existing row (409 on the endpoint; created:false on MCP);`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Create → duplicate guard → insert",
+        code: `flowchart TD
+  A[create store — endpoint or MCP] --> B[findDuplicateStore]
+  B --> C{active match?}
+  C -- "place_id / phone / website / address" --> R[reject: return existing row]
+  C -- none --> I[insert new store]
+  classDef stop fill:#4d1f1f,stroke:#f87171,color:#ffe6e6
+  classDef ok fill:#1f4d2e,stroke:#4ade80,color:#e6ffe6
+  class R stop
+  class I ok`,
+      },
+    ],
+    verification: {
+      qcScript: "MCP dedup_showroom_stores (dry-run) + tsc/build",
+      command: "npx tsc --noEmit; pnpm run build; dedup_showroom_stores {}",
+      ranAt: "2026-07-25",
+      output:
+        "npx tsc --noEmit — 0 errors in the changed files. Dry-run (pre-merge) reported 33\n" +
+        "groups / 54 rows, childRowCounts { showroom_store_links: 26 } — confirming the\n" +
+        "duplicates only carry seeded links, which the merge dedups. Apply is human-gated.",
+    },
+  },
   "drives-map-fix-card-actions": {
     slug: "drives-map-fix-card-actions",
     branch: "claude/drive-list-ui-improvements-b58ece",

@@ -6,6 +6,7 @@ import {
   resolveStoreGeoPatch,
   mapPlaceDetailsToStoreInput,
 } from "@backend/services/showroom/onboarding";
+import { findDuplicateStore } from "@backend/services/showroom/duplicate-check";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -77,6 +78,35 @@ export const createShowroom = defineTool({
     url: urlField,
   },
   handler: async ({ env, db }, input) => {
+    // ── Duplicate guard (all paths) ───────────────────────────────────────
+    // Reject if an ACTIVE store already matches by place_id / phone / website /
+    // address, using whatever the caller provided. Returns the existing row
+    // rather than creating a second copy. The placeId path re-checks the
+    // Google-derived fields below (an existing store may have a different
+    // placeId but the same phone/address).
+    const dupByInput = await findDuplicateStore(db, {
+      placeId: input.placeId,
+      phoneNumber: input.phoneNumber,
+      websiteUrl: input.websiteUrl,
+      locationAddress: input.locationAddress,
+    });
+    if (dupByInput) {
+      const [existing] = await db
+        .select()
+        .from(showroomStores)
+        .where(eq(showroomStores.id, dupByInput.id))
+        .limit(1);
+      if (existing) {
+        return {
+          created: false,
+          status: `exists (matched by ${dupByInput.reason})`,
+          store: existing,
+          region: existing.hubName ?? null,
+          url: showroomUrl(env, existing.id),
+        };
+      }
+    }
+
     // ── placeId path: full onboarding, idempotent by placeId ──────────────
     const placeId = input.placeId?.trim();
     if (placeId) {
@@ -114,6 +144,31 @@ export const createShowroom = defineTool({
       if (input.websiteUrl) mapped.websiteUrl = input.websiteUrl;
       if (input.isAppointmentOnly != null) {
         mapped.values.isAppointmentOnly = input.isAppointmentOnly;
+      }
+
+      // Re-check against the Google-derived fields: a store with a DIFFERENT
+      // placeId but the same phone/website/address is still the same showroom.
+      const dupByPlace = await findDuplicateStore(db, {
+        placeId: mapped.values.placeId,
+        phoneNumber: mapped.values.phoneNumber,
+        websiteUrl: mapped.websiteUrl,
+        locationAddress: mapped.values.locationAddress,
+      });
+      if (dupByPlace) {
+        const [existing] = await db
+          .select()
+          .from(showroomStores)
+          .where(eq(showroomStores.id, dupByPlace.id))
+          .limit(1);
+        if (existing) {
+          return {
+            created: false,
+            status: `exists (matched by ${dupByPlace.reason})`,
+            store: existing,
+            region: existing.hubName ?? null,
+            url: showroomUrl(env, existing.id),
+          };
+        }
       }
 
       const created = await persistPlaceShowroom(env, db, mapped);

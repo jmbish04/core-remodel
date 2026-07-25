@@ -53,6 +53,7 @@ import {
   resolveStoreGeoPatch,
   scheduleShowroomEnrichment,
 } from "@backend/services/showroom/onboarding";
+import { findDuplicateStore } from "@backend/services/showroom/duplicate-check";
 import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 import {
   deriveIsOpenWeekends,
@@ -1613,30 +1614,29 @@ showroomStoresRouter.post("/", async (c) => {
     }),
   );
 
-  // ── Duplicate prevention by Google Places place_id ──────────────────────
-  // Pre-check before inserting: if a showroom already exists for this
-  // place_id, short-circuit with 409 rather than let the unique constraint
-  // fail (or worse, silently create a duplicate on a schema that lacked the
-  // index). The insert below is ALSO try/catch-guarded to close the race
-  // between this check and the insert.
-  if (typeof data.placeId === "string" && data.placeId.length > 0) {
-    const [existingByPlaceId] = await db
-      .select({ id: showroomStores.id, name: showroomStores.name })
-      .from(showroomStores)
-      .where(eq(showroomStores.placeId, data.placeId))
-      .limit(1);
-
-    if (existingByPlaceId) {
-      return c.json(
-        {
-          success: false,
-          error: "This showroom has already been added.",
-          existingId: existingByPlaceId.id,
-          existingName: existingByPlaceId.name,
-        },
-        409,
-      );
-    }
+  // ── Duplicate prevention ────────────────────────────────────────────────
+  // Pre-check before inserting: reject if an ACTIVE showroom already matches by
+  // place_id, phone, website host, or normalized address — not just place_id, so
+  // a manual (no-placeId) entry can't clone an existing store either. Returns 409
+  // with the existing row. The insert below is ALSO try/catch-guarded to close
+  // the race between this check and the insert (the place_id unique index).
+  const duplicate = await findDuplicateStore(db, {
+    placeId: data.placeId,
+    phoneNumber: storeValues.phoneNumber,
+    websiteUrl,
+    locationAddress: storeValues.locationAddress,
+  });
+  if (duplicate) {
+    return c.json(
+      {
+        success: false,
+        error: `This showroom already exists (matched by ${duplicate.reason}).`,
+        matchedOn: duplicate.reason,
+        existingId: duplicate.id,
+        existingName: duplicate.name,
+      },
+      409,
+    );
   }
 
   let inserted: typeof showroomStores.$inferSelect;
