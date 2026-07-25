@@ -16,10 +16,16 @@ import {
 } from "@backend/services/drive-home-arrival-rules";
 import { getHomeCoords } from "@backend/services/drive-home-arrival";
 import {
+  addDriveStops,
   createDriveList,
+  type DriveStopInput,
+  type DriveStopUpdateInput,
   fillMissingStopCoords,
   parseDriveNotes,
+  removeDriveStop,
   setActiveDrive,
+  updateDriveList,
+  updateDriveStop,
 } from "@backend/services/drive-lists";
 import { getStreamControl, isWithinStreamWindow } from "@backend/services/tesla/gating";
 import { isRequestAuthenticated } from "@backend/utils/access";
@@ -183,9 +189,37 @@ driveListsRouter.get("/:slug", async (c) => {
  */
 driveListsRouter.patch("/:slug", async (c) => {
   const db = drizzle(c.env.DB);
-  const body = (await c.req.json().catch(() => ({}))) as { isActive?: boolean };
+  const slug = c.req.param("slug");
+  const body = (await c.req.json().catch(() => ({}))) as {
+    isActive?: boolean;
+    title?: string;
+    description?: string | null;
+    notes?: string[] | null;
+    status?: "draft" | "active" | "completed" | "archived";
+  };
+
+  // Field edits (title/description/notes/status) are a separate concern from
+  // activation. `status` here is a lifecycle label only and never flips the
+  // active pointer — activation stays on the gated isActive path below.
+  const hasFieldEdit =
+    body.title !== undefined ||
+    body.description !== undefined ||
+    body.notes !== undefined ||
+    body.status !== undefined;
+  if (body.isActive === undefined && hasFieldEdit) {
+    const res = await updateDriveList(db, {
+      slug,
+      title: body.title,
+      description: body.description,
+      notes: body.notes,
+      status: body.status,
+    });
+    if (!res) return c.json({ error: "Not found" }, 404);
+    return c.json({ ok: true, id: res.id, slug: res.slug });
+  }
+
   if (typeof body.isActive !== "boolean") {
-    return c.json({ error: "`isActive` (boolean) is required" }, 400);
+    return c.json({ error: "`isActive` (boolean) or an editable field is required" }, 400);
   }
   const [drive] = await db
     .select({ id: driveLists.id })
@@ -233,19 +267,25 @@ driveListsRouter.patch("/:slug", async (c) => {
   return c.json({ ok: true, isActive: body.isActive });
 });
 
-/** PATCH /api/drive-lists/:slug/stops/:stopId — toggle/set a stop's visited state. */
+/**
+ * PATCH /api/drive-lists/:slug/stops/:stopId — edit a stop.
+ *
+ * Backwards-compatible with the `{ visited }` check-off, but now accepts any of
+ * the stop's editable fields (name/address/hours/skipped/sortOrder/…) via the
+ * shared `updateDriveStop` service.
+ */
 driveListsRouter.patch("/:slug/stops/:stopId", async (c) => {
   const db = drizzle(c.env.DB);
   const slug = c.req.param("slug");
   const stopId = Number(c.req.param("stopId"));
   if (!Number.isFinite(stopId)) return c.json({ error: "Invalid stop id" }, 400);
 
-  const body = (await c.req.json().catch(() => ({}))) as { visited?: boolean };
-  if (typeof body.visited !== "boolean") {
-    return c.json({ error: "`visited` (boolean) is required" }, 400);
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  if (body === null || typeof body !== "object" || Object.keys(body).length === 0) {
+    return c.json({ error: "At least one editable stop field is required" }, 400);
   }
 
-  // Resolve the drive first so a stop can't be toggled through the wrong slug.
+  // Resolve the drive first so a stop can't be edited through the wrong slug.
   const [drive] = await db
     .select({ id: driveLists.id })
     .from(driveLists)
@@ -262,11 +302,9 @@ driveListsRouter.patch("/:slug/stops/:stopId", async (c) => {
     return c.json({ error: "Stop not found on this drive" }, 404);
   }
 
-  await db
-    .update(driveListStops)
-    .set({ visited: body.visited, visitedAt: body.visited ? new Date() : null })
-    .where(eq(driveListStops.id, stopId))
-    .run();
+  // The MCP tool is the zod-validated surface; this admin API trusts the caller
+  // and forwards recognized keys (the service ignores anything it doesn't read).
+  await updateDriveStop(db, stopId, body as DriveStopUpdateInput);
 
   // Recompute completion for the response. Progress alone decides which landing
   // tab the drive falls in (pending / in progress / finished), so checking a
@@ -284,6 +322,46 @@ driveListsRouter.patch("/:slug/stops/:stopId", async (c) => {
   await db.update(driveLists).set({ updatedAt: new Date() }).where(eq(driveLists.id, drive.id)).run();
 
   return c.json({ ok: true, visited: body.visited, stopCount: total, visitedCount });
+});
+
+/** POST /api/drive-lists/:slug/stops — append one or more stops to a drive. */
+driveListsRouter.post("/:slug/stops", async (c) => {
+  const db = drizzle(c.env.DB);
+  const slug = c.req.param("slug");
+  const body = (await c.req.json().catch(() => ({}))) as { stops?: DriveStopInput[] };
+  if (!Array.isArray(body.stops) || body.stops.length === 0) {
+    return c.json({ error: "`stops` (non-empty array) is required" }, 400);
+  }
+  const res = await addDriveStops(db, { slug }, body.stops);
+  if (!res) return c.json({ error: "Not found" }, 404);
+  return c.json({ ok: true, ...res }, 201);
+});
+
+/** DELETE /api/drive-lists/:slug/stops/:stopId — remove a stop from a drive. */
+driveListsRouter.delete("/:slug/stops/:stopId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const slug = c.req.param("slug");
+  const stopId = Number(c.req.param("stopId"));
+  if (!Number.isFinite(stopId)) return c.json({ error: "Invalid stop id" }, 400);
+
+  const [drive] = await db
+    .select({ id: driveLists.id })
+    .from(driveLists)
+    .where(eq(driveLists.slug, slug))
+    .limit(1);
+  if (!drive) return c.json({ error: "Not found" }, 404);
+
+  const [stop] = await db
+    .select({ driveListId: driveListStops.driveListId })
+    .from(driveListStops)
+    .where(eq(driveListStops.id, stopId))
+    .limit(1);
+  if (!stop || stop.driveListId !== drive.id) {
+    return c.json({ error: "Stop not found on this drive" }, 404);
+  }
+
+  await removeDriveStop(db, stopId);
+  return c.json({ ok: true, stopId, driveListId: drive.id });
 });
 
 export default driveListsRouter;
