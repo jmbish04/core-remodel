@@ -10,7 +10,7 @@
  * caller never has to re-derive tokens.
  */
 import { drizzle } from "drizzle-orm/d1";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 
 import { images, inspirationalImageRooms, listingPhotos } from "@backend/db";
 
@@ -122,6 +122,42 @@ export async function resolveInspirationDrawer(
   for (const mapping of inspirationMappings) {
     const img = byId.get(mapping.imageId);
     if (!img) continue;
+    const token = img.cfImageIdOptimized ?? img.cfImageIdOriginal;
+    if (!token) continue;
+    drawer.push({
+      sourceId: img.id,
+      cfImageUrl: deliveryUrlFromToken(token),
+      label: img.displayName ?? null,
+    });
+  }
+  return drawer;
+}
+
+/**
+ * Resolve a room's AI/SketchUp renders (`images.photoCategory = 'ai_render'`,
+ * room-scoped) as drawer entries. These are real per-room source images the
+ * Workshop can drag onto the canvas and run recipes on (material-swap, mix,
+ * clay-to-photoreal). Drawer-only — never auto-seeded as board nodes.
+ */
+export async function resolveRenderDrawer(
+  env: Env,
+  roomId: number,
+): Promise<RoomDrawerPhoto[]> {
+  const db = drizzle(env.DB);
+  const renderImages = await db
+    .select()
+    .from(images)
+    .where(
+      and(
+        eq(images.roomId, roomId),
+        eq(images.photoCategory, "ai_render"),
+        eq(images.isDeleted, false),
+      ),
+    )
+    .all();
+
+  const drawer: RoomDrawerPhoto[] = [];
+  for (const img of renderImages) {
     const token = img.cfImageIdOptimized ?? img.cfImageIdOriginal;
     if (!token) continue;
     drawer.push({

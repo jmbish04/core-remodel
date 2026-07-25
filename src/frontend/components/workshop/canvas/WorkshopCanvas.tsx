@@ -52,6 +52,7 @@ interface WorkshopCanvasProps {
   onExtractClipping: (node: BoardNode) => void;
   onMaterialSwap: (node: BoardNode) => void;
   onMix: (node: BoardNode) => void;
+  onClayToPhotoreal: (node: BoardNode) => void;
   /** "Place image (I)" opens the drawer — our rendition of image placement. */
   onPlaceImage: () => void;
 }
@@ -91,6 +92,7 @@ export function WorkshopCanvas({
   onExtractClipping,
   onMaterialSwap,
   onMix,
+  onClayToPhotoreal,
   onPlaceImage,
 }: WorkshopCanvasProps) {
   const { containerRef, zoom, pan, spaceDown, setPan, zoomBy, fitToScreen } =
@@ -634,6 +636,7 @@ export function WorkshopCanvas({
         onExtractClipping={onExtractClipping}
         onMaterialSwap={onMaterialSwap}
         onMix={onMix}
+        onClayToPhotoreal={onClayToPhotoreal}
       />
     </div>
   );

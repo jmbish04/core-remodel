@@ -25,7 +25,7 @@
  *   DELETE /collections/:id/items/:itemId             remove a photo from a pile
  *   POST   /clippings/extract                         extract a reusable clipping
  *   PATCH  /clippings/:id                             rename / promote-demote global drawer
- *   POST   /nodes/:id/recipe                          run extract|material-swap|mix on a node
+ *   POST   /nodes/:id/recipe                          run extract|material-swap|mix|clay-to-photoreal|floor-plan-furnish on a node
  *
  * All routes are mounted behind `requireAccessAuth` (see api/index.ts). Every
  * multi-row write goes through `db.batch` (D1 has no interactive transactions).
@@ -45,11 +45,13 @@ import {
 } from "@backend/db";
 
 import { cropAndUploadCfImage, probeCfImageDimensions } from "../../services/render/cf-images";
-import { nearestAspectRatio, PRESERVATION_BLOCK, referenceScopingNote } from "../../services/render/prompt-kit";
+import { nearestAspectRatio } from "../../services/render/prompt-kit";
+import { RECIPES, buildRecipePrompt } from "../../services/render/recipes";
 import { runStage } from "../../services/render/stage-runner";
 import {
   resolveInspirationDrawer,
   resolveListingPhotoDrawer,
+  resolveRenderDrawer,
   resolveRoomArtifactSeeds,
 } from "../../services/workshop/room-context";
 
@@ -224,6 +226,7 @@ workshopRouter.openapi(
               clippings: z.array(ClippingSchema),
               listingPhotos: z.array(DrawerPhotoSchema),
               inspirationPhotos: z.array(DrawerPhotoSchema),
+              renderPhotos: z.array(DrawerPhotoSchema),
             }),
           },
         },
@@ -337,17 +340,19 @@ workshopRouter.openapi(
         nodes = nodes.filter((node) => !staleIds.has(node.id));
       }
 
-      const [collections, clippings, listingPhotos, inspirationPhotos] = await Promise.all([
-        db.select().from(photoCollections).where(eq(photoCollections.boardId, board.id)).all(),
-        // Clippings visibility: room-scoped OR promoted to the global drawer.
-        db
-          .select()
-          .from(sampleClippings)
-          .where(or(eq(sampleClippings.roomId, roomId), eq(sampleClippings.isGlobal, true)))
-          .all(),
-        resolveListingPhotoDrawer(c.env, roomId),
-        resolveInspirationDrawer(c.env, roomId),
-      ]);
+      const [collections, clippings, listingPhotos, inspirationPhotos, renderPhotos] =
+        await Promise.all([
+          db.select().from(photoCollections).where(eq(photoCollections.boardId, board.id)).all(),
+          // Clippings visibility: room-scoped OR promoted to the global drawer.
+          db
+            .select()
+            .from(sampleClippings)
+            .where(or(eq(sampleClippings.roomId, roomId), eq(sampleClippings.isGlobal, true)))
+            .all(),
+          resolveListingPhotoDrawer(c.env, roomId),
+          resolveInspirationDrawer(c.env, roomId),
+          resolveRenderDrawer(c.env, roomId),
+        ]);
 
       const collectionsWithItems = await Promise.all(
         collections.map(async (collection) => {
@@ -381,6 +386,7 @@ workshopRouter.openapi(
           clippings: clippings.map(serializeClipping),
           listingPhotos,
           inspirationPhotos,
+          renderPhotos,
         },
         200,
       );
@@ -1016,7 +1022,7 @@ workshopRouter.openapi(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /nodes/:id/recipe — extract | material-swap | mix
+// POST /nodes/:id/recipe — extract | material-swap | mix | clay-to-photoreal | floor-plan-furnish
 // ─────────────────────────────────────────────────────────────────────────────
 
 const RecipeExtractParams = z.object({
@@ -1033,10 +1039,20 @@ const RecipeMixParams = z.object({
   prompt: z.string().min(1).optional(),
 });
 
+const RecipeClayParams = z.object({
+  referenceCfImageUrls: z.array(z.url()).max(3).optional(),
+  prompt: z.string().min(1).optional(),
+});
+const RecipeFloorPlanFurnishParams = z.object({
+  prompt: z.string().min(1).optional(),
+});
+
 const RecipeRequestSchema = z.discriminatedUnion("recipe", [
   z.object({ recipe: z.literal("extract"), params: RecipeExtractParams }),
   z.object({ recipe: z.literal("material-swap"), params: RecipeMaterialSwapParams }),
   z.object({ recipe: z.literal("mix"), params: RecipeMixParams }),
+  z.object({ recipe: z.literal("clay-to-photoreal"), params: RecipeClayParams }),
+  z.object({ recipe: z.literal("floor-plan-furnish"), params: RecipeFloorPlanFurnishParams }),
 ]);
 
 /** Get-or-create the room's Workshop render session (idempotent by roomId). */
@@ -1086,7 +1102,7 @@ workshopRouter.openapi(
       500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
     },
     tags: ["workshop"],
-    summary: "Run a node-action recipe (extract | material-swap | mix)",
+    summary: "Run a node-action recipe (extract | material-swap | mix | clay-to-photoreal | floor-plan-furnish)",
     operationId: "runNodeRecipe",
   }),
   async (c) => {
@@ -1169,40 +1185,7 @@ workshopRouter.openapi(
       const aspectRatio = nearestAspectRatio(aspectSourceWidth, aspectSourceHeight);
 
       let stageResult;
-      if (body.recipe === "material-swap") {
-        const { referenceCfImageUrls, prompt } = body.params;
-        const references = referenceCfImageUrls.map((url, index) => ({
-          url,
-          label: `reference ${index + 1}`,
-        }));
-        const userRequest = prompt || "Apply the referenced material/finish to this room.";
-        const composedPrompt = [
-          "You are an expert architectural photo editor. Perform a natural, localized, photorealistic finish edit on the provided room image based on the user's request.",
-          "",
-          `User Request: ${userRequest}`,
-          "",
-          "Editing Guidelines:",
-          "- The edit must be photorealistic and blend seamlessly with the surrounding area.",
-          PRESERVATION_BLOCK,
-          "",
-          "Reference images (material/form only):",
-          ...references.map((ref) => `- ${referenceScopingNote(ref.label)}`),
-          "",
-          "Output: return ONLY the final edited image. Do not return text.",
-        ].join("\n");
-
-        stageResult = await runStage({
-          env: c.env,
-          sessionId,
-          type: "stage_3_LP_finish",
-          inputImageUrl: node.cfImageUrl,
-          prompt: composedPrompt,
-          parentCanvasId: node.renderCanvasId ?? null,
-          roomId,
-          aspectRatio,
-          references,
-        });
-      } else {
+      if (body.recipe === "mix") {
         // mix: stage_5_LP_synthesis of the node's image (base) + the clippings' images.
         const { clippingIds, prompt } = body.params;
         const clippingRows = await Promise.all(
@@ -1217,35 +1200,49 @@ workshopRouter.openapi(
           return c.json({ error: "No resolvable clippings" }, 400);
         }
 
+        const references = foundClippings.map((clip, index) => ({
+          url: clip.clippingCfImageUrl,
+          label: clip.label || `sample ${index + 1}`,
+        }));
         const imageUrls = [node.cfImageUrl, ...foundClippings.map((clip) => clip.clippingCfImageUrl)];
-        const userRequest = prompt || "Mix these samples into the room, keeping the result photorealistic.";
-        const composedPrompt = [
-          "You are an expert architectural photo editor. Synthesize the referenced samples into the base room image based on the user's request.",
-          "",
-          `User Request: ${userRequest}`,
-          "",
-          "Editing Guidelines:",
-          "- The edit must be photorealistic and blend seamlessly with the surrounding area.",
-          PRESERVATION_BLOCK,
-          "",
-          "Reference images (material/form only, in @image order after the base):",
-          ...foundClippings.map((clip, index) =>
-            `- ${referenceScopingNote(clip.label || `sample ${index + 1}`)}`,
-          ),
-          "",
-          "Output: return ONLY the final edited image. Do not return text.",
-        ].join("\n");
+        const composedPrompt = buildRecipePrompt(RECIPES.mix, { userRequest: prompt, references });
 
         stageResult = await runStage({
           env: c.env,
           sessionId,
-          type: "stage_5_LP_synthesis",
+          type: RECIPES.mix.stageType,
           inputImageUrl: node.cfImageUrl,
           prompt: composedPrompt,
           parentCanvasId: node.renderCanvasId ?? null,
           roomId,
           aspectRatio,
           imageUrls,
+        });
+      } else {
+        // material-swap | clay-to-photoreal | floor-plan-furnish — single-image
+        // edit on the node with optional material/style references.
+        const recipe = RECIPES[body.recipe];
+        const refUrls =
+          "referenceCfImageUrls" in body.params ? body.params.referenceCfImageUrls ?? [] : [];
+        const references = refUrls.map((url, index) => ({
+          url,
+          label: `reference ${index + 1}`,
+        }));
+        const composedPrompt = buildRecipePrompt(recipe, {
+          userRequest: body.params.prompt,
+          references,
+        });
+
+        stageResult = await runStage({
+          env: c.env,
+          sessionId,
+          type: recipe.stageType,
+          inputImageUrl: node.cfImageUrl,
+          prompt: composedPrompt,
+          parentCanvasId: node.renderCanvasId ?? null,
+          roomId,
+          aspectRatio,
+          references,
         });
       }
 
