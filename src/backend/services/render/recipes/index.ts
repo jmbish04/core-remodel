@@ -45,6 +45,13 @@ export const POST_PRODUCTION_LOCK = [
   "- Change ONLY the requested lighting or color property. Do NOT add, remove, move, restyle, or re-render anything in the scene.",
 ].join("\n");
 
+/** plan → isometric: program & walls preserved, projection intentionally changes. */
+export const ISO_LOCK = [
+  "- PRESERVE EXACTLY: the room layout, the number and arrangement of rooms, every wall and opening position, and the overall proportions of the plan.",
+  "- CHANGE the projection: render the plan as a clean 3D isometric 'dollhouse' view with low walls, as the goal.",
+  "- Do NOT add, remove, merge, or move any room, wall, door, or window.",
+].join("\n");
+
 /** Recipe ids wired end-to-end. */
 export type RecipeId =
   | "material-swap"
@@ -52,7 +59,8 @@ export type RecipeId =
   | "clay-to-photoreal"
   | "floor-plan-furnish"
   | "tone-unify"
-  | "lighting-enhance";
+  | "lighting-enhance"
+  | "plan-to-isometric";
 
 /**
  * How a recipe hands images to `runStage`:
@@ -163,6 +171,19 @@ export const RECIPES: Record<RecipeId, RecipeDef> = {
       "Even out the exposure, recover shadow detail, and make the lighting look natural.",
     guardrail: POST_PRODUCTION_LOCK,
     referencesHeader: "Reference images (lighting mood only):",
+  },
+  "plan-to-isometric": {
+    id: "plan-to-isometric",
+    label: "Turn plan into a dollhouse",
+    category: "plan",
+    stageType: "stage_3_LP_finish",
+    inputMode: "references",
+    intro:
+      "You are an expert architectural illustrator. Convert the provided 2D floor plan into a 3D isometric 'dollhouse' view based on the user's request.",
+    defaultUserRequest:
+      "Render this floor plan as a clean, furnished 3D isometric dollhouse with low walls.",
+    guardrail: ISO_LOCK,
+    referencesHeader: "Style reference images (material/palette only):",
   },
 };
 

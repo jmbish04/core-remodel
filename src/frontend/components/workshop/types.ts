@@ -203,7 +203,8 @@ export type RecipeKind =
   | "clay-to-photoreal"
   | "floor-plan-furnish"
   | "tone-unify"
-  | "lighting-enhance";
+  | "lighting-enhance"
+  | "plan-to-isometric";
 
 /** Synchronous recipe result. */
 export interface RecipeSyncResult {

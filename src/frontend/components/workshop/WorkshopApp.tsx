@@ -237,7 +237,8 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
         | "clay-to-photoreal"
         | "floor-plan-furnish"
         | "tone-unify"
-        | "lighting-enhance",
+        | "lighting-enhance"
+        | "plan-to-isometric",
       params: RecipeRunParams,
     ) => {
       board.setNodeProcessing(node.id, true);
@@ -359,6 +360,9 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
             }
             onFloorPlanFurnish={(node) =>
               handleRunRecipe(node, "floor-plan-furnish", { referenceCfImageUrls: [] })
+            }
+            onPlanToIsometric={(node) =>
+              handleRunRecipe(node, "plan-to-isometric", { referenceCfImageUrls: [] })
             }
             onToneUnify={(node) =>
               handleRunRecipe(node, "tone-unify", { referenceCfImageUrls: [] })

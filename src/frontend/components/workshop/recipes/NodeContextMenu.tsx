@@ -9,7 +9,7 @@
 // ---------------------------------------------------------------------------
 
 import { useEffect, useRef } from "react";
-import { Armchair, Blend, Palette, Scissors, Sun, SwatchBook, Wand2 } from "lucide-react";
+import { Armchair, Blend, Box, Palette, Scissors, Sun, SwatchBook, Wand2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -33,6 +33,7 @@ interface NodeContextMenuProps {
   onFloorPlanFurnish: (node: BoardNode) => void;
   onToneUnify: (node: BoardNode) => void;
   onLightingEnhance: (node: BoardNode) => void;
+  onPlanToIsometric: (node: BoardNode) => void;
 }
 
 const ITEM_CLASS =
@@ -48,6 +49,7 @@ export function NodeContextMenu({
   onFloorPlanFurnish,
   onToneUnify,
   onLightingEnhance,
+  onPlanToIsometric,
 }: NodeContextMenuProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const firstItemRef = useRef<HTMLButtonElement | null>(null);
@@ -189,6 +191,22 @@ export function NodeContextMenu({
             Furnish this plan…
             <span className="block text-[11px] text-muted-foreground">
               Add furniture, keeping the walls intact
+            </span>
+          </span>
+        </button>
+      ) : null}
+      {state.node.sourceType === "floor_plan" ? (
+        <button
+          type="button"
+          role="menuitem"
+          className={ITEM_CLASS}
+          onClick={() => run(onPlanToIsometric)}
+        >
+          <Box className="size-4 text-muted-foreground" />
+          <span>
+            Turn into a dollhouse…
+            <span className="block text-[11px] text-muted-foreground">
+              Render the plan as a 3D isometric view
             </span>
           </span>
         </button>
