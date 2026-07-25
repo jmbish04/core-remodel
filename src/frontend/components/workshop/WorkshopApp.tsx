@@ -144,6 +144,18 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
     [board],
   );
 
+  const placeRenderOnCanvas = useCallback(
+    (photo: BoardPhoto) => {
+      void board.addNode({
+        kind: "image",
+        cfImageUrl: photo.cfImageUrl,
+        sourceType: "render",
+        sourceId: photo.sourceId,
+      });
+    },
+    [board],
+  );
+
   const placeInspirationOnCanvas = useCallback(
     (photo: BoardPhoto) => {
       void board.addNode({
@@ -333,9 +345,11 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
           onOpenChange={setDrawerOpen}
           listingPhotos={board.listingPhotos}
           inspirationPhotos={board.inspirationPhotos}
+          renderPhotos={board.renderPhotos}
           clippings={board.clippings}
           onPlaceListing={placeListingOnCanvas}
           onPlaceInspiration={placeInspirationOnCanvas}
+          onPlaceRender={placeRenderOnCanvas}
           onPlaceClipping={placeClippingOnCanvas}
           onExtractFromInspiration={onExtractFromPhoto}
           onSetClippingGlobal={setClippingGlobal}

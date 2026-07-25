@@ -181,6 +181,8 @@ export interface BoardResponse {
   listingPhotos: BoardPhoto[];
   /** Whole inspiration photos for this room (drawer "Inspiration" tab). */
   inspirationPhotos: BoardPhoto[];
+  /** This room's AI/SketchUp renders (drawer "Renders" tab). */
+  renderPhotos: BoardPhoto[];
 }
 
 /** Normalized bbox (0..1) — what /clippings/extract expects. */
@@ -268,7 +270,7 @@ export function clippingAltText(clipping: Pick<Clipping, "label">): string {
 
 export function boardPhotoAltText(
   photo: Pick<BoardPhoto, "label">,
-  kind: "listing_photo" | "inspiration",
+  kind: "listing_photo" | "inspiration" | "render",
 ): string {
   const base = SOURCE_LABEL[kind];
   return photo.label ? `${base}: ${photo.label}` : base;

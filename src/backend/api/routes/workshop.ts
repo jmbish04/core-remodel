@@ -51,6 +51,7 @@ import { runStage } from "../../services/render/stage-runner";
 import {
   resolveInspirationDrawer,
   resolveListingPhotoDrawer,
+  resolveRenderDrawer,
   resolveRoomArtifactSeeds,
 } from "../../services/workshop/room-context";
 
@@ -225,6 +226,7 @@ workshopRouter.openapi(
               clippings: z.array(ClippingSchema),
               listingPhotos: z.array(DrawerPhotoSchema),
               inspirationPhotos: z.array(DrawerPhotoSchema),
+              renderPhotos: z.array(DrawerPhotoSchema),
             }),
           },
         },
@@ -338,17 +340,19 @@ workshopRouter.openapi(
         nodes = nodes.filter((node) => !staleIds.has(node.id));
       }
 
-      const [collections, clippings, listingPhotos, inspirationPhotos] = await Promise.all([
-        db.select().from(photoCollections).where(eq(photoCollections.boardId, board.id)).all(),
-        // Clippings visibility: room-scoped OR promoted to the global drawer.
-        db
-          .select()
-          .from(sampleClippings)
-          .where(or(eq(sampleClippings.roomId, roomId), eq(sampleClippings.isGlobal, true)))
-          .all(),
-        resolveListingPhotoDrawer(c.env, roomId),
-        resolveInspirationDrawer(c.env, roomId),
-      ]);
+      const [collections, clippings, listingPhotos, inspirationPhotos, renderPhotos] =
+        await Promise.all([
+          db.select().from(photoCollections).where(eq(photoCollections.boardId, board.id)).all(),
+          // Clippings visibility: room-scoped OR promoted to the global drawer.
+          db
+            .select()
+            .from(sampleClippings)
+            .where(or(eq(sampleClippings.roomId, roomId), eq(sampleClippings.isGlobal, true)))
+            .all(),
+          resolveListingPhotoDrawer(c.env, roomId),
+          resolveInspirationDrawer(c.env, roomId),
+          resolveRenderDrawer(c.env, roomId),
+        ]);
 
       const collectionsWithItems = await Promise.all(
         collections.map(async (collection) => {
@@ -382,6 +386,7 @@ workshopRouter.openapi(
           clippings: clippings.map(serializeClipping),
           listingPhotos,
           inspirationPhotos,
+          renderPhotos,
         },
         200,
       );
