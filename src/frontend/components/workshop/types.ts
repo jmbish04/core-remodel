@@ -204,7 +204,8 @@ export type RecipeKind =
   | "floor-plan-furnish"
   | "tone-unify"
   | "lighting-enhance"
-  | "plan-to-isometric";
+  | "plan-to-isometric"
+  | "evolution-grid";
 
 /** Synchronous recipe result. */
 export interface RecipeSyncResult {
