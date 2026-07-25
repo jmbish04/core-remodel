@@ -53,6 +53,7 @@ interface WorkshopCanvasProps {
   onMaterialSwap: (node: BoardNode) => void;
   onMix: (node: BoardNode) => void;
   onClayToPhotoreal: (node: BoardNode) => void;
+  onFloorPlanFurnish: (node: BoardNode) => void;
   /** "Place image (I)" opens the drawer — our rendition of image placement. */
   onPlaceImage: () => void;
 }
@@ -93,6 +94,7 @@ export function WorkshopCanvas({
   onMaterialSwap,
   onMix,
   onClayToPhotoreal,
+  onFloorPlanFurnish,
   onPlaceImage,
 }: WorkshopCanvasProps) {
   const { containerRef, zoom, pan, spaceDown, setPan, zoomBy, fitToScreen } =
@@ -637,6 +639,7 @@ export function WorkshopCanvas({
         onMaterialSwap={onMaterialSwap}
         onMix={onMix}
         onClayToPhotoreal={onClayToPhotoreal}
+        onFloorPlanFurnish={onFloorPlanFurnish}
       />
     </div>
   );

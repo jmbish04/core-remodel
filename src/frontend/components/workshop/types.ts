@@ -12,7 +12,8 @@ export type NodeSourceType =
   | "blank_canvas"
   | "inspiration"
   | "clipping"
-  | "render";
+  | "render"
+  | "floor_plan";
 
 /** A free-floating node on the board (board_nodes row, view-model subset). */
 export interface BoardNode {
@@ -183,6 +184,8 @@ export interface BoardResponse {
   inspirationPhotos: BoardPhoto[];
   /** This room's AI/SketchUp renders (drawer "Renders" tab). */
   renderPhotos: BoardPhoto[];
+  /** The whole-house floor plan (drawer "Plan" tab) — one shared entry. */
+  floorPlanPhotos: BoardPhoto[];
 }
 
 /** Normalized bbox (0..1) — what /clippings/extract expects. */
@@ -256,6 +259,7 @@ const SOURCE_LABEL: Record<NodeSourceType, string> = {
   inspiration: "Inspiration image",
   clipping: "Material clipping",
   render: "Rendered variation",
+  floor_plan: "Floor plan",
 };
 
 export function nodeAltText(node: Pick<BoardNode, "sourceType" | "metadata">): string {
@@ -275,7 +279,7 @@ export function clippingAltText(clipping: Pick<Clipping, "label">): string {
 
 export function boardPhotoAltText(
   photo: Pick<BoardPhoto, "label">,
-  kind: "listing_photo" | "inspiration" | "render",
+  kind: "listing_photo" | "inspiration" | "render" | "floor_plan",
 ): string {
   const base = SOURCE_LABEL[kind];
   return photo.label ? `${base}: ${photo.label}` : base;

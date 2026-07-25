@@ -57,7 +57,7 @@ export const photoCollectionItems = sqliteTable(
     cfImageUrl: text("cf_image_url").notNull(),
     // Same enum as board_nodes.sourceType — what kind of record this photo came from.
     sourceType: text("source_type", {
-      enum: ["listing_photo", "blank_canvas", "inspiration", "clipping", "render"],
+      enum: ["listing_photo", "blank_canvas", "inspiration", "clipping", "render", "floor_plan"],
     }).notNull(),
     // Stringified PK of the source record. Nullable for ad-hoc items.
     sourceId: text("source_id"),

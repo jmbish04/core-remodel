@@ -28,6 +28,7 @@ import {
   Home,
   Image as ImageIcon,
   Layers,
+  Map,
   MoreVertical,
   Scissors,
   Sparkles,
@@ -50,7 +51,7 @@ import {
   type Clipping,
 } from "../types";
 
-type TabKey = "listing" | "inspiration" | "renders" | "samples" | "global";
+type TabKey = "listing" | "inspiration" | "renders" | "plan" | "samples" | "global";
 
 interface SampleDrawerProps {
   /** Controlled open state (so the canvas "Place image" tool can open it). */
@@ -59,6 +60,7 @@ interface SampleDrawerProps {
   listingPhotos: BoardPhoto[];
   inspirationPhotos: BoardPhoto[];
   renderPhotos: BoardPhoto[];
+  floorPlanPhotos: BoardPhoto[];
   clippings: Clipping[];
   /** Place a whole listing photo onto the canvas as a listing_photo node. */
   onPlaceListing: (photo: BoardPhoto) => void;
@@ -66,6 +68,8 @@ interface SampleDrawerProps {
   onPlaceInspiration: (photo: BoardPhoto) => void;
   /** Place a whole render onto the canvas as a render node. */
   onPlaceRender: (photo: BoardPhoto) => void;
+  /** Place the floor plan onto the canvas as a floor_plan node. */
+  onPlaceFloorPlan: (photo: BoardPhoto) => void;
   /** Place a clipping onto the canvas as a clipping node. */
   onPlaceClipping: (clipping: Clipping) => void;
   /** Open the extraction dialog against an inspiration photo. */
@@ -80,6 +84,7 @@ const TABS: Array<{ key: TabKey; label: string; icon: typeof Home }> = [
   { key: "listing", label: "Listing", icon: Home },
   { key: "inspiration", label: "Inspiration", icon: Sparkles },
   { key: "renders", label: "Renders", icon: ImageIcon },
+  { key: "plan", label: "Plan", icon: Map },
   { key: "samples", label: "Samples", icon: Scissors },
   { key: "global", label: "Global", icon: Globe },
 ];
@@ -90,10 +95,12 @@ export function SampleDrawer({
   listingPhotos,
   inspirationPhotos,
   renderPhotos,
+  floorPlanPhotos,
   clippings,
   onPlaceListing,
   onPlaceInspiration,
   onPlaceRender,
+  onPlaceFloorPlan,
   onPlaceClipping,
   onExtractFromInspiration,
   onSetClippingGlobal,
@@ -122,6 +129,8 @@ export function SampleDrawer({
         return inspirationPhotos.length;
       case "renders":
         return renderPhotos.length;
+      case "plan":
+        return floorPlanPhotos.length;
       case "samples":
         return roomClippings.length;
       case "global":
@@ -145,6 +154,7 @@ export function SampleDrawer({
           {listingPhotos.length +
             inspirationPhotos.length +
             renderPhotos.length +
+            floorPlanPhotos.length +
             clippings.length}
         </span>
         <ChevronUp
@@ -226,6 +236,16 @@ export function SampleDrawer({
                   emptyTitle="No renders yet"
                   emptyBody="This room’s AI and SketchUp renders show up here — place one on the canvas to restyle it or make it photoreal."
                 />
+              ) : tab === "plan" ? (
+                <PhotoGrid
+                  photos={floorPlanPhotos}
+                  kind="floor_plan"
+                  reduced={reduced}
+                  onPlace={onPlaceFloorPlan}
+                  emptyIcon={Map}
+                  emptyTitle="No floor plan"
+                  emptyBody="The house floor plan shows up here — place it on the canvas and furnish it."
+                />
               ) : tab === "samples" ? (
                 <ClippingGrid
                   clippings={roomClippings}
@@ -282,7 +302,7 @@ function PhotoGrid({
   emptyBody,
 }: {
   photos: BoardPhoto[];
-  kind: "listing_photo" | "inspiration" | "render";
+  kind: "listing_photo" | "inspiration" | "render" | "floor_plan";
   reduced: boolean;
   onPlace: (photo: BoardPhoto) => void;
   onExtract?: (photo: BoardPhoto) => void;

@@ -9,7 +9,7 @@
 // ---------------------------------------------------------------------------
 
 import { useEffect, useRef } from "react";
-import { Blend, Scissors, SwatchBook, Wand2 } from "lucide-react";
+import { Armchair, Blend, Scissors, SwatchBook, Wand2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -29,6 +29,8 @@ interface NodeContextMenuProps {
   onMix: (node: BoardNode) => void;
   /** Only offered on render nodes (SketchUp/AI renders). */
   onClayToPhotoreal: (node: BoardNode) => void;
+  /** Only offered on floor_plan nodes. */
+  onFloorPlanFurnish: (node: BoardNode) => void;
 }
 
 const ITEM_CLASS =
@@ -41,6 +43,7 @@ export function NodeContextMenu({
   onMaterialSwap,
   onMix,
   onClayToPhotoreal,
+  onFloorPlanFurnish,
 }: NodeContextMenuProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const firstItemRef = useRef<HTMLButtonElement | null>(null);
@@ -138,6 +141,22 @@ export function NodeContextMenu({
             Make it photoreal…
             <span className="block text-[11px] text-muted-foreground">
               Turn this SketchUp / clay render photorealistic
+            </span>
+          </span>
+        </button>
+      ) : null}
+      {state.node.sourceType === "floor_plan" ? (
+        <button
+          type="button"
+          role="menuitem"
+          className={ITEM_CLASS}
+          onClick={() => run(onFloorPlanFurnish)}
+        >
+          <Armchair className="size-4 text-muted-foreground" />
+          <span>
+            Furnish this plan…
+            <span className="block text-[11px] text-muted-foreground">
+              Add furniture, keeping the walls intact
             </span>
           </span>
         </button>

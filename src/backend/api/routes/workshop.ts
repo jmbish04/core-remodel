@@ -49,6 +49,7 @@ import { nearestAspectRatio } from "../../services/render/prompt-kit";
 import { RECIPES, buildRecipePrompt } from "../../services/render/recipes";
 import { runStage } from "../../services/render/stage-runner";
 import {
+  resolveFloorPlanDrawer,
   resolveInspirationDrawer,
   resolveListingPhotoDrawer,
   resolveRenderDrawer,
@@ -63,7 +64,14 @@ export const workshopRouter = new OpenAPIHono<{ Bindings: Env }>();
 
 const ErrorSchema = z.object({ error: z.string() });
 
-const SOURCE_TYPES = ["listing_photo", "blank_canvas", "inspiration", "clipping", "render"] as const;
+const SOURCE_TYPES = [
+  "listing_photo",
+  "blank_canvas",
+  "inspiration",
+  "clipping",
+  "render",
+  "floor_plan",
+] as const;
 
 // Node kinds: "image" is the original Slice-1 kind; rectangle/ellipse/text/pen
 // are the devl.dev vector-shape template-parity kinds (frontend, appended
@@ -227,6 +235,7 @@ workshopRouter.openapi(
               listingPhotos: z.array(DrawerPhotoSchema),
               inspirationPhotos: z.array(DrawerPhotoSchema),
               renderPhotos: z.array(DrawerPhotoSchema),
+              floorPlanPhotos: z.array(DrawerPhotoSchema),
             }),
           },
         },
@@ -387,6 +396,7 @@ workshopRouter.openapi(
           listingPhotos,
           inspirationPhotos,
           renderPhotos,
+          floorPlanPhotos: resolveFloorPlanDrawer(new URL(c.req.url).origin),
         },
         200,
       );
