@@ -39,12 +39,14 @@ import {
 import { extractCoord, extractTelemetryFields } from "@backend/services/tesla/frames";
 import {
   getStreamControl,
+  isWithinStreamWindow,
   setPollFallbackSeconds,
   setStreamEnabled,
   setStreamWindow,
   shouldPollNow,
   shouldStreamNow,
 } from "@backend/services/tesla/gating";
+import { getVehicleImageUrl } from "@backend/services/tesla/vehicle-image";
 import { evaluateAutomations } from "@backend/services/tesla-automations";
 import { telemetryRecordingAllowed } from "@backend/services/tesla-integration";
 import { pollVehicleForActiveDrive } from "@backend/services/tesla-poller";
@@ -217,6 +219,48 @@ teslaRouter.post("/stream/stop", async (c) => {
 teslaRouter.get("/stream/status", async (c) => {
   const res = await teslaStreamStub(c.env).fetch("https://do/status");
   return c.json(await res.json(), res.status as ContentfulStatusCode);
+});
+
+/** Format an hour (0–24) as a 12-hour clock label, e.g. 7 → "7:00 AM", 20 → "8:00 PM". */
+function to12h(hour: number): string {
+  const h = ((hour % 24) + 24) % 24;
+  const period = h < 12 ? "AM" : "PM";
+  const disp = h % 12 === 0 ? 12 : h % 12;
+  return `${disp}:00 ${period}`;
+}
+
+/**
+ * GET /api/tesla/stream/banner — everything the GLOBAL admin telemetry alert needs.
+ *
+ * The alert shows only when a drive list is active. It reports whether telemetry
+ * is live (the DO's heartbeat-backed connected flag), whether the daytime window
+ * is open (12-hour label), whether an Enable button should appear (active drive ∧
+ * in window ∧ toggle off), and — when telemetry IS live — the compositor image of
+ * the actual car. All D1/KV reads, no DO round-trip, so it's cheap on every page.
+ */
+teslaRouter.get("/stream/banner", async (c) => {
+  const db = drizzle(c.env.DB);
+  const [active] = await db
+    .select({ slug: driveLists.slug, title: driveLists.title })
+    .from(driveLists)
+    .where(eq(driveLists.isActive, true))
+    .limit(1);
+
+  const control = await getStreamControl(c.env);
+  const withinWindow = isWithinStreamWindow(new Date(), control);
+  const telemetryActive = control.connected;
+  const canEnable = Boolean(active) && withinWindow && !control.enabled;
+  const vehicleImageUrl = telemetryActive ? await getVehicleImageUrl(c.env).catch(() => null) : null;
+
+  return c.json({
+    activeDrive: active ? { slug: active.slug, title: active.title } : null,
+    telemetryActive,
+    telemetryEnabled: control.enabled,
+    withinWindow,
+    canEnable,
+    windowLabel: `${to12h(control.windowStartHour)}–${to12h(control.windowEndHour)}`,
+    vehicleImageUrl,
+  });
 });
 
 /**
