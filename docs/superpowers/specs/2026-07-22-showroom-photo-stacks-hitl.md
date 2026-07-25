@@ -227,3 +227,28 @@ a compact style record — the raw signal Phase F's style profile reads.
 
 > Note: a fresh preview/prod deploy needs ~10-15s to propagate before new routes
 > answer; QC immediately after deploy can see a transient Astro 404.
+
+---
+
+## Phase E — HITL walkthrough UI (THIS CHANGELIST)
+
+**Goal:** the screen where a human reviews a bucket's candidate matches. Flow
+(owner pick): **compare then confirm** — a grid to compare candidates, tap one
+for a full card to react + confirm.
+
+### Tasks (done)
+
+- **E.1 Backend** — `GET /api/intake/candidate-queue`: every bucket with ≥1
+  candidate + total/pending/confirmed counts + showroom name.
+- **E.2 Page** — `/admin/shopping/product-photo-hitl` (BaseLayout + island);
+  added to the shopping sidebar nav ("Product-Photo Review").
+- **E.3 App** — `ProductPhotoHitlApp.tsx`: bucket queue → candidate compare grid
+  → per-candidate dialog (image carousel over staged source URLs, details,
+  match/like/dislike/stars, typed OR MediaRecorder voice reaction, confirm/
+  reject). Monolith dark; sonner toasts; reuses the `api` helper + shadcn.
+
+### Acceptance
+
+- `tsc --noEmit` adds 0 errors; `pnpm run build` bundles.
+- QC (`pr_hitl_queue.mjs`): candidate-queue aggregates counts + showroom, page
+  returns 200 — 6/6 on preview. Action endpoints covered by the D1/D2 QCs.

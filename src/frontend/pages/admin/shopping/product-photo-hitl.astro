@@ -1,0 +1,11 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ProductPhotoHitlApp } from "@/components/intake/ProductPhotoHitlApp";
+---
+
+<BaseLayout
+  title="Product-Photo Review — The Monolith"
+  description="Walk through each photo bucket's candidate product matches: compare, react, and confirm the one that's right."
+>
+  <ProductPhotoHitlApp client:only="react" />
+</BaseLayout>

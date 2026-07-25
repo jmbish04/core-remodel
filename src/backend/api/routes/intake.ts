@@ -24,7 +24,7 @@
  */
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { asc, desc, eq, inArray, and, isNull } from "drizzle-orm";
+import { asc, desc, eq, inArray, and, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -39,6 +39,7 @@ import {
   scrapingSitemap,
   showroomProductMappings,
   showroomStoreProducts,
+  showroomStores,
 } from "@backend/db";
 import { createResearchJob } from "@backend/services/research-jobs";
 import {
@@ -599,6 +600,33 @@ intakeRouter.post("/buckets/:id/intake", async (c) => {
 
 /**
  * GET /api/intake/buckets/:id/candidates — Phase C.
+ * GET /api/intake/candidate-queue — Phase E.
+ * Every bucket that has ≥1 candidate, newest-first, with candidate + pending
+ * counts and showroom name. Feeds the HITL walkthrough's bucket picker.
+ */
+intakeRouter.get("/candidate-queue", async (c) => {
+  const db = drizzle(c.env.DB);
+  const rows = await db
+    .select({
+      bucketId: bucketProductCandidates.bucketId,
+      total: sql<number>`count(*)`,
+      pending: sql<number>`sum(case when ${bucketProductCandidates.status} = 'pending' then 1 else 0 end)`,
+      confirmed: sql<number>`sum(case when ${bucketProductCandidates.status} = 'confirmed' then 1 else 0 end)`,
+      label: productPhotoBuckets.label,
+      bucketStatus: productPhotoBuckets.status,
+      showroomId: productPhotoBuckets.showroomId,
+      showroomName: showroomStores.name,
+    })
+    .from(bucketProductCandidates)
+    .innerJoin(productPhotoBuckets, eq(productPhotoBuckets.id, bucketProductCandidates.bucketId))
+    .leftJoin(showroomStores, eq(showroomStores.id, productPhotoBuckets.showroomId))
+    .groupBy(bucketProductCandidates.bucketId)
+    .orderBy(desc(bucketProductCandidates.bucketId));
+
+  return c.json({ buckets: rows });
+});
+
+/**
  * The candidate rows the workflow produced, rank-ASC. `colors` / `rawExtraction`
  * are parsed back from their stored JSON. Feeds the HITL walkthrough (Phase D/E).
  */
