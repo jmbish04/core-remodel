@@ -226,6 +226,24 @@ export const CHANGELOG: ChangelogEntry[] = [
     status: "staged",
   },
   {
+    id: "tesla-stream-lifecycle-control",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-25",
+    tag: "0023",
+    area: "Tesla / Ingest",
+    title: "Streaming-ingest lifecycle control + shared frame extractors",
+    summary:
+      "Foundation for the TeslaStreamDO: the single decision surface for when the outbound Tessie socket may be alive (duration-billed, so it must earn its keep), plus the frame parsing both ingest paths share. The stream is alive only when a drive is active, it's 07:00–20:00 Pacific, recording is on, and the UI toggle is on; otherwise the poller falls back on a configurable cadence. Exactly one of stream/poll ever covers an active drive.",
+    changes: [
+      { kind: "added", text: "services/tesla/gating.ts — project_system_variables-backed stream control (toggle, window hours, poll-fallback cadence, DO connected flag) in one batched read; Pacific-aware isWithinStreamWindow (Intl, DST-correct); shouldStreamNow/shouldPollNow decision predicates; enforceStreamWindow deactivates a drive once the window closes." },
+      { kind: "added", text: "GET/POST /api/tesla/stream/control — admin toggle + window + cadence, with inverted-window rejection." },
+      { kind: "changed", text: "services/tesla/frames.ts — extractCoord + extractTelemetryFields lifted verbatim out of routes/tesla.ts so the DO and the compat webhook/telemetry routes parse frames identically (ING-01)." },
+      { kind: "changed", text: "tesla-poller.ts is now the explicit FALLBACK path: stands down (reason 'stream-active') when the stream carries ingest, and throttles on the configurable cadence instead of a hardcoded 120s." },
+      { kind: "changed", text: "Drive activation is time-gated — PATCH /api/drive-lists/:slug {isActive:true} returns 409 outside 07:00–20:00; deactivation always allowed. _worker scheduled() runs enforceStreamWindow each minute." },
+    ],
+    status: "staged",
+  },
+  {
     id: "showroom-store-dedup-tool",
     branch: "claude/showroom-listing-500-map-6kvtm9",
     date: "2026-07-25",
