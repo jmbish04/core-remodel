@@ -211,6 +211,21 @@ export const BRANCHES: ChangelogBranch[] = [
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "showroom-dedup-hardening",
+    branch: "claude/showroom-listing-500-map-6kvtm9",
+    date: "2026-07-25",
+    area: "Showrooms",
+    title: "dedup tool hardening — fix a link-duplication bug + Codra review fixes",
+    summary:
+      "Hardening the dedup_showroom_stores tool before it is run. The v1 reparented EVERY child FK, but the seed inserts a WEBSITE link per store and showroom_store_links has no unique index — so v1 would have given each kept store a second website link. v2 uses a per-table policy: reparent user data, drop redundant/seeded/scrape/mapping rows via cascade. Also addresses Codra's review: fully-typed Drizzle builders (no raw SQL), db.batch() writes, column-selected load, typed result helper, JSDoc.",
+    changes: [
+      { kind: "fixed", text: "dedup would duplicate the kept store's website link: the seed adds a WEBSITE row per store and showroom_store_links has no unique index, so reparenting a shell's link created a second link. Links (and other seeded/scrape/mapping rows) are now DROPPED via ON DELETE CASCADE, not moved." },
+      { kind: "changed", text: "Per-table policy: reparent user data (notes/ratings/pocs/contacts/sales/images/price/drive-stops/journal); drop redundant/scrape/mapping rows; explicit-delete the 4 non-cascade artifact tables before the store delete." },
+      { kind: "changed", text: "Codra review fixes: replaced raw sql.raw with typed Drizzle builders, batched writes via db.batch() in <=90-param chunks, load only the 11 columns needed, single changesOf() result helper, JSDoc on the export." },
+    ],
+    status: "staged",
+  },
+  {
     id: "showroom-store-dedup-tool",
     branch: "claude/showroom-listing-500-map-6kvtm9",
     date: "2026-07-25",
