@@ -8,6 +8,7 @@ import {
 } from "drizzle-orm/sqlite-core";
 
 import { storeBayareaCities } from "./bay_area_cities";
+import { showroomStoreType } from "./store_types";
 
 /**
  * Showroom Stores — 1 row per physical location.
@@ -25,6 +26,20 @@ export const showroomStores = sqliteTable("showroom_stores", {
   description: text("description"),
   pricePoint: text("price_point", {
     enum: ["$", "$$", "$$$", "$$$$"],
+  }),
+
+  /**
+   * Business-model classification — single-select FK to `showroom_store_type`
+   * (corporate, authorized_dealer, local_boutique, specialty_no_showroom, …).
+   *
+   * ORTHOGONAL to `showroom_store_category` (what the store SELLS, many-to-many).
+   * This is HOW the business operates, and a store is exactly one, so it lives
+   * here as a single FK — never a mapping table, never a denormalized type_name
+   * (JOIN `showroom_store_type` for the display label). Nullable: legacy rows are
+   * backfilled from the free-text `scale` descriptor and left for review.
+   */
+  typeId: integer("type_id").references(() => showroomStoreType.id, {
+    onDelete: "set null",
   }),
 
   // ── Location details (per-row = per-physical-location) ────────────────

@@ -1,5 +1,6 @@
 export * from "./bay_area_cities";
 export * from "./stores";
+export * from "./store_types";
 export * from "./store_products";
 export * from "./categories";
 export * from "./product_docs";

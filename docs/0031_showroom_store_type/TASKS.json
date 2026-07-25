@@ -1,0 +1,79 @@
+{
+  "slug": "0031-showroom-store-type",
+  "title": "Showroom Store Type (business-model taxonomy)",
+  "phases": ["P1 Schema", "P2 API", "P3 MCP", "P4 Frontend"],
+  "tasks": [
+    {
+      "taskKey": "0031-p1-schema",
+      "workstream": "database",
+      "phase": "P1 Schema",
+      "changeType": "schema",
+      "dependsOn": [],
+      "status": "in_progress",
+      "title": "showroom_store_type table + stores.type_id FK; generate + migrate:remote"
+    },
+    {
+      "taskKey": "0031-p1-seed-backfill",
+      "workstream": "database",
+      "phase": "P1 Schema",
+      "changeType": "data",
+      "dependsOn": ["0031-p1-schema"],
+      "status": "pending",
+      "title": "Seed 6 types; backfill type_id from existing booleans (fill-only, no overwrite)"
+    },
+    {
+      "taskKey": "0031-p2-type-crud",
+      "workstream": "api",
+      "phase": "P2 API",
+      "changeType": "feature",
+      "dependsOn": ["0031-p1-schema"],
+      "status": "pending",
+      "title": "GET/POST /api/showroom-store-types + PATCH /:id (list-active, create-Other, edit/soft-deactivate)"
+    },
+    {
+      "taskKey": "0031-p2-store-wire",
+      "workstream": "api",
+      "phase": "P2 API",
+      "changeType": "feature",
+      "dependsOn": ["0031-p2-type-crud"],
+      "status": "pending",
+      "title": "Store read returns joined type; create/update accept typeId; directory LIST/SEARCH type filter"
+    },
+    {
+      "taskKey": "0031-p3-mcp",
+      "workstream": "mcp",
+      "phase": "P3 MCP",
+      "changeType": "feature",
+      "dependsOn": ["0031-p2-store-wire"],
+      "status": "pending",
+      "title": "list_store_types tool; type on get/list_showrooms; typeId on update_showroom; search filter; /connect docs"
+    },
+    {
+      "taskKey": "0031-p4-config-page",
+      "workstream": "frontend",
+      "phase": "P4 Frontend",
+      "changeType": "feature",
+      "dependsOn": ["0031-p2-type-crud"],
+      "status": "pending",
+      "title": "/admin/config/showroom/store-types on ConfigShell with color picker"
+    },
+    {
+      "taskKey": "0031-p4-badge-filter",
+      "workstream": "frontend",
+      "phase": "P4 Frontend",
+      "changeType": "feature",
+      "dependsOn": ["0031-p2-store-wire"],
+      "status": "pending",
+      "title": "Color-coded type badge (html_color) on directory + viewport; ComboboxWithOther picker; type filter chips on directory/map/drive"
+    },
+    {
+      "taskKey": "0031-qc",
+      "workstream": "qc",
+      "phase": "P4 Frontend",
+      "changeType": "test",
+      "dependsOn": ["0031-p2-store-wire", "0031-p3-mcp", "0031-p4-badge-filter"],
+      "status": "pending",
+      "title": "scripts/qc/pr_<n>.mjs: types CRUD + set store type + directory filter + regression guard; --preview + prod"
+    }
+  ]
+}
