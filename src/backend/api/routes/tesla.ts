@@ -52,6 +52,7 @@ import { isRequestAuthenticated } from "@backend/utils/access";
 import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
 
 const teslaRouter = new Hono<{ Bindings: Env }>();
 
@@ -203,19 +204,19 @@ function teslaStreamStub(env: Env) {
  */
 teslaRouter.post("/stream/start", async (c) => {
   const res = await teslaStreamStub(c.env).fetch("https://do/start", { method: "POST" });
-  return c.json(await res.json(), res.status as 200);
+  return c.json(await res.json(), res.status as ContentfulStatusCode);
 });
 
 /** POST /api/tesla/stream/stop — disconnect the socket and stop the DO now. */
 teslaRouter.post("/stream/stop", async (c) => {
   const res = await teslaStreamStub(c.env).fetch("https://do/stop", { method: "POST" });
-  return c.json(await res.json(), res.status as 200);
+  return c.json(await res.json(), res.status as ContentfulStatusCode);
 });
 
 /** GET /api/tesla/stream/status — the DO's live connection state + write budget + breaker. */
 teslaRouter.get("/stream/status", async (c) => {
   const res = await teslaStreamStub(c.env).fetch("https://do/status");
-  return c.json(await res.json(), res.status as 200);
+  return c.json(await res.json(), res.status as ContentfulStatusCode);
 });
 
 /**

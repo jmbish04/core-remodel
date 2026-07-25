@@ -88,9 +88,14 @@ export class TeslaStreamDO extends DurableObject<Env> {
   private lastShift: string | null = null;
   /** Wall-clock of the last persisted frame, for the persist throttle. */
   private lastPersistMs = 0;
+  /** Cached drizzle instances — the frame path is high-frequency. */
+  private readonly teslaDb: ReturnType<typeof drizzle>;
+  private readonly appDb: ReturnType<typeof drizzle>;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    this.teslaDb = drizzle(env.TESLA_DB);
+    this.appDb = drizzle(env.DB);
   }
 
   // ── Control API (called by the /api/tesla/stream routes via the DO stub) ──────
@@ -173,7 +178,18 @@ export class TeslaStreamDO extends DurableObject<Env> {
    * not run. Uses a native fire-rate window in `ctx.storage` — no growing table.
    */
   private async guardOrTrip(): Promise<boolean> {
-    const breaker = await readCircuitBreaker(this.env.DB).catch(() => ({ tripped: false }));
+    // FAIL CLOSED: the file header's contract is "downtime is acceptable over
+    // billing". If we can't even read the kill-switch, assume the worst and
+    // hard-stop rather than keep an outbound socket open on faith.
+    let breaker;
+    try {
+      breaker = await readCircuitBreaker(this.env.DB);
+    } catch (err) {
+      console.error(`[${DO_NAME}] breaker read failed — failing closed:`, err);
+      await this.disconnect("circuit breaker unreadable (failing closed)");
+      await this.ctx.storage.deleteAlarm();
+      return false;
+    }
     if (breaker.tripped) {
       await this.disconnect("circuit breaker tripped");
       await this.ctx.storage.deleteAlarm();
@@ -278,7 +294,9 @@ export class TeslaStreamDO extends DurableObject<Env> {
     let payload: Record<string, unknown>;
     try {
       payload = typeof raw === "string" ? JSON.parse(raw) : (raw as Record<string, unknown>);
-      if (!payload || typeof payload !== "object") return;
+      // Arrays are typeof "object" too — reject them so a list frame can't reach
+      // extractTelemetryFields with an unexpected shape.
+      if (!payload || typeof payload !== "object" || Array.isArray(payload)) return;
     } catch {
       return; // non-JSON frame — ignore, never throw on the socket path.
     }
@@ -299,7 +317,7 @@ export class TeslaStreamDO extends DurableObject<Env> {
         await this.ctx.storage.deleteAlarm();
         return;
       }
-      await drizzle(this.env.TESLA_DB)
+      await this.teslaDb
         .insert(teslaTelemetryEvents)
         .values({
           vin: f.vin,
@@ -325,15 +343,15 @@ export class TeslaStreamDO extends DurableObject<Env> {
   }
 
   private async onPark(lat: number, lng: number): Promise<void> {
-    const db = drizzle(this.env.DB);
-    const match = await matchAndMarkVisited(db, { lat, lng });
+    const match = await matchAndMarkVisited(this.appDb, { lat, lng });
     if (match.matched && match.next) {
       await sendNavigation(this.env, `${match.next.lat},${match.next.lng}`).catch(() => {});
     }
     const home = await maybeEndActiveDriveOnHomeArrival(this.env, {
       latitude: lat,
       longitude: lng,
-      source: "tesla-webhook",
+      // This is the real-time telemetry stream, not the webhook path.
+      source: "tesla-telemetry",
       stopped: true,
     });
     if (home.ended) {
