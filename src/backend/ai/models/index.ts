@@ -15,6 +15,7 @@ import { aura_1 } from "./aura-1";
 import { bge_large_en_v1_5 } from "./bge-large-en-v1-5";
 import { gpt_oss_120b } from "./gpt-oss-120b";
 import { kimi_k2_6 } from "./kimi-k2.6";
+import { kimi_k2_7_code } from "./kimi-k2.7-code";
 import { llama_3_1_8b } from "./llama-3-1-8b-instruct";
 import { llama_3_2_11b_vision } from "./llama-3-2-11b-vision";
 import { llama_3_3_70b } from "./llama-3-3-70b-instruct-fp8-fast";
@@ -27,6 +28,7 @@ import { whisper } from "./whisper";
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const MODEL_MAP: Record<string, ModelDescriptor<any, any>> = {
   "@cf/moonshotai/kimi-k2.6": kimi_k2_6,
+  "@cf/moonshotai/kimi-k2.7-code": kimi_k2_7_code,
   "@cf/openai/gpt-oss-120b": gpt_oss_120b,
   "@cf/meta/llama-3.3-70b-instruct-fp8-fast": llama_3_3_70b,
   "@cf/meta/llama-3.1-8b-instruct": llama_3_1_8b,
@@ -39,7 +41,11 @@ const MODEL_MAP: Record<string, ModelDescriptor<any, any>> = {
 
 export const modelRegistry = {
   chat: kimi_k2_6,
-  extract: kimi_k2_6,
+  // Structured extraction MUST use kimi-k2.7-code, NOT k2.6: k2.6 burns its
+  // whole budget on the reasoning channel and returns content:"" (empty), which
+  // normalizers silently turn into all-null extractions. Measured 2026-07-19;
+  // see kimi-k2.7-code.ts + brand-reconcile.ts. Do not "simplify" back to k2.6.
+  extract: kimi_k2_7_code,
   draft: kimi_k2_6,
   embed: bge_large_en_v1_5,
   stt: whisper,
@@ -53,7 +59,7 @@ export const modelRegistry = {
 
 export function getModelRegistry(_env: Env) {
   // Static registry — model selection is fixed for this project.
-  // Vision: llama-3.2-11b-vision | Reasoning: kimi-k2.6
+  // Vision: llama-3.2-11b-vision | Chat/draft: kimi-k2.6 | Extract: kimi-k2.7-code
   return modelRegistry;
 }
 
