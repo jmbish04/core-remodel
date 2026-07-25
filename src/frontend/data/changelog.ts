@@ -211,6 +211,21 @@ export const BRANCHES: ChangelogBranch[] = [
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "tesla-stream-ui",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-25",
+    tag: "0023",
+    area: "Tesla / Ingest",
+    title: "Drive-list streaming toggle + live status pill",
+    summary:
+      "The on/off button for the streaming DO, on the Showroom Drives page, with a live pill that shows which ingest path is running: Streaming (DO holds the socket), Polling (fallback while a drive is active), or Idle (no active drive) — plus a Tripped state when the circuit breaker is set. The subline always says why, so the mode is never a mystery.",
+    changes: [
+      { kind: "added", text: "components/drives/TeslaStreamControl.tsx — a Switch bound to POST /api/tesla/stream/control and a status pill polling /control + /status every 15s (Streaming / Polling / Idle / Tripped, with an explanatory subline). Hides itself when the routes 404 on a not-yet-deployed worker." },
+      { kind: "changed", text: "DriveListsApp.tsx mounts the control above the drive tabs." },
+    ],
+    status: "staged",
+  },
+  {
     id: "tesla-stream-do",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-25",
