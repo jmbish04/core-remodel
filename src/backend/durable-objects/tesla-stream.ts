@@ -41,6 +41,7 @@ import {
 } from "@backend/services/safety/do-circuit-breaker";
 import { getTessieConfig, sendNavigation } from "@backend/services/tesla";
 import { extractTelemetryFields } from "@backend/services/tesla/frames";
+import { finalizeSoftArrivals, stageSoftArrival } from "@backend/services/tesla/visit-sessions";
 import {
   heartbeatStream,
   setStreamConnected,
@@ -160,7 +161,7 @@ export class TeslaStreamDO extends DurableObject<Env> {
 
     // 4) CONNECT if needed; heartbeat if already connected.
     if (!this.ws) {
-      await this.connect();
+      await this.connectStream();
     } else {
       await heartbeatStream(this.env).catch(() => {});
     }
@@ -215,7 +216,7 @@ export class TeslaStreamDO extends DurableObject<Env> {
   }
 
   // ── Connection ────────────────────────────────────────────────────────────────
-  private async connect(): Promise<void> {
+  private async connectStream(): Promise<void> {
     const cfg = await getTessieConfig(this.env);
     if (!cfg) {
       console.warn(`[${DO_NAME}] Tessie not configured; cannot connect.`);
@@ -339,6 +340,10 @@ export class TeslaStreamDO extends DurableObject<Env> {
     if (shiftChanged && f.shiftState === "P" && f.latitude != null && f.longitude != null) {
       await this.onPark(f.latitude, f.longitude).catch((e) => console.error(`[${DO_NAME}] onPark:`, e));
     }
+    // Drive-away (P → moving) → finalize any open soft arrivals into staged visits.
+    if (shiftChanged && this.lastShift === "P" && f.shiftState != null && f.shiftState !== "P") {
+      await finalizeSoftArrivals(this.env).catch((e) => console.error(`[${DO_NAME}] finalize:`, e));
+    }
     this.lastShift = f.shiftState;
   }
 
@@ -358,7 +363,14 @@ export class TeslaStreamDO extends DurableObject<Env> {
       // The drive is over at home → the socket has no reason to stay open.
       await this.disconnect("car reached home, drive ended");
       await this.ctx.storage.deleteAlarm();
+      return;
     }
+    // Not home → if we're at a registered showroom, stage a soft-arrival draft.
+    await stageSoftArrival(this.env, {
+      latitude: lat,
+      longitude: lng,
+      gpsSource: "tesla-telemetry",
+    }).catch((e) => console.error(`[${DO_NAME}] stageSoftArrival:`, e));
   }
 
   /** Increment (and roll over daily) the TESLA_DB write budget. Returns false when spent. */
