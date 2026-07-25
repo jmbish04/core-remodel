@@ -6,9 +6,7 @@
  * and route through the active provider (currently Workers AI only).
  */
 
-import type { z } from "zod";
-
-import { zodToJsonSchema } from "zod-to-json-schema";
+import { z } from "zod";
 
 import type { GptOssMessage } from "../models/gpt-oss-120b";
 import type { AIProvider } from "./base";
@@ -69,7 +67,7 @@ export async function generateStructuredOutput<TSchema extends z.ZodTypeAny>(
         max_tokens: opts.max_tokens,
         response_format: {
           type: "json_schema" as const,
-          json_schema: zodToJsonSchema(opts.schema as never, opts.schemaName ?? "Schema"),
+          json_schema: z.toJSONSchema(opts.schema),
         },
       },
       { cacheTtl: opts.cacheTtl },
@@ -136,9 +134,7 @@ async function structuredViaGemini<TSchema extends z.ZodTypeAny>(
     config: {
       ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
       responseMimeType: "application/json",
-      responseSchema: toGeminiSchema(
-        zodToJsonSchema(opts.schema as never, { $refStrategy: "none" }),
-      ),
+      responseSchema: toGeminiSchema(z.toJSONSchema(opts.schema)),
       temperature: opts.temperature ?? 0,
       // Honour an explicit cap for parity with the Workers AI path, but only
       // when the caller set one — passing undefined (the common case) lets
