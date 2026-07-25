@@ -1,15 +1,23 @@
 /**
  * @fileoverview FaviconService
  *
- * Resolves a website's favicon / brand icon, uploads it to Cloudflare Images,
- * and writes the resulting delivery URL back to the appropriate DB row.
+ * Resolves a website's favicon / brand icon and writes its URL back to the
+ * appropriate DB row. The icon is HOTLINKED from its source (the site's own
+ * `<link>` favicon, `/favicon.ico`, or the Google S2 favicon service) — it is
+ * NOT round-tripped through Cloudflare Images.
+ *
+ * Why hotlink (0025): favicons are almost always `.ico`/`.svg`, which the
+ * Cloudflare Images upload API rejects with HTTP 400 — that throw was caught
+ * silently, so `iconCfImagesUrl` never got written (icons came back empty).
+ * A favicon is already served from the site's own host (or Google's), so we
+ * store that URL directly and render it as a plain `<img src>`, mirroring the
+ * brand-imagery hotlink pattern (`brands/brand-image-harvest.ts`). The column
+ * name (`icon_cf_images_url`) is retained for compatibility; it now holds a
+ * hotlinked URL rather than an imagedelivery.net one.
  *
  * Used in `waitUntil()` fire-and-forget contexts — every method is fully
  * wrapped in try/catch and NEVER throws (a thrown error inside waitUntil
  * silently kills the background task with no retries).
- *
- * Upload infra reuses the shared `ImageProcessorService` + `resolveCloudflareImagesCredentials`
- * pattern from showroom-scan.ts — do NOT re-implement CF Images upload logic here.
  */
 
 import { drizzle } from "drizzle-orm/d1";
@@ -18,8 +26,6 @@ import { eq } from "drizzle-orm";
 import { showroomStores } from "@backend/db/schema/showroom/stores";
 import { brands } from "@backend/db/schema/brands/brands";
 import { brandTypeMappings } from "@backend/db/schema/brands/brand_type_mappings";
-import { ImageProcessorService } from "@backend/services/image-processor";
-import { resolveCloudflareImagesCredentials } from "@backend/utils/secrets";
 
 /** Content-type → file extension mapping for icon types we accept. */
 const MIME_TO_EXT: Record<string, string> = {
@@ -57,24 +63,19 @@ function isAcceptableImageType(contentType: string): boolean {
   return base.startsWith("image/");
 }
 
-export class FaviconService {
-  /**
-   * Constructs a new `ImageProcessorService` using the same credential pattern
-   * as showroom-scan.ts. Returns null when credentials are unavailable so
-   * callers can bail out gracefully.
-   */
-  private async buildImageProcessor(env: Env): Promise<ImageProcessorService | null> {
-    try {
-      const { accountId, apiTokens } = await resolveCloudflareImagesCredentials(env);
-      if (!accountId || apiTokens.length === 0) return null;
-      const [primaryToken, ...fallbackApiTokens] = apiTokens;
-      return new ImageProcessorService(env, accountId, primaryToken, { fallbackApiTokens });
-    } catch (err) {
-      console.error("[FaviconService] Failed to build ImageProcessorService:", err);
-      return null;
-    }
+/** The always-hotlinkable Google S2 favicon URL for a host (128px PNG). */
+function googleS2FaviconUrl(websiteUrl: string): string | null {
+  const normalised = /^https?:\/\//i.test(websiteUrl.trim())
+    ? websiteUrl.trim()
+    : `https://${websiteUrl.trim()}`;
+  try {
+    return `https://www.google.com/s2/favicons?domain=${new URL(normalised).hostname}&sz=128`;
+  } catch {
+    return null;
   }
+}
 
+export class FaviconService {
   /**
    * Given a website URL, scrapes the page HTML and returns the absolute URL of
    * the best available favicon/brand icon.
@@ -254,56 +255,45 @@ export class FaviconService {
   }
 
   /**
-   * Full pipeline: resolve favicon URL → download → upload to Cloudflare Images.
+   * Resolve a hotlinkable icon URL for an entity: the site's own favicon when it
+   * actually serves an image, otherwise the always-available Google S2 favicon.
    *
-   * Uses a stable `customId` derived from `entity` + `entityId` so re-runs
-   * overwrite the previous upload rather than creating duplicate images.
+   * No Cloudflare Images upload — the returned URL is stored as-is and rendered
+   * as a plain `<img src>`. We still download-validate the resolved favicon (it
+   * must return a real image within the size limit) so a 404/hotlink-blocked
+   * `<link>` href doesn't get persisted; on failure we fall back to Google S2.
    *
-   * Returns the Cloudflare Images delivery URL on success, `null` on any failure.
-   * This method is safe to call inside `c.executionCtx.waitUntil(...)` — it
+   * Returns the icon URL on success, `null` when even the fallback can't be
+   * built (e.g. an unparseable website URL). Safe inside `waitUntil(...)` — it
    * catches and logs all errors internally and never propagates.
    */
-  async uploadFaviconForEntity(
-    env: Env,
+  async resolveIconUrlForEntity(
     opts: { entity: "showroom" | "brand"; entityId: number; websiteUrl: string },
   ): Promise<string | null> {
     try {
-      const iconUrl = await this.resolveFaviconUrl(opts.websiteUrl);
-      if (!iconUrl) {
+      const resolved = await this.resolveFaviconUrl(opts.websiteUrl);
+      const fallback = googleS2FaviconUrl(opts.websiteUrl);
+
+      // The resolved URL is preferred, but a scraped <link>/favicon.ico href can
+      // 404 or hotlink-block — validate it actually serves an image first.
+      if (resolved) {
+        if (resolved === fallback) return resolved; // S2 is trusted, skip the fetch
+        const ok = await this.fetchIconBlob(resolved);
+        if (ok) return resolved;
         console.warn(
-          `[FaviconService] No icon URL resolved for ${opts.entity}:${opts.entityId} (${opts.websiteUrl})`,
+          `[FaviconService] Resolved icon unusable for ${opts.entity}:${opts.entityId} (${resolved}) — falling back to Google S2`,
         );
-        return null;
       }
 
-      const downloaded = await this.fetchIconBlob(iconUrl);
-      if (!downloaded) {
-        console.warn(
-          `[FaviconService] Icon download failed for ${opts.entity}:${opts.entityId} from ${iconUrl}`,
-        );
-        return null;
-      }
+      if (fallback) return fallback;
 
-      const svc = await this.buildImageProcessor(env);
-      if (!svc) {
-        console.warn("[FaviconService] ImageProcessorService unavailable — skipping upload");
-        return null;
-      }
-
-      const customId = `${opts.entity}-icon-${opts.entityId}`;
-      const filename = `${opts.entity}-${opts.entityId}.${downloaded.ext}`;
-
-      const uploadResp = await svc.uploadToCloudflareImages(
-        downloaded.blob,
-        customId,
-        filename,
+      console.warn(
+        `[FaviconService] No icon URL resolvable for ${opts.entity}:${opts.entityId} (${opts.websiteUrl})`,
       );
-
-      const deliveryUrl = svc.getDeliveryUrl(uploadResp, customId);
-      return deliveryUrl;
+      return null;
     } catch (err) {
       console.error(
-        `[FaviconService] uploadFaviconForEntity failed for ${opts.entity}:${opts.entityId}:`,
+        `[FaviconService] resolveIconUrlForEntity failed for ${opts.entity}:${opts.entityId}:`,
         err,
       );
       return null;
@@ -322,7 +312,7 @@ export class FaviconService {
     websiteUrl: string,
   ): Promise<void> {
     try {
-      const url = await this.uploadFaviconForEntity(env, {
+      const url = await this.resolveIconUrlForEntity({
         entity: "showroom",
         entityId: storeId,
         websiteUrl,
@@ -362,7 +352,7 @@ export class FaviconService {
     websiteUrl: string,
   ): Promise<void> {
     try {
-      const url = await this.uploadFaviconForEntity(env, {
+      const url = await this.resolveIconUrlForEntity({
         entity: "brand",
         entityId: brandId,
         websiteUrl,
