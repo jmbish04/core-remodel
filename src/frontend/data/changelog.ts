@@ -112,13 +112,13 @@ export const BRANCHES: ChangelogBranch[] = [
   },
   {
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
-    title: "Durable Object alarm circuit breaker (hard-stop)",
+    title: "0023 P6 · Location AI for the in-car assistant",
     summary:
-      "The guard the $700 cf_agents_schedules runaway (#162) never had: a runtime circuit breaker that hard-stops a runaway DO alarm loop — deletes the alarm, flips a global kill-switch, and refuses to run — before it bills into the thousands. Retro-hardens RemodelOrchestrator, bans the append-only this.schedule() in new DOs via a CI guard, and adds an admin Safety tab.",
-    date: "2026-07-21",
+      "The two MCP tools an in-car assistant needs: get_vehicle_location enriched with heading + compass, a quota-gated reverse-geocoded address, region, and freshness (serverTime/ageSeconds/isStale); and a new whats_near_me that ranks registered showrooms by distance + bearing and can sweep quota-gated Google Places for undiscovered nearby spots. Showroom coordinates read through one helper so the anticipated move off showroom_stores is a one-line change. (The DO circuit breaker that shipped earlier on this branch is PR #181.)",
+    date: "2026-07-25",
     status: "staged",
-    prNumber: 181,
-    prUrl: "https://github.com/jmbish04/core-remodel/pull/181",
+    prNumber: 220,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/220",
   },
   {
     branch: "claude/health-status-page",
@@ -238,6 +238,23 @@ export const CHANGELOG: ChangelogEntry[] = [
     changes: [
       { kind: "fixed", text: "seedShowroomStores now short-circuits (returns { inserted: 0, skipped }) the moment any showroom_stores row exists, so it only ever populates an empty directory. This stops any further duplication from a repeated seed." },
       { kind: "changed", text: "Documented that the seed is bootstrap-only and carries no natural key, so it must never run against a populated table." },
+    ],
+    status: "staged",
+  },
+  {
+    id: "tesla-location-ai-p6",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-25",
+    tag: "0023",
+    area: "Tesla / Location AI",
+    title: "Location AI — enriched get_vehicle_location + whats_near_me",
+    summary:
+      "The two MCP tools an in-car assistant needs to answer 'where am I / which way am I heading / what's worth stopping at?', enriched by the worker and quota-safe. get_vehicle_location now returns heading + compass, a reverse-geocoded address, region, and freshness; whats_near_me ranks registered showrooms by distance and bearing and can sweep Google Places for undiscovered nearby spots.",
+    changes: [
+      { kind: "changed", text: "get_vehicle_location enriched in place: heading + headingCompass (Tessie /location now parsed for heading + fix-time, both fail-soft), a resolved street address (Tessie's own, else a quota-gated Geocoding-SKU reverseGeocode that degrades to null rather than billing), Bay Area region, and freshness (serverTime, ageSeconds, isStale — unknown age is treated as stale)." },
+      { kind: "added", text: "whats_near_me MCP tool: ranks registered showrooms around the driver by straight-line distance with a compass bearing + miles; includeUndiscovered also sweeps quota-gated placesNearby for spots not yet in the directory (de-duped against known showrooms; an empty return is reported as possibly-quota-blocked). Location resolves explicit → live Tesla GPS → last phone fix." },
+      { kind: "added", text: "initialBearing() + compassFromBearing() geo primitives alongside haversineMeters in drive-geo-match, and loadShowroomCoords() — a single coordinate-source helper so the anticipated move of location data off showroom_stores is a one-line change, not a scattered rewrite." },
+      { kind: "changed", text: "TeslaLocation gains heading + timestampMs (both fail-soft); getLocation() normalizes Tessie's seconds-or-ms fix timestamp." },
     ],
     status: "staged",
   },
