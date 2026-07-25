@@ -110,16 +110,31 @@ export interface HarvestResult {
  * common shape, and unbounded recursion on an attacker-controlled xml file is
  * not something to hand a worker.
  */
-export async function discoverPages(websiteUrl: string): Promise<string[]> {
+/** Discovery result — the page list plus which sitemap produced it, so callers
+ *  (Phase B cache) can persist the source and freshness. */
+export interface SitemapDiscovery {
+  pageUrls: string[];
+  /** The sitemap URL that resolved, or null on homepage fallback / error. */
+  sitemapUrl: string | null;
+  /** ok = sitemap parsed; empty = no sitemap (homepage fallback); error = bad url. */
+  status: "ok" | "empty" | "error";
+}
+
+/**
+ * Resolve a brand's website to a page list AND report which sitemap produced it.
+ * `discoverPages` below is the thin string[]-only wrapper for existing callers.
+ */
+export async function discoverSitemap(websiteUrl: string): Promise<SitemapDiscovery> {
   let origin: string;
   try {
     origin = new URL(websiteUrl).origin;
   } catch {
-    return [];
+    return { pageUrls: [], sitemapUrl: null, status: "error" };
   }
 
   for (const path of SITEMAP_CANDIDATES) {
-    const urls = await readSitemap(`${origin}${path}`);
+    const sitemapUrl = `${origin}${path}`;
+    const urls = await readSitemap(sitemapUrl);
     if (urls.length === 0) continue;
 
     // An index sitemap's <loc>s are themselves .xml. Follow one level.
@@ -130,15 +145,23 @@ export async function discoverPages(websiteUrl: string): Promise<string[]> {
         pages.push(...(await readSitemap(child)).filter((u) => !u.endsWith(".xml")));
         if (pages.length >= MAX_PAGES_PER_RUN) break;
       }
-      if (pages.length > 0) return pages.slice(0, MAX_PAGES_PER_RUN);
+      if (pages.length > 0) return { pageUrls: pages.slice(0, MAX_PAGES_PER_RUN), sitemapUrl, status: "ok" };
       continue;
     }
 
-    return urls.filter((u) => !u.endsWith(".xml")).slice(0, MAX_PAGES_PER_RUN);
+    return {
+      pageUrls: urls.filter((u) => !u.endsWith(".xml")).slice(0, MAX_PAGES_PER_RUN),
+      sitemapUrl,
+      status: "ok",
+    };
   }
 
   // No sitemap — the homepage alone still yields the hero imagery.
-  return [websiteUrl];
+  return { pageUrls: [websiteUrl], sitemapUrl: null, status: "empty" };
+}
+
+export async function discoverPages(websiteUrl: string): Promise<string[]> {
+  return (await discoverSitemap(websiteUrl)).pageUrls;
 }
 
 /** `<loc>` extraction by regex, as the demo script does — no XML parser needed. */

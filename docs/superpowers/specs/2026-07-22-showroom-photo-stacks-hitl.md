@@ -108,3 +108,41 @@ human review. Design forks confirmed by the owner:
 - QC on the preview worker: kick `/buckets/:id/intake` on a seeded bucket, poll
   the research job to completion, assert `/buckets/:id/candidates` returns ≥1
   ranked candidate with a raw extraction.
+
+---
+
+## Phase B — Sitemap persistence (THIS CHANGELIST)
+
+**Goal:** stop discarding discovered sitemaps. Cache a site's page list keyed to
+the entity so the intake workflow's per-candidate product-page scrape (deferred
+in C1) reuses a recent sitemap instead of re-fetching — Browser Rendering /
+plain fetch is the most rate-limited resource in the system.
+
+### Tasks (done)
+
+- **B.1 Schema** — `scraping_sitemap` (`scraping_sitemap.ts`): `scrape_job_type`
+  enum (brand|showroom|product), `brand_id`/`showroom_id` FKs + soft `product_id`,
+  `website_url`, resolved `sitemap_url` (null on homepage fallback), `page_urls`
+  JSON, `page_count`, `status` (ok|empty|error), `fetched_at` freshness key.
+  Migration `0134_dark_iron_monger` (single additive CREATE TABLE, applied remote).
+- **B.2 Discovery refactor** — extract `discoverSitemap()` from
+  `brand-image-harvest.ts` returning `{ pageUrls, sitemapUrl, status }`;
+  `discoverPages()` stays as the thin `string[]` wrapper (existing caller
+  unchanged, no circular import).
+- **B.3 Cache service** — `services/scraping/sitemap-cache.ts`:
+  `getFreshSitemap` / `cacheSitemap` / `discoverPagesCached` (reuse within a
+  7-day window, persist on miss, never block the result on a write failure).
+- **B.4 API** — `POST /api/intake/sitemaps/discover` (reuse-or-fetch, reports
+  `cached`), `GET /api/intake/sitemaps` (list an entity's cached rows).
+
+### Deferred (ponytail)
+
+- Wiring `discoverPagesCached` into `harvestBrandImages` — would create a circular
+  import (harvest ↔ cache); the cache's real consumer is the Phase C scrape,
+  which calls it server-side. The discover endpoint is the producer for now.
+
+### Acceptance
+
+- Migration applies clean; `tsc --noEmit` adds 0 errors; `pnpm run build` bundles.
+- QC (`pr_sitemap_cache.mjs`): first discover persists (`cached:false`), second
+  reuses (`cached:true`, no dup row), GET lists it, 400 guards — 11/11 on preview.

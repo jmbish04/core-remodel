@@ -239,6 +239,13 @@
       "when": 1784956592754,
       "tag": "0133_chemical_karnak",
       "breakpoints": true
+    },
+    {
+      "idx": 134,
+      "version": "6",
+      "when": 1784957835427,
+      "tag": "0134_dark_iron_monger",
+      "breakpoints": true
     }
   ]
 }

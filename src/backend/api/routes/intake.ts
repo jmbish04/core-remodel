@@ -36,9 +36,16 @@ import {
   productPhotoBuckets,
   productPriceObservations,
   productShowroomPhotos,
+  scrapingSitemap,
   showroomStoreProducts,
 } from "@backend/db";
 import { createResearchJob } from "@backend/services/research-jobs";
+import {
+  cacheSitemap,
+  getFreshSitemap,
+  type SitemapContext,
+} from "@backend/services/scraping/sitemap-cache";
+import { discoverSitemap } from "@backend/services/brands/brand-image-harvest";
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { cropAndUploadCfImage } from "@backend/services/render/cf-images";
 import { extractShowroomProductFromDescriptions } from "@backend/services/image-processor/product-extraction";
@@ -621,6 +628,116 @@ intakeRouter.get("/buckets/:id/candidates", async (c) => {
   }));
 
   return c.json({ bucketId, candidates });
+});
+
+// ─── Sitemaps (Phase B) ──────────────────────────────────────────────────────
+
+/** Build a SitemapContext from a body/query, or return an error string. */
+function readSitemapContext(input: {
+  scrapeJobType?: unknown;
+  brandId?: unknown;
+  showroomId?: unknown;
+  productId?: unknown;
+}): SitemapContext | { error: string } {
+  const type = input.scrapeJobType;
+  if (type !== "brand" && type !== "showroom" && type !== "product") {
+    return { error: "scrapeJobType must be one of brand|showroom|product" };
+  }
+  const num = (v: unknown): number | null => (Number.isFinite(Number(v)) ? Number(v) : null);
+  const ctx: SitemapContext = {
+    scrapeJobType: type,
+    brandId: num(input.brandId),
+    showroomId: num(input.showroomId),
+    productId: num(input.productId),
+  };
+  const ownerId =
+    type === "brand" ? ctx.brandId : type === "showroom" ? ctx.showroomId : ctx.productId;
+  if (ownerId == null) return { error: `${type}Id is required for scrapeJobType='${type}'` };
+  return ctx;
+}
+
+/**
+ * POST /api/intake/sitemaps/discover — Phase B.
+ * Discover a site's page list, reusing a fresh cached row when present. Persists
+ * a `scraping_sitemap` row on a miss. Body: { scrapeJobType, brandId|showroomId|
+ * productId, websiteUrl }. Returns { cached, pageUrls, count, sitemapUrl, status }.
+ */
+intakeRouter.post("/sitemaps/discover", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const ctx = readSitemapContext(body);
+  if ("error" in ctx) return c.json({ error: ctx.error }, 400);
+  const websiteUrl = typeof body.websiteUrl === "string" ? body.websiteUrl.trim() : "";
+  if (!websiteUrl) return c.json({ error: "websiteUrl is required" }, 400);
+
+  const db = drizzle(c.env.DB);
+
+  const cached = await getFreshSitemap(db, ctx, websiteUrl).catch(() => null);
+  if (cached) {
+    let pageUrls: string[] = [];
+    try {
+      pageUrls = JSON.parse(cached.pageUrls ?? "[]");
+    } catch {
+      pageUrls = [];
+    }
+    return c.json({
+      cached: true,
+      pageUrls,
+      count: cached.pageCount,
+      sitemapUrl: cached.sitemapUrl,
+      status: cached.status,
+    });
+  }
+
+  const discovery = await discoverSitemap(websiteUrl);
+  await cacheSitemap(db, ctx, websiteUrl, discovery).catch((err) =>
+    console.error("[intake] sitemap cache persist failed:", err),
+  );
+  return c.json({
+    cached: false,
+    pageUrls: discovery.pageUrls,
+    count: discovery.pageUrls.length,
+    sitemapUrl: discovery.sitemapUrl,
+    status: discovery.status,
+  });
+});
+
+/**
+ * GET /api/intake/sitemaps?scrapeJobType=&brandId=&showroomId=&productId= — Phase B.
+ * Cached sitemap rows for one entity, newest-first, `page_urls` parsed back.
+ */
+intakeRouter.get("/sitemaps", async (c) => {
+  const ctx = readSitemapContext({
+    scrapeJobType: c.req.query("scrapeJobType"),
+    brandId: c.req.query("brandId"),
+    showroomId: c.req.query("showroomId"),
+    productId: c.req.query("productId"),
+  });
+  if ("error" in ctx) return c.json({ error: ctx.error }, 400);
+
+  const db = drizzle(c.env.DB);
+  const ownerCol =
+    ctx.scrapeJobType === "brand"
+      ? eq(scrapingSitemap.brandId, ctx.brandId!)
+      : ctx.scrapeJobType === "showroom"
+        ? eq(scrapingSitemap.showroomId, ctx.showroomId!)
+        : eq(scrapingSitemap.productId, ctx.productId!);
+
+  const rows = await db
+    .select()
+    .from(scrapingSitemap)
+    .where(and(eq(scrapingSitemap.scrapeJobType, ctx.scrapeJobType), ownerCol))
+    .orderBy(desc(scrapingSitemap.fetchedAt));
+
+  const sitemaps = rows.map((r) => {
+    let pageUrls: string[] = [];
+    try {
+      pageUrls = JSON.parse(r.pageUrls ?? "[]");
+    } catch {
+      pageUrls = [];
+    }
+    return { ...r, pageUrls };
+  });
+  return c.json({ sitemaps });
 });
 
 // ─── GET /review-queue ──────────────────────────────────────────────────────
