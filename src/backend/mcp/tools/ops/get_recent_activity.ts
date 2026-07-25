@@ -21,8 +21,8 @@ export const getRecentActivity = defineTool({
       totalToolCalls: z.number().int(),
       url: urlField.describe("The MCP Ops console (sessions + logs)"),
       sessions: z.array(looseObject({ id: z.string(), toolCallCount: z.number().int() })),
-      recentCalls: z.array(looseObject({ id: z.string(), toolName: z.string() })),
-      recentErrors: z.array(looseObject({ id: z.string(), toolName: z.string() })),
+      recentCalls: z.array(looseObject({ id: z.number().int(), toolName: z.string() })),
+      recentErrors: z.array(looseObject({ id: z.number().int(), toolName: z.string() })),
     },
     examples: [{ title: "Recent activity", args: {} }],
     handler: async ({ env, db }, input) => {
