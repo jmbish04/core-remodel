@@ -25,7 +25,7 @@
  *   DELETE /collections/:id/items/:itemId             remove a photo from a pile
  *   POST   /clippings/extract                         extract a reusable clipping
  *   PATCH  /clippings/:id                             rename / promote-demote global drawer
- *   POST   /nodes/:id/recipe                          run extract|material-swap|mix on a node
+ *   POST   /nodes/:id/recipe                          run extract|material-swap|mix|clay-to-photoreal|floor-plan-furnish on a node
  *
  * All routes are mounted behind `requireAccessAuth` (see api/index.ts). Every
  * multi-row write goes through `db.batch` (D1 has no interactive transactions).
@@ -1017,7 +1017,7 @@ workshopRouter.openapi(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /nodes/:id/recipe — extract | material-swap | mix
+// POST /nodes/:id/recipe — extract | material-swap | mix | clay-to-photoreal | floor-plan-furnish
 // ─────────────────────────────────────────────────────────────────────────────
 
 const RecipeExtractParams = z.object({
@@ -1034,10 +1034,20 @@ const RecipeMixParams = z.object({
   prompt: z.string().min(1).optional(),
 });
 
+const RecipeClayParams = z.object({
+  referenceCfImageUrls: z.array(z.url()).max(3).optional(),
+  prompt: z.string().min(1).optional(),
+});
+const RecipeFloorPlanFurnishParams = z.object({
+  prompt: z.string().min(1).optional(),
+});
+
 const RecipeRequestSchema = z.discriminatedUnion("recipe", [
   z.object({ recipe: z.literal("extract"), params: RecipeExtractParams }),
   z.object({ recipe: z.literal("material-swap"), params: RecipeMaterialSwapParams }),
   z.object({ recipe: z.literal("mix"), params: RecipeMixParams }),
+  z.object({ recipe: z.literal("clay-to-photoreal"), params: RecipeClayParams }),
+  z.object({ recipe: z.literal("floor-plan-furnish"), params: RecipeFloorPlanFurnishParams }),
 ]);
 
 /** Get-or-create the room's Workshop render session (idempotent by roomId). */
@@ -1087,7 +1097,7 @@ workshopRouter.openapi(
       500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
     },
     tags: ["workshop"],
-    summary: "Run a node-action recipe (extract | material-swap | mix)",
+    summary: "Run a node-action recipe (extract | material-swap | mix | clay-to-photoreal | floor-plan-furnish)",
     operationId: "runNodeRecipe",
   }),
   async (c) => {
@@ -1170,27 +1180,7 @@ workshopRouter.openapi(
       const aspectRatio = nearestAspectRatio(aspectSourceWidth, aspectSourceHeight);
 
       let stageResult;
-      if (body.recipe === "material-swap") {
-        const recipe = RECIPES["material-swap"];
-        const { referenceCfImageUrls, prompt } = body.params;
-        const references = referenceCfImageUrls.map((url, index) => ({
-          url,
-          label: `reference ${index + 1}`,
-        }));
-        const composedPrompt = buildRecipePrompt(recipe, { userRequest: prompt, references });
-
-        stageResult = await runStage({
-          env: c.env,
-          sessionId,
-          type: recipe.stageType,
-          inputImageUrl: node.cfImageUrl,
-          prompt: composedPrompt,
-          parentCanvasId: node.renderCanvasId ?? null,
-          roomId,
-          aspectRatio,
-          references,
-        });
-      } else {
+      if (body.recipe === "mix") {
         // mix: stage_5_LP_synthesis of the node's image (base) + the clippings' images.
         const { clippingIds, prompt } = body.params;
         const clippingRows = await Promise.all(
@@ -1222,6 +1212,32 @@ workshopRouter.openapi(
           roomId,
           aspectRatio,
           imageUrls,
+        });
+      } else {
+        // material-swap | clay-to-photoreal | floor-plan-furnish — single-image
+        // edit on the node with optional material/style references.
+        const recipe = RECIPES[body.recipe];
+        const refUrls =
+          "referenceCfImageUrls" in body.params ? body.params.referenceCfImageUrls ?? [] : [];
+        const references = refUrls.map((url, index) => ({
+          url,
+          label: `reference ${index + 1}`,
+        }));
+        const composedPrompt = buildRecipePrompt(recipe, {
+          userRequest: body.params.prompt,
+          references,
+        });
+
+        stageResult = await runStage({
+          env: c.env,
+          sessionId,
+          type: recipe.stageType,
+          inputImageUrl: node.cfImageUrl,
+          prompt: composedPrompt,
+          parentCanvasId: node.renderCanvasId ?? null,
+          roomId,
+          aspectRatio,
+          references,
         });
       }
 
