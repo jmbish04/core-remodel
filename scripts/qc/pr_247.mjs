@@ -19,6 +19,7 @@ console.log(`\nQC pr_247 — drive-list stream control UI\n  target: ${resolveBa
 
 await assertReachable(client, checks);
 
+try {
 // ── The drives page still serves (the island mounts here) ────────────────────
 const page = await client.get("/admin/shopping/drives");
 checks.ok(
@@ -58,6 +59,10 @@ if (onProd && status.status === 404) {
       typeof status.json?.breaker?.tripped === "boolean",
     `→ ${status.status}`,
   );
+}
+} catch (err) {
+  // A thrown request/parse must record a structured failure, not crash the run.
+  checks.ok(`QC completed without an unhandled error`, false, (err && err.message) || String(err));
 }
 
 checks.finish();

@@ -59,6 +59,11 @@ function ProgressBar({ pct }: { pct: number }) {
   );
 }
 
+/**
+ * Showroom Drives landing island: the stream-ingest control, then drive sheets
+ * bucketed into Pending / In progress / Finished with a per-card active toggle.
+ * @returns The drives dashboard (no props).
+ */
 export function DriveListsApp() {
   const [drives, setDrives] = useState<DriveListSummary[] | null>(null);
   const [error, setError] = useState<string | null>(null);
