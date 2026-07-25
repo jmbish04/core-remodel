@@ -145,7 +145,7 @@ added because the Cloudflare↔GitHub CI/CD integration was **disconnected on pu
   **Actions tab → "Deploy (manual)" → Run workflow** (branch `main`, type `deploy`
   to confirm), or from a session with the GitHub MCP:
 
-  ```
+  ```text
   actions_run_trigger(workflow: "deploy.yml", ref: "main",
     inputs: { confirm: "deploy", run_migrations: true })
   ```

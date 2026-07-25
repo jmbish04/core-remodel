@@ -1,26 +1,35 @@
 # Manual production deploy for the core-remodel Worker.
 #
-# WHY MANUAL-ONLY: Cloudflare Workers Builds was disconnected on purpose — while
-# connected, every branch push force-deployed to the *production* worker
-# (`core-remodel`), ignoring `--name`, so a "preview" build silently shipped
-# unreviewed branch code to prod. This workflow replaces that with an EXPLICIT,
-# human-triggered deploy: `workflow_dispatch` only — it never runs on push or PR.
+# WHY MANUAL-ONLY: the Cloudflare↔GitHub Workers Builds integration was
+# disconnected on purpose — while connected, every branch push force-deployed to
+# the *production* worker (`core-remodel`), ignoring `--name`, so a "preview"
+# build silently shipped unreviewed branch code to prod. This workflow replaces
+# that with an EXPLICIT, human-triggered deploy: `workflow_dispatch` only — it
+# never runs on push or PR.
 #
-# It reproduces `pnpm run deploy` in the one safe order (migrations BEFORE the
-# upload, so new code never reaches prod ahead of its columns):
+# It runs the same steps as `pnpm run deploy`, in the one safe order (migrations
+# BEFORE the upload, so new code never reaches prod ahead of its columns):
 #   build → migrate:remote (app D1) → migrate:tesla:remote (Tesla D1) → wrangler deploy
 #
+# The upload uses Cloudflare's maintained `cloudflare/wrangler-action` with a
+# PINNED wrangler version for reproducible deploys. wrangler is also installed
+# globally at that same pin so the repo's migration applier (`scripts/d1-migrate.mjs`,
+# which shells out to `npx wrangler d1 execute --remote`) uses the identical
+# version — nothing in the pipeline floats on `@latest`.
+#
 # ── One-time setup (Settings → Secrets and variables → Actions) ───────────────
-#   Secret  CLOUDFLARE_API_TOKEN   — token with: Account · Workers Scripts:Edit,
-#                                    Account · D1:Edit, Account · Workers Routes:Edit,
-#                                    and read on any binding sources (KV/R2/Vectorize/
-#                                    Images/Secrets Store) so `wrangler deploy` can
-#                                    validate the 37 bindings. (Runtime secret VALUES
-#                                    are NOT needed — they live in the Secrets Store
-#                                    and are only referenced by id.)
+#   Secret  CLOUDFLARE_API_TOKEN   — Account · Workers Scripts:Edit, D1:Edit,
+#                                    Workers Routes:Edit, + read on any binding
+#                                    sources (KV/R2/Vectorize/Images/Secrets Store)
+#                                    so `wrangler deploy` can validate the 37
+#                                    bindings. Runtime secret VALUES are NOT needed —
+#                                    they live in the Secrets Store, referenced by id.
 #   Secret  CLOUDFLARE_ACCOUNT_ID  — the account that owns `core-remodel`
-#                                    (wrangler.jsonc has no account_id, so this is
-#                                    required).
+#                                    (wrangler.jsonc has no account_id).
+# Optional but recommended — protect the `production` environment (Settings →
+# Environments → production): add required reviewers and restrict deployment
+# branches to `main`, so even a manual dispatch is gated and the Cloudflare
+# secrets are reachable only from an approved deploy.
 name: Deploy (manual)
 
 on:
@@ -29,7 +38,7 @@ on:
       confirm:
         description: 'Type "deploy" to confirm a PRODUCTION deploy'
         required: true
-        default: ''
+        default: ""
       run_migrations:
         description: "Apply remote D1 migrations before the upload"
         type: boolean
@@ -41,15 +50,32 @@ on:
         required: false
         default: false
 
+# Least privilege: this job only reads the repo and runs deploy commands — it
+# needs no write scope on the repository via GITHUB_TOKEN.
+permissions:
+  contents: read
+
 # One deploy at a time; a second run waits rather than racing the first onto prod.
 concurrency:
   group: production-deploy
   cancel-in-progress: false
 
+env:
+  # Pinned for reproducible deploys. Bump DELIBERATELY (the repo's local scripts
+  # intentionally use a rolling `npx wrangler@latest`; CI pins so a deploy can't
+  # silently change behavior under you).
+  WRANGLER_VERSION: "4.100.0"
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # GitHub deployment environment — configure protection rules in repo settings
+    # (required reviewers, deployment branch = main) to gate this and scope the
+    # Cloudflare secrets. `url` surfaces the deployed worker in the Environments UI.
+    environment:
+      name: production
+      url: ${{ steps.deploy.outputs.deployment-url }}
     env:
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -84,6 +110,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Pin Wrangler for the migration applier
+        # scripts/d1-migrate.mjs runs `npx wrangler d1 execute --remote`; a global
+        # install at the pinned version puts it on PATH so npx uses it instead of
+        # fetching @latest — keeping migrations on the same wrangler as the deploy.
+        run: npm install -g wrangler@${WRANGLER_VERSION}
+
       - name: Build
         run: |
           pnpm run build
@@ -98,10 +130,20 @@ jobs:
         run: pnpm run migrate:tesla:remote
 
       - name: Deploy Worker to production
-        run: npx wrangler@latest deploy
+        id: deploy
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: ${{ env.WRANGLER_VERSION }}
+          packageManager: pnpm
+          command: deploy
 
       - name: Confirm the deployment landed
-        run: npx wrangler@latest deployments list | tail -20
+        run: |
+          set -euo pipefail
+          echo "Deployment URL: ${{ steps.deploy.outputs.deployment-url || '(none reported)' }}"
+          npx wrangler@${WRANGLER_VERSION} deployments list
 
       - name: Summary
         if: always()
@@ -111,5 +153,7 @@ jobs:
             echo ""
             echo "- ref: \`${{ github.ref_name }}\`  ·  commit: \`${{ github.sha }}\`"
             echo "- migrations applied: \`${{ inputs.run_migrations }}\`"
+            echo "- deployment URL: ${{ steps.deploy.outputs.deployment-url || '(none reported)' }}"
+            echo "- wrangler: \`${{ env.WRANGLER_VERSION }}\`"
             echo "- triggered by: @${{ github.actor }}"
           } >> "$GITHUB_STEP_SUMMARY"
