@@ -112,6 +112,7 @@ async function structuredViaGemini<TSchema extends z.ZodTypeAny>(
     schema: TSchema;
     schemaName?: string;
     temperature?: number;
+    max_tokens?: number;
   },
 ): Promise<z.infer<TSchema>> {
   const ai = await createGeminiClient(env, "structured_fallback");
@@ -139,6 +140,11 @@ async function structuredViaGemini<TSchema extends z.ZodTypeAny>(
         zodToJsonSchema(opts.schema as never, { $refStrategy: "none" }),
       ),
       temperature: opts.temperature ?? 0,
+      // Honour an explicit cap for parity with the Workers AI path, but only
+      // when the caller set one — passing undefined (the common case) lets
+      // Gemini use its own generous default, so its thinking tokens are never
+      // squeezed by an artificially tight limit.
+      ...(opts.max_tokens ? { maxOutputTokens: opts.max_tokens } : {}),
     },
   });
 
