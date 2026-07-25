@@ -21,6 +21,7 @@ import { updateBrand } from "./update_brand";
 import { ensureBrand } from "./ensure_brand";
 import { linkBrandToShowroom } from "./link_brand_to_showroom";
 import { unlinkBrandFromShowroom } from "./unlink_brand_from_showroom";
+import { consolidateBrandTypesTool } from "./consolidate_brand_types";
 
 export const brandTools: RemodelTool[] = [
   listBrands,
@@ -30,4 +31,5 @@ export const brandTools: RemodelTool[] = [
   ensureBrand,
   linkBrandToShowroom,
   unlinkBrandFromShowroom,
+  consolidateBrandTypesTool,
 ];
