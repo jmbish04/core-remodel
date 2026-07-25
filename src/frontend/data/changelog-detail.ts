@@ -113,6 +113,95 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "brands-name-key-dedup": {
+    slug: "brands-name-key-dedup",
+    branch: "claude/showroom-location-tagging-ex2ik5",
+    subtitle: "Brands · dedup + integrity guard (ops #4)",
+    problem:
+      "A bulk import forked the brand roster: it inserted ALL-CAPS / respaced restatements of brands that already existed, so a single company appeared as two `brands` rows, each holding half its showroom and type mappings. Nine such pairs were logged in ops issue #4 (e.g. `#188 Newport Brass` / `#302 NEWPORTBRASS`, `#18 Dornbracht` / `#315 DORN BRACHT`, `#184 Visual Comfort` / `#221 Visual Comfort & Co.`). The two mapping tables each carry a UNIQUE pair — `brand_type_mappings(brand_id, type_id)` and `showroom_brand_mappings(showroom_id, brand_id)` — so naively repointing a loser's rows to the survivor hits a unique violation on the pairs that overlap, aborting a merge half-applied. Nothing at the schema level stopped the next import from forking the roster again.",
+    approach:
+      "Merge in the 0118 order that cannot lose data, then add a schema-level guard. For the last live pair (Visual Comfort): delete the loser's colliding `brand_type_mappings` row (survivor already holds that type), repoint the remaining FK rows to the survivor, carry the loser's spelling across as a demoted (`is_primary=0`) alias, COALESCE any scalar the survivor was missing, and finally soft-retire the loser (`is_active=0`, never DELETE — every brand FK is ON DELETE cascade). Then a PARTIAL unique index enforces the invariant going forward. The normalization strips case + spaces + dots + commas so restatements collapse; `WHERE is_active = 1` is mandatory because dedup keeps losers as soft-deleted rows and 6 active/retired pairs share a name key — a full index would refuse to create. Suffix variants (`& Co.`) still differ after stripping and stay the intake layer's job.",
+    apiChanges: [
+      "No API surface change. Schema-only: new partial unique index brands_name_key_uniq.",
+      "Future create_brand / ensure_brand inserts that would fork an active brand by case/spacing now fail loudly at the DB instead of silently duplicating.",
+    ],
+    filesTouched: [
+      "src/backend/db/schema/brands/brands.ts",
+      "drizzle/0138_white_hedge_knight.sql",
+      "drizzle/meta/0138_snapshot.json",
+    ],
+    migrations: [
+      {
+        tag: "0138",
+        sql: `CREATE UNIQUE INDEX \`brands_name_key_uniq\` ON \`brands\` (replace(replace(replace(lower(trim("name")),' ',''),'.',''),',','')) WHERE "brands"."is_active" = 1;`,
+      },
+    ],
+    code: [
+      {
+        title: "Partial unique index — brands.ts",
+        lang: "ts",
+        code: `export const brands = sqliteTable("brands", {
+  // …columns…
+}, (table) => ({
+  // Two ACTIVE brands may not share a normalized name key. Strips case + spaces
+  // + dots + commas so bulk-import restatements ("Newport Brass" / "NEWPORTBRASS")
+  // collapse to one. PARTIAL on is_active=1 — dedup soft-deletes losers, and 6
+  // active/retired pairs share a name key, so a full index would refuse to create.
+  nameKeyUniq: uniqueIndex("brands_name_key_uniq")
+    .on(sql\`replace(replace(replace(lower(trim(\${table.name})),' ',''),'.',''),',','')\`)
+    .where(sql\`\${table.isActive} = 1\`),
+}));`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "The merge — loser's rows repoint to the survivor, then the loser is retired (never deleted)",
+        code: `flowchart TD
+  L["#221 Visual Comfort & Co.<br/>(loser)"] -->|"drop colliding<br/>type_id=21 row"| T[brand_type_mappings]
+  L -->|"repoint showroom 136"| S[showroom_brand_mappings]
+  L -->|"carry spelling as<br/>is_primary=0 alias"| V[brand_name_variations]
+  L -->|"COALESCE blank scalars"| K["#184 Visual Comfort<br/>(survivor · showrooms 121+136)"]
+  L -->|"is_active = 0<br/>(soft-retire, keep FKs)"| R[(retired)]
+  classDef keep fill:#1f4d2e,stroke:#4ade80,color:#e6ffe6
+  classDef stop fill:#4d1f1f,stroke:#f87171,color:#ffe6e6
+  class K keep
+  class R stop`,
+      },
+      {
+        caption: "The guard — a partial unique index over the normalized name key of ACTIVE brands only",
+        code: `erDiagram
+  brands {
+    int id PK
+    text name
+    int is_active "soft-delete flag"
+  }
+  brands ||--o| brands_name_key_uniq : "UNIQUE(norm(name)) WHERE is_active=1"
+  brands_name_key_uniq {
+    expr key "replace(...lower(trim(name))...) — strips case/space/dot/comma"
+    partial where "is_active = 1 — retired losers exempt"
+  }`,
+      },
+    ],
+    prNumber: 223,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/223",
+    verification: {
+      qcScript: "n/a — data + index change verified directly against remote D1",
+      command: "cloudflare D1 /query (read-back after merge)",
+      source:
+        "SELECT id,name,is_active FROM brands WHERE id IN (184,221);\n" +
+        "SELECT showroom_id FROM showroom_brand_mappings WHERE brand_id=184;\n" +
+        "SELECT replace(replace(replace(lower(trim(name)),' ',''),'.',''),',','') k, count(*) c\n" +
+        "  FROM brands WHERE is_active=1 GROUP BY k HAVING c>1;",
+      ranAt: "2026-07-25",
+      output:
+        "Merge (applied to remote): #184 Visual Comfort active; #221 retired (is_active=0);\n" +
+        "#184 now carries showrooms [121, 136]; 0 residual rows point at #221;\n" +
+        "active brands 385 -> 384; 0 mechanical name-key collisions remain.\n" +
+        "Index migration 0138: `pnpm run db:generate` is a clean no-op (schema <-> snapshot\n" +
+        "<-> .sql consistent). NOT yet on remote D1 — applies via `pnpm run migrate:remote`\n" +
+        "(schema changes don't ride the build); verify brands_name_key_uniq exists after deploy.",
+    },
+  },
   "showroom-seed-bootstrap-only": {
     slug: "showroom-seed-bootstrap-only",
     branch: "claude/showroom-listing-500-map-6kvtm9",

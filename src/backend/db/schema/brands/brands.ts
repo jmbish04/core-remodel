@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { sqliteTable, text, integer, real } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, real, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /**
  * Brands — top-level brand registry, independent of any showroom or product.
@@ -85,7 +85,25 @@ export const brands = sqliteTable("brands", {
   updatedAt: integer("updated_at", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),
-});
+}, (table) => ({
+  /**
+   * Durable dedup guard (ops #4). Two ACTIVE brands may not share a normalized
+   * name key. The key lowercases, trims, then strips spaces/dots/commas so the
+   * case+spacing restatements a bulk import forked into two rows collapse to one
+   * — "Newport Brass" vs "NEWPORTBRASS", "Dornbracht" vs "DORN BRACHT". Added
+   * only AFTER the 0118 dedup pass cleared existing collisions (verified 0 among
+   * active brands). PARTIAL on `is_active = 1` on purpose: dedup soft-deletes the
+   * loser (keeps its row for FK history), so a retired brand must stay free to
+   * hold a name key a survivor now also holds — a full index would refuse to
+   * create (6 such active/retired collisions measured). This does NOT catch
+   * suffix variants ("Visual Comfort" vs "Visual Comfort & Co.", which differ as
+   * strings even after stripping) — those stay the intake layer's job to
+   * reconcile.
+   */
+  nameKeyUniq: uniqueIndex("brands_name_key_uniq")
+    .on(sql`replace(replace(replace(lower(trim(${table.name})),' ',''),'.',''),',','')`)
+    .where(sql`${table.isActive} = 1`),
+}));
 
 export type Brand = typeof brands.$inferSelect;
 export type BrandInsert = typeof brands.$inferInsert;

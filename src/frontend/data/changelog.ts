@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/showroom-location-tagging-ex2ik5",
+    title: "Brands · finish ops #4 dedup + durable name-key unique index",
+    summary:
+      "Merged the last live duplicate brand (Visual Comfort & Co. #221 → Visual Comfort #184) on remote D1, and added a PARTIAL unique index on a normalized name key (lower/trim + strip spaces/dots/commas, WHERE is_active=1) so a bulk import can no longer fork one brand across two rows. Partial scope is required — dedup soft-deletes losers, and 6 active/retired pairs share a name key, so a full index would refuse to create. Index lands on migrate:remote (migration 0138).",
+    date: "2026-07-25",
+    status: "staged",
+    prNumber: 223,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/223",
+  },
+  {
     branch: "claude/showroom-listing-500-map-6kvtm9",
     title: "Showroom seed is bootstrap-only (stops re-run duplication)",
     summary:
@@ -200,6 +210,23 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "brands-name-key-dedup",
+    branch: "claude/showroom-location-tagging-ex2ik5",
+    date: "2026-07-25",
+    tag: "ops #4",
+    area: "Brands",
+    title: "Last duplicate merged + durable name-key guard",
+    summary:
+      "8 of 9 duplicate brand pairs were already merged; the last (Visual Comfort & Co. #221 → Visual Comfort #184, both visualcomfort.com) was merged on remote D1 — colliding type-mapping dropped, showroom mapping repointed (#184 now carries showrooms 121+136), loser spelling kept as a demoted alias, scalars COALESCE'd, #221 soft-retired. A partial unique index on a normalized name key now stops two ACTIVE brands sharing a case/spacing restatement.",
+    status: "staged",
+    migrations: ["0138"],
+    changes: [
+      { kind: "fixed", text: "Merged the last live duplicate brand pair (Visual Comfort #184 ⟵ Visual Comfort & Co. #221) on remote D1; 0 mechanical name-key collisions remain among active brands (385 → 384)." },
+      { kind: "added", text: "brands_name_key_uniq — PARTIAL unique index on replace(replace(replace(lower(trim(name)),' ',''),'.',''),',','') WHERE is_active=1, blocking case/spacing restatements of the same brand." },
+      { kind: "migration", text: "0138 creates the index; applies via migrate:remote (does not ride the build)." },
+    ],
+  },
   {
     id: "showroom-seed-bootstrap-only",
     branch: "claude/showroom-listing-500-map-6kvtm9",
