@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "af096a76-b7d1-4f19-8a09-bfe8b9282433",
+  "id": "c2f43197-15ec-4f53-bb6c-1f9dcc447183",
   "prevId": "f04e6fdc-7089-4a81-9a0b-0a8036334131",
   "tables": {
     "users": {
@@ -15410,6 +15410,197 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {}
     },
+    "material_room_proposals": {
+      "name": "material_room_proposals",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "integer",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": true
+        },
+        "material_id": {
+          "name": "material_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "line_item_id": {
+          "name": "line_item_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "subcategory_id": {
+          "name": "subcategory_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'staged'"
+        },
+        "proposed_room_id": {
+          "name": "proposed_room_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "confirmed_room_id": {
+          "name": "confirmed_room_id",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "candidates_json": {
+          "name": "candidates_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "confidence": {
+          "name": "confidence",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "reasoning_markdown": {
+          "name": "reasoning_markdown",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(unixepoch())"
+        },
+        "resolved_at": {
+          "name": "resolved_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "material_room_proposals_material_idx": {
+          "name": "material_room_proposals_material_idx",
+          "columns": [
+            "material_id"
+          ],
+          "isUnique": false
+        },
+        "material_room_proposals_status_idx": {
+          "name": "material_room_proposals_status_idx",
+          "columns": [
+            "status"
+          ],
+          "isUnique": false
+        },
+        "material_room_proposals_line_item_idx": {
+          "name": "material_room_proposals_line_item_idx",
+          "columns": [
+            "line_item_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "material_room_proposals_material_id_material_schedule_items_id_fk": {
+          "name": "material_room_proposals_material_id_material_schedule_items_id_fk",
+          "tableFrom": "material_room_proposals",
+          "tableTo": "material_schedule_items",
+          "columnsFrom": [
+            "material_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "material_room_proposals_line_item_id_worker_email_invoice_line_items_id_fk": {
+          "name": "material_room_proposals_line_item_id_worker_email_invoice_line_items_id_fk",
+          "tableFrom": "material_room_proposals",
+          "tableTo": "worker_email_invoice_line_items",
+          "columnsFrom": [
+            "line_item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "material_room_proposals_subcategory_id_subcategories_id_fk": {
+          "name": "material_room_proposals_subcategory_id_subcategories_id_fk",
+          "tableFrom": "material_room_proposals",
+          "tableTo": "subcategories",
+          "columnsFrom": [
+            "subcategory_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "material_room_proposals_proposed_room_id_rooms_id_fk": {
+          "name": "material_room_proposals_proposed_room_id_rooms_id_fk",
+          "tableFrom": "material_room_proposals",
+          "tableTo": "rooms",
+          "columnsFrom": [
+            "proposed_room_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "material_room_proposals_confirmed_room_id_rooms_id_fk": {
+          "name": "material_room_proposals_confirmed_room_id_rooms_id_fk",
+          "tableFrom": "material_room_proposals",
+          "tableTo": "rooms",
+          "columnsFrom": [
+            "confirmed_room_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {}
+    },
     "store_bayarea_cities": {
       "name": "store_bayarea_cities",
       "columns": {
@@ -20877,262 +21068,6 @@
           "tableTo": "brands",
           "columnsFrom": [
             "brand_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {}
-    },
-    "bucket_product_candidates": {
-      "name": "bucket_product_candidates",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "integer",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": true
-        },
-        "bucket_id": {
-          "name": "bucket_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "rank": {
-          "name": "rank",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
-        },
-        "confidence": {
-          "name": "confidence",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "brand_id": {
-          "name": "brand_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "brand_name_raw": {
-          "name": "brand_name_raw",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "product_name": {
-          "name": "product_name",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "model_number": {
-          "name": "model_number",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "sku": {
-          "name": "sku",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "product_url": {
-          "name": "product_url",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "category": {
-          "name": "category",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "style": {
-          "name": "style",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "price_text": {
-          "name": "price_text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "sale_price_text": {
-          "name": "sale_price_text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "discount_text": {
-          "name": "discount_text",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "image_source_urls": {
-          "name": "image_source_urls",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "pdf_source_urls": {
-          "name": "pdf_source_urls",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "colors": {
-          "name": "colors",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "rationale": {
-          "name": "rationale",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "raw_extraction": {
-          "name": "raw_extraction",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "is_match": {
-          "name": "is_match",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "liked": {
-          "name": "liked",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "stars": {
-          "name": "stars",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "reaction_transcript": {
-          "name": "reaction_transcript",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "reaction_summary": {
-          "name": "reaction_summary",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'pending'"
-        },
-        "confirmed_product_id": {
-          "name": "confirmed_product_id",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(unixepoch())"
-        }
-      },
-      "indexes": {
-        "bucket_product_candidates_bucket_idx": {
-          "name": "bucket_product_candidates_bucket_idx",
-          "columns": [
-            "bucket_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "bucket_product_candidates_bucket_id_product_photo_buckets_id_fk": {
-          "name": "bucket_product_candidates_bucket_id_product_photo_buckets_id_fk",
-          "tableFrom": "bucket_product_candidates",
-          "tableTo": "product_photo_buckets",
-          "columnsFrom": [
-            "bucket_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "bucket_product_candidates_brand_id_brands_id_fk": {
-          "name": "bucket_product_candidates_brand_id_brands_id_fk",
-          "tableFrom": "bucket_product_candidates",
-          "tableTo": "brands",
-          "columnsFrom": [
-            "brand_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        },
-        "bucket_product_candidates_confirmed_product_id_showroom_store_products_id_fk": {
-          "name": "bucket_product_candidates_confirmed_product_id_showroom_store_products_id_fk",
-          "tableFrom": "bucket_product_candidates",
-          "tableTo": "showroom_store_products",
-          "columnsFrom": [
-            "confirmed_product_id"
           ],
           "columnsTo": [
             "id"
