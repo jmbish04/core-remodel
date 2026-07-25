@@ -241,6 +241,20 @@ export const BRANCHES: ChangelogBranch[] = [
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "delete-showroom-mcp-include-inactive",
+    branch: "claude/showroom-listing-500-map-6kvtm9",
+    date: "2026-07-25",
+    area: "Showrooms",
+    title: "delete_showroom MCP tool (soft delete) + includeInactive list param",
+    summary:
+      "An AI cleaning up junk showrooms in chat couldn't remove them — there was no MCP delete. Added delete_showroom, a soft delete that flips is_active=0 (row + history kept, restorable via restore:true), for genuine junk (not duplicates — those go through dedup_showroom_stores). list_showrooms (MCP) and GET /api/showroom-stores now take includeInactive (default false), so inactive rows are hidden unless explicitly requested.",
+    changes: [
+      { kind: "added", text: "delete_showroom MCP tool — soft delete (is_active=0) of a junk store; restore:true un-deletes. Idempotent, DESTRUCTIVE annotation, returns {id,name,isActive,changed,url}." },
+      { kind: "added", text: "includeInactive param (default false) on list_showrooms (MCP) and GET /api/showroom-stores; each list row now carries isActive. Default behavior unchanged — active-only." },
+    ],
+    status: "staged",
+  },
+  {
     id: "tesla-admin-alert",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-25",

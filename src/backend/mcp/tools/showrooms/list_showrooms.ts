@@ -24,6 +24,7 @@ function storeListDto(
     website,
     rating: s.rating,
     isAppointmentOnly: s.isAppointmentOnly,
+    isActive: s.isActive,
   };
 }
 
@@ -32,7 +33,11 @@ export const listShowrooms = defineTool({
   category: "showrooms",
   title: "List showrooms",
   description:
-    "List showroom store locations as compact rows (id, name, pricePoint, address, phone, website, rating). Optional filters: free-text `q` over name/description/address, exact `pricePoint` ($..$$$$), and `isAppointmentOnly`. Use a store's `id` as the target for get_showroom and every write tool.",
+    "List showroom store locations as compact rows (id, name, pricePoint, address, phone, website, rating). " +
+    "By default only ACTIVE stores are returned (soft-deleted junk/duplicates are hidden); pass " +
+    "`includeInactive: true` to also include inactive ones (each row carries `isActive`). Optional filters: " +
+    "free-text `q` over name/description/address, exact `pricePoint` ($..$$$$), and `isAppointmentOnly`. Use a " +
+    "store's `id` as the target for get_showroom and every write tool.",
   inputShape: {
     q: z
       .string()
@@ -46,6 +51,10 @@ export const listShowrooms = defineTool({
       .boolean()
       .optional()
       .describe("Only stores flagged appointment-only (true) or walk-in (false)"),
+    includeInactive: z
+      .boolean()
+      .optional()
+      .describe("Include soft-deleted (inactive) stores too. Default false — only active stores."),
     limit: z.number().int().positive().max(200).optional(),
     offset: z.number().int().min(0).optional(),
   },
@@ -66,12 +75,10 @@ export const listShowrooms = defineTool({
     { title: "Affordable tile places", args: { q: "tile", pricePoint: "$$" } },
   ],
   handler: async ({ db }, input) => {
-    // Soft-deleted stores never surface to the agent.
-    const all = await db
-      .select()
-      .from(showroomStores)
-      .where(eq(showroomStores.isActive, true))
-      .all();
+    // Soft-deleted stores are hidden unless includeInactive is set.
+    const all = input.includeInactive
+      ? await db.select().from(showroomStores).all()
+      : await db.select().from(showroomStores).where(eq(showroomStores.isActive, true)).all();
     const filtered = all.filter((s) => {
       if (input.q && !matchesQuery([s.name, s.description, s.locationAddress], input.q)) {
         return false;

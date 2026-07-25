@@ -18,6 +18,7 @@ import { findKnownShowrooms } from "./find_known_showrooms";
 import { getUserLocation } from "./get_user_location";
 import { whatsNearMe } from "./whats_near_me";
 import { dedupShowroomStores } from "./dedup_showroom_stores";
+import { deleteShowroom } from "./delete_showroom";
 
 export const showroomTools: RemodelTool[] = [
   listShowrooms,
@@ -38,4 +39,5 @@ export const showroomTools: RemodelTool[] = [
   getUserLocation,
   whatsNearMe,
   dedupShowroomStores,
+  deleteShowroom,
 ];
