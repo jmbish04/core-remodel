@@ -232,6 +232,13 @@
       "when": 1784940029163,
       "tag": "0132_cold_metal_master",
       "breakpoints": true
+    },
+    {
+      "idx": 133,
+      "version": "6",
+      "when": 1784956592754,
+      "tag": "0133_chemical_karnak",
+      "breakpoints": true
     }
   ]
 }
