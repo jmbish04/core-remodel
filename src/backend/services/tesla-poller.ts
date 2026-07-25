@@ -89,8 +89,10 @@ export async function pollVehicleForActiveDrive(env: Env): Promise<PollResult> {
 
   // Gate 2: throttle. KV TTL is the clock — a present key means "polled
   // recently", so no timestamp arithmetic and no clock skew to reason about.
+  // Cloudflare KV rejects a TTL below 60s, so floor it (the config setter already
+  // enforces this, but a hand-edited row must not throw here).
   if (await env.CACHE.get(THROTTLE_KEY)) return { polled: false, reason: "throttled" };
-  await env.CACHE.put(THROTTLE_KEY, "1", { expirationTtl: throttleTtl });
+  await env.CACHE.put(THROTTLE_KEY, "1", { expirationTtl: Math.max(throttleTtl, 60) });
 
   const state = await getVehicleState(env);
   if (!state || state.latitude == null || state.longitude == null) {
