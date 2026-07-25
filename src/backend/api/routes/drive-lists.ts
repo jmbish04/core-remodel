@@ -214,9 +214,8 @@ driveListsRouter.patch("/:slug", async (c) => {
       stub
         .fetch(body.isActive ? "https://do/start" : "https://do/stop", { method: "POST" })
         // Drain the DO response body so the subrequest stream doesn't linger.
-        .then((res) => {
-          res.body?.cancel();
-        })
+        // Return the cancel promise so waitUntil actually tracks it to completion.
+        .then((res) => res.body?.cancel())
         .catch((err) => console.error("[drive-lists] tesla stream signal failed:", err)),
     );
   } catch (err) {
