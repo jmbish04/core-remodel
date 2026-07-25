@@ -123,14 +123,25 @@ export interface FinalizeResult {
 }
 
 /**
- * On drive-away, finalize every still-open soft arrival into a TESLA_STAGED row
- * (arrival copied, departure = now, dwell computed), linked by `softArrivalId`.
- * The UNIQUE index on `softArrivalId` makes this idempotent — a second call inserts
+ * On drive-away, finalize the still-open soft arrivals FOR THE ACTIVE DRIVE into
+ * TESLA_STAGED rows (arrival copied, departure = now, dwell computed), linked by
+ * `softArrivalId`. The UNIQUE index makes this idempotent — a second call inserts
  * nothing. Never spans a transaction (D1 has none); each finalize is one insert.
+ *
+ * Scoped to the active drive on purpose: a stale soft arrival that a PRIOR drive
+ * never finalized (e.g. a missed drive-away) must NOT be closed here with today's
+ * timestamp and a bogus multi-day dwell.
  */
 export async function finalizeSoftArrivals(env: Env): Promise<FinalizeResult> {
   const db = drizzle(env.DB);
   const now = new Date();
+
+  const [active] = await db
+    .select({ id: driveLists.id })
+    .from(driveLists)
+    .where(eq(driveLists.isActive, true))
+    .limit(1);
+  if (!active) return { finalized: 0, visitLogIds: [] };
 
   // Open soft arrivals = TESLA_SOFT_ARRIVAL rows not yet referenced by a staged row.
   const staged = db
@@ -153,6 +164,7 @@ export async function finalizeSoftArrivals(env: Env): Promise<FinalizeResult> {
     .where(
       and(
         eq(showroomVisitLog.status, "TESLA_SOFT_ARRIVAL"),
+        eq(showroomVisitLog.driveListId, active.id),
         // Type-safe correlated subquery — `staged` selects only non-null
         // soft_arrival_ids, so NOT IN can't be poisoned by a NULL.
         notInArray(showroomVisitLog.id, staged),
