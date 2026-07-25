@@ -201,6 +201,8 @@ app.use("/api/gmail/*", requireAccessAuth);
 // AI Photo Design Workshop (0014 Slice 1) — admin-only canvas/piles/clippings/recipes.
 app.use("/api/workshop", requireAccessAuth);
 app.use("/api/workshop/*", requireAccessAuth);
+app.use("/api/floorplan-regions", requireAccessAuth);
+app.use("/api/floorplan-regions/*", requireAccessAuth);
 app.use("/api/bid-portfolios/*", async (c, next) => {
   // Public routes do not require auth
   const path = new URL(c.req.url).pathname;

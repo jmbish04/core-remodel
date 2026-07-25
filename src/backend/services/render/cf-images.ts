@@ -108,13 +108,24 @@ export async function cropCfImageToBbox(
   if (!sourceRes.ok) {
     throw new Error(`Failed to fetch source image ${sourceUrl}: ${sourceRes.status}`);
   }
-  const sourceBytes = await sourceRes.arrayBuffer();
+  return cropBytesToBbox(env, await sourceRes.arrayBuffer(), bbox);
+}
 
+/**
+ * Crop raw image bytes to a normalized bbox. Use this over the URL variant when
+ * the source is a trusted binding (e.g. env.ASSETS) rather than an arbitrary
+ * URL — it never issues an outbound fetch, so there is no SSRF surface.
+ */
+export async function cropBytesToBbox(
+  env: Env,
+  sourceBytes: ArrayBuffer,
+  bbox: NormalizedBbox,
+): Promise<{ blob: Blob; width: number; height: number }> {
   const info = await env.IMAGES.info(new Blob([sourceBytes]).stream());
   const sourceWidth = "width" in info ? info.width : 0;
   const sourceHeight = "height" in info ? info.height : 0;
   if (!sourceWidth || !sourceHeight) {
-    throw new Error(`Could not determine source image dimensions for ${sourceUrl}`);
+    throw new Error("Could not determine source image dimensions");
   }
 
   const left = Math.max(0, Math.round(bbox.x * sourceWidth));
@@ -141,6 +152,22 @@ export async function cropAndUploadCfImage(
   filename = "clipping.jpg",
 ): Promise<CfImageResult & { width: number; height: number }> {
   const { blob, width, height } = await cropCfImageToBbox(env, sourceUrl, bbox);
+  const uploaded = await uploadBlobToCfImages(env, blob, filename);
+  return { ...uploaded, width, height };
+}
+
+/**
+ * Crop trusted source bytes to a bbox and upload the result to Cloudflare
+ * Images. SSRF-safe counterpart to {@link cropAndUploadCfImage} — pass bytes
+ * you already hold (e.g. from env.ASSETS) instead of a URL to fetch.
+ */
+export async function cropAndUploadCfImageFromBytes(
+  env: Env,
+  sourceBytes: ArrayBuffer,
+  bbox: NormalizedBbox,
+  filename = "crop.jpg",
+): Promise<CfImageResult & { width: number; height: number }> {
+  const { blob, width, height } = await cropBytesToBbox(env, sourceBytes, bbox);
   const uploaded = await uploadBlobToCfImages(env, blob, filename);
   return { ...uploaded, width, height };
 }

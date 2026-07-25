@@ -15,8 +15,13 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { rooms } from "@backend/db";
 
-import { cropAndUploadCfImage } from "../../services/render/cf-images";
+import { cropAndUploadCfImageFromBytes } from "../../services/render/cf-images";
 
+/**
+ * OpenAPI Hono router for the `/api/floorplan-regions` admin endpoints. Bound to
+ * `Env` so handlers reach D1, the ASSETS binding, and Cloudflare Images.
+ * Mounted behind `requireAccessAuth` in api/index.ts.
+ */
 export const floorplanRegionsRouter = new OpenAPIHono<{ Bindings: Env }>();
 
 /** The static whole-house floorplan served from the Worker's /public. */
@@ -29,6 +34,7 @@ const RegionSchema = z
     wPct: z.number().min(0.5).max(100),
     hPct: z.number().min(0.5).max(100),
   })
+  // 0.5% slack absorbs frontend rounding when a box is dragged flush to an edge.
   .refine((r) => r.xPct + r.wPct <= 100.5 && r.yPct + r.hPct <= 100.5, {
     message: "Region extends past the floorplan edge",
   });
@@ -153,12 +159,18 @@ floorplanRegionsRouter.openapi(
           .where(eq(rooms.id, roomId))
           .run();
       } else {
-        // Crop the whole-house floorplan to this room's rectangle. Source is the
-        // Worker's own public asset (absolute origin → subrequest-reachable).
-        const sourceUrl = `${new URL(c.req.url).origin}${FLOOR_PLAN_ASSET_PATH}`;
-        const cropped = await cropAndUploadCfImage(
+        // Crop the whole-house floorplan to this room's rectangle. Read the
+        // source via the ASSETS binding (not an outbound fetch on a Host-derived
+        // URL) so there is no SSRF surface — the host in the request is ignored.
+        const assetRes = await c.env.ASSETS.fetch(
+          new Request(new URL(FLOOR_PLAN_ASSET_PATH, "https://assets.internal")),
+        );
+        if (!assetRes.ok) {
+          return c.json({ error: "Floorplan asset unavailable" }, 500);
+        }
+        const cropped = await cropAndUploadCfImageFromBytes(
           c.env,
-          sourceUrl,
+          await assetRes.arrayBuffer(),
           {
             x: region.xPct / 100,
             y: region.yPct / 100,

@@ -59,12 +59,13 @@ export function FloorplanRegionsApp() {
   const dragStart = useRef<{ x: number; y: number } | null>(null);
 
   const load = useCallback(async () => {
-    const res = await fetch("/api/floorplan-regions", { credentials: "include" });
-    if (!res.ok) {
+    try {
+      const res = await fetch("/api/floorplan-regions", { credentials: "include" });
+      if (!res.ok) throw new Error(String(res.status));
+      setData((await res.json()) as ApiResponse);
+    } catch {
       toast.error("Could not load floorplan regions.");
-      return;
     }
-    setData(await res.json());
   }, []);
 
   useEffect(() => {
@@ -119,11 +120,12 @@ export function FloorplanRegionsApp() {
   );
 
   const onPointerDown = (e: React.PointerEvent) => {
+    if (saving) return; // don't start a new box while a save is in flight
     if (!selectedRoom) {
       toast.info("Pick a room first, then drag its rectangle.");
       return;
     }
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+    e.currentTarget.setPointerCapture(e.pointerId);
     const p = pctFromEvent(e);
     dragStart.current = p;
     setDraft({ xPct: p.x, yPct: p.y, wPct: 0, hPct: 0 });
@@ -141,7 +143,10 @@ export function FloorplanRegionsApp() {
     });
   };
 
-  const onPointerUp = () => {
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
     const region = draft;
     dragStart.current = null;
     setDraft(null);
@@ -153,13 +158,12 @@ export function FloorplanRegionsApp() {
     <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
       {/* Room list */}
       <aside className="space-y-4">
-        <div className="flex flex-wrap gap-1" role="tablist" aria-label="Floor level">
+        <div className="flex flex-wrap gap-1" role="group" aria-label="Floor level">
           {LEVELS.map((l) => (
             <button
               key={l.key}
               type="button"
-              role="tab"
-              aria-selected={activeLevel === l.key}
+              aria-pressed={activeLevel === l.key}
               onClick={() => {
                 setActiveLevel(l.key);
                 setSelectedRoomId(null);
