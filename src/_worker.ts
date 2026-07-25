@@ -12,6 +12,7 @@ import { refreshPricingCatalog } from "./backend/services/pricing/catalog";
 import { dispatchDueWorkflows } from "./backend/services/workflow-dispatcher";
 import { autoHealImageUploads } from "./backend/services/image-processor/auto-heal";
 import { monitorShowroomSourcingCoverage } from "./backend/services/showroom-sourcing-monitor";
+import { enforceStreamWindow } from "./backend/services/tesla/gating";
 import { pollVehicleForActiveDrive } from "./backend/services/tesla-poller";
 import { backfillShowroomPlacesData } from "./backend/services/showroom/places-backfill";
 import { sweepShowroomSales } from "./backend/services/showroom/sales";
@@ -311,10 +312,19 @@ const legacyHandler: ExportedHandler<Env> = {
       // errors (or whose workflow never started) without manual reprocessing.
       ctx.waitUntil(autoHealImageUploads(env));
       ctx.waitUntil(monitorShowroomSourcingCoverage(env));
-      // Vehicle polling. Tessie has no webhook product — its telemetry is a
-      // WebSocket the client dials — so the drive automation pulls instead.
-      // Self-gating: no active drive, or a poll within the last two minutes,
-      // and this is one indexed D1 read.
+      // Enforce the daytime window: a drive can only be active 07:00–20:00
+      // Pacific, so deactivate one that has run past the close. Cheap (one
+      // indexed read; a write only on the boundary tick).
+      ctx.waitUntil(
+        enforceStreamWindow(env)
+          .then((r) => {
+            if (r.deactivated) console.log(`[scheduled] drive '${r.slug}' deactivated: window closed`);
+          })
+          .catch((err) => console.error("[scheduled] stream window enforce failed:", err)),
+      );
+      // Vehicle polling — the FALLBACK ingest path. Self-gates: no active drive,
+      // the streaming DO is carrying ingest, or a poll within the configured
+      // cadence, and it's one indexed D1 read.
       ctx.waitUntil(
         pollVehicleForActiveDrive(env)
           .then((r) => {
