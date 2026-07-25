@@ -12,7 +12,7 @@
 import { drizzle } from "drizzle-orm/d1";
 import { and, eq, inArray } from "drizzle-orm";
 
-import { images, inspirationalImageRooms, listingPhotos } from "@backend/db";
+import { images, inspirationalImageRooms, listingPhotos, rooms } from "@backend/db";
 
 /** Matches board_nodes.sourceType / photo_collection_items.sourceType. */
 export type SeedSourceType = "listing_photo" | "blank_canvas" | "inspiration";
@@ -173,13 +173,30 @@ export async function resolveRenderDrawer(
 const FLOOR_PLAN_ASSET_PATH = "/floorplans/126colby-listing-floorplan.jpg";
 
 /**
- * Resolve the whole-house floor plan as a single drawer entry. It is the same
- * static asset for every room (Option #1: furnish-the-plan is a whole-house
- * action, not per-room). `origin` is the request origin so the URL Gemini
- * fetches is absolute + publicly reachable — no Cloudflare Images upload needed
- * (deliveryUrlFromToken passes http(s) URLs straight through).
+ * Resolve the floor plan as a single drawer entry for a room. If the room has a
+ * saved region (cropped via /admin/designs/floorplan-regions), return that
+ * per-room crop from Cloudflare Images so furnish-this-plan is scoped to the
+ * room. Otherwise fall back to the whole-house static asset (absolute origin URL
+ * → Gemini-reachable; deliveryUrlFromToken passes http(s) through).
  */
-export function resolveFloorPlanDrawer(origin: string): RoomDrawerPhoto[] {
+export async function resolveFloorPlanDrawer(
+  env: Env,
+  roomId: number,
+  origin: string,
+): Promise<RoomDrawerPhoto[]> {
+  const db = drizzle(env.DB);
+  const room = await db.select().from(rooms).where(eq(rooms.id, roomId)).get();
+
+  if (room?.floorplanCropCfImageId) {
+    return [
+      {
+        sourceId: `floorplan-room-${roomId}`,
+        cfImageUrl: deliveryUrlFromToken(room.floorplanCropCfImageId),
+        label: `${room.roomName ?? "Room"} — plan region`,
+      },
+    ];
+  }
+
   return [
     {
       sourceId: "floorplan-house",

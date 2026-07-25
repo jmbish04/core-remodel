@@ -386,6 +386,12 @@ workshopRouter.openapi(
         }),
       );
 
+      const floorPlanPhotos = await resolveFloorPlanDrawer(
+        c.env,
+        roomId,
+        new URL(c.req.url).origin,
+      );
+
       return c.json(
         {
           success: true as const,
@@ -396,7 +402,7 @@ workshopRouter.openapi(
           listingPhotos,
           inspirationPhotos,
           renderPhotos,
-          floorPlanPhotos: resolveFloorPlanDrawer(new URL(c.req.url).origin),
+          floorPlanPhotos,
         },
         200,
       );
