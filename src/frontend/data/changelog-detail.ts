@@ -113,6 +113,60 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "showroom-dedup-hardening": {
+    slug: "showroom-dedup-hardening",
+    branch: "claude/showroom-listing-500-map-6kvtm9",
+    subtitle: "Showrooms · dedup tool v2 (bug fix + review fixes)",
+    problem:
+      "The dedup tool (PR #227) reparented EVERY child FK from a duplicate to the keeper. That is wrong for showroom_store_links: the seed inserts a WEBSITE link per store, and showroom_store_links has NO unique index — so reparenting a shell's seeded link would leave the kept store with two website links. The v1 leaned on `UPDATE OR IGNORE` to skip collisions, but with no unique index there is no collision to skip, so the duplicate link would simply be created. Codra's review also flagged raw sql.raw usage, sequential (non-batched) writes, loading the whole table into memory, brittle result casts, and a missing docstring.",
+    approach:
+      "A per-table policy replaces the blanket reparent. REPARENT (move loser→keeper) only user data worth keeping — notes, ratings, pocs, contacts, sales, images, price observations, drive stops, journal. DROP everything else — the seeded WEBSITE link, hours, scrape logs, and unique-index join mappings — by leaving it for the loser's ON DELETE CASCADE; four non-cascade artifact tables (photo buckets, product photos, scan log, sitemap) are explicitly deleted first so the store delete isn't blocked by a NO-ACTION FK. The rewrite is fully-typed Drizzle builders (no raw SQL), writes go through db.batch() (D1 has no transactions) in ≤90-param chunks, the store load selects only the 11 columns needed, a single changesOf() helper replaces the ad-hoc casts, and the export carries a JSDoc. The dry-run still prints per-table child counts, so any unexpected data on a shell (e.g. a mapping) is visible before apply.",
+    apiChanges: ["MCP dedup_showroom_stores — same contract; corrected apply semantics + typed/batched internals."],
+    filesTouched: ["src/backend/mcp/tools/showrooms/dedup_showroom_stores.ts"],
+    migrations: [],
+    code: [
+      {
+        title: "Per-table policy — reparent user data, drop the rest",
+        lang: "ts",
+        code: `// REPARENT (typed, batched) — user data moved to the keeper
+db.update(storeRating).set({ storeId: keepId }).where(inArray(storeRating.storeId, ids)),
+db.update(showroomPocs).set({ showroomId: keepId }).where(inArray(showroomPocs.showroomId, ids)),
+// ...ratings, contacts, sales, images, price, drive-stops, journal
+
+// DROP — links/hours/scrape/mappings are NOT moved. showroom_store_links has no
+// unique index, so moving the seeded WEBSITE link would duplicate the keeper's.
+// The loser's ON DELETE CASCADE removes them; 4 non-cascade tables deleted first.
+const batch = [...reparentStmts, ...dropStmts, db.delete(showroomStores).where(inArray(showroomStores.id, ids))];
+await db.batch(batch); // D1 runs a batch as one all-or-nothing unit`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Child-row disposition on apply",
+        code: `flowchart TD
+  L[loser row + its children] --> R{child table kind?}
+  R -- "user data" --> M[reparent -> keeper]
+  R -- "seeded link / hours / scrape / mapping (cascade)" --> C[leave — cascade deletes on loser delete]
+  R -- "artifact, non-cascade" --> X[explicit delete first]
+  M --> D[delete loser store]
+  C --> D
+  X --> D
+  classDef keep fill:#1f4d2e,stroke:#4ade80,color:#e6ffe6
+  classDef stop fill:#4d1f1f,stroke:#f87171,color:#ffe6e6
+  class M keep
+  class C,X,D stop`,
+      },
+    ],
+    verification: {
+      qcScript: "MCP dedup_showroom_stores (dry-run)",
+      command: "dedup_showroom_stores {}  (dry-run, via the MCP connector)",
+      ranAt: "2026-07-25",
+      output:
+        "npx tsc --noEmit — 0 errors in the rewritten tool. Dry-run runs server-side via the\n" +
+        "connector; its per-table child counts are reviewed before any apply. No rows deleted\n" +
+        "without approval.",
+    },
+  },
   "showroom-store-dedup-tool": {
     slug: "showroom-store-dedup-tool",
     branch: "claude/showroom-listing-500-map-6kvtm9",
