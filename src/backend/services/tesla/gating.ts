@@ -84,13 +84,23 @@ export async function getStreamControl(env: Env): Promise<StreamControl> {
   const end = map.get(STREAM_WINDOW_END_KEY) ?? null;
   const poll = map.get(STREAM_POLL_FALLBACK_KEY) ?? null;
   const connected = map.get(STREAM_CONNECTED_KEY) ?? null;
-  const windowStartHour = toIntInRange(start, DEFAULTS.windowStartHour, 0, 23);
-  const windowEndHour = toIntInRange(end, DEFAULTS.windowEndHour, 1, 24);
+  const rawStart = toIntInRange(start, DEFAULTS.windowStartHour, 0, 23);
+  const rawEnd = toIntInRange(end, DEFAULTS.windowEndHour, 1, 24);
+  // Guard against an inverted window. The two hours are independent rows, so a
+  // partial write (only the start key present) or a hand edit can leave end ≤
+  // start — which would make isWithinStreamWindow() false for EVERY hour and
+  // silently kill all streaming AND polling. When inverted, fall back to BOTH
+  // defaults so the returned window is always coherent.
+  let windowStartHour = rawStart;
+  let windowEndHour = rawEnd;
+  if (windowEndHour <= windowStartHour) {
+    windowStartHour = DEFAULTS.windowStartHour;
+    windowEndHour = DEFAULTS.windowEndHour;
+  }
   return {
     enabled: enabled == null ? DEFAULTS.enabled : enabled === "true",
     windowStartHour,
-    // Guard against an inverted window (end ≤ start) — fall back to the default end.
-    windowEndHour: windowEndHour > windowStartHour ? windowEndHour : DEFAULTS.windowEndHour,
+    windowEndHour,
     pollFallbackSeconds: toIntInRange(poll, DEFAULTS.pollFallbackSeconds, 15, 3600),
     connected: connected === "true",
   };
