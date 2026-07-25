@@ -34,6 +34,7 @@ import {
   showroomStoreCategory,
   showroomStoreCategoryMapping,
   showroomStoreLinks,
+  showroomStoreType,
   showroomStores,
 } from "@backend/db/schema/showroom/index";
 import { brands, showroomBrandMappings } from "@backend/db/schema/brands/index";
@@ -107,6 +108,13 @@ interface PageExtraction {
    * dropped; the name round-trip is what silently lost categories before.
    */
   categoryIds: number[];
+  /**
+   * Single business-model type id (FK → showroom_store_type). The store IS one
+   * business model (corporate, dealer, salvage, specialty…), orthogonal to the
+   * many category ids above. Id not name, validated against the live active set;
+   * null when the page gives no clear signal.
+   */
+  typeId: number | null;
   instagramUrl: string | null;
   appointmentOnly: boolean | null;
   hoursText: string | null;
@@ -119,6 +127,7 @@ const EXTRACTION_JSON_SCHEMA = {
   properties: {
     brandNames: { type: "array", items: { type: "string" } },
     categoryIds: { type: "array", items: { type: "integer" } },
+    typeId: { type: ["integer", "null"] },
     instagramUrl: { type: ["string", "null"] },
     appointmentOnly: { type: ["boolean", "null"] },
     hoursText: { type: ["string", "null"] },
@@ -259,11 +268,25 @@ export class ShowroomScrapeWorkflow extends WorkflowEntrypoint<
         .from(showroomStoreCategory)
         .where(eq(showroomStoreCategory.isActive, true));
 
+      // Business-model type vocabulary — loaded ONCE like categories. The model
+      // is handed `id: key — name — description` and returns a single id (the
+      // FK), validated against these active ids before it can reach the store.
+      const storeTypes = await db
+        .select({
+          id: showroomStoreType.id,
+          key: showroomStoreType.key,
+          name: showroomStoreType.displayName,
+          description: showroomStoreType.description,
+        })
+        .from(showroomStoreType)
+        .where(eq(showroomStoreType.isActive, true));
+
       for (let i = 0; i < pageUrls.length && i < MAX_PAGES; i++) {
         const pageUrl = pageUrls[i];
         const { markdown, links, facetBrands, ...extraction } = await step.do(
           `scrape-${i}`,
-          async () => scrapePage(env, showroomId, ragUuid, pageUrl, siteHost, categories),
+          async () =>
+            scrapePage(env, showroomId, ragUuid, pageUrl, siteHost, categories, storeTypes),
         );
         extractions.push(extraction);
         pageTexts.push({ pageUrl, markdown });
@@ -410,6 +433,13 @@ async function scrapePage(
   siteHost?: string,
   /** Live category vocabulary handed to the extractor so it can return ids. */
   categories: Array<{ id: number; name: string; description: string | null }> = [],
+  /** Live business-model type vocabulary — model returns one id (the FK). */
+  storeTypes: Array<{
+    id: number;
+    key: string;
+    name: string;
+    description: string | null;
+  }> = [],
 ): Promise<
   PageExtraction & {
     markdown: string;
@@ -456,11 +486,12 @@ async function scrapePage(
   await embedPage(env, { ragUuid, showroomId, pageUrl, text: markdown });
 
   // (d) Workers-AI structured extraction over the markdown.
-  const workersAiPrompt = buildExtractionPrompt(pageUrl, markdown, categories);
+  const workersAiPrompt = buildExtractionPrompt(pageUrl, markdown, categories, storeTypes);
   const extraction = await extractPage(
     env,
     workersAiPrompt,
     new Set(categories.map((c) => c.id)),
+    new Set(storeTypes.map((t) => t.id)),
   );
 
   // (e) Persist the browser_run_pages row.
@@ -617,6 +648,12 @@ function buildExtractionPrompt(
   pageUrl: string,
   markdown: string,
   categories: Array<{ id: number; name: string; description: string | null }>,
+  storeTypes: Array<{
+    id: number;
+    key: string;
+    name: string;
+    description: string | null;
+  }> = [],
 ): string {
   const preview =
     markdown.length > 8000 ? `${markdown.slice(0, 8000)}\n\n[truncated]` : markdown;
@@ -638,6 +675,17 @@ ${
           .join("\n")
       : "  (none configured — return an empty array)"
   }
+- typeId: the SINGLE numeric id of the ONE business model that best fits how this business OPERATES (how you engage them), which is different from what they SELL above. Pick exactly one, or null if the page gives no clear signal. The id MUST come from this list:
+${
+    storeTypes.length > 0
+      ? storeTypes
+          .map(
+            (t) =>
+              `  ${t.id}: ${t.key} — ${t.name}${t.description ? ` — ${t.description}` : ""}`,
+          )
+          .join("\n")
+      : "  (none configured — return null)"
+  }
 
 Respond ONLY with valid JSON conforming to the supplied schema.
 
@@ -649,10 +697,12 @@ async function extractPage(
   env: Env,
   prompt: string,
   validCategoryIds: ReadonlySet<number> = new Set(),
+  validTypeIds: ReadonlySet<number> = new Set(),
 ): Promise<PageExtraction> {
   const empty: PageExtraction = {
     brandNames: [],
     categoryIds: [],
+    typeId: null,
     instagramUrl: null,
     appointmentOnly: null,
     hoursText: null,
@@ -689,7 +739,7 @@ async function extractPage(
       "showroom page extraction",
     );
 
-    return normalizeExtraction(source, validCategoryIds);
+    return normalizeExtraction(source, validCategoryIds, validTypeIds);
   } catch (err) {
     console.error("showroom-scrape: AI extraction failed", err);
     return empty;
@@ -699,6 +749,7 @@ async function extractPage(
 function normalizeExtraction(
   source: Partial<PageExtraction>,
   validCategoryIds: ReadonlySet<number> = new Set(),
+  validTypeIds: ReadonlySet<number> = new Set(),
 ): PageExtraction {
   const brandNames = Array.isArray(source.brandNames)
     ? source.brandNames
@@ -718,6 +769,15 @@ function normalizeExtraction(
       ]
     : [];
 
+  // Single type id, validated against the live active set — a hallucinated or
+  // retired id is dropped to null rather than reaching the FK.
+  const rawTypeId =
+    typeof source.typeId === "number"
+      ? source.typeId
+      : Number.parseInt(String(source.typeId ?? ""), 10);
+  const typeId =
+    Number.isInteger(rawTypeId) && validTypeIds.has(rawTypeId) ? rawTypeId : null;
+
   const str = (v: unknown): string | null =>
     typeof v === "string" && v.trim().length > 0 ? v.trim() : null;
 
@@ -727,6 +787,7 @@ function normalizeExtraction(
   return {
     brandNames,
     categoryIds,
+    typeId,
     instagramUrl: str(source.instagramUrl),
     appointmentOnly: bool(source.appointmentOnly),
     hoursText: str(source.hoursText),
@@ -913,6 +974,32 @@ async function aggregate(
       console.log(
         `showroom-scrape: showroom ${showroomId} categorised from site content -> [${scrapedCategoryIds.join(", ")}]`,
       );
+    }
+  }
+
+  // ── Business-model type: majority vote across pages, FILL-BLANKS. ───────
+  // Unlike categories (many), a store IS exactly one type, so pick a single id:
+  // the most common non-null vote across the crawled pages. Fill only — never
+  // overwrite a type a human or the scale-backfill already set.
+  const typeVotes = new Map<number, number>();
+  for (const e of extractions) {
+    if (e.typeId != null) typeVotes.set(e.typeId, (typeVotes.get(e.typeId) ?? 0) + 1);
+  }
+  if (typeVotes.size > 0) {
+    const winningTypeId = [...typeVotes.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    const [store] = await db
+      .select({ typeId: showroomStores.typeId })
+      .from(showroomStores)
+      .where(eq(showroomStores.id, showroomId))
+      .limit(1);
+    if (store && store.typeId == null) {
+      await db
+        .update(showroomStores)
+        .set({ typeId: winningTypeId, updatedAt: new Date() })
+        .where(eq(showroomStores.id, showroomId));
+      console.log(`showroom-scrape: showroom ${showroomId} typed from site content -> ${winningTypeId}`);
+    } else {
+      console.log(`showroom-scrape: showroom ${showroomId} already typed — skipping site-inferred type`);
     }
   }
 

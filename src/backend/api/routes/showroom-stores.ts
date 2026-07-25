@@ -12,6 +12,7 @@ import { generateProductDraftPrompt } from "@backend/ai/agents/ShowroomResearchA
 import { brandImages, brands, showroomBrandMappings } from "@backend/db/schema/brands/index";
 import {
   showroomStores,
+  showroomStoreType,
   showroomStoreProducts,
   showroomStoreCategory,
   showroomStoreCategoryMapping,
@@ -191,6 +192,9 @@ const createStoreSchema = z.object({
   description: z.string().optional().nullable(),
   pricePoint: z.enum(["$", "$$", "$$$", "$$$$"]).optional().nullable(),
   bayAreaCityId: z.number().optional().nullable(),
+  // Business-model type — single FK to showroom_store_type. Spread straight into
+  // the store insert/update like any scalar column (see PUT/POST handlers).
+  typeId: z.number().int().optional().nullable(),
   locationAddress: z.string().optional().nullable(),
   // Granular address parts — usually filled by the place-import / address
   // backfill from Google Places, but accepted directly here too.
@@ -1101,9 +1105,13 @@ showroomStoresRouter.get("/", async (c) => {
       cityName: storeBayareaCities.bayAreaCityName,
       hubRoute: storeBayareaCities.hubRoute,
       hubName: storeBayareaCities.hubName,
+      typeKey: showroomStoreType.key,
+      typeName: showroomStoreType.displayName,
+      typeColor: showroomStoreType.htmlColor,
     })
     .from(showroomStores)
     .leftJoin(storeBayareaCities, eq(showroomStores.bayAreaCityId, storeBayareaCities.id))
+    .leftJoin(showroomStoreType, eq(showroomStores.typeId, showroomStoreType.id))
     .orderBy(desc(showroomStores.createdAt))
     .$dynamic();
 
@@ -1121,6 +1129,12 @@ showroomStoresRouter.get("/", async (c) => {
   }
   if (hubFilter) {
     conditions.push(eq(storeBayareaCities.hubRoute, hubFilter));
+  }
+  // Business-model type filter — accepts a numeric type_id. The island filters
+  // client-side today, but a server filter keeps the API/MCP surface honest.
+  const typeFilter = c.req.query("typeId");
+  if (typeFilter && Number.isFinite(Number(typeFilter))) {
+    conditions.push(eq(showroomStores.typeId, Number(typeFilter)));
   }
 
   if (conditions.length > 0) {
@@ -1302,6 +1316,11 @@ showroomStoresRouter.get("/", async (c) => {
         // Links table is the URL source of truth; derive legacy flat fields too.
         links,
         ...linksToLegacyUrls(links),
+        // Business-model type (joined from showroom_store_type) — powers the
+        // color-coded badge + directory filter. typeId is already in ...r.store.
+        typeKey: r.typeKey ?? null,
+        typeName: r.typeName ?? null,
+        typeColor: r.typeColor ?? null,
       };
 
       if (includes.has("categories")) {
@@ -1339,9 +1358,13 @@ showroomStoresRouter.get("/:id", async (c) => {
       cityName: storeBayareaCities.bayAreaCityName,
       hubRoute: storeBayareaCities.hubRoute,
       hubName: storeBayareaCities.hubName,
+      typeKey: showroomStoreType.key,
+      typeName: showroomStoreType.displayName,
+      typeColor: showroomStoreType.htmlColor,
     })
     .from(showroomStores)
     .leftJoin(storeBayareaCities, eq(showroomStores.bayAreaCityId, storeBayareaCities.id))
+    .leftJoin(showroomStoreType, eq(showroomStores.typeId, showroomStoreType.id))
     .where(eq(showroomStores.id, storeId))
     .limit(1);
 
@@ -1520,6 +1543,9 @@ showroomStoresRouter.get("/:id", async (c) => {
     cityName: store.cityName,
     hubRoute: store.store.hubRoute ?? detailDerived?.route ?? store.hubRoute,
     hubName: store.store.hubName ?? detailDerived?.name ?? store.hubName,
+    typeKey: store.typeKey ?? null,
+    typeName: store.typeName ?? null,
+    typeColor: store.typeColor ?? null,
     hours,
     hoursJson: rowsToHoursJson(hours),
     links,
@@ -2517,6 +2543,23 @@ showroomStoresRouter.get("/meta/categories", async (c) => {
     .where(eq(showroomStoreCategory.isActive, true));
 
   return c.json({ categories });
+});
+
+/**
+ * GET /meta/types — active business-model types (showroom_store_type).
+ * Feeds the directory type filter and the store type-edit modal. Active only:
+ * a retired type stays valid on stores that already point at it but never
+ * appears as a selectable option.
+ */
+showroomStoresRouter.get("/meta/types", async (c) => {
+  const db = drizzle(c.env.DB);
+  const types = await db
+    .select()
+    .from(showroomStoreType)
+    .where(eq(showroomStoreType.isActive, true))
+    .orderBy(showroomStoreType.displayName);
+
+  return c.json({ types });
 });
 
 const placeExistsQuerySchema = z.object({

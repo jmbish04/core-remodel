@@ -288,6 +288,13 @@
       "when": 1784999608087,
       "tag": "0140_useful_psylocke",
       "breakpoints": true
+    },
+    {
+      "idx": 141,
+      "version": "6",
+      "when": 1784999608088,
+      "tag": "0141_fluffy_sunfire",
+      "breakpoints": true
     }
   ]
 }

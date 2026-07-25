@@ -114,6 +114,10 @@ interface Store {
   latitude: number | null;
   longitude: number | null;
   categories: string[];
+  /** Business-model type (joined from showroom_store_type); null = untyped. */
+  typeId: number | null;
+  typeName: string | null;
+  typeColor: string | null;
   /** Aggregated external review-platform rating (Yelp/Google/etc). */
   onlineRating: number | null;
   onlineRatingCount: number;
@@ -147,6 +151,13 @@ interface Store {
 interface Category {
   id: number;
   name: string;
+}
+
+interface StoreType {
+  id: number;
+  key: string;
+  displayName: string;
+  htmlColor: string | null;
 }
 
 interface City {
@@ -665,6 +676,8 @@ interface Filters {
   search: string;
   hub: string | null;
   categories: string[];
+  /** Business-model type filter — a showroom_store_type id, or null for all. */
+  type: number | null;
   pricePoint: string | null;
   minRating: number | null;
   appointmentOnly: boolean;
@@ -677,6 +690,7 @@ const EMPTY_FILTERS: Filters = {
   search: "",
   hub: null,
   categories: [],
+  type: null,
   pricePoint: null,
   minRating: null,
   appointmentOnly: false,
@@ -689,11 +703,13 @@ function FilterBar({
   filters,
   onChange,
   allCategories,
+  allTypes,
   pst,
 }: {
   filters: Filters;
   onChange: (f: Filters) => void;
   allCategories: Category[];
+  allTypes: StoreType[];
   pst: PstNow;
 }) {
 
@@ -787,6 +803,31 @@ function FilterBar({
             {pp}
           </Button>
         ))}
+
+        {allTypes.length > 0 ? (
+          <>
+            <div className="mx-1 h-5 w-px bg-border/40" />
+            {/* Business-model type chips — color-dotted, single-select toggle. */}
+            {allTypes.map((t) => (
+              <Button
+                key={t.id}
+                size="sm"
+                variant={filters.type === t.id ? "default" : "outline"}
+                onClick={() =>
+                  onChange({ ...filters, type: filters.type === t.id ? null : t.id })
+                }
+                className="h-7 gap-1.5 text-[11px]"
+              >
+                <span
+                  aria-hidden
+                  className="size-2 rounded-full ring-1 ring-border/60"
+                  style={{ backgroundColor: t.htmlColor ?? "transparent" }}
+                />
+                {t.displayName}
+              </Button>
+            ))}
+          </>
+        ) : null}
 
         <div className="mx-1 h-5 w-px bg-border/40" />
 
@@ -2428,6 +2469,7 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
   const [allStores, setAllStores] = useState<Store[]>([]);
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [types, setTypes] = useState<StoreType[]>([]);
   const [cities, setCities] = useState<City[]>([]);
   const [filters, setFilters] = useState<Filters>({ ...EMPTY_FILTERS });
   const [viewMode, setViewMode] = useState<ViewMode>(initialTab);
@@ -2470,6 +2512,9 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
         data.stores.map((s) => ({
           ...s,
           categories: s.categories ?? [],
+          typeId: s.typeId ?? null,
+          typeName: s.typeName ?? null,
+          typeColor: s.typeColor ?? null,
           onlineRating: s.onlineRating ?? null,
           onlineRatingCount: s.onlineRatingCount ?? 0,
           userRating: s.userRating ?? null,
@@ -2497,11 +2542,13 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
 
   const fetchMeta = useCallback(async () => {
     try {
-      const [catData, cityData] = await Promise.all([
+      const [catData, typeData, cityData] = await Promise.all([
         api<{ categories: Category[] }>("/api/showroom-stores/meta/categories"),
+        api<{ types: StoreType[] }>("/api/showroom-stores/meta/types"),
         api<{ cities: City[] }>("/api/showroom-stores/meta/cities"),
       ]);
       setCategories(catData.categories);
+      setTypes(typeData.types);
       setCities(cityData.cities);
     } catch {
       // Non-critical — filters just won't show all options
@@ -2525,6 +2572,7 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
       )
         return false;
       if (filters.pricePoint && s.pricePoint !== filters.pricePoint) return false;
+      if (filters.type != null && s.typeId !== filters.type) return false;
       if (filters.minRating !== null && (s.onlineRating === null || s.onlineRating < filters.minRating))
         return false;
       if (filters.appointmentOnly && !s.isAppointmentOnly) return false;
@@ -2563,7 +2611,7 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
 
       {/* Filter Bar */}
       <div className="mb-5 mt-4">
-        <FilterBar filters={filters} onChange={setFilters} allCategories={categories} pst={pst} />
+        <FilterBar filters={filters} onChange={setFilters} allCategories={categories} allTypes={types} pst={pst} />
       </div>
 
       {/* Content */}
