@@ -53,6 +53,14 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/showroom-listing-500-map-6kvtm9",
+    title: "Showroom seed is bootstrap-only (stops re-run duplication)",
+    summary:
+      "seedShowroomStores inserted a fixed store list with no natural key, so a repeated POST /api/showroom-stores/seed cloned every row — production ended up with 213 stores instead of 146 ('Whole Wood' ×3). The seed now bails the moment any store exists, so it only ever populates an empty directory. Cleaning up the already-duplicated rows is a separate destructive step held for sign-off.",
+    date: "2026-07-25",
+    status: "staged",
+  },
+  {
     branch: "claude/backend-health-checks-d1-d6df78",
     title: "0029 · Health platform — every module declares its own checks",
     summary:
@@ -192,6 +200,20 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "showroom-seed-bootstrap-only",
+    branch: "claude/showroom-listing-500-map-6kvtm9",
+    date: "2026-07-25",
+    area: "Showrooms",
+    title: "Showroom store seed is bootstrap-only (re-runs can't duplicate rows)",
+    summary:
+      "seedShowroomStores inserted a fixed list of stores with no natural key, so re-running it against a populated table cloned every row. A repeated POST /api/showroom-stores/seed did exactly that in production — 213 rows where there should be 146, with 'Whole Wood' appearing three times. The seed now skips entirely if any store already exists.",
+    changes: [
+      { kind: "fixed", text: "seedShowroomStores now short-circuits (returns { inserted: 0, skipped }) the moment any showroom_stores row exists, so it only ever populates an empty directory. This stops any further duplication from a repeated seed." },
+      { kind: "changed", text: "Documented that the seed is bootstrap-only and carries no natural key, so it must never run against a populated table." },
+    ],
+    status: "staged",
+  },
   {
     id: "0029-health-platform",
     branch: "claude/backend-health-checks-d1-d6df78",
