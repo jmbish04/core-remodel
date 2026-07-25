@@ -23,7 +23,9 @@ await assertReachable(client, checks);
 const page = await client.get("/admin/shopping/drives");
 checks.ok(
   "GET /admin/shopping/drives → 200 HTML (page serves)",
-  page.status === 200,
+  // json is null for an HTML body; confirm it's actually an HTML document, not a
+  // 200 JSON error masquerading as a served page.
+  page.status === 200 && page.json === null && /<!doctype html|<html/i.test(page.text ?? ""),
   `→ ${page.status}`,
 );
 
@@ -37,6 +39,7 @@ if (onProd && control.status === 404) {
     control.status === 200 &&
       typeof control.json?.control?.enabled === "boolean" &&
       typeof control.json?.control?.windowStartHour === "number" &&
+      typeof control.json?.control?.windowEndHour === "number" &&
       typeof control.json?.control?.pollFallbackSeconds === "number" &&
       typeof control.json?.shouldStream === "boolean" &&
       typeof control.json?.shouldPoll === "boolean",

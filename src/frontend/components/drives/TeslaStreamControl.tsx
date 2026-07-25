@@ -11,7 +11,8 @@
  *   • Idle      — no active drive, so nothing ingests (and nothing bills).
  *
  * Reads `GET /api/tesla/stream/control` (+ `/status`) and writes the toggle via
- * `POST /api/tesla/stream/control`. Polls every 15s so the pill stays live.
+ * `POST /api/tesla/stream/control`. Polls every 15s (paused while the tab is
+ * hidden) so the pill stays live; stops entirely when the routes 404.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Moon, Radio, RefreshCw, Satellite } from "lucide-react";
@@ -43,6 +44,7 @@ function hourLabel(h: number): string {
   return `${String(h).padStart(2, "0")}:00`;
 }
 
+/** The drive-list header card: the live-stream toggle + a Streaming/Polling/Idle pill. */
 export function TeslaStreamControl() {
   const [control, setControl] = useState<StreamControl | null>(null);
   const [status, setStatus] = useState<StreamStatus | null>(null);
@@ -50,9 +52,17 @@ export function TeslaStreamControl() {
   const [shouldPoll, setShouldPoll] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  /** Absent (never configured) → hide the whole widget rather than show a broken card. */
+  /** Absent (never configured / not deployed) → hide the widget instead of a broken card. */
   const [available, setAvailable] = useState(true);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const mounted = useRef(true);
+
+  const stopPolling = useCallback(() => {
+    if (timer.current) {
+      clearInterval(timer.current);
+      timer.current = null;
+    }
+  }, []);
 
   const load = useCallback(async () => {
     try {
@@ -60,9 +70,12 @@ export function TeslaStreamControl() {
         fetch("/api/tesla/stream/control", { credentials: "include" }),
         fetch("/api/tesla/stream/status", { credentials: "include" }),
       ]);
-      // The routes only exist once deployed; a 404 means "not on this worker yet".
+      if (!mounted.current) return;
+      // The routes only exist once deployed; a 404 means "not on this worker yet"
+      // — hide the widget AND stop the interval so it doesn't poll a dead route.
       if (ctlRes.status === 404) {
         setAvailable(false);
+        stopPolling();
         return;
       }
       if (!ctlRes.ok) {
@@ -74,28 +87,36 @@ export function TeslaStreamControl() {
         shouldStream: boolean;
         shouldPoll: boolean;
       };
+      const st = stRes.ok ? ((await stRes.json()) as StreamStatus) : null;
+      if (!mounted.current) return;
       setControl(ctl.control);
       setShouldStream(ctl.shouldStream);
       setShouldPoll(ctl.shouldPoll);
-      setStatus(stRes.ok ? ((await stRes.json()) as StreamStatus) : null);
+      setStatus(st);
       setError(null);
     } catch (e) {
-      setError((e as Error).message);
+      if (mounted.current) setError((e as Error).message);
     }
-  }, []);
+  }, [stopPolling]);
 
   useEffect(() => {
+    mounted.current = true;
     void load();
-    timer.current = setInterval(() => void load(), REFRESH_MS);
+    // Poll for liveness, but skip while the tab is backgrounded to save battery/traffic.
+    timer.current = setInterval(() => {
+      if (!document.hidden) void load();
+    }, REFRESH_MS);
     return () => {
-      if (timer.current) clearInterval(timer.current);
+      mounted.current = false;
+      stopPolling();
     };
-  }, [load]);
+  }, [load, stopPolling]);
 
   const toggle = async (next: boolean) => {
     if (!control) return;
+    const prev = control;
     setSaving(true);
-    // Optimistic — reflect the intent immediately, reconcile on the response.
+    // Optimistic — reflect intent immediately, roll back if the save fails.
     setControl({ ...control, enabled: next });
     try {
       const res = await fetch("/api/tesla/stream/control", {
@@ -104,19 +125,22 @@ export function TeslaStreamControl() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ enabled: next }),
       });
+      if (!mounted.current) return;
       if (res.ok) {
         const body = (await res.json()) as { control: StreamControl };
-        setControl(body.control);
+        if (mounted.current) setControl(body.control);
         await load();
       } else {
+        setControl(prev);
         setError(`save ${res.status}`);
-        await load();
       }
     } catch (e) {
-      setError((e as Error).message);
-      await load();
+      if (mounted.current) {
+        setControl(prev);
+        setError((e as Error).message);
+      }
     } finally {
-      setSaving(false);
+      if (mounted.current) setSaving(false);
     }
   };
 
@@ -144,6 +168,7 @@ export function TeslaStreamControl() {
     },
   };
   const M = modeMeta[mode];
+  const ModeIcon = M.icon;
 
   const windowLabel = control
     ? `${hourLabel(control.windowStartHour)}–${hourLabel(control.windowEndHour)} PT`
@@ -169,11 +194,16 @@ export function TeslaStreamControl() {
           <div>
             <div className="flex items-center gap-2">
               <span className="text-sm font-semibold tracking-tight">Tesla telemetry ingest</span>
-              <Badge className={cn("gap-1 font-medium", tripped ? "border-destructive/50 bg-destructive/10 text-destructive" : M.className)}>
+              <Badge
+                className={cn(
+                  "gap-1 font-medium",
+                  tripped ? "border-destructive/50 bg-destructive/10 text-destructive" : M.className,
+                )}
+              >
                 {tripped ? (
                   <RefreshCw className="size-3" aria-hidden />
                 ) : (
-                  <M.icon className={cn("size-3", mode === "streaming" && "animate-pulse")} aria-hidden />
+                  <ModeIcon className={cn("size-3", mode === "streaming" && "animate-pulse")} aria-hidden />
                 )}
                 {tripped ? "Tripped" : M.label}
               </Badge>
@@ -182,16 +212,19 @@ export function TeslaStreamControl() {
           </div>
         </div>
 
-        <label className="flex items-center gap-2 text-sm">
+        <div className="flex items-center gap-2 text-sm">
           {saving && <Loader2 className="size-3.5 animate-spin text-muted-foreground" aria-hidden />}
-          <span className="text-muted-foreground">Live stream</span>
+          <span id="tesla-stream-toggle-label" className="text-muted-foreground">
+            Live stream
+          </span>
           <Switch
             checked={control?.enabled ?? false}
             onCheckedChange={(next) => void toggle(next)}
             disabled={saving || !control}
+            aria-labelledby="tesla-stream-toggle-label"
             aria-label="Toggle Tesla live streaming (off = poll instead)"
           />
-        </label>
+        </div>
       </CardContent>
     </Card>
   );
