@@ -204,6 +204,22 @@ driveListsRouter.patch("/:slug", async (c) => {
   }
 
   await setActiveDrive(db, body.isActive ? drive.id : null);
+
+  // Match the streaming DO to the new active state (fire-and-forget). The DO's own
+  // lifecycle guard is the source of truth; this just makes start/stop prompt
+  // instead of waiting for the next alarm tick.
+  try {
+    const stub = c.env.TESLA_STREAM.get(c.env.TESLA_STREAM.idFromName("singleton"));
+    c.executionCtx.waitUntil(
+      stub
+        .fetch(body.isActive ? "https://do/start" : "https://do/stop", { method: "POST" })
+        .then(() => undefined)
+        .catch((err) => console.error("[drive-lists] tesla stream signal failed:", err)),
+    );
+  } catch (err) {
+    console.error("[drive-lists] tesla stream stub failed:", err);
+  }
+
   return c.json({ ok: true, isActive: body.isActive });
 });
 

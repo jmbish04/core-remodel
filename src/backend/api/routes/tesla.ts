@@ -189,6 +189,35 @@ teslaRouter.post("/stream/control", async (c) => {
   return c.json({ ok: true, control });
 });
 
+/** Resolve the singleton TeslaStreamDO stub (one instance for the one vehicle). */
+function teslaStreamStub(env: Env) {
+  return env.TESLA_STREAM.get(env.TESLA_STREAM.idFromName("singleton"));
+}
+
+/**
+ * POST /api/tesla/stream/start — arm the streaming DO's lifecycle.
+ *
+ * The DO's own alarm re-checks `shouldStreamNow` before it connects, so calling
+ * this outside the window / with no active drive is a safe no-op (it goes dormant).
+ * Normally the drive-activation route calls this for you.
+ */
+teslaRouter.post("/stream/start", async (c) => {
+  const res = await teslaStreamStub(c.env).fetch("https://do/start", { method: "POST" });
+  return c.json(await res.json(), res.status as 200);
+});
+
+/** POST /api/tesla/stream/stop — disconnect the socket and stop the DO now. */
+teslaRouter.post("/stream/stop", async (c) => {
+  const res = await teslaStreamStub(c.env).fetch("https://do/stop", { method: "POST" });
+  return c.json(await res.json(), res.status as 200);
+});
+
+/** GET /api/tesla/stream/status — the DO's live connection state + write budget + breaker. */
+teslaRouter.get("/stream/status", async (c) => {
+  const res = await teslaStreamStub(c.env).fetch("https://do/status");
+  return c.json(await res.json(), res.status as 200);
+});
+
 /**
  * POST /api/tesla/webhook — Tessie webhook (drive-state / park / etc.).
  *

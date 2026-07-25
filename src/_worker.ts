@@ -55,6 +55,7 @@ export { DeepResearchAgent } from "./backend/ai/agents/DeepResearchAgent/index";
 export { RemodelOrchestrator } from "./backend/ai/agents/RemodelOrchestrator";
 export { AdminChatAgent } from "./backend/ai/agents/AdminChatAgent";
 export { ShowroomScout } from "./backend/ai/agents/showroom-scout/index";
+export { TeslaStreamDO } from "./backend/durable-objects/tesla-stream";
 // 0015 MCP connector Durable Object (agents/mcp McpAgent).
 export { RemodelMcpAgent } from "./backend/mcp/agent";
 
