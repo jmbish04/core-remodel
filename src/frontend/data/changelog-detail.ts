@@ -113,6 +113,86 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "drives-map-fix-card-actions": {
+    slug: "drives-map-fix-card-actions",
+    branch: "claude/drive-list-ui-improvements-b58ece",
+    prNumber: 244,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/244",
+    subtitle: "Drives · PR-A quick fixes (map render + card action strip)",
+    problem:
+      "The drive viewport's route map (DriveRouteMap — MapLibre GL with a free CartoCDN basemap, no API key) plots only the stops that carry lat/lng, and renders a single empty MapPinned icon on a muted panel when NONE do. Drive stops are denormalized: a stop can be created with just a showroomStoreId and no coords of its own. The landing list already worked around this — it coalesces each marker's coords from the linked showroom — but GET /api/drive-lists/:slug returned stops verbatim, so any drive whose stops lacked their own lat/lng showed a blank pin even though the linked showrooms are geocoded. In production that was 14 of 23 drives. Two cosmetic issues rode along: the Tesla button sat as a separate raised secondary button OUTSIDE the address+Navigate background, and the hours/phone were small badges — hard to hit on a Tesla or phone screen.",
+    approach:
+      "A new service helper, fillMissingStopCoords(db, stops), backfills each stop's null lat/lng from its linked showroom in one bounded query (drives cap at 24 stops, so no chunking), mutating in place; the :slug handler calls it before responding. It lives in the service layer, not the route, deliberately — drizzle-orm 0.33's .set() type inference is fragile and degrades from added type-load in a file, so keeping the extra showroom query out of the route file leaves its unrelated PATCH handlers' inference intact. On the frontend, the address+Navigate <a> and the Tesla <button> now share one rounded bg-muted container at matched min-h-14 height (a thin divider between them), reading as a single control strip; the hours badge is enlarged to text-base and the phone becomes a large min-h-12 tap-to-dial button.",
+    apiChanges: [
+      "GET /api/drive-lists/:slug — unchanged contract; each returned stop's latitude/longitude is now backfilled from its linked showroom when the stop's own value is null.",
+    ],
+    filesTouched: [
+      "src/backend/services/drive-lists.ts (new fillMissingStopCoords helper)",
+      "src/backend/api/routes/drive-lists.ts (:slug calls the helper)",
+      "src/frontend/components/drives/DriveViewportApp.tsx (action strip + hours/phone)",
+      "scripts/qc/pr_244.mjs (new)",
+    ],
+    migrations: [],
+    code: [
+      {
+        title: "Backfill stop coords from the linked showroom (service)",
+        lang: "ts",
+        code: `// A stop can be created without lat/lng yet still link a geocoded showroom;
+// the map + per-stop navigation key off the stop's OWN coords, so without this
+// the whole map falls back to an empty pin. Bounded (<=24 stops) — no chunking.
+const need = stops.filter(
+  (s) => (s.latitude == null || s.longitude == null) && s.showroomStoreId != null,
+);
+if (need.length === 0) return stops;
+const ids = Array.from(new Set(need.map((s) => s.showroomStoreId)));
+const coords = await db
+  .select({ id: showroomStores.id, latitude: showroomStores.latitude, longitude: showroomStores.longitude })
+  .from(showroomStores)
+  .where(inArray(showroomStores.id, ids));
+const byId = new Map(coords.map((r) => [r.id, r]));
+for (const s of stops) {
+  const sr = s.showroomStoreId == null ? null : byId.get(s.showroomStoreId);
+  if (!sr) continue;
+  if (s.latitude == null) s.latitude = sr.latitude;
+  if (s.longitude == null) s.longitude = sr.longitude;
+}`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Why the map went blank, and where the fix sits",
+        code: `flowchart TD
+  A[GET /api/drive-lists/:slug] --> B[load drive_list_stops]
+  B --> C{stop has own lat/lng?}
+  C -- yes --> P[plot marker]
+  C -- "no, but links showroom" --> F[fillMissingStopCoords: coalesce from showroom]
+  C -- "no, no showroom" --> N[stop omitted from map]
+  F --> P
+  P --> M{any plotted stop?}
+  M -- yes --> MAP[render MapLibre route map]
+  M -- no --> ICON[empty pin fallback — the reported bug]
+  classDef fix fill:#1f4d2e,stroke:#4ade80,color:#e6ffe6
+  classDef bug fill:#4d1f1f,stroke:#f87171,color:#ffe6e6
+  class F,MAP fix
+  class ICON bug`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_244.mjs",
+      command: "pnpm run test:pr 244 -- --preview   # and bare against prod (regression)",
+      ranAt: "2026-07-25",
+      output:
+        "PREVIEW (fix):  4 passed, 0 failed — 23/23 drives render a map, 94/94 linked stops carry coords,\n" +
+        "  'no drive links showrooms yet renders an empty map' assertion PASSES.\n" +
+        "PROD (old code): 3 passed, 0 failed — list + detail 200/shape regression guards pass;\n" +
+        "  9/23 drives map, 28/94 linked stops with coords; coord-backfill assertion reported\n" +
+        "  PENDING merge/deploy (14 offending drives on prod, the bug).\n" +
+        "pnpm run build (astro/esbuild — the deploy path) passes. tsc adds two spurious .set()\n" +
+        "inference errors on byte-identical unchanged code — the known drizzle-0.33 instability\n" +
+        "that already blankets ~50 baseline files; runtime unaffected.",
+      migrations: [],
+    },
+  },
   "tesla-stream-ui": {
     slug: "tesla-stream-ui",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
