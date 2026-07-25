@@ -211,6 +211,20 @@ export const BRANCHES: ChangelogBranch[] = [
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "showroom-store-dedup-tool",
+    branch: "claude/showroom-listing-500-map-6kvtm9",
+    date: "2026-07-25",
+    area: "Showrooms",
+    title: "dedup_showroom_stores — safe, dry-run-first cleanup of re-seed duplicates",
+    summary:
+      "The bootstrap-only guard stopped NEW duplication; this is the cleanup tool for the ~60 rows already cloned by the seed running 3×. An admin-gated MCP tool groups stores by (name, city), keeps the most-enriched row, and — only after a human approves the dry-run map — reparents every child FK and deletes the duplicates. Distinct chain branches sharing a (name, city) are detected and skipped, never merged.",
+    changes: [
+      { kind: "added", text: "dedup_showroom_stores MCP tool (DESTRUCTIVE, dry-run by default). Dry run reports the keep/delete map + child-row counts across all 28 FK columns; apply:true reparents children then deletes losers in db.batch-safe, 90-param-chunked steps." },
+      { kind: "added", text: "Anti-merge guard: a (name, city) group with ≥2 'real' rows (each with its own zip/placeId) is treated as distinct locations and skipped — 'All Natural Stone' in four cities is never collapsed." },
+    ],
+    status: "staged",
+  },
+  {
     id: "brands-name-key-dedup",
     branch: "claude/showroom-location-tagging-ex2ik5",
     date: "2026-07-25",

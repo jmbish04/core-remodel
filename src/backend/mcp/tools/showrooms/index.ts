@@ -17,6 +17,7 @@ import { backfillShowroomMedia } from "./backfill_showroom_media";
 import { findKnownShowrooms } from "./find_known_showrooms";
 import { getUserLocation } from "./get_user_location";
 import { whatsNearMe } from "./whats_near_me";
+import { dedupShowroomStores } from "./dedup_showroom_stores";
 
 export const showroomTools: RemodelTool[] = [
   listShowrooms,
@@ -36,4 +37,5 @@ export const showroomTools: RemodelTool[] = [
   findKnownShowrooms,
   getUserLocation,
   whatsNearMe,
+  dedupShowroomStores,
 ];
