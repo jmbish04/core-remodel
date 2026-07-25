@@ -54,6 +54,7 @@ interface WorkshopCanvasProps {
   onMix: (node: BoardNode) => void;
   onClayToPhotoreal: (node: BoardNode) => void;
   onFloorPlanFurnish: (node: BoardNode) => void;
+  onPlanToIsometric: (node: BoardNode) => void;
   onToneUnify: (node: BoardNode) => void;
   onLightingEnhance: (node: BoardNode) => void;
   /** "Place image (I)" opens the drawer — our rendition of image placement. */
@@ -97,6 +98,7 @@ export function WorkshopCanvas({
   onMix,
   onClayToPhotoreal,
   onFloorPlanFurnish,
+  onPlanToIsometric,
   onToneUnify,
   onLightingEnhance,
   onPlaceImage,
@@ -644,6 +646,7 @@ export function WorkshopCanvas({
         onMix={onMix}
         onClayToPhotoreal={onClayToPhotoreal}
         onFloorPlanFurnish={onFloorPlanFurnish}
+        onPlanToIsometric={onPlanToIsometric}
         onToneUnify={onToneUnify}
         onLightingEnhance={onLightingEnhance}
       />
