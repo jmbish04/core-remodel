@@ -101,7 +101,7 @@ first thing to suspect whenever a route 500s right after a schema change.
 |---|---|
 | Changed a drizzle schema | `pnpm run migrate:remote`, then **verify** the column/table exists on remote |
 | Opened or updated a PR | `pnpm run deploy:preview` — then QC with `pnpm run test:pr <n> -- --preview` |
-| **Merged to `main`** | **`pnpm run deploy`** — this is the only thing that updates production |
+| **Merged to `main`** | **`pnpm run deploy`** from `main`, **or** run the **Deploy (manual)** GitHub Action (see below) — one of these is the only thing that updates production |
 | Merged the PR | `pnpm run preview:delete` from the branch's worktree |
 
 **Say what you did.** End the turn by stating explicitly whether you deployed,
@@ -123,6 +123,39 @@ commands are one word apart and the failure is not recoverable by rerunning.
 npx wrangler deployments list | tail -20   # newest entry should be yours
 pnpm run test:pr <n>                       # QC against production, after merge
 ```
+
+### Two ways to run the deploy — CLI, or the manual GitHub Action
+
+There is now a **`Deploy (manual)` GitHub Action** (`.github/workflows/deploy.yml`),
+added because the Cloudflare↔GitHub CI/CD integration was **disconnected on purpose**
+(see "Deploy topology & previews"). Pick whichever fits your session:
+
+- **`pnpm run deploy`** — from a session that HAS local Cloudflare auth (a
+  `CLOUDFLARE_API_TOKEN` in the env, or `wrangler login` done). Runs from your
+  working tree, so only from `main` after your PR merged and you pulled.
+- **`Deploy (manual)` Action** — when you do NOT have local wrangler auth (the
+  common case for a remote Claude Code session — `wrangler whoami` says "not
+  authenticated" and there's no token). It runs the **same pipeline**
+  (`build → migrate:remote → migrate:tesla:remote → wrangler deploy`) on GitHub's
+  runners using the repo's `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`
+  Actions secrets (already configured).
+
+  It is **`workflow_dispatch` only** — it NEVER runs on push or PR (that is the
+  whole point; a push must never deploy again). Trigger it either from the repo's
+  **Actions tab → "Deploy (manual)" → Run workflow** (branch `main`, type `deploy`
+  to confirm), or from a session with the GitHub MCP:
+
+  ```
+  actions_run_trigger(workflow: "deploy.yml", ref: "main",
+    inputs: { confirm: "deploy", run_migrations: true })
+  ```
+
+  Guards baked in: typed `deploy` confirmation, **main-only** (unless
+  `allow_non_main: true`), a secrets preflight, a `run_migrations` toggle
+  (turn off for a code-only redeploy), and a concurrency group so two deploys
+  can't race onto prod. After it runs, verify as above (`wrangler deployments
+  list`, `pnpm run test:pr <n>`). This is the sanctioned way to ship from `main`
+  without a local token — use it instead of reporting "I can't deploy."
 
 ## MANDATORY planning artifacts — every feature, BEFORE any code (do ALL THREE)
 
@@ -717,9 +750,12 @@ After the PR is open and conflict-free:
    created per branch and nothing reaps them — then `pnpm run preview:cleanup`
    to sweep any whose branch is already gone.
 
-> A branch build going GREEN is not a good sign here — it means the build deployed
-> your branch to **production**. See "Deploy topology & previews" below before you
-> act on any CI result.
+> HISTORICAL (pre-2026-07-25): a branch build going GREEN meant the build had
+> deployed your branch to **production**. The Cloudflare↔GitHub integration is now
+> **disconnected**, so a branch push no longer builds or deploys anything on
+> Cloudflare — the only automated PR signal is the review bot (codra). Production
+> only changes when someone runs `pnpm run deploy` or the `Deploy (manual)` Action.
+> See "Deploy topology & previews" below.
 
 ### 3. Migrations — always apply to remote when the PR changes schema
 
@@ -783,10 +819,13 @@ it reads as "my endpoint 404s" or "my column is missing" when the real answer is
 
 ## Deploy topology & previews (READ BEFORE VERIFYING ANYTHING)
 
-**Workers Builds auto-deploy is DISABLED.** Deploys are manual and agent-owned —
-see "LAST ACTION OF EVERY TURN" at the top of this file. The history below is
-kept because it explains why CI is off and why it must not be switched back on
-casually.
+**The Cloudflare↔GitHub Workers Builds integration is now fully DISCONNECTED**
+(2026-07-25) — not merely "triggers disabled." A push to any branch no longer
+builds or deploys anything on Cloudflare's side. Deploys are manual and
+agent-owned via `pnpm run deploy` **or** the `Deploy (manual)` GitHub Action
+(`workflow_dispatch` only — see "Two ways to run the deploy" under "LAST ACTION
+OF EVERY TURN"). The history below is kept because it explains WHY the
+integration was removed and why it must not be reconnected casually.
 
 ### CI cannot deploy anywhere except production. Do not turn it back on.
 
