@@ -67,7 +67,11 @@ export class BucketIntakeWorkflow extends WorkflowEntrypoint<
   async run(event: WorkflowEvent<BucketIntakeParams>, rawStep: WorkflowStep) {
     const { bucketId } = event.payload;
     const env = this.env;
-    const db = drizzle(env.DB);
+    // NB: do NOT hoist a `drizzle(env.DB)` here and use it inside step.do —
+    // a D1 client captured in the outer run() scope goes stale across a
+    // Workflow step boundary and every query throws "The RPC receiver does not
+    // implement the method 'bind'". Create the client fresh inside each step
+    // (mirrors ProductResearchWorkflow).
 
     const run = await startRun(env, {
       agent: "bucket-intake",
@@ -104,6 +108,7 @@ export class BucketIntakeWorkflow extends WorkflowEntrypoint<
     try {
       // ── 1. mark-running ─────────────────────────────────────────────────
       const marked = await step.do("mark-running", async () => {
+        const db = drizzle(env.DB);
         const [bucket] = await db
           .select()
           .from(productPhotoBuckets)
@@ -191,6 +196,7 @@ export class BucketIntakeWorkflow extends WorkflowEntrypoint<
         2,
         () =>
           step.do("extract-candidates", async () => {
+            const db = drizzle(env.DB);
             const vocab = await loadExtractionVocab(db);
             return extractShowroomProductCandidates(
               env,
@@ -212,7 +218,7 @@ export class BucketIntakeWorkflow extends WorkflowEntrypoint<
         3,
         () =>
           step.do("persist-candidates", async () =>
-            persistCandidates(db, bucketId, marked.brandId, candidates),
+            persistCandidates(drizzle(env.DB), bucketId, marked.brandId, candidates),
           ),
         (n) => ({ detail: `${n} candidate row(s) written` }),
       );
@@ -224,7 +230,7 @@ export class BucketIntakeWorkflow extends WorkflowEntrypoint<
         4,
         () =>
           step.do("mark-complete", async () => {
-            await db
+            await drizzle(env.DB)
               .update(productPhotoBuckets)
               .set({ status: "processed" })
               .where(eq(productPhotoBuckets.id, bucketId));
@@ -242,7 +248,7 @@ export class BucketIntakeWorkflow extends WorkflowEntrypoint<
       // Never leave the bucket stuck in 'processing' — revert to 'draft' so
       // the wizard can retry (mirrors the inline handler's recovery).
       try {
-        await db
+        await drizzle(env.DB)
           .update(productPhotoBuckets)
           .set({ status: "draft" })
           .where(eq(productPhotoBuckets.id, bucketId));

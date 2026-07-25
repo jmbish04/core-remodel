@@ -3,7 +3,6 @@ import { sql } from "drizzle-orm";
 import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
 
 import { productPhotoBuckets } from "./product_photo_buckets";
-import { showroomStoreProducts } from "./store_products";
 import { brands } from "../brands/brands";
 
 /**
@@ -87,11 +86,14 @@ export const bucketProductCandidates = sqliteTable(
       .notNull()
       .default("pending"),
 
-    /** Set on HITL confirm — the real product this candidate became. */
-    confirmedProductId: integer("confirmed_product_id").references(
-      () => showroomStoreProducts.id,
-      { onDelete: "set null" }
-    ),
+    /**
+     * Set on HITL confirm — the real product this candidate became. Soft
+     * pointer (no FK): the products table is mid-rename on remote
+     * (showroom_store_products → products) and the schema hasn't caught up, so
+     * a hard FK here would target a name that no longer exists remotely. Add
+     * the FK back once that rename lands in the Drizzle schema.
+     */
+    confirmedProductId: integer("confirmed_product_id"),
 
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
