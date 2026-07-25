@@ -8,6 +8,7 @@ import { requestFeature } from "./request_feature";
 import { listFeatureRequests } from "./list_feature_requests";
 import { getRecentActivity } from "./get_recent_activity";
 import { runHealthSessionTool } from "./run_health_session";
+import { getHealthResultsTool } from "./get_health_results";
 
 export const opsTools: RemodelTool[] = [
   exportConversation,
@@ -18,4 +19,5 @@ export const opsTools: RemodelTool[] = [
   listFeatureRequests,
   getRecentActivity,
   runHealthSessionTool,
+  getHealthResultsTool,
 ];

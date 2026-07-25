@@ -235,6 +235,76 @@ export async function sendMessage(
   return (await res.json()) as SendMessageResult;
 }
 
+/** Fetch a message as raw RFC-822 bytes (Gmail `format=raw`, base64url). */
+export async function getRawMessage(token: string, id: string): Promise<ArrayBuffer> {
+  const res = await gmailFetch(token, `/messages/${id}?format=raw`);
+  const data = (await res.json()) as { raw?: string };
+  if (!data.raw) throw new Error(`gmail/client: message ${id} returned no raw body`);
+  const normalized = data.raw.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+// ─── Labels ─────────────────────────────────────────────────────────────────
+
+export interface GmailLabel {
+  id: string;
+  name: string;
+  type?: string;
+}
+
+/** GET /labels — every label (system + user) on the mailbox. */
+export async function listLabels(token: string): Promise<GmailLabel[]> {
+  const res = await gmailFetch(token, "/labels");
+  const data = (await res.json()) as { labels?: GmailLabel[] };
+  return data.labels ?? [];
+}
+
+/**
+ * Return the id of the label named `name`, creating it if absent. Nested labels
+ * use "/" in the name (Gmail renders them as a hierarchy), e.g.
+ * `core-remodel/unit-testing`. Idempotent: a name clash on create (race) falls
+ * back to a re-list.
+ */
+export async function ensureLabel(token: string, name: string): Promise<string> {
+  const existing = (await listLabels(token)).find((l) => l.name === name);
+  if (existing) return existing.id;
+  try {
+    const res = await gmailFetch(token, "/labels", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name,
+        labelListVisibility: "labelShow",
+        messageListVisibility: "show",
+      }),
+    });
+    return ((await res.json()) as GmailLabel).id;
+  } catch (err) {
+    // 409 (label already exists) can happen if two runs race — re-read.
+    const retry = (await listLabels(token)).find((l) => l.name === name);
+    if (retry) return retry.id;
+    throw err;
+  }
+}
+
+/** POST /messages/{id}/modify — add and/or remove label ids on one message. */
+export async function modifyMessageLabels(
+  token: string,
+  messageId: string,
+  add: string[] = [],
+  remove: string[] = [],
+): Promise<void> {
+  await gmailFetch(token, `/messages/${messageId}/modify`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ addLabelIds: add, removeLabelIds: remove }),
+  });
+}
+
 // ─── Compose helpers ──────────────────────────────────────────────────────────
 
 export interface ReplyAllInput {

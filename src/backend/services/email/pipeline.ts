@@ -29,6 +29,7 @@ import { workerEmailStagedCompanies } from "@backend/db/schema/emails/worker_ema
 import { companies } from "@backend/db/schema/directory/companies";
 import { parsePdfToMarkdown } from "@backend/services/documents/liteparse";
 import { analyzeWithGemini, type AiAnalysis } from "./classify";
+import { isHealthcheckSubject } from "@backend/services/health/email-loopback-markers";
 import { registerShowroomContactFromEmail } from "./showroom-contact-autopopulate";
 import {
   buildMatchContext,
@@ -352,6 +353,20 @@ export async function processEmail(args: ProcessEmailArgs): Promise<void> {
       status: "pending",
     })
     .returning();
+
+  // ── Health-check short-circuit ───────────────────────────────────────────
+  // The email-loopback probe sends itself mail (subject prefix). We only need
+  // the row + its verbatim body for the round-trip probe to verify extraction —
+  // storing it is the whole point, but running the AI classifier on it would
+  // burn model spend and pollute the invoice/contract tables. Mark it done and
+  // stop. (The loopback state machine deletes this row once the cycle finishes.)
+  if (isHealthcheckSubject(email.subject)) {
+    await db
+      .update(workerEmails)
+      .set({ status: "processed" })
+      .where(eq(workerEmails.id, insertedEmail.id));
+    return;
+  }
 
   // ── Phase 3: Attachments → R2 ────────────────────────────────────────────
   const attachmentRecords: AttachmentRecord[] = [];

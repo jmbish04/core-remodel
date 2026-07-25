@@ -38,6 +38,13 @@ import {
   buildAiPrefillPayload,
 } from "./helpers";
 
+/** Split `values` into slices of at most `size` (D1 caps a statement at 100 bound params). */
+function chunk<T>(values: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < values.length; i += size) out.push(values.slice(i, i + size));
+  return out;
+}
+
 /** Compact photo metadata extracted at upload time (stored in the image row's JSON). */
 export interface PhotoMetadata {
   width?: number;
@@ -691,36 +698,49 @@ ${visionDescription}`,
       return { skipped: false, count: 0 };
     }
 
-    await dbClient
-      .insert(imageTags)
-      .values(
-        normalizedTags.map((tag) => ({
-          slug: tag.slug,
-          label: tag.label,
-        })),
-      )
-      .onConflictDoNothing()
-      .run();
+    // D1 caps a statement at 100 bound parameters. The tag list comes straight
+    // from the model, so it is unbounded — a photo that produced ~25 tags blew
+    // the limit ("D1_ERROR: too many SQL variables") and failed the whole
+    // upload workflow. Every statement below is per-tag-row, so all three are
+    // chunked. 20 rows × 5 columns stays under 100.
+    // ponytail: fixed chunk of 20, sized for the widest row here (5 cols); drop
+    // it if D1 ever raises the variable cap.
+    const TAG_CHUNK = 20;
+    for (const batch of chunk(normalizedTags, TAG_CHUNK)) {
+      await dbClient
+        .insert(imageTags)
+        .values(
+          batch.map((tag) => ({
+            slug: tag.slug,
+            label: tag.label,
+          })),
+        )
+        .onConflictDoNothing()
+        .run();
+    }
 
     const slugs = normalizedTags.map((tag) => tag.slug);
-    const ensuredTags = await dbClient
-      .select()
-      .from(imageTags)
-      .where(inArray(imageTags.slug, slugs))
-      .all();
+    const ensuredTags: (typeof imageTags.$inferSelect)[] = [];
+    for (const batch of chunk(slugs, TAG_CHUNK)) {
+      ensuredTags.push(
+        ...(await dbClient.select().from(imageTags).where(inArray(imageTags.slug, batch)).all()),
+      );
+    }
 
-    await dbClient
-      .insert(imageTagMappings)
-      .values(
-        ensuredTags.map((tagRow) => ({
-          imageId,
-          tagId: tagRow.id,
-          source: "ai_prefill" as const,
-          aiRationale: rationaleBySlug?.get(tagRow.slug) ?? null,
-        })),
-      )
-      .onConflictDoNothing()
-      .run();
+    for (const batch of chunk(ensuredTags, TAG_CHUNK)) {
+      await dbClient
+        .insert(imageTagMappings)
+        .values(
+          batch.map((tagRow) => ({
+            imageId,
+            tagId: tagRow.id,
+            source: "ai_prefill" as const,
+            aiRationale: rationaleBySlug?.get(tagRow.slug) ?? null,
+          })),
+        )
+        .onConflictDoNothing()
+        .run();
+    }
 
     return { skipped: false, count: ensuredTags.length };
   }

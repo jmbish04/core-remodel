@@ -16,9 +16,23 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { McpAgent } from "agents/mcp";
 import { drizzle } from "drizzle-orm/d1";
 
+import { z } from "zod";
+
 import { logInvocation, principalLabel, type McpTransport } from "./logging";
 import { getAllTools } from "./registry";
 import type { McpProps, ToolCtx } from "./types";
+import { GITHUB_REPO_URL } from "./urls";
+
+/**
+ * `repoUrl` rides on EVERY tool response — declared once here and merged into
+ * each tool's outputSchema, so no tool file has to remember it and the declared
+ * schema can never disagree with what the transport actually returns.
+ */
+const REPO_URL_FIELD = {
+  repoUrl: z
+    .string()
+    .describe("GitHub repository backing this MCP server — where the code and issues live"),
+};
 
 /** Full-parity props used when a caller is trusted but carries no OAuth grant. */
 const DEFAULT_PROPS: McpProps = { userId: "justin", scope: "remodel", kind: "oauth" };
@@ -42,7 +56,9 @@ export class RemodelMcpAgent extends McpAgent<Env, unknown, McpProps> {
           // Register the response schema when the tool declares one so MCP
           // clients can anticipate the shape and we can return validated
           // `structuredContent` below. Omitted for tools without an outputShape.
-          ...(tool.outputShape ? { outputSchema: tool.outputShape } : {}),
+          ...(tool.outputShape
+            ? { outputSchema: { ...tool.outputShape, ...REPO_URL_FIELD } }
+            : {}),
           annotations: { title: tool.title, ...tool.annotations },
         },
         async (args: Record<string, unknown>) => {
@@ -88,7 +104,17 @@ export class RemodelMcpAgent extends McpAgent<Env, unknown, McpProps> {
                 durationMs: Date.now() - startedAt,
               }),
             );
-            const text = typeof result === "string" ? result : JSON.stringify(result, null, 2);
+            // Stamp the repo on every response — object results get a `repoUrl`
+            // key, prose results get a trailing line. A tool that already set
+            // its own `repoUrl` wins.
+            const stamped =
+              typeof result === "object" && result !== null && !Array.isArray(result)
+                ? { repoUrl: GITHUB_REPO_URL, ...(result as Record<string, unknown>) }
+                : result;
+            const text =
+              typeof stamped === "string"
+                ? `${stamped}\n\nRepo: ${GITHUB_REPO_URL}`
+                : JSON.stringify(stamped, null, 2);
             // When the tool declared an outputSchema, hand back validated
             // structuredContent too (the SDK requires it and validates it
             // against the schema). Handlers with an outputShape always return a
@@ -99,7 +125,7 @@ export class RemodelMcpAgent extends McpAgent<Env, unknown, McpProps> {
             if (tool.outputShape && isPlainObject) {
               return {
                 content: [{ type: "text" as const, text }],
-                structuredContent: result as Record<string, unknown>,
+                structuredContent: stamped as Record<string, unknown>,
               };
             }
             return { content: [{ type: "text" as const, text }] };

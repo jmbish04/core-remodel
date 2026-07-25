@@ -23,6 +23,7 @@ import {
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { advanceEmailLoopback } from "./email-loopback";
 import { ALL_HEALTH_PROBES, HEALTH_MODULE_GROUPS, PROBE_GROUP_BY_NAME } from "./probes";
 import type { HealthProbe, HealthResult } from "./types";
 
@@ -278,6 +279,21 @@ export async function runHealthSession(
     defIdByName = new Map();
   }
 
+  // Advance the email round-trip BEFORE probing, so the two loopback probes
+  // read the state this run just moved. Never on the per-minute cron (nothing
+  // there calls this) — only human/MCP/API screens send mail. Time-boxed and
+  // swallowed: a slow Gmail call must not delay or sink the whole session.
+  if (triggeredBy !== "cron") {
+    try {
+      await Promise.race([
+        advanceEmailLoopback(env),
+        new Promise((resolve) => setTimeout(resolve, 15_000)),
+      ]);
+    } catch (e) {
+      console.error("[health/run] email loopback advance failed:", e);
+    }
+  }
+
   const runs = await Promise.all(ALL_HEALTH_PROBES.map((p) => runProbe(p, env)));
 
   const counts = {
@@ -350,12 +366,17 @@ export async function getHealthCatalogue(env: Env) {
  * The most recent persisted session, reshaped like a live run. Used to paint the
  * dashboard on load and to answer the header badge without probing anything.
  */
-export async function getLatestHealthSession(env: Env): Promise<HealthSessionResult | null> {
+export async function getLatestHealthSession(
+  env: Env,
+  /** Read one specific session instead of the newest (used by `get_health_results`). */
+  sessionUuid?: string,
+): Promise<HealthSessionResult | null> {
   const db = drizzle(env.DB);
 
   const [latest] = await db
     .select({ sessionUuid: healthResults.sessionUuid, timestamp: healthResults.timestamp })
     .from(healthResults)
+    .where(sessionUuid ? eq(healthResults.sessionUuid, sessionUuid) : undefined)
     .orderBy(desc(healthResults.timestamp), desc(healthResults.id))
     .limit(1);
   if (!latest) return null;

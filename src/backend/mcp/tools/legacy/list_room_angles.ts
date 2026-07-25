@@ -15,6 +15,7 @@ export const listRoomAngles = defineTool({
       roomId: z.number().describe("Room id whose listing photos to list."),
     },
     annotations: READ_ONLY,
+    examples: [{ title: "Angles available for a room", args: { roomId: 3 } }],
     // Envelope the array under `items` so the tool can carry an object
     // outputSchema (MCP structuredContent must be an object, never a bare array).
     outputShape: {
