@@ -7,7 +7,7 @@ import {
   type PlacePhotoRef,
 } from "@backend/services/showroom/onboarding";
 import { getStoreLinksMap, linksToLegacyUrls } from "@backend/utils/showroom-links";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { z } from "zod";
 
 import { defineTool, WRITE_IDEMPOTENT } from "../../types";
@@ -137,11 +137,23 @@ export const backfillShowroomMedia = defineTool({
             });
             const top = results[0];
             if (top?.placeId) {
-              placeId = top.placeId;
-              const loc = top.location as { latitude?: number; longitude?: number } | undefined;
-              if (typeof loc?.latitude === "number" && typeof loc?.longitude === "number") {
-                lat = loc.latitude;
-                lng = loc.longitude;
+              // Guard the unique place_id index: if another store already owns
+              // this placeId, the text-search match is ambiguous/duplicate (e.g.
+              // "Closet Factory" resolving to the existing "California Closets").
+              // Don't adopt it — leave the store for manual follow-up rather than
+              // writing a wrong location or crashing on the unique constraint.
+              const [dupe] = await db
+                .select({ id: showroomStores.id })
+                .from(showroomStores)
+                .where(and(eq(showroomStores.placeId, top.placeId), ne(showroomStores.id, s.id)))
+                .limit(1);
+              if (!dupe) {
+                placeId = top.placeId;
+                const loc = top.location as { latitude?: number; longitude?: number } | undefined;
+                if (typeof loc?.latitude === "number" && typeof loc?.longitude === "number") {
+                  lat = loc.latitude;
+                  lng = loc.longitude;
+                }
               }
             }
           } else if (placeId) {
@@ -177,7 +189,13 @@ export const backfillShowroomMedia = defineTool({
             patch.hubRoute = geo.hubRoute;
             patch.hubName = geo.hubName;
           }
-          await db.update(showroomStores).set(patch).where(eq(showroomStores.id, s.id)).run();
+          try {
+            await db.update(showroomStores).set(patch).where(eq(showroomStores.id, s.id)).run();
+          } catch (err) {
+            // Defensive: a concurrent write could still race the place_id unique
+            // index. Skip this store rather than abort the whole batch.
+            console.error(`[backfill_showroom_media] coord update failed for store ${s.id}:`, err);
+          }
         }
       }
 
