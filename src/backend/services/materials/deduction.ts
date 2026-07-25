@@ -17,6 +17,7 @@
  *   - resolveProposal  — a human confirms/overrides; the ONE write of roomId
  */
 import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
+import { alias } from "drizzle-orm/sqlite-core";
 import type { drizzle } from "drizzle-orm/d1";
 import { Type, type Schema } from "@google/genai";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -38,7 +39,7 @@ type Db = ReturnType<typeof drizzle>;
 /** D1 caps a statement at 100 bound params; inArray binds one per id. */
 const CHUNK = 90;
 
-async function inChunks<T>(ids: number[], fetch: (chunk: number[]) => Promise<T[]>): Promise<T[]> {
+export async function inChunks<T>(ids: number[], fetch: (chunk: number[]) => Promise<T[]>): Promise<T[]> {
   const out: T[] = [];
   for (let i = 0; i < ids.length; i += CHUNK) out.push(...(await fetch(ids.slice(i, i + CHUNK))));
   return out;
@@ -56,7 +57,7 @@ async function inChunks<T>(ids: number[], fetch: (chunk: number[]) => Promise<T[
  * Deliberately small and readable rather than exhaustive — a wrong include is
  * recoverable (the reviewer drops it), a wrong exclude hides the right answer.
  */
-function roomMatcherForSubcategory(name: string | null): ((roomName: string) => boolean) | null {
+export function roomMatcherForSubcategory(name: string | null): ((roomName: string) => boolean) | null {
   const n = (name ?? "").toLowerCase();
   const bathroomTypes = ["toilet", "faucet", "shower valve", "shower head", "sink", "bathtub", "drain"];
   if (bathroomTypes.includes(n)) {
@@ -89,7 +90,13 @@ export interface PromoteResult {
 export async function promoteLineItem(
   db: Db,
   lineItemId: number,
-  opts: { roomId: number; subcategoryId?: number | null; categoryId?: number | null },
+  opts: {
+    roomId: number;
+    subcategoryId?: number | null;
+    categoryId?: number | null;
+    /** Units of the same product placed together in this one room (grouped). Null = 1. */
+    quantity?: number | null;
+  },
 ): Promise<PromoteResult> {
   const [line] = await db
     .select()
@@ -99,12 +106,18 @@ export async function promoteLineItem(
   if (!line) throw new Error(`Line item ${lineItemId} not found`);
 
   const title = (line.description ?? "Material").trim().slice(0, 200) || "Material";
+  // Normalize quantity: only store a real group size (>1); 1 or null stay null.
+  const quantity = opts.quantity && opts.quantity > 1 ? Math.round(opts.quantity) : null;
 
   const [material] = await db
     .insert(materialScheduleItems)
     .values({
       title,
       roomId: opts.roomId,
+      quantity,
+      // Provenance for the many-materials-per-line case: the line's single
+      // material FK cannot point at every material a split qty-N line mints.
+      sourceLineItemId: lineItemId,
       isPurchased: true,
       notes: `Promoted from receipt line item #${lineItemId}.`,
     })
@@ -515,9 +528,31 @@ export async function resolveProposal(
   }
 
   const status = roomId === proposal.proposedRoomId ? "confirmed" : "overridden";
+
+  // Preserve a GROUPED placement's quantity through a manual resolve. A split
+  // qty-N line stages N proposals sharing a lineItemId (one unit each, qty 1); a
+  // grouped line stages exactly ONE. So if this is the only staged proposal for
+  // its line, carry the line's full quantity onto the material — otherwise it is
+  // one unit of a split. Derived from the proposal set rather than a stored flag.
+  let quantity: number | null = null;
+  const siblings = await db
+    .select({ id: materialRoomProposals.id })
+    .from(materialRoomProposals)
+    .where(eq(materialRoomProposals.lineItemId, proposal.lineItemId))
+    .all();
+  if (siblings.length === 1) {
+    const [line] = await db
+      .select({ quantity: workerEmailInvoiceLineItems.quantity })
+      .from(workerEmailInvoiceLineItems)
+      .where(eq(workerEmailInvoiceLineItems.id, proposal.lineItemId))
+      .limit(1);
+    quantity = line?.quantity && line.quantity > 1 ? Math.round(line.quantity) : null;
+  }
+
   const promoted = await promoteLineItem(db, proposal.lineItemId, {
     roomId,
     subcategoryId: proposal.subcategoryId,
+    quantity,
   });
 
   await db
@@ -577,9 +612,14 @@ export async function stageProposalsForReceipt(
   emailId: number,
 ): Promise<{ staged: number; autoConfirmed: number; skipped: number }> {
   const { workerEmailInvoices } = await import("@backend/db/schema/emails/worker_email_invoices");
+  const { allocateReceipt, buildRoomContext, computeLineFacts } = await import("./allocate");
 
   const invoices = await db
-    .select({ id: workerEmailInvoices.id, vendor: workerEmailInvoices.vendorName })
+    .select({
+      id: workerEmailInvoices.id,
+      vendor: workerEmailInvoices.vendorName,
+      lineItemsJson: workerEmailInvoices.lineItemsJson,
+    })
     .from(workerEmailInvoices)
     .where(eq(workerEmailInvoices.emailId, emailId))
     .all();
@@ -596,10 +636,9 @@ export async function stageProposalsForReceipt(
 
   // Idempotency: clear prior UNRESOLVED proposals (staged, no material yet) for
   // these line items, so a re-run replaces rather than piling up duplicates.
-  // Resolved proposals (a human confirmed, or a single-survivor auto-confirm)
-  // minted a real material and are LEFT — they are decisions, not noise, and
-  // they feed the learning step. Also sweeps staged proposals orphaned by a
-  // prior reprocess (their line item was cascade-deleted → lineItemId null).
+  // Resolved proposals minted a real material and are LEFT — decisions, not
+  // noise, and they feed the learning step. Also sweeps staged proposals
+  // orphaned by a prior reprocess (line item cascade-deleted → lineItemId null).
   const lineIds = lines.map((l) => l.id);
   if (lineIds.length > 0) {
     await inChunks(lineIds, async (chunk) => {
@@ -625,33 +664,100 @@ export async function stageProposalsForReceipt(
       ),
     );
 
+  const unmatched = lines.filter((l) => !l.matchStatus || l.matchStatus === "unmatched");
+  const skipped = lines.length - unmatched.length;
+  if (unmatched.length === 0) return { staged: 0, autoConfirmed: 0, skipped };
+
+  // Classify every unmatched line's type up front, and resolve its display name.
+  const taxonomyByLine = new Map<number, { subcategoryId: number | null; categoryId: number | null }>();
+  for (const line of unmatched) {
+    const type = await classifyLineItemSubcategory(db, line.description);
+    taxonomyByLine.set(line.id, {
+      subcategoryId: type?.subcategoryId ?? null,
+      categoryId: type?.categoryId ?? null,
+    });
+  }
+  const subIds = [...new Set([...taxonomyByLine.values()].map((t) => t.subcategoryId).filter((x): x is number => x != null))];
+  const subNameById = new Map<number, string>();
+  if (subIds.length > 0) {
+    const subRows = await inChunks(subIds, (chunk) =>
+      db.select({ id: subcategories.id, name: subcategories.name }).from(subcategories).where(inArray(subcategories.id, chunk)).all(),
+    );
+    for (const s of subRows) if (s.name) subNameById.set(s.id, s.name);
+  }
+
+  // Product attributes (brand/model/variant) live on the invoice's extracted
+  // lineItemsJson, not on the line-item table — merge them all for enrichment.
+  const extractedItems: { description?: string; brand?: string; modelNumber?: string; variant?: string }[] = [];
+  for (const inv of invoices) {
+    if (!inv.lineItemsJson) continue;
+    try {
+      const arr = JSON.parse(inv.lineItemsJson);
+      if (Array.isArray(arr)) extractedItems.push(...arr);
+    } catch {
+      /* malformed extraction json — skip enrichment for this invoice */
+    }
+  }
+
+  const facts = computeLineFacts(
+    unmatched.map((l) => {
+      const t = taxonomyByLine.get(l.id)!;
+      return {
+        id: l.id,
+        description: l.description,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        subcategoryId: t.subcategoryId,
+        subName: t.subcategoryId != null ? subNameById.get(t.subcategoryId) ?? null : null,
+      };
+    }),
+    extractedItems,
+  );
+
+  const ctx = await buildRoomContext(db);
+  const plan = await allocateReceipt(db, env, facts, ctx, taxonomyByLine);
+
   let staged = 0;
   let autoConfirmed = 0;
-  let skipped = 0;
 
-  for (const line of lines) {
-    if (line.matchStatus && line.matchStatus !== "unmatched") {
-      skipped++;
-      continue;
-    }
+  for (const a of plan.assignments) {
     try {
-      const type = await classifyLineItemSubcategory(db, line.description);
-      const deduction = await deduceRoom(db, env, {
-        title: (line.description ?? "Material").trim(),
-        subcategoryId: type?.subcategoryId ?? null,
-        quantity: line.quantity ?? null,
-        receiptContext: `${invoices.find((i) => i.id === line.invoiceId)?.vendor ?? "receipt"} — ${line.description ?? ""}`,
+      // Auto-confirm ONLY a truly unambiguous placement: exactly one eligible
+      // room for the line. Anything the allocator had to CHOOSE among stays
+      // staged for the owner — nothing auto-commits an ambiguous multi-unit
+      // receipt (a hard requirement of the design).
+      const unambiguous = a.candidates.length === 1 && a.proposedRoomId != null;
+
+      let materialId: number | null = null;
+      if (unambiguous && a.proposedRoomId != null) {
+        const promoted = await promoteLineItem(db, a.lineItemId, {
+          roomId: a.proposedRoomId,
+          subcategoryId: a.subcategoryId,
+          categoryId: a.categoryId,
+          quantity: a.grouped ? a.quantity : null,
+        });
+        materialId = promoted.materialId;
+      }
+
+      await db.insert(materialRoomProposals).values({
+        materialId,
+        lineItemId: a.lineItemId,
+        subcategoryId: a.subcategoryId,
+        unitIndex: a.unitIndex,
+        application: a.application,
+        status: unambiguous ? "auto_confirmed" : "staged",
+        proposedRoomId: a.proposedRoomId,
+        confirmedRoomId: unambiguous ? a.proposedRoomId : null,
+        candidatesJson: JSON.stringify(a.candidates),
+        confidence: a.confidence,
+        reasoningMarkdown: a.reasoning,
+        resolvedAt: unambiguous ? new Date() : null,
       });
-      const res = await stageProposal(db, {
-        lineItemId: line.id,
-        subcategoryId: type?.subcategoryId ?? null,
-        categoryId: type?.categoryId ?? null,
-        deduction,
-      });
-      if (res.status === "auto_confirmed") autoConfirmed++;
+
+      if (unambiguous) autoConfirmed++;
       else staged++;
     } catch (err) {
-      console.error(`[deduction] failed to stage a proposal for line item ${line.id}:`, err);
+      console.error(`[deduction] failed to stage allocation for line item ${a.lineItemId} unit ${a.unitIndex}:`, err);
     }
   }
 
@@ -676,12 +782,22 @@ export interface RoomProposalView {
   id: number;
   /** Line-item description, falling back to the material title. */
   title: string;
+  /** The receipt (invoice) this came from — lets a client group by receipt. */
+  invoiceId: number | null;
+  lineItemId: number | null;
+  /** Which unit of a split multi-unit line this proposal places. */
+  unitIndex: number;
   subcategoryId: number | null;
   subcategoryName: string | null;
+  /** The inferred use the allocator reasoned toward, e.g. "island lighting". */
+  application: string | null;
   status: string;
   confidence: number | null;
   proposedRoomId: number | null;
   proposedRoomName: string | null;
+  /** The room a human actually chose — the #203 read view omitted this. */
+  confirmedRoomId: number | null;
+  confirmedRoomName: string | null;
   candidates: RoomCandidate[];
   reasoningMarkdown: string | null;
 }
@@ -698,13 +814,20 @@ export async function listRoomProposals(
   db: Db,
   status: ProposalStatus = "staged",
 ): Promise<RoomProposalView[]> {
+  // Two rooms joins — one for the engine's proposed room, one for the room a
+  // human confirmed — both by display name, never stored (AGENTS.md FK rule).
+  const proposedRoom = alias(rooms, "proposed_room");
+  const confirmedRoom = alias(rooms, "confirmed_room");
+
   const rows = await db
     .select({
       p: materialRoomProposals,
+      invoiceId: workerEmailInvoiceLineItems.invoiceId,
       lineDesc: workerEmailInvoiceLineItems.description,
       matTitle: materialScheduleItems.title,
       subName: subcategories.name,
-      roomName: rooms.roomName,
+      proposedRoomName: proposedRoom.roomName,
+      confirmedRoomName: confirmedRoom.roomName,
     })
     .from(materialRoomProposals)
     .leftJoin(
@@ -713,7 +836,8 @@ export async function listRoomProposals(
     )
     .leftJoin(materialScheduleItems, eq(materialRoomProposals.materialId, materialScheduleItems.id))
     .leftJoin(subcategories, eq(materialRoomProposals.subcategoryId, subcategories.id))
-    .leftJoin(rooms, eq(materialRoomProposals.proposedRoomId, rooms.id))
+    .leftJoin(proposedRoom, eq(materialRoomProposals.proposedRoomId, proposedRoom.id))
+    .leftJoin(confirmedRoom, eq(materialRoomProposals.confirmedRoomId, confirmedRoom.id))
     .where(eq(materialRoomProposals.status, status))
     .orderBy(desc(materialRoomProposals.createdAt))
     .all();
@@ -721,12 +845,18 @@ export async function listRoomProposals(
   return rows.map((r) => ({
     id: r.p.id,
     title: (r.lineDesc ?? r.matTitle ?? "Material").trim() || "Material",
+    invoiceId: r.invoiceId ?? null,
+    lineItemId: r.p.lineItemId,
+    unitIndex: r.p.unitIndex,
     subcategoryId: r.p.subcategoryId,
     subcategoryName: r.subName ?? null,
+    application: r.p.application ?? null,
     status: r.p.status,
     confidence: r.p.confidence,
     proposedRoomId: r.p.proposedRoomId,
-    proposedRoomName: r.roomName ?? null,
+    proposedRoomName: r.proposedRoomName ?? null,
+    confirmedRoomId: r.p.confirmedRoomId,
+    confirmedRoomName: r.confirmedRoomName ?? null,
     candidates: parseCandidates(r.p.candidatesJson),
     reasoningMarkdown: r.p.reasoningMarkdown,
   }));

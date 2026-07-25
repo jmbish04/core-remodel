@@ -56,6 +56,20 @@ export const materialRoomProposals = sqliteTable(
       onDelete: "set null",
     }),
 
+    /**
+     * Which unit of a multi-unit line this proposal places (0-based). A qty-2
+     * toilet line the allocator SPLITS across two baths stages two proposals
+     * sharing a `lineItemId`, distinguished by `unitIndex` 0 and 1. A grouped
+     * placement (qty stays in one room) is a single proposal, unitIndex 0.
+     */
+    unitIndex: integer("unit_index").notNull().default(0),
+
+    /**
+     * The inferred use the allocator reasoned the material toward — e.g.
+     * "primary bath floor", "island lighting". Free text; the argument, not a FK.
+     */
+    application: text("application"),
+
     status: text("status", {
       enum: ["staged", "auto_confirmed", "confirmed", "overridden", "dismissed"],
     })
