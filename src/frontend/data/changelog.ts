@@ -211,6 +211,24 @@ export const BRANCHES: ChangelogBranch[] = [
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "tesla-stream-do",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-25",
+    tag: "0023",
+    area: "Tesla / Ingest",
+    title: "TeslaStreamDO — the outbound Fleet-Telemetry connector",
+    summary:
+      "The Durable Object that finally fills TESLA_DB, built cost-safe from the first line. An outbound Tessie WebSocket is duration-billed, so the DO holds it ONLY while a drive is active in the 07:00–20:00 window with the toggle on, and drops it the instant that goes false (window close / car home / toggle off / drive end). Native alarms only, circuit breaker on every fire (kill-switch + fire-rate + per-day write budget + max-connected). Idle ⇒ DO evicted ⇒ ~$0.",
+    migrations: ["v16"],
+    changes: [
+      { kind: "added", text: "durable-objects/tesla-stream.ts — singleton DO dialing streaming.tessie.com/<vin>. Every native-alarm fire re-checks shouldStreamNow and hard-stops on any circuit-breaker trip. Frames parse via the shared extractTelemetryFields; persistence is throttled (always on shift change, else ≤5s) to bound D1 writes; on shift→P it mirrors the poller (match+mark visited, auto-nav next, close the drive on home arrival)." },
+      { kind: "added", text: "POST /api/tesla/stream/start|stop, GET /api/tesla/stream/status (admin) via the DO stub; drive activation now signals the DO so ingest is event-driven." },
+      { kind: "migration", text: "v16 — new_sqlite_classes TeslaStreamDO; TESLA_STREAM binding in wrangler.jsonc; exported from _worker.ts (OAuthProvider wrapper untouched)." },
+      { kind: "fixed", text: "Poll cadence floored at 60s (KV rejects sub-60 TTL; cron is per-minute) with a defensive Math.max; the connected flag carries a heartbeat so a crashed DO can't suppress the poller fallback (stale >5min → false). (codra follow-ups to #241.)" },
+    ],
+    status: "staged",
+  },
+  {
     id: "showroom-dedup-hardening",
     branch: "claude/showroom-listing-500-map-6kvtm9",
     date: "2026-07-25",
