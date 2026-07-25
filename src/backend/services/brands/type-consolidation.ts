@@ -208,31 +208,41 @@ export async function consolidateBrandTypes(env: Env): Promise<ConsolidationRepo
 
 Return every type you were given, keyed by its exact name.`;
 
-    const userPrompt = `Types:\n${undescribed.map((t) => `- ${t.name}`).join("\n")}`;
+    // Chunk the generation. A single call asking for ALL undescribed types at
+    // once silently truncates: the model defaults to max_tokens 4096, and a few
+    // dozen description + rationale pairs run well past that, so the JSON comes
+    // back cut off, `schema.parse` throws, and the whole backfill lands as zero.
+    // Ten per call keeps each response comfortably inside the cap. Each chunk is
+    // independent — a bad batch is logged and skipped, the rest still write, and
+    // its types stay null for a later re-run. We never write empty over null.
+    const DESCRIBE_CHUNK = 10;
+    for (let i = 0; i < undescribed.length; i += DESCRIBE_CHUNK) {
+      const batch = undescribed.slice(i, i + DESCRIBE_CHUNK);
+      const userPrompt = `Types:\n${batch.map((t) => `- ${t.name}`).join("\n")}`;
 
-    // Fail LOUD, not silent: on a bad AI response the merges and primaries above
-    // still stand (they are already committed); only the descriptions are left
-    // null for a later re-run. We do NOT write empty strings over null.
-    let described: z.infer<typeof DescribedTypeSchema> | null = null;
-    try {
-      described = await generateStructuredOutput(env, {
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-        schema: DescribedTypeSchema,
-        schemaName: "BrandTypeDescriptions",
-        temperature: 0,
-      });
-    } catch (err) {
-      console.error("[type-consolidation] description backfill failed:", err);
-    }
+      let described: z.infer<typeof DescribedTypeSchema> | null = null;
+      try {
+        described = await generateStructuredOutput(env, {
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          schema: DescribedTypeSchema,
+          schemaName: "BrandTypeDescriptions",
+          temperature: 0,
+        });
+      } catch (err) {
+        console.error(
+          `[type-consolidation] description backfill failed for batch ${i / DESCRIBE_CHUNK}:`,
+          err,
+        );
+        continue;
+      }
 
-    if (described) {
       const byName = new Map(
         described.types.map((t) => [t.name.trim().toLowerCase(), t]),
       );
-      for (const t of undescribed) {
+      for (const t of batch) {
         const d = byName.get(t.name.trim().toLowerCase());
         if (!d?.description) continue; // skip rather than store an empty string
         await db
