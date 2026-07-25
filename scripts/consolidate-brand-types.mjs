@@ -148,6 +148,14 @@ async function main() {
         );
       }
     }
+    if (Array.isArray(report.splits) && report.splits.length > 0) {
+      console.log("  splits:");
+      for (const s of report.splits) {
+        console.log(
+          `    ${s.compound} → ${s.into.join(" + ")}  (${s.brands} brand(s), +${s.mappingsAdded} mapping(s))`,
+        );
+      }
+    }
   }
   console.log("\n" + JSON.stringify(body, null, 2));
 }
