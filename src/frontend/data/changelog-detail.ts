@@ -113,6 +113,80 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "showroom-store-dedup-tool": {
+    slug: "showroom-store-dedup-tool",
+    branch: "claude/showroom-listing-500-map-6kvtm9",
+    subtitle: "Showrooms · destructive cleanup, dry-run first",
+    problem:
+      "The non-idempotent seed ran three times, leaving showroom_stores with 219 rows where ~159 are unique — ~60 city-only duplicate shells, with the earliest stores (Whole Wood = ids 1, 154, 188) tripled. PR #221's guard stops NEW duplication but does nothing about the rows already there. Cleaning them is genuinely dangerous: ~28 child columns across 27 tables carry a FK to showroom_stores, almost all ON DELETE CASCADE, so a blind delete silently cascades away any visit/note/rating a user attached to a duplicate. And a naive 'delete the high ids' would destroy 8 stores that exist ONLY as later-seed rows (Italdoors ×2, Craftex, Tile Tech Pavers, Topcret ×2, The Container Store, IKEA PAX).",
+    approach:
+      "An admin-gated MCP tool, dry-run by default. It groups rows by (normalized name + city), so distinct chain branches in different cities never share a group. Within a group it keeps the most-enriched row (zip/placeId » coords » icon/hero » phone » lowest id) and marks the rest duplicates. A hard anti-merge guard: if a group has ≥2 'real' rows (each with its own zip or placeId) it is treated as distinct locations and SKIPPED — 'All Natural Stone' in four cities is left untouched. The dry run writes nothing and returns the full keep/delete map plus, per duplicate, the count of child rows in every FK table — the 'is real data attached?' signal a human approves before anything is deleted. apply:true reparents each child FK from loser to keeper (UPDATE OR IGNORE for unique-mapping join tables, whose skipped rows are then swept by ON DELETE CASCADE; plain UPDATE elsewhere so the row definitely moves before its loser is deleted), then deletes the losers — chunked under D1's 100-bound-param cap.",
+    apiChanges: [
+      "MCP dedup_showroom_stores — DESTRUCTIVE. Dry-run (default) returns {duplicateGroups, rowsToDelete, rowsAfter, ambiguousGroupsSkipped, childRowsToReparent, plan[]}. apply:true performs reparent + delete.",
+    ],
+    filesTouched: [
+      "src/backend/mcp/tools/showrooms/dedup_showroom_stores.ts",
+      "src/backend/mcp/tools/showrooms/index.ts",
+    ],
+    migrations: [],
+    code: [
+      {
+        title: "Anti-merge guard — never collapse two genuine locations",
+        lang: "ts",
+        code: `const reals = rows.filter(isReal); // isReal = has zip OR placeId
+if (reals.length >= 2) {
+  // Two distinct genuine locations sharing (name, city). Do NOT merge —
+  // that would destroy a real store. Leave the whole group for a human.
+  ambiguous.push({ key, ids: rows.map(r => r.id), reason: "distinct locations" });
+  continue;
+}
+// 0 or 1 real row: the rest are city-only shells → safe to collapse.
+const sorted = [...rows].sort((a, b) => score(b) - score(a) || a.id - b.id);
+const keep = sorted[0];
+const deleteIds = sorted.slice(1).map(r => r.id);`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Per-group decision — keep the enriched row, skip ambiguous groups",
+        code: `flowchart TD
+  A[group rows by name + city] --> B{group size > 1?}
+  B -- no --> K[keep single row]
+  B -- yes --> C{>= 2 rows have zip/placeId?}
+  C -- "yes (distinct branches)" --> S[SKIP group — report ambiguous]
+  C -- no --> D[keep highest-scored row]
+  D --> E[reparent child FKs loser -> keeper]
+  E --> F[delete losers]
+  classDef keep fill:#1f4d2e,stroke:#4ade80,color:#e6ffe6
+  classDef stop fill:#4d1f1f,stroke:#f87171,color:#ffe6e6
+  class K,D,E keep
+  class F,S stop`,
+      },
+      {
+        caption: "Reparent-then-delete across the child FK tables",
+        code: `sequenceDiagram
+  participant T as dedup tool
+  participant D as D1
+  T->>D: UPDATE (OR IGNORE) child.fk = keepId WHERE fk IN losers
+  Note over T,D: plain UPDATE for logs/observations;\\nOR IGNORE for unique-mapping join tables
+  T->>D: DELETE FROM showroom_stores WHERE id IN losers
+  D-->>T: ON DELETE CASCADE sweeps any OR-IGNORE-skipped rows`,
+      },
+    ],
+    prNumber: 227,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/227",
+    verification: {
+      qcScript: "MCP dedup_showroom_stores (dry-run)",
+      command: "dedup_showroom_stores {}  (dry-run, via the MCP connector)",
+      ranAt: "2026-07-25",
+      output:
+        "npx tsc --noEmit — 0 errors in the new tool + barrel.\n" +
+        "Dry-run executes server-side via the MCP connector (this container has no prod DB\n" +
+        "access). The keep/delete map + per-table child-row counts are produced by the\n" +
+        "dry-run for human approval BEFORE any apply:true call. No rows deleted without that\n" +
+        "approval.",
+    },
+  },
   "brands-name-key-dedup": {
     slug: "brands-name-key-dedup",
     branch: "claude/showroom-location-tagging-ex2ik5",
