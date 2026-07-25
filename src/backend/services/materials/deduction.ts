@@ -16,7 +16,7 @@
  *   - stageProposal    — persist the proposal; auto-confirm a single survivor
  *   - resolveProposal  — a human confirms/overrides; the ONE write of roomId
  */
-import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import type { drizzle } from "drizzle-orm/d1";
 import { Type, type Schema } from "@google/genai";
 import type { BatchItem } from "drizzle-orm/batch";
@@ -593,6 +593,37 @@ export async function stageProposalsForReceipt(
       .where(inArray(workerEmailInvoiceLineItems.invoiceId, chunk))
       .all(),
   );
+
+  // Idempotency: clear prior UNRESOLVED proposals (staged, no material yet) for
+  // these line items, so a re-run replaces rather than piling up duplicates.
+  // Resolved proposals (a human confirmed, or a single-survivor auto-confirm)
+  // minted a real material and are LEFT — they are decisions, not noise, and
+  // they feed the learning step. Also sweeps staged proposals orphaned by a
+  // prior reprocess (their line item was cascade-deleted → lineItemId null).
+  const lineIds = lines.map((l) => l.id);
+  if (lineIds.length > 0) {
+    await inChunks(lineIds, async (chunk) => {
+      await db
+        .delete(materialRoomProposals)
+        .where(
+          and(
+            eq(materialRoomProposals.status, "staged"),
+            isNull(materialRoomProposals.materialId),
+            inArray(materialRoomProposals.lineItemId, chunk),
+          ),
+        );
+      return [];
+    });
+  }
+  await db
+    .delete(materialRoomProposals)
+    .where(
+      and(
+        eq(materialRoomProposals.status, "staged"),
+        isNull(materialRoomProposals.materialId),
+        isNull(materialRoomProposals.lineItemId),
+      ),
+    );
 
   let staged = 0;
   let autoConfirmed = 0;

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * @fileoverview QC for PR #999 (placeholder) — receipt → material room deduction (0030).
+ * @fileoverview QC for PR #203 — receipt → material room deduction (0030).
  *
  * Migrations: 0130 (material_room_proposals) — already applied to remote.
  *
@@ -32,7 +32,7 @@ const isToilet = (p, toiletId) =>
   (toiletId != null && p.subcategoryId === toiletId) || /toilet/i.test(p.title || "");
 
 async function main() {
-  console.log(`\nPR #999 QC (0030 receipt→material deduction) → ${client.base}\n`);
+  console.log(`\nPR #203 QC (0030 receipt→material deduction) → ${client.base}\n`);
   await assertReachable(client, checks);
 
   // ── Reference data: the Toilet subcategory + active bathrooms ─────────────
