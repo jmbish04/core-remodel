@@ -22,9 +22,11 @@ await assertReachable(client, checks);
 
 try {
   const res = await client.get("/api/tesla/visits?limit=5");
-  if (onProd && (res.status === 404 || res.status === 500)) {
-    // New route + new table — absent (404) or table-missing (500) until merge+migrate+deploy.
-    checks.info(`PENDING: /api/tesla/visits not live on prod yet (→ ${res.status}; needs merge+migrate+deploy)`);
+  if (onProd && res.status === 404) {
+    // Route absent until merge+deploy. NOTE: only 404 is "pending" — the manual
+    // deploy applies the migration WITH the upload, so once the route is live the
+    // table exists too; a 500 then is a REAL failure and must fail QC below.
+    checks.info("PENDING: /api/tesla/visits not on prod yet (route 404; needs merge+deploy)");
   } else {
     checks.ok(
       "GET /api/tesla/visits → 200 with { count, visits[] }",

@@ -270,9 +270,16 @@ teslaRouter.get("/stream/banner", async (c) => {
  * store name is JOINed from `showroom_stores` (never denormalized). `?status=` and
  * `?limit=` narrow the list. Admin-gated by the router middleware.
  */
+const VISIT_STATUSES = ["AI_STAGED", "TESLA_SOFT_ARRIVAL", "TESLA_STAGED", "SUBMITTED"] as const;
+type VisitStatus = (typeof VISIT_STATUSES)[number];
+
 teslaRouter.get("/visits", async (c) => {
   const db = drizzle(c.env.DB);
-  const status = c.req.query("status");
+  const rawStatus = c.req.query("status");
+  // Whitelist against the enum — an unknown status is ignored, not cast/queried.
+  const status: VisitStatus | undefined = VISIT_STATUSES.includes(rawStatus as VisitStatus)
+    ? (rawStatus as VisitStatus)
+    : undefined;
   const limit = Math.min(Math.max(parseInt(c.req.query("limit") || "100", 10) || 100, 1), 500);
   const base = db
     .select({
@@ -295,9 +302,7 @@ teslaRouter.get("/visits", async (c) => {
     .leftJoin(showroomStores, eq(showroomVisitLog.storeId, showroomStores.id))
     .orderBy(desc(showroomVisitLog.createdAt))
     .limit(limit);
-  const rows = status
-    ? await base.where(eq(showroomVisitLog.status, status as "TESLA_SOFT_ARRIVAL"))
-    : await base;
+  const rows = status ? await base.where(eq(showroomVisitLog.status, status)) : await base;
   return c.json({ count: rows.length, visits: rows });
 });
 

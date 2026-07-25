@@ -73,8 +73,10 @@ export const showroomVisitLog = sqliteTable(
     notesMarkdown: text("notes_markdown"),
     notesHtml: text("notes_html"),
 
-    /** Provenance of the arrival fix: "tesla-telemetry" | "tesla-webhook" | "device" | "manual". */
-    gpsSource: text("gps_source"),
+    /** Provenance of the arrival fix. */
+    gpsSource: text("gps_source", {
+      enum: ["tesla-telemetry", "tesla-webhook", "device", "manual"],
+    }),
     latitude: real("latitude"),
     longitude: real("longitude"),
 

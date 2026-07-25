@@ -17,17 +17,19 @@
  */
 import { driveLists, showroomStores, showroomVisitLog } from "@backend/db";
 import { haversineMeters } from "@backend/services/drive-geo-match";
-import { and, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, notInArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 /** A park counts as "at" a showroom within this many metres. */
 export const SHOWROOM_MATCH_RADIUS_M = 250;
 
+/** Where an arrival fix came from — matches the gps_source column's enum. */
+export type GpsSource = "tesla-telemetry" | "tesla-webhook" | "device" | "manual";
+
 export interface ParkFix {
   latitude: number;
   longitude: number;
-  /** "tesla-telemetry" | "tesla-webhook" | "device" | "manual". */
-  gpsSource: string;
+  gpsSource: GpsSource;
 }
 
 export interface StageResult {
@@ -81,14 +83,17 @@ export async function stageSoftArrival(env: Env, fix: ParkFix): Promise<StageRes
   const store = await nearestShowroom(db, fix);
   if (!store) return { staged: false, reason: "no-showroom-nearby" };
 
-  // Dedup: an OPEN soft arrival = a TESLA_SOFT_ARRIVAL row for this store with no
-  // TESLA_STAGED row finalizing it. If one exists, don't stage another.
+  // Dedup within THIS drive: an OPEN soft arrival = a TESLA_SOFT_ARRIVAL row for
+  // this store on this drive. Scoping to the active drive means a lingering,
+  // never-finalized soft arrival from an EARLIER drive at the same store can't
+  // block a fresh visit today.
   const [openSoft] = await db
     .select({ id: showroomVisitLog.id })
     .from(showroomVisitLog)
     .where(
       and(
         eq(showroomVisitLog.storeId, store.id),
+        eq(showroomVisitLog.driveListId, active.id),
         eq(showroomVisitLog.status, "TESLA_SOFT_ARRIVAL"),
       ),
     )
@@ -148,7 +153,9 @@ export async function finalizeSoftArrivals(env: Env): Promise<FinalizeResult> {
     .where(
       and(
         eq(showroomVisitLog.status, "TESLA_SOFT_ARRIVAL"),
-        sql`${showroomVisitLog.id} NOT IN ${staged}`,
+        // Type-safe correlated subquery — `staged` selects only non-null
+        // soft_arrival_ids, so NOT IN can't be poisoned by a NULL.
+        notInArray(showroomVisitLog.id, staged),
       ),
     )
     .all();
