@@ -231,7 +231,13 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
   const handleRunRecipe = useCallback(
     (
       node: BoardNode,
-      recipe: "material-swap" | "mix" | "clay-to-photoreal" | "floor-plan-furnish",
+      recipe:
+        | "material-swap"
+        | "mix"
+        | "clay-to-photoreal"
+        | "floor-plan-furnish"
+        | "tone-unify"
+        | "lighting-enhance",
       params: RecipeRunParams,
     ) => {
       board.setNodeProcessing(node.id, true);
@@ -353,6 +359,12 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
             }
             onFloorPlanFurnish={(node) =>
               handleRunRecipe(node, "floor-plan-furnish", { referenceCfImageUrls: [] })
+            }
+            onToneUnify={(node) =>
+              handleRunRecipe(node, "tone-unify", { referenceCfImageUrls: [] })
+            }
+            onLightingEnhance={(node) =>
+              handleRunRecipe(node, "lighting-enhance", { referenceCfImageUrls: [] })
             }
             onPlaceImage={() => setDrawerOpen(true)}
           />

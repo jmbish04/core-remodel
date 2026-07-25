@@ -25,7 +25,7 @@
  *   DELETE /collections/:id/items/:itemId             remove a photo from a pile
  *   POST   /clippings/extract                         extract a reusable clipping
  *   PATCH  /clippings/:id                             rename / promote-demote global drawer
- *   POST   /nodes/:id/recipe                          run extract|material-swap|mix|clay-to-photoreal|floor-plan-furnish on a node
+ *   POST   /nodes/:id/recipe                          run extract|material-swap|mix|clay-to-photoreal|floor-plan-furnish|tone-unify|lighting-enhance on a node
  *
  * All routes are mounted behind `requireAccessAuth` (see api/index.ts). Every
  * multi-row write goes through `db.batch` (D1 has no interactive transactions).
@@ -1038,7 +1038,7 @@ workshopRouter.openapi(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /nodes/:id/recipe — extract | material-swap | mix | clay-to-photoreal | floor-plan-furnish
+// POST /nodes/:id/recipe — extract | material-swap | mix | clay-to-photoreal | floor-plan-furnish | tone-unify | lighting-enhance
 // ─────────────────────────────────────────────────────────────────────────────
 
 const RecipeExtractParams = z.object({
@@ -1059,7 +1059,8 @@ const RecipeClayParams = z.object({
   referenceCfImageUrls: z.array(z.url()).max(3).optional(),
   prompt: z.string().min(1).optional(),
 });
-const RecipeFloorPlanFurnishParams = z.object({
+/** Params for recipes that take no references — only an optional prompt override. */
+const RecipePromptOnlyParams = z.object({
   prompt: z.string().min(1).optional(),
 });
 
@@ -1068,7 +1069,9 @@ const RecipeRequestSchema = z.discriminatedUnion("recipe", [
   z.object({ recipe: z.literal("material-swap"), params: RecipeMaterialSwapParams }),
   z.object({ recipe: z.literal("mix"), params: RecipeMixParams }),
   z.object({ recipe: z.literal("clay-to-photoreal"), params: RecipeClayParams }),
-  z.object({ recipe: z.literal("floor-plan-furnish"), params: RecipeFloorPlanFurnishParams }),
+  z.object({ recipe: z.literal("floor-plan-furnish"), params: RecipePromptOnlyParams }),
+  z.object({ recipe: z.literal("tone-unify"), params: RecipePromptOnlyParams }),
+  z.object({ recipe: z.literal("lighting-enhance"), params: RecipePromptOnlyParams }),
 ]);
 
 /** Get-or-create the room's Workshop render session (idempotent by roomId). */
@@ -1118,7 +1121,7 @@ workshopRouter.openapi(
       500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
     },
     tags: ["workshop"],
-    summary: "Run a node-action recipe (extract | material-swap | mix | clay-to-photoreal | floor-plan-furnish)",
+    summary: "Run a node-action recipe (extract | material-swap | mix | clay-to-photoreal | floor-plan-furnish | tone-unify | lighting-enhance)",
     operationId: "runNodeRecipe",
   }),
   async (c) => {

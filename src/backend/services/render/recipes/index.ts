@@ -39,8 +39,20 @@ export const PLAN_FURNISH_LOCK = [
   "- Remove any text labels/annotations; do NOT add new text.",
 ].join("\n");
 
+/** Post-production: nothing in the scene changes, only light/color is corrected. */
+export const POST_PRODUCTION_LOCK = [
+  "- PRESERVE EXACTLY (do not change in any way): every object, material, surface, fixture, furniture piece, the layout, the composition, the framing, and the camera angle.",
+  "- Change ONLY the requested lighting or color property. Do NOT add, remove, move, restyle, or re-render anything in the scene.",
+].join("\n");
+
 /** Recipe ids wired end-to-end. */
-export type RecipeId = "material-swap" | "mix" | "clay-to-photoreal" | "floor-plan-furnish";
+export type RecipeId =
+  | "material-swap"
+  | "mix"
+  | "clay-to-photoreal"
+  | "floor-plan-furnish"
+  | "tone-unify"
+  | "lighting-enhance";
 
 /**
  * How a recipe hands images to `runStage`:
@@ -125,6 +137,32 @@ export const RECIPES: Record<RecipeId, RecipeDef> = {
       "Furnish every room appropriately for its function, keeping the plan's structure intact.",
     guardrail: PLAN_FURNISH_LOCK,
     referencesHeader: "Style reference images (material/palette only):",
+  },
+  "tone-unify": {
+    id: "tone-unify",
+    label: "Clean up the color",
+    category: "post",
+    stageType: "stage_3_LP_finish",
+    inputMode: "references",
+    intro:
+      "You are an expert architectural photo colorist. Correct the white balance and unify the color temperature of the provided image based on the user's request.",
+    defaultUserRequest:
+      "Neutralize color casts and unify the white balance to a natural, consistent temperature.",
+    guardrail: POST_PRODUCTION_LOCK,
+    referencesHeader: "Reference images (target palette only):",
+  },
+  "lighting-enhance": {
+    id: "lighting-enhance",
+    label: "Even out the lighting",
+    category: "post",
+    stageType: "stage_3_LP_finish",
+    inputMode: "references",
+    intro:
+      "You are an expert architectural lighting artist. Enhance the lighting of the provided image based on the user's request — recover shadow detail, balance exposure, and make the light falloff realistic.",
+    defaultUserRequest:
+      "Even out the exposure, recover shadow detail, and make the lighting look natural.",
+    guardrail: POST_PRODUCTION_LOCK,
+    referencesHeader: "Reference images (lighting mood only):",
   },
 };
 
