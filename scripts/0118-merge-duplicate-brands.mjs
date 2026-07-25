@@ -6,10 +6,13 @@
  * side holds some of the showroom mappings, so the directory shows one brand
  * twice with half its showrooms each.
  *
- * SOFT DELETE, NEVER DELETE. Every FK into `brands` is ON DELETE CASCADE across
- * 7 tables, so `DELETE FROM brands WHERE id = 315` would silently take that
- * brand's showroom mappings, type mappings, product links and intel with it.
- * The loser is flagged `is_active = 0` after its rows have been repointed.
+ * SOFT DELETE, NEVER DELETE. Most FKs into `brands` are ON DELETE CASCADE (the
+ * mapping / image / intel / product-line tables), so `DELETE FROM brands WHERE
+ * id = 315` would silently take that brand's showroom mappings, type mappings,
+ * product links and intel with it; the newer product-photo / sitemap tables are
+ * ON DELETE SET NULL, which would blank their brand instead. Either way a hard
+ * delete loses data, so the loser is flagged `is_active = 0` after its rows have
+ * been repointed to the survivor.
  *
  * ONLY NAME MATCHES AUTO-MERGE. Normalised name equality (case / punctuation /
  * suffix-insensitive) means the two rows are the same string written
@@ -45,15 +48,26 @@ const DB = "core-remodel";
 const args = process.argv.slice(2);
 const mode = args.includes("--remote") ? "--remote" : "--local";
 
-/** Tables holding a brand_id that must follow the merge. */
+/**
+ * Tables holding a brand_id that must follow the merge.
+ *
+ * KEEP THIS CURRENT WITH THE SCHEMA. `showroom_store_products` was renamed to
+ * `products` (#206) — the old name here would have made the repoint UPDATE fail
+ * with "no such table", aborting the merge half-applied. The product-photo /
+ * sitemap tables were added later; their brand_id is ON DELETE SET NULL (not
+ * cascade) and carries no UNIQUE on brand_id, so they repoint cleanly.
+ */
 const FK_TABLES = [
-  "showroom_store_products",
+  "products",
   "brand_categories",
   "brand_images",
   "brand_intel",
   "brand_product_lines",
   "brand_type_mappings",
   "showroom_brand_mappings",
+  "product_photo_buckets",
+  "bucket_product_candidates",
+  "scraping_sitemap",
 ];
 
 /** (table, column) pairs whose UNIQUE index can collide when repointing. */
