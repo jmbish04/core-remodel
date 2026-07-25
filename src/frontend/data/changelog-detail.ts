@@ -160,6 +160,79 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
       migrations: [{ tag: "v16", applied: false }],
     },
   },
+  "receipt-review-hitl": {
+    slug: "receipt-review-hitl",
+    branch: "claude/receipt-review-hitl-4808",
+    subtitle: "Shopping · 0030 receipt→room deduction, the review surface",
+    problem:
+      "The 0030 engine (shipped #229/#236) reads an emailed receipt, and for each line item deduces which room the material belongs to — a receipt of three toilets is split across three bathrooms by homogeneity, product-nature, and open-slot signals. But a deduction is an educated guess, and nothing should enter the materials schedule on a guess. Until this PR the proposals sat staged in D1 with no way for the owner to review them: the MCP tools could resolve one conversationally, but there was no visual queue to see a whole receipt at once, read the reasoning, and correct the rooms the engine placed wrong.",
+    approach:
+      "A receipt-grouped HITL queue at /admin/shopping/receipt-review. Staged room_proposals are fetched and grouped by invoiceId — one card per receipt — and each line item shows the proposed room, the confidence, and the engine's reasoning. The room is editable from a dropdown of the ELIGIBLE candidate rooms the engine considered; for the cases it gets way wrong, the dropdown also carries an \"Other room…\" entry that opens a modal with RoomSelect over ALL rooms (floor-grouped, searchable). \"Confirm all\" walks the receipt's proposals and resolves each via the #236 endpoint, which mints the material against the chosen roomId FK. Frontend-only — no schema change, no new endpoint. The page is the standard thin Astro shell (BaseLayout, icon header, `class` not `className`) mounting one React island.",
+    apiChanges: [
+      "No new endpoints. Reuses GET /api/materials/room-proposals?status=staged and POST /api/materials/room-proposals/:id/resolve from #236, and GET /api/rooms/catalog for the Other-room modal.",
+    ],
+    filesTouched: [
+      "src/frontend/components/materials/ReceiptReviewApp.tsx (new)",
+      "src/frontend/pages/admin/shopping/receipt-review.astro (new)",
+      "src/frontend/components/sidebar/nav-groups.ts (+1 link)",
+    ],
+    migrations: [],
+    code: [
+      {
+        title: "Per-line room picker — eligible candidates + an Other-room escape hatch",
+        lang: "tsx",
+        code: `<DropdownMenu>
+  <DropdownMenuTrigger render={<Button variant="outline" />}>
+    {chosenRoomName ?? proposal.proposedRoomName ?? "Pick a room"}
+  </DropdownMenuTrigger>
+  <DropdownMenuContent>
+    {proposal.candidates.map((c) => (
+      <DropdownMenuItem key={c.roomId} onClick={() => setRoom(proposal.id, c.roomId)}>
+        {c.roomName}
+      </DropdownMenuItem>
+    ))}
+    <DropdownMenuSeparator />
+    {/* way-wrong escape hatch → modal over ALL rooms */}
+    <DropdownMenuItem onClick={() => setOtherOpen(proposal.id)}>Other room…</DropdownMenuItem>
+  </DropdownMenuContent>
+</DropdownMenu>
+
+// Confirm resolves each staged proposal against a roomId FK (never a name).
+await api.post(\`/api/materials/room-proposals/\${p.id}/resolve\`, { roomId });`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Review flow — one receipt, per-line room correction",
+        code: `flowchart TD
+  Q[staged room_proposals] --> G[group by invoiceId]
+  G --> C[receipt card: line items + reasoning]
+  C --> R{room correct?}
+  R -- yes --> K[keep proposed room]
+  R -- "wrong, but a candidate" --> D[pick from eligible dropdown]
+  R -- "way wrong" --> O["Other room… → RoomSelect over ALL rooms"]
+  K --> F[Confirm all]
+  D --> F
+  O --> F
+  F --> P["POST resolve :id {roomId} → mint material vs FK"]
+  classDef keep fill:#1f4d2e,stroke:#4ade80,color:#e6ffe6
+  class K,F keep`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_246.mjs",
+      command: "pnpm run test:pr 246 -- --preview   # and against prod (regression)",
+      ranAt: "2026-07-25",
+      output:
+        "Preview wcrp-claude-receipt-review-hitl-4808:\n" +
+        "  GET /admin/shopping/receipt-review → 200, shell + astro-island present.\n" +
+        "  GET /api/materials/room-proposals?status=staged → 3 Toilet proposals under invoiceId 28\n" +
+        "    (TOTO→Primary, 2 Kohler→Guest/Hall), each with candidates[] + a numeric proposedRoomId.\n" +
+        "  POST /room-proposals/46/resolve {roomId:3284744} → 200, minted material #10\n" +
+        "    \"TOTO Washlet G5A\" room=Primary Bathroom; reprocess email 3 re-stages clean.\n" +
+        "  pnpm run build green; tsc --noEmit no net-new errors.",
+    },
+  },
   "showroom-dedup-hardening": {
     slug: "showroom-dedup-hardening",
     branch: "claude/showroom-listing-500-map-6kvtm9",
