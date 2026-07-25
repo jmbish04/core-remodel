@@ -30,7 +30,11 @@ export function extractCoord(
     const obj = c as Record<string, unknown>;
     const lat = obj.latitude ?? obj.lat;
     const lng = obj.longitude ?? obj.lng ?? obj.long;
-    if (typeof lat === "number" && typeof lng === "number") return { latitude: lat, longitude: lng };
+    // Number.isFinite rejects NaN/Infinity, which `typeof === "number"` would let
+    // through as bogus coordinates.
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return { latitude: lat as number, longitude: lng as number };
+    }
   }
   return null;
 }
@@ -56,8 +60,10 @@ export interface TelemetryFields {
  * Anything absent stays null — this never throws on an unexpected frame.
  */
 export function extractTelemetryFields(payload: Record<string, unknown>): TelemetryFields {
-  // Flatten a `data: [{key,value}]` array into a plain object, if present.
-  const kv: Record<string, unknown> = {};
+  // Flatten a `data: [{key,value}]` array into a lookup, if present. Uses a
+  // null-prototype object so a hostile frame carrying `key: "__proto__"` can't
+  // pollute Object.prototype for the isolate.
+  const kv: Record<string, unknown> = Object.create(null);
   if (Array.isArray(payload.data)) {
     for (const item of payload.data) {
       if (item && typeof item === "object" && "key" in item) {
@@ -82,7 +88,14 @@ export function extractTelemetryFields(payload: Record<string, unknown>): Teleme
   if (typeof tsRaw === "number") {
     eventTs = new Date(tsRaw < 1e10 ? tsRaw * 1000 : tsRaw);
   } else if (typeof tsRaw === "string") {
-    eventTs = new Date(tsRaw);
+    // A numeric STRING ("1712345678") is a Unix timestamp too — new Date() would
+    // reject it, so parse it with the same seconds-vs-ms heuristic; fall back to
+    // Date parsing for an ISO string.
+    const asNum = Number(tsRaw);
+    eventTs =
+      tsRaw.trim() !== "" && Number.isFinite(asNum)
+        ? new Date(asNum < 1e10 ? asNum * 1000 : asNum)
+        : new Date(tsRaw);
   }
 
   return {

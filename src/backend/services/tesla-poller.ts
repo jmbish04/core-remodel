@@ -72,15 +72,25 @@ export async function pollVehicleForActiveDrive(env: Env): Promise<PollResult> {
   // carrying the load (toggle on, socket connected, inside the daytime window)
   // it stands down so the two paths never double-process the same drive. The
   // configured cadence also becomes the throttle interval below.
-  const control = await getStreamControl(env);
-  const streamCarrying =
-    control.enabled && control.connected && isWithinStreamWindow(new Date(), control);
+  //
+  // A failure reading stream-control must NOT take the fallback down — default to
+  // "stream not carrying" and the built-in cadence so ingest keeps flowing.
+  let streamCarrying = false;
+  let throttleTtl = POLL_INTERVAL_SECONDS;
+  try {
+    const control = await getStreamControl(env);
+    streamCarrying =
+      control.enabled && control.connected && isWithinStreamWindow(new Date(), control);
+    throttleTtl = control.pollFallbackSeconds;
+  } catch (err) {
+    console.error("[tesla-poller] stream-control read failed; using default cadence:", err);
+  }
   if (streamCarrying) return { polled: false, reason: "stream-active" };
 
   // Gate 2: throttle. KV TTL is the clock — a present key means "polled
   // recently", so no timestamp arithmetic and no clock skew to reason about.
   if (await env.CACHE.get(THROTTLE_KEY)) return { polled: false, reason: "throttled" };
-  await env.CACHE.put(THROTTLE_KEY, "1", { expirationTtl: control.pollFallbackSeconds });
+  await env.CACHE.put(THROTTLE_KEY, "1", { expirationTtl: throttleTtl });
 
   const state = await getVehicleState(env);
   if (!state || state.latitude == null || state.longitude == null) {

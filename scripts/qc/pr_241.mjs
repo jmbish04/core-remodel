@@ -65,44 +65,56 @@ if (onProd && got.status === 404) {
       `stream=${got.json.shouldStream} poll=${got.json.shouldPoll}`,
     );
 
-    // ── POST a valid window + cadence, expect it echoed back ──────────────────
-    const set = await client.post("/api/tesla/stream/control", {
-      windowStartHour: 7,
-      windowEndHour: 20,
-      pollFallbackSeconds: 90,
-    });
-    checks.ok(
-      "POST valid window (7–20) + cadence 90 → 200 echoes control",
-      set.status === 200 &&
-        set.json?.control?.windowStartHour === 7 &&
-        set.json?.control?.windowEndHour === 20 &&
-        set.json?.control?.pollFallbackSeconds === 90,
-      `→ ${set.status} ${JSON.stringify(set.json?.control)}`,
-    );
+    // ── The POST tests MUTATE live streaming-ingest config, which could transiently
+    //    affect a real drive. So they run ONLY against a preview/isolated target,
+    //    never production, and always restore the original state in a finally. ──
+    if (onProd) {
+      checks.info("SKIPPED on prod: mutating control POST tests (QC stays read-only against prod)");
+    } else {
+      try {
+        // POST a valid window + cadence, expect it echoed back.
+        const set = await client.post("/api/tesla/stream/control", {
+          windowStartHour: 7,
+          windowEndHour: 20,
+          pollFallbackSeconds: 90,
+        });
+        checks.ok(
+          "POST valid window (7–20) + cadence 90 → 200 echoes control",
+          set.status === 200 &&
+            set.json?.control?.windowStartHour === 7 &&
+            set.json?.control?.windowEndHour === 20 &&
+            set.json?.control?.pollFallbackSeconds === 90,
+          `→ ${set.status} ${JSON.stringify(set.json?.control)}`,
+        );
 
-    // ── Inverted window must be rejected ──────────────────────────────────────
-    const bad = await client.post("/api/tesla/stream/control", {
-      windowStartHour: 20,
-      windowEndHour: 7,
-    });
-    checks.ok(
-      "POST inverted window (20–7) → 400 rejected",
-      bad.status === 400,
-      `→ ${bad.status} ${JSON.stringify(bad.json)}`,
-    );
-
-    // ── Restore the original config so QC leaves no trace ─────────────────────
-    const restore = await client.post("/api/tesla/stream/control", {
-      enabled: original.enabled,
-      windowStartHour: original.windowStartHour,
-      windowEndHour: original.windowEndHour,
-      pollFallbackSeconds: original.pollFallbackSeconds,
-    });
-    checks.ok(
-      "restore original control → 200",
-      restore.status === 200,
-      `→ ${restore.status}`,
-    );
+        // Inverted window must be rejected.
+        const bad = await client.post("/api/tesla/stream/control", {
+          windowStartHour: 20,
+          windowEndHour: 7,
+        });
+        checks.ok(
+          "POST inverted window (20–7) → 400 rejected",
+          bad.status === 400,
+          `→ ${bad.status} ${JSON.stringify(bad.json)}`,
+        );
+      } finally {
+        // Always restore the original config, even if an assertion threw above.
+        const restore = await client.post("/api/tesla/stream/control", {
+          enabled: original.enabled,
+          windowStartHour: original.windowStartHour,
+          windowEndHour: original.windowEndHour,
+          pollFallbackSeconds: original.pollFallbackSeconds,
+        });
+        checks.ok(
+          "restored original control → 200 with original values",
+          restore.status === 200 &&
+            restore.json?.control?.windowStartHour === original.windowStartHour &&
+            restore.json?.control?.windowEndHour === original.windowEndHour &&
+            restore.json?.control?.pollFallbackSeconds === original.pollFallbackSeconds,
+          `→ ${restore.status} ${JSON.stringify(restore.json?.control)}`,
+        );
+      }
+    }
   }
 }
 
