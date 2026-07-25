@@ -113,6 +113,53 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "tesla-stream-do": {
+    slug: "tesla-stream-do",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0023 Ingest · the outbound socket, built cost-safe",
+    problem:
+      "TESLA_DB is empty because nothing holds Tessie's real-time telemetry — it's an OUTBOUND WebSocket the client dials, not a webhook. But an outbound socket the worker holds is DURATION-BILLED the whole time, and the $700 DO runaway proved an unbounded alarm loop can bill into the thousands. So the connector can't just 'open a socket' — it has to be incapable of running away and incapable of staying open when it isn't earning its keep.",
+    approach:
+      "A singleton Durable Object whose every native-alarm tick re-checks shouldStreamNow (active drive ∧ 07:00–20:00 Pacific ∧ recording ∧ toggle) and drops the socket + goes dormant the moment that's false. Alarms are native ctx.storage.setAlarm (single slot, replaces — never the append-only Agents-SDK schedule that caused #162). Every fire also runs the shared circuit breaker: the global kill-switch, a native fire-rate window (reconnect-storm guard), a per-UTC-day TESLA_DB write budget, and a max-continuous-connected backstop — any trip hard-stops with no reschedule. Frames parse through the shared extractTelemetryFields; persistence is throttled (always on a shift change, otherwise ≤ every 5s) so a ~500ms firehose can't become an unbounded D1 write cost; on the shift→P transition it mirrors the poller (match+mark the nearest stop, auto-nav the next, and close the drive on home arrival — which also drops the socket). Drive activation signals the DO start/stop so ingest is event-driven, but the DO's own guard stays the source of truth.",
+    apiChanges: [
+      "POST /api/tesla/stream/start — arm the DO lifecycle (safe no-op outside the window).",
+      "POST /api/tesla/stream/stop — disconnect + stop now.",
+      "GET /api/tesla/stream/status — connected, connectedSinceMs, writesToday, breaker, nextAlarmMs.",
+    ],
+    filesTouched: [
+      "src/backend/durable-objects/tesla-stream.ts (new)",
+      "wrangler.jsonc (TESLA_STREAM binding + migration v16)",
+      "src/_worker.ts (export TeslaStreamDO)",
+      "src/backend/api/routes/tesla.ts (stream start/stop/status)",
+      "src/backend/api/routes/drive-lists.ts (activation → DO signal)",
+      "src/backend/services/tesla/gating.ts + tesla-poller.ts (KV floor + heartbeat)",
+    ],
+    migrations: [{ tag: "v16", sql: "-- DO migration: new_sqlite_classes [\"TeslaStreamDO\"] (no D1 DDL)" }],
+    diagrams: [
+      {
+        caption: "Every alarm: circuit breaker → lifecycle → connect/heartbeat/dormant",
+        code: `flowchart TD
+  A["native alarm"] --> CB{"breaker ok?"}
+  CB -->|trip| STOP["close · deleteAlarm · dormant"]
+  CB -->|ok| LC{"shouldStreamNow?"}
+  LC -->|no| STOP
+  LC -->|yes| C["connect / heartbeat · re-arm 90s"]
+  F["frame → P"] --> H{"home?"}
+  H -->|yes| STOP`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_242.mjs",
+      command: "pnpm run test:pr 242 -- --preview   # and prod (regression)",
+      ranAt: undefined,
+      output:
+        "AUTHORED, NOT YET RUN. Read-only QC (status contract + control regression + the\n" +
+        "60s cadence floor); it never calls /start, which would open a real Tessie socket.\n" +
+        "Live connect/disconnect is smoke-tested manually against the preview worker with\n" +
+        "Tessie configured. New routes report PENDING against prod until merge+deploy.",
+      migrations: [{ tag: "v16", applied: false }],
+    },
+  },
   "showroom-dedup-hardening": {
     slug: "showroom-dedup-hardening",
     branch: "claude/showroom-listing-500-map-6kvtm9",

@@ -443,6 +443,13 @@
         "name": "REMODEL_MCP",
         "class_name": "RemodelMcpAgent",
       },
+      {
+        // 0023 ING-02: outbound Fleet-Telemetry connector. One singleton DO holds
+        // the Tessie WebSocket only while a drive is active in the daytime window;
+        // native alarms + circuit breaker bound its cost. Not an Agents-SDK DO.
+        "name": "TESLA_STREAM",
+        "class_name": "TeslaStreamDO",
+      },
     ],
   },
   "migrations": [
@@ -512,6 +519,11 @@
       // Showroom Scout session DO.
       "tag": "v15",
       "new_sqlite_classes": ["ShowroomScout"],
+    },
+    {
+      // 0023 Tesla streaming-ingest connector DO.
+      "tag": "v16",
+      "new_sqlite_classes": ["TeslaStreamDO"],
     },
   ],
   "worker_loaders": [

@@ -36,6 +36,22 @@ export const STREAM_WINDOW_END_KEY = "tesla_stream_window_end_hour";
 export const STREAM_POLL_FALLBACK_KEY = "tesla_stream_poll_fallback_seconds";
 /** Runtime flag the DO sets while its socket is up, so the poller stands down. */
 export const STREAM_CONNECTED_KEY = "tesla_stream_connected";
+/** Epoch-ms heartbeat the DO refreshes while connected — makes `connected` stale-proof. */
+export const STREAM_CONNECTED_AT_KEY = "tesla_stream_connected_at";
+
+/**
+ * Floor for the poller cadence. Cloudflare KV rejects an `expirationTtl` below 60s,
+ * and the master tick is per-minute anyway, so a sub-60s cadence is both impossible
+ * to honor and rejected by the throttle store.
+ */
+export const MIN_POLL_FALLBACK_SECONDS = 60;
+
+/**
+ * A `connected` flag older than this is treated as STALE (the DO crashed without
+ * clearing it), so the poller resumes rather than standing down forever. The DO
+ * refreshes the heartbeat well inside this on every alarm.
+ */
+export const STREAM_CONNECTED_STALE_MS = 5 * 60_000;
 
 /** Defaults — an install with no rows behaves as: toggle on, 07:00–20:00, 120s poll. */
 const DEFAULTS = {
@@ -76,6 +92,7 @@ export async function getStreamControl(env: Env): Promise<StreamControl> {
         STREAM_WINDOW_END_KEY,
         STREAM_POLL_FALLBACK_KEY,
         STREAM_CONNECTED_KEY,
+        STREAM_CONNECTED_AT_KEY,
       ]),
     );
   const map = new Map(rows.map((r) => [r.key, r.value ?? null]));
@@ -83,7 +100,8 @@ export async function getStreamControl(env: Env): Promise<StreamControl> {
   const start = map.get(STREAM_WINDOW_START_KEY) ?? null;
   const end = map.get(STREAM_WINDOW_END_KEY) ?? null;
   const poll = map.get(STREAM_POLL_FALLBACK_KEY) ?? null;
-  const connected = map.get(STREAM_CONNECTED_KEY) ?? null;
+  const connectedFlag = map.get(STREAM_CONNECTED_KEY) ?? null;
+  const connectedAt = map.get(STREAM_CONNECTED_AT_KEY) ?? null;
   const rawStart = toIntInRange(start, DEFAULTS.windowStartHour, 0, 23);
   const rawEnd = toIntInRange(end, DEFAULTS.windowEndHour, 1, 24);
   // Guard against an inverted window. The two hours are independent rows, so a
@@ -97,12 +115,22 @@ export async function getStreamControl(env: Env): Promise<StreamControl> {
     windowStartHour = DEFAULTS.windowStartHour;
     windowEndHour = DEFAULTS.windowEndHour;
   }
+  // `connected` is only trusted when its heartbeat is fresh — a stale flag (DO
+  // crashed without clearing it) degrades to false so the poller resumes.
+  const connectedAtMs = connectedAt == null ? NaN : parseInt(connectedAt, 10);
+  const connectedFresh =
+    Number.isFinite(connectedAtMs) && Date.now() - connectedAtMs < STREAM_CONNECTED_STALE_MS;
   return {
     enabled: enabled == null ? DEFAULTS.enabled : enabled === "true",
     windowStartHour,
     windowEndHour,
-    pollFallbackSeconds: toIntInRange(poll, DEFAULTS.pollFallbackSeconds, 15, 3600),
-    connected: connected === "true",
+    pollFallbackSeconds: toIntInRange(
+      poll,
+      DEFAULTS.pollFallbackSeconds,
+      MIN_POLL_FALLBACK_SECONDS,
+      3600,
+    ),
+    connected: connectedFlag === "true" && connectedFresh,
   };
 }
 
@@ -124,19 +152,35 @@ export async function setStreamWindow(
   await setConfigValue(env, STREAM_WINDOW_END_KEY, String(e));
 }
 
-/** Set the poller fallback cadence (seconds). */
+/** Set the poller fallback cadence (seconds). Floored at the KV/cron minimum. */
 export async function setPollFallbackSeconds(env: Env, seconds: number): Promise<void> {
-  const n = toIntInRange(String(seconds), DEFAULTS.pollFallbackSeconds, 15, 3600);
+  const n = toIntInRange(String(seconds), DEFAULTS.pollFallbackSeconds, MIN_POLL_FALLBACK_SECONDS, 3600);
   await setConfigValue(env, STREAM_POLL_FALLBACK_KEY, String(n));
 }
 
 /**
  * Runtime connected flag, written by the DO on connect/disconnect. It is only a
  * hint for the poller stand-down — never a source of truth for billing safety
- * (the DO's own lifecycle + circuit breaker own that).
+ * (the DO's own lifecycle + circuit breaker own that). When set true it stamps a
+ * heartbeat so a stale flag (crashed DO) degrades to "not connected".
  */
 export async function setStreamConnected(env: Env, connected: boolean): Promise<void> {
-  await setConfigValue(env, STREAM_CONNECTED_KEY, connected ? "true" : "false");
+  if (connected) {
+    // Stamp the heartbeat first, so a reader never sees connected=true with no time.
+    await setConfigValue(env, STREAM_CONNECTED_AT_KEY, String(Date.now()));
+    await setConfigValue(env, STREAM_CONNECTED_KEY, "true");
+  } else {
+    await setConfigValue(env, STREAM_CONNECTED_KEY, "false");
+  }
+}
+
+/**
+ * Refresh the connected heartbeat — called by the DO on every alarm while its
+ * socket is up, so `getStreamControl().connected` stays fresh (and thus trusted)
+ * for the poller stand-down.
+ */
+export async function heartbeatStream(env: Env): Promise<void> {
+  await setConfigValue(env, STREAM_CONNECTED_AT_KEY, String(Date.now()));
 }
 
 /**
