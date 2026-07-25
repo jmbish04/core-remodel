@@ -24,7 +24,7 @@
  */
 import { Hono } from "hono";
 import { drizzle } from "drizzle-orm/d1";
-import { asc, desc, eq, inArray, and, isNull } from "drizzle-orm";
+import { asc, desc, eq, inArray, and, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 
 import {
@@ -37,7 +37,9 @@ import {
   productPriceObservations,
   productShowroomPhotos,
   scrapingSitemap,
+  showroomProductMappings,
   showroomStoreProducts,
+  showroomStores,
 } from "@backend/db";
 import { createResearchJob } from "@backend/services/research-jobs";
 import {
@@ -46,6 +48,8 @@ import {
   type SitemapContext,
 } from "@backend/services/scraping/sitemap-cache";
 import { discoverSitemap } from "@backend/services/brands/brand-image-harvest";
+import { transcribeAudioBase64 } from "@backend/services/estimate-intake";
+import { summarizeStyleReaction } from "@backend/services/reaction-summary";
 import { ImageProcessorService } from "@backend/services/image-processor";
 import { cropAndUploadCfImage } from "@backend/services/render/cf-images";
 import { extractShowroomProductFromDescriptions } from "@backend/services/image-processor/product-extraction";
@@ -596,6 +600,33 @@ intakeRouter.post("/buckets/:id/intake", async (c) => {
 
 /**
  * GET /api/intake/buckets/:id/candidates — Phase C.
+ * GET /api/intake/candidate-queue — Phase E.
+ * Every bucket that has ≥1 candidate, newest-first, with candidate + pending
+ * counts and showroom name. Feeds the HITL walkthrough's bucket picker.
+ */
+intakeRouter.get("/candidate-queue", async (c) => {
+  const db = drizzle(c.env.DB);
+  const rows = await db
+    .select({
+      bucketId: bucketProductCandidates.bucketId,
+      total: sql<number>`count(*)`,
+      pending: sql<number>`sum(case when ${bucketProductCandidates.status} = 'pending' then 1 else 0 end)`,
+      confirmed: sql<number>`sum(case when ${bucketProductCandidates.status} = 'confirmed' then 1 else 0 end)`,
+      label: productPhotoBuckets.label,
+      bucketStatus: productPhotoBuckets.status,
+      showroomId: productPhotoBuckets.showroomId,
+      showroomName: showroomStores.name,
+    })
+    .from(bucketProductCandidates)
+    .innerJoin(productPhotoBuckets, eq(productPhotoBuckets.id, bucketProductCandidates.bucketId))
+    .leftJoin(showroomStores, eq(showroomStores.id, productPhotoBuckets.showroomId))
+    .groupBy(bucketProductCandidates.bucketId)
+    .orderBy(desc(bucketProductCandidates.bucketId));
+
+  return c.json({ buckets: rows });
+});
+
+/**
  * The candidate rows the workflow produced, rank-ASC. `colors` / `rawExtraction`
  * are parsed back from their stored JSON. Feeds the HITL walkthrough (Phase D/E).
  */
@@ -624,10 +655,188 @@ intakeRouter.get("/buckets/:id/candidates", async (c) => {
     colors: parseJson(r.colors),
     imageSourceUrls: parseJson(r.imageSourceUrls),
     pdfSourceUrls: parseJson(r.pdfSourceUrls),
+    reactionSummary: parseJson(r.reactionSummary),
     rawExtraction: parseJson(r.rawExtraction),
   }));
 
   return c.json({ bucketId, candidates });
+});
+
+// ─── Candidate reactions + confirm/reject (Phase D1) ─────────────────────────
+
+/** Load one candidate row by id, or null. */
+async function loadCandidate(db: ReturnType<typeof drizzle>, id: number) {
+  const [row] = await db
+    .select()
+    .from(bucketProductCandidates)
+    .where(eq(bucketProductCandidates.id, id))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * PATCH /api/intake/candidates/:id/reaction — Phase D1.
+ * Record the human's reaction to ONE candidate: match (y/n), like (y/n), stars
+ * (1-5). All fields optional; only those present are updated. Reactions are kept
+ * even on non-matches — that's the style-training signal.
+ */
+intakeRouter.patch("/candidates/:id/reaction", async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isFinite(id)) return c.json({ error: "Invalid candidate id" }, 400);
+  const body = await c.req.json().catch(() => ({}));
+
+  const patch: Partial<typeof bucketProductCandidates.$inferInsert> = {};
+  if (typeof body.isMatch === "boolean") patch.isMatch = body.isMatch;
+  if (typeof body.liked === "boolean") patch.liked = body.liked;
+  if (body.stars === null) patch.stars = null;
+  else if (Number.isInteger(body.stars)) {
+    if (body.stars < 1 || body.stars > 5) return c.json({ error: "stars must be 1-5 or null" }, 400);
+    patch.stars = body.stars;
+  }
+  if (Object.keys(patch).length === 0) return c.json({ error: "no reaction fields provided" }, 400);
+
+  const db = drizzle(c.env.DB);
+  const existing = await loadCandidate(db, id);
+  if (!existing) return c.json({ error: "Candidate not found" }, 404);
+
+  await db.update(bucketProductCandidates).set(patch).where(eq(bucketProductCandidates.id, id));
+  const updated = await loadCandidate(db, id);
+  return c.json({ candidate: updated });
+});
+
+/**
+ * POST /api/intake/candidates/:id/reject — Phase D1.
+ * Mark a candidate rejected. It is KEPT (not deleted) — rejected candidates are
+ * retained as negative style signal.
+ */
+intakeRouter.post("/candidates/:id/reject", async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isFinite(id)) return c.json({ error: "Invalid candidate id" }, 400);
+
+  const db = drizzle(c.env.DB);
+  const existing = await loadCandidate(db, id);
+  if (!existing) return c.json({ error: "Candidate not found" }, 404);
+
+  await db
+    .update(bucketProductCandidates)
+    .set({ status: "rejected", isMatch: false })
+    .where(eq(bucketProductCandidates.id, id));
+  return c.json({ candidate: await loadCandidate(db, id) });
+});
+
+/**
+ * POST /api/intake/candidates/:id/confirm — Phase D1.
+ * Promote a candidate into a REAL product (this is the only place a product /
+ * brand is created from the intake pipeline). Ensures the brand + product exist,
+ * maps the product to the bucket's showroom, links the bucket, and records
+ * `confirmed_product_id` + status 'confirmed' on the candidate.
+ */
+intakeRouter.post("/candidates/:id/confirm", async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isFinite(id)) return c.json({ error: "Invalid candidate id" }, 400);
+
+  const db = drizzle(c.env.DB);
+  const cand = await loadCandidate(db, id);
+  if (!cand) return c.json({ error: "Candidate not found" }, 404);
+  if (cand.confirmedProductId) {
+    return c.json({ error: "Candidate already confirmed", productId: cand.confirmedProductId }, 409);
+  }
+
+  let colors: { name: string; hexCode?: string | null }[] | null = null;
+  try {
+    colors = cand.colors ? JSON.parse(cand.colors) : null;
+  } catch {
+    colors = null;
+  }
+
+  // Map the candidate onto the extraction shape ensureProductFromExtraction wants.
+  // resolveBrandId inside it is find-or-create, so the brand is minted here too.
+  const { product, created } = await ensureProductFromExtraction(db, {
+    brand: cand.brandNameRaw,
+    modelNumber: cand.modelNumber,
+    itemName: cand.productName,
+    colors,
+    style: cand.style,
+    category: cand.category,
+    price: cand.priceText,
+    salePrice: cand.salePriceText,
+    discountInfo: cand.discountText,
+    photoKind: null,
+    dominantColors: null,
+    confidence: cand.confidence ?? null,
+  });
+
+  // Load the bucket for its showroom, to map the product to that location.
+  const [bucket] = await db
+    .select()
+    .from(productPhotoBuckets)
+    .where(eq(productPhotoBuckets.id, cand.bucketId))
+    .limit(1);
+
+  if (bucket?.showroomId) {
+    await db
+      .insert(showroomProductMappings)
+      .values({ showroomId: bucket.showroomId, productId: product.id })
+      .onConflictDoNothing();
+  }
+  if (bucket) {
+    await db
+      .update(productPhotoBuckets)
+      .set({ productId: product.id, status: "reviewed" })
+      .where(eq(productPhotoBuckets.id, bucket.id));
+  }
+
+  await db
+    .update(bucketProductCandidates)
+    .set({ confirmedProductId: product.id, status: "confirmed", isMatch: true })
+    .where(eq(bucketProductCandidates.id, id));
+
+  return c.json({
+    productId: product.id,
+    productCreated: created,
+    candidate: await loadCandidate(db, id),
+  });
+});
+
+/**
+ * POST /api/intake/candidates/:id/voice-reaction — Phase D2.
+ * Attach a spoken (or typed) reaction to a candidate: transcribe the audio with
+ * Whisper (or accept a `transcript` directly), distill it into a compact style
+ * summary, and store both on the candidate. Body: { audioBase64 } | { transcript }.
+ */
+intakeRouter.post("/candidates/:id/voice-reaction", async (c) => {
+  const id = Number(c.req.param("id"));
+  if (!Number.isFinite(id)) return c.json({ error: "Invalid candidate id" }, 400);
+  const body = await c.req.json().catch(() => ({}));
+
+  const db = drizzle(c.env.DB);
+  const cand = await loadCandidate(db, id);
+  if (!cand) return c.json({ error: "Candidate not found" }, 404);
+
+  // Accept a direct transcript (typed reaction / retry) or transcribe audio.
+  let transcript = typeof body.transcript === "string" ? body.transcript.trim() : "";
+  if (!transcript) {
+    const audioBase64 = typeof body.audioBase64 === "string" ? body.audioBase64.trim() : "";
+    if (!audioBase64) return c.json({ error: "audioBase64 or transcript is required" }, 400);
+    try {
+      transcript = (await transcribeAudioBase64(c.env, audioBase64)).trim();
+    } catch (err) {
+      return c.json({ error: "Transcription failed", details: err instanceof Error ? err.message : "Unknown" }, 502);
+    }
+  }
+  if (!transcript) return c.json({ error: "Empty transcript" }, 400);
+
+  const summary = await summarizeStyleReaction(c.env, transcript, {
+    productName: cand.productName,
+    brandName: cand.brandNameRaw,
+  });
+
+  await db
+    .update(bucketProductCandidates)
+    .set({ reactionTranscript: transcript, reactionSummary: JSON.stringify(summary) })
+    .where(eq(bucketProductCandidates.id, id));
+
+  return c.json({ candidate: await loadCandidate(db, id), transcript, summary });
 });
 
 // ─── Sitemaps (Phase B) ──────────────────────────────────────────────────────

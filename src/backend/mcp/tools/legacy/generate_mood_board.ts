@@ -19,6 +19,17 @@ export const generateMoodBoardTool = defineTool({
       roomId: z.number().optional().describe("Optional room id to associate."),
     },
     annotations: WRITE,
+    examples: [
+      { title: "Mood board from a prompt", args: { prompt: "Dark walnut + brass powder room" } },
+      {
+        title: "Mood board seeded with reference photos",
+        args: {
+          prompt: "Warm minimal kitchen",
+          imageUrls: ["https://example.com/ref-1.jpg"],
+          roomId: 3,
+        },
+      },
+    ],
     // Envelope the opaque generateMoodBoard result under `moodBoard` (passthrough).
     outputShape: {
       moodBoard: looseObject({ id: z.string() }),

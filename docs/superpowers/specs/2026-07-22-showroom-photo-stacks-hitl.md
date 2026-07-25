@@ -146,3 +146,181 @@ plain fetch is the most rate-limited resource in the system.
 - Migration applies clean; `tsc --noEmit` adds 0 errors; `pnpm run build` bundles.
 - QC (`pr_sitemap_cache.mjs`): first discover persists (`cached:false`), second
   reuses (`cached:true`, no dup row), GET lists it, 400 guards — 11/11 on preview.
+
+---
+
+## Phase C2 — Candidate asset enrichment (THIS CHANGELIST)
+
+**Goal:** the intake workflow now stages each top candidate's product-page image
++ PDF **source URLs** (no download — held until HITL confirm), using Phase B's
+sitemap cache to resolve the page.
+
+### Tasks (done)
+
+- **C2.1** `scrapePageAssets(pageUrl)` (exported, `brand-image-harvest.ts`) — one
+  cheap fetch + HTMLRewriter over `<img>` (src/data-src/srcset) and `<a href>`
+  ending `.pdf`; returns `{ imageUrls, pdfUrls }` capped; never throws.
+- **C2.2** `services/scraping/candidate-enrich.ts` — resolve a page (candidate
+  URL → bucket hint URL → brand website via cached sitemap, fuzzy-matched to
+  model/name) then `scrapePageAssets`. Best-effort; never throws.
+- **C2.3** New workflow step `enrich-candidates` (top 3 by rank) between extract
+  and persist; `persistCandidates` writes `image_source_urls` / `pdf_source_urls`
+  JSON and the resolved `product_url`. Job step count 5 → 6.
+
+### Acceptance
+
+- `tsc --noEmit` adds 0 errors; `pnpm run build` bundles.
+- QC (`pr_candidate_enrich.mjs`): bucket with a hint productUrl → workflow
+  completes → top candidate has a non-empty `imageSourceUrls` array of http
+  source links (not downloaded) + `product_url` recorded — 8/8 on preview.
+
+---
+
+## Phase D1 — Candidate reactions + confirm/reject (THIS CHANGELIST)
+
+**Goal:** the backend the HITL walkthrough (Phase E UI) drives — record a
+per-candidate reaction and promote a candidate into a real product.
+
+### Tasks (done)
+
+- **D1.1** `PATCH /api/intake/candidates/:id/reaction` — match (y/n), like (y/n),
+  stars (1-5 or null); only supplied fields updated. Reactions kept on
+  non-matches (style signal).
+- **D1.2** `POST /api/intake/candidates/:id/reject` — status 'rejected', kept
+  (not deleted).
+- **D1.3** `POST /api/intake/candidates/:id/confirm` — the ONLY place the intake
+  pipeline creates a product/brand: `ensureProductFromExtraction` (find-or-create
+  brand + product) from the candidate fields, map product→showroom, link
+  bucket (`product_id`, status 'reviewed'), set `confirmed_product_id` + status
+  'confirmed'. 409 if already confirmed.
+
+### Acceptance
+
+- `tsc --noEmit` adds 0 errors; `pnpm run build` bundles.
+- QC (`pr_candidate_reaction.mjs`): reaction persists, out-of-range stars 400,
+  reject keeps the row, confirm mints product+brand+mapping and links the bucket,
+  second confirm 409 — 15/15 on preview.
+
+---
+
+## Phase D2 — Voice reaction → transcript + style summary (THIS CHANGELIST)
+
+**Goal:** capture a spoken (or typed) reaction to a candidate and distill it into
+a compact style record — the raw signal Phase F's style profile reads.
+
+### Tasks (done)
+
+- **D2.1** `services/reaction-summary.ts` — `summarizeStyleReaction(env,
+  transcript, ctx)` → `{ summary, likes[], dislikes[], sentiment }` via
+  gpt-oss-120b; faithful-only prompt (never invents a preference).
+- **D2.2** `POST /api/intake/candidates/:id/voice-reaction` — accepts
+  `{ audioBase64 }` (Whisper via reused `transcribeAudioBase64`) OR
+  `{ transcript }`; stores `reaction_transcript` + `reaction_summary` (JSON).
+- **D2.3** `GET /buckets/:id/candidates` now parses `reaction_summary` back to an
+  object for the UI.
+
+### Acceptance
+
+- `tsc --noEmit` adds 0 errors; `pnpm run build` bundles.
+- QC (`pr_voice_reaction.mjs`): transcript path stores transcript + a parseable
+  non-empty AI summary; missing body 400 — 7/7 on preview.
+
+> Note: a fresh preview/prod deploy needs ~10-15s to propagate before new routes
+> answer; QC immediately after deploy can see a transient Astro 404.
+
+---
+
+## Phase E — HITL walkthrough UI (THIS CHANGELIST)
+
+**Goal:** the screen where a human reviews a bucket's candidate matches. Flow
+(owner pick): **compare then confirm** — a grid to compare candidates, tap one
+for a full card to react + confirm.
+
+### Tasks (done)
+
+- **E.1 Backend** — `GET /api/intake/candidate-queue`: every bucket with ≥1
+  candidate + total/pending/confirmed counts + showroom name.
+- **E.2 Page** — `/admin/shopping/product-photo-hitl` (BaseLayout + island);
+  added to the shopping sidebar nav ("Product-Photo Review").
+- **E.3 App** — `ProductPhotoHitlApp.tsx`: bucket queue → candidate compare grid
+  → per-candidate dialog (image carousel over staged source URLs, details,
+  match/like/dislike/stars, typed OR MediaRecorder voice reaction, confirm/
+  reject). Monolith dark; sonner toasts; reuses the `api` helper + shadcn.
+
+### Acceptance
+
+- `tsc --noEmit` adds 0 errors; `pnpm run build` bundles.
+- QC (`pr_hitl_queue.mjs`): candidate-queue aggregates counts + showroom, page
+  returns 200 — 6/6 on preview. Action endpoints covered by the D1/D2 QCs.
+
+---
+
+## Phase F — Style profile ("Spotify wrapped") + chat (PLANNED — NOT BUILT)
+
+**Status:** staged plan only (this changelist adds the plan; no code). Build when
+there is real reaction data to profile — F is empty until buckets have been
+reviewed on the Phase E screen.
+
+**Goal:** turn the accumulated HITL reactions into a personal design-taste
+profile — a visual "wrapped" card + a chat that answers "what's my style?" —
+grounded in real signal, never invented.
+
+### Data it reads (all already produced by A′–E, no new capture)
+
+From `bucket_product_candidates` across ALL buckets:
+- `reaction_summary` (JSON `{ summary, likes[], dislikes[], sentiment }`) — the D2
+  distillations. Parse in JS (it's TEXT), not SQL.
+- `stars` (1-5), `liked` (bool), `is_match` (bool), `status`
+  (pending/confirmed/rejected).
+- Identity of confirmed picks: `brand_name_raw` / `brand_id`, `category`, `style`,
+  `price_text`, and the confirmed `products` row (via `confirmed_product_id`).
+
+Signal rules: liked/high-star/confirmed = positive taste; disliked/rejected =
+negative taste (kept deliberately — the retention decision in C1). Both feed the
+profile.
+
+### Tasks (traditional, dependency-ordered — each its own PR when built)
+
+- **F1 — Aggregation backend.** `GET /api/intake/style-profile`:
+  - Pull all candidate rows with a reaction (`reaction_summary IS NOT NULL` OR
+    `stars`/`liked`/`is_match` set OR `status != 'pending'`).
+  - Compute, in the handler:
+    - `likes` / `dislikes` frequency tallies (flatten the JSON arrays, normalize
+      case, top-N with counts).
+    - `sentiment` distribution; `stars` avg + histogram; like/dislike ratio;
+      match + confirm conversion rates.
+    - Top brands / categories / styles among confirmed + liked picks (with counts).
+    - Price-band lean (parse `price_text` → cents via `@backend/lib/money`,
+      bucket into ranges).
+    - `reviewedCount`, `confirmedCount`, date range.
+  - Optional AI narrative: one `generateStructuredOutput` pass (gpt-oss-120b) over
+    the aggregates → `{ headline, paragraphs[] }`, faithful-only prompt. Never
+    degrade a failed parse to `{}` (see [[workers-ai-structured-output-gotchas]]).
+  - QC: seed candidates with reactions, assert tallies + conversion math exact;
+    clean up.
+
+- **F2 — "Wrapped" card UI.** Page `/admin/shopping/style-profile` (+ shopping
+  nav). `StyleProfileApp.tsx`: stat cards + a few recharts (sentiment donut, stars
+  histogram, top-finishes bar), the AI headline, top brands/styles chips. Monolith
+  dark, `api` helper, shadcn. Empty state when `reviewedCount === 0` that points to
+  the review screen. QC: page 200 + renders with seeded data.
+
+- **F3 — Style chat.** `POST /api/intake/style-chat { message }` → LLM grounded in
+  the F1 aggregates + the raw `reaction_summary` corpus (feed as context; small
+  enough to inline, no Vectorize needed at first). Answers "what finishes do I keep
+  picking?", "am I drifting modern?", etc. — must cite only what the data shows.
+  Chat surface on the F2 page. QC: a canned question returns a grounded,
+  non-empty answer.
+
+### Acceptance (when built)
+
+- `tsc --noEmit` adds 0 errors; `pnpm run build` bundles.
+- F1 tallies/conversion math verified exact against seeded data (deterministic —
+  the AI narrative is the only non-deterministic part, asserted non-empty only).
+- No new migration expected (reads existing columns).
+
+### Deliberately deferred within F
+
+- Vectorize-backed semantic chat over a large reaction corpus — inline context is
+  enough until the corpus is big.
+- Cross-room / per-room profiles — start with one global profile.

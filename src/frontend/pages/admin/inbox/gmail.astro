@@ -8,6 +8,20 @@ import BaseLayout from "@/layouts/BaseLayout.astro";
   description="Two-pane Gmail comms hub — read threads, reply, and draft with AI across every contractor conversation."
 >
   <main class="container mx-auto px-4 py-8">
+    <div
+      class="mb-6 rounded-xl bg-muted/40 ring-1 ring-inset ring-border/60 px-4 py-3 text-sm text-muted-foreground"
+    >
+      <p class="font-medium text-foreground">📥 Missing an email? Drop it into the <code class="rounded bg-background/60 px-1 py-0.5 text-xs">core-remodel/inbox</code> label.</p>
+      <p class="mt-1">
+        If an email never made it into the system — the automatic Gmail sync didn't
+        catch it — just apply the <strong>core-remodel/inbox</strong> label to it in
+        Gmail (phone or desktop). The worker checks that label every few hours, pulls
+        the message in like any other inbound email, then removes the label. It's a
+        no-configuration safety net: the label name is always the same, so you never
+        have to set anything up. Tip: make a Gmail filter that auto-archives the label
+        to keep it tidy.
+      </p>
+    </div>
     <GmailInboxApp client:only="react" />
   </main>
 </BaseLayout>

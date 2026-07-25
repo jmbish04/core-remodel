@@ -19,14 +19,22 @@ interface Usage {
     model: string;
     calls: number;
     totalTokens: number;
-    costUsd: number;
+    costUsd: number | null;
+    priced: boolean;
     errors: number;
   }>;
-  byFeature: Array<{ feature: string; calls: number; costUsd: number }>;
+  byFeature: Array<{ feature: string; calls: number; costUsd: number | null; priced: boolean }>;
 }
 
 const fmt = new Intl.NumberFormat();
-const usd = (n: number) => `$${n.toFixed(n < 1 ? 4 : 2)}`;
+/**
+ * Money, or the word "unknown".
+ *
+ * A null cost means the model has no published rate in our table — showing
+ * "$0.00" would read as "this was free", which is the wrong kind of wrong. The
+ * operator needs to know the number is MISSING, not zero.
+ */
+const usd = (n: number | null) => (n === null ? "unknown" : `$${n.toFixed(n < 1 ? 4 : 2)}`);
 
 /**
  * Integration usage over the real ledgers — `gemini_usage_log` (token counts and
@@ -76,7 +84,7 @@ export function IntegrationUsageApp() {
           label="AI cost"
           value={
             totals.aiCallsPriced === 0
-              ? "not tracked"
+              ? "unknown"
               : totals.aiCallsPriced < totals.aiCallsTotal * 0.5
                 ? `${usd(totals.aiCostUsd)}*`
                 : usd(totals.aiCostUsd)
@@ -104,8 +112,8 @@ export function IntegrationUsageApp() {
           label: m.model,
           calls: m.calls,
           cost: m.costUsd,
-          extra: `${fmt.format(m.totalTokens)} tokens${m.errors ? ` · ${m.errors} errors` : ""}`,
-          problem: m.errors > 0,
+          extra: `${fmt.format(m.totalTokens)} tokens${m.errors ? ` · ${m.errors} errors` : ""}${m.priced ? "" : " · unpriced model"}`,
+          problem: m.errors > 0 || !m.priced,
         }))}
       />
       <UsageTable
@@ -160,7 +168,7 @@ function UsageTable({
     key: string;
     label: string;
     calls: number;
-    cost: number;
+    cost: number | null;
     extra?: string;
     problem?: boolean;
   }>;
@@ -180,7 +188,13 @@ function UsageTable({
                 <td className="py-2 pr-4 text-right font-mono text-xs tabular-nums">
                   {fmt.format(r.calls)}
                 </td>
-                <td className="py-2 pr-4 text-right font-mono text-xs tabular-nums text-emerald-400">
+                <td
+                  className={
+                    r.cost === null
+                      ? "py-2 pr-4 text-right font-mono text-xs tabular-nums text-muted-foreground"
+                      : "py-2 pr-4 text-right font-mono text-xs tabular-nums text-emerald-400"
+                  }
+                >
                   {usd(r.cost)}
                 </td>
                 <td

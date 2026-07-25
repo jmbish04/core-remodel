@@ -228,6 +228,10 @@ systemObservabilityRouter.get("/integration-usage", async (c) => {
       calls: sql<number>`count(*)`,
       totalTokens: sql<number>`coalesce(sum(${geminiUsageLog.totalTokens}), 0)`,
       costUsd: sql<number>`coalesce(sum(${geminiUsageLog.estimatedCostUsd}), 0)`,
+      // How many of this model's calls carry a price. Zero means the model is
+      // unpriced — the UI must say "unknown", never "$0.00", which would read
+      // as "this model is free".
+      pricedCalls: sql<number>`sum(case when ${geminiUsageLog.estimatedCostUsd} is not null then 1 else 0 end)`,
       errors: sql<number>`sum(case when ${geminiUsageLog.status} != 'ok' then 1 else 0 end)`,
     })
     .from(geminiUsageLog)
@@ -240,6 +244,7 @@ systemObservabilityRouter.get("/integration-usage", async (c) => {
       feature: geminiUsageLog.feature,
       calls: sql<number>`count(*)`,
       costUsd: sql<number>`coalesce(sum(${geminiUsageLog.estimatedCostUsd}), 0)`,
+      pricedCalls: sql<number>`sum(case when ${geminiUsageLog.estimatedCostUsd} is not null then 1 else 0 end)`,
     })
     .from(geminiUsageLog)
     .where(gte(geminiUsageLog.timestamp, since))
@@ -286,12 +291,15 @@ systemObservabilityRouter.get("/integration-usage", async (c) => {
     },
     byModel: byModel.map((m) => ({
       ...m,
-      costUsd: Number(Number(m.costUsd ?? 0).toFixed(4)),
+      // null, not 0, when nothing in this model's calls was priced.
+      costUsd: Number(m.pricedCalls ?? 0) > 0 ? Number(Number(m.costUsd ?? 0).toFixed(6)) : null,
+      priced: Number(m.pricedCalls ?? 0) > 0,
     })),
     byFeature: byFeature.map((f) => ({
       feature: f.feature ?? "unattributed",
       calls: f.calls,
-      costUsd: Number(Number(f.costUsd ?? 0).toFixed(4)),
+      costUsd: Number(f.pricedCalls ?? 0) > 0 ? Number(Number(f.costUsd ?? 0).toFixed(6)) : null,
+      priced: Number(f.pricedCalls ?? 0) > 0,
     })),
   });
 });

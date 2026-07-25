@@ -16,6 +16,7 @@ import { pollVehicleForActiveDrive } from "./backend/services/tesla-poller";
 import { backfillShowroomPlacesData } from "./backend/services/showroom/places-backfill";
 import { sweepShowroomSales } from "./backend/services/showroom/sales";
 import { ingestCompanyEmails } from "./backend/services/gmail/ingestion";
+import { ingestInboxLabel } from "./backend/services/gmail/inbox-label";
 import {
   getDeviceIdFromRequest,
   isRequestAuthenticated,
@@ -354,6 +355,19 @@ const legacyHandler: ExportedHandler<Env> = {
             ),
           )
           .catch((err) => console.error("[scheduled] gmail ingestion failed:", err)),
+      );
+      // Safety-net: pull anything the user manually dropped into the
+      // `core-remodel/inbox` Gmail label, then unlabel it. See inbox-label.ts.
+      ctx.waitUntil(
+        ingestInboxLabel(env)
+          .then((r) => {
+            if (r.found > 0) {
+              console.log(
+                `[scheduled] gmail inbox-label safety-net: found=${r.found} ingested=${r.ingested} skipped=${r.skipped}`,
+              );
+            }
+          })
+          .catch((err) => console.error("[scheduled] gmail inbox-label ingestion failed:", err)),
       );
       return;
     }

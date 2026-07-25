@@ -38,6 +38,10 @@ import {
   type ProductCandidate,
 } from "@backend/services/image-processor/product-extraction";
 import { loadExtractionVocab } from "@backend/services/image-processor/intake-helpers";
+import {
+  enrichCandidateAssets,
+  type CandidateEnrichResult,
+} from "@backend/services/scraping/candidate-enrich";
 import { startRun } from "@backend/services/agent-runs";
 import { ledgerSteps } from "@backend/services/agent-run-workflow";
 import {
@@ -57,8 +61,11 @@ export interface BucketIntakeParams {
   researchJobId?: number;
 }
 
-/** mark-running, describe-photos, extract-candidates, persist, mark-complete. */
-const TOTAL_JOB_STEPS = 5;
+/** mark-running, describe-photos, extract-candidates, enrich, persist, mark-complete. */
+const TOTAL_JOB_STEPS = 6;
+
+/** Top-ranked candidates to web-scrape for staged assets (bounds fetch fan-out). */
+const MAX_ENRICH_CANDIDATES = 3;
 
 export class BucketIntakeWorkflow extends WorkflowEntrypoint<
   Env,
@@ -211,23 +218,51 @@ export class BucketIntakeWorkflow extends WorkflowEntrypoint<
         }),
       );
 
-      // ── 4. persist-candidates ───────────────────────────────────────────
+      // ── 4. enrich-candidates ────────────────────────────────────────────
+      // Stage each top candidate's product-page image/PDF SOURCE urls (no
+      // download — held until HITL confirm). Best-effort; never fails the run.
+      const enrichments = await recorded(
+        "enrich-candidates",
+        "Staging product-page assets",
+        3,
+        () =>
+          step.do("enrich-candidates", async () =>
+            Promise.all(
+              candidates.map((cand, i) =>
+                i < MAX_ENRICH_CANDIDATES
+                  ? enrichCandidateAssets(env, {
+                      productUrl: cand.productUrl,
+                      hintProductUrl: marked.hints.productUrl,
+                      brandId: marked.brandId,
+                      itemName: cand.itemName,
+                      modelNumber: cand.modelNumber,
+                    }).catch(() => EMPTY_ENRICHMENT)
+                  : Promise.resolve(EMPTY_ENRICHMENT),
+              ),
+            ),
+          ),
+        (res) => ({
+          detail: `${res.filter((r) => r.imageSourceUrls.length || r.pdfSourceUrls.length).length} candidate(s) enriched`,
+        }),
+      );
+
+      // ── 5. persist-candidates ───────────────────────────────────────────
       const persisted = await recorded(
         "persist-candidates",
         "Saving candidates for review",
-        3,
+        4,
         () =>
           step.do("persist-candidates", async () =>
-            persistCandidates(drizzle(env.DB), bucketId, marked.brandId, candidates),
+            persistCandidates(drizzle(env.DB), bucketId, marked.brandId, candidates, enrichments),
           ),
         (n) => ({ detail: `${n} candidate row(s) written` }),
       );
 
-      // ── 5. mark-complete ────────────────────────────────────────────────
+      // ── 6. mark-complete ────────────────────────────────────────────────
       await recorded(
         "mark-complete",
         "Marking bucket processed",
-        4,
+        5,
         () =>
           step.do("mark-complete", async () => {
             await drizzle(env.DB)
@@ -266,17 +301,26 @@ export class BucketIntakeWorkflow extends WorkflowEntrypoint<
 
 type Db = ReturnType<typeof drizzle>;
 
+/** Placeholder for candidates not enriched (beyond the top-N, or a miss). */
+const EMPTY_ENRICHMENT: CandidateEnrichResult = {
+  productUrl: null,
+  imageSourceUrls: [],
+  pdfSourceUrls: [],
+};
+
 async function persistCandidates(
   db: Db,
   bucketId: number,
   hintBrandId: number | null,
   candidates: ProductCandidate[],
+  enrichments: CandidateEnrichResult[] = [],
 ): Promise<number> {
   if (candidates.length === 0) return 0;
 
   let written = 0;
   for (let i = 0; i < candidates.length; i++) {
     const cand = candidates[i];
+    const enrich = enrichments[i] ?? EMPTY_ENRICHMENT;
     // Resolve the brand to an existing id by exact name (case-insensitive);
     // fall back to the bucket's hint brand. No new brand is created here —
     // that happens only on HITL confirm.
@@ -290,13 +334,16 @@ async function persistCandidates(
       brandNameRaw: cand.brand ?? null,
       productName: cand.itemName ?? null,
       modelNumber: cand.modelNumber ?? null,
-      productUrl: cand.productUrl ?? null,
+      // Prefer the page the assets were scraped from, else the extracted url.
+      productUrl: enrich.productUrl ?? cand.productUrl ?? null,
       category: cand.category ?? null,
       style: cand.style ?? null,
       priceText: cand.price ?? null,
       salePriceText: cand.salePrice ?? null,
       discountText: cand.discountInfo ?? null,
       colors: cand.colors ? JSON.stringify(cand.colors) : null,
+      imageSourceUrls: enrich.imageSourceUrls.length ? JSON.stringify(enrich.imageSourceUrls) : null,
+      pdfSourceUrls: enrich.pdfSourceUrls.length ? JSON.stringify(enrich.pdfSourceUrls) : null,
       rationale: cand.rationale ?? null,
       rawExtraction: JSON.stringify(cand),
       status: "pending",

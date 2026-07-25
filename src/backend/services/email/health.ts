@@ -22,8 +22,16 @@ import {
   tableExists,
   type HealthProbe,
 } from "@backend/services/health/types";
+import { getLatestLoopback } from "@backend/services/health/email-loopback";
 
 const FILE = "src/backend/services/email/health.ts";
+
+const LOOPBACK_FILE = "src/backend/services/health/email-loopback.ts";
+/** Human age of a timestamp, e.g. "3m" / "5h". */
+function ageLabel(from: Date): string {
+  const mins = Math.max(0, Math.floor((Date.now() - from.getTime()) / 60000));
+  return mins < 60 ? `${mins}m` : `${(mins / 60).toFixed(1)}h`;
+}
 
 /** Route ids declared in `routes.ts`. A row's `route` column should be one of these. */
 const KNOWN_ROUTES = ["invoices", "contracts", "general"] as const;
@@ -189,6 +197,87 @@ export const HEALTH_PROBES: HealthProbe[] = [
         return degraded(`Unique index present, but ${dupes} Message-ID(s) appear on more than one row.`);
       }
       return ok("Unique index on worker_emails.message_id present; no duplicate Message-IDs.");
+    },
+  }),
+
+  defineProbe({
+    name: "email_loopback_gmail_to_worker",
+    displayName: "Email · Gmail → worker round-trip (leg 1)",
+    description:
+      "The INBOUND half of the live email round-trip. Each health screen advances a small state machine (services/health/email-loopback.ts): it sends a real email FROM justin@126colby.com TO the worker inbox (remodel@hacolby.app) carrying a unique token and a known number, then — because SMTP delivery outlasts a 10s probe — a LATER run confirms the message landed in `worker_emails` and that the stored body still contains that token and number (i.e. the worker received it AND extraction works). This probe reports the most recent cycle's leg-1 result. It never sends here; it only reads the cycle the runner advanced.",
+    healthTsFilepath: LOOPBACK_FILE,
+    bindingTypesTested: ["d1", "email", "external_api"],
+    whatSuccessMeans:
+      "The last cycle's probe email travelled Gmail → Cloudflare Email Routing → the `email()` handler → the pipeline, was stored in `worker_emails`, and the stored body carried the exact token + number we planted. Inbound email and text extraction both work end-to-end.",
+    whatFailureMeans:
+      "FAILURE (received-but-mismatch): the worker stored the message but the body lost the planted token/number — a parsing/extraction regression in the pipeline. FAILURE (expired): 6h passed and the message never landed in `worker_emails` — Cloudflare Email Routing is not delivering to the Worker, the `email()` handler is erroring, or the routing rule for remodel@hacolby.app is gone. DEGRADED (in-flight): a cycle was just sent and delivery has not completed yet — expected, resolves on the next run.",
+    troubleshootingSteps:
+      "1. Check the cycle detail: `npx wrangler d1 execute core-remodel --remote --command \"SELECT * FROM health_email_loopback ORDER BY id DESC LIMIT 3\"`. 2. If expired: confirm the Cloudflare Email Routing rule still delivers remodel@hacolby.app to this Worker (dashboard → Email → Routing), then `npx wrangler tail --format pretty | grep email-router` while re-running the screen. 3. If received-but-mismatch: open the row in /admin/inbox/all and compare `body_text` against the LOOPBACK-TOKEN / LOOPBACK-NUMBER lines. 4. Confirm Gmail send worked at all — the sender is the service account impersonating justin (see the gmail credential probes).",
+    devOpsPlaybook:
+      "1. This sends REAL mail from justin's Gmail; the sent copies are labelled core-remodel/unit-testing so they can be bulk-cleaned. 2. A cycle advances one step per health screen — to force progress, run the screen again rather than waiting. 3. After a fix, `pnpm run deploy` from `main`, run the screen twice a few minutes apart, and confirm the newest health_email_loopback row reaches stage='complete'. 4. If Gmail auth is the blocker, fix the domain-wide-delegation scopes first (gmail.compose) — no token, no send.",
+    isBillingRisk: false,
+    severity: "MEDIUM",
+    run: async (env) => {
+      if (!(await tableExists(env.DB, "health_email_loopback"))) {
+        return failure("Table `health_email_loopback` does not exist — run `pnpm run migrate:remote`.");
+      }
+      const c = await getLatestLoopback(env);
+      if (!c) return degraded("No email round-trip has run yet — one starts on the next health screen.");
+      if (c.g2wReceived && c.g2wExtractOk) {
+        return ok(`Gmail→worker delivered and extracted (token ${c.token}, number ${c.g2wExpected} matched).`);
+      }
+      if (c.g2wReceived && !c.g2wExtractOk) {
+        return failure(
+          `Gmail→worker email arrived (worker_emails #${c.g2wWorkerEmailId}) but the stored body lost token ${c.token} / number ${c.g2wExpected} — extraction regression.`,
+        );
+      }
+      if (c.stage === "expired") {
+        return failure(`Gmail→worker email (token ${c.token}) never reached the worker within 6h — inbound routing is not delivering.`);
+      }
+      return degraded(`Gmail→worker leg in flight (token ${c.token}, sent ${ageLabel(c.startedAt)} ago) — awaiting delivery.`);
+    },
+  }),
+
+  defineProbe({
+    name: "email_loopback_worker_to_gmail",
+    displayName: "Email · worker → Gmail round-trip (leg 2)",
+    description:
+      "The OUTBOUND half of the same round-trip. Once leg 1 confirms the worker received the probe email, the state machine has the worker REPLY (via `env.EMAIL.send()`) back to justin@126colby.com with a second token/number; a later run then searches Gmail for that reply and checks the delivered body still carries what the worker sent. This proves the worker can send mail AND that Gmail actually receives it — the mirror image of leg 1. Reports the most recent cycle's leg-2 result.",
+    healthTsFilepath: LOOPBACK_FILE,
+    bindingTypesTested: ["email", "external_api"],
+    whatSuccessMeans:
+      "The worker's reply, sent through the `EMAIL` binding, was delivered to Gmail and the message Gmail returned still contained the token + number the worker planted. Outbound send from the Worker works and reaches a real mailbox.",
+    whatFailureMeans:
+      "FAILURE (delivered-but-mismatch): Gmail got the reply but the body lost the planted markers. FAILURE (failed): 6h passed and Gmail never received the worker's reply — the most likely cause is that justin@126colby.com is not a VERIFIED destination for the `EMAIL` send binding (Cloudflare Email Routing only delivers to verified destinations), or the send threw. DEGRADED: the worker has replied and Gmail delivery is still in flight, or leg 1 has not completed yet so leg 2 has not started.",
+    troubleshootingSteps:
+      "1. Inspect the cycle: `... SELECT stage, w2g_received, w2g_extract_ok, last_error FROM health_email_loopback ORDER BY id DESC LIMIT 3`. 2. If failed: verify justin@126colby.com is a confirmed destination address under Cloudflare → Email → Email Routing → Destination addresses; an unverified destination silently fails outbound. 3. Watch the send: `npx wrangler tail --format pretty | grep -i email` while re-running the screen. 4. Confirm the SendEmail binding itself is healthy (see the `email_send_binding_present` probe).",
+    devOpsPlaybook:
+      "1. Outbound uses the `EMAIL` binding and the from-address remodel@hacolby.app — both must remain valid senders on the domain. 2. The health check leaves Gmail untouched (no delete); only the worker_emails probe row is removed on completion. 3. After a fix, deploy from `main` and run the screen twice a few minutes apart until the newest cycle hits stage='complete'. 4. If leg 1 is the blocker, fix that probe first — leg 2 cannot start until the worker has received the inbound message.",
+    isBillingRisk: false,
+    severity: "MEDIUM",
+    run: async (env) => {
+      if (!(await tableExists(env.DB, "health_email_loopback"))) {
+        return failure("Table `health_email_loopback` does not exist — run `pnpm run migrate:remote`.");
+      }
+      const c = await getLatestLoopback(env);
+      if (!c) return degraded("No email round-trip has run yet — one starts on the next health screen.");
+      if (c.stage === "complete" && c.w2gReceived && c.w2gExtractOk) {
+        return ok(`Worker→Gmail delivered and extracted (token ${c.token}, number ${c.w2gExpected} matched).`);
+      }
+      if (c.w2gReceived && !c.w2gExtractOk) {
+        return failure(
+          `Worker→Gmail reply reached Gmail but the delivered body lost token ${c.token} / number ${c.w2gExpected}.`,
+        );
+      }
+      if (c.stage === "failed") {
+        return failure(
+          `Worker→Gmail reply (token ${c.token}) never reached Gmail within 6h — likely justin@126colby.com is not a verified send destination. ${c.lastError ?? ""}`.trim(),
+        );
+      }
+      if (c.stage === "sent_w2g") {
+        return degraded(`Worker replied (token ${c.token}); Gmail delivery in flight (${ageLabel(c.updatedAt)} ago).`);
+      }
+      return degraded(`Waiting on the Gmail→worker leg first (token ${c.token}, stage ${c.stage}).`);
     },
   }),
 ];

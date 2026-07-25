@@ -9,6 +9,7 @@ export * from "./ai/messages";
 
 export * from "./health/health_checks";
 export * from "./health/health_tests";
+export * from "./health/health_email_loopback";
 export * from "./notifications/notifications";
 export * from "./plans/index";
 export * from "./documents/documents";
