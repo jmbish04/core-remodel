@@ -121,6 +121,16 @@ export const BRANCHES: ChangelogBranch[] = [
     prUrl: "https://github.com/jmbish04/core-remodel/pull/220",
   },
   {
+    branch: "claude/receipt-review-hitl-4808",
+    title: "Receipt Review — a HITL queue for the receipt→room deduction engine",
+    summary:
+      "The frontend for 0030: /admin/shopping/receipt-review groups staged room proposals by receipt, shows the engine's proposed room + confidence + reasoning per line item, and lets the owner swap any room from a dropdown of eligible candidates — plus an \"Other room…\" entry that opens a full-room modal for when the guess is way off. Confirming resolves each proposal against a roomId FK (never a name), minting the material. No schema or API change; reuses the resolve endpoints from #236.",
+    date: "2026-07-25",
+    status: "staged",
+    prNumber: 246,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/246",
+  },
+  {
     branch: "claude/health-status-page",
     title: "Public /health page with an on-demand live health screen",
     summary:
@@ -225,6 +235,21 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "added", text: "POST /api/tesla/stream/start|stop, GET /api/tesla/stream/status (admin) via the DO stub; drive activation now signals the DO so ingest is event-driven." },
       { kind: "migration", text: "v16 — new_sqlite_classes TeslaStreamDO; TESLA_STREAM binding in wrangler.jsonc; exported from _worker.ts (OAuthProvider wrapper untouched)." },
       { kind: "fixed", text: "Poll cadence floored at 60s (KV rejects sub-60 TTL; cron is per-minute) with a defensive Math.max; the connected flag carries a heartbeat so a crashed DO can't suppress the poller fallback (stale >5min → false). (codra follow-ups to #241.)" },
+    ],
+    status: "staged",
+  },
+  {
+    id: "receipt-review-hitl",
+    branch: "claude/receipt-review-hitl-4808",
+    date: "2026-07-25",
+    area: "Shopping",
+    title: "Receipt Review HITL page — confirm/correct room placements",
+    summary:
+      "The human-in-the-loop surface for the receipt→material→room deduction engine (0030). A receipt-grouped queue at /admin/shopping/receipt-review: each card is one receipt (invoiceId), each row a line item with the engine's proposed room, confidence, and reasoning. A per-row dropdown offers the eligible candidate rooms plus \"Other room…\" — which opens a modal (RoomSelect over ALL rooms, floor-grouped) for the cases the engine gets wrong. \"Confirm all\" resolves each proposal via POST /api/materials/room-proposals/:id/resolve, minting the material against the chosen roomId FK. Frontend-only: no schema, no new endpoints.",
+    changes: [
+      { kind: "added", text: "New page /admin/shopping/receipt-review (thin Astro shell + ReceiptReviewApp island), plus a sidebar link under Shopping & Sourcing." },
+      { kind: "added", text: "Per-line room dropdown of eligible candidates, and an \"Other room…\" entry opening a full-room RoomSelect modal for way-wrong guesses." },
+      { kind: "changed", text: "Confirm resolves each staged proposal against a roomId FK (never a denormalized room name) via the #236 resolve endpoint; nothing commits to the materials schedule until the owner confirms." },
     ],
     status: "staged",
   },
