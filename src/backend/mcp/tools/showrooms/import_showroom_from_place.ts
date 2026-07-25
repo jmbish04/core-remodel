@@ -1,6 +1,7 @@
 import { showroomStores } from "@backend/db";
 import { GoogleMapsService } from "@backend/services/google/maps";
 import { mapPlaceDetailsToStoreInput } from "@backend/services/showroom/onboarding";
+import { findDuplicateStore } from "@backend/services/showroom/duplicate-check";
 import type { GooglePlaceDetails } from "@frontend/components/showroom/intake/places-mapper";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -81,6 +82,32 @@ export const importShowroomFromPlace = defineTool({
     }
     // Ensure the placeId is stored even if the payload omitted `id`.
     mapped.values.placeId = mapped.values.placeId ?? placeId;
+
+    // Duplicate guard: an existing ACTIVE store may have a DIFFERENT placeId but
+    // the same phone/website/address — don't create a second copy.
+    const dup = await findDuplicateStore(db, {
+      placeId: mapped.values.placeId,
+      phoneNumber: mapped.values.phoneNumber,
+      websiteUrl: mapped.websiteUrl,
+      locationAddress: mapped.values.locationAddress,
+    });
+    if (dup) {
+      const [existingDup] = await db
+        .select()
+        .from(showroomStores)
+        .where(eq(showroomStores.id, dup.id))
+        .limit(1);
+      if (existingDup) {
+        return {
+          created: false,
+          status: `exists (matched by ${dup.reason})`,
+          showroomId: existingDup.id,
+          url: showroomUrl(env, existingDup.id),
+          region: existingDup.hubName ?? null,
+          store: existingDup,
+        };
+      }
+    }
 
     const created = await persistPlaceShowroom(env, db, mapped);
 

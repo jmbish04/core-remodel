@@ -231,6 +231,25 @@ export const BRANCHES: ChangelogBranch[] = [
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "showroom-dedup-merge-and-guards",
+    branch: "claude/showroom-listing-500-map-6kvtm9",
+    date: "2026-07-25",
+    area: "Showrooms",
+    title: "Dedup = true merge (soft-delete + remap children) + duplicate-creation guards",
+    summary:
+      "dedup_showroom_stores now MERGES: it remaps every child/support row from a duplicate onto the keeper (deduping links/hours/mappings so a merge never creates a second website link or trips a unique index) and SOFT-DELETES the duplicate (is_active = 0), never a hard delete. And a shared findDuplicateStore guard now blocks creating a store that already exists — by place_id, phone, website host, or normalized address — wired into the create endpoint and the create_showroom / import_showroom_from_place MCP tools. Also removed the unsupported `remote` field from secrets_store_secrets and upgraded wrangler to 4.114.0.",
+    changes: [
+      { kind: "changed", text: "dedup_showroom_stores: merge semantics — remap child rows (notes/ratings/pocs/contacts/sales/images/price/drive-stops/journal/research/scan/pages/sitemap/photos + dedup-aware links/hours/tag/category/pa/product/brand mappings) to the keeper, then soft-delete the duplicate store (is_active=0). No hard deletes." },
+      { kind: "added", text: "findDuplicateStore(db, {placeId, phoneNumber, websiteUrl, locationAddress}) — shared guard matching an active store by place_id / phone (digits) / website host / normalized address." },
+      { kind: "added", text: "Duplicate-creation guard wired into POST /api/showroom-stores (409 with matchedOn) and the create_showroom + import_showroom_from_place MCP tools (return the existing row instead of creating a copy)." },
+      { kind: "fixed", text: "Removed the `remote` field from 24 secrets_store_secrets bindings (newer wrangler rejects it, failing every wrangler command); upgraded wrangler ^4.100.0 -> ^4.114.0." },
+      { kind: "added", text: "scripts/0119-soft-delete-showroom-duplicates.sql — one-shot SQL to soft-delete the 59 existing re-seed duplicates (superseded by the merge tool for future cleanup)." },
+      { kind: "changed", text: "dedup now groups by normalized NAME (not name+city), so a stub filed under a different city than its real record — Concreteworks (Alameda) vs (San Leandro), etc. — is caught. Distinct multi-branch chains stay safe via the >=2-real-rows skip guard." },
+      { kind: "fixed", text: "apply now reports totalActiveAfter from a live COUNT and keeps storesSoftDeleted separate from childRowsMoved, fixing a miscount that summed store + dropped-link rows." },
+    ],
+    status: "staged",
+  },
+  {
     id: "tesla-stream-ui",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-25",
