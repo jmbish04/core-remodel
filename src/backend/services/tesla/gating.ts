@@ -255,5 +255,17 @@ export async function enforceStreamWindow(env: Env): Promise<WindowEnforcement> 
   const control = await getStreamControl(env);
   if (isWithinStreamWindow(new Date(), control)) return { deactivated: false, slug: null };
   await setActiveDrive(db, null);
+
+  // Proactively stop the streaming DO too. Deactivating the drive already makes
+  // shouldStreamNow() false, but the DO would otherwise keep holding its
+  // duration-billed outbound Tessie socket until its NEXT alarm re-checks —
+  // dropping it here closes that billing gap at the 20:00 window boundary.
+  try {
+    const stub = env.TESLA_STREAM.get(env.TESLA_STREAM.idFromName("singleton"));
+    await stub.fetch("https://do/stop", { method: "POST" }).then((r) => r.body?.cancel());
+  } catch (err) {
+    console.error("[gating] tesla stream stop on window-close failed:", err);
+  }
+
   return { deactivated: true, slug };
 }

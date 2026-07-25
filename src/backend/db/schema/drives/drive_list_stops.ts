@@ -60,9 +60,31 @@ export const driveListStops = sqliteTable(
     /** true = optional "research pick"; false = core numbered stop. */
     isOptional: integer("is_optional", { mode: "boolean" }).notNull().default(false),
 
+    /**
+     * Stop classification. `core` = numbered stop; `optional` = an AI research
+     * pick (mirrors `isOptional=true`, kept in sync); `pitstop` = a
+     * system-suggested proximity stop (0031 Phase D). Backfilled from
+     * `isOptional` on migration.
+     */
+    kind: text("kind", { enum: ["core", "optional", "pitstop"] })
+      .notNull()
+      .default("core"),
+
+    /**
+     * A pitstop suggestion the user has NOT yet promoted. `true` rows render
+     * minimized and are excluded from progress, timing, and the map until the
+     * user adds them to the drive (which flips this to `false`). Always `false`
+     * for core/optional stops.
+     */
+    suggested: integer("suggested", { mode: "boolean" }).notNull().default(false),
+
     /** The drive's check-off — counts toward completion. */
     visited: integer("visited", { mode: "boolean" }).notNull().default(false),
     visitedAt: integer("visited_at", { mode: "timestamp" }),
+
+    /** User skipped this stop on the drive — renders minimized + struck; excluded from progress. */
+    skipped: integer("skipped", { mode: "boolean" }).notNull().default(false),
+    skippedAt: integer("skipped_at", { mode: "timestamp" }),
 
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
