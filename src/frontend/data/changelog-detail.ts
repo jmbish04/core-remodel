@@ -113,6 +113,48 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "tesla-admin-alert": {
+    slug: "tesla-admin-alert",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0023 Ingest · the telemetry state, on every admin page",
+    problem:
+      "Telemetry is only meaningful under two conditions — a drive list is active AND it's inside 7 AM–8 PM — but nothing surfaced that state outside the drives page. The operator wanted a single global alert (alongside the active-drive alert) that says whether a drive is active and whether telemetry is live, offers a one-click enable when it should be on but isn't, and — when live — shows the actual car.",
+    approach:
+      "One aggregate endpoint, GET /api/tesla/stream/banner, returns everything the alert needs from D1/KV only (no DO round-trip, so it's cheap on every page): the active drive, whether telemetry is live (the DO's heartbeat-backed connected flag), the window state with a 12-hour label, whether an Enable button applies (active ∧ in-window ∧ toggle off), and — only when live — the vehicle image URL. That URL is Tesla's public compositor render of the actual car, built from Tessie's vehicle_config with the car/paint/wheel option-code maps ported from the operator's iOS app (Model 3/Y only; S/X need a longer option string) and cached in KV for a day. The alert is a React island mounted in BaseLayout after AppHeader, admin-only, that renders nothing unless a drive is active, polls every 20s (paused while the tab is hidden), and self-hides if the routes 404.",
+    apiChanges: [
+      "GET /api/tesla/stream/banner — { activeDrive, telemetryActive, telemetryEnabled, withinWindow, canEnable, windowLabel (12h), vehicleImageUrl }.",
+    ],
+    filesTouched: [
+      "src/backend/services/tesla/vehicle-image.ts (new)",
+      "src/backend/api/routes/tesla.ts (banner route + 12h label)",
+      "src/frontend/components/AdminTeslaAlert.tsx (new)",
+      "src/frontend/layouts/BaseLayout.astro (admin-only mount)",
+    ],
+    migrations: [],
+    diagrams: [
+      {
+        caption: "What the global alert shows",
+        code: `flowchart TD
+  A{"drive active?"} -->|no| H["nothing"]
+  A -->|yes| T{"telemetry live?"}
+  T -->|yes| L["'Telemetry active' + car image"]
+  T -->|no| W{"in 7 AM-8 PM?"}
+  W -->|yes| E["'Enable telemetry' button"]
+  W -->|no| P["'paused - window is 7 AM-8 PM'"]`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_251.mjs",
+      command: "pnpm run test:pr 251 -- --preview   # and prod (regression)",
+      ranAt: undefined,
+      output:
+        "AUTHORED, NOT YET RUN. Read-only: asserts the banner contract (all fields +\n" +
+        "12-hour label), the canEnable and vehicle-image invariants, and that an admin\n" +
+        "page still serves the layout the banner mounts in. New route reports PENDING\n" +
+        "against prod until merge+deploy.",
+      migrations: [],
+    },
+  },
   "showroom-dedup-merge-and-guards": {
     slug: "showroom-dedup-merge-and-guards",
     branch: "claude/showroom-listing-500-map-6kvtm9",
