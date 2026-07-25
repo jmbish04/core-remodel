@@ -146,3 +146,30 @@ plain fetch is the most rate-limited resource in the system.
 - Migration applies clean; `tsc --noEmit` adds 0 errors; `pnpm run build` bundles.
 - QC (`pr_sitemap_cache.mjs`): first discover persists (`cached:false`), second
   reuses (`cached:true`, no dup row), GET lists it, 400 guards — 11/11 on preview.
+
+---
+
+## Phase C2 — Candidate asset enrichment (THIS CHANGELIST)
+
+**Goal:** the intake workflow now stages each top candidate's product-page image
++ PDF **source URLs** (no download — held until HITL confirm), using Phase B's
+sitemap cache to resolve the page.
+
+### Tasks (done)
+
+- **C2.1** `scrapePageAssets(pageUrl)` (exported, `brand-image-harvest.ts`) — one
+  cheap fetch + HTMLRewriter over `<img>` (src/data-src/srcset) and `<a href>`
+  ending `.pdf`; returns `{ imageUrls, pdfUrls }` capped; never throws.
+- **C2.2** `services/scraping/candidate-enrich.ts` — resolve a page (candidate
+  URL → bucket hint URL → brand website via cached sitemap, fuzzy-matched to
+  model/name) then `scrapePageAssets`. Best-effort; never throws.
+- **C2.3** New workflow step `enrich-candidates` (top 3 by rank) between extract
+  and persist; `persistCandidates` writes `image_source_urls` / `pdf_source_urls`
+  JSON and the resolved `product_url`. Job step count 5 → 6.
+
+### Acceptance
+
+- `tsc --noEmit` adds 0 errors; `pnpm run build` bundles.
+- QC (`pr_candidate_enrich.mjs`): bucket with a hint productUrl → workflow
+  completes → top candidate has a non-empty `imageSourceUrls` array of http
+  source links (not downloaded) + `product_url` recorded — 8/8 on preview.
