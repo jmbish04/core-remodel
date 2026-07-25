@@ -42,7 +42,7 @@ export const boardNodes = sqliteTable(
     // What kind of record this node's image came from. Determines how sourceId is
     // interpreted (or ignored, for render — see renderCanvasId instead).
     sourceType: text("source_type", {
-      enum: ["listing_photo", "blank_canvas", "inspiration", "clipping", "render"],
+      enum: ["listing_photo", "blank_canvas", "inspiration", "clipping", "render", "floor_plan"],
     }).notNull(),
     // Stringified PK of the source record (listing_photos.id, images.id,
     // sample_clippings.id, …). Nullable for ad-hoc nodes with no backing record.

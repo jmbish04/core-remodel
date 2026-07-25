@@ -40,6 +40,8 @@ export interface UseBoardResult {
   inspirationPhotos: BoardPhoto[];
   /** This room's AI/SketchUp renders (drawer "Renders" tab). */
   renderPhotos: BoardPhoto[];
+  /** The whole-house floor plan (drawer "Plan" tab). */
+  floorPlanPhotos: BoardPhoto[];
   /** Source node ids with a recipe HTTP request currently in flight. */
   processingNodeIds: Set<string>;
   /** Child node ids added this session (drives the staggered reveal). */
@@ -115,6 +117,7 @@ export function useBoard(roomId: string): UseBoardResult {
   const [listingPhotos, setListingPhotos] = useState<BoardPhoto[]>([]);
   const [inspirationPhotos, setInspirationPhotos] = useState<BoardPhoto[]>([]);
   const [renderPhotos, setRenderPhotos] = useState<BoardPhoto[]>([]);
+  const [floorPlanPhotos, setFloorPlanPhotos] = useState<BoardPhoto[]>([]);
   const [processingNodeIds, setProcessingNodeIds] = useState<Set<string>>(
     new Set(),
   );
@@ -147,6 +150,7 @@ export function useBoard(roomId: string): UseBoardResult {
       setListingPhotos(data.listingPhotos ?? []);
       setInspirationPhotos(data.inspirationPhotos ?? []);
       setRenderPhotos(data.renderPhotos ?? []);
+      setFloorPlanPhotos(data.floorPlanPhotos ?? []);
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Failed to load the board";
@@ -541,6 +545,7 @@ export function useBoard(roomId: string): UseBoardResult {
       listingPhotos,
       inspirationPhotos,
       renderPhotos,
+      floorPlanPhotos,
       processingNodeIds,
       justAddedNodeIds,
       reload,
@@ -573,6 +578,7 @@ export function useBoard(roomId: string): UseBoardResult {
       listingPhotos,
       inspirationPhotos,
       renderPhotos,
+      floorPlanPhotos,
       processingNodeIds,
       justAddedNodeIds,
       reload,

@@ -156,6 +156,18 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
     [board],
   );
 
+  const placeFloorPlanOnCanvas = useCallback(
+    (photo: BoardPhoto) => {
+      void board.addNode({
+        kind: "image",
+        cfImageUrl: photo.cfImageUrl,
+        sourceType: "floor_plan",
+        sourceId: photo.sourceId,
+      });
+    },
+    [board],
+  );
+
   const placeInspirationOnCanvas = useCallback(
     (photo: BoardPhoto) => {
       void board.addNode({
@@ -219,7 +231,7 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
   const handleRunRecipe = useCallback(
     (
       node: BoardNode,
-      recipe: "material-swap" | "mix" | "clay-to-photoreal",
+      recipe: "material-swap" | "mix" | "clay-to-photoreal" | "floor-plan-furnish",
       params: RecipeRunParams,
     ) => {
       board.setNodeProcessing(node.id, true);
@@ -339,6 +351,9 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
             onClayToPhotoreal={(node) =>
               handleRunRecipe(node, "clay-to-photoreal", { referenceCfImageUrls: [] })
             }
+            onFloorPlanFurnish={(node) =>
+              handleRunRecipe(node, "floor-plan-furnish", { referenceCfImageUrls: [] })
+            }
             onPlaceImage={() => setDrawerOpen(true)}
           />
         </div>
@@ -349,10 +364,12 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
           listingPhotos={board.listingPhotos}
           inspirationPhotos={board.inspirationPhotos}
           renderPhotos={board.renderPhotos}
+          floorPlanPhotos={board.floorPlanPhotos}
           clippings={board.clippings}
           onPlaceListing={placeListingOnCanvas}
           onPlaceInspiration={placeInspirationOnCanvas}
           onPlaceRender={placeRenderOnCanvas}
+          onPlaceFloorPlan={placeFloorPlanOnCanvas}
           onPlaceClipping={placeClippingOnCanvas}
           onExtractFromInspiration={onExtractFromPhoto}
           onSetClippingGlobal={setClippingGlobal}

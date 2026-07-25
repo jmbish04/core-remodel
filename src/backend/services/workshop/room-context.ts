@@ -168,3 +168,23 @@ export async function resolveRenderDrawer(
   }
   return drawer;
 }
+
+/** The static whole-house floor-plan asset served from the Worker's /public. */
+const FLOOR_PLAN_ASSET_PATH = "/floorplans/126colby-listing-floorplan.jpg";
+
+/**
+ * Resolve the whole-house floor plan as a single drawer entry. It is the same
+ * static asset for every room (Option #1: furnish-the-plan is a whole-house
+ * action, not per-room). `origin` is the request origin so the URL Gemini
+ * fetches is absolute + publicly reachable — no Cloudflare Images upload needed
+ * (deliveryUrlFromToken passes http(s) URLs straight through).
+ */
+export function resolveFloorPlanDrawer(origin: string): RoomDrawerPhoto[] {
+  return [
+    {
+      sourceId: "floorplan-house",
+      cfImageUrl: `${origin}${FLOOR_PLAN_ASSET_PATH}`,
+      label: "126 Colby — full floor plan",
+    },
+  ];
+}
