@@ -1,0 +1,115 @@
+# Manual production deploy for the core-remodel Worker.
+#
+# WHY MANUAL-ONLY: Cloudflare Workers Builds was disconnected on purpose — while
+# connected, every branch push force-deployed to the *production* worker
+# (`core-remodel`), ignoring `--name`, so a "preview" build silently shipped
+# unreviewed branch code to prod. This workflow replaces that with an EXPLICIT,
+# human-triggered deploy: `workflow_dispatch` only — it never runs on push or PR.
+#
+# It reproduces `pnpm run deploy` in the one safe order (migrations BEFORE the
+# upload, so new code never reaches prod ahead of its columns):
+#   build → migrate:remote (app D1) → migrate:tesla:remote (Tesla D1) → wrangler deploy
+#
+# ── One-time setup (Settings → Secrets and variables → Actions) ───────────────
+#   Secret  CLOUDFLARE_API_TOKEN   — token with: Account · Workers Scripts:Edit,
+#                                    Account · D1:Edit, Account · Workers Routes:Edit,
+#                                    and read on any binding sources (KV/R2/Vectorize/
+#                                    Images/Secrets Store) so `wrangler deploy` can
+#                                    validate the 37 bindings. (Runtime secret VALUES
+#                                    are NOT needed — they live in the Secrets Store
+#                                    and are only referenced by id.)
+#   Secret  CLOUDFLARE_ACCOUNT_ID  — the account that owns `core-remodel`
+#                                    (wrangler.jsonc has no account_id, so this is
+#                                    required).
+name: Deploy (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type "deploy" to confirm a PRODUCTION deploy'
+        required: true
+        default: ''
+      run_migrations:
+        description: "Apply remote D1 migrations before the upload"
+        type: boolean
+        required: true
+        default: true
+      allow_non_main:
+        description: "Allow deploying from a branch other than main (unsafe — DO NOT for a normal deploy)"
+        type: boolean
+        required: false
+        default: false
+
+# One deploy at a time; a second run waits rather than racing the first onto prod.
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Require typed confirmation
+        if: ${{ inputs.confirm != 'deploy' }}
+        run: |
+          echo "::error::Refusing to deploy — type 'deploy' in the confirm field to proceed."
+          exit 1
+
+      - name: Enforce main-only (unless explicitly overridden)
+        if: ${{ github.ref_name != 'main' && inputs.allow_non_main != true }}
+        run: |
+          echo "::error::Refusing to deploy production from '${{ github.ref_name }}'. Deploy from main, or re-run with allow_non_main=true if you truly mean to."
+          exit 1
+
+      - name: Verify credentials are present
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN"  || { echo "::error::CLOUDFLARE_API_TOKEN secret is not set."; exit 1; }
+          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::CLOUDFLARE_ACCOUNT_ID secret is not set."; exit 1; }
+
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        # version is read from package.json "packageManager" (pnpm@10.33.2)
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: |
+          pnpm run build
+          cp .assetsignore dist/.assetsignore
+
+      - name: Apply remote D1 migrations (app DB)
+        if: ${{ inputs.run_migrations }}
+        run: pnpm run migrate:remote
+
+      - name: Apply remote D1 migrations (Tesla DB)
+        if: ${{ inputs.run_migrations }}
+        run: pnpm run migrate:tesla:remote
+
+      - name: Deploy Worker to production
+        run: npx wrangler@latest deploy
+
+      - name: Confirm the deployment landed
+        run: npx wrangler@latest deployments list | tail -20
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### core-remodel deploy"
+            echo ""
+            echo "- ref: \`${{ github.ref_name }}\`  ·  commit: \`${{ github.sha }}\`"
+            echo "- migrations applied: \`${{ inputs.run_migrations }}\`"
+            echo "- triggered by: @${{ github.actor }}"
+          } >> "$GITHUB_STEP_SUMMARY"
