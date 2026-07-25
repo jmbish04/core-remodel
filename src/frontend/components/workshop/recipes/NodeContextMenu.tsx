@@ -9,7 +9,7 @@
 // ---------------------------------------------------------------------------
 
 import { useEffect, useRef } from "react";
-import { Armchair, Blend, Scissors, SwatchBook, Wand2 } from "lucide-react";
+import { Armchair, Blend, Palette, Scissors, Sun, SwatchBook, Wand2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -31,6 +31,8 @@ interface NodeContextMenuProps {
   onClayToPhotoreal: (node: BoardNode) => void;
   /** Only offered on floor_plan nodes. */
   onFloorPlanFurnish: (node: BoardNode) => void;
+  onToneUnify: (node: BoardNode) => void;
+  onLightingEnhance: (node: BoardNode) => void;
 }
 
 const ITEM_CLASS =
@@ -44,6 +46,8 @@ export function NodeContextMenu({
   onMix,
   onClayToPhotoreal,
   onFloorPlanFurnish,
+  onToneUnify,
+  onLightingEnhance,
 }: NodeContextMenuProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const firstItemRef = useRef<HTMLButtonElement | null>(null);
@@ -126,6 +130,34 @@ export function NodeContextMenu({
           Mix with samples…
           <span className="block text-[11px] text-muted-foreground">
             Blend saved samples onto this image
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className={ITEM_CLASS}
+        onClick={() => run(onLightingEnhance)}
+      >
+        <Sun className="size-4 text-muted-foreground" />
+        <span>
+          Even out the lighting…
+          <span className="block text-[11px] text-muted-foreground">
+            Balance exposure + recover shadow detail
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className={ITEM_CLASS}
+        onClick={() => run(onToneUnify)}
+      >
+        <Palette className="size-4 text-muted-foreground" />
+        <span>
+          Clean up the color…
+          <span className="block text-[11px] text-muted-foreground">
+            Fix white balance + unify color temperature
           </span>
         </span>
       </button>

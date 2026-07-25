@@ -201,7 +201,9 @@ export type RecipeKind =
   | "material-swap"
   | "mix"
   | "clay-to-photoreal"
-  | "floor-plan-furnish";
+  | "floor-plan-furnish"
+  | "tone-unify"
+  | "lighting-enhance";
 
 /** Synchronous recipe result. */
 export interface RecipeSyncResult {
