@@ -207,6 +207,22 @@ export type RecipeKind =
   | "plan-to-isometric"
   | "evolution-grid";
 
+/**
+ * Honest, recipe-specific narration shown over a node while its recipe runs
+ * (§7 copy: narrate the promise being kept — never a generic/misleading line).
+ */
+export const RECIPE_NARRATION: Record<RecipeKind, string> = {
+  extract: "Cutting your sample out cleanly…",
+  "material-swap": "Swapping the finish, keeping everything else in place…",
+  mix: "Blending your samples into the room…",
+  "clay-to-photoreal": "Bringing your model to life…",
+  "floor-plan-furnish": "Furnishing the plan, keeping the walls exactly where they are…",
+  "tone-unify": "Cleaning up the color balance…",
+  "lighting-enhance": "Evening out the light…",
+  "plan-to-isometric": "Standing your plan up into 3D…",
+  "evolution-grid": "Laying out the design, stage by stage…",
+};
+
 /** Synchronous recipe result. */
 export interface RecipeSyncResult {
   node: BoardNode;
