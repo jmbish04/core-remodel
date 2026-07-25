@@ -17,7 +17,7 @@
  */
 
 import { drizzle } from "drizzle-orm/d1";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import { brands } from "@backend/db/schema/brands/brands";
 import { brandTypesDef } from "@backend/db/schema/brands/brand_types_def";
@@ -91,20 +91,22 @@ export async function assignBrandCategories(env: Env): Promise<CategoryAssignmen
   report.brands = targets.length;
   if (targets.length === 0) return report;
 
-  const targetIds = targets.map((b) => b.id);
+  const targetSet = new Set(targets.map((b) => b.id));
 
   // Each target brand's type names, for context — a brand's types strongly imply
   // its categories (a Tile + Slabs brand is a "stone"/"tile" brand).
-  const typeRows =
-    targetIds.length > 0
-      ? await db
-          .select({ brandId: brandTypeMappings.brandId, typeName: brandTypesDef.name })
-          .from(brandTypeMappings)
-          .innerJoin(brandTypesDef, eq(brandTypesDef.id, brandTypeMappings.typeId))
-          .where(inArray(brandTypeMappings.brandId, targetIds))
-      : [];
+  //
+  // Fetch ALL mappings and filter in memory rather than `inArray(targetIds)`:
+  // targetIds is every unmapped brand and can exceed 100, which trips D1's
+  // 100-bound-parameter cap and throws. The mappings table is small, so one
+  // unfiltered scan is cheaper than chunking the IN list.
+  const typeRows = await db
+    .select({ brandId: brandTypeMappings.brandId, typeName: brandTypesDef.name })
+    .from(brandTypeMappings)
+    .innerJoin(brandTypesDef, eq(brandTypesDef.id, brandTypeMappings.typeId));
   const typesByBrand = new Map<number, string[]>();
   for (const r of typeRows) {
+    if (!targetSet.has(r.brandId)) continue;
     const arr = typesByBrand.get(r.brandId) ?? [];
     arr.push(r.typeName);
     typesByBrand.set(r.brandId, arr);
