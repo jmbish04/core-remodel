@@ -38,6 +38,15 @@ export const brandTypeMappings = sqliteTable(
       .notNull()
       .references(() => brandTypesDef.id, { onDelete: "cascade" }),
 
+    /**
+     * The one type that best represents this brand — a plumbing house that also
+     * sells a few fixtures is a Plumbing brand first. Exactly zero or one row
+     * per brand should carry this; it drives the highlighted primary badge and
+     * the default sort. A soft flag, not a constraint: a brand with no primary
+     * simply shows all its types unweighted.
+     */
+    isPrimary: integer("is_primary", { mode: "boolean" }).notNull().default(false),
+
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),
