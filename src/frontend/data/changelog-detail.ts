@@ -166,6 +166,25 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
   class E stop`,
       },
     ],
+    prNumber: 221,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/221",
+    verification: {
+      qcScript: "scripts/qc/pr_221.mjs",
+      command: "pnpm run test:pr 221",
+      source:
+        "const before = d1('SELECT COUNT(*) n FROM showroom_stores;')[0]?.n;\n" +
+        "const res = await c.post('/api/showroom-stores/seed', {});\n" +
+        "const after = d1('SELECT COUNT(*) n FROM showroom_stores;')[0]?.n;\n" +
+        "check('re-seed did NOT add rows (bootstrap-only guard held)', after === before);",
+      ranAt: "2026-07-25",
+      output:
+        "npx tsc --noEmit — 0 new errors in seed-showroom-stores.ts.\n" +
+        "pnpm run build — Complete (server built, prerender OK).\n" +
+        "pnpm run test:pr 221 — AUTHORED, NOT YET RUN. This session runs in a remote\n" +
+        "container with no `tokens` CLI and no CLOUDFLARE_API_TOKEN, so it cannot reach\n" +
+        "the deployed worker or remote D1. The idempotency regression guard must be run\n" +
+        "against prod from a toolchain-equipped environment before merge; result pending.",
+    },
   },
   "0029-health-platform": {
     slug: "0029-health-platform",
