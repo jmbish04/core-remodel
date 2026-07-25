@@ -32,6 +32,7 @@ import { brandNameVariations } from "@backend/db/schema/brands/brand_name_variat
 import { setPrimaryBrandName } from "@backend/services/brand-names";
 import { brandTypesDef } from "@backend/db/schema/brands/brand_types_def";
 import { consolidateBrandTypes } from "@backend/services/brands/type-consolidation";
+import { assignBrandCategories } from "@backend/services/brands/assign-brand-categories";
 import { brandTypeMappings } from "@backend/db/schema/brands/brand_type_mappings";
 import { showroomBrandMappings } from "@backend/db/schema/brands/showroom_brand_mappings";
 import { brandIntel } from "@backend/db/schema/brands/brand_intel";
@@ -286,6 +287,21 @@ brandsRouter.post("/types/consolidate", async (c) => {
   } catch (err) {
     console.error("[brands] POST /types/consolidate failed:", err);
     return c.json({ success: false, error: "Consolidation failed" }, 500);
+  }
+});
+
+/**
+ * POST /categories/backfill — populate `brand_categories` for brands that have
+ * none, mapping each to the shared category vocabulary via AI. Additive and
+ * idempotent (only unmapped brands, onConflictDoNothing). Run on demand.
+ */
+brandsRouter.post("/categories/backfill", async (c) => {
+  try {
+    const report = await assignBrandCategories(c.env);
+    return c.json({ success: true, report });
+  } catch (err) {
+    console.error("[brands] POST /categories/backfill failed:", err);
+    return c.json({ success: false, error: "Category backfill failed" }, 500);
   }
 });
 
