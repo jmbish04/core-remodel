@@ -38,6 +38,9 @@ export interface ShowroomCardData {
   hubName: string | null;
   pricePoint: "$" | "$$" | "$$$" | "$$$$" | null;
   categories: string[];
+  /** Business-model type (joined from showroom_store_type); null = untyped. */
+  typeName?: string | null;
+  typeColor?: string | null;
   heroImageCfImagesUrl: string | null;
   iconCfImagesUrl: string | null;
   hours: HourRow[];
@@ -376,6 +379,28 @@ export function ShowroomMergedCard({
                   +{store.categories.length - 1}
                 </span>
               )}
+            </span>
+          )}
+
+          {store.typeName && (
+            <span
+              className="inline-flex w-fit items-center gap-1 rounded border px-1.5 py-0 text-[10px] font-medium"
+              style={
+                store.typeColor
+                  ? {
+                      backgroundColor: `${store.typeColor}1f`,
+                      color: store.typeColor,
+                      borderColor: `${store.typeColor}55`,
+                    }
+                  : undefined
+              }
+            >
+              <span
+                className="size-1.5 rounded-full"
+                style={{ backgroundColor: store.typeColor ?? "currentColor" }}
+                aria-hidden="true"
+              />
+              {store.typeName}
             </span>
           )}
 

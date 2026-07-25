@@ -82,6 +82,7 @@ import {
   ManageLinksModal,
   SocialLinks,
   SOCIAL_LINK_TYPES,
+  TypeEditor,
   UploadPhotoModal,
   type StoreCategoryChip,
 } from "./hero";
@@ -138,6 +139,10 @@ interface StoreDetail {
   name: string;
   description: string | null;
   pricePoint: string | null;
+  // Business-model type (joined from showroom_store_type on GET /:id).
+  typeId: number | null;
+  typeName: string | null;
+  typeColor: string | null;
   phoneNumber: string | null;
   emailAddress: string | null;
   /**
@@ -1130,6 +1135,15 @@ export function StoreViewportApp({
             <CategoryChipsEditor
               storeId={id}
               categories={store.categories}
+              onChanged={() => void loadStore()}
+            />
+
+            {/* Business-model type — single FK, edited via the yellow-highlight modal. */}
+            <TypeEditor
+              storeId={id}
+              typeId={store.typeId}
+              typeName={store.typeName}
+              typeColor={store.typeColor}
               onChanged={() => void loadStore()}
             />
 
