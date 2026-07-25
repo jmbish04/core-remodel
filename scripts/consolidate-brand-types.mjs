@@ -29,8 +29,30 @@ const DEFAULT_BASE = "https://core-remodel.hacolby.workers.dev";
 /** Resolve the base URL: --base <url> → $BASE_URL → production. */
 function resolveBase() {
   const i = process.argv.indexOf("--base");
-  if (i !== -1 && process.argv[i + 1]) return process.argv[i + 1];
+  if (i !== -1) {
+    const val = process.argv[i + 1];
+    // Guard against `--base` being last or followed by another flag, which would
+    // otherwise adopt the flag string (or nothing) as the URL.
+    if (val && !val.startsWith("--")) return val;
+  }
   return process.env.BASE_URL || DEFAULT_BASE;
+}
+
+/**
+ * Refuse to send the access cookie in cleartext to a remote host. Localhost over
+ * http is fine for dev; any other non-HTTPS base requires an explicit
+ * `--allow-insecure` so a credential can't leak to `http://10.0.0.x` by accident.
+ */
+function assertBaseIsSafe(base) {
+  if (!base.startsWith("http://")) return;
+  const host = new URL(base).hostname;
+  const isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
+  if (isLocal || process.argv.includes("--allow-insecure")) return;
+  console.error(
+    `Refusing to send the remodel_access cookie in cleartext to ${base}.\n` +
+      "Use an https:// base, or pass --allow-insecure if you really mean to.",
+  );
+  process.exit(1);
 }
 
 /** Read WORKER_API_KEY from $WORKER_API_KEY or the local `tokens` CLI. */
@@ -64,14 +86,31 @@ async function main() {
     console.error("WORKER_API_KEY resolved empty — aborting.");
     process.exit(1);
   }
+  assertBaseIsSafe(base);
+
   const cookie = `remodel_access=${accessCookieValue(key)}`;
   const url = `${base}/api/brands/types/consolidate`;
 
   console.log(`POST ${url}`);
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { cookie, "content-type": "application/json" },
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { cookie, "content-type": "application/json" },
+      // The route reads no body, but send an empty JSON object so any
+      // content-type-aware validation is satisfied and the header isn't a lie.
+      body: "{}",
+      // Bound the request so a hung/unreachable server can't block forever.
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (err) {
+    if (err?.name === "TimeoutError") {
+      console.error("\n✗ Request timed out after 30s — the server didn't respond.");
+    } else {
+      console.error("\n✗ Request failed:", String(err?.message || err));
+    }
+    process.exit(1);
+  }
 
   const text = await res.text();
   let body;
