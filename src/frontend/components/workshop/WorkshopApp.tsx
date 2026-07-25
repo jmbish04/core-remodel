@@ -219,7 +219,7 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
   const handleRunRecipe = useCallback(
     (
       node: BoardNode,
-      recipe: "material-swap" | "mix",
+      recipe: "material-swap" | "mix" | "clay-to-photoreal",
       params: RecipeRunParams,
     ) => {
       board.setNodeProcessing(node.id, true);
@@ -336,6 +336,9 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
               setRecipeState({ recipe: "material-swap", node })
             }
             onMix={(node) => setRecipeState({ recipe: "mix", node })}
+            onClayToPhotoreal={(node) =>
+              handleRunRecipe(node, "clay-to-photoreal", { referenceCfImageUrls: [] })
+            }
             onPlaceImage={() => setDrawerOpen(true)}
           />
         </div>

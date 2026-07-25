@@ -193,7 +193,12 @@ export interface NormalizedBBox {
   height: number;
 }
 
-export type RecipeKind = "extract" | "material-swap" | "mix";
+export type RecipeKind =
+  | "extract"
+  | "material-swap"
+  | "mix"
+  | "clay-to-photoreal"
+  | "floor-plan-furnish";
 
 /** Synchronous recipe result. */
 export interface RecipeSyncResult {

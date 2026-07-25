@@ -9,7 +9,7 @@
 // ---------------------------------------------------------------------------
 
 import { useEffect, useRef } from "react";
-import { Blend, Scissors, SwatchBook } from "lucide-react";
+import { Blend, Scissors, SwatchBook, Wand2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -27,6 +27,8 @@ interface NodeContextMenuProps {
   onExtractClipping: (node: BoardNode) => void;
   onMaterialSwap: (node: BoardNode) => void;
   onMix: (node: BoardNode) => void;
+  /** Only offered on render nodes (SketchUp/AI renders). */
+  onClayToPhotoreal: (node: BoardNode) => void;
 }
 
 const ITEM_CLASS =
@@ -38,6 +40,7 @@ export function NodeContextMenu({
   onExtractClipping,
   onMaterialSwap,
   onMix,
+  onClayToPhotoreal,
 }: NodeContextMenuProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const firstItemRef = useRef<HTMLButtonElement | null>(null);
@@ -123,6 +126,22 @@ export function NodeContextMenu({
           </span>
         </span>
       </button>
+      {state.node.sourceType === "render" ? (
+        <button
+          type="button"
+          role="menuitem"
+          className={ITEM_CLASS}
+          onClick={() => run(onClayToPhotoreal)}
+        >
+          <Wand2 className="size-4 text-muted-foreground" />
+          <span>
+            Make it photoreal…
+            <span className="block text-[11px] text-muted-foreground">
+              Turn this SketchUp / clay render photorealistic
+            </span>
+          </span>
+        </button>
+      ) : null}
     </div>
   );
 }
