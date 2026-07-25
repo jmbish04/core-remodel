@@ -55,6 +55,7 @@ interface WorkshopCanvasProps {
   onClayToPhotoreal: (node: BoardNode) => void;
   onFloorPlanFurnish: (node: BoardNode) => void;
   onPlanToIsometric: (node: BoardNode) => void;
+  onEvolutionGrid: (node: BoardNode) => void;
   onToneUnify: (node: BoardNode) => void;
   onLightingEnhance: (node: BoardNode) => void;
   /** "Place image (I)" opens the drawer — our rendition of image placement. */
@@ -99,6 +100,7 @@ export function WorkshopCanvas({
   onClayToPhotoreal,
   onFloorPlanFurnish,
   onPlanToIsometric,
+  onEvolutionGrid,
   onToneUnify,
   onLightingEnhance,
   onPlaceImage,
@@ -647,6 +649,7 @@ export function WorkshopCanvas({
         onClayToPhotoreal={onClayToPhotoreal}
         onFloorPlanFurnish={onFloorPlanFurnish}
         onPlanToIsometric={onPlanToIsometric}
+        onEvolutionGrid={onEvolutionGrid}
         onToneUnify={onToneUnify}
         onLightingEnhance={onLightingEnhance}
       />

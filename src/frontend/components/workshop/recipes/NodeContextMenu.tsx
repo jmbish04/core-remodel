@@ -9,7 +9,7 @@
 // ---------------------------------------------------------------------------
 
 import { useEffect, useRef } from "react";
-import { Armchair, Blend, Box, Palette, Scissors, Sun, SwatchBook, Wand2 } from "lucide-react";
+import { Armchair, Blend, Box, LayoutGrid, Palette, Scissors, Sun, SwatchBook, Wand2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -34,6 +34,7 @@ interface NodeContextMenuProps {
   onToneUnify: (node: BoardNode) => void;
   onLightingEnhance: (node: BoardNode) => void;
   onPlanToIsometric: (node: BoardNode) => void;
+  onEvolutionGrid: (node: BoardNode) => void;
 }
 
 const ITEM_CLASS =
@@ -50,6 +51,7 @@ export function NodeContextMenu({
   onToneUnify,
   onLightingEnhance,
   onPlanToIsometric,
+  onEvolutionGrid,
 }: NodeContextMenuProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const firstItemRef = useRef<HTMLButtonElement | null>(null);
@@ -160,6 +162,20 @@ export function NodeContextMenu({
           Clean up the color…
           <span className="block text-[11px] text-muted-foreground">
             Fix white balance + unify color temperature
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className={ITEM_CLASS}
+        onClick={() => run(onEvolutionGrid)}
+      >
+        <LayoutGrid className="size-4 text-muted-foreground" />
+        <span>
+          Show it evolving…
+          <span className="block text-[11px] text-muted-foreground">
+            A 2×2 grid from empty to finished
           </span>
         </span>
       </button>
