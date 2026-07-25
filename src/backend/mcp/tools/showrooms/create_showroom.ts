@@ -1,6 +1,6 @@
 import type { GooglePlaceDetails } from "@frontend/components/showroom/intake/places-mapper";
 
-import { showroomStoreLinks, showroomStores } from "@backend/db";
+import { showroomStoreLinks, showroomStores, showroomStoreType } from "@backend/db";
 import { GoogleMapsService } from "@backend/services/google/maps";
 import {
   resolveStoreGeoPatch,
@@ -51,6 +51,14 @@ export const createShowroom = defineTool({
     websiteUrl: z.string().optional(),
     zipCode: z.string().optional(),
     pricePoint: z.enum(["$", "$$", "$$$", "$$$$"]).optional(),
+    typeId: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe(
+        "Business-model type FK (showroom_store_type.id — see list_store_types). A store is exactly one type.",
+      ),
     isAppointmentOnly: z.boolean().optional().describe("True if the store is appointment-only"),
   },
   annotations: WRITE,
@@ -78,6 +86,18 @@ export const createShowroom = defineTool({
     url: urlField,
   },
   handler: async ({ env, db }, input) => {
+    // A non-null typeId must reference a real type — validate before any insert.
+    if (input.typeId != null) {
+      const [type] = await db
+        .select({ id: showroomStoreType.id })
+        .from(showroomStoreType)
+        .where(eq(showroomStoreType.id, input.typeId))
+        .limit(1);
+      if (!type) {
+        toolError(`typeId ${input.typeId} is not a valid showroom type. Call list_store_types.`);
+      }
+    }
+
     // ── Duplicate guard (all paths) ───────────────────────────────────────
     // Reject if an ACTIVE store already matches by place_id / phone / website /
     // address, using whatever the caller provided. Returns the existing row
@@ -139,6 +159,7 @@ export const createShowroom = defineTool({
       if (input.name?.trim()) mapped.values.name = input.name.trim();
       if (input.description) mapped.values.description = input.description;
       if (input.pricePoint) mapped.values.pricePoint = input.pricePoint;
+      if (input.typeId != null) mapped.values.typeId = input.typeId;
       if (input.phoneNumber) mapped.values.phoneNumber = input.phoneNumber;
       if (input.emailAddress) mapped.values.emailAddress = input.emailAddress;
       if (input.websiteUrl) mapped.websiteUrl = input.websiteUrl;
@@ -202,6 +223,7 @@ export const createShowroom = defineTool({
         emailAddress: input.emailAddress,
         zipCode: input.zipCode,
         pricePoint: input.pricePoint,
+        typeId: input.typeId,
         isAppointmentOnly: input.isAppointmentOnly,
         scrapeStatus: "pending",
         ...geo,

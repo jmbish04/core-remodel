@@ -1,4 +1,4 @@
-import { showroomStores } from "@backend/db";
+import { showroomStores, showroomStoreType } from "@backend/db";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -18,6 +18,15 @@ export const updateShowroom = defineTool({
     name: z.string().optional(),
     description: z.string().optional(),
     pricePoint: z.enum(["$", "$$", "$$$", "$$$$"]).optional(),
+    typeId: z
+      .number()
+      .int()
+      .positive()
+      .nullable()
+      .optional()
+      .describe(
+        "Business-model type FK (showroom_store_type.id — see list_store_types). Pass null to clear it. A store is exactly one type.",
+      ),
     locationAddress: z.string().optional(),
     phoneNumber: z.string().optional(),
     emailAddress: z.string().optional(),
@@ -75,6 +84,18 @@ export const updateShowroom = defineTool({
       .limit(1);
     if (!existing) {
       toolError(`Showroom ${id} not found. Call list_showrooms for valid ids.`);
+    }
+    // A non-null typeId must reference a real type — never let a hallucinated id
+    // reach the FK column. (null is allowed: it clears the type.)
+    if (patch.typeId != null) {
+      const [type] = await db
+        .select({ id: showroomStoreType.id })
+        .from(showroomStoreType)
+        .where(eq(showroomStoreType.id, patch.typeId as number))
+        .limit(1);
+      if (!type) {
+        toolError(`typeId ${patch.typeId} is not a valid showroom type. Call list_store_types.`);
+      }
     }
     await db.update(showroomStores).set(patch).where(eq(showroomStores.id, id)).run();
     const [updated] = await db
