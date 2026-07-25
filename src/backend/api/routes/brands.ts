@@ -32,6 +32,7 @@ import { brandNameVariations } from "@backend/db/schema/brands/brand_name_variat
 import { setPrimaryBrandName } from "@backend/services/brand-names";
 import { brandTypesDef } from "@backend/db/schema/brands/brand_types_def";
 import { consolidateBrandTypes } from "@backend/services/brands/type-consolidation";
+import { assignPrimaryTypes } from "@backend/services/brands/assign-primary-type";
 import { brandTypeMappings } from "@backend/db/schema/brands/brand_type_mappings";
 import { showroomBrandMappings } from "@backend/db/schema/brands/showroom_brand_mappings";
 import { brandIntel } from "@backend/db/schema/brands/brand_intel";
@@ -286,6 +287,23 @@ brandsRouter.post("/types/consolidate", async (c) => {
   } catch (err) {
     console.error("[brands] POST /types/consolidate failed:", err);
     return c.json({ success: false, error: "Consolidation failed" }, 500);
+  }
+});
+
+/**
+ * POST /types/assign-primary — pick the primary type for MULTI-type brands.
+ *
+ * Consolidation flags a primary only for single-type brands; this fills the
+ * ambiguous case with an AI call that may only choose from a brand's own types.
+ * Idempotent admin operation, run on demand (calls the model), like consolidate.
+ */
+brandsRouter.post("/types/assign-primary", async (c) => {
+  try {
+    const report = await assignPrimaryTypes(c.env);
+    return c.json({ success: true, report });
+  } catch (err) {
+    console.error("[brands] POST /types/assign-primary failed:", err);
+    return c.json({ success: false, error: "Primary assignment failed" }, 500);
   }
 });
 
