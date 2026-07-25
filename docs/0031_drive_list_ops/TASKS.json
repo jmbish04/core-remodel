@@ -1,0 +1,237 @@
+{
+  "slug": "drive-list-ops",
+  "title": "Drive List Ops — notes, ratings, skip, active banner, live timing, pitstops",
+  "tasks": [
+    {
+      "taskKey": "B1",
+      "workstream": "schema",
+      "phase": "B",
+      "changeType": "schema",
+      "dependsOn": [],
+      "status": "pending",
+      "title": "drive_list_notes table + migration",
+      "detail": "New table (drive_list_id FK, drive_list_stop_id FK nullable, body, source user|ai, read_at, created_at). Migration backfills drive_lists.notes JSON → rows (stop_id null). Additive only.",
+      "successCriteria": "migrate:remote applied; existing drive notes appear as rows; drive_lists.notes untouched for back-compat read."
+    },
+    {
+      "taskKey": "B2",
+      "workstream": "schema",
+      "phase": "B",
+      "changeType": "schema",
+      "dependsOn": [],
+      "status": "pending",
+      "title": "drive_list_stops: add kind, suggested, skipped, skipped_at",
+      "detail": "kind enum core|optional|pitstop (backfill from is_optional), suggested bool default 0, skipped bool default 0, skipped_at ts. Keep is_optional.",
+      "successCriteria": "columns exist on remote; kind backfilled; suggested/skipped default 0."
+    },
+    {
+      "taskKey": "B3",
+      "workstream": "frontend",
+      "phase": "B",
+      "changeType": "chore",
+      "dependsOn": [],
+      "status": "pending",
+      "title": "Install @reui/c-alert-5",
+      "detail": "shadcn CLI --dry-run first; diff src/frontend/components/ui after; revert any shared primitive it rewrites.",
+      "successCriteria": "Alert component in src/frontend/components/reui/; no unrelated primitive diff."
+    },
+    {
+      "taskKey": "B4",
+      "workstream": "api",
+      "phase": "B",
+      "changeType": "api",
+      "dependsOn": ["B1"],
+      "status": "pending",
+      "title": "Notes CRUD API",
+      "detail": "GET /:slug/notes (grouped), POST /:slug/notes {body,stopId?,source?}, PATCH /:slug/notes/:id {read}, DELETE /:slug/notes/:id.",
+      "successCriteria": "QC: create drive + stop note, toggle read sets/clears read_at, delete removes."
+    },
+    {
+      "taskKey": "B5",
+      "workstream": "api",
+      "phase": "B",
+      "changeType": "api",
+      "dependsOn": [],
+      "status": "pending",
+      "title": "Stop rating → showroom visit log",
+      "detail": "POST /:slug/stops/:stopId/rating {rating, contextMarkdown?, deferFeedback?}. Resolves stop.showroomStoreId → records showroom visit + rating. 400 if no linked showroom. deferFeedback creates an ai note via B4.",
+      "successCriteria": "QC: rating a linked stop creates a visit row with that rating; unlinked stop → 400; defer creates the ai note."
+    },
+    {
+      "taskKey": "B6",
+      "workstream": "api",
+      "phase": "B",
+      "changeType": "api",
+      "dependsOn": ["B2"],
+      "status": "pending",
+      "title": "Skip toggle on stop PATCH",
+      "detail": "Extend PATCH /:slug/stops/:stopId to accept {skipped}. Sets skipped_at. Excluded from progress.",
+      "successCriteria": "QC: skip/unskip flips the flag; progress ignores skipped stops."
+    },
+    {
+      "taskKey": "B7",
+      "workstream": "frontend",
+      "phase": "B",
+      "changeType": "frontend",
+      "dependsOn": ["B3", "B4"],
+      "status": "pending",
+      "title": "Notes as collapsible alerts",
+      "detail": "Render drive + per-stop notes as reui Alerts; collapsed when read_at set, expandable; +Note inline composer (plain text).",
+      "successCriteria": "notes show as alerts, mark-read collapses + persists, reload keeps state."
+    },
+    {
+      "taskKey": "B8",
+      "workstream": "frontend",
+      "phase": "B",
+      "changeType": "frontend",
+      "dependsOn": ["B5"],
+      "status": "pending",
+      "title": "Star rating card row + fullscreen modal",
+      "detail": "Stars on the card (linked stops only); tap → fullscreen Dialog with big stars preselected + optional feedback textarea + 'AI follow up later' button.",
+      "successCriteria": "rate from modal writes visit; AI-later creates the dated ai note; card reflects new rating."
+    },
+    {
+      "taskKey": "B9",
+      "workstream": "frontend",
+      "phase": "B",
+      "changeType": "frontend",
+      "dependsOn": ["B6"],
+      "status": "pending",
+      "title": "Skip button + confirm + crossed-out minimized + unskip",
+      "detail": "Skip → confirm Dialog → minimized struck card with Unskip only.",
+      "successCriteria": "skip confirms + minimizes + strikes; unskip restores."
+    },
+    {
+      "taskKey": "C1",
+      "workstream": "schema",
+      "phase": "C",
+      "changeType": "schema",
+      "dependsOn": [],
+      "status": "pending",
+      "title": "drive_lists: started_at, start_latitude, start_longitude",
+      "detail": "Additive columns for start capture on activation.",
+      "successCriteria": "columns on remote."
+    },
+    {
+      "taskKey": "C2",
+      "workstream": "api",
+      "phase": "C",
+      "changeType": "api",
+      "dependsOn": [],
+      "status": "pending",
+      "title": "GET /api/drive-lists/active",
+      "detail": "Lightweight {slug,title}|null for the global banner.",
+      "successCriteria": "returns active drive or null; used by banner."
+    },
+    {
+      "taskKey": "C3",
+      "workstream": "api",
+      "phase": "C",
+      "changeType": "api",
+      "dependsOn": ["C1"],
+      "status": "pending",
+      "title": "Activation captures start_at + location (on top of #242)",
+      "detail": "Extend PATCH /:slug {isActive:true} (already edited by #242) to set started_at + start coords from Tesla GPS → phone fix, fire-and-forget. Respect 07:00-20:00 gate.",
+      "successCriteria": "activating inside window sets started_at + coords; deactivate keeps started_at."
+    },
+    {
+      "taskKey": "C4",
+      "workstream": "api",
+      "phase": "C",
+      "changeType": "api",
+      "dependsOn": ["C1"],
+      "status": "pending",
+      "title": "Feasibility plan endpoint",
+      "detail": "GET /:slug/plan — structured-hours resolver (linked showroom) + drive-route-planner from started_at/start coords; per-stop {etaLocal,dwellMin,waitMin,feasible,reason}. Cache per (drive, started_at, stopset).",
+      "successCriteria": "QC: returns timing for linked+hours stops; correct won't-make-it flag on a late start; unlinked stops omit timing."
+    },
+    {
+      "taskKey": "C5",
+      "workstream": "frontend",
+      "phase": "C",
+      "changeType": "chore",
+      "dependsOn": [],
+      "status": "pending",
+      "title": "Install @reui/c-button-53 (sliding button)",
+      "detail": "shadcn CLI --dry-run first; revert shared-primitive rewrites.",
+      "successCriteria": "sliding button available; no unrelated primitive diff."
+    },
+    {
+      "taskKey": "C6",
+      "workstream": "frontend",
+      "phase": "C",
+      "changeType": "frontend",
+      "dependsOn": ["C2"],
+      "status": "pending",
+      "title": "Activate button on drive viewport header",
+      "detail": "Activate/Active toggle in the drive header; shows 409 window reason inline.",
+      "successCriteria": "activates the drive; reflects active state."
+    },
+    {
+      "taskKey": "C7",
+      "workstream": "frontend",
+      "phase": "C",
+      "changeType": "frontend",
+      "dependsOn": ["C2", "C5"],
+      "status": "pending",
+      "title": "Global active-drive banner in BaseLayout",
+      "detail": "client:only island polling /active; Return (sliding button) + End (confirm → PATCH isActive:false). Sticky, high contrast.",
+      "successCriteria": "banner shows on every page when a drive is active; return navigates; end confirms + clears."
+    },
+    {
+      "taskKey": "C8",
+      "workstream": "frontend",
+      "phase": "C",
+      "changeType": "frontend",
+      "dependsOn": ["C4"],
+      "status": "pending",
+      "title": "Per-stop timing display",
+      "detail": "Render plan chip per stop: 'stay ~N min · ETA', or 'won't make it — closes HH:MM'. No chip when no timing.",
+      "successCriteria": "timing chips match /plan; late stops flagged; unlinked show none."
+    },
+    {
+      "taskKey": "D1",
+      "workstream": "api",
+      "phase": "D",
+      "changeType": "api",
+      "dependsOn": ["B2"],
+      "status": "pending",
+      "title": "Proximity pitstop generator (D1-only, no Google cost)",
+      "detail": "In createDriveList (MCP + API): after core stops, haversine registered showrooms within 5-10mi of route, open in drive window, not already on drive → insert kind='pitstop', suggested=1, is_optional=1.",
+      "successCriteria": "new drive gets suggested pitstops (or 0); no Google call at create; suggested excluded from progress/timing/map."
+    },
+    {
+      "taskKey": "D2",
+      "workstream": "api",
+      "phase": "D",
+      "changeType": "api",
+      "dependsOn": ["D1", "C4"],
+      "status": "pending",
+      "title": "Promote pitstop",
+      "detail": "PATCH /:slug/stops/:stopId {suggested:false}; promoted stop enters /plan recalc.",
+      "successCriteria": "QC: promote flips suggested; promoted pitstop appears in /plan."
+    },
+    {
+      "taskKey": "D3",
+      "workstream": "frontend",
+      "phase": "D",
+      "changeType": "frontend",
+      "dependsOn": [],
+      "status": "pending",
+      "title": "Fullscreen showroom detail modal",
+      "detail": "Tap card (outside buttons) → Dialog with condensed showroom card from /api/showroom-stores/:id (name, phone, photos, brands, products, actions). Linked stops only; lazy fetch.",
+      "successCriteria": "modal shows real showroom data; unlinked stops don't open it; loading/error states."
+    },
+    {
+      "taskKey": "D4",
+      "workstream": "frontend",
+      "phase": "D",
+      "changeType": "frontend",
+      "dependsOn": ["D1", "D3"],
+      "status": "pending",
+      "title": "Pitstop card rendering + Add-to-drive",
+      "detail": "Suggested pitstops minimized by default under nearest core stop, dashed, 'Proximity pitstop' badge; expand → full affordances; Add to drive → promote (D2).",
+      "successCriteria": "pitstops minimized by default; full card on expand; Add promotes + joins timing."
+    }
+  ]
+}
