@@ -1,0 +1,26 @@
+{
+  "slug": "phase-grouped-task-ux",
+  "title": "Phase-Grouped Task/Changelog UX (shared grid)",
+  "hasDesignSpec": true,
+  "phases": [
+    { "key": "A", "title": "Data structures" },
+    { "key": "B", "title": "Shared component" },
+    { "key": "C", "title": "Wire all surfaces" },
+    { "key": "D", "title": "Assignee/authoring (optional, needs 0034)" }
+  ],
+  "tasks": [
+    { "taskKey": "A1", "phase": "A", "workstream": "db", "changeType": "new", "dependsOn": [], "status": "pending", "title": "plan_tasks.parent_task_key (subtasks)", "successCriteria": "nullable TEXT self-ref within plan_slug by task_key; a parent with children renders a disclosure; migrate:remote" },
+    { "taskKey": "A2", "phase": "A", "workstream": "db", "changeType": "new", "dependsOn": [], "status": "pending", "title": "plan_phases table + seed from submit_feature_proposal phases[]", "successCriteria": "plan_slug/phase/title/sort_order, UNIQUE(plan_slug,phase); proposal service + POST /api/changelog/proposals seed it; backfill existing plans' phase titles" },
+    { "taskKey": "A3", "phase": "A", "workstream": "db", "changeType": "new", "dependsOn": [], "status": "pending", "title": "changelog_entries.plan_slug + backfill", "successCriteria": "nullable slug link -> plans; backfill from matching changelog_proposals.plan_slug so committed entries can render their plan_tasks" },
+    { "taskKey": "A4", "phase": "A", "workstream": "api", "changeType": "update", "dependsOn": ["A1", "A2"], "status": "pending", "title": "GET /api/admin/plans/:slug returns phase-nested tasks + subtasks + phase titles", "successCriteria": "tasks nested by phase (plan_phases titles), subtasks by parent_task_key; realtime poke unchanged; QC" },
+    { "taskKey": "B1", "phase": "B", "workstream": "frontend", "changeType": "new", "dependsOn": ["A4"], "status": "pending", "title": "Build <PhaseGroupedTaskGrid> per DESIGN_SPEC (shadcn/Monolith)", "successCriteria": "phase headers+counts, parent rows w/ disclosure, indented subtasks, StatusBadge/PriorityBadge (OKLCH), assignee avatar/initials, workstream chip, search+tabs, pagination; loading/empty/filtered/error states; Base UI not Radix; shadcn add --dry-run verified" },
+    { "taskKey": "B2", "phase": "B", "workstream": "frontend", "changeType": "new", "dependsOn": ["B1"], "status": "pending", "title": "A11y + responsive", "successCriteria": "keyboard disclosure (aria-expanded), focus rings, semantic table in overflow-x-auto wrapper; body never scrolls horizontally" },
+    { "taskKey": "B3", "phase": "B", "workstream": "frontend", "changeType": "new", "dependsOn": ["B1"], "status": "pending", "title": "Realtime row updates", "successCriteria": "subscribe to plan room; update_plan_task poke restyles the row (status/PR chip) without full reload" },
+    { "taskKey": "B4", "phase": "B", "workstream": "qc", "changeType": "new", "dependsOn": ["B2", "B3"], "status": "pending", "title": "Light+dark verify + get-review-rules pass", "successCriteria": "screenshots light+dark; AA contrast; review rules pass; tsc delta empty" },
+    { "taskKey": "C1", "phase": "C", "workstream": "frontend", "changeType": "update", "dependsOn": ["B4"], "status": "pending", "title": "Preview changelog uses the shared grid (mode=proposed)", "successCriteria": "ProposalBundle.tsx renders <PhaseGroupedTaskGrid mode=proposed>; live board still updates" },
+    { "taskKey": "C2", "phase": "C", "workstream": "frontend", "changeType": "update", "dependsOn": ["B4", "A3"], "status": "pending", "title": "Committed changelog detail uses the shared grid (mode=committed)", "successCriteria": "ChangelogEntryView/[slug].astro renders mode=committed from entry.plan_slug (read-only, done/shipped); changes[] kept for prose/migrations" },
+    { "taskKey": "C3", "phase": "C", "workstream": "frontend", "changeType": "update", "dependsOn": ["B4"], "status": "pending", "title": "Plans board uses the shared grid (mode=board); delete old boards", "successCriteria": "/admin/plans/:slug uses the component; bespoke boards removed; no regressions" },
+    { "taskKey": "C4", "phase": "C", "workstream": "qc", "changeType": "new", "dependsOn": ["C1", "C2", "C3"], "status": "pending", "title": "QC all surfaces + changelog", "successCriteria": "identical phase-grouped grid on preview + committed + board; subtasks expand; filters/tabs; live poke; changelog + link" },
+    { "taskKey": "D1", "phase": "D", "workstream": "frontend", "changeType": "update", "dependsOn": ["C4"], "status": "pending", "title": "(optional, needs 0034) real assignee avatars via users + subtask authoring", "successCriteria": "assignee_participant_id -> users avatar; 'my tasks' filter; subtask create UI; deferred until 0034 lands users" }
+  ]
+}
