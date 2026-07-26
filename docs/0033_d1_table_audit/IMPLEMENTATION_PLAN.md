@@ -52,6 +52,27 @@ append-only logs), usage meters (`gemini_usage_log`, `google_maps_usage_log`), c
 (`project_system_variables`, `sales_tax_rates`, `model_pricing`, `device_preferences`), integration
 logs (clickup/tesla/health/workflow), and KV-style stores (`agent_adhoc_memory`, `google_oauth_tokens`).
 
+### 1.1 Cross-check vs a schema-only pass (Gemini) — FKs CONSIDERED & DECLINED
+
+A second reviewer working from the schema CSV alone (no code, no schema comments) proposed wiring
+many more FKs. Each is recorded here with the reason it stays standalone, so B7 documents the
+decision rather than leaving it to be re-litigated:
+
+| Proposed FK | Verdict | Reason |
+|---|---|---|
+| `mcp_tool_invocations.session_id` / `mcp_conversations` / `mcp_agent_issues` / `mcp_feature_requests` → `mcp_sessions.id` | **DECLINE** (strongest candidate) | Genuine hierarchy, but these are append-only telemetry written via `ctx.waitUntil`; an FK makes a log insert **fail** if the session row is missing or written late (race) → lost telemetry. Logs are FK-free on purpose. |
+| `gemini_usage_log.agent_run_id` → `agent_runs.id` | **DECLINE** | Nullable soft-correlation on a usage meter (many calls are direct, no run). FK would reject valid null-context rows on any late/missing run. |
+| `clickup_revision_log.clickup_task_id` / `clickup_task_flags.clickup_task_id` → (a task table) | **DECLINE — target does not exist** | `clickup_task_id` is an **external ClickUp id**; there is no local ClickUp task table to point at. |
+| `device_preferences.device_id` → (a devices table) | **DECLINE — target does not exist** | `device_id` is a **cookie id** (cookie=user convention); there is no `devices` row. |
+| `permits_contact_insights.contact_name` → `permits_contacts` | **DECLINE — would be a name-join** | Relating by `contact_name` is the banned denormalized-name anti-pattern. A proper `contact_id` FK is a separate, deliberate change if wanted — not a name link. |
+| `changelog_branches`/`entries`/`proposals` (branch/slug strings) | **DECLINE** | CLAUDE.md: the changelog is append-only and **FK-free by design**; slug/branch are intentional soft links. |
+| `showroom_gaps.material_id`, `showroom_gaps.sweep_session_id` | **DECLINE (for now)** | The schema comments mark these as deliberate plain columns. Only `room_id` (which also carries the banned `room_name`) is fixed in B3. Revisit material_id/sweep_session_id separately if desired. |
+| `d1_migrations` | **N/A** | Migration-runner bookkeeping (system table, not in the Drizzle schema) — explains the 49-vs-50 count delta. |
+
+If you *want* the MCP `session_id` FK despite the write-safety cost, it can be added as an optional
+task — but it should use a nullable FK with `onDelete set null`, and the logging middleware must
+tolerate an insert that skips the constraint rather than dropping the log line.
+
 ---
 
 ## 2. Target relations (Phase B FK adds)
