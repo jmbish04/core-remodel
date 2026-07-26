@@ -52,6 +52,13 @@ export const ISO_LOCK = [
   "- Do NOT add, remove, merge, or move any room, wall, door, or window.",
 ].join("\n");
 
+/** evolution-grid: a 2×2 storyboard of one space at four design stages. */
+export const GRID_LOCK = [
+  "- Output a SINGLE image composed of a 2×2 grid of four panels.",
+  "- Every panel shows the SAME space from the SAME viewpoint — only the design completeness changes across the four panels (e.g. empty → rough layout → materials → fully finished).",
+  "- Do NOT change the room's architecture, dimensions, or camera between panels.",
+].join("\n");
+
 /** Recipe ids wired end-to-end. */
 export type RecipeId =
   | "material-swap"
@@ -60,7 +67,8 @@ export type RecipeId =
   | "floor-plan-furnish"
   | "tone-unify"
   | "lighting-enhance"
-  | "plan-to-isometric";
+  | "plan-to-isometric"
+  | "evolution-grid";
 
 /**
  * How a recipe hands images to `runStage`:
@@ -183,6 +191,19 @@ export const RECIPES: Record<RecipeId, RecipeDef> = {
     defaultUserRequest:
       "Render this floor plan as a clean, furnished 3D isometric dollhouse with low walls.",
     guardrail: ISO_LOCK,
+    referencesHeader: "Style reference images (material/palette only):",
+  },
+  "evolution-grid": {
+    id: "evolution-grid",
+    label: "Show it evolving",
+    category: "explore",
+    stageType: "stage_3_LP_finish",
+    inputMode: "references",
+    intro:
+      "You are an architectural design storyteller. Produce a single 2×2 grid image showing the provided space evolving across four design stages, based on the user's request.",
+    defaultUserRequest:
+      "Show a 2×2 grid of the same space: empty, rough layout, materials added, then fully finished.",
+    guardrail: GRID_LOCK,
     referencesHeader: "Style reference images (material/palette only):",
   },
 };

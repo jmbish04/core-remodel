@@ -28,7 +28,7 @@ import {
 } from "./recipes/RecipeDialog";
 import { RoomPicker } from "./RoomPicker";
 import { runRecipe } from "./api";
-import { isAsyncRecipeResult } from "./types";
+import { isAsyncRecipeResult, RECIPE_NARRATION } from "./types";
 import { useBoard } from "./hooks/useBoard";
 import type {
   BoardNode,
@@ -238,10 +238,11 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
         | "floor-plan-furnish"
         | "tone-unify"
         | "lighting-enhance"
-        | "plan-to-isometric",
+        | "plan-to-isometric"
+        | "evolution-grid",
       params: RecipeRunParams,
     ) => {
-      board.setNodeProcessing(node.id, true);
+      board.setNodeProcessing(node.id, true, RECIPE_NARRATION[recipe]);
       void (async () => {
         try {
           const result = await runRecipe(node.id, recipe as RecipeKind, {
@@ -369,6 +370,9 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
             }
             onLightingEnhance={(node) =>
               handleRunRecipe(node, "lighting-enhance", { referenceCfImageUrls: [] })
+            }
+            onEvolutionGrid={(node) =>
+              handleRunRecipe(node, "evolution-grid", { referenceCfImageUrls: [] })
             }
             onPlaceImage={() => setDrawerOpen(true)}
           />
