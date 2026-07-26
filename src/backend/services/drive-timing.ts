@@ -129,7 +129,8 @@ export async function getDriveTiming(db: RemodelDb, slug: string): Promise<Drive
 
   // Only route the stops the driver will actually visit, in order.
   const active = stops.filter((s) => !s.skipped && !s.suggested);
-  const anchor = drive.startedAt ? new Date(Number(drive.startedAt) * 1000) : new Date();
+  // `startedAt` is a drizzle timestamp column → already a Date (or null).
+  const anchor = drive.startedAt ?? new Date();
   const day = laWeekday(anchor);
   const startMinute = localMinutesInLA(anchor);
   const fromActiveStart = drive.startedAt != null && drive.startLat != null && drive.startLng != null;
@@ -218,7 +219,7 @@ export async function getDriveTiming(db: RemodelDb, slug: string): Promise<Drive
   }
 
   return {
-    startedAt: drive.startedAt != null ? Number(drive.startedAt) : null,
+    startedAt: drive.startedAt ? Math.floor(drive.startedAt.getTime() / 1000) : null,
     startMinute,
     day,
     fromActiveStart,
