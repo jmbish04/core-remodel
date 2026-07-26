@@ -44,7 +44,7 @@ contract the frontend depends on, and without losing a single row.**
 | 4 | Hub | **Derived from address** via the region service — no captured hub columns. Built to generalize beyond the Bay Area for eventual resale (Phase D2). |
 | 5 | `location_notes` | **PlateJS triple** — `notes` (plaintext) + `notes_markdown` + `notes_html`; notes input becomes `OverviewNoteEditor` (B9). |
 | 6 | `location_address` | **Not stored** — parse source only; dropped permanently. Display address reconstructed from structured parts (`formatShowroomAddress`). AI abuses a free address field. |
-| 7 | `distance_from_sf_*` | **Dropped** — distance derived dynamically from the `/admin/config/address` origin at read; not hardcoded to SF, not stored. |
+| 7 | `distance_from_sf_*` | **Dropped** — distance derived at read from the **property/origin config table** (D1, plan **0032**; CRUD API; surfaced at `/admin/config/address`) → showroom coords. Not hardcoded to SF, not stored. **B10 depends on 0032 landing.** |
 
 ---
 
@@ -321,9 +321,10 @@ Idempotent: upsert by unique `store_id`; contacts insert guarded so re-runs don'
   (`src/backend/lib/bay-area-region.ts`) — the hub is derived here, on write and at read.
 - **POC → contacts:** the existing backfill endpoint `showroom-contacts.ts:~664` already
   reads `main_poc_*` and builds contact rows — align the Phase A script with its mapping.
-- **Config origin address:** `/admin/config/address` (`config-nav.ts`, `config-tax.ts`,
-  `services/drive-home-arrival.ts`) already holds the configurable home/origin — use it as
-  the distance origin so `distanceFromSf*` is computed dynamically (not hardcoded to SF).
+- **Property/origin config:** the canonical origin address (+ geocoded lat/lng) is delivered
+  as a first-class D1 table with CRUD APIs by **plan 0032** (today the routing origin is
+  hardcoded as `"126 Colby St, San Francisco, CA"` in `plan_drive_route.ts:132`, `showroom-scout.ts`,
+  `maps.ts`). B10 reads that table for the distance origin. **0031-B10 depends on 0032.**
 - **Notes editor:** `@/components/showroom/OverviewNoteEditor` (PlateJS, emits `{markdown, html}`).
 - **New small helper:** `formatShowroomAddress(parts)` — assembles a display address from
   the structured parts (with an `assert` self-check). Ships in Phase B; there is no existing

@@ -46,7 +46,7 @@ at plan time and code moves.
 3. `B4` Shared field-out writer — flat body → `{stores identity, locations, contacts}`; `db.batch`. POC fields fan out to contacts (SALES / GENERAL_CONTACT). Stop writing the old columns.
 4. `B5`/`B6` Repoint every writer in §5.1 (API + MCP + services + seed) to the field-out helper.
 5. `B7` Hub derivation wired on write (sets `bay_area_city_id` via `resolveStoreGeoPatch`) and at read (helper). No captured hub columns read/written.
-6. `B10` Distance derivation — compute `distanceFromSf*` at read from the `/admin/config/address` origin → showroom coords (reuse the existing drive/geo distance util; geocode + cache the config origin if it stores only text). Never stored, never hardcoded to SF.
+6. `B10` Distance derivation — compute `distanceFromSf*` at read from the **property/origin config table** (D1, plan **0032**; lat/lng) → showroom coords (reuse the existing drive/geo distance util). Never stored, never hardcoded to SF. **Blocked until 0032 lands.**
 7. `B9` Notes → PlateJS triple end-to-end: the field-out writer accepts `{markdown, html}` (derives plaintext) and the read helper returns `locationNotes`/`locationNotesMarkdown`/`locationNotesHtml`; swap the notes input in `EditStoreModal.tsx` (and the intake notes field) from a plain textarea to the existing `OverviewNoteEditor` (`@/components/showroom/OverviewNoteEditor`). Sanitize html on write.
 8. `B8` `scripts/qc/pr_<B>.mjs` on `--preview` AND prod; frontend smoke on preview (notes editor round-trips markdown+html; derived `locationAddress` + `distanceFromSf*` correct). Changelog + link.
 

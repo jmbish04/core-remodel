@@ -1,0 +1,22 @@
+{
+  "slug": "property-origin-config",
+  "title": "Property / Origin Config (first-class, relational)",
+  "unblocks": ["0031:B10"],
+  "phases": [
+    { "key": "A", "title": "Table + API + backfill" },
+    { "key": "B", "title": "De-hardcode consumers" },
+    { "key": "C", "title": "Relational ties (optional, gated on 0033)" }
+  ],
+  "tasks": [
+    { "taskKey": "A1", "phase": "A", "workstream": "db", "changeType": "new", "dependsOn": [], "status": "pending", "title": "Add properties schema (structured parts + coords + block/lot; single is_primary)", "successCriteria": "config/properties.ts: id PK, is_primary bool w/ partial-unique guard, label, street parts, zip_code, place_id, google_maps_link, lat/lng, sf_assessor_block, sf_assessor_lot, timestamps; barrel export; db:generate" },
+    { "taskKey": "A2", "phase": "A", "workstream": "db", "changeType": "new", "dependsOn": ["A1"], "status": "pending", "title": "migrate:remote — create properties table", "successCriteria": "table exists on remote; verified" },
+    { "taskKey": "A3", "phase": "A", "workstream": "api", "changeType": "new", "dependsOn": ["A2"], "status": "pending", "title": "CRUD API /api/admin/properties + geocode-on-write", "successCriteria": "admin-gated GET / GET/:id GET/primary POST PUT/:id; geocodes assembled address via GoogleMapsService -> lat/lng/place_id/google_maps_link; geocode failure = parts stored, null coords, warning (no 500)" },
+    { "taskKey": "A4", "phase": "A", "workstream": "data", "changeType": "new", "dependsOn": ["A3"], "status": "pending", "title": "Backfill one is_primary row from config KV + hardcoded 126 Colby", "successCriteria": "scripts/backfill/property-origin.mjs idempotent; parses KV (permits_block/lot/address/zip) + the 126 Colby literal to parts, geocodes, upserts single is_primary row" },
+    { "taskKey": "A5", "phase": "A", "workstream": "qc", "changeType": "new", "dependsOn": ["A4"], "status": "pending", "title": "QC pr-A + changelog (unblocks 0031-B10)", "successCriteria": "scripts/qc/pr_<A>.mjs: table exists, one primary row, coords non-null, CRUD round-trips; changelog + PR link; note it unblocks 0031-B10" },
+    { "taskKey": "B1", "phase": "B", "workstream": "backend", "changeType": "update", "dependsOn": ["A5"], "status": "pending", "title": "getPrimaryProperty(env) helper + de-hardcode all 126 Colby origins", "successCriteria": "cached helper; replace hardcoded origin in plan_drive_route.ts:132, showroom-scout.ts, maps.ts homeAddress callers, openapi/budget-tracker (live vs example audited); grep for the literal comes back clean" },
+    { "taskKey": "B2", "phase": "B", "workstream": "frontend", "changeType": "update", "dependsOn": ["A5"], "status": "pending", "title": "Repoint PropertyAddressConfigApp to typed CRUD; drop hardcoded DEFAULTS", "successCriteria": "form reads/writes /api/admin/properties primary row; hardcoded DEFAULTS removed; empty state renders from row or blank create form" },
+    { "taskKey": "B3", "phase": "B", "workstream": "qc", "changeType": "test", "dependsOn": ["B1", "B2"], "status": "pending", "title": "QC pr-B (preview + prod) + literal grep guard + changelog", "successCriteria": "scripts/qc/pr_<B>.mjs green on --preview and prod; grep guard: no '126 Colby' literal in code; changelog + link" },
+    { "taskKey": "C1", "phase": "C", "workstream": "db", "changeType": "update", "dependsOn": ["B3"], "status": "pending", "title": "Expand/contract: permits_records.property_id FK; retire denormalized property_address text", "successCriteria": "add property_id FK -> properties; backfill from property_address; verify parity; retire text column only after FK populated + verified; gated on 0033 audit of address denormalizers" },
+    { "taskKey": "C2", "phase": "C", "workstream": "qc", "changeType": "test", "dependsOn": ["C1"], "status": "pending", "title": "QC pr-C + changelog", "successCriteria": "scripts/qc/pr_<C>.mjs green on prod; permits still resolve property; changelog + link" }
+  ]
+}
