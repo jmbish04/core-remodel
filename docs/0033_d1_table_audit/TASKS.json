@@ -1,0 +1,22 @@
+{
+  "slug": "d1-table-audit",
+  "title": "D1 Table Integrity Audit & Targeted Remediation",
+  "phases": [
+    { "key": "A", "title": "Audit & classify (DONE)" },
+    { "key": "B", "title": "Targeted remediation" },
+    { "key": "C", "title": "Repeatable audit (optional)" }
+  ],
+  "tasks": [
+    { "taskKey": "A1", "phase": "A", "workstream": "audit", "changeType": "investigate", "dependsOn": [], "status": "done", "title": "Read-only audit: 264 defs, 50 isolated → 45 standalone / 4 missing-FK / 1 dead", "successCriteria": "every sqliteTable classified by code usage; findings recorded in plan + changelog; no migrations proposed in this phase" },
+    { "taskKey": "B0", "phase": "B", "workstream": "ops", "changeType": "keep", "dependsOn": ["A1"], "status": "pending", "title": "Back up remote D1 before any FK rebuild", "successCriteria": "backups/DB-<UTC>.sql; restore path for every table-rebuild FK add" },
+    { "taskKey": "B1", "phase": "B", "workstream": "db", "changeType": "delete", "dependsOn": ["B0"], "status": "pending", "title": "Drop dead saved_image_searches (confirm plan-0010 abandoned first)", "successCriteria": "0 code refs verified; confirm 0010 recovery task abandoned (else KEEP); drop table + schema file + barrel + dead plan-0010 row; PRAGMA confirms gone" },
+    { "taskKey": "B2", "phase": "B", "workstream": "backend", "changeType": "delete", "dependsOn": ["A1"], "status": "pending", "title": "Delete dead duplicate canvasInspirationReferences def", "successCriteria": "remove the duplicate const in images/image_base_canvas.ts:77 (barrel uses images/canvas_inspiration_references.ts); tsc delta empty; no migration" },
+    { "taskKey": "B3", "phase": "B", "workstream": "db", "changeType": "update", "dependsOn": ["B0"], "status": "pending", "title": "showroom_gaps: add room_id FK → rooms + drop denormalized room_name", "successCriteria": "validate room_id resolves to rooms.id (flag orphans, no auto-delete); add FK (onDelete cascade); drop room_name; repoint reader/route to JOIN rooms; generated SQL rebuilds only showroom_gaps; row count preserved" },
+    { "taskKey": "B4", "phase": "B", "workstream": "db", "changeType": "update", "dependsOn": ["B0"], "status": "pending", "title": "photo_viewer_notes.image_id FK → images.id", "successCriteria": "validate orphans; add FK; generated SQL rebuilds only photo_viewer_notes; rows preserved; readers still 200" },
+    { "taskKey": "B5", "phase": "B", "workstream": "db", "changeType": "update", "dependsOn": ["B0"], "status": "pending", "title": "dialer_call_attempts.prospect_id FK → dialer_prospects.id", "successCriteria": "validate orphans; add FK; rebuild only the target; rows preserved" },
+    { "taskKey": "B6", "phase": "B", "workstream": "db", "changeType": "update", "dependsOn": ["B0"], "status": "pending", "title": "dialer_prospect_state.prospect_id FK → dialer_prospects.id", "successCriteria": "validate orphans; add FK; rebuild only the target; rows preserved" },
+    { "taskKey": "B7", "phase": "B", "workstream": "docs", "changeType": "keep", "dependsOn": ["A1"], "status": "pending", "title": "Document the 45 STANDALONE_BY_DESIGN tables as intentional", "successCriteria": "short per-cluster note/comment (changelog, plan/agent-ledger, MCP-ops, permits, usage meters, config/vocab, integration logs, KV stores) so future audits don't re-flag them" },
+    { "taskKey": "B8", "phase": "B", "workstream": "qc", "changeType": "new", "dependsOn": ["B1", "B3", "B4", "B5", "B6"], "status": "pending", "title": "QC: re-run read-only audit + endpoint checks + changelog", "successCriteria": "re-audit shows 46 standalone / 0 orphaned / 0 dead; touched endpoints 200; changelog + PR links" },
+    { "taskKey": "C1", "phase": "C", "workstream": "ops", "changeType": "new", "dependsOn": ["B8"], "status": "pending", "title": "Land repeatable read-only audit script + health probe", "successCriteria": "scripts/audit/d1-integrity.mjs (SELECT/pragma only, NO fix half) + health probe; outputs the classification buckets; catches drift continuously" }
+  ]
+}
