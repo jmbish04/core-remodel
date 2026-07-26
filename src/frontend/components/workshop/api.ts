@@ -212,6 +212,22 @@ export async function runRecipe(
   return data;
 }
 
+/** A detected furnishing/material (procurement extraction, recipe 6.1). */
+export interface FurnishingItem {
+  label: string;
+  category: string;
+  note: string;
+}
+
+/** Run the vision extraction over a node's image → shopping-list items. */
+export async function extractFurnishings(nodeId: string): Promise<FurnishingItem[]> {
+  const { data } = await request<{ items: FurnishingItem[] }>(
+    `/nodes/${encodeURIComponent(nodeId)}/extract-furnishings`,
+    { method: "POST" },
+  );
+  return data.items;
+}
+
 // ---- Piles (collections) --------------------------------------------------
 
 export async function createCollection(

@@ -48,6 +48,7 @@ import { cropAndUploadCfImage, probeCfImageDimensions } from "../../services/ren
 import { nearestAspectRatio } from "../../services/render/prompt-kit";
 import { RECIPES, buildRecipePrompt } from "../../services/render/recipes";
 import { runStage } from "../../services/render/stage-runner";
+import { extractFurnishings } from "../../services/workshop/furnishing-extraction";
 import {
   resolveFloorPlanDrawer,
   resolveInspirationDrawer,
@@ -1309,6 +1310,52 @@ workshopRouter.openapi(
     } catch (err) {
       console.error("[workshop] POST /nodes/:id/recipe failed:", err);
       return c.json({ error: "Failed to run recipe" }, 500);
+    }
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /nodes/:id/extract-furnishings — vision → shopping-list items (recipe 6.1)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const FurnishingItemSchema = z.object({
+  label: z.string(),
+  category: z.string(),
+  note: z.string(),
+});
+
+workshopRouter.openapi(
+  createRoute({
+    method: "post",
+    path: "/nodes/{id}/extract-furnishings",
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: {
+        description: "Detected furnishings/materials",
+        content: {
+          "application/json": {
+            schema: z.object({ success: z.literal(true), items: z.array(FurnishingItemSchema) }),
+          },
+        },
+      },
+      404: { description: "Node not found", content: { "application/json": { schema: ErrorSchema } } },
+      500: { description: "Extraction failed", content: { "application/json": { schema: ErrorSchema } } },
+    },
+    summary: "Extract furnishings/materials from a node image",
+    operationId: "extractFurnishings",
+  }),
+  async (c) => {
+    try {
+      const { id } = c.req.valid("param");
+      const db = drizzle(c.env.DB);
+      const node = await db.select().from(boardNodes).where(eq(boardNodes.id, id)).get();
+      if (!node) return c.json({ error: "Node not found" }, 404);
+
+      const items = await extractFurnishings(c.env, node.cfImageUrl);
+      return c.json({ success: true as const, items }, 200);
+    } catch (err) {
+      console.error("[workshop] POST /nodes/:id/extract-furnishings failed:", err);
+      return c.json({ error: "Failed to extract furnishings" }, 500);
     }
   },
 );
