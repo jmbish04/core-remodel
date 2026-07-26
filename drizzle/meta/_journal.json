@@ -302,6 +302,13 @@
       "when": 1785070272290,
       "tag": "0142_elite_vance_astro",
       "breakpoints": true
+    },
+    {
+      "idx": 143,
+      "version": "6",
+      "when": 1785105541205,
+      "tag": "0143_thick_black_bird",
+      "breakpoints": true
     }
   ]
 }
