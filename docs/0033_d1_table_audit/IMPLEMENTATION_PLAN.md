@@ -4,13 +4,23 @@
 **Status:** PLAN — awaiting approval. **Phase A (audit) is already complete** (findings below);
 Phases B/C are the proposed remediation, gated on your per-item approval.
 
-> **Methodology correction (important).** The trigger was "260 tables, 49 with no FK — why are
-> they in lala land?" But **FK-isolation ≠ dead or broken.** The real signal is *"is the table
-> read/written by code, and by whom?"* On that signal, **49 of the 50 isolated tables are alive**
-> — they are logs, ledgers, config/vocab, and registries that are FK-free *by design*. We do NOT
-> auto-add FKs and we do NOT fabricate seed data (both are in the pasted `audit-and-fix.mjs`; both
-> are forbidden here — mock data is banned, and a blind FK-add forces a SQLite table rebuild that
-> can cascade-wipe children). Remediation is a short, hand-picked list.
+> **Directive (updated 2026): MAXIMIZE the relational graph.** Default posture is now **connect**,
+> not "leave standalone." For every isolated table that carries an id or soft-key with a real
+> INTERNAL counterpart, wire it — **a direct `*_id` FK** where the target is one of our tables, or
+> **a bridge/mapping table** where the id is *external* (e.g. a ClickUp task id → an internal task
+> row). A table stays standalone ONLY when the referent genuinely has no internal table (a cookie
+> id, a Gmail message id, a Cloudflare workflow-instance id).
+>
+> Two guardrails remain absolute and are NOT relaxed by this directive:
+> 1. **No fabricated/seed data** (the pasted `audit-and-fix.mjs` mock-seeding half is forbidden).
+> 2. **No blind rebuilds, no guessed parents.** Every FK/bridge is validated for orphan rows first
+>    (flag, never auto-delete), the generated SQL is read (rebuild touches only the target), and an
+>    **ambiguous parent is confirmed with a human, never guessed** (repo rule). Adding an FK forces
+>    a SQLite table rebuild — back up first.
+>
+> Net effect vs the first draft: the "leave the 45 alone" stance becomes "connect the ones with a
+> real internal target; document the genuinely-external few." The exact target + mechanism per table
+> is being resolved from the code (see §1.2).
 
 ---
 
@@ -52,11 +62,16 @@ append-only logs), usage meters (`gemini_usage_log`, `google_maps_usage_log`), c
 (`project_system_variables`, `sales_tax_rates`, `model_pricing`, `device_preferences`), integration
 logs (clickup/tesla/health/workflow), and KV-style stores (`agent_adhoc_memory`, `google_oauth_tokens`).
 
-### 1.1 Cross-check vs a schema-only pass (Gemini) — FKs CONSIDERED & DECLINED
+### 1.1 Cross-check vs a schema-only pass (Gemini)
 
-A second reviewer working from the schema CSV alone (no code, no schema comments) proposed wiring
-many more FKs. Each is recorded here with the reason it stays standalone, so B7 documents the
-decision rather than leaving it to be re-litigated:
+> **SUPERSEDED by the connect-by-default directive above.** The verdicts below were the
+> *conservative* first read (decline unless obviously safe). Under the new directive most of these
+> flip to **CONNECT** — a direct FK where the target is internal, a **bridge table** where the id is
+> external (the ClickUp case the user called out). The reasons below now read as *"what to watch
+> when wiring it"* (write-safety on logs, external ids need a bridge not a direct FK, name-joins are
+> still banned — use an id FK). The finalized per-table mechanism lands in **§1.2** once code target
+> resolution returns. The genuinely-external few (cookie id, Gmail id, CF workflow id) still stay
+> standalone.
 
 | Proposed FK | Verdict | Reason |
 |---|---|---|
