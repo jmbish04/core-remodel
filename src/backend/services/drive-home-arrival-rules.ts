@@ -6,11 +6,22 @@
  * `drive-home-arrival.ts` does the I/O and calls in here for every judgement.
  */
 
-/** How close counts as "at the house". A city lot plus GPS slop. */
-export const HOME_RADIUS_M = 150;
+/**
+ * How close counts as "at the house" — 500 yards (~457m). If the car is PARKED
+ * this near the permit address the driver is at the property, so they are not
+ * out visiting showrooms — end the drive and stand telemetry down. Wide enough
+ * to cover street parking / the block; the `stopped` (parked) gate is what keeps
+ * merely driving past from triggering it.
+ */
+export const HOME_RADIUS_M = 457;
 
-/** Local wall-clock minute (America/Los_Angeles) from which arriving home ends the drive. */
-export const HOME_ARRIVAL_AFTER_MINUTES = 15 * 60 + 30; // 15:30, seven days a week
+/**
+ * @deprecated The drive no longer waits for a wall-clock cutoff — a car PARKED
+ * at the permit address ends the drive at ANY hour (no reason to stream
+ * telemetry while parked at the remodel). Kept only for the `/home-location`
+ * response's informational field; `homeArrivalReason` no longer reads it.
+ */
+export const HOME_ARRIVAL_AFTER_MINUTES = 15 * 60 + 30;
 
 /** Great-circle distance in metres. */
 export function distanceMeters(aLat: number, aLng: number, bLat: number, bLng: number): number {
@@ -66,7 +77,8 @@ export function homeArrivalReason(facts: {
 }): HomeArrivalReason {
   if (!facts.hasActiveDrive) return "no-active-drive";
   if (!facts.stopped) return "not-stopped";
-  if (localMinutesInLA(facts.at) < HOME_ARRIVAL_AFTER_MINUTES) return "before-cutoff";
+  // No wall-clock cutoff: parked at the permit address ends the drive at any
+  // hour. `facts.at` is retained for callers/telemetry but no longer gates here.
   if (facts.distanceM == null) return "home-unconfigured";
   return facts.distanceM <= HOME_RADIUS_M ? "ended" : "not-home";
 }

@@ -74,7 +74,7 @@ const AFTER = new Date("2026-07-21T23:00:00Z"); // 16:00 PDT
 const BEFORE = new Date("2026-07-21T18:00:00Z"); // 11:00 PDT
 const base = { hasActiveDrive: true, stopped: true, at: AFTER, distanceM: 10 };
 
-check("parked at home after the cutoff ends the drive", () => {
+check("parked at home ends the drive", () => {
   assert.equal(homeArrivalReason(base), "ended");
 });
 
@@ -82,12 +82,12 @@ check("no active drive short-circuits first", () => {
   assert.equal(homeArrivalReason({ ...base, hasActiveDrive: false }), "no-active-drive");
 });
 
-check("driving PAST the house does not end it", () => {
+check("driving PAST the house does not end it (must be parked)", () => {
   assert.equal(homeArrivalReason({ ...base, stopped: false }), "not-stopped");
 });
 
-check("home at lunchtime does not end it", () => {
-  assert.equal(homeArrivalReason({ ...base, at: BEFORE }), "before-cutoff");
+check("parked at home at lunchtime NOW ends it (no wall-clock cutoff)", () => {
+  assert.equal(homeArrivalReason({ ...base, at: BEFORE }), "ended");
 });
 
 check("parked somewhere else does not end it", () => {
@@ -106,15 +106,12 @@ check("an unknown home position never reads as 'home'", () => {
   assert.equal(homeArrivalReason({ ...base, distanceM: null }), "home-unconfigured");
 });
 
-check("the cutoff minute itself qualifies (15:30 exactly)", () => {
-  // 15:30 PDT = 22:30 UTC.
-  const at = new Date("2026-07-21T22:30:00Z");
-  assert.equal(localMinutesInLA(at), HOME_ARRIVAL_AFTER_MINUTES);
-  assert.equal(homeArrivalReason({ ...base, at }), "ended");
-});
-
-check("one minute before the cutoff does not", () => {
-  assert.equal(homeArrivalReason({ ...base, at: new Date("2026-07-21T22:29:00Z") }), "before-cutoff");
+check("time of day no longer matters — parked at home ends it at any hour", () => {
+  // 15:30 PDT and one minute earlier both end now (no wall-clock cutoff).
+  assert.equal(homeArrivalReason({ ...base, at: new Date("2026-07-21T22:30:00Z") }), "ended");
+  assert.equal(homeArrivalReason({ ...base, at: new Date("2026-07-21T22:29:00Z") }), "ended");
+  // 3am, still parked at home → ended.
+  assert.equal(homeArrivalReason({ ...base, at: new Date("2026-07-21T10:00:00Z") }), "ended");
 });
 
 check("the rule applies seven days a week (Sunday)", () => {

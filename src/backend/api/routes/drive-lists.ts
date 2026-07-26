@@ -10,10 +10,7 @@
  * Mounted at `/api/drive-lists`.
  */
 import { driveListNotes, driveListStops, driveLists, showroomStores, storeNotes } from "@backend/db";
-import {
-  HOME_ARRIVAL_AFTER_MINUTES,
-  HOME_RADIUS_M,
-} from "@backend/services/drive-home-arrival-rules";
+import { HOME_RADIUS_M } from "@backend/services/drive-home-arrival-rules";
 import { getHomeCoords } from "@backend/services/drive-home-arrival";
 import {
   addDriveStops,
@@ -177,7 +174,10 @@ driveListsRouter.get("/home-location", async (c) => {
   return c.json({
     home,
     radiusM: HOME_RADIUS_M,
-    afterLocalMinutes: HOME_ARRIVAL_AFTER_MINUTES,
+    // No wall-clock cutoff anymore — a car PARKED within radiusM ends the drive
+    // at any hour. Field kept (null) so existing readers don't break.
+    afterLocalMinutes: null,
+    requiresParked: true,
     timezone: "America/Los_Angeles",
   });
 });
