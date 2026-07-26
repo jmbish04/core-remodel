@@ -89,7 +89,7 @@ export function FurnishingsDialog({ node, onClose }: FurnishingsDialogProps) {
         ) : items && items.length > 0 ? (
           <ul className="max-h-[50vh] space-y-2 overflow-y-auto pr-1">
             {items.map((item, i) => (
-              <li key={`${item.label}-${i}`}>
+              <li key={item.id}>
                 <a
                   href={productSearchUrl(item.label)}
                   target="_blank"

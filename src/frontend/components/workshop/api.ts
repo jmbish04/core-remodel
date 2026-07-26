@@ -212,11 +212,14 @@ export async function runRecipe(
   return data;
 }
 
-/** A detected furnishing/material (procurement extraction, recipe 6.1). */
+/** A persisted furnishing/material (procurement extraction, recipe 6.1). */
 export interface FurnishingItem {
+  id: string;
   label: string;
   category: string;
   note: string;
+  /** detected | dismissed | adopted. */
+  status: string;
 }
 
 /** Run the vision extraction over a node's image → shopping-list items. */
