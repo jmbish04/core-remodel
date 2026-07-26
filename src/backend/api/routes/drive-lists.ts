@@ -144,6 +144,24 @@ driveListsRouter.post("/", async (c) => {
 });
 
 /**
+ * GET /api/drive-lists/active — THE active drive ({ id, slug, title }) or null.
+ *
+ * Cheap probe for the global "active drive" banner and the viewport's activate
+ * control (so it can name the drive it would deactivate). Declared BEFORE
+ * `/:slug` so the literal path wins over the slug pattern.
+ */
+driveListsRouter.get("/active", async (c) => {
+  const db = drizzle(c.env.DB);
+  const [row] = await db
+    .select({ id: driveLists.id, slug: driveLists.slug, title: driveLists.title })
+    .from(driveLists)
+    .where(eq(driveLists.isActive, true))
+    .orderBy(desc(driveLists.updatedAt))
+    .limit(1);
+  return c.json({ active: row ?? null });
+});
+
+/**
  * GET /api/drive-lists/home-location — the project's coordinates, as used by the
  * home-arrival rule that ends an active drive.
  *

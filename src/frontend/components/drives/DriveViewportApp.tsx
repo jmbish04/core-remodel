@@ -35,8 +35,10 @@ import {
   MapPin,
   Navigation,
   Phone,
+  Power,
   ShieldAlert,
   StickyNote,
+  Zap,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -45,6 +47,16 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { DriveRouteMap, type RouteMapStop } from "@/components/drives/DriveRouteMap";
 
@@ -77,6 +89,7 @@ type Drive = {
   description: string | null;
   notes: string[];
   status: string;
+  isActive: boolean;
   stops: Stop[];
 };
 
@@ -104,6 +117,71 @@ export function DriveViewportApp({ slug }: { slug: string }) {
   const [showOptional, setShowOptional] = useState(true);
   const [teslaConfigured, setTeslaConfigured] = useState(false);
   const [navigatingStopId, setNavigatingStopId] = useState<number | null>(null);
+  // THE active drive (if any) — used to name the drive a switch would deactivate.
+  const [activeOther, setActiveOther] = useState<{ slug: string; title: string } | null>(null);
+  const [activating, setActivating] = useState(false);
+  const [confirmSwitch, setConfirmSwitch] = useState(false);
+
+  const refreshActive = useCallback(async () => {
+    try {
+      const res = await fetch("/api/drive-lists/active", { credentials: "include" });
+      if (!res.ok) return;
+      const data = (await res.json()) as { active: { slug: string; title: string } | null };
+      setActiveOther(data.active);
+    } catch {
+      /* leave as-is */
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshActive();
+  }, [refreshActive]);
+
+  /** PATCH this drive's active state; handles the 07:00–20:00 window 409. */
+  const applyActive = useCallback(
+    async (next: boolean) => {
+      setActivating(true);
+      try {
+        const res = await fetch(`/api/drive-lists/${encodeURIComponent(slug)}`, {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ isActive: next }),
+        });
+        const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        if (res.status === 409) {
+          toast.error(data.error ?? "A drive can only be made active between 07:00 and 20:00 Pacific.");
+          return;
+        }
+        if (!res.ok || data.ok !== true) {
+          toast.error(data.error ?? `Failed to update (${res.status})`);
+          return;
+        }
+        setDrive((prev) => (prev ? { ...prev, isActive: next } : prev));
+        // Activating clears any other active drive (single-active invariant).
+        await refreshActive();
+        toast.success(next ? "This drive is now the active drive" : "Drive marked inactive");
+      } catch (e) {
+        toast.error((e as Error).message);
+      } finally {
+        setActivating(false);
+      }
+    },
+    [slug, refreshActive],
+  );
+
+  const onActivateClick = useCallback(() => {
+    if (drive?.isActive) {
+      void applyActive(false);
+      return;
+    }
+    // Another drive is active → confirm the switch (it will be deactivated).
+    if (activeOther && activeOther.slug !== slug) {
+      setConfirmSwitch(true);
+      return;
+    }
+    void applyActive(true);
+  }, [drive?.isActive, activeOther, slug, applyActive]);
 
   useEffect(() => {
     let active = true;
@@ -310,7 +388,72 @@ export function DriveViewportApp({ slug }: { slug: string }) {
         {drive.description ? (
           <p className="mt-2 text-muted-foreground">{drive.description}</p>
         ) : null}
+
+        {/* Active-drive control — the single most important state on this page.
+            Only one drive can be active; switching from another asks first. */}
+        <div className="mt-4">
+          {drive.isActive ? (
+            <div className="flex flex-wrap items-center gap-3 rounded-xl bg-primary/15 px-4 py-3 ring-1 ring-inset ring-primary/40">
+              <Zap className="size-5 shrink-0 text-primary" aria-hidden />
+              <span className="flex-1 text-sm font-bold text-primary">This drive is active</span>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                disabled={activating}
+                onClick={onActivateClick}
+                className="text-muted-foreground"
+              >
+                {activating ? <Loader2 className="size-4 animate-spin" /> : <Power className="size-4" />}
+                Make inactive
+              </Button>
+            </div>
+          ) : (
+            <Button
+              type="button"
+              size="lg"
+              disabled={activating}
+              onClick={onActivateClick}
+              className="min-h-14 w-full text-base font-bold"
+            >
+              {activating ? <Loader2 className="size-5 animate-spin" /> : <Zap className="size-5" />}
+              Make this the active drive
+            </Button>
+          )}
+        </div>
       </header>
+
+      {/* Confirm switching the active drive away from another one. */}
+      <AlertDialog open={confirmSwitch} onOpenChange={setConfirmSwitch}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Switch the active drive?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {activeOther ? (
+                <>
+                  Making <span className="font-semibold text-foreground">{drive.title}</span> active
+                  will mark{" "}
+                  <span className="font-semibold text-foreground">{activeOther.title}</span> as
+                  inactive. Only one drive can be active at a time.
+                </>
+              ) : (
+                "Only one drive can be active at a time."
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmSwitch(false);
+                void applyActive(true);
+              }}
+            >
+              Yes, make this active
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Progress */}
       <section className="mt-5">
