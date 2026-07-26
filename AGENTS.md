@@ -206,10 +206,19 @@ written. Do not skip them, and do not treat them as something that happens "late
    `designBriefMarkdown` (= DESIGN_SPEC when present), `tasks[]` (= TASKS.json, which
    also seeds #2), and — this is the point — the **raw, unsummarized conversation
    transcript** as `context` (stored in R2; add a `contextCoverageNote` when it's
-   partial). It upserts by `slug` and renders at **`/admin/changelog/preview/<slug>`**
+   partial). It upserts by `slug` and renders at
+   **`https://core-remodel.hacolby.workers.dev/admin/changelog/preview/<slug>`**
    — the link the user reviews. Re-file (same slug) as the plan evolves.
    The proposal's PRD/PROMPT/tasks MUST match the `docs/####_*` artifacts; they are
    the same plan in two homes (a file bundle and a reviewable D1/R2 record).
+
+   **ALWAYS give the user the FULL, clickable URL — never a relative path.** The base
+   is **`https://core-remodel.hacolby.workers.dev`** (pattern:
+   `https://${worker-name}.hacolby.workers.dev`, worker = `core-remodel`). Every admin
+   link surfaced to the user — the preview changelog above, `/admin/plans/<slug>`,
+   `/admin/changelog/<slug>`, any `/admin/*` page — MUST be written as the absolute
+   `https://core-remodel.hacolby.workers.dev/…` URL so it is one-click from chat. A bare
+   `/admin/changelog/preview/<slug>` in a reply is a defect; prepend the base every time.
 
 Only after these three exist — and the user has reviewed the preview changelog — does
 implementation (feature code, migrations, PRs) begin. The changelog *entries* written
