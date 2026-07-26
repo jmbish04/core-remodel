@@ -42,6 +42,9 @@ contract the frontend depends on, and without losing a single row.**
 | 2 | Rollout | **Phased: expand → backfill → contract** (3 PRs, verify-before-drop). |
 | 3 | `main_poc_*` named-person contact type | **`SALES`** (name-less phone/email upserts the store `GENERAL_CONTACT`). |
 | 4 | Hub | **Derived from address** via the region service — no captured hub columns. Built to generalize beyond the Bay Area for eventual resale (Phase D2). |
+| 5 | `location_notes` | **PlateJS triple** — `notes` (plaintext) + `notes_markdown` + `notes_html`; notes input becomes `OverviewNoteEditor` (B9). |
+| 6 | `location_address` | **Not stored** — parse source only; dropped permanently. Display address reconstructed from structured parts (`formatShowroomAddress`). AI abuses a free address field. |
+| 7 | `distance_from_sf_*` | **Dropped** — distance derived dynamically from the `/admin/config/address` origin at read; not hardcoded to SF, not stored. |
 
 ---
 
@@ -123,7 +126,6 @@ erDiagram
         text city
         text state
         text zip_code
-        text location_address "formatted — display source"
         text notes "plaintext"
         text notes_markdown "PlateJS source"
         text notes_html "PlateJS render cache"
@@ -158,7 +160,7 @@ erDiagram
 | `google_maps_link` | `…locations.google_maps_link` | (Your list said `google_maps_url` — actual name is `google_maps_link`.) |
 | `bay_area_city_id` | `…locations.bay_area_city_id` | FK → `store_bayarea_cities`. |
 | `latitude` / `longitude` | `…locations.latitude` / `longitude` | |
-| `location_address` | `…locations.location_address` | **Added to new table** (your list omitted it, but it is the display source read by directory/detail/brands/backfill — must move, not drop). |
+| `location_address` | **NOT stored — parse source only** | Used at backfill to gap-fill null street parts, then **dropped from `showroom_stores` permanently**. The display address is **reconstructed from the structured parts** (`formatShowroomAddress`), never stored — a free address field gets abused by AI (e.g. "SF Bay area"). Unparseable rows are flagged for human fix BEFORE the Phase-C drop (never silently lost). |
 | `location_street_number` | `…locations.street_number` | |
 | `location_street_name` | `…locations.street_name` | |
 | `location_city` | `…locations.city` | |
@@ -166,7 +168,7 @@ erDiagram
 | `location_zip_code` + `zip_code` | `…locations.zip_code` | `COALESCE(location_zip_code, zip_code)`. |
 | `location_notes` | `…locations.notes` + `notes_markdown` + `notes_html` | Field is **PlateJS-authored** → keep all three versions (plaintext + markdown + html), per the `OverviewNoteEditor` / `notes_markdown`+`notes_html` convention. The existing plain value seeds all three on backfill. |
 | `hub_route` / `hub_name` | **derived** | From `bay_area_city` join, else `resolveCityName(signals)`. Columns dropped. |
-| `distance_from_sf_time` / `_miles` | **dropped** | Recomputable from coords; not carried. |
+| `distance_from_sf_time` / `_miles` | **dropped** | **Computed dynamically** at read from the configured origin at `/admin/config/address` → showroom coords. Not hardcoded to SF and not stored — generalizes for resale (D2). |
 | `main_poc_fullname` | `showroom_store_contacts` (type `SALES`) | Split into first/last. |
 | `main_poc_phone_number` | `…contacts.mobile_phone_number` | Name-less → `GENERAL_CONTACT.office_phone_number`. |
 | `main_poc_email_address` | `…contacts.email_address` | |
@@ -183,7 +185,7 @@ signature returns `undefined` instead of erroring). So the external contract sta
 flowchart LR
     subgraph read["READ — one shared helper"]
         Q[loadStoreWithLocation] -->|LEFT JOIN locations| M[merge to flat<br/>camelCase keys]
-        M -->|derive hub| H[hubRoute/hubName<br/>from city/region lib]
+        M -->|derive| H[hubRoute/hubName from region lib<br/>locationAddress from structured parts<br/>distance from /admin/config/address]
         H --> R[same JSON shape<br/>as today]
     end
     subgraph write["WRITE — one shared helper"]
@@ -200,9 +202,17 @@ flowchart LR
 ```
 
 The `showroom_store_contacts` schema already documents this exact "field-out a submitted
-payload" pattern, so this is idiomatic, not novel. The merge helper maps
-`locations.notes → response.locationNotes` and `locations.location_address →
-response.locationAddress` etc., so keys are byte-identical to today.
+payload" pattern, so this is idiomatic, not novel. The merge helper keeps keys byte-identical
+to today, but three response fields are now **derived, not stored**:
+- `locationAddress` — rebuilt from the structured parts via `formatShowroomAddress(parts)`
+  (never persisted; a free address column gets abused by AI, e.g. "SF Bay area").
+- `hubRoute` / `hubName` — from the `bay_area_city` join, else `resolveCityName(signals)`.
+- `distanceFromSf*` — computed from the `/admin/config/address` origin → showroom coords.
+
+Write side: the address parts, `place_id`, `google_maps_link`, coords, `bay_area_city_id`,
+and the notes triple are fielded into `showroom_store_locations`; POC fields into
+`showroom_store_contacts`. A submitted free `locationAddress` on write is parsed into parts,
+not stored raw.
 
 ---
 
@@ -243,7 +253,9 @@ flowchart TD
 - **Phase B (PR-B) — cutover.** Switch reads to the JOIN+merge helper and writes to the
   field-out helper (new table only). Frontend untouched except the **notes** field, which
   swaps to the `OverviewNoteEditor` (PlateJS) so it emits `{markdown, html}` — the API now
-  reads/writes the `notes` triple (B9). Verify on preview **and** prod.
+  reads/writes the `notes` triple (B9). The read helper also **derives** `locationAddress`
+  from the structured parts and `distanceFromSf*` from the `/admin/config/address` origin
+  (B10). Verify on preview **and** prod.
 - **Phase C (PR-C) — contract.** Drop the 20 dead columns (native `DROP COLUMN`; drop the
   `place_id` unique index first). Remove the two now-dead `distance_from_sf_*` field defs
   from `EditStoreModal` / hero edit modal. Regression QC.
@@ -259,10 +271,13 @@ sequenceDiagram
     loop per store
         S->>S: build location row (1:1 copy, COALESCE zip)<br/>seed notes triple: notes=plain,<br/>notes_markdown=plain, notes_html=<p>escaped</p>
         alt street parts null AND location_address present
-            S->>P: parse formatted address
+            S->>P: parse formatted address (source only — NOT stored raw)
             P-->>S: {streetNumber, streetName, city, state, zip}
+            opt parse failed AND parts still null
+                S->>D: flag store for human address fix (before Phase-C drop)
+            end
         end
-        S->>D: UPSERT showroom_store_locations (unique store_id)
+        S->>D: UPSERT showroom_store_locations (unique store_id) — no location_address column
         alt main_poc_fullname present
             S->>D: INSERT contact type=SALES (first/last split, mobile, email) if absent
         else phone/email only
@@ -306,6 +321,13 @@ Idempotent: upsert by unique `store_id`; contacts insert guarded so re-runs don'
   (`src/backend/lib/bay-area-region.ts`) — the hub is derived here, on write and at read.
 - **POC → contacts:** the existing backfill endpoint `showroom-contacts.ts:~664` already
   reads `main_poc_*` and builds contact rows — align the Phase A script with its mapping.
+- **Config origin address:** `/admin/config/address` (`config-nav.ts`, `config-tax.ts`,
+  `services/drive-home-arrival.ts`) already holds the configurable home/origin — use it as
+  the distance origin so `distanceFromSf*` is computed dynamically (not hardcoded to SF).
+- **Notes editor:** `@/components/showroom/OverviewNoteEditor` (PlateJS, emits `{markdown, html}`).
+- **New small helper:** `formatShowroomAddress(parts)` — assembles a display address from
+  the structured parts (with an `assert` self-check). Ships in Phase B; there is no existing
+  formatter to reuse.
 - **Legacy `showroom_pocs`** (separate old table used by `add_showroom_poc`/`get_showroom`)
   is **out of scope** — do not touch it.
 
@@ -333,6 +355,11 @@ flowchart LR
 - **`place_id` unique index:** SQLite refuses `DROP COLUMN` on an indexed column. The
   generated Phase C migration must `DROP INDEX showroom_stores_place_id_uniq` before
   dropping `place_id`. Verify; the new unique index lives on `showroom_store_locations`.
+- **`location_address` is dropped permanently** (not moved). Before the Phase-C drop, A5
+  must confirm every row's structured parts are populated (already-present or parsed); any
+  row whose address won't parse is **flagged for human fix**, never silently dropped. The
+  A1 backup is the final safety net if a real address is lost. Garbage values like
+  "SF Bay area" are intentionally discarded, not preserved.
 - **No `db.transaction()`** (dead on D1) — use `db.batch([...])` for multi-statement writes
   in the field-out helper; sequential + compensating-delete where a generated id must feed
   the next insert.
