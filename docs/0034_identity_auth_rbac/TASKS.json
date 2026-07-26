@@ -1,0 +1,33 @@
+{
+  "slug": "identity-auth-rbac",
+  "title": "Identity, Auth (Clerk) & RBAC",
+  "consumes": ["0033: device table linkage"],
+  "phases": [
+    { "key": "A", "title": "Clerk foundation" },
+    { "key": "B", "title": "RBAC schema" },
+    { "key": "C", "title": "Device identity" },
+    { "key": "D", "title": "Authz cutover" }
+  ],
+  "tasks": [
+    { "taskKey": "A1", "phase": "A", "workstream": "backend", "changeType": "new", "dependsOn": [], "status": "pending", "title": "Spike: verify @clerk/astro + @clerk/backend under @astrojs/cloudflare (Workers edge)", "successCriteria": "Clerk runs in-Worker OR documented fallback (@clerk/backend token verify + custom Astro middleware); Clerk skills consulted" },
+    { "taskKey": "A2", "phase": "A", "workstream": "backend", "changeType": "new", "dependsOn": ["A1"], "status": "pending", "title": "Clerk env + secrets", "successCriteria": "CLERK_PUBLISHABLE_KEY public var; CLERK_SECRET_KEY + CLERK_WEBHOOK_SIGNING_SECRET Worker secrets" },
+    { "taskKey": "A3", "phase": "A", "workstream": "frontend", "changeType": "new", "dependsOn": ["A2"], "status": "pending", "title": "Sign-in/up pages + session middleware", "successCriteria": "protected routes reject anonymous; signed-in session resolves" },
+    { "taskKey": "A4", "phase": "A", "workstream": "db", "changeType": "update", "dependsOn": ["A2"], "status": "pending", "title": "Extend users table (clerk_user_id, user_type_id, password_hash nullable)", "successCriteria": "add clerk_user_id TEXT UNIQUE + user_type_id; password_hash nullable; never rebuild; migrate:remote" },
+    { "taskKey": "A5", "phase": "A", "workstream": "api", "changeType": "new", "dependsOn": ["A4"], "status": "pending", "title": "Svix-verified /api/webhooks/clerk → users mirror sync + lazy upsert fallback", "successCriteria": "user.created/updated/deleted upsert the mirror; middleware lazily upserts on first authed request (webhook-lag)" },
+    { "taskKey": "A6", "phase": "A", "workstream": "qc", "changeType": "new", "dependsOn": ["A3", "A5"], "status": "pending", "title": "QC pr-A + changelog", "successCriteria": "sign-in works on deployed Worker; user appears in mirror; anon rejected; changelog + link" },
+
+    { "taskKey": "B1", "phase": "B", "workstream": "db", "changeType": "new", "dependsOn": ["A4"], "status": "pending", "title": "RBAC schema: user_types + permissions + user_type_permissions + users.user_type_id FK", "successCriteria": "definition + mapping tables (is_active soft-delete); users.user_type_id FK" },
+    { "taskKey": "B2", "phase": "B", "workstream": "data", "changeType": "new", "dependsOn": ["B1"], "status": "pending", "title": "Seed roles + permission keys", "successCriteria": "roles homeowner/contractor/designer/admin/viewer; permission keys per protected surface" },
+    { "taskKey": "B3", "phase": "B", "workstream": "backend", "changeType": "new", "dependsOn": ["B1"], "status": "pending", "title": "hasPermission helper + admin config pages", "successCriteria": "users->user_type->permissions join; /admin/config/user-types + /permissions CRUD" },
+    { "taskKey": "B4", "phase": "B", "workstream": "qc", "changeType": "new", "dependsOn": ["B2", "B3"], "status": "pending", "title": "QC pr-B + changelog", "successCriteria": "hasPermission correct across roles; config pages CRUD; changelog + link" },
+
+    { "taskKey": "C1", "phase": "C", "workstream": "db", "changeType": "new", "dependsOn": ["B1"], "status": "pending", "title": "devices table (cookie <-> device <-> user)", "successCriteria": "device_cookie_id UNIQUE, user_id FK nullable, first/last seen, label" },
+    { "taskKey": "C2", "phase": "C", "workstream": "db", "changeType": "update", "dependsOn": ["C1"], "status": "pending", "title": "FK device_preferences.device_id + add device_location.device_id → devices", "successCriteria": "device_preferences.device_id -> devices FK; device_location gains device_id FK (forward-only, historic null)" },
+    { "taskKey": "C3", "phase": "C", "workstream": "backend", "changeType": "update", "dependsOn": ["C1"], "status": "pending", "title": "Bind remodel_device cookie → device → user on sign-in", "successCriteria": "signed-in device row links cookie->device->user" },
+    { "taskKey": "C4", "phase": "C", "workstream": "qc", "changeType": "new", "dependsOn": ["C2", "C3"], "status": "pending", "title": "QC pr-C + changelog", "successCriteria": "device chain resolves; preferences/location resolve their device; changelog + link" },
+
+    { "taskKey": "D1", "phase": "D", "workstream": "backend", "changeType": "update", "dependsOn": ["B3", "A3"], "status": "pending", "title": "Dual-gate: Clerk admin session OR legacy remodel_access cookie", "successCriteria": "api/middleware/auth.ts accepts either; no admin access drop; WORKER_API_KEY NOT rotated" },
+    { "taskKey": "D2", "phase": "D", "workstream": "backend", "changeType": "update", "dependsOn": ["D1"], "status": "pending", "title": "Migrate all gated routes; reconcile MCP OAuth principal→user; retire shared secret + sessions table", "successCriteria": "every remodel_access route accepts Clerk admin; MCP OAuth principal maps to user; legacy secret retired last; hand-rolled sessions table dropped" },
+    { "taskKey": "D3", "phase": "D", "workstream": "qc", "changeType": "new", "dependsOn": ["D2"], "status": "pending", "title": "QC pr-D + changelog", "successCriteria": "gated routes accept Clerk admin; legacy still works pre-retirement; MCP unaffected; changelog + link" }
+  ]
+}
