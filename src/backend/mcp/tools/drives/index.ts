@@ -17,6 +17,10 @@ import { type RemodelTool } from "../../types";
 import { listDriveLists } from "./list_drive_lists";
 import { getDriveList } from "./get_drive_list";
 import { createDriveListTool } from "./create_drive_list";
+import { updateDriveListTool } from "./update_drive_list";
+import { updateDriveStopTool } from "./update_drive_stop";
+import { addDriveStopsTool } from "./add_drive_stops";
+import { removeDriveStopTool } from "./remove_drive_stop";
 import { analyzeDriveCoverage } from "./analyze_drive_coverage";
 import { planDriveRoute } from "./plan_drive_route";
 
@@ -24,6 +28,10 @@ export const driveTools: RemodelTool[] = [
   listDriveLists,
   getDriveList,
   createDriveListTool,
+  updateDriveListTool,
+  updateDriveStopTool,
+  addDriveStopsTool,
+  removeDriveStopTool,
   analyzeDriveCoverage,
   planDriveRoute,
 ];

@@ -10,7 +10,7 @@
  * drives also render as a stack of cards.
  */
 import { driveListStops, driveLists, showroomStores } from "@backend/db";
-import { and, desc, eq, inArray, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 /** Drizzle D1 client (matches the MCP registry's `RemodelDb`). */
@@ -221,6 +221,213 @@ export async function createDriveList(
   }
 
   return { id: drive.id, slug, stopCount: input.stops.length };
+}
+
+/** Resolve a drive's id + slug from an `{ id }` or `{ slug }` selector. */
+async function resolveDrive(
+  db: RemodelDb,
+  sel: { id?: number; slug?: string },
+): Promise<{ id: number; slug: string } | null> {
+  const where =
+    sel.id != null
+      ? eq(driveLists.id, sel.id)
+      : sel.slug != null
+        ? eq(driveLists.slug, sel.slug)
+        : null;
+  if (!where) return null;
+  const [row] = await db
+    .select({ id: driveLists.id, slug: driveLists.slug })
+    .from(driveLists)
+    .where(where)
+    .limit(1);
+  return row ?? null;
+}
+
+/** Fields an update may set on a drive. Only provided keys are written. */
+export interface DriveListUpdateInput {
+  id?: number;
+  slug?: string;
+  title?: string;
+  description?: string | null;
+  notes?: string[] | null;
+  status?: "draft" | "active" | "completed" | "archived";
+}
+
+/**
+ * Patch a drive's own fields (title/description/notes/status). Only the keys
+ * present in `input` are written; text is entity-decoded on the way in.
+ *
+ * NOTE: `status` is a lifecycle LABEL only — it does NOT flip the single-active
+ * pointer (`is_active`). Activation stays exclusively on the gated path
+ * (`setActiveDrive`, reached via the drive page / PATCH isActive) so the
+ * 07:00–20:00 window rule can never be bypassed through a field edit.
+ * Returns the drive's id/slug, or null if no drive matched.
+ */
+export async function updateDriveList(
+  db: RemodelDb,
+  input: DriveListUpdateInput,
+): Promise<{ id: number; slug: string } | null> {
+  const drive = await resolveDrive(db, input);
+  if (!drive) return null;
+  const patch: Partial<typeof driveLists.$inferInsert> = { updatedAt: new Date() };
+  if (input.title !== undefined) patch.title = decodeHtmlEntities(input.title);
+  if (input.description !== undefined) patch.description = decodeHtmlEntities(input.description);
+  if (input.notes !== undefined) {
+    patch.notes = serializeDriveNotes(input.notes?.map((n) => decodeHtmlEntities(n)) ?? null);
+  }
+  if (input.status !== undefined) patch.status = input.status;
+  await db.update(driveLists).set(patch).where(eq(driveLists.id, drive.id)).run();
+
+  // Labeling a drive completed/archived/draft should not leave it as THE active
+  // drive. Deactivation is always allowed (only ACTIVATION is window-gated), so
+  // clearing the active pointer here can't bypass the 07:00–20:00 rule. We never
+  // ACTIVATE from a label change — that stays on the gated path.
+  if (input.status !== undefined && input.status !== "active") {
+    const [row] = await db
+      .select({ isActive: driveLists.isActive })
+      .from(driveLists)
+      .where(eq(driveLists.id, drive.id))
+      .limit(1);
+    if (row?.isActive) await setActiveDrive(db, null);
+  }
+  return drive;
+}
+
+/** Fields an update may set on a single stop. Only provided keys are written. */
+export interface DriveStopUpdateInput {
+  name?: string;
+  showroomStoreId?: number | null;
+  city?: string | null;
+  address?: string | null;
+  phone?: string | null;
+  hours?: string | null;
+  note?: string | null;
+  pick?: string | null;
+  websiteUrl?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  leg?: string | null;
+  legWindow?: string | null;
+  isOptional?: boolean;
+  sortOrder?: number;
+  visited?: boolean;
+  skipped?: boolean;
+}
+
+/**
+ * Patch one stop's fields by stop id. Text fields are entity-decoded; toggling
+ * `isOptional` keeps `kind` in sync (core<->optional, never touching a pitstop).
+ * `visited`/`skipped` also stamp their `*_at` timestamp. Returns the owning
+ * drive id, or null if the stop does not exist.
+ */
+export async function updateDriveStop(
+  db: RemodelDb,
+  stopId: number,
+  input: DriveStopUpdateInput,
+): Promise<{ driveListId: number } | null> {
+  const [stop] = await db
+    .select({ driveListId: driveListStops.driveListId, kind: driveListStops.kind })
+    .from(driveListStops)
+    .where(eq(driveListStops.id, stopId))
+    .limit(1);
+  if (!stop) return null;
+
+  const patch: Partial<typeof driveListStops.$inferInsert> = {};
+  if (input.name !== undefined) patch.name = decodeHtmlEntities(input.name);
+  if (input.showroomStoreId !== undefined) patch.showroomStoreId = input.showroomStoreId;
+  if (input.city !== undefined) patch.city = decodeHtmlEntities(input.city);
+  if (input.address !== undefined) patch.address = decodeHtmlEntities(input.address);
+  if (input.phone !== undefined) patch.phone = input.phone;
+  if (input.hours !== undefined) patch.hours = decodeHtmlEntities(input.hours);
+  if (input.note !== undefined) patch.note = decodeHtmlEntities(input.note);
+  if (input.pick !== undefined) patch.pick = decodeHtmlEntities(input.pick);
+  if (input.websiteUrl !== undefined) patch.websiteUrl = input.websiteUrl;
+  if (input.latitude !== undefined) patch.latitude = input.latitude;
+  if (input.longitude !== undefined) patch.longitude = input.longitude;
+  if (input.leg !== undefined) patch.leg = decodeHtmlEntities(input.leg);
+  if (input.legWindow !== undefined) patch.legWindow = decodeHtmlEntities(input.legWindow);
+  if (input.sortOrder !== undefined) patch.sortOrder = input.sortOrder;
+  if (input.isOptional !== undefined) {
+    patch.isOptional = input.isOptional;
+    // Keep kind in sync, but never reclassify a pitstop as core/optional.
+    if (stop.kind !== "pitstop") patch.kind = input.isOptional ? "optional" : "core";
+  }
+  if (input.visited !== undefined) {
+    patch.visited = input.visited;
+    patch.visitedAt = input.visited ? new Date() : null;
+  }
+  if (input.skipped !== undefined) {
+    patch.skipped = input.skipped;
+    patch.skippedAt = input.skipped ? new Date() : null;
+  }
+  await db.update(driveListStops).set(patch).where(eq(driveListStops.id, stopId)).run();
+  return { driveListId: stop.driveListId };
+}
+
+/**
+ * Append stops to an existing drive, after its current last stop. Returns the
+ * new stop count for the drive, or null if the drive does not exist.
+ */
+export async function addDriveStops(
+  db: RemodelDb,
+  sel: { id?: number; slug?: string },
+  stops: DriveStopInput[],
+): Promise<{ driveListId: number; added: number; stopCount: number } | null> {
+  const drive = await resolveDrive(db, sel);
+  if (!drive) return null;
+  if (stops.length === 0) return { driveListId: drive.id, added: 0, stopCount: 0 };
+
+  const [{ maxOrder } = { maxOrder: null }] = await db
+    .select({ maxOrder: sql<number | null>`max(${driveListStops.sortOrder})` })
+    .from(driveListStops)
+    .where(eq(driveListStops.driveListId, drive.id));
+  let order = (maxOrder ?? -1) + 1;
+
+  const values = stops.map((s) => ({
+    driveListId: drive.id,
+    showroomStoreId: s.showroomStoreId,
+    sortOrder: order++,
+    leg: decodeHtmlEntities(s.leg),
+    legWindow: decodeHtmlEntities(s.legWindow),
+    name: decodeHtmlEntities(s.name),
+    city: decodeHtmlEntities(s.city),
+    address: decodeHtmlEntities(s.address),
+    phone: s.phone,
+    hours: decodeHtmlEntities(s.hours),
+    note: decodeHtmlEntities(s.note),
+    pick: decodeHtmlEntities(s.pick),
+    websiteUrl: s.websiteUrl,
+    latitude: s.latitude,
+    longitude: s.longitude,
+    isOptional: s.isOptional ?? false,
+    kind: (s.isOptional ?? false) ? ("optional" as const) : ("core" as const),
+  }));
+  const STOP_BATCH_SIZE = 50;
+  for (let i = 0; i < values.length; i += STOP_BATCH_SIZE) {
+    const chunk = values.slice(i, i + STOP_BATCH_SIZE);
+    const stmts = chunk.map((val) => db.insert(driveListStops).values(val));
+    await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
+  }
+  const [{ n } = { n: 0 }] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(driveListStops)
+    .where(eq(driveListStops.driveListId, drive.id));
+  return { driveListId: drive.id, added: values.length, stopCount: Number(n) };
+}
+
+/** Delete one stop by id. Returns the owning drive id, or null if not found. */
+export async function removeDriveStop(
+  db: RemodelDb,
+  stopId: number,
+): Promise<{ driveListId: number } | null> {
+  const [stop] = await db
+    .select({ driveListId: driveListStops.driveListId })
+    .from(driveListStops)
+    .where(eq(driveListStops.id, stopId))
+    .limit(1);
+  if (!stop) return null;
+  await db.delete(driveListStops).where(eq(driveListStops.id, stopId)).run();
+  return { driveListId: stop.driveListId };
 }
 
 /**
