@@ -20,22 +20,22 @@ import { eq, asc, sql } from "drizzle-orm";
 import { plans, planTasks } from "@backend/db/schema/plans/index";
 import type { PlanTask } from "@backend/db/schema/plans/index";
 import { seedPlanTasks } from "@backend/db/seeds/seed-plan-tasks";
+import {
+  PLAN_TASK_STATUSES,
+  updatePlanTask,
+  type PlanTaskPatch,
+  type PlanTaskStatus,
+} from "@backend/services/plan-tasks";
 
 export const adminPlansRouter = new Hono<{ Bindings: Env }>();
 
-const TASK_STATUSES = ["pending", "in_progress", "blocked", "deferred", "done"] as const;
-type TaskStatus = (typeof TASK_STATUSES)[number];
-
 /** Roll a task list up into status counts + a completion percentage. */
 function rollup(tasks: Pick<PlanTask, "status">[]) {
-  const counts: Record<TaskStatus, number> = {
-    pending: 0,
-    in_progress: 0,
-    blocked: 0,
-    deferred: 0,
-    done: 0,
-  };
-  for (const task of tasks) counts[task.status as TaskStatus]++;
+  const counts = Object.fromEntries(PLAN_TASK_STATUSES.map((s) => [s, 0])) as Record<
+    PlanTaskStatus,
+    number
+  >;
+  for (const task of tasks) counts[task.status as PlanTaskStatus]++;
   const total = tasks.length;
   const percent = total > 0 ? Math.round((counts.done / total) * 100) : 0;
   return { total, percent, counts };
@@ -125,27 +125,35 @@ adminPlansRouter.patch("/tasks/:id", async (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isFinite(id)) return c.json({ success: false, error: "Invalid task id" }, 400);
 
-  const body = (await c.req.json().catch(() => ({}))) as { status?: string; notes?: string };
-  const update: Partial<PlanTask> = { updatedAt: new Date() };
+  const body = (await c.req.json().catch(() => ({}))) as {
+    status?: string;
+    notes?: string | null;
+    prNumber?: number | null;
+    changelogSlug?: string | null;
+    progressPct?: number | null;
+  };
+  const patch: PlanTaskPatch = {};
 
   if (body.status !== undefined) {
-    if (!TASK_STATUSES.includes(body.status as TaskStatus)) {
-      return c.json({ success: false, error: `status must be one of ${TASK_STATUSES.join(", ")}` }, 400);
+    if (!PLAN_TASK_STATUSES.includes(body.status as PlanTaskStatus)) {
+      return c.json(
+        { success: false, error: `status must be one of ${PLAN_TASK_STATUSES.join(", ")}` },
+        400,
+      );
     }
-    update.status = body.status as TaskStatus;
+    patch.status = body.status as PlanTaskStatus;
   }
-  if (body.notes !== undefined) update.notes = body.notes;
+  if (body.notes !== undefined) patch.notes = body.notes;
+  if (body.prNumber !== undefined) patch.prNumber = body.prNumber;
+  if (body.changelogSlug !== undefined) patch.changelogSlug = body.changelogSlug;
+  if (body.progressPct !== undefined) patch.progressPct = body.progressPct;
 
-  const [updated] = await db_update(c, id, update);
+  // Route through the shared service so the write also pokes the plan's realtime
+  // room — an open preview-changelog viewer updates without a manual refresh.
+  const updated = await updatePlanTask(c.env, drizzle(c.env.DB), { id }, patch);
   if (!updated) return c.json({ success: false, error: "Task not found" }, 404);
   return c.json({ success: true, task: updated });
 });
-
-/** Small helper to keep the PATCH handler tidy. */
-async function db_update(c: { env: Env }, id: number, update: Partial<PlanTask>) {
-  const db = drizzle(c.env.DB);
-  return db.update(planTasks).set(update).where(eq(planTasks.id, id)).returning();
-}
 
 // ─── POST /:slug/seed — idempotent (re)seed ──────────────────────────────────
 // Seeds ALL plans/tasks (the canonical list is global); :slug is accepted for
