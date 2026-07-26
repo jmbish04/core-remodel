@@ -24,7 +24,7 @@ import { projectSystemVariables } from "@backend/db";
 import { getActiveDriveSlug, setActiveDrive } from "@backend/services/drive-lists";
 import { telemetryRecordingAllowed } from "@backend/services/tesla-integration";
 import { setConfigValue } from "@backend/services/usage/metering";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 /** Timezone the daytime window is expressed in — the house is in the Bay Area. */
@@ -168,17 +168,23 @@ export async function setPollFallbackSeconds(env: Env, seconds: number): Promise
 /**
  * Whether auto-navigation is opted in. Reads the single config row; defaults to
  * FALSE so the vehicle is never commanded to navigate without an explicit opt-in.
+ * @param env - The Cloudflare Worker environment bindings.
+ * @returns `true` only if the operator has explicitly opted into auto-navigation.
  */
 export async function isAutoNavigateEnabled(env: Env): Promise<boolean> {
   const [row] = await drizzle(env.DB)
     .select({ value: projectSystemVariables.valueText })
     .from(projectSystemVariables)
-    .where(inArray(projectSystemVariables.variableKey, [STREAM_AUTO_NAV_KEY]))
+    .where(eq(projectSystemVariables.variableKey, STREAM_AUTO_NAV_KEY))
     .limit(1);
   return row?.value === "true";
 }
 
-/** Toggle the auto-navigate opt-in. */
+/**
+ * Toggle the auto-navigate opt-in.
+ * @param env - The Cloudflare Worker environment bindings.
+ * @param enabled - `true` to opt in (command the car to the next stop on a match), `false` to opt out.
+ */
 export async function setAutoNavigate(env: Env, enabled: boolean): Promise<void> {
   await setConfigValue(env, STREAM_AUTO_NAV_KEY, enabled ? "true" : "false");
 }

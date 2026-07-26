@@ -60,6 +60,9 @@ export function AdminTeslaAlert() {
   const eventsTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const rotateTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const mounted = useRef(true);
+  // Tracks the live flag for async guards — an in-flight events fetch must not
+  // repopulate the buffer after telemetry has gone inactive.
+  const liveRef = useRef(false);
 
   const stop = useCallback(() => {
     if (timer.current) {
@@ -97,7 +100,9 @@ export function AdminTeslaAlert() {
   const loadEvents = useCallback(async () => {
     try {
       const res = await fetch("/api/tesla/stream/events?limit=8", { credentials: "include" });
-      if (!mounted.current || !res.ok) return;
+      // Drop the result if we unmounted OR telemetry went inactive while the
+      // request was in flight, so a late response can't repopulate stale frames.
+      if (!mounted.current || !liveRef.current || !res.ok) return;
       const data = (await res.json()) as { events?: TelemetryEvent[] };
       setEvents(Array.isArray(data.events) ? data.events : []);
     } catch {
@@ -121,6 +126,7 @@ export function AdminTeslaAlert() {
   // Ticker lifecycle: poll parsed frames + rotate ONLY while telemetry is live.
   const live = Boolean(banner?.telemetryActive);
   useEffect(() => {
+    liveRef.current = live;
     if (!live) {
       stopTicker();
       setEvents([]);
@@ -132,7 +138,8 @@ export function AdminTeslaAlert() {
       if (!document.hidden) void loadEvents();
     }, EVENTS_MS);
     rotateTimer.current = setInterval(() => {
-      setRotateIdx((i) => i + 1);
+      // Don't advance while the tab is hidden — no one is watching and it's wasted work.
+      if (!document.hidden) setRotateIdx((i) => i + 1);
     }, ROTATE_MS);
     return stopTicker;
   }, [live, loadEvents, stopTicker]);
@@ -196,7 +203,6 @@ export function AdminTeslaAlert() {
         <span
           key={current.id}
           className="flex min-w-0 items-center gap-2 font-mono text-xs text-emerald-100/90 tabular-nums animate-in fade-in-0 slide-in-from-bottom-1 duration-300"
-          aria-live="polite"
           title="Latest parsed telemetry frame"
         >
           <span className="size-1.5 shrink-0 rounded-full bg-emerald-400" aria-hidden />
