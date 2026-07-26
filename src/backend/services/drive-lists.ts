@@ -9,8 +9,8 @@
  * legacy rows that still hold one freeform chunk, splits on blank lines so old
  * drives also render as a stack of cards.
  */
-import { driveListStops, driveLists, showroomStores } from "@backend/db";
-import { and, desc, eq, inArray, ne, sql } from "drizzle-orm";
+import { driveListNotes, driveListStops, driveLists, showroomStores } from "@backend/db";
+import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 /** Drizzle D1 client (matches the MCP registry's `RemodelDb`). */
@@ -428,6 +428,72 @@ export async function removeDriveStop(
   if (!stop) return null;
   await db.delete(driveListStops).where(eq(driveListStops.id, stopId)).run();
   return { driveListId: stop.driveListId };
+}
+
+// ── Drive-list notes (drive-global OR pinned to a stop) ──────────────────────
+
+/** A note to create on a drive. `stopId` null/absent = a drive-global note. */
+export interface DriveNoteInput {
+  body: string;
+  stopId?: number | null;
+  source?: "user" | "ai";
+}
+
+/** Create a note (entity-decoded). Returns the inserted row. */
+export async function createDriveNote(
+  db: RemodelDb,
+  driveListId: number,
+  input: DriveNoteInput,
+): Promise<typeof driveListNotes.$inferSelect> {
+  const [row] = await db
+    .insert(driveListNotes)
+    .values({
+      driveListId,
+      driveListStopId: input.stopId ?? null,
+      body: decodeHtmlEntities(input.body),
+      source: input.source ?? "user",
+    })
+    .returning();
+  return row;
+}
+
+/** All notes for a drive, split into drive-global and per-stop, oldest first. */
+export async function listDriveNotes(
+  db: RemodelDb,
+  driveListId: number,
+): Promise<{
+  drive: (typeof driveListNotes.$inferSelect)[];
+  byStop: Record<number, (typeof driveListNotes.$inferSelect)[]>;
+}> {
+  const rows = await db
+    .select()
+    .from(driveListNotes)
+    .where(eq(driveListNotes.driveListId, driveListId))
+    .orderBy(asc(driveListNotes.createdAt), asc(driveListNotes.id));
+  const drive = rows.filter((r) => r.driveListStopId == null);
+  const byStop: Record<number, (typeof driveListNotes.$inferSelect)[]> = {};
+  for (const r of rows) {
+    if (r.driveListStopId != null) (byStop[r.driveListStopId] ??= []).push(r);
+  }
+  return { drive, byStop };
+}
+
+/** Set/clear a note's read (collapsed) state. */
+export async function setDriveNoteRead(
+  db: RemodelDb,
+  noteId: number,
+  read: boolean,
+): Promise<void> {
+  await db
+    .update(driveListNotes)
+    .set({ readAt: read ? new Date() : null })
+    .where(eq(driveListNotes.id, noteId))
+    .run();
+}
+
+/** Delete a note by id. */
+export async function deleteDriveNote(db: RemodelDb, noteId: number): Promise<void> {
+  await db.delete(driveListNotes).where(eq(driveListNotes.id, noteId)).run();
 }
 
 /**
