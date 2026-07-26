@@ -1,5 +1,7 @@
 # Drive visit state machine — park, dwell, depart
 
+> 🔗 **Folded in (2026-07-26):** this `tesla_park_sessions` poll-based machine is adopted as the **L1 detector** in **`0032_location_visits_discovery`**, generalized past Tesla to any subject/source (`park_sessions`, keyed on `subject_id` = vin|phone|ai; shiftState transition OR dwell heuristic). Preview: https://core-remodel.hacolby.workers.dev/admin/changelog/preview/0032-location-visits-discovery · tracker: `docs/0032_location_visits_discovery/TRACKING.json`
+
 Status: **proposed** (not built). Written 2026-07-21, alongside PR #178.
 
 ## The idea

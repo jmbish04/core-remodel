@@ -1,5 +1,7 @@
 # 0031 — Drive List Ops: notes, ratings, skip, active banner, live timing, pitstops
 
+> 🔗 **Cross-reference (2026-07-26):** the **`0032_location_visits_discovery`** pass touches the same `drive_lists` / `drive_list_stops` tables **additively** (adds `drive_lists.paused`, `drive_list_stops.is_detour` + `hitl_queue_id`) — no column overlap with 0031's `kind`/`suggested`/`skipped`/`started_at`. **Coordination point:** both write `drive_list_stops.visited` — 0031 via manual/rating, 0032 via automatic park-settle; keep them idempotent. Preview: https://core-remodel.hacolby.workers.dev/admin/changelog/preview/0032-location-visits-discovery · tracker: `docs/0032_location_visits_discovery/TRACKING.json`
+
 **Status:** planning · **Owner:** Claude Code · **Extends:** `0022_gps_showroom_drives`,
 builds Phase C on top of PR #242 (`0023_tesla_telemetry_webhooks`).
 **Slug:** `drive-list-ops` · **Branch (PR-A already shipped):** `claude/drive-list-ui-improvements-b58ece` (#244)
