@@ -324,10 +324,11 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
       ) : null}
 
       {/*
-        Verification. Deliberately shows an explicit "not recorded" state rather
-        than rendering nothing: an absent section is indistinguishable from a
-        change nobody tested, and the reader cannot tell which they are looking at.
+        Verification — SHIPPED entries only. A proposal has not been built or QC'd
+        yet, so the "not recorded" state is pure noise on the preview; hide the whole
+        section when staged. For shipped entries it stays explicit (absent ≠ untested).
       */}
+      {staged ? null : (
       <section id="verification" class="mt-12 scroll-mt-24 border-t border-border/40 pt-8">
         <h2 class="text-sm font-semibold tracking-tight">Verification</h2>
 
@@ -404,6 +405,7 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
           </div>
         ) : null}
       </section>
+      )}
 
       <section class="mt-12 border-t border-border/40 pt-8">
         <Changelog21 {...recap} />

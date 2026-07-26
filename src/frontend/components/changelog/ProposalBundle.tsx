@@ -24,6 +24,7 @@ import { ChevronDown, GitPullRequest } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { MarkdownProse } from "@/components/research/MarkdownProse";
+import { AgentPromptCard } from "@/components/changelog/AgentPromptCard";
 import { ProgressBar } from "@/components/plans/shared";
 import { cn } from "@/lib/utils";
 
@@ -412,29 +413,25 @@ export function ProposalBundle(props: ProposalBundleProps) {
         <span className="rounded-md bg-violet-500/12 px-2 py-0.5 text-[11px] font-medium text-violet-300">
           Proposal bundle
         </span>
-        <span className="rounded-md bg-card px-2 py-0.5 text-[11px] text-muted-foreground ring-1 ring-border/40">
-          {props.status}
-        </span>
-        <span className="text-[11px] text-muted-foreground">
+        {designBriefMarkdown ? (
+          <span className="rounded-md bg-fuchsia-500/12 px-2 py-0.5 text-[11px] font-medium text-fuchsia-300 ring-1 ring-fuchsia-500/25">
+            Design spec
+          </span>
+        ) : null}
+        <span className="text-[11px] text-muted-foreground/70">
           filed by {props.sourceKind.replace("_", " ")}
           {props.sourceModel ? ` · ${props.sourceModel}` : ""}
         </span>
       </div>
-      <p className="mt-2 max-w-3xl text-sm text-muted-foreground">
-        The thinking behind this entry, carried forward so it can be picked up later without
-        rebuilding it from a summary.
-      </p>
 
       {promptMarkdown ? (
-        <Panel
-          title="Prompt"
-          subtitle="The handoff artifact — paste this to start a coding agent."
-          action={<CopyButton text={promptMarkdown} />}
-        >
-          <pre className="max-h-[28rem] overflow-auto whitespace-pre-wrap font-mono text-xs leading-relaxed text-foreground/90">
-            {promptMarkdown}
-          </pre>
-        </Panel>
+        <div className="mt-5">
+          <AgentPromptCard
+            title="Prompt"
+            description="The handoff artifact — paste this to start a coding agent."
+            prompt={promptMarkdown}
+          />
+        </div>
       ) : null}
 
       {prdMarkdown ? (
