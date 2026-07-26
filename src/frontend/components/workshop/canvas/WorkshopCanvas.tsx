@@ -56,6 +56,7 @@ interface WorkshopCanvasProps {
   onFloorPlanFurnish: (node: BoardNode) => void;
   onPlanToIsometric: (node: BoardNode) => void;
   onEvolutionGrid: (node: BoardNode) => void;
+  onExtractFurnishings: (node: BoardNode) => void;
   onToneUnify: (node: BoardNode) => void;
   onLightingEnhance: (node: BoardNode) => void;
   /** "Place image (I)" opens the drawer — our rendition of image placement. */
@@ -101,6 +102,7 @@ export function WorkshopCanvas({
   onFloorPlanFurnish,
   onPlanToIsometric,
   onEvolutionGrid,
+  onExtractFurnishings,
   onToneUnify,
   onLightingEnhance,
   onPlaceImage,
@@ -651,6 +653,7 @@ export function WorkshopCanvas({
         onFloorPlanFurnish={onFloorPlanFurnish}
         onPlanToIsometric={onPlanToIsometric}
         onEvolutionGrid={onEvolutionGrid}
+        onExtractFurnishings={onExtractFurnishings}
         onToneUnify={onToneUnify}
         onLightingEnhance={onLightingEnhance}
       />

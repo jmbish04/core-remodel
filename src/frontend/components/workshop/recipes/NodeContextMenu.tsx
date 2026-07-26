@@ -9,7 +9,7 @@
 // ---------------------------------------------------------------------------
 
 import { useEffect, useRef } from "react";
-import { Armchair, Blend, Box, LayoutGrid, Palette, Scissors, Sun, SwatchBook, Wand2 } from "lucide-react";
+import { Armchair, Blend, Box, LayoutGrid, PackageSearch, Palette, Scissors, Sun, SwatchBook, Wand2 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
@@ -35,6 +35,7 @@ interface NodeContextMenuProps {
   onLightingEnhance: (node: BoardNode) => void;
   onPlanToIsometric: (node: BoardNode) => void;
   onEvolutionGrid: (node: BoardNode) => void;
+  onExtractFurnishings: (node: BoardNode) => void;
 }
 
 const ITEM_CLASS =
@@ -52,6 +53,7 @@ export function NodeContextMenu({
   onLightingEnhance,
   onPlanToIsometric,
   onEvolutionGrid,
+  onExtractFurnishings,
 }: NodeContextMenuProps) {
   const ref = useRef<HTMLDivElement | null>(null);
   const firstItemRef = useRef<HTMLButtonElement | null>(null);
@@ -176,6 +178,20 @@ export function NodeContextMenu({
           Show it evolving…
           <span className="block text-[11px] text-muted-foreground">
             A 2×2 grid from empty to finished
+          </span>
+        </span>
+      </button>
+      <button
+        type="button"
+        role="menuitem"
+        className={ITEM_CLASS}
+        onClick={() => run(onExtractFurnishings)}
+      >
+        <PackageSearch className="size-4 text-muted-foreground" />
+        <span>
+          List the furnishings…
+          <span className="block text-[11px] text-muted-foreground">
+            Pull a shopping list out of this image
           </span>
         </span>
       </button>
