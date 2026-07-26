@@ -44,6 +44,7 @@ import { extractTelemetryFields } from "@backend/services/tesla/frames";
 import { finalizeSoftArrivals, stageSoftArrival } from "@backend/services/tesla/visit-sessions";
 import {
   heartbeatStream,
+  isAutoNavigateEnabled,
   setStreamConnected,
   shouldStreamNow,
 } from "@backend/services/tesla/gating";
@@ -349,7 +350,9 @@ export class TeslaStreamDO extends DurableObject<Env> {
 
   private async onPark(lat: number, lng: number): Promise<void> {
     const match = await matchAndMarkVisited(this.appDb, { lat, lng });
-    if (match.matched && match.next) {
+    // Auto-navigation is OPT-IN (see gating.isAutoNavigateEnabled) — never command
+    // the vehicle to a next stop the driver didn't ask for.
+    if (match.matched && match.next && (await isAutoNavigateEnabled(this.env))) {
       await sendNavigation(this.env, `${match.next.lat},${match.next.lng}`).catch(() => {});
     }
     const home = await maybeEndActiveDriveOnHomeArrival(this.env, {

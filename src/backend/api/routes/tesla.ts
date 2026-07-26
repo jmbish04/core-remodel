@@ -39,7 +39,9 @@ import {
 import { extractCoord, extractTelemetryFields } from "@backend/services/tesla/frames";
 import {
   getStreamControl,
+  isAutoNavigateEnabled,
   isWithinStreamWindow,
+  setAutoNavigate,
   setPollFallbackSeconds,
   setStreamEnabled,
   setStreamWindow,
@@ -166,9 +168,10 @@ teslaRouter.get("/stream/control", async (c) => {
 /**
  * POST /api/tesla/stream/control — update the lifecycle controls.
  *
- * Body (all optional): `{ enabled, windowStartHour, windowEndHour, pollFallbackSeconds }`.
+ * Body (all optional): `{ enabled, windowStartHour, windowEndHour, pollFallbackSeconds, autoNavigate }`.
  * `enabled:false` stands the DO down and hands ingest to the poller while a drive
- * is still active. The window and cadence are validated in the service layer.
+ * is still active. `autoNavigate` opts into commanding the car to the next stop on
+ * a matched park (default OFF). The window and cadence are validated in the service layer.
  */
 teslaRouter.post("/stream/control", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
@@ -176,6 +179,7 @@ teslaRouter.post("/stream/control", async (c) => {
     windowStartHour?: number;
     windowEndHour?: number;
     pollFallbackSeconds?: number;
+    autoNavigate?: boolean;
   };
   try {
     if (typeof body.enabled === "boolean") await setStreamEnabled(c.env, body.enabled);
@@ -185,11 +189,15 @@ teslaRouter.post("/stream/control", async (c) => {
     if (typeof body.pollFallbackSeconds === "number") {
       await setPollFallbackSeconds(c.env, body.pollFallbackSeconds);
     }
+    if (typeof body.autoNavigate === "boolean") await setAutoNavigate(c.env, body.autoNavigate);
   } catch (err) {
     return c.json({ error: (err as Error).message }, 400);
   }
-  const control = await getStreamControl(c.env);
-  return c.json({ ok: true, control });
+  const [control, autoNavigate] = await Promise.all([
+    getStreamControl(c.env),
+    isAutoNavigateEnabled(c.env),
+  ]);
+  return c.json({ ok: true, control: { ...control, autoNavigate } });
 });
 
 /** Resolve the singleton TeslaStreamDO stub (one instance for the one vehicle). */
@@ -261,6 +269,73 @@ teslaRouter.get("/stream/banner", async (c) => {
     windowLabel: `${to12h(control.windowStartHour)}–${to12h(control.windowEndHour)}`,
     vehicleImageUrl,
   });
+});
+
+/** Human gear label for the ticker. */
+function gearLabel(shift: string | null): string | null {
+  switch ((shift ?? "").toUpperCase()) {
+    case "P":
+      return "Parked";
+    case "D":
+      return "Driving";
+    case "R":
+      return "Reverse";
+    case "N":
+      return "Neutral";
+    default:
+      return null;
+  }
+}
+
+/**
+ * GET /api/tesla/stream/events — recent PARSED telemetry frames for the live ticker.
+ *
+ * Feeds the rotating parsed-event line in the global admin alert while a session is
+ * open. Reads the newest `tesla_telemetry_events` rows (TESLA_DB, `received_at`
+ * indexed) and pre-parses each into a compact, display-ready item so the client
+ * only rotates strings. `?limit=` (1–20, default 8). Empty until frames flow —
+ * the ticker simply shows nothing then. Admin-gated by the router middleware.
+ */
+teslaRouter.get("/stream/events", async (c) => {
+  const limit = Math.min(Math.max(parseInt(c.req.query("limit") || "8", 10) || 8, 1), 20);
+  const rows = await drizzle(c.env.TESLA_DB)
+    .select({
+      id: teslaTelemetryEvents.id,
+      receivedAt: teslaTelemetryEvents.receivedAt,
+      eventTs: teslaTelemetryEvents.eventTs,
+      latitude: teslaTelemetryEvents.latitude,
+      longitude: teslaTelemetryEvents.longitude,
+      speed: teslaTelemetryEvents.speed,
+      shiftState: teslaTelemetryEvents.shiftState,
+      batteryLevel: teslaTelemetryEvents.batteryLevel,
+    })
+    .from(teslaTelemetryEvents)
+    .orderBy(desc(teslaTelemetryEvents.receivedAt))
+    .limit(limit);
+
+  const events = rows.map((r) => {
+    const gear = gearLabel(r.shiftState);
+    const parts: string[] = [];
+    if (gear) parts.push(gear);
+    if (r.speed != null && r.speed > 0) parts.push(`${Math.round(r.speed)} mph`);
+    if (r.batteryLevel != null) parts.push(`${r.batteryLevel}%`);
+    if (r.latitude != null && r.longitude != null) {
+      parts.push(`${r.latitude.toFixed(4)}, ${r.longitude.toFixed(4)}`);
+    }
+    return {
+      id: r.id,
+      at: (r.eventTs ?? r.receivedAt)?.toISOString() ?? null,
+      gear,
+      speed: r.speed,
+      batteryLevel: r.batteryLevel,
+      latitude: r.latitude,
+      longitude: r.longitude,
+      // Pre-built summary line — "Driving · 34 mph · 62% · 37.8712, -122.3011".
+      text: parts.join(" · ") || "Telemetry frame",
+    };
+  });
+
+  return c.json({ count: events.length, events });
 });
 
 /**

@@ -12,6 +12,10 @@
  * Reads `GET /api/tesla/stream/banner` (one cheap aggregate) every 20s; writes the
  * toggle + starts the stream via the existing control routes. Self-hides on 404
  * (a worker without the ingest routes) and when no drive is active.
+ *
+ * LIVE TICKER: while telemetry is active it also polls `GET /api/tesla/stream/events`
+ * every 5s for the newest PARSED frames and rotates through them (~3s each) in the
+ * bar, so real-time data streams across the top of every admin page as it arrives.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Radio, Route } from "lucide-react";
@@ -29,19 +33,49 @@ interface Banner {
   vehicleImageUrl: string | null;
 }
 
+interface TelemetryEvent {
+  id: number;
+  at: string | null;
+  gear: string | null;
+  speed: number | null;
+  batteryLevel: number | null;
+  latitude: number | null;
+  longitude: number | null;
+  text: string;
+}
+
 const REFRESH_MS = 20_000;
+/** How often to pull new parsed frames while live. */
+const EVENTS_MS = 5_000;
+/** How long each parsed event is shown before rotating to the next. */
+const ROTATE_MS = 3_000;
 
 export function AdminTeslaAlert() {
   const [banner, setBanner] = useState<Banner | null>(null);
   const [enabling, setEnabling] = useState(false);
   const [gone, setGone] = useState(false);
+  const [events, setEvents] = useState<TelemetryEvent[]>([]);
+  const [rotateIdx, setRotateIdx] = useState(0);
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const eventsTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const rotateTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const mounted = useRef(true);
 
   const stop = useCallback(() => {
     if (timer.current) {
       clearInterval(timer.current);
       timer.current = null;
+    }
+  }, []);
+
+  const stopTicker = useCallback(() => {
+    if (eventsTimer.current) {
+      clearInterval(eventsTimer.current);
+      eventsTimer.current = null;
+    }
+    if (rotateTimer.current) {
+      clearInterval(rotateTimer.current);
+      rotateTimer.current = null;
     }
   }, []);
 
@@ -60,6 +94,17 @@ export function AdminTeslaAlert() {
     }
   }, [stop]);
 
+  const loadEvents = useCallback(async () => {
+    try {
+      const res = await fetch("/api/tesla/stream/events?limit=8", { credentials: "include" });
+      if (!mounted.current || !res.ok) return;
+      const data = (await res.json()) as { events?: TelemetryEvent[] };
+      setEvents(Array.isArray(data.events) ? data.events : []);
+    } catch {
+      /* transient — keep the last frames */
+    }
+  }, []);
+
   useEffect(() => {
     mounted.current = true;
     void load();
@@ -69,8 +114,28 @@ export function AdminTeslaAlert() {
     return () => {
       mounted.current = false;
       stop();
+      stopTicker();
     };
-  }, [load, stop]);
+  }, [load, stop, stopTicker]);
+
+  // Ticker lifecycle: poll parsed frames + rotate ONLY while telemetry is live.
+  const live = Boolean(banner?.telemetryActive);
+  useEffect(() => {
+    if (!live) {
+      stopTicker();
+      setEvents([]);
+      setRotateIdx(0);
+      return;
+    }
+    void loadEvents();
+    eventsTimer.current = setInterval(() => {
+      if (!document.hidden) void loadEvents();
+    }, EVENTS_MS);
+    rotateTimer.current = setInterval(() => {
+      setRotateIdx((i) => i + 1);
+    }, ROTATE_MS);
+    return stopTicker;
+  }, [live, loadEvents, stopTicker]);
 
   const enable = async () => {
     setEnabling(true);
@@ -95,6 +160,8 @@ export function AdminTeslaAlert() {
   if (gone || !banner?.activeDrive) return null;
 
   const { activeDrive, telemetryActive, canEnable, withinWindow, windowLabel, vehicleImageUrl } = banner;
+  // The parsed frame currently in the rotation (newest-first buffer, wraps around).
+  const current = events.length > 0 ? events[rotateIdx % events.length] : null;
 
   return (
     <div
@@ -122,6 +189,18 @@ export function AdminTeslaAlert() {
       ) : (
         <span className="text-muted-foreground">
           {withinWindow ? "Telemetry off" : `Telemetry paused — window is ${windowLabel}`}
+        </span>
+      )}
+
+      {telemetryActive && current && (
+        <span
+          key={current.id}
+          className="flex min-w-0 items-center gap-2 font-mono text-xs text-emerald-100/90 tabular-nums animate-in fade-in-0 slide-in-from-bottom-1 duration-300"
+          aria-live="polite"
+          title="Latest parsed telemetry frame"
+        >
+          <span className="size-1.5 shrink-0 rounded-full bg-emerald-400" aria-hidden />
+          <span className="truncate">{current.text}</span>
         </span>
       )}
 
