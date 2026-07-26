@@ -9,8 +9,11 @@
  * slide index, mermaid rendering — and a server pass would only emit the first
  * slide before hydration replaced it.
  */
+import { drizzle } from "drizzle-orm/d1";
+
 import { ChangelogDeck } from "@/components/changelog/ChangelogDeck";
 import { detailHref, loadEntry, type ChangelogStage } from "@/lib/changelog-blocks";
+import { getProposal } from "@backend/services/changelog-proposals";
 
 
 interface Props {
@@ -18,9 +21,60 @@ interface Props {
   stage: ChangelogStage;
 }
 
+/**
+ * Pull ```mermaid fenced blocks out of a proposal's markdown so the deck shows
+ * them as DIAGRAM slides instead of dumping prose onto centered text slides. The
+ * title is the nearest preceding markdown heading (else "Diagram N").
+ */
+function extractMermaidSlides(markdown: string | null | undefined): { title: string; code: string }[] {
+  if (!markdown) return [];
+  const out: { title: string; code: string }[] = [];
+  let heading = "";
+  let inFence = false;
+  let buf: string[] = [];
+  let n = 0;
+  for (const line of markdown.split("\n")) {
+    const fence = line.match(/^```(\w*)/);
+    if (!inFence && fence) {
+      if (fence[1] === "mermaid") { inFence = true; buf = []; }
+      continue;
+    }
+    if (inFence && /^```/.test(line)) {
+      n += 1;
+      out.push({ title: heading || `Diagram ${n}`, code: buf.join("\n") });
+      inFence = false;
+      continue;
+    }
+    if (inFence) { buf.push(line); continue; }
+    const h = line.match(/^#{1,4}\s+(.*)/);
+    if (h) heading = h[1].replace(/[*`]/g, "").trim();
+  }
+  return out;
+}
+
 const { slug, stage } = Astro.props;
 const { entry, detail, prNumber, prUrl } = await loadEntry(Astro.locals.runtime?.env, slug);
 const href = detailHref(slug, stage);
+
+// A PROPOSAL's rich diagrams live in the bundle's prd/design markdown, not in
+// detail.diagrams — mine them out so the deck is visual, not a wall of text.
+let proposalDiagrams: { title: string; code: string }[] = [];
+if (stage === "staged") {
+  try {
+    const env = Astro.locals.runtime?.env;
+    if (env?.DB) {
+      const found = await getProposal(drizzle(env.DB), slug);
+      if (found) {
+        proposalDiagrams = [
+          ...extractMermaidSlides(found.proposal.prdMarkdown),
+          ...extractMermaidSlides(found.proposal.designBriefMarkdown),
+        ];
+      }
+    }
+  } catch {
+    proposalDiagrams = [];
+  }
+}
 
 // Same rule the detail page uses: prefer the verification block's per-tag remote
 // state, and never imply "applied" for a tag nobody recorded.
@@ -28,11 +82,18 @@ const migrations =
   detail?.verification?.migrations?.map((m) => ({ tag: m.tag, appliedRemote: m.appliedRemote })) ??
   (entry?.migrations ?? []).map((tag) => ({ tag, appliedRemote: false }));
 
-const diagrams = (detail?.diagrams ?? []).map((d) => ({
-  title: d.title ?? d.caption,
-  description: d.description,
-  code: d.code,
-}));
+const diagrams = [
+  ...(detail?.diagrams ?? []).map((d) => ({
+    title: d.title ?? d.caption,
+    description: d.description,
+    code: d.code,
+  })),
+  // Proposal diagrams (from prd/design markdown) — deduped by code against any
+  // already present in detail.diagrams.
+  ...proposalDiagrams.filter(
+    (p) => !(detail?.diagrams ?? []).some((d) => d.code.trim() === p.code.trim()),
+  ),
+];
 ---
 
 {

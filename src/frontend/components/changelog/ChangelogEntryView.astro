@@ -172,6 +172,9 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
               no PR
             </span>
           )}
+          <span class="rounded-md bg-card px-2 py-0.5 font-mono text-[11px] text-muted-foreground ring-1 ring-border/40">
+            {slug}
+          </span>
           <span class="text-[11px] text-muted-foreground">{entry!.date}</span>
         </div>
 
@@ -407,7 +410,7 @@ const crossHref = entry && entry.status !== stage ? detailHref(slug, entry.statu
       </section>
       )}
 
-      <section class="mt-12 border-t border-border/40 pt-8">
+      <section class="mt-8 border-t border-border/40 pt-6">
         <Changelog21 {...recap} />
       </section>
     </main>
