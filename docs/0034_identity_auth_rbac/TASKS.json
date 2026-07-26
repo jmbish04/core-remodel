@@ -6,7 +6,8 @@
     { "key": "A", "title": "Clerk foundation" },
     { "key": "B", "title": "RBAC schema" },
     { "key": "C", "title": "Device identity" },
-    { "key": "D", "title": "Authz cutover" }
+    { "key": "D", "title": "Authz cutover" },
+    { "key": "E", "title": "Domain identity linkage" }
   ],
   "tasks": [
     { "taskKey": "A1", "phase": "A", "workstream": "backend", "changeType": "new", "dependsOn": [], "status": "pending", "title": "Spike: verify @clerk/astro + @clerk/backend under @astrojs/cloudflare (Workers edge)", "successCriteria": "Clerk runs in-Worker OR documented fallback (@clerk/backend token verify + custom Astro middleware); Clerk skills consulted" },
@@ -28,6 +29,11 @@
 
     { "taskKey": "D1", "phase": "D", "workstream": "backend", "changeType": "update", "dependsOn": ["B3", "A3"], "status": "pending", "title": "Dual-gate: Clerk admin session OR legacy remodel_access cookie", "successCriteria": "api/middleware/auth.ts accepts either; no admin access drop; WORKER_API_KEY NOT rotated" },
     { "taskKey": "D2", "phase": "D", "workstream": "backend", "changeType": "update", "dependsOn": ["D1"], "status": "pending", "title": "Migrate all gated routes; reconcile MCP OAuth principal→user; retire shared secret + sessions table", "successCriteria": "every remodel_access route accepts Clerk admin; MCP OAuth principal maps to user; legacy secret retired last; hand-rolled sessions table dropped" },
-    { "taskKey": "D3", "phase": "D", "workstream": "qc", "changeType": "new", "dependsOn": ["D2"], "status": "pending", "title": "QC pr-D + changelog", "successCriteria": "gated routes accept Clerk admin; legacy still works pre-retirement; MCP unaffected; changelog + link" }
+    { "taskKey": "D3", "phase": "D", "workstream": "qc", "changeType": "new", "dependsOn": ["D2"], "status": "pending", "title": "QC pr-D + changelog", "successCriteria": "gated routes accept Clerk admin; legacy still works pre-retirement; MCP unaffected; changelog + link" },
+
+    { "taskKey": "E1", "phase": "E", "workstream": "db", "changeType": "update", "dependsOn": ["A4"], "status": "pending", "title": "companies.user_id FK -> users (contractor bid submission)", "successCriteria": "add user_id FK to the CANONICAL contractor table (per 0035 Finding B — not both); logged-in contractor submits bids as their company; nullable" },
+    { "taskKey": "E2", "phase": "E", "workstream": "db", "changeType": "update", "dependsOn": ["A4"], "status": "pending", "title": "planning_participants.user_id FK -> users", "successCriteria": "tie each task actor to a real account (nullable — off-platform actors allowed); enables notifications + login personalization" },
+    { "taskKey": "E3", "phase": "E", "workstream": "db", "changeType": "new", "dependsOn": ["E2"], "status": "pending", "title": "task_contacts mapping (assignee/cc/RASCI) replacing JSON participant-id arrays", "successCriteria": "task_id->planning_tasks, participant_id->planning_participants, role enum(ASSIGNEE|CC|RESPONSIBLE|ACCOUNTABLE|SUPPORT|CONSULTED|INFORMED), UNIQUE(task_id,participant_id,role); migrate owner/responsible/accountable_participant_id + support/consulted/informed_participant_ids arrays INTO it; retire the JSON arrays" },
+    { "taskKey": "E4", "phase": "E", "workstream": "qc", "changeType": "new", "dependsOn": ["E1", "E3"], "status": "pending", "title": "QC pr-E + changelog", "successCriteria": "contractor submits bid tied to user; task RASCI resolves via task_contacts; notifications target user; 'my tasks' join works" }
   ]
 }

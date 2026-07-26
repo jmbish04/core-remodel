@@ -98,6 +98,46 @@ flowchart TD
   Clerk session + an `admin` permission. **Dual-gate transitionally** (accept either the legacy cookie OR a
   Clerk admin session) until every surface is migrated, then retire the shared secret. Reconcile with the MCP
   OAuth provider (`@cloudflare/workers-oauth-provider`) — it stays for `/mcp`, but its principal maps to a user.
+- **Phase E — domain identity linkage (§4a).** `companies.user_id` FK (contractor bid submission; target per 0035
+  Finding B); `planning_participants.user_id` FK; new `task_contacts` mapping replacing the JSON participant-id
+  arrays; feed the existing `notifications` table + login personalization.
+
+## 4a. Domain identity linkage (owner-specified)
+
+Two more user-account ties, both landing on the `users` table this plan creates:
+
+### Companies → user (contractors submit bids)
+```mermaid
+erDiagram
+    users ||--o{ companies : "user_id (NEW FK) — the account that operates the company"
+```
+- Add `user_id` FK on the **canonical contractor table** so a logged-in contractor/designer submits bids/estimates
+  as their company. **Depends on 0035 Finding B** (which of `companies` / `estimate_companies` is canonical) —
+  add the FK to the winner, not both.
+
+### Task contacts (assignee · cc · RASCI) → user (notifications + login personalization)
+```mermaid
+erDiagram
+    planning_tasks ||--o{ task_contacts : task_id
+    planning_participants ||--o{ task_contacts : participant_id
+    planning_participants }o--|| users : "user_id (NEW FK)"
+    task_contacts {
+      int id PK
+      int task_id FK
+      int participant_id FK
+      text role "ASSIGNEE|CC|RESPONSIBLE|ACCOUNTABLE|SUPPORT|CONSULTED|INFORMED"
+    }
+```
+- `planning_tasks` ALREADY has RASCI via `planning_participants` (`owner/responsible/accountable_participant_id`)
+  — BUT support/consulted/informed are stored as **JSON `number[]` arrays** (`support/consulted/informed_participant_ids`),
+  the exact multi-value-in-a-column anti-pattern the repo bans.
+- **`task_contacts`** replaces those arrays with a proper mapping (`task_id`, `participant_id`, `role` enum;
+  `UNIQUE(task_id, participant_id, role)`) — covering assignee, cc, and all five RASCI roles in one table.
+- **`planning_participants.user_id` FK → users** ties each task actor to a real account, so the existing
+  `notifications` table can target a user, and login personalization ("my tasks") is a join. A participant may
+  have a null `user_id` (an off-platform actor named but not accounted).
+- Migrate the scalar `owner/responsible/accountable_participant_id` + the three JSON arrays INTO `task_contacts`,
+  then retire the array columns (keep the scalar owner columns transitionally if any reader needs them).
 
 ## 5. Compliance & guardrails
 - `user_types` + `permissions` + `user_type_permissions` = the mandated definition+mapping pattern (admin config
