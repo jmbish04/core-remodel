@@ -32,6 +32,7 @@ import {
   Check,
   ChevronDown,
   Diamond,
+  Info,
   Loader2,
   MapPin,
   Navigation,
@@ -116,6 +117,21 @@ type StopTiming = {
   feasible: boolean | null;
   reason: string | null;
   closesAt: string | null;
+};
+
+/** Condensed showroom detail (subset of GET /api/showroom-stores/:id). */
+type ShowroomDetail = {
+  id: number;
+  name: string;
+  phoneNumber: string | null;
+  heroImageCfImagesUrl: string | null;
+  description: string | null;
+  pricePoint: string | null;
+  cityName: string | null;
+  websiteUrl: string | null;
+  brands: { id: number; name: string; images?: { deliveryUrl?: string | null }[] }[];
+  products: { id: number; name: string }[];
+  hours: { day: string; openHour: number; openMinute: number; closeHour: number; closeMinute: number }[];
 };
 
 /** A stop with its precomputed fork label ("1", "3a", …). */
@@ -309,6 +325,10 @@ export function DriveViewportApp({ slug }: { slug: string }) {
   const [ratingText, setRatingText] = useState("");
   const [ratingBusy, setRatingBusy] = useState(false);
   const [skipConfirm, setSkipConfirm] = useState<Stop | null>(null);
+  // Fullscreen showroom detail modal (linked stops only).
+  const [detailStop, setDetailStop] = useState<Stop | null>(null);
+  const [detailData, setDetailData] = useState<ShowroomDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   // THE active drive (if any) — used to name the drive a switch would deactivate.
   const [activeOther, setActiveOther] = useState<{ slug: string; title: string } | null>(null);
   const [activating, setActivating] = useState(false);
@@ -589,6 +609,23 @@ export function DriveViewportApp({ slug }: { slug: string }) {
     setRatingStop(stop);
     setRatingValue(0);
     setRatingText("");
+  }, []);
+
+  const openDetail = useCallback(async (stop: Stop) => {
+    if (stop.showroomStoreId == null) return;
+    setDetailStop(stop);
+    setDetailData(null);
+    setDetailLoading(true);
+    try {
+      const res = await fetch(`/api/showroom-stores/${stop.showroomStoreId}`, {
+        credentials: "include",
+      });
+      if (res.ok) setDetailData((await res.json()) as ShowroomDetail);
+    } catch {
+      /* leave null — modal shows an error state */
+    } finally {
+      setDetailLoading(false);
+    }
   }, []);
 
   const submitRating = useCallback(
@@ -961,14 +998,35 @@ export function DriveViewportApp({ slug }: { slug: string }) {
                             {stop.pick}
                           </p>
                         ) : null}
-                        <h2
-                          className={cn(
-                            "text-xl font-bold leading-tight",
-                            stop.visited && "line-through decoration-muted-foreground",
-                          )}
-                        >
-                          {stop.name}
-                        </h2>
+                        {stop.showroomStoreId != null ? (
+                          <button
+                            type="button"
+                            onClick={() => void openDetail(stop)}
+                            className="group/name text-left"
+                          >
+                            <h2
+                              className={cn(
+                                "text-xl font-bold leading-tight underline-offset-4 group-hover/name:underline",
+                                stop.visited && "line-through decoration-muted-foreground",
+                              )}
+                            >
+                              {stop.name}
+                              <Info
+                                className="ml-1.5 inline size-4 align-middle text-muted-foreground"
+                                aria-hidden
+                              />
+                            </h2>
+                          </button>
+                        ) : (
+                          <h2
+                            className={cn(
+                              "text-xl font-bold leading-tight",
+                              stop.visited && "line-through decoration-muted-foreground",
+                            )}
+                          >
+                            {stop.name}
+                          </h2>
+                        )}
                       </div>
                       {stop.city ? (
                         <Badge variant="outline" className="shrink-0 text-primary">
@@ -1186,6 +1244,116 @@ export function DriveViewportApp({ slug }: { slug: string }) {
               AI: follow up with feedback later
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Fullscreen showroom detail — condensed card for the linked showroom. */}
+      <Dialog
+        open={detailStop !== null}
+        onOpenChange={(o) => {
+          if (!o) {
+            setDetailStop(null);
+            setDetailData(null);
+          }
+        }}
+      >
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{detailData?.name ?? detailStop?.name}</DialogTitle>
+            <DialogDescription>
+              {[detailData?.cityName ?? detailStop?.city, detailData?.pricePoint]
+                .filter(Boolean)
+                .join(" · ") || "Showroom details"}
+            </DialogDescription>
+          </DialogHeader>
+          {detailLoading ? (
+            <div className="flex h-40 items-center justify-center">
+              <Loader2 className="size-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : detailData ? (
+            <div className="space-y-4">
+              {detailData.heroImageCfImagesUrl ? (
+                <img
+                  src={detailData.heroImageCfImagesUrl}
+                  alt={detailData.name}
+                  loading="lazy"
+                  className="max-h-56 w-full rounded-lg object-cover"
+                />
+              ) : null}
+              {detailData.description ? (
+                <p className="text-sm text-muted-foreground">{detailData.description}</p>
+              ) : null}
+              <div className="flex flex-wrap gap-2">
+                {detailData.phoneNumber ? (
+                  <a
+                    href={`tel:${detailData.phoneNumber.replace(/[^0-9+]/g, "")}`}
+                    className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-muted px-4 text-sm font-semibold transition-colors hover:bg-accent"
+                  >
+                    <Phone className="size-4 text-primary" /> {detailData.phoneNumber}
+                  </a>
+                ) : null}
+                {detailStop?.address ? (
+                  <a
+                    href={navUrl(detailStop)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex min-h-11 items-center gap-2 rounded-lg bg-muted px-4 text-sm font-semibold text-primary transition-colors hover:bg-accent"
+                  >
+                    <Navigation className="size-4" /> Navigate
+                  </a>
+                ) : null}
+                {detailStop ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    className="min-h-11"
+                    onClick={() => {
+                      const s = detailStop;
+                      setDetailStop(null);
+                      setDetailData(null);
+                      if (s) {
+                        setRatingStop(s);
+                        setRatingValue(0);
+                        setRatingText("");
+                      }
+                    }}
+                  >
+                    <Star className="size-4" /> Rate
+                  </Button>
+                ) : null}
+              </div>
+              {detailData.brands?.length ? (
+                <div>
+                  <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Brands
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {detailData.brands.slice(0, 40).map((b) => (
+                      <Badge key={b.id} variant="secondary">
+                        {b.name}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              {detailData.products?.length ? (
+                <div>
+                  <p className="mb-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Products ({detailData.products.length})
+                  </p>
+                  <ul className="space-y-1 text-sm text-muted-foreground">
+                    {detailData.products.slice(0, 25).map((p) => (
+                      <li key={p.id}>• {p.name}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              Couldn't load showroom details.
+            </p>
+          )}
         </DialogContent>
       </Dialog>
 

@@ -18,9 +18,19 @@
  * bar, so real-time data streams across the top of every admin page as it arrives.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Loader2, Radio, Route } from "lucide-react";
+import { ArrowRight, Loader2, Power, Radio, Route } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 
 interface Banner {
@@ -53,6 +63,8 @@ const ROTATE_MS = 3_000;
 export function AdminTeslaAlert() {
   const [banner, setBanner] = useState<Banner | null>(null);
   const [enabling, setEnabling] = useState(false);
+  const [ending, setEnding] = useState(false);
+  const [confirmEnd, setConfirmEnd] = useState(false);
   const [gone, setGone] = useState(false);
   const [events, setEvents] = useState<TelemetryEvent[]>([]);
   const [rotateIdx, setRotateIdx] = useState(0);
@@ -163,6 +175,22 @@ export function AdminTeslaAlert() {
     }
   };
 
+  const endDrive = async () => {
+    if (!banner?.activeDrive) return;
+    setEnding(true);
+    try {
+      await fetch(`/api/drive-lists/${encodeURIComponent(banner.activeDrive.slug)}`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ isActive: false }),
+      });
+      await load(); // banner self-hides once no drive is active
+    } finally {
+      if (mounted.current) setEnding(false);
+    }
+  };
+
   // Only ever shown while a drive list is active (and once the routes exist).
   if (gone || !banner?.activeDrive) return null;
 
@@ -217,6 +245,32 @@ export function AdminTeslaAlert() {
         </Button>
       )}
 
+      {/* Sizeable "return to the active drive" + "end drive" controls. */}
+      <div className="ml-auto flex items-center gap-2">
+        <Button
+          size="sm"
+          className="h-8 gap-1.5 font-semibold"
+          render={<a href={`/admin/shopping/drives/${activeDrive.slug}`} />}
+        >
+          Return to drive
+          <ArrowRight className="size-4" aria-hidden />
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-8 gap-1.5 text-muted-foreground"
+          onClick={() => setConfirmEnd(true)}
+          disabled={ending}
+        >
+          {ending ? (
+            <Loader2 className="size-4 animate-spin" aria-hidden />
+          ) : (
+            <Power className="size-4" aria-hidden />
+          )}
+          End drive
+        </Button>
+      </div>
+
       {telemetryActive && vehicleImageUrl && (
         <img
           src={vehicleImageUrl}
@@ -224,9 +278,32 @@ export function AdminTeslaAlert() {
           width={120}
           height={60}
           loading="lazy"
-          className="ml-auto h-12 w-auto object-contain drop-shadow"
+          className="h-12 w-auto object-contain drop-shadow"
         />
       )}
+
+      <AlertDialog open={confirmEnd} onOpenChange={setConfirmEnd}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>End the active drive?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This marks <span className="font-semibold text-foreground">{activeDrive.title}</span>{" "}
+              inactive and stands telemetry down. You can reactivate it anytime.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmEnd(false);
+                void endDrive();
+              }}
+            >
+              Yes, end drive
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
