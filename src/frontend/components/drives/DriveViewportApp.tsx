@@ -35,6 +35,7 @@ import {
   Info,
   Loader2,
   MapPin,
+  MapPinned,
   Navigation,
   Phone,
   Plus,
@@ -94,6 +95,8 @@ type Stop = {
   longitude: number | null;
   showroomStoreId: number | null;
   isOptional: boolean;
+  kind: string;
+  suggested: boolean;
   visited: boolean;
   skipped: boolean;
 };
@@ -695,27 +698,67 @@ export function DriveViewportApp({ slug }: { slug: string }) {
     [slug],
   );
 
+  /** Promote a suggested proximity pitstop onto the drive (enters timing). */
+  const promotePitstop = useCallback(
+    async (stop: Stop) => {
+      setDrive((prev) =>
+        prev
+          ? { ...prev, stops: prev.stops.map((s) => (s.id === stop.id ? { ...s, suggested: false } : s)) }
+          : prev,
+      );
+      try {
+        const res = await fetch(`/api/drive-lists/${encodeURIComponent(slug)}/stops/${stop.id}`, {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ suggested: false }),
+        });
+        if (!res.ok) throw new Error(`Save failed (${res.status})`);
+        await loadTiming(); // now part of the route → include it in the timing
+        toast.success(`Added ${stop.name} to the drive`);
+      } catch (e) {
+        setDrive((prev) =>
+          prev
+            ? { ...prev, stops: prev.stops.map((s) => (s.id === stop.id ? { ...s, suggested: true } : s)) }
+            : prev,
+        );
+        toast.error((e as Error).message);
+      }
+    },
+    [slug, loadTiming],
+  );
+
   // Precompute fork labels in sort order: core stops number 1,2,3…; optional
   // stops hang off the preceding core stop as "3a", "3b".
   const labeledStops = useMemo<LabeledStop[]>(() => {
     if (!drive) return [];
     let coreN = 0;
     let optLetter = 0;
-    return drive.stops.map((stop) => {
-      let label: string;
-      if (!stop.isOptional) {
-        coreN += 1;
-        optLetter = 0;
-        label = String(coreN);
-      } else if (coreN === 0) {
-        label = "•";
-      } else {
-        label = `${coreN}${String.fromCharCode(97 + optLetter)}`;
-        optLetter += 1;
-      }
-      return { ...stop, label };
-    });
+    // Suggested proximity pitstops are NOT part of the numbered route until the
+    // user promotes one — they render in their own section below.
+    return drive.stops
+      .filter((stop) => !stop.suggested)
+      .map((stop) => {
+        let label: string;
+        if (!stop.isOptional) {
+          coreN += 1;
+          optLetter = 0;
+          label = String(coreN);
+        } else if (coreN === 0) {
+          label = "•";
+        } else {
+          label = `${coreN}${String.fromCharCode(97 + optLetter)}`;
+          optLetter += 1;
+        }
+        return { ...stop, label };
+      });
   }, [drive]);
+
+  /** Un-promoted proximity pitstop suggestions (rendered minimized below). */
+  const pitstopSuggestions = useMemo(
+    () => (drive ? drive.stops.filter((s) => s.suggested) : []),
+    [drive],
+  );
 
   const optionalCount = useMemo(
     () => labeledStops.filter((s) => s.isOptional).length,
@@ -1186,6 +1229,59 @@ export function DriveViewportApp({ slug }: { slug: string }) {
           );
         })}
       </div>
+
+      {/* Proximity pitstops — suggested nearby showrooms, minimized; Add to include. */}
+      {pitstopSuggestions.length > 0 ? (
+        <section className="mt-8 space-y-3">
+          <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-widest text-muted-foreground">
+            <MapPinned className="size-4" />
+            Proximity pitstops ({pitstopSuggestions.length})
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            Registered showrooms near your route. Tap a name for details, or Add to include one in
+            the drive and its timing.
+          </p>
+          {pitstopSuggestions.map((stop) => (
+            <Card key={stop.id} className="border-dashed bg-muted/30 py-0">
+              <CardContent className="flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
+                <Badge variant="outline" className="shrink-0 border-dashed text-primary">
+                  Pitstop
+                </Badge>
+                <button
+                  type="button"
+                  onClick={() => stop.showroomStoreId != null && void openDetail(stop)}
+                  className="min-w-0 flex-1 text-left"
+                >
+                  <span className="font-semibold underline-offset-4 hover:underline">
+                    {stop.name}
+                  </span>
+                  {stop.city ? (
+                    <span className="ml-2 text-xs text-muted-foreground">{stop.city}</span>
+                  ) : null}
+                </button>
+                {stop.address ? (
+                  <a
+                    href={navUrl(stop)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex min-h-9 items-center gap-1 rounded-lg bg-muted px-3 text-xs font-semibold text-primary transition-colors hover:bg-accent"
+                  >
+                    <Navigation className="size-3.5" /> Navigate
+                  </a>
+                ) : null}
+                <Button
+                  type="button"
+                  size="sm"
+                  className="ml-auto gap-1.5"
+                  onClick={() => void promotePitstop(stop)}
+                >
+                  <Plus className="size-4" /> Add to drive
+                </Button>
+              </CardContent>
+            </Card>
+          ))}
+        </section>
+      ) : null}
 
       <footer className="mt-8 space-y-3">
         <div className="flex items-center justify-between gap-2">
