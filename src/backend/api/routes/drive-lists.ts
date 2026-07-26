@@ -9,7 +9,7 @@
  *
  * Mounted at `/api/drive-lists`.
  */
-import { driveListStops, driveLists, showroomStores } from "@backend/db";
+import { driveListNotes, driveListStops, driveLists, showroomStores, storeNotes } from "@backend/db";
 import {
   HOME_ARRIVAL_AFTER_MINUTES,
   HOME_RADIUS_M,
@@ -18,12 +18,16 @@ import { getHomeCoords } from "@backend/services/drive-home-arrival";
 import {
   addDriveStops,
   createDriveList,
+  createDriveNote,
+  deleteDriveNote,
   type DriveStopInput,
   type DriveStopUpdateInput,
   fillMissingStopCoords,
+  listDriveNotes,
   parseDriveNotes,
   removeDriveStop,
   setActiveDrive,
+  setDriveNoteRead,
   updateDriveList,
   updateDriveStop,
 } from "@backend/services/drive-lists";
@@ -362,6 +366,152 @@ driveListsRouter.delete("/:slug/stops/:stopId", async (c) => {
 
   await removeDriveStop(db, stopId);
   return c.json({ ok: true, stopId, driveListId: drive.id });
+});
+
+/** Resolve a drive id from its slug, or null. */
+async function driveIdBySlug(db: ReturnType<typeof drizzle>, slug: string): Promise<number | null> {
+  const [drive] = await db
+    .select({ id: driveLists.id })
+    .from(driveLists)
+    .where(eq(driveLists.slug, slug))
+    .limit(1);
+  return drive?.id ?? null;
+}
+
+/** GET /api/drive-lists/:slug/notes — drive-global + per-stop notes. */
+driveListsRouter.get("/:slug/notes", async (c) => {
+  const db = drizzle(c.env.DB);
+  const driveId = await driveIdBySlug(db, c.req.param("slug"));
+  if (driveId == null) return c.json({ error: "Not found" }, 404);
+  return c.json(await listDriveNotes(db, driveId));
+});
+
+/** POST /api/drive-lists/:slug/notes — create a note ({ body, stopId?, source? }). */
+driveListsRouter.post("/:slug/notes", async (c) => {
+  const db = drizzle(c.env.DB);
+  const driveId = await driveIdBySlug(db, c.req.param("slug"));
+  if (driveId == null) return c.json({ error: "Not found" }, 404);
+  const body = (await c.req.json().catch(() => ({}))) as {
+    body?: string;
+    stopId?: number | null;
+    source?: "user" | "ai";
+  };
+  if (!body.body?.trim()) return c.json({ error: "`body` is required" }, 400);
+  const note = await createDriveNote(db, driveId, {
+    body: body.body,
+    stopId: body.stopId ?? null,
+    source: body.source,
+  });
+  return c.json({ ok: true, note }, 201);
+});
+
+/** PATCH /api/drive-lists/:slug/notes/:noteId — set/clear read (collapsed) state. */
+driveListsRouter.patch("/:slug/notes/:noteId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const driveId = await driveIdBySlug(db, c.req.param("slug"));
+  if (driveId == null) return c.json({ error: "Not found" }, 404);
+  const noteId = Number(c.req.param("noteId"));
+  if (!Number.isFinite(noteId)) return c.json({ error: "Invalid note id" }, 400);
+  const body = (await c.req.json().catch(() => ({}))) as { read?: boolean };
+  if (typeof body.read !== "boolean") return c.json({ error: "`read` (boolean) is required" }, 400);
+
+  const [note] = await db
+    .select({ driveListId: driveListNotes.driveListId })
+    .from(driveListNotes)
+    .where(eq(driveListNotes.id, noteId))
+    .limit(1);
+  if (!note || note.driveListId !== driveId) {
+    return c.json({ error: "Note not found on this drive" }, 404);
+  }
+  await setDriveNoteRead(db, noteId, body.read);
+  return c.json({ ok: true, read: body.read });
+});
+
+/** DELETE /api/drive-lists/:slug/notes/:noteId — delete a note. */
+driveListsRouter.delete("/:slug/notes/:noteId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const driveId = await driveIdBySlug(db, c.req.param("slug"));
+  if (driveId == null) return c.json({ error: "Not found" }, 404);
+  const noteId = Number(c.req.param("noteId"));
+  if (!Number.isFinite(noteId)) return c.json({ error: "Invalid note id" }, 400);
+
+  const [note] = await db
+    .select({ driveListId: driveListNotes.driveListId })
+    .from(driveListNotes)
+    .where(eq(driveListNotes.id, noteId))
+    .limit(1);
+  if (!note || note.driveListId !== driveId) {
+    return c.json({ error: "Note not found on this drive" }, 404);
+  }
+  await deleteDriveNote(db, noteId);
+  return c.json({ ok: true });
+});
+
+/**
+ * POST /api/drive-lists/:slug/stops/:stopId/rating — rate the stop's showroom.
+ *
+ * Writes to the canonical showroom visit log (the stop's linked showroom's
+ * latest-visit `rating` + `ratingContext*`, plus a `store_notes` visit note) —
+ * the same path as the `record_showroom_visit` MCP tool. A stop with no linked
+ * showroom cannot be rated (400). `deferFeedback` instead files an AI follow-up
+ * note on the stop for after the drive.
+ */
+driveListsRouter.post("/:slug/stops/:stopId/rating", async (c) => {
+  const db = drizzle(c.env.DB);
+  const driveId = await driveIdBySlug(db, c.req.param("slug"));
+  if (driveId == null) return c.json({ error: "Not found" }, 404);
+  const stopId = Number(c.req.param("stopId"));
+  if (!Number.isFinite(stopId)) return c.json({ error: "Invalid stop id" }, 400);
+
+  const body = (await c.req.json().catch(() => ({}))) as {
+    rating?: number;
+    contextMarkdown?: string;
+    deferFeedback?: boolean;
+  };
+  if (!Number.isInteger(body.rating) || body.rating! < 1 || body.rating! > 5) {
+    return c.json({ error: "`rating` must be an integer 1–5" }, 400);
+  }
+
+  const [stop] = await db
+    .select({ id: driveListStops.id, driveListId: driveListStops.driveListId, showroomStoreId: driveListStops.showroomStoreId, name: driveListStops.name })
+    .from(driveListStops)
+    .where(eq(driveListStops.id, stopId))
+    .limit(1);
+  if (!stop || stop.driveListId !== driveId) {
+    return c.json({ error: "Stop not found on this drive" }, 404);
+  }
+  if (stop.showroomStoreId == null) {
+    return c.json({ error: "This stop is not linked to a registered showroom, so it can't be rated." }, 400);
+  }
+
+  const context = body.contextMarkdown?.trim() || `Visit — ${body.rating}★ (from drive)`;
+  // Canonical visit log: latest-visit rating on the store + a store note.
+  await db
+    .update(showroomStores)
+    .set({ rating: body.rating, ratingContextMarkdown: context, ratingContextHtml: context })
+    .where(eq(showroomStores.id, stop.showroomStoreId))
+    .run();
+  await db
+    .insert(storeNotes)
+    .values({
+      storeId: stop.showroomStoreId,
+      title: `Visit — ${body.rating}★`,
+      contentMarkdown: context,
+      note: context,
+    })
+    .run();
+
+  // Deferred feedback: an AI follow-up note pinned to this stop, dated.
+  let followUpNote = null;
+  if (body.deferFeedback) {
+    const date = new Date().toISOString().slice(0, 10);
+    followUpNote = await createDriveNote(db, driveId, {
+      body: `AI: follow up on feedback after drive list is completed ${date}`,
+      stopId,
+      source: "ai",
+    });
+  }
+  return c.json({ ok: true, rating: body.rating, showroomStoreId: stop.showroomStoreId, followUpNote });
 });
 
 export default driveListsRouter;
