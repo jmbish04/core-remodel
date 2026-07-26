@@ -255,6 +255,24 @@ export const CHANGELOG: ChangelogEntry[] = [
     status: "staged",
   },
   {
+    id: "tesla-live-ticker",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-26",
+    tag: "0023",
+    area: "Tesla / Ingest",
+    title: "Drive-scoped matching + opt-in auto-nav + live parsed-event ticker",
+    summary:
+      "Three fixes from a real drive where the system mis-attributed a stop and pushed the car a navigation command to a place the driver never chose. The stop matcher is now scoped to THE active drive (is_active) instead of every status=active list — a week-old list was false-checking a stop 190m away on the same block and auto-navigating the car to that list's next stop. Auto-navigation is now OPT-IN (default off). And while telemetry is live, the global admin alert rotates the newest PARSED frames (gear · speed · battery · coords) across the top of every page.",
+    changes: [
+      { kind: "fixed", text: "drive-geo-match.loadActiveStops scoped to is_active=true (THE active drive), not status=active (many stale lists). No active drive → no candidates → no false match. This is what mis-attributed a Fourth-St-Berkeley park to Farrow & Ball off a week-old list." },
+      { kind: "changed", text: "Auto-navigation is OPT-IN — new tesla_auto_navigate config flag (default false), gated in both the poller and the stream DO. Commanding the vehicle to a next stop the driver didn't choose must be explicit." },
+      { kind: "added", text: "GET /api/tesla/stream/events — newest parsed telemetry frames (TESLA_DB), pre-formatted (gear/speed/battery/coords) for display." },
+      { kind: "added", text: "AdminTeslaAlert: while telemetry is live, polls parsed frames every 5s and rotates them (~3s each) across the top of every admin page." },
+      { kind: "changed", text: "POST /api/tesla/stream/control accepts + returns autoNavigate. No schema change (flag in project_system_variables) → no migration." },
+    ],
+    status: "staged",
+  },
+  {
     id: "tesla-visit-sessions",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-25",
