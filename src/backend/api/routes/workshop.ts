@@ -1402,6 +1402,92 @@ workshopRouter.openapi(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GET /nodes/:id/furnishings — this node's already-extracted items (no re-scan)
+// ─────────────────────────────────────────────────────────────────────────────
+
+workshopRouter.openapi(
+  createRoute({
+    method: "get",
+    path: "/nodes/{id}/furnishings",
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: {
+        description: "This node's saved furnishings",
+        content: {
+          "application/json": {
+            schema: z.object({ success: z.literal(true), items: z.array(FurnishingItemSchema) }),
+          },
+        },
+      },
+    },
+    summary: "List a node's already-extracted furnishings",
+    operationId: "listNodeFurnishings",
+  }),
+  async (c) => {
+    const { id } = c.req.valid("param");
+    const db = drizzle(c.env.DB);
+    const saved = await db
+      .select()
+      .from(furnishingItems)
+      .where(eq(furnishingItems.sourceNodeId, id))
+      .all();
+    return c.json({ success: true as const, items: saved.map(serializeFurnishing) }, 200);
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PATCH /furnishings/:id — curate (dismiss / adopt, link a product)
+// ─────────────────────────────────────────────────────────────────────────────
+
+workshopRouter.openapi(
+  createRoute({
+    method: "patch",
+    path: "/furnishings/{id}",
+    request: {
+      params: z.object({ id: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              status: z.enum(["detected", "dismissed", "adopted"]).optional(),
+              productId: z.number().nullable().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "Updated furnishing",
+        content: {
+          "application/json": {
+            schema: z.object({ success: z.literal(true), item: FurnishingItemSchema }),
+          },
+        },
+      },
+      404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+    },
+    summary: "Curate a furnishing (dismiss / adopt / link product)",
+    operationId: "patchFurnishing",
+  }),
+  async (c) => {
+    const { id } = c.req.valid("param");
+    const body = c.req.valid("json");
+    const db = drizzle(c.env.DB);
+    const existing = await db.select().from(furnishingItems).where(eq(furnishingItems.id, id)).get();
+    if (!existing) return c.json({ error: "Not found" }, 404);
+
+    await db
+      .update(furnishingItems)
+      .set({ ...body, updatedAt: new Date() })
+      .where(eq(furnishingItems.id, id))
+      .run();
+    const updated = await db.select().from(furnishingItems).where(eq(furnishingItems.id, id)).get();
+    return c.json({ success: true as const, item: serializeFurnishing(updated!) }, 200);
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /rooms/:roomId/furnishings — the room's saved shopping list
 // ─────────────────────────────────────────────────────────────────────────────
 

@@ -222,13 +222,33 @@ export interface FurnishingItem {
   status: string;
 }
 
-/** Run the vision extraction over a node's image → shopping-list items. */
+/** Run the vision extraction over a node's image → persisted shopping-list items. */
 export async function extractFurnishings(nodeId: string): Promise<FurnishingItem[]> {
   const { data } = await request<{ items: FurnishingItem[] }>(
     `/nodes/${encodeURIComponent(nodeId)}/extract-furnishings`,
     { method: "POST" },
   );
   return data.items;
+}
+
+/** Load a node's already-extracted furnishings (no re-scan). */
+export async function getNodeFurnishings(nodeId: string): Promise<FurnishingItem[]> {
+  const { data } = await request<{ items: FurnishingItem[] }>(
+    `/nodes/${encodeURIComponent(nodeId)}/furnishings`,
+  );
+  return data.items;
+}
+
+/** Curate a furnishing — dismiss / adopt / link a product. */
+export async function patchFurnishing(
+  id: string,
+  patch: { status?: "detected" | "dismissed" | "adopted"; productId?: number | null },
+): Promise<FurnishingItem> {
+  const { data } = await request<{ item: FurnishingItem }>(
+    `/furnishings/${encodeURIComponent(id)}`,
+    { method: "PATCH", body: JSON.stringify(patch) },
+  );
+  return data.item;
 }
 
 // ---- Piles (collections) --------------------------------------------------
