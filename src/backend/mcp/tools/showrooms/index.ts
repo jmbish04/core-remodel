@@ -1,6 +1,7 @@
 import type { RemodelTool } from "../../types";
 
 import { listShowrooms } from "./list_showrooms";
+import { listStoreTypes } from "./list_store_types";
 import { getShowroom } from "./get_showroom";
 import { createShowroom } from "./create_showroom";
 import { updateShowroom } from "./update_showroom";
@@ -22,6 +23,7 @@ import { deleteShowroom } from "./delete_showroom";
 
 export const showroomTools: RemodelTool[] = [
   listShowrooms,
+  listStoreTypes,
   getShowroom,
   createShowroom,
   updateShowroom,

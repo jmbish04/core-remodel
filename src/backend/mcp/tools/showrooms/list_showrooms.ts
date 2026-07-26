@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { showroomStores } from "@backend/db";
+import { showroomStores, showroomStoreType } from "@backend/db";
 import { getStoreLinksMap, linksToLegacyUrls } from "@backend/utils/showroom-links";
 import { z } from "zod";
 
@@ -9,10 +9,12 @@ import { defineTool, READ_ONLY } from "../../types";
 
 /** Shape a store row into a compact list row for `list_showrooms`. The website
  *  is derived from the store's WEBSITE link (URLs live in showroom_store_links,
- *  no longer on the store row). */
+ *  no longer on the store row). `typeName` is resolved from a small id→name map
+ *  (showroom_store_type is a tiny config table — one fetch, no per-row join). */
 function storeListDto(
   s: typeof showroomStores.$inferSelect,
   website: string | null,
+  typeName: string | null,
 ) {
   return {
     id: s.id,
@@ -24,6 +26,8 @@ function storeListDto(
     website,
     rating: s.rating,
     isAppointmentOnly: s.isAppointmentOnly,
+    typeId: s.typeId,
+    typeName,
     isActive: s.isActive,
   };
 }
@@ -36,7 +40,8 @@ export const listShowrooms = defineTool({
     "List showroom store locations as compact rows (id, name, pricePoint, address, phone, website, rating). " +
     "By default only ACTIVE stores are returned (soft-deleted junk/duplicates are hidden); pass " +
     "`includeInactive: true` to also include inactive ones (each row carries `isActive`). Optional filters: " +
-    "free-text `q` over name/description/address, exact `pricePoint` ($..$$$$), and `isAppointmentOnly`. Use a " +
+    "free-text `q` over name/description/address, exact `pricePoint` ($..$$$$), `isAppointmentOnly`, and `typeId` " +
+    "(business-model type — see list_store_types). Each row carries `typeId`/`typeName`. Use a " +
     "store's `id` as the target for get_showroom and every write tool.",
   inputShape: {
     q: z
@@ -51,6 +56,12 @@ export const listShowrooms = defineTool({
       .boolean()
       .optional()
       .describe("Only stores flagged appointment-only (true) or walk-in (false)"),
+    typeId: z
+      .number()
+      .int()
+      .positive()
+      .optional()
+      .describe("Filter to one business-model type id (see list_store_types)"),
     includeInactive: z
       .boolean()
       .optional()
@@ -87,12 +98,20 @@ export const listShowrooms = defineTool({
       if (input.isAppointmentOnly != null && s.isAppointmentOnly !== input.isAppointmentOnly) {
         return false;
       }
+      if (input.typeId != null && s.typeId !== input.typeId) return false;
       return true;
     });
     const linksMap = await getStoreLinksMap(db, filtered.map((s) => s.id));
+    // Tiny config table — one fetch, build an id→displayName map for the DTO.
+    const typeRows = await db.select().from(showroomStoreType).all();
+    const typeName = new Map(typeRows.map((t) => [t.id, t.displayName]));
     return paginate(
       filtered.map((s) =>
-        storeListDto(s, linksToLegacyUrls(linksMap.get(s.id) ?? []).websiteUrl),
+        storeListDto(
+          s,
+          linksToLegacyUrls(linksMap.get(s.id) ?? []).websiteUrl,
+          s.typeId != null ? (typeName.get(s.typeId) ?? null) : null,
+        ),
       ),
       input.limit ?? 50,
       input.offset ?? 0,

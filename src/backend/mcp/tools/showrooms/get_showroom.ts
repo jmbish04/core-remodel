@@ -1,4 +1,10 @@
-import { showroomStoreHours, showroomPocs, showroomStores, storeNotes } from "@backend/db";
+import {
+  showroomStoreHours,
+  showroomPocs,
+  showroomStores,
+  showroomStoreType,
+  storeNotes,
+} from "@backend/db";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -33,6 +39,15 @@ export const getShowroom = defineTool({
       toolError(`Showroom ${input.id} not found. Call list_showrooms for valid ids.`);
     }
 
+    // Resolve the business-model type (single FK) — tiny config table, one row.
+    const [type] = store.typeId
+      ? await db
+          .select()
+          .from(showroomStoreType)
+          .where(eq(showroomStoreType.id, store.typeId))
+          .limit(1)
+      : [];
+
     const pocs = await db
       .select()
       .from(showroomPocs)
@@ -53,7 +68,12 @@ export const getShowroom = defineTool({
       .all();
 
     return {
-      store,
+      store: {
+        ...store,
+        typeKey: type?.key ?? null,
+        typeName: type?.displayName ?? null,
+        typeColor: type?.htmlColor ?? null,
+      },
       pocs: pocs.map((p) => ({
         id: p.id,
         fullName: p.fullName,

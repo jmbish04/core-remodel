@@ -47,4 +47,9 @@ export const CONFIG_NAV: ConfigNavGroup[] = [
       { href: "/admin/config/photo/colors", label: "Colors" },
     ],
   },
+  {
+    id: "showroom",
+    label: "Showroom",
+    items: [{ href: "/admin/config/showroom/store-types", label: "Store Types" }],
+  },
 ];
