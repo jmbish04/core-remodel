@@ -10,6 +10,7 @@
  * drives also render as a stack of cards.
  */
 import { driveListNotes, driveListStops, driveLists, showroomStores } from "@backend/db";
+import { distanceMeters } from "@backend/services/drive-home-arrival-rules";
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -220,7 +221,105 @@ export async function createDriveList(
     await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
   }
 
+  // Suggest nearby registered showrooms as proximity pitstops — generated ONCE
+  // here from D1 alone (no Maps SKU). They stay minimized + un-promoted until the
+  // user adds one, so they cost nothing downstream unless kept.
+  await generateProximityPitstops(db, drive.id).catch((err) =>
+    console.error("[drive-lists] proximity pitstop generation failed:", err),
+  );
+
   return { id: drive.id, slug, stopCount: input.stops.length };
+}
+
+/** How close a registered showroom must sit to the route to be suggested (10 mi). */
+const PITSTOP_RADIUS_M = 16_093;
+/** Cap on suggestions per drive, nearest-first. */
+const MAX_PITSTOPS = 6;
+
+/**
+ * Suggest registered showrooms near a drive's route as proximity pitstops.
+ *
+ * Pure D1 + haversine — no Google call, so this is free to run at create time.
+ * A candidate is any geocoded showroom NOT already on the drive whose nearest
+ * approach to a route point is within PITSTOP_RADIUS_M. Inserted minimized:
+ * `kind='pitstop'`, `suggested=true` (excluded from timing/progress/map until
+ * the user promotes it), `isOptional=true`.
+ */
+export async function generateProximityPitstops(
+  db: RemodelDb,
+  driveListId: number,
+): Promise<number> {
+  const stops = await db
+    .select({
+      id: driveListStops.id,
+      showroomStoreId: driveListStops.showroomStoreId,
+      latitude: driveListStops.latitude,
+      longitude: driveListStops.longitude,
+      sortOrder: driveListStops.sortOrder,
+    })
+    .from(driveListStops)
+    .where(eq(driveListStops.driveListId, driveListId));
+  await fillMissingStopCoords(db, stops);
+
+  const routePts = stops
+    .filter((s) => s.latitude != null && s.longitude != null)
+    .map((s) => ({ lat: s.latitude as number, lng: s.longitude as number }));
+  if (routePts.length === 0) return 0;
+
+  const onDrive = new Set(
+    stops.map((s) => s.showroomStoreId).filter((v): v is number => v != null),
+  );
+  const maxOrder = stops.reduce((m, s) => Math.max(m, s.sortOrder), -1);
+
+  const candidates = await db
+    .select({
+      id: showroomStores.id,
+      name: showroomStores.name,
+      phone: showroomStores.phoneNumber,
+      address: showroomStores.locationAddress,
+      city: showroomStores.locationCity,
+      lat: showroomStores.latitude,
+      lng: showroomStores.longitude,
+    })
+    .from(showroomStores);
+
+  const near: { c: (typeof candidates)[number]; dist: number }[] = [];
+  for (const cand of candidates) {
+    if (cand.lat == null || cand.lng == null || onDrive.has(cand.id)) continue;
+    let min = Infinity;
+    for (const p of routePts) {
+      const d = distanceMeters(p.lat, p.lng, cand.lat, cand.lng);
+      if (d < min) min = d;
+    }
+    if (min <= PITSTOP_RADIUS_M) near.push({ c: cand, dist: min });
+  }
+  near.sort((a, b) => a.dist - b.dist);
+  const chosen = near.slice(0, MAX_PITSTOPS);
+  if (chosen.length === 0) return 0;
+
+  let order = maxOrder + 1;
+  const values = chosen.map(({ c }) => ({
+    driveListId,
+    showroomStoreId: c.id,
+    sortOrder: order++,
+    name: c.name,
+    city: c.city,
+    address: c.address,
+    phone: c.phone,
+    pick: "Proximity pitstop",
+    latitude: c.lat,
+    longitude: c.lng,
+    isOptional: true,
+    kind: "pitstop" as const,
+    suggested: true,
+  }));
+  const CHUNK = 40;
+  for (let i = 0; i < values.length; i += CHUNK) {
+    const part = values.slice(i, i + CHUNK);
+    const stmts = part.map((v) => db.insert(driveListStops).values(v));
+    await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
+  }
+  return chosen.length;
 }
 
 /** Resolve a drive's id + slug from an `{ id }` or `{ slug }` selector. */
@@ -312,6 +411,8 @@ export interface DriveStopUpdateInput {
   sortOrder?: number;
   visited?: boolean;
   skipped?: boolean;
+  /** Promote a suggested proximity pitstop onto the drive (false = keep it). */
+  suggested?: boolean;
 }
 
 /**
@@ -360,6 +461,7 @@ export async function updateDriveStop(
     patch.skipped = input.skipped;
     patch.skippedAt = input.skipped ? new Date() : null;
   }
+  if (input.suggested !== undefined) patch.suggested = input.suggested;
   await db.update(driveListStops).set(patch).where(eq(driveListStops.id, stopId)).run();
   return { driveListId: stop.driveListId };
 }
