@@ -1040,7 +1040,7 @@ workshopRouter.openapi(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /nodes/:id/recipe — extract | material-swap | mix | clay-to-photoreal | floor-plan-furnish | tone-unify | lighting-enhance | plan-to-isometric | evolution-grid
+// POST /nodes/:id/recipe — extract | material-swap | mix | clay-to-photoreal | floor-plan-furnish | tone-unify | lighting-enhance | plan-to-isometric | evolution-grid | sketch-to-render | elevation-render | cabinet-reveal
 // ─────────────────────────────────────────────────────────────────────────────
 
 const RecipeExtractParams = z.object({
@@ -1076,6 +1076,9 @@ const RecipeRequestSchema = z.discriminatedUnion("recipe", [
   z.object({ recipe: z.literal("lighting-enhance"), params: RecipePromptOnlyParams }),
   z.object({ recipe: z.literal("plan-to-isometric"), params: RecipePromptOnlyParams }),
   z.object({ recipe: z.literal("evolution-grid"), params: RecipePromptOnlyParams }),
+  z.object({ recipe: z.literal("sketch-to-render"), params: RecipePromptOnlyParams }),
+  z.object({ recipe: z.literal("elevation-render"), params: RecipePromptOnlyParams }),
+  z.object({ recipe: z.literal("cabinet-reveal"), params: RecipePromptOnlyParams }),
 ]);
 
 /** Get-or-create the room's Workshop render session (idempotent by roomId). */
@@ -1125,7 +1128,7 @@ workshopRouter.openapi(
       500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
     },
     tags: ["workshop"],
-    summary: "Run a node-action recipe (extract | material-swap | mix | clay-to-photoreal | floor-plan-furnish | tone-unify | lighting-enhance | plan-to-isometric | evolution-grid)",
+    summary: "Run a node-action recipe (extract | material-swap | mix | clay-to-photoreal | floor-plan-furnish | tone-unify | lighting-enhance | plan-to-isometric | evolution-grid | sketch-to-render | elevation-render | cabinet-reveal)",
     operationId: "runNodeRecipe",
   }),
   async (c) => {

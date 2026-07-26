@@ -205,7 +205,10 @@ export type RecipeKind =
   | "tone-unify"
   | "lighting-enhance"
   | "plan-to-isometric"
-  | "evolution-grid";
+  | "evolution-grid"
+  | "sketch-to-render"
+  | "elevation-render"
+  | "cabinet-reveal";
 
 /**
  * Honest, recipe-specific narration shown over a node while its recipe runs
@@ -221,6 +224,9 @@ export const RECIPE_NARRATION: Record<RecipeKind, string> = {
   "lighting-enhance": "Evening out the light…",
   "plan-to-isometric": "Standing your plan up into 3D…",
   "evolution-grid": "Laying out the design, stage by stage…",
+  "sketch-to-render": "Turning your sketch into a photo…",
+  "elevation-render": "Rendering the elevation for real…",
+  "cabinet-reveal": "Opening it up…",
 };
 
 /** Synchronous recipe result. */

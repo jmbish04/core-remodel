@@ -241,7 +241,10 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
         | "tone-unify"
         | "lighting-enhance"
         | "plan-to-isometric"
-        | "evolution-grid",
+        | "evolution-grid"
+        | "sketch-to-render"
+        | "elevation-render"
+        | "cabinet-reveal",
       params: RecipeRunParams,
     ) => {
       board.setNodeProcessing(node.id, true, RECIPE_NARRATION[recipe]);
@@ -375,6 +378,15 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
             }
             onEvolutionGrid={(node) =>
               handleRunRecipe(node, "evolution-grid", { referenceCfImageUrls: [] })
+            }
+            onSketchToRender={(node) =>
+              handleRunRecipe(node, "sketch-to-render", { referenceCfImageUrls: [] })
+            }
+            onElevationRender={(node) =>
+              handleRunRecipe(node, "elevation-render", { referenceCfImageUrls: [] })
+            }
+            onCabinetReveal={(node) =>
+              handleRunRecipe(node, "cabinet-reveal", { referenceCfImageUrls: [] })
             }
             onExtractFurnishings={(node) => setFurnishingsNode(node)}
             onPlaceImage={() => setDrawerOpen(true)}
