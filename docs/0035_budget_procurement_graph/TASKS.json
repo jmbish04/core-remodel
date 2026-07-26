@@ -1,0 +1,28 @@
+{
+  "slug": "budget-procurement-graph",
+  "title": "Budget / Procurement Graph (targeted links)",
+  "confirms": ["companies vs estimate_companies unification (Finding B) — gates contractor links"],
+  "phases": [
+    { "key": "P0", "title": "Contractor-table decision" },
+    { "key": "A", "title": "Additive links" },
+    { "key": "B", "title": "Trade-terms feature" },
+    { "key": "C", "title": "Contractor unification (optional)" }
+  ],
+  "tasks": [
+    { "taskKey": "P0", "phase": "P0", "workstream": "db", "changeType": "investigate", "dependsOn": [], "status": "pending", "title": "DECIDE companies vs estimate_companies unification (Finding B)", "successCriteria": "one canonical contractor table chosen (recommend companies + migrate estimate_company_id refs, or a bridge); documented; blocks only contractor links" },
+
+    { "taskKey": "A1", "phase": "A", "workstream": "ops", "changeType": "keep", "dependsOn": [], "status": "pending", "title": "Back up remote D1 before FK rebuilds", "successCriteria": "backups/DB-<UTC>.sql" },
+    { "taskKey": "A2", "phase": "A", "workstream": "db", "changeType": "update", "dependsOn": ["A1"], "status": "pending", "title": "worker_email_invoices.room_id -> rooms (no floor_id — derive via room)", "successCriteria": "room_id FK added; floor derived by JOIN rooms.floor_id; NO denormalized floor_id" },
+    { "taskKey": "A3", "phase": "A", "workstream": "db", "changeType": "update", "dependsOn": ["A1"], "status": "pending", "title": "worker_email_invoice_line_items.contract_payment_milestone_id -> contract_payment_milestones", "successCriteria": "FK to stable contract_payment_milestones.id; labor-draw reconciliation" },
+    { "taskKey": "A4", "phase": "A", "workstream": "db", "changeType": "update", "dependsOn": ["A1"], "status": "pending", "title": "budget_expense_entries: room_id + invoice_id FKs + budget_item_track_id TEXT", "successCriteria": "room_id->rooms.id; invoice_id->worker_email_invoices.id; budget_item_track_id TEXT (NO FK to revisioned budget_tracker_items); backfill from source_ref/vendor_name where confident, flag rest" },
+    { "taskKey": "A5", "phase": "A", "workstream": "db", "changeType": "update", "dependsOn": ["A1"], "status": "pending", "title": "budget_tracker_items.primary_service_id -> services", "successCriteria": "on-row FK to services.id (re-copied per revision, OK)" },
+    { "taskKey": "A6", "phase": "A", "workstream": "qc", "changeType": "new", "dependsOn": ["A2", "A3", "A4", "A5"], "status": "pending", "title": "QC pr-A + changelog", "successCriteria": "each link orphan-validated; rebuild only target; rows preserved; readers 200; changelog + link" },
+
+    { "taskKey": "B1", "phase": "B", "workstream": "db", "changeType": "new", "dependsOn": ["P0", "A1"], "status": "pending", "title": "contractor_showroom_trade_terms table (bps + text/cents)", "successCriteria": "id, contractor_company_id FK (per P0 target), showroom_id->showroom_stores.id, trade_discount_bps/homeowner_passthrough_bps/contractor_margin_bps INTEGER, min_spend_text+cents, terms, timestamps; UNIQUE(contractor_company_id, showroom_id)" },
+    { "taskKey": "B2", "phase": "B", "workstream": "api", "changeType": "new", "dependsOn": ["B1"], "status": "pending", "title": "Trade-terms CRUD API + admin UI", "successCriteria": "admin-gated CRUD; percentages entered/stored as bps; a passthrough computes vs a product price" },
+    { "taskKey": "B3", "phase": "B", "workstream": "db", "changeType": "update", "dependsOn": ["P0", "A1"], "status": "pending", "title": "budget_tracker_items.primary_contractor_company_id (per P0 target)", "successCriteria": "on-row FK to the canonical contractor table chosen in P0" },
+    { "taskKey": "B4", "phase": "B", "workstream": "qc", "changeType": "new", "dependsOn": ["B2", "B3"], "status": "pending", "title": "QC pr-B + changelog", "successCriteria": "trade-term CRUD round-trips; bps correct; changelog + link" },
+
+    { "taskKey": "C1", "phase": "C", "workstream": "db", "changeType": "update", "dependsOn": ["P0", "A6", "B4"], "status": "pending", "title": "(optional) contractor unification expand/contract per P0", "successCriteria": "if P0 chose merge: migrate estimate_company refs onto companies (expand/contract, verify parity); else skip" }
+  ]
+}
