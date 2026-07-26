@@ -91,7 +91,14 @@ export interface AutoVisitResult {
 }
 
 /**
- * Load every unvisited stop on active drives with a usable coordinate.
+ * Load every unvisited stop on THE active drive with a usable coordinate.
+ *
+ * Scoped to `is_active = true` — the ONE drive the user is currently on — NOT
+ * `status = "active"`, which several stale lists can share. Matching against every
+ * status-active list is how a week-old drive falsely checked off a stop 190 m away
+ * (a stop on a different list, on the same block) and auto-navigated the car to
+ * that list's next stop. The single-active invariant (`setActiveDrive`) makes this
+ * a safe, unambiguous scope: no active drive → no candidates → no false match.
  * Exported so the webhook can distinguish "no candidates" from "no match".
  */
 async function loadActiveStops(db: RemodelDb): Promise<GeoStop[]> {
@@ -110,7 +117,7 @@ async function loadActiveStops(db: RemodelDb): Promise<GeoStop[]> {
     .from(driveListStops)
     .innerJoin(driveLists, eq(driveListStops.driveListId, driveLists.id))
     .leftJoin(showroomStores, eq(driveListStops.showroomStoreId, showroomStores.id))
-    .where(eq(driveLists.status, "active"))
+    .where(eq(driveLists.isActive, true))
     .orderBy(asc(driveListStops.driveListId), asc(driveListStops.sortOrder))
     .all();
 

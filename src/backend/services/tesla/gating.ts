@@ -34,6 +34,13 @@ export const STREAM_ENABLED_KEY = "tesla_stream_enabled";
 export const STREAM_WINDOW_START_KEY = "tesla_stream_window_start_hour";
 export const STREAM_WINDOW_END_KEY = "tesla_stream_window_end_hour";
 export const STREAM_POLL_FALLBACK_KEY = "tesla_stream_poll_fallback_seconds";
+/**
+ * OPT-IN: auto-send the car's navigation to the next unvisited stop on a matched
+ * park. OFF by default — the poller/stream matched a stale-list stop and silently
+ * pushed a Tessie navigation command to the car for a place the driver never chose.
+ * Commanding the vehicle is a side effect the operator must explicitly turn on.
+ */
+export const STREAM_AUTO_NAV_KEY = "tesla_auto_navigate";
 /** Runtime flag the DO sets while its socket is up, so the poller stands down. */
 export const STREAM_CONNECTED_KEY = "tesla_stream_connected";
 /** Epoch-ms heartbeat the DO refreshes while connected — makes `connected` stale-proof. */
@@ -156,6 +163,24 @@ export async function setStreamWindow(
 export async function setPollFallbackSeconds(env: Env, seconds: number): Promise<void> {
   const n = toIntInRange(String(seconds), DEFAULTS.pollFallbackSeconds, MIN_POLL_FALLBACK_SECONDS, 3600);
   await setConfigValue(env, STREAM_POLL_FALLBACK_KEY, String(n));
+}
+
+/**
+ * Whether auto-navigation is opted in. Reads the single config row; defaults to
+ * FALSE so the vehicle is never commanded to navigate without an explicit opt-in.
+ */
+export async function isAutoNavigateEnabled(env: Env): Promise<boolean> {
+  const [row] = await drizzle(env.DB)
+    .select({ value: projectSystemVariables.valueText })
+    .from(projectSystemVariables)
+    .where(inArray(projectSystemVariables.variableKey, [STREAM_AUTO_NAV_KEY]))
+    .limit(1);
+  return row?.value === "true";
+}
+
+/** Toggle the auto-navigate opt-in. */
+export async function setAutoNavigate(env: Env, enabled: boolean): Promise<void> {
+  await setConfigValue(env, STREAM_AUTO_NAV_KEY, enabled ? "true" : "false");
 }
 
 /**

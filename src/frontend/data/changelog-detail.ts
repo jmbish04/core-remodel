@@ -113,6 +113,60 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "tesla-live-ticker": {
+    slug: "tesla-live-ticker",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0023 Ingest · drive-scoped matching, opt-in auto-nav, live ticker",
+    problem:
+      "On a real drive the operator caught two wrong behaviours. The stop matcher matched against EVERY status='active' drive list, and a week-old list had never been archived — so when the car parked on the Fourth-St-Berkeley shopping strip, the nearest unvisited stop across all lists was Farrow & Ball (190 m, a stop on the stale list, same block). It false-checked that stop AND auto-sent the car a navigation command to that list's next stop (Luxury Flooring) — a place the driver never chose. Separately, there was no way to watch the live telemetry as it arrived.",
+    approach:
+      "Three changes. (1) loadActiveStops is scoped to is_active=true — THE one active drive (single-active invariant) — not status='active', which many stale lists share; no active drive now means no candidates and no false match. (2) Auto-navigation is gated behind a new tesla_auto_navigate config flag (default false) in BOTH the poller and the stream DO, so the vehicle is never commanded to a stop the driver didn't ask for. (3) A GET /api/tesla/stream/events endpoint returns the newest parsed telemetry frames (gear/speed/battery/coords) pre-formatted for display, and AdminTeslaAlert — while telemetry is live — polls it every 5 s and rotates through the frames (~3 s each) across the top of every admin page. Root-cause note on the earlier 0-frames: shouldStreamNow requires an ACTIVE drive (is_active) + window + toggle; the drive was status:active but never is_active, so the stream was never armed — the Tessie handshake (Authorization: Bearer header) was never the issue.",
+    apiChanges: [
+      "GET /api/tesla/stream/events?limit= — newest parsed telemetry frames, pre-formatted.",
+      "POST /api/tesla/stream/control now accepts + returns autoNavigate.",
+    ],
+    filesTouched: [
+      "src/backend/services/drive-geo-match.ts (loadActiveStops → is_active scope)",
+      "src/backend/services/tesla/gating.ts (isAutoNavigateEnabled/setAutoNavigate)",
+      "src/backend/services/tesla-poller.ts + durable-objects/tesla-stream.ts (auto-nav gated)",
+      "src/backend/api/routes/tesla.ts (stream/events + control autoNavigate)",
+      "src/frontend/components/AdminTeslaAlert.tsx (live parsed-event ticker)",
+    ],
+    migrations: [],
+    diagrams: [
+      {
+        caption: "Parsed frames stream to the ticker",
+        code: `flowchart LR
+  car[Tesla] -->|wss| DO[TeslaStreamDO]
+  DO -->|insert parsed frame| TDB[(TESLA_DB)]
+  TDB -->|GET /stream/events| Bar[AdminTeslaAlert]
+  Bar -->|rotate ~3s| Screen[top of every /admin page]`,
+      },
+      {
+        caption: "Matcher scope: the one active drive, not every active-status list",
+        code: `flowchart TD
+  park[Park fix] --> q{is_active drive?}
+  q -->|no| none[no candidates → no match]
+  q -->|yes| stops[stops of THAT drive only]
+  stops --> near{within 250m?}
+  near -->|yes| mark[mark visited]
+  near -->|no| none`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_263.mjs",
+      command: "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 263 -- --preview",
+      ranAt: "2026-07-26",
+      output:
+        "`npx tsc --noEmit` — clean on all six touched files (no additions to the\n" +
+        "pre-existing baseline). `pnpm run build` — Complete (vite + server built,\n" +
+        "prerender OK in ~96s). No schema change, so no migration. Preview/prod QC\n" +
+        "(pr_263: /stream/events shape + /stream/control autoNavigate round-trip)\n" +
+        "pending merge + deploy; /stream/events reads TESLA_DB which is empty until a\n" +
+        "live in-window drive streams.",
+      migrations: [],
+    },
+  },
   "tesla-visit-sessions": {
     slug: "tesla-visit-sessions",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",

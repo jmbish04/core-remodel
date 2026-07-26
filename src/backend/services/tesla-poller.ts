@@ -31,7 +31,7 @@ import { matchAndMarkVisited } from "@backend/services/drive-geo-match";
 import { maybeEndActiveDriveOnHomeArrival } from "@backend/services/drive-home-arrival";
 import { getActiveDriveSlug } from "@backend/services/drive-lists";
 import { getVehicleState, sendNavigation, tessieConfigured } from "@backend/services/tesla";
-import { getStreamControl, isWithinStreamWindow } from "@backend/services/tesla/gating";
+import { getStreamControl, isAutoNavigateEnabled, isWithinStreamWindow } from "@backend/services/tesla/gating";
 import { drizzle } from "drizzle-orm/d1";
 
 /** KV key holding the last poll timestamp, used as the throttle. */
@@ -117,7 +117,10 @@ export async function pollVehicleForActiveDrive(env: Env): Promise<PollResult> {
         name: match.matched.name,
         distanceM: match.matched.distanceM,
       };
-      if (match.next) {
+      // Auto-navigation is OPT-IN — commanding the car to a next stop without the
+      // driver asking (and, before the is_active scoping fix, off a STALE list) is
+      // exactly what pushed a bogus destination to the vehicle.
+      if (match.next && (await isAutoNavigateEnabled(env))) {
         const nav = await sendNavigation(env, `${match.next.lat},${match.next.lng}`);
         if (nav.ok) navigatedTo = match.next.name;
       }
