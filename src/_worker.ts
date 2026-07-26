@@ -217,7 +217,13 @@ const legacyHandler: ExportedHandler<Env> = {
       (path) => url.pathname === path || url.pathname.startsWith(`${path}/`),
     );
 
-    if (url.pathname.startsWith("/api/realtime/estimates")) {
+    if (
+      url.pathname.startsWith("/api/realtime/estimates") ||
+      url.pathname.startsWith("/api/realtime/plans")
+    ) {
+      // Both surfaces fan out through the same EstimateCollabHub DO, keyed by the
+      // `room` param. Plan/task progress uses room `plan:<planSlug>` so an open
+      // preview-changelog viewer gets a live poke when a task's status changes.
       const room = url.searchParams.get("room")?.trim() || "global";
       const stub = env.ESTIMATE_COLLAB.getByName(room);
       return stub.fetch(request);

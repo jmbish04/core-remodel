@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/changelist-phases-live-updates-6cfa61",
+    title: "Changelog · phase-grouped, live-updating preview tasks (websocket + poll)",
+    summary:
+      "The preview changelog (/admin/changelog/preview/<slug>) showed plan tasks as one flat, unreadable list that only refreshed on a full page reload. Tasks now group into collapsible phase sections (per-phase progress bar, PR chips, a 'pending PR' badge) and follow progress LIVE: the viewport polls every 10s and holds a websocket to the plan's room, so as an agent ticks a task's status or attaches a PR the user's open page updates with no refresh. New update_plan_task MCP tool + a shared updatePlanTask() service that fans a realtime poke out of the EstimateCollabHub DO; PATCH /api/admin/plans/tasks/:id gains prNumber/changelogSlug/progressPct and the in_review status (which was in the DB enum but missing from every read/write/render surface). No migration — plan_tasks.prNumber/changelogSlug already existed.",
+    date: "2026-07-26",
+    status: "staged",
+    prNumber: 269,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/269",
+  },
+  {
     branch: "claude/drive-list-ops-b-notes-rating-skip",
     title: "Drives · schema foundation + drizzle meta repair + HTML-entity cleanup (0031 PR-B0)",
     summary:
@@ -240,6 +250,24 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "changelog-live-phases",
+    branch: "claude/changelist-phases-live-updates-6cfa61",
+    date: "2026-07-26",
+    area: "Changelog",
+    title: "Phase-grouped, live-updating preview changelog tasks",
+    summary:
+      "Plan tasks on the preview changelog were a single flat list that only updated on a full reload. They now group into collapsible phase sections (per-phase progress bar, PR chips, a 'pending PR' badge) and update LIVE — the page polls every 10s and holds a websocket to the plan's room, so as an agent works a task the user's open page reflects it with no refresh. New update_plan_task MCP tool lets agents tick one task at a time (in_progress → in_review+PR → done+PR).",
+    changes: [
+      { kind: "added", text: "Preview changelog task list groups by phase into collapsible sections, each with a per-phase progress bar, PR-count, per-task PR chip (#123), and a 'pending PR' badge when a phase's work has all landed but nothing merged." },
+      { kind: "added", text: "Live updates: the viewport polls GET /api/changelog/proposals/:slug every 10s AND holds a websocket to /api/realtime/plans?room=plan:<slug>; any poke triggers an immediate refetch. A Live/Polling indicator shows which is active." },
+      { kind: "added", text: "update_plan_task MCP tool — per-task status/prNumber/notes ticks so a session keeps the board honest (in_progress → in_review+PR → done+PR)." },
+      { kind: "added", text: "updatePlanTask() service + /api/realtime/plans gateway — every task write fans a poke out of the shared EstimateCollabHub DO (room plan:<slug>). Best-effort; a downed hub never fails the write." },
+      { kind: "changed", text: "PATCH /api/admin/plans/tasks/:id now accepts prNumber/changelogSlug/progressPct and the in_review status, and routes through the shared service so it publishes too." },
+      { kind: "fixed", text: "in_review was in the plan_tasks DB enum (0028) but missing from rollup(), admin validation, the proposal schema, and the frontend — now consistent across every read/write/render surface." },
+    ],
+    status: "staged",
+  },
   {
     id: "delete-showroom-mcp-include-inactive",
     branch: "claude/showroom-listing-500-map-6kvtm9",

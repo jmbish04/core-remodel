@@ -113,6 +113,81 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "changelog-live-phases": {
+    slug: "changelog-live-phases",
+    branch: "claude/changelist-phases-live-updates-6cfa61",
+    subtitle: "Changelog · phase-grouped, live-updating preview tasks (websocket + poll)",
+    problem:
+      "The preview changelog (/admin/changelog/preview/<slug>) is where the user reviews a proposed change and then follows it being built. But its plan-task list rendered as one flat, ungrouped <ul> — a long feature's tasks were an unreadable wall — and it was a one-time SSR snapshot: the only way to see progress was to reload the whole page. There was also no clean, low-friction way for a working agent to tick a single task's status or attach the PR it shipped in, so the board rotted between sessions and the user had no live view of where things stood.",
+    approach:
+      "Two halves. FRONTEND: the task list now groups by phase into collapsible sections (the exact pattern already proven on /admin/plans PlanBoardApp — lifted, not reinvented), each with a per-phase progress bar, a PR-count, per-task PR chips, and a 'pending PR' badge when every task in a phase has landed (done/in_review) but nothing merged. It stays LIVE by seeding from the SSR snapshot, then polling GET /api/changelog/proposals/:slug every 10s AND holding a websocket to plan:<slug>; any socket message pokes an immediate refetch, with the poll as the fallback (a Live/Polling pill shows which). BACKEND: a shared updatePlanTask() service writes one plan_task (by id or by planSlug+taskKey) and fans a poke out of the existing EstimateCollabHub DO — best-effort, so a downed hub never fails the write. A new update_plan_task MCP tool gives agents the per-task tick (in_progress → in_review+PR → done+PR), and PATCH /api/admin/plans/tasks/:id gains prNumber/changelogSlug/progressPct + the in_review status and routes through the same service so it publishes too. in_review was already in the plan_tasks DB enum (0028) but missing from rollup(), validation, the proposal schema and the frontend — now consistent everywhere. No migration: plan_tasks.prNumber/changelogSlug already existed.",
+    apiChanges: [
+      "update_plan_task (MCP, changelog domain) — set one task's status/prNumber/changelogSlug/progressPct/notes by planSlug+taskKey; fans a realtime poke.",
+      "PATCH /api/admin/plans/tasks/:id — now accepts prNumber/changelogSlug/progressPct and the in_review status; publishes on write.",
+      "GET/WS /api/realtime/plans?room=plan:<slug> — gateway to EstimateCollabHub (the preview page subscribes here).",
+    ],
+    filesTouched: [
+      "src/backend/services/plan-tasks.ts (new — updatePlanTask + realtime poke)",
+      "src/backend/mcp/tools/changelog/update_plan_task.ts (new MCP tool) + index.ts",
+      "src/backend/api/routes/admin-plans.ts (PATCH fields + in_review + publish via service)",
+      "src/_worker.ts (/api/realtime/plans gateway)",
+      "src/frontend/components/changelog/ProposalBundle.tsx (phase groups, collapse, poll + WS)",
+      "src/frontend/components/plans/shared.tsx (in_review across types/badges/rollup)",
+      "src/frontend/pages/admin/changelog/preview/[slug].astro (carry prNumber/sortOrder/changelogSlug)",
+    ],
+    migrations: [],
+    code: [],
+    diagrams: [
+      {
+        caption: "An agent ticks a task → the user's open page updates with no refresh",
+        code: `sequenceDiagram
+  participant A as Agent
+  participant W as Worker (update_plan_task / PATCH)
+  participant DB as D1 plan_tasks
+  participant DO as EstimateCollabHub (room plan:slug)
+  participant U as Preview page (open)
+  U->>DO: ws connect (room plan:slug)
+  A->>W: update_plan_task(status in_review, prNumber)
+  W->>DB: update row
+  W-->>DO: publish poke (best-effort)
+  DO-->>U: message
+  U->>W: refetch GET /proposals/slug
+  W-->>U: live tasks
+  Note over U: 10s poll is the fallback if the socket drops`,
+      },
+      {
+        caption: "Phase grouping + the 'pending PR' state",
+        code: `stateDiagram-v2
+  [*] --> pending
+  pending --> in_progress: pick up
+  in_progress --> in_review: open PR (+prNumber)
+  in_review --> done: merge (+prNumber)
+  note right of in_review
+    phase shows "pending PR"
+    when every task is done/in_review
+    but not all merged
+  end note`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_269.mjs",
+      command: "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 269 -- --preview   # and prod (regression)",
+      ranAt: "2026-07-26",
+      output:
+        "`npx tsc --noEmit` — zero new errors vs the parent commit (baseline diff clean).\n" +
+        "`pnpm run build` — Complete (vite + server built, prerender OK, ~54s).\n" +
+        "No schema change → no migration.\n" +
+        "PREVIEW QC (pr_269, against wcrp-…-6cfa61): 15 passed, 0 failed — proposal seeds\n" +
+        "4 tasks carrying phase+sortOrder+prNumber; PATCH accepts in_review + prNumber 269;\n" +
+        "the re-read reflects it (the follow-along path); a websocket client received the\n" +
+        "realtime poke after the PATCH; /api/realtime/plans DO health reachable.\n" +
+        "PROD QC (regression): 9 passed, 6 failed — the 9 are the pre-existing proposal\n" +
+        "round-trip (no regression; prod already returns prNumber/sortOrder). The 6 failures\n" +
+        "are the new surface (in_review, PR write, /api/realtime/plans, WS poke), which is\n" +
+        "old code on prod — they flip green after merge + `pnpm run deploy`.",
+      migrations: [],
+    },
+  },
   "tesla-live-ticker": {
     slug: "tesla-live-ticker",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",

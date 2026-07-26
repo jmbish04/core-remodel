@@ -6,7 +6,13 @@ import { cn } from "@/lib/utils";
  * Shape returned by every task on a plan board. Mirrors the live
  * `GET /api/admin/plans/:slug` contract (see the admin plans route).
  */
-export type TaskStatus = "pending" | "in_progress" | "blocked" | "deferred" | "done";
+export type TaskStatus =
+  | "pending"
+  | "in_progress"
+  | "in_review"
+  | "blocked"
+  | "deferred"
+  | "done";
 export type ChangeType =
   | "new"
   | "move"
@@ -20,6 +26,7 @@ export type PlanStatus = "planning" | "active" | "done" | "archived";
 export interface ProgressCounts {
   pending: number;
   in_progress: number;
+  in_review: number;
   blocked: number;
   deferred: number;
   done: number;
@@ -154,6 +161,11 @@ const STATUS_META: Record<TaskStatus, { label: string; className: string; dot: s
     className: "bg-sky-500/10 text-sky-300 ring-sky-500/30",
     dot: "bg-sky-400",
   },
+  in_review: {
+    label: "In Review",
+    className: "bg-violet-500/10 text-violet-300 ring-violet-500/30",
+    dot: "bg-violet-400",
+  },
   blocked: {
     label: "Blocked",
     className: "bg-rose-500/10 text-rose-300 ring-rose-500/30",
@@ -174,6 +186,7 @@ const STATUS_META: Record<TaskStatus, { label: string; className: string; dot: s
 export const TASK_STATUSES: TaskStatus[] = [
   "pending",
   "in_progress",
+  "in_review",
   "blocked",
   "deferred",
   "done",

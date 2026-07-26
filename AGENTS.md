@@ -64,19 +64,31 @@ replaced.
 reflect reality if every session updates them.** They have been seeded and then
 left to rot before; that is the exact failure this rule exists to stop.
 
-- **Before starting plan work,** read your phase's open tasks — `list_plan_tasks`
-  (MCP), or `GET /api/admin/plans/<slug>`. Mark what you begin `in_progress`.
-- **Finish a task → close it with the PR number that shipped it.** Use
-  `close_plan_task` (MCP, once P2 lands it) or `PATCH /api/admin/plans/tasks/:id`
-  with `status: "done"` and the PR in `notes`. A `plan_tasks` row left at
-  `pending` after its work merged is a lie the next session will trust.
-- **Discover new work → file it** (`create_plan_task`) rather than leaving it in
-  prose. Prose is not a backlog.
+- **Before starting plan work,** read your phase's open tasks — `get_feature_proposal`
+  (MCP, returns the live tasks), or `GET /api/admin/plans/<slug>`. Mark what you
+  begin `in_progress`.
+- **Tick every task as you work it, with `update_plan_task` (MCP).** This is the
+  one that keeps the user in the loop: the preview changelog at
+  `/admin/changelog/preview/<slug>` holds a websocket to the plan's room AND polls,
+  so the moment you call `update_plan_task` the phase-grouped board there updates
+  **live for the user — no refresh needed.** The cadence:
+  - pick it up → `status: "in_progress"`
+  - open the PR → `status: "in_review"`, `prNumber: <n>`  (the board shows the phase
+    as "complete pending PR" and stamps a PR chip on the task)
+  - it merges → `status: "done"`, `prNumber: <n>`
+  Update tasks one PR/phase at a time as you go; don't batch it to the end. A
+  `plan_tasks` row left at `pending` after its work merged is a lie the next
+  session will trust, and it leaves the user staring at a stale board.
+- **Discover new work → file it** by re-filing the proposal with the extra rows
+  (`submit_feature_proposal` upserts tasks by `taskKey`; it will NOT reset a status
+  you already advanced). Prose is not a backlog.
 - **"Done" is not a status.** A phase is complete when its task rows say so —
   each `done` and PR-linked, or explicitly `blocked`/`deferred` with a reason.
 
-This is not bookkeeping for its own sake: `/admin/plans`, the velocity dashboard,
-and the AI program-manager (0028) all read these rows as ground truth.
+This is not bookkeeping for its own sake: the preview changelog viewer, `/admin/plans`,
+the velocity dashboard, and the AI program-manager (0028) all read these rows as
+ground truth. `update_plan_task` and `PATCH /api/admin/plans/tasks/:id` both fan out a
+realtime poke, so either write path keeps an open viewer live.
 
 ## LAST ACTION OF EVERY TURN — you own the deploy (MANDATORY)
 
