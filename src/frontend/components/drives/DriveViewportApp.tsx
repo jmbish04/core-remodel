@@ -108,6 +108,16 @@ type DriveNote = {
 
 type DriveNotes = { drive: DriveNote[]; byStop: Record<number, DriveNote[]> };
 
+/** Per-stop live timing from GET /:slug/plan. */
+type StopTiming = {
+  stopId: number;
+  etaLocal: string | null;
+  stayMinutes: number | null;
+  feasible: boolean | null;
+  reason: string | null;
+  closesAt: string | null;
+};
+
 /** A stop with its precomputed fork label ("1", "3a", …). */
 type LabeledStop = Stop & { label: string };
 
@@ -292,6 +302,8 @@ export function DriveViewportApp({ slug }: { slug: string }) {
   const [navigatingStopId, setNavigatingStopId] = useState<number | null>(null);
   // Notes (drive-global + per-stop), the rating modal, and the skip confirmation.
   const [notes, setNotes] = useState<DriveNotes>({ drive: [], byStop: {} });
+  // Live per-stop timing keyed by stopId (ETA / stay / won't-make-it).
+  const [timing, setTiming] = useState<Record<number, StopTiming>>({});
   const [ratingStop, setRatingStop] = useState<Stop | null>(null);
   const [ratingValue, setRatingValue] = useState(0);
   const [ratingText, setRatingText] = useState("");
@@ -317,16 +329,42 @@ export function DriveViewportApp({ slug }: { slug: string }) {
     void refreshActive();
   }, [refreshActive]);
 
+  const loadTiming = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/drive-lists/${encodeURIComponent(slug)}/plan`, {
+        credentials: "include",
+      });
+      if (!res.ok) return;
+      const data = (await res.json()) as { stops: StopTiming[] };
+      setTiming(Object.fromEntries((data.stops ?? []).map((t) => [t.stopId, t])));
+    } catch {
+      /* leave timing as-is */
+    }
+  }, [slug]);
+
   /** PATCH this drive's active state; handles the 07:00–20:00 window 409. */
   const applyActive = useCallback(
     async (next: boolean) => {
       setActivating(true);
       try {
+        // On activation, capture the device's location so start timing anchors
+        // on where the driver actually is. Best-effort — server falls back to
+        // the Tesla's GPS, then to relative-from-first-stop.
+        let coords: { startLatitude: number; startLongitude: number } | null = null;
+        if (next && typeof navigator !== "undefined" && navigator.geolocation) {
+          coords = await new Promise((resolve) => {
+            navigator.geolocation.getCurrentPosition(
+              (p) => resolve({ startLatitude: p.coords.latitude, startLongitude: p.coords.longitude }),
+              () => resolve(null),
+              { timeout: 4000, maximumAge: 60_000 },
+            );
+          });
+        }
         const res = await fetch(`/api/drive-lists/${encodeURIComponent(slug)}`, {
           method: "PATCH",
           credentials: "include",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ isActive: next }),
+          body: JSON.stringify({ isActive: next, ...(coords ?? {}) }),
         });
         const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
         if (res.status === 409) {
@@ -338,8 +376,10 @@ export function DriveViewportApp({ slug }: { slug: string }) {
           return;
         }
         setDrive((prev) => (prev ? { ...prev, isActive: next } : prev));
-        // Activating clears any other active drive (single-active invariant).
+        // Activating clears any other active drive (single-active invariant),
+        // and re-anchors the live timing on the new start.
         await refreshActive();
+        await loadTiming();
         toast.success(next ? "This drive is now the active drive" : "Drive marked inactive");
       } catch (e) {
         toast.error((e as Error).message);
@@ -347,7 +387,7 @@ export function DriveViewportApp({ slug }: { slug: string }) {
         setActivating(false);
       }
     },
-    [slug, refreshActive],
+    [slug, refreshActive, loadTiming],
   );
 
   const onActivateClick = useCallback(() => {
@@ -479,6 +519,10 @@ export function DriveViewportApp({ slug }: { slug: string }) {
   useEffect(() => {
     void loadNotes();
   }, [loadNotes]);
+
+  useEffect(() => {
+    void loadTiming();
+  }, [loadTiming]);
 
   const addNote = useCallback(
     async (body: string, stopId: number | null) => {
@@ -945,6 +989,37 @@ export function DriveViewportApp({ slug }: { slug: string }) {
                           }}
                         />
                       </div>
+                    ) : null}
+
+                    {/* Live timing chip — ETA + suggested stay, or won't-make-it. */}
+                    {timing[stop.id] && timing[stop.id].etaLocal ? (
+                      (() => {
+                        const t = timing[stop.id];
+                        const bad = t.feasible === false;
+                        return (
+                          <div
+                            className={cn(
+                              "mt-3 inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-lg px-3 py-2 text-sm font-semibold",
+                              bad
+                                ? "bg-destructive/15 text-destructive"
+                                : "bg-secondary text-secondary-foreground",
+                            )}
+                          >
+                            <span>
+                              {bad ? "⚠ " : ""}
+                              ETA {t.etaLocal}
+                            </span>
+                            {bad ? (
+                              <span>· {t.reason}</span>
+                            ) : t.stayMinutes != null ? (
+                              <span className="text-muted-foreground">
+                                · stay ~{t.stayMinutes} min
+                                {t.reason ? ` · ${t.reason}` : ""}
+                              </span>
+                            ) : null}
+                          </div>
+                        );
+                      })()
                     ) : null}
 
                     {stop.note ? (

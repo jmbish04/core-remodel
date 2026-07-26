@@ -28,6 +28,8 @@ import {
   updateDriveList,
   updateDriveStop,
 } from "@backend/services/drive-lists";
+import { getDriveTiming } from "@backend/services/drive-timing";
+import { getLocation, tessieConfigured } from "@backend/services/tesla";
 import { getStreamControl, isWithinStreamWindow } from "@backend/services/tesla/gating";
 import { isRequestAuthenticated } from "@backend/utils/access";
 import { asc, desc, eq, sql } from "drizzle-orm";
@@ -218,6 +220,8 @@ driveListsRouter.patch("/:slug", async (c) => {
     description?: string | null;
     notes?: string[] | null;
     status?: "draft" | "active" | "completed" | "archived";
+    startLatitude?: number;
+    startLongitude?: number;
   };
 
   // Field edits (title/description/notes/status) are a separate concern from
@@ -268,6 +272,33 @@ driveListsRouter.patch("/:slug", async (c) => {
   }
 
   await setActiveDrive(db, body.isActive ? drive.id : null);
+
+  // On activation, stamp the official start time + the device's location so the
+  // live per-stop timing (GET /:slug/plan) can project forward from here. Coords
+  // come from the client (browser geolocation) when provided, else the Tesla's
+  // live GPS; null is fine — timing then reads relative from the first stop.
+  if (body.isActive) {
+    let lat = typeof body.startLatitude === "number" ? body.startLatitude : null;
+    let lng = typeof body.startLongitude === "number" ? body.startLongitude : null;
+    if (lat == null || lng == null) {
+      try {
+        if (await tessieConfigured(c.env)) {
+          const loc = await getLocation(c.env);
+          if (loc) {
+            lat = loc.latitude;
+            lng = loc.longitude;
+          }
+        }
+      } catch {
+        /* leave null — timing falls back to relative-from-first-stop */
+      }
+    }
+    await db
+      .update(driveLists)
+      .set({ startedAt: new Date(), startLatitude: lat, startLongitude: lng })
+      .where(eq(driveLists.id, drive.id))
+      .run();
+  }
 
   // Match the streaming DO to the new active state (fire-and-forget). The DO's own
   // lifecycle guard is the source of truth; this just makes start/stop prompt
@@ -395,6 +426,19 @@ async function driveIdBySlug(db: ReturnType<typeof drizzle>, slug: string): Prom
     .limit(1);
   return drive?.id ?? null;
 }
+
+/**
+ * GET /api/drive-lists/:slug/plan — live per-stop timing along the drive's order.
+ *
+ * Free to call (straight-line travel estimate, no Maps SKU). Anchors on the
+ * captured start when the drive is active; otherwise projects from now.
+ */
+driveListsRouter.get("/:slug/plan", async (c) => {
+  const db = drizzle(c.env.DB);
+  const timing = await getDriveTiming(db, c.req.param("slug"));
+  if (!timing) return c.json({ error: "Not found" }, 404);
+  return c.json(timing);
+});
 
 /** GET /api/drive-lists/:slug/notes — drive-global + per-stop notes. */
 driveListsRouter.get("/:slug/notes", async (c) => {

@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 /**
  * Showroom Drive Lists — a planned day of showroom stops ("drive sheets").
@@ -51,6 +51,16 @@ export const driveLists = sqliteTable(
 
     /** Freeform note on where this came from (the chat context). */
     sourceConversation: text("source_conversation"),
+
+    /**
+     * The official start of the drive — set when it is ACTIVATED, along with the
+     * device's location at that moment. These anchor the live per-stop timing
+     * (ETA / "stay ~N min" / "won't make it") which projects forward from here.
+     * Null until first activation; left in place after deactivation (history).
+     */
+    startedAt: integer("started_at", { mode: "timestamp" }),
+    startLatitude: real("start_latitude"),
+    startLongitude: real("start_longitude"),
 
     /** "date registered" — drives the newest-first landing order. */
     createdAt: integer("created_at", { mode: "timestamp" })
