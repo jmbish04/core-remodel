@@ -239,6 +239,14 @@ export async function getNodeFurnishings(nodeId: string): Promise<FurnishingItem
   return data.items;
 }
 
+/** Load a whole room's saved furnishings (the room shopping list). */
+export async function getRoomFurnishings(roomId: number | string): Promise<FurnishingItem[]> {
+  const { data } = await request<{ items: FurnishingItem[] }>(
+    `/rooms/${encodeURIComponent(String(roomId))}/furnishings`,
+  );
+  return data.items;
+}
+
 /** Curate a furnishing — dismiss / adopt / link a product. */
 export async function patchFurnishing(
   id: string,
