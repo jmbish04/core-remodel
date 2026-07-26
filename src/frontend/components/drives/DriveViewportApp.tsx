@@ -30,14 +30,21 @@ import {
   AlertCircle,
   ArrowLeft,
   Check,
+  ChevronDown,
   Diamond,
   Loader2,
   MapPin,
   Navigation,
   Phone,
+  Plus,
   Power,
+  Sparkles,
+  Star,
   ShieldAlert,
+  SkipForward,
   StickyNote,
+  Trash2,
+  Undo2,
   Zap,
 } from "lucide-react";
 
@@ -46,6 +53,15 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -75,9 +91,22 @@ type Stop = {
   websiteUrl: string | null;
   latitude: number | null;
   longitude: number | null;
+  showroomStoreId: number | null;
   isOptional: boolean;
   visited: boolean;
+  skipped: boolean;
 };
+
+/** A note on the drive — drive-global (stopId null) or pinned to a stop. */
+type DriveNote = {
+  id: number;
+  driveListStopId: number | null;
+  body: string;
+  source: "user" | "ai";
+  readAt: string | number | null;
+};
+
+type DriveNotes = { drive: DriveNote[]; byStop: Record<number, DriveNote[]> };
 
 /** A stop with its precomputed fork label ("1", "3a", …). */
 type LabeledStop = Stop & { label: string };
@@ -111,12 +140,163 @@ function TeslaIcon({ className }: { className?: string }) {
   );
 }
 
+/** Clickable 1–5 star row. Read-only when `onPick` is omitted. */
+function StarRow({
+  value,
+  onPick,
+  size = "size-6",
+}: {
+  value: number;
+  onPick?: (n: number) => void;
+  size?: string;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button
+          key={n}
+          type="button"
+          disabled={!onPick}
+          aria-label={`${n} star${n > 1 ? "s" : ""}`}
+          onClick={() => onPick?.(n)}
+          className={cn("transition-transform", onPick && "cursor-pointer active:scale-90")}
+        >
+          <Star
+            className={cn(size, n <= value ? "fill-primary text-primary" : "text-muted-foreground/40")}
+          />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Notes as collapsible alerts — collapsed shows the title + first line only. */
+function NoteAlerts({
+  notes,
+  onToggleRead,
+  onDelete,
+}: {
+  notes: DriveNote[];
+  onToggleRead: (n: DriveNote) => void;
+  onDelete: (n: DriveNote) => void;
+}) {
+  if (notes.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      {notes.map((n) => {
+        const collapsed = n.readAt != null;
+        const Icon = n.source === "ai" ? Sparkles : StickyNote;
+        const firstLine = n.body.split("\n")[0];
+        return (
+          <Alert key={n.id} variant="info" className="relative pr-16">
+            <Icon />
+            <button
+              type="button"
+              onClick={() => onToggleRead(n)}
+              className="col-start-2 block w-full text-left"
+            >
+              <AlertTitle className="flex items-center gap-2">
+                {n.source === "ai" ? "AI follow-up" : "Note"}
+                {collapsed ? (
+                  <span className="truncate text-xs font-normal text-muted-foreground">
+                    — {firstLine}
+                  </span>
+                ) : null}
+              </AlertTitle>
+              {!collapsed ? (
+                <AlertDescription className="whitespace-pre-line text-foreground/90">
+                  {n.body}
+                </AlertDescription>
+              ) : null}
+            </button>
+            <div className="absolute right-2 top-2 flex items-center gap-1">
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="size-7"
+                onClick={() => onToggleRead(n)}
+                aria-label={collapsed ? "Expand note" : "Mark read (collapse)"}
+              >
+                {collapsed ? <ChevronDown className="size-4" /> : <Check className="size-4" />}
+              </Button>
+              <Button
+                type="button"
+                size="icon"
+                variant="ghost"
+                className="size-7 text-muted-foreground"
+                onClick={() => onDelete(n)}
+                aria-label="Delete note"
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            </div>
+          </Alert>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Inline "+ Note" composer — a button that expands into a one-line input. */
+function NoteComposer({ onAdd, placeholder }: { onAdd: (body: string) => void; placeholder: string }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  if (!open) {
+    return (
+      <Button
+        type="button"
+        size="sm"
+        variant="ghost"
+        className="text-muted-foreground"
+        onClick={() => setOpen(true)}
+      >
+        <Plus className="size-4" /> Note
+      </Button>
+    );
+  }
+  const submit = () => {
+    onAdd(text);
+    setText("");
+    setOpen(false);
+  };
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        autoFocus
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            submit();
+          } else if (e.key === "Escape") {
+            setOpen(false);
+          }
+        }}
+        placeholder={placeholder}
+        className="min-h-10 flex-1 rounded-lg bg-muted px-3 text-sm outline-none focus:ring-2 focus:ring-primary/40"
+      />
+      <Button type="button" size="sm" onClick={submit} disabled={!text.trim()}>
+        Add
+      </Button>
+    </div>
+  );
+}
+
 export function DriveViewportApp({ slug }: { slug: string }) {
   const [drive, setDrive] = useState<Drive | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showOptional, setShowOptional] = useState(true);
   const [teslaConfigured, setTeslaConfigured] = useState(false);
   const [navigatingStopId, setNavigatingStopId] = useState<number | null>(null);
+  // Notes (drive-global + per-stop), the rating modal, and the skip confirmation.
+  const [notes, setNotes] = useState<DriveNotes>({ drive: [], byStop: {} });
+  const [ratingStop, setRatingStop] = useState<Stop | null>(null);
+  const [ratingValue, setRatingValue] = useState(0);
+  const [ratingText, setRatingText] = useState("");
+  const [ratingBusy, setRatingBusy] = useState(false);
+  const [skipConfirm, setSkipConfirm] = useState<Stop | null>(null);
   // THE active drive (if any) — used to name the drive a switch would deactivate.
   const [activeOther, setActiveOther] = useState<{ slug: string; title: string } | null>(null);
   const [activating, setActivating] = useState(false);
@@ -279,6 +459,156 @@ export function DriveViewportApp({ slug }: { slug: string }) {
         toast.error((e as Error).message || "Failed to send to Tesla");
       } finally {
         setNavigatingStopId(null);
+      }
+    },
+    [slug],
+  );
+
+  const loadNotes = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/drive-lists/${encodeURIComponent(slug)}/notes`, {
+        credentials: "include",
+      });
+      if (!res.ok) return;
+      setNotes((await res.json()) as DriveNotes);
+    } catch {
+      /* leave notes as-is */
+    }
+  }, [slug]);
+
+  useEffect(() => {
+    void loadNotes();
+  }, [loadNotes]);
+
+  const addNote = useCallback(
+    async (body: string, stopId: number | null) => {
+      const text = body.trim();
+      if (!text) return;
+      try {
+        const res = await fetch(`/api/drive-lists/${encodeURIComponent(slug)}/notes`, {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ body: text, stopId }),
+        });
+        if (!res.ok) throw new Error(`Save failed (${res.status})`);
+        await loadNotes();
+      } catch (e) {
+        toast.error((e as Error).message);
+      }
+    },
+    [slug, loadNotes],
+  );
+
+  const toggleNoteRead = useCallback(
+    async (note: DriveNote) => {
+      const read = note.readAt == null; // toggle to the opposite state
+      // Optimistic: flip readAt locally so the alert collapses/expands instantly.
+      setNotes((prev) => {
+        const flip = (n: DriveNote): DriveNote =>
+          n.id === note.id ? { ...n, readAt: read ? Date.now() : null } : n;
+        return {
+          drive: prev.drive.map(flip),
+          byStop: Object.fromEntries(Object.entries(prev.byStop).map(([k, v]) => [k, v.map(flip)])),
+        };
+      });
+      try {
+        await fetch(`/api/drive-lists/${encodeURIComponent(slug)}/notes/${note.id}`, {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ read }),
+        });
+      } catch {
+        void loadNotes(); // resync on failure
+      }
+    },
+    [slug, loadNotes],
+  );
+
+  const deleteNote = useCallback(
+    async (note: DriveNote) => {
+      try {
+        await fetch(`/api/drive-lists/${encodeURIComponent(slug)}/notes/${note.id}`, {
+          method: "DELETE",
+          credentials: "include",
+        });
+        await loadNotes();
+      } catch (e) {
+        toast.error((e as Error).message);
+      }
+    },
+    [slug, loadNotes],
+  );
+
+  const openRating = useCallback((stop: Stop) => {
+    setRatingStop(stop);
+    setRatingValue(0);
+    setRatingText("");
+  }, []);
+
+  const submitRating = useCallback(
+    async (defer: boolean) => {
+      if (!ratingStop || ratingValue < 1) return;
+      setRatingBusy(true);
+      try {
+        const res = await fetch(
+          `/api/drive-lists/${encodeURIComponent(slug)}/stops/${ratingStop.id}/rating`,
+          {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              rating: ratingValue,
+              contextMarkdown: ratingText.trim() || undefined,
+              deferFeedback: defer,
+            }),
+          },
+        );
+        const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+        if (!res.ok || data.ok !== true) {
+          toast.error(data.error ?? `Failed to rate (${res.status})`);
+          return;
+        }
+        toast.success(
+          defer ? "Rated — AI will follow up on feedback later" : `Rated ${ratingValue}★`,
+        );
+        setRatingStop(null);
+        if (defer) await loadNotes();
+      } catch (e) {
+        toast.error((e as Error).message);
+      } finally {
+        setRatingBusy(false);
+      }
+    },
+    [slug, ratingStop, ratingValue, ratingText, loadNotes],
+  );
+
+  const setSkipped = useCallback(
+    async (stop: Stop, skipped: boolean) => {
+      setDrive((prev) =>
+        prev
+          ? { ...prev, stops: prev.stops.map((s) => (s.id === stop.id ? { ...s, skipped } : s)) }
+          : prev,
+      );
+      try {
+        const res = await fetch(
+          `/api/drive-lists/${encodeURIComponent(slug)}/stops/${stop.id}`,
+          {
+            method: "PATCH",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ skipped }),
+          },
+        );
+        if (!res.ok) throw new Error(`Save failed (${res.status})`);
+      } catch (e) {
+        setDrive((prev) =>
+          prev
+            ? { ...prev, stops: prev.stops.map((s) => (s.id === stop.id ? { ...s, skipped: !skipped } : s)) }
+            : prev,
+        );
+        toast.error((e as Error).message);
       }
     },
     [slug],
@@ -550,8 +880,36 @@ export function DriveViewportApp({ slug }: { slug: string }) {
                 </div>
 
                 {/* Stop card */}
-                <Card className={cn("gap-0 py-0", stop.isOptional && "bg-muted/40", stop.visited && "opacity-60")}>
+                <Card
+                  className={cn(
+                    "gap-0 py-0",
+                    stop.isOptional && "bg-muted/40",
+                    stop.visited && "opacity-60",
+                    stop.skipped && "opacity-50",
+                  )}
+                >
                   <CardContent className="px-5 py-4">
+                    {stop.skipped ? (
+                      /* Skipped — minimized + struck, with an Unskip control. */
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <h2 className="truncate text-base font-semibold text-muted-foreground line-through decoration-muted-foreground">
+                            {stop.name}
+                          </h2>
+                          <p className="text-xs uppercase tracking-wide text-muted-foreground">Skipped</p>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="shrink-0 text-primary"
+                          onClick={() => setSkipped(stop, false)}
+                        >
+                          <Undo2 className="size-4" /> Unskip
+                        </Button>
+                      </div>
+                    ) : (
+                      <>
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         {stop.pick ? (
@@ -574,6 +932,20 @@ export function DriveViewportApp({ slug }: { slug: string }) {
                         </Badge>
                       ) : null}
                     </div>
+
+                    {/* Rating — linked stops only. Tapping a star opens the modal. */}
+                    {stop.showroomStoreId != null ? (
+                      <div className="mt-3">
+                        <StarRow
+                          value={0}
+                          onPick={(n) => {
+                            setRatingStop(stop);
+                            setRatingValue(n);
+                            setRatingText("");
+                          }}
+                        />
+                      </div>
+                    ) : null}
 
                     {stop.note ? (
                       <p className="mt-2 text-sm text-muted-foreground">{stop.note}</p>
@@ -644,6 +1016,36 @@ export function DriveViewportApp({ slug }: { slug: string }) {
                         </div>
                       </>
                     ) : null}
+
+                    {/* Per-stop notes as collapsible alerts */}
+                    {(notes.byStop[stop.id]?.length ?? 0) > 0 ? (
+                      <div className="mt-3">
+                        <NoteAlerts
+                          notes={notes.byStop[stop.id] ?? []}
+                          onToggleRead={toggleNoteRead}
+                          onDelete={deleteNote}
+                        />
+                      </div>
+                    ) : null}
+
+                    {/* Card actions: add a note, or skip this stop */}
+                    <div className="mt-3 flex items-center justify-between gap-2">
+                      <NoteComposer
+                        onAdd={(b) => addNote(b, stop.id)}
+                        placeholder="Note for this stop"
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="text-muted-foreground"
+                        onClick={() => setSkipConfirm(stop)}
+                      >
+                        <SkipForward className="size-4" /> Skip
+                      </Button>
+                    </div>
+                      </>
+                    )}
                   </CardContent>
                 </Card>
               </div>
@@ -652,21 +1054,89 @@ export function DriveViewportApp({ slug }: { slug: string }) {
         })}
       </div>
 
-      {drive.notes.length > 0 ? (
-        <footer className="mt-8 space-y-3">
+      <footer className="mt-8 space-y-3">
+        <div className="flex items-center justify-between gap-2">
           <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-widest text-muted-foreground">
             <StickyNote className="size-4" />
-            Notes
+            General notes
           </h2>
-          {drive.notes.map((note, i) => (
-            <Card key={i} className="w-full py-0">
-              <CardContent className="whitespace-pre-line px-5 py-4 text-sm leading-relaxed text-muted-foreground">
-                {note}
-              </CardContent>
-            </Card>
-          ))}
-        </footer>
-      ) : null}
+          <NoteComposer onAdd={(b) => addNote(b, null)} placeholder="Add a general note" />
+        </div>
+        <NoteAlerts notes={notes.drive} onToggleRead={toggleNoteRead} onDelete={deleteNote} />
+        {notes.drive.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No general notes yet — per-location notes live on each stop above.
+          </p>
+        ) : null}
+      </footer>
+
+      {/* Rating modal — big stars, optional feedback, or defer to an AI note. */}
+      <Dialog open={ratingStop !== null} onOpenChange={(o) => !o && setRatingStop(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Rate {ratingStop?.name}</DialogTitle>
+            <DialogDescription>
+              Confirm or change your rating. Feedback is optional — or let AI follow up later.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center gap-5 py-2">
+            <StarRow value={ratingValue} onPick={setRatingValue} size="size-11" />
+            <Textarea
+              value={ratingText}
+              onChange={(e) => setRatingText(e.target.value)}
+              placeholder="Optional feedback — what stood out, what to remember…"
+              className="min-h-24 w-full"
+            />
+          </div>
+          <DialogFooter className="flex-col gap-2 sm:flex-col">
+            <Button
+              type="button"
+              size="lg"
+              className="min-h-12 w-full"
+              disabled={ratingValue < 1 || ratingBusy}
+              onClick={() => void submitRating(false)}
+            >
+              {ratingBusy ? <Loader2 className="size-5 animate-spin" /> : <Star className="size-5" />}
+              Save rating
+            </Button>
+            <Button
+              type="button"
+              size="lg"
+              variant="secondary"
+              className="min-h-12 w-full"
+              disabled={ratingValue < 1 || ratingBusy}
+              onClick={() => void submitRating(true)}
+            >
+              <Sparkles className="size-5" />
+              AI: follow up with feedback later
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Skip confirmation */}
+      <AlertDialog open={skipConfirm !== null} onOpenChange={(o) => !o && setSkipConfirm(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Skip this stop?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {skipConfirm?.name} will be minimized and crossed out. You can unskip it anytime.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                const s = skipConfirm;
+                setSkipConfirm(null);
+                if (s) void setSkipped(s, true);
+              }}
+            >
+              Yes, skip it
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
