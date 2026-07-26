@@ -269,6 +269,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "added", text: "GET /api/tesla/stream/events — newest parsed telemetry frames (TESLA_DB), pre-formatted (gear/speed/battery/coords) for display." },
       { kind: "added", text: "AdminTeslaAlert: while telemetry is live, polls parsed frames every 5s and rotates them (~3s each) across the top of every admin page." },
       { kind: "changed", text: "POST /api/tesla/stream/control accepts + returns autoNavigate. No schema change (flag in project_system_variables) → no migration." },
+      { kind: "fixed", text: "Ticker polish (#264): dropped aria-live from the rotating line (screen-reader spam), paused rotation while the tab is hidden, and guarded loadEvents so a late fetch can't repopulate frames after telemetry goes inactive. gating single-key lookup uses eq() + JSDoc." },
     ],
     status: "staged",
   },
