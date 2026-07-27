@@ -167,7 +167,8 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
       qcScript: "scripts/qc/pr_285.mjs",
       command: "pnpm run test:pr 285 -- --preview   # branch preview (fix present)\npnpm run test:pr 285                # production (regression guard)",
       ranAt: "2026-07-27",
-      output: "PENDING — filled after preview deploy + QC run (bearer-auth 200 on preview, 401 on prod-pending, cookie regression green).",
+      output:
+        "PREVIEW (wcrp-claude-api-auth-bearer):\n  ✓ target reachable\n  ✓ WORKER_API_KEY resolved locally\n  ✓ no-credential request is rejected (401)\n  ✓ cookie (hash) path still authenticates (200)\n  ✓ Authorization: Bearer <key> authenticates (200)\n  ✓ x-worker-api-key header authenticates (200)\n  6 passed, 0 failed\n\nPRODUCTION (regression guard, pre-merge):\n  ✓ target reachable\n  ✓ WORKER_API_KEY resolved locally\n  ✓ no-credential request is rejected (401)\n  ✓ cookie (hash) path still authenticates (200)\n    raw-key header auth not on prod yet — Bearer=401, header=401 (expected 401 pre-merge)\n  4 passed, 0 failed\n\nThe prod Bearer=401/header=401 confirms the bug this PR fixes (prod rejects the raw key today); the preview 200s confirm the fix. tsc --noEmit clean on access.ts.",
       migrations: [],
     },
   },
