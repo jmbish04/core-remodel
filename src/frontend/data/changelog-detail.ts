@@ -113,6 +113,64 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "0038-sales-schema-phase-a": {
+    slug: "0038-sales-schema-phase-a",
+    branch: "claude/sales-clearance-page-b0c752",
+    subtitle: "Sales & Clearance · Phase A of the 0038 overhaul (data spine)",
+    introduction:
+      "First slice of the /admin/shopping/sales rebuild. Additive-only: it lands the whole data model the later phases (scrape upgrade, cost-aware shopping triage, weekly PDF ad, frontend) hang off, and backfills existing data — but nothing reads the new rows yet, so it is safe to ship alone.",
+    problem:
+      "Clearance items were stored as a JSON blob: one showroom_store_sales row per page, with an items[] array of ClearanceItem inside clearanceDetailsJson. Because items were not rows, the page could not filter by color/size, attach per-item images, watch a single listing, diff a listing across weeks, or hang a deal score + agent insight off it. Every capability the overhaul wants is blocked on the same thing: the item needs to be a row.",
+    approach:
+      "Promote ClearanceItem to a real sale_items table and land the mapping/support tables around it, all additive (migration 0148, applied + verified on remote D1). Compliance is built in rather than retrofitted: prices are text+cents pairs, colors go through the shared colors definition + a sale_item_colors mapping (never a comma-joined string), category/type are FKs into the shared config categories/subcategories vocab with verbatim *_text kept only as a fallback when no id could be matched (FK-not-name), and rich text (damage notes, deal insight) is stored as markdown+html. Support tables: sale_cycles (anchors a sweep), sale_scrape_runs (per-source health, incl. failed/low_quality for the Scan Health page), sale_watch, sale_research_clusters (for the cost-aware triage), weekly_sale_ad. Two columns added to existing tables: showroom_stores.is_online_only (web-only clearance sources) and showroom_store_sales.page_markdown. Backfill: backfillSaleItems() reads every isCurrent snapshot, explodes items[] into sale_items with single-row inserts batched — sale_items is ~40 columns, so a multi-row insert would exceed D1's 100 bound-param cap — and is idempotent (skips fully-backfilled snapshots; wipes + re-inserts partial ones). It is invoked once via POST /api/showroom-sales/backfill (access-gated).",
+    apiChanges: [
+      "POST /api/showroom-sales/backfill (access-gated) — one-shot: explode isCurrent clearanceDetailsJson.items[] into sale_items rows. Idempotent; returns snapshotsSeen/backfilled/skipped + itemsInserted/itemsExpected.",
+    ],
+    filesTouched: [
+      "src/backend/db/schema/showroom/sale_cycles.ts, sale_items.ts, sale_item_images.ts, sale_item_colors.ts, sale_watch.ts, sale_scrape_runs.ts, sale_research_clusters.ts, weekly_sale_ad.ts (new)",
+      "src/backend/db/schema/showroom/sales.ts (+page_markdown), stores.ts (+is_online_only), index.ts (barrel)",
+      "src/backend/services/showroom/sales-backfill.ts (new — backfillSaleItems)",
+      "src/backend/api/routes/showroom-sales.ts (+POST /backfill)",
+      "drizzle/0148_gifted_wolverine.sql, scripts/qc/pr_284.mjs, docs/0038_sales_clearance_overhaul/",
+    ],
+    migrations: [
+      {
+        tag: "0148_gifted_wolverine",
+        sql: "CREATE TABLE sale_items ( id INTEGER PRIMARY KEY AUTOINCREMENT, sale_snapshot_id INTEGER NOT NULL REFERENCES showroom_store_sales(id) ON DELETE cascade, store_id INTEGER NOT NULL REFERENCES showroom_stores(id) ON DELETE cascade, ... brand_id INTEGER REFERENCES brands(id) ON DELETE set null, category_id INTEGER REFERENCES categories(id) ON DELETE set null, subcategory_id INTEGER REFERENCES subcategories(id) ON DELETE set null, original_price text, original_price_cents integer, sale_price text, sale_price_cents integer, change_status text NOT NULL DEFAULT 'new', deal_score integer, research_tier text, ... );\n-- + sale_cycles, sale_item_images, sale_item_colors (UNIQUE color_id+sale_item_id), sale_watch, sale_scrape_runs, sale_research_clusters, weekly_sale_ad\n-- + ALTER showroom_stores ADD is_online_only; ALTER showroom_store_sales ADD page_markdown;",
+      },
+    ],
+    code: [
+      {
+        title: "Wide-table backfill: single-row inserts batched under D1's 100-param cap (sales-backfill.ts)",
+        lang: "ts",
+        code: "// sale_items is ~40 cols, so a multi-row insert would exceed D1's 100\n// bound-param cap. One row per statement stays well under it, and db.batch\n// runs each chunk atomically.\nfor (let i = 0; i < pending.length; i += BATCH_STATEMENTS) {\n  const chunk = pending.slice(i, i + BATCH_STATEMENTS);\n  const stmts = chunk.map((row) => db.insert(saleItems).values(row));\n  if (stmts.length === 0) continue;\n  await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);\n  result.itemsInserted += stmts.length;\n}",
+      },
+    ],
+    diagrams: [
+      {
+        caption:
+          "Phase A data spine — the JSON blob becomes real rows, with FK-not-name into the shared config vocabularies.",
+        code: "erDiagram\n    showroom_store_sales ||--o{ sale_items : \"exploded into\"\n    showroom_stores ||--o{ sale_items : \"sells\"\n    sale_cycles ||--o{ sale_items : \"observed in\"\n    sale_items ||--o{ sale_item_images : \"raw src urls\"\n    sale_items ||--o{ sale_item_colors : \"colors mapping\"\n    colors ||--o{ sale_item_colors : \"definition\"\n    brands ||--o{ sale_items : \"brand_id\"\n    categories ||--o{ sale_items : \"category_id\"\n    subcategories ||--o{ sale_items : \"subcategory_id\"\n    sale_items ||--o| sale_watch : \"watched\"\n    sale_research_clusters ||--o{ sale_items : \"scored together\"\n    sale_cycles ||--o{ sale_scrape_runs : \"per-source health\"\n    sale_cycles ||--o| weekly_sale_ad : \"produces\"",
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_284.mjs",
+      command:
+        "pnpm run test:pr 284 -- --preview   # branch preview — runs the backfill\npnpm run test:pr 284                # production (regression guard)",
+      ranAt: "2026-07-27",
+      source:
+        "// preview: POST /backfill, assert ok + count parity (itemsInserted === itemsExpected),\n// then a second run must insert 0 (idempotent). prod: existing sales endpoints still 200;\n// /backfill 404 is 'pending merge/deploy'. Preview shares prod D1, so the backfill writes real rows.",
+      output:
+        "PREVIEW (wcrp-claude-sales-clearance-page-b0c752):\n  ✓ GET /api/showroom-sales → 200 (regression)\n  ✓ GET /api/showroom-sales/facets → 200 (regression)\n  ✓ POST /backfill → 200\n  backfill: {\"snapshotsSeen\":14,\"snapshotsBackfilled\":3,\"snapshotsSkipped\":0,\"itemsInserted\":29,\"itemsExpected\":29}\n  ✓ count parity: itemsInserted === itemsExpected on first run\n  re-run: {\"itemsInserted\":0,\"snapshotsBackfilled\":0,\"snapshotsSkipped\":3}\n  ✓ idempotent: second run inserts 0 items\n  8 passed, 0 failed\n\nPRODUCTION (regression guard, pre-merge):\n  ✓ GET /api/showroom-sales → 200 (regression)\n  ✓ GET /api/showroom-sales/facets → 200 (regression)\n    POST /backfill → 404 on prod (pending merge/deploy) — expected\n  3 passed, 0 failed\n\nAlso: tsc --noEmit clean on all new/edited files; pnpm run build ✓; migration applied via pnpm run migrate:remote and all 8 tables + is_online_only + page_markdown confirmed present on remote D1 via wrangler d1 execute.",
+      migrations: [
+        {
+          tag: "0148_gifted_wolverine",
+          appliedRemote: true,
+          note: "Applied via pnpm run migrate:remote; 8 tables + 2 columns verified on remote D1.",
+        },
+      ],
+    },
+  },
   "api-auth-bearer": {
     slug: "api-auth-bearer",
     branch: "claude/api-auth-bearer",

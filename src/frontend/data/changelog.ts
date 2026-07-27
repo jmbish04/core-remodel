@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/sales-clearance-page-b0c752",
+    title: "Sales & Clearance · Phase A — sale_items schema + backfill (0038)",
+    summary:
+      "Foundation for the 0038 Sales & Clearance overhaul: promote clearance items from JSON blobs (showroom_store_sales.clearanceDetailsJson.items[]) to real, queryable rows. Migration 0148 adds sale_cycles, sale_items, sale_item_images, sale_item_colors, sale_watch, sale_scrape_runs, sale_research_clusters, weekly_sale_ad, plus showroom_stores.is_online_only and showroom_store_sales.page_markdown — all additive. Compliance baked in: prices text+cents, colors via the shared colors def + mapping (no comma-joined strings), category/subcategory FKs into the shared config vocab, rich text markdown+html. backfillSaleItems() explodes isCurrent snapshots into sale_items (single-row inserts batched under D1's 100-param cap; idempotent) via POST /api/showroom-sales/backfill. No reads wired yet — Phase B/E follow, and Phase E must reconcile with the 0037 shopping refactor. Bundle numbered 0038 to dodge ordinal collisions.",
+    date: "2026-07-27",
+    status: "staged",
+    prNumber: 284,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/284",
+  },
+  {
     branch: "claude/api-auth-bearer",
     title: "Auth · accept the raw WORKER_API_KEY as a Bearer token (fix codra API tests)",
     summary:
@@ -280,6 +290,23 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "0038-sales-schema-phase-a",
+    branch: "claude/sales-clearance-page-b0c752",
+    date: "2026-07-27",
+    area: "Shopping",
+    title: "Sale items schema + backfill (0038 Phase A)",
+    summary:
+      "Clearance items lived as a JSON blob inside one showroom_store_sales row per page, so they could not be filtered by color/size, given per-item images, watched, or diffed across weeks. Phase A promotes each item to a real sale_items row and lands the whole data spine for the overhaul — image + color mapping tables, a per-cycle table, scrape-run logging, watch list, research clusters, and the weekly-ad record — all additive (migration 0148). A backfill route explodes the existing isCurrent snapshots into rows.",
+    changes: [
+      { kind: "migration", text: "0148_gifted_wolverine: 8 new tables (sale_cycles, sale_items, sale_item_images, sale_item_colors, sale_watch, sale_scrape_runs, sale_research_clusters, weekly_sale_ad) + showroom_stores.is_online_only + showroom_store_sales.page_markdown. Additive; applied + verified on remote D1." },
+      { kind: "added", text: "sale_items promotes ClearanceItem: brand/category/subcategory FKs into the shared config vocab (+ verbatim *_text fallback when no id matched), prices as text+cents, colors via a colors def + sale_item_colors mapping, size/condition/warranty/qty, damage notes + deal insight as markdown+html, cross-cycle change_status + deal_score/research_tier columns." },
+      { kind: "added", text: "backfillSaleItems() explodes isCurrent showroom_store_sales.clearanceDetailsJson.items[] into sale_items — single-row inserts batched (sale_items is ~40 cols, so multi-row would blow D1's 100 bound-param cap), idempotent (skips snapshots that already have rows)." },
+      { kind: "added", text: "POST /api/showroom-sales/backfill (access-gated) runs the one-shot; 14 current snapshots → 29 items on first run, exact count-parity, 0 on re-run." },
+    ],
+    migrations: ["0148_gifted_wolverine"],
+    status: "staged",
+  },
   {
     id: "0032-visit-log-rest-crud",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
