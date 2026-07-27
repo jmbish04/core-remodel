@@ -9,8 +9,8 @@
 // per open and the canvas holds the revision thread.
 // ---------------------------------------------------------------------------
 
-import { useEffect, useState } from "react";
-import { Sparkles, Wand2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Check, Sparkles, Wand2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,10 @@ import { cn } from "@/lib/utils";
 
 import { editNode } from "../api";
 import type { BoardNode } from "../types";
+import type { RecipeReference } from "./RecipeDialog";
+
+/** Gemini's reference cap for a single edit. */
+const EDIT_REFERENCE_CAP = 14;
 
 /** A tiny segmented toggle (Monolith: ring group, active = filled). */
 function Segmented<T extends string>({
@@ -69,31 +73,61 @@ function Segmented<T extends string>({
 
 interface FreeformEditDialogProps {
   node: BoardNode | null;
+  /** Candidate reference images (inspiration + clippings) — pick up to 14. */
+  references: RecipeReference[];
   /** Drop the edited child node onto the board. */
   onResult: (child: BoardNode) => void;
   onClose: () => void;
 }
 
-export function FreeformEditDialog({ node, onResult, onClose }: FreeformEditDialogProps) {
+export function FreeformEditDialog({
+  node,
+  references,
+  onResult,
+  onClose,
+}: FreeformEditDialogProps) {
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);
   const [thoughts, setThoughts] = useState<string | null>(null);
   const [imageSize, setImageSize] = useState<"2K" | "4K">("2K");
   const [model, setModel] = useState<"flash" | "pro">("flash");
+  const [selectedRefs, setSelectedRefs] = useState<string[]>([]);
 
   // Reset when the target node changes (dialog reopened on another node).
   useEffect(() => {
     setPrompt("");
     setThoughts(null);
     setRunning(false);
+    setSelectedRefs([]);
   }, [node]);
+
+  const toggleRef = (id: string) => {
+    setSelectedRefs((prev) => {
+      if (prev.includes(id)) return prev.filter((r) => r !== id);
+      if (prev.length >= EDIT_REFERENCE_CAP) {
+        toast.error(`You can pick up to ${EDIT_REFERENCE_CAP} references.`);
+        return prev;
+      }
+      return [...prev, id];
+    });
+  };
+
+  const referenceCfImageUrls = useMemo(
+    () => references.filter((r) => selectedRefs.includes(r.id)).map((r) => r.cfImageUrl),
+    [references, selectedRefs],
+  );
 
   const run = async () => {
     if (!node || !prompt.trim()) return;
     setRunning(true);
     setThoughts(null);
     try {
-      const result = await editNode(node.id, { prompt: prompt.trim(), imageSize, model });
+      const result = await editNode(node.id, {
+        prompt: prompt.trim(),
+        imageSize,
+        model,
+        referenceCfImageUrls: referenceCfImageUrls.length ? referenceCfImageUrls : undefined,
+      });
       onResult(result.node);
       setThoughts(result.thoughts || "Done.");
       toast.success("Edit applied — added to the canvas.");
@@ -128,6 +162,49 @@ export function FreeformEditDialog({ node, onResult, onClose }: FreeformEditDial
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void run();
           }}
         />
+
+        {references.length > 0 ? (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <span className="font-mono text-[10px] uppercase tracking-[0.15em] text-muted-foreground">
+                References (optional)
+              </span>
+              <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                {selectedRefs.length}/{EDIT_REFERENCE_CAP}
+              </span>
+            </div>
+            <div className="grid max-h-40 grid-cols-[repeat(auto-fill,minmax(72px,1fr))] gap-2 overflow-y-auto">
+              {references.map((ref) => {
+                const isOn = selectedRefs.includes(ref.id);
+                return (
+                  <button
+                    key={ref.id}
+                    type="button"
+                    disabled={running}
+                    onClick={() => toggleRef(ref.id)}
+                    aria-pressed={isOn}
+                    className={cn(
+                      "relative aspect-square overflow-hidden rounded-lg bg-background outline-none ring-1 transition-all focus-visible:ring-2 focus-visible:ring-ring",
+                      isOn ? "ring-2 ring-primary" : "ring-border/40 hover:ring-border",
+                    )}
+                  >
+                    <img
+                      src={ref.cfImageUrl}
+                      alt={ref.label ?? "Reference"}
+                      className="size-full object-cover"
+                      draggable={false}
+                    />
+                    {isOn ? (
+                      <span className="absolute right-1 top-1 grid size-4 place-items-center rounded-full bg-primary text-primary-foreground">
+                        <Check className="size-3" />
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : null}
 
         <div className="flex flex-wrap items-center gap-4">
           <Segmented
