@@ -1,5 +1,7 @@
 # 0022 — GPS Showroom Drives & Visit Logs
 
+> 🔗 **Active planning cross-reference (2026-07-26):** a re-scoped pass **`0032_location_visits_discovery`** is planning the execution of this PRD's user-facing features **decoupled from the streaming Durable Object** (works off Tessie poll / phone GPS / AI-supplied coords). It claims §5.1 (visit_log reconcile), §5.2 (HITL), §5.4–5.5 (drive-list deltas), §6.1–6.3 (gating/park pipeline/proximityScan), P1, P2, P4, and §14.1 (visit/contact CRUD). Left for a later pass: §5.7 + §14.2/§14.5 (discovery finder + realtime) and P5 (multi-waypoint nav). Preview changelog: https://core-remodel.hacolby.workers.dev/admin/changelog/preview/0032-location-visits-discovery · tracker: `docs/0032_location_visits_discovery/TRACKING.json`
+
 **Status:** Planning → ready to build
 **Owner:** Justin (product + backend), coding agent (implementation), Claude AI Design (frontend, orchestrated)
 **Plan slug (D1 `/admin/plans`):** `0022_gps_showroom_drives`

@@ -271,6 +271,24 @@ export const BRANCHES: ChangelogBranch[] = [
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "0032-visit-log-reconcile",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-26",
+    tag: "0032",
+    area: "Tesla / Visits",
+    title: "Visit-log reconcile — engagement visit_type + GPS provenance (0032 V1)",
+    summary:
+      "First slice of the location-source-agnostic visits & discovery plan (docs/0032). Reconciles showroom_visit_log toward 0022 §5.1 so the Visit Logs workspace (next) has what it needs: an engagement-depth visit_type (SOFT_ARRIVAL/BROWSED_NO_CONTACT/BRIEF_NO_HELP/FULL_SESSION/APPOINTMENT) distinct from the deprecated contact-axis type, plus match_distance_m + provenance_json for the GPS-attestation story. Widened gps_source for the multi-source ingress. Rating 1-5 enforced in the API layer (SQLite can't ALTER-ADD a CHECK). Migration 0147 = three additive ADD COLUMNs.",
+    migrations: ["0147"],
+    changes: [
+      { kind: "migration", text: "0147 — showroom_visit_log ADD visit_type (engagement enum, default SOFT_ARRIVAL), match_distance_m, provenance_json. Three additive ADD COLUMNs." },
+      { kind: "added", text: "visit_type = engagement depth of the visit (the quality signal for visit history / future GPS-attested reviews), separate from the contact channel which lives on showroom_store_contact_log.type." },
+      { kind: "changed", text: "stageSoftArrival/finalizeSoftArrivals populate match_distance_m (park-to-store distance) + provenance_json (raw fix + active-drive id); gps_source enum widened (+ tesla-poll, phone, ai)." },
+      { kind: "changed", text: "hitl_queue_id + the store/hitl XOR rule deferred to D1 (avoids a dangling FK before the showroom_store_hitl_queue table exists)." },
+    ],
+    status: "staged",
+  },
+  {
     id: "0037-shopping-sidebar-ia",
     branch: "claude/shopping-sourcing-sidebar-41f368",
     date: "2026-07-26",
