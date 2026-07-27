@@ -16,7 +16,11 @@ import { assertReachable, createChecks, createClient, resolveBase, WORKER_BASE }
 
 const client = createClient();
 const checks = createChecks();
-const onProd = client.base === WORKER_BASE && !process.argv.includes("--preview");
+// Page-pending logic keys off the resolved base (prod runs `main`).
+const onProd = client.base === WORKER_BASE;
+// The write probe is gated on the ACTUAL target base, never a CLI flag — passing
+// `--preview` while the base still resolves to prod must NOT write to prod config.
+const isPreviewBase = client.base !== WORKER_BASE;
 
 console.log(`\nQC pr_293 — Tesla location config (C1)\n  target: ${resolveBase()}\n`);
 
@@ -58,11 +62,12 @@ try {
   // ── 2. New SSR page (200 on preview; pending on prod pre-merge) ──
   await checkPage("/admin/config/tesla", "Tesla Location", "Tesla location config page");
 
-  // ── 3. Config KV write round-trip (PREVIEW ONLY — don't pollute prod config) ──
-  if (onProd) {
-    checks.info("SKIP: config write probe skipped on prod (would leave a scratch KV key)");
+  // ── 3. Config KV write round-trip (only when the base is NOT prod) ──
+  if (!isPreviewBase) {
+    checks.info("SKIP: config write probe skipped — target base is prod (would leave a scratch KV key)");
   } else {
-    const probeKey = "tesla_location_qc_probe";
+    // Unique key per run so concurrent QC runs can't race on blanking/asserting.
+    const probeKey = `tesla_location_qc_probe_${process.pid}`;
     const write = await client.post("/api/admin/config", {
       variables: [{ variableKey: probeKey, valueText: "42", category: "tesla_location", description: "QC probe" }],
     });
@@ -72,11 +77,14 @@ try {
     const stored = (read.json?.variables ?? []).find((v) => v.variableKey === probeKey);
     checks.ok("scratch key persisted (round-trip)", stored?.valueText === "42", `→ ${stored?.valueText}`);
 
-    // Blank it out (config KV has no DELETE) so the probe leaves no meaningful value.
+    // Blank it out (config KV has no DELETE) so the probe leaves no meaningful value,
+    // then VERIFY the blanking landed (a dropped cleanup would leave "42" behind).
     await client.post("/api/admin/config", {
       variables: [{ variableKey: probeKey, valueText: "", category: "tesla_location", description: "QC probe (cleared)" }],
     });
-    checks.info("scratch key blanked (config KV has no DELETE; value reset to empty)");
+    const after = await client.get("/api/admin/config");
+    const cleared = (after.json?.variables ?? []).find((v) => v.variableKey === probeKey);
+    checks.ok("scratch key blanked (cleanup verified)", cleared?.valueText === "", `→ "${cleared?.valueText}"`);
   }
 } catch (err) {
   checks.ok("QC completed without an unhandled error", false, (err && err.message) || String(err));

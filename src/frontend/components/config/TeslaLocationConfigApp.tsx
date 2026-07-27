@@ -14,7 +14,7 @@
  *    (batch-safe upsert).
  */
 import { CircleCheck, Loader2, MapPinned, Radar, Save, Video } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { toast } from "sonner";
 
 import { ConfigShell } from "@/components/config/ConfigShell";
@@ -374,15 +374,18 @@ function NumField({
   value: string | undefined;
   onChange: (v: string) => void;
 }) {
+  const id = useId();
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs">
+      <Label htmlFor={id} className="text-xs">
         {label} <span className="text-muted-foreground">({unit})</span>
       </Label>
       <Input
+        id={id}
         inputMode="numeric"
+        maxLength={9}
         value={value ?? ""}
-        onChange={(e) => onChange(e.target.value.replace(/[^\d]/g, ""))}
+        onChange={(e) => onChange(e.target.value.replace(/[^\d]/g, "").slice(0, 9))}
       />
     </div>
   );
@@ -393,6 +396,7 @@ function relTime(iso: string): string {
   const t = new Date(iso).getTime();
   if (!Number.isFinite(t)) return "unknown";
   const diff = Date.now() - t;
+  // Clamp a future timestamp (clock skew) to "just now" rather than "-5 min ago".
   if (diff < 60_000) return "just now";
   const mins = Math.round(diff / 60_000);
   if (mins < 60) return `${mins} min ago`;
