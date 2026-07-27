@@ -4,15 +4,17 @@
  * `sale_items` rows (0038 Phase A).
  *
  * Scope: only `isCurrent` snapshots — "what's on sale now". Historical snapshots
- * keep their JSON; we do not need exploded pre-0038 history. Idempotent: a
- * snapshot that already has `sale_items` rows is skipped, so re-running is safe.
+ * keep their JSON; we do not need exploded pre-0038 history. Idempotent by item
+ * COUNT: a snapshot whose `sale_items` count already equals its expected item
+ * length is skipped; one left partially backfilled by a failed prior run is
+ * wiped and re-inserted, so re-running is always safe and never duplicates.
  *
  * Old `ClearanceItem` has no images and no colors, so this creates neither —
  * those arrive with the Phase B scrape upgrade. Prices in the old blob are plain
  * USD numbers; we derive cents directly and keep a `$`-prefixed display text.
  */
 import { drizzle } from "drizzle-orm/d1";
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 
 import {
   showroomStoreSales,
@@ -73,18 +75,28 @@ export async function backfillSaleItems(
     .where(eq(showroomStoreSales.isCurrent, true))
     .all();
 
-  // Which snapshots already have sale_items — skip them (idempotency).
-  const already = new Set<number>();
+  // Existing sale_items COUNT per snapshot (idempotency). Counting — not merely
+  // "any rows exist" — is required because items from every snapshot are batched
+  // together on insert (below), so a prior run that died mid-batch can leave a
+  // snapshot PARTIALLY backfilled. A presence-only check would then skip that
+  // snapshot forever, stranding its remaining items. We instead compare the count
+  // to the expected item length: fully-backfilled snapshots are skipped, and
+  // partially-backfilled ones are wiped and re-inserted cleanly (see wipe loop).
+  const already = new Map<number, number>();
   const ids = snapshots.map((s) => s.id);
   for (let i = 0; i < ids.length; i += 100) {
     const chunk = ids.slice(i, i + 100);
     if (chunk.length === 0) continue;
     const rows = await db
-      .select({ id: saleItems.saleSnapshotId })
+      .select({
+        snapshotId: saleItems.saleSnapshotId,
+        count: sql<number>`count(*)`,
+      })
       .from(saleItems)
       .where(inArray(saleItems.saleSnapshotId, chunk))
+      .groupBy(saleItems.saleSnapshotId)
       .all();
-    for (const r of rows) already.add(r.id);
+    for (const r of rows) already.set(r.snapshotId, Number(r.count));
   }
 
   const result: SalesBackfillResult = {
@@ -96,16 +108,26 @@ export async function backfillSaleItems(
   };
 
   const pending: SaleItemInsert[] = [];
+  // Snapshots that are partially backfilled (0 < existing < expected): their
+  // stale rows are deleted before re-insert so a retry never duplicates rows.
+  const wipeSnapshotIds: number[] = [];
 
   for (const snap of snapshots) {
-    if (already.has(snap.id)) {
+    const details = snap.clearanceDetailsJson;
+    const items = Array.isArray(details?.items) ? details.items : [];
+    const existingCount = already.get(snap.id) ?? 0;
+
+    // Fully backfilled already — nothing to do.
+    if (existingCount > 0 && existingCount === items.length) {
       result.snapshotsSkipped += 1;
       continue;
     }
-    const details = snap.clearanceDetailsJson;
-    const items = Array.isArray(details?.items) ? details.items : [];
+
     result.itemsExpected += items.length;
     if (items.length === 0) continue;
+
+    // Partial leftover from a failed prior run — wipe before re-inserting.
+    if (existingCount > 0) wipeSnapshotIds.push(snap.id);
 
     for (const item of items) {
       pending.push({
@@ -130,6 +152,14 @@ export async function backfillSaleItems(
       });
     }
     result.snapshotsBackfilled += 1;
+  }
+
+  // Clear stale rows from partially-backfilled snapshots first, so the re-insert
+  // below can't create duplicates. Chunked to stay under D1's bound-param cap.
+  for (let i = 0; i < wipeSnapshotIds.length; i += 100) {
+    const chunk = wipeSnapshotIds.slice(i, i + 100);
+    if (chunk.length === 0) continue;
+    await db.delete(saleItems).where(inArray(saleItems.saleSnapshotId, chunk)).run();
   }
 
   // Single-row inserts, batched. sale_items is wide (~40 cols) so a multi-row
