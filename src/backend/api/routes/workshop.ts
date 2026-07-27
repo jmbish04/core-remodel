@@ -1373,7 +1373,7 @@ workshopRouter.openapi(
         .from(workstationBoards)
         .where(eq(workstationBoards.id, node.boardId))
         .get();
-      if (!board) return c.json({ error: "Node not found" }, 404);
+      if (!board) return c.json({ error: "Board not found" }, 404);
 
       const detected = await extractFurnishings(c.env, node.cfImageUrl);
 
@@ -1486,7 +1486,8 @@ workshopRouter.openapi(
       .where(eq(furnishingItems.id, id))
       .run();
     const updated = await db.select().from(furnishingItems).where(eq(furnishingItems.id, id)).get();
-    return c.json({ success: true as const, item: serializeFurnishing(updated!) }, 200);
+    if (!updated) return c.json({ error: "Not found" }, 404);
+    return c.json({ success: true as const, item: serializeFurnishing(updated) }, 200);
   },
 );
 
