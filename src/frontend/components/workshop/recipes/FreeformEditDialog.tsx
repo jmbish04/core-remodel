@@ -22,9 +22,50 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 
 import { editNode } from "../api";
 import type { BoardNode } from "../types";
+
+/** A tiny segmented toggle (Monolith: ring group, active = filled). */
+function Segmented<T extends string>({
+  label,
+  value,
+  options,
+  onChange,
+  disabled,
+}: {
+  label: string;
+  value: T;
+  options: { value: T; label: string }[];
+  onChange: (v: T) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <div className="flex gap-0.5 rounded-md p-0.5 ring-1 ring-border/40">
+        {options.map((o) => (
+          <button
+            key={o.value}
+            type="button"
+            disabled={disabled}
+            aria-pressed={value === o.value}
+            onClick={() => onChange(o.value)}
+            className={cn(
+              "rounded px-2 py-0.5 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+              value === o.value
+                ? "bg-foreground/[0.1] text-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {o.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 interface FreeformEditDialogProps {
   node: BoardNode | null;
@@ -37,6 +78,8 @@ export function FreeformEditDialog({ node, onResult, onClose }: FreeformEditDial
   const [prompt, setPrompt] = useState("");
   const [running, setRunning] = useState(false);
   const [thoughts, setThoughts] = useState<string | null>(null);
+  const [imageSize, setImageSize] = useState<"2K" | "4K">("2K");
+  const [model, setModel] = useState<"flash" | "pro">("flash");
 
   // Reset when the target node changes (dialog reopened on another node).
   useEffect(() => {
@@ -50,7 +93,7 @@ export function FreeformEditDialog({ node, onResult, onClose }: FreeformEditDial
     setRunning(true);
     setThoughts(null);
     try {
-      const result = await editNode(node.id, { prompt: prompt.trim() });
+      const result = await editNode(node.id, { prompt: prompt.trim(), imageSize, model });
       onResult(result.node);
       setThoughts(result.thoughts || "Done.");
       toast.success("Edit applied — added to the canvas.");
@@ -85,6 +128,29 @@ export function FreeformEditDialog({ node, onResult, onClose }: FreeformEditDial
             if ((e.metaKey || e.ctrlKey) && e.key === "Enter") void run();
           }}
         />
+
+        <div className="flex flex-wrap items-center gap-4">
+          <Segmented
+            label="Quality"
+            value={imageSize}
+            options={[
+              { value: "2K", label: "2K" },
+              { value: "4K", label: "4K" },
+            ]}
+            onChange={setImageSize}
+            disabled={running}
+          />
+          <Segmented
+            label="Model"
+            value={model}
+            options={[
+              { value: "flash", label: "Fast" },
+              { value: "pro", label: "Pro" },
+            ]}
+            onChange={setModel}
+            disabled={running}
+          />
+        </div>
 
         {thoughts ? (
           <div className="rounded-lg bg-card p-3 text-sm text-muted-foreground ring-1 ring-border/40">

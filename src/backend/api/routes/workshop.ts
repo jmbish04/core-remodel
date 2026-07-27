@@ -50,7 +50,11 @@ import { nearestAspectRatio } from "../../services/render/prompt-kit";
 import { RECIPES, buildRecipePrompt } from "../../services/render/recipes";
 import { runStage } from "../../services/render/stage-runner";
 import { extractFurnishings } from "../../services/workshop/furnishing-extraction";
-import { freeformEdit, MAX_EDIT_REFERENCES } from "../../services/workshop/freeform-edit";
+import {
+  EDIT_IMAGE_SIZES,
+  freeformEdit,
+  MAX_EDIT_REFERENCES,
+} from "../../services/workshop/freeform-edit";
 import {
   resolveFloorPlanDrawer,
   resolveInspirationDrawer,
@@ -1330,6 +1334,9 @@ const FreeformEditRequestSchema = z.object({
   referenceCfImageUrls: z.array(z.url()).max(MAX_EDIT_REFERENCES).optional(),
   /** Base64 PNG inpainting mask (no data: prefix). */
   maskBase64: z.string().optional(),
+  imageSize: z.enum(EDIT_IMAGE_SIZES).optional(),
+  aspectRatio: z.string().optional(),
+  model: z.enum(["flash", "pro"]).optional(),
 });
 
 workshopRouter.openapi(
@@ -1372,6 +1379,9 @@ workshopRouter.openapi(
         prompt: body.prompt,
         referenceCfImageUrls: body.referenceCfImageUrls,
         maskBase64: body.maskBase64,
+        imageSize: body.imageSize,
+        aspectRatio: body.aspectRatio,
+        model: body.model,
       });
 
       const childId = crypto.randomUUID();

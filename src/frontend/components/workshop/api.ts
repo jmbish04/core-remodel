@@ -257,7 +257,14 @@ export interface FreeformEditResult {
 /** Run one freeform edit turn on a node; returns the new child node + thoughts. */
 export async function editNode(
   nodeId: string,
-  body: { prompt: string; referenceCfImageUrls?: string[]; maskBase64?: string },
+  body: {
+    prompt: string;
+    referenceCfImageUrls?: string[];
+    maskBase64?: string;
+    imageSize?: "512px" | "1K" | "2K" | "4K";
+    aspectRatio?: string;
+    model?: "flash" | "pro";
+  },
 ): Promise<FreeformEditResult> {
   const { data } = await request<FreeformEditResult>(
     `/nodes/${encodeURIComponent(nodeId)}/edit`,

@@ -14,8 +14,18 @@ import { GoogleGenAI } from "@google/genai";
 
 import { uploadBytesToCfImages } from "../render/cf-images";
 
-/** gemini-3.1 flash image — reads/writes images + returns thinking text. */
-const EDIT_MODEL = "gemini-3.1-flash-image";
+/**
+ * Selectable image models (nano-banana 2 family). Flash = fast/cheap default,
+ * up to 4K. Pro = grounded "Thinking" + professional asset production, up to 4K.
+ */
+export const EDIT_MODELS = {
+  flash: "gemini-3.1-flash-image",
+  pro: "gemini-3.1-pro-image",
+} as const;
+export type EditModelKey = keyof typeof EDIT_MODELS;
+
+/** Default model — flash is the proven, cost-effective all-rounder. */
+const DEFAULT_EDIT_MODEL = EDIT_MODELS.flash;
 /** Gemini's reference-image cap for a single interaction. */
 export const MAX_EDIT_REFERENCES = 14;
 
@@ -37,6 +47,10 @@ async function fetchInline(url: string): Promise<{ data: string; mimeType: strin
   return { data: btoa(binary), mimeType };
 }
 
+/** Output resolutions gemini-3.1-flash-image supports (nano-banana 2 table). */
+export const EDIT_IMAGE_SIZES = ["512px", "1K", "2K", "4K"] as const;
+export type EditImageSize = (typeof EDIT_IMAGE_SIZES)[number];
+
 export interface FreeformEditArgs {
   /** The image being edited (Cloudflare Images delivery URL). */
   imageUrl: string;
@@ -46,6 +60,12 @@ export interface FreeformEditArgs {
   referenceCfImageUrls?: string[];
   /** Optional black-and-white inpainting mask (base64 PNG) scoping the edit. */
   maskBase64?: string;
+  /** Output resolution (default 2K). "4K" for print-grade. */
+  imageSize?: EditImageSize;
+  /** Output aspect ratio, e.g. "16:9". Omit to match the input image. */
+  aspectRatio?: string;
+  /** Model: "flash" (default, fast) or "pro" (grounded thinking, pro-grade). */
+  model?: EditModelKey;
 }
 
 export interface FreeformEditResult {
@@ -76,9 +96,19 @@ export async function freeformEdit(env: Env, args: FreeformEditArgs): Promise<Fr
     input.push({ type: "image", mime_type: "image/png", data: args.maskBase64 });
   }
 
+  // Ask for BOTH the thinking text and the image, and size the image. The array
+  // response_format keeps the model's narration while controlling the output
+  // (aspect_ratio omitted → matches the input image; image_size default 2K).
+  const imageFormat: Record<string, string> = { type: "image", image_size: args.imageSize ?? "2K" };
+  if (args.aspectRatio) imageFormat.aspect_ratio = args.aspectRatio;
+
   // The SDK's interactions types aren't fully exported; the input/step shapes
   // match blank-canvas-generator (the proven caller).
-  const interaction = await (ai as any).interactions.create({ model: EDIT_MODEL, input });
+  const interaction = await (ai as any).interactions.create({
+    model: args.model ? EDIT_MODELS[args.model] : DEFAULT_EDIT_MODEL,
+    input,
+    response_format: [{ type: "text" }, imageFormat],
+  });
 
   let imageBytes: ArrayBuffer | null = null;
   let mimeType = "image/png";
