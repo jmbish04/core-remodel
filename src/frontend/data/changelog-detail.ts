@@ -131,11 +131,11 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
       "src/backend/db/schema/showroom/sales.ts (+page_markdown), stores.ts (+is_online_only), index.ts (barrel)",
       "src/backend/services/showroom/sales-backfill.ts (new — backfillSaleItems)",
       "src/backend/api/routes/showroom-sales.ts (+POST /backfill)",
-      "drizzle/0148_gifted_wolverine.sql, scripts/qc/pr_284.mjs, docs/0038_sales_clearance_overhaul/",
+      "drizzle/0148_keen_vance_astro.sql, scripts/qc/pr_284.mjs, docs/0038_sales_clearance_overhaul/",
     ],
     migrations: [
       {
-        tag: "0148_gifted_wolverine",
+        tag: "0148_keen_vance_astro",
         sql: "CREATE TABLE sale_items ( id INTEGER PRIMARY KEY AUTOINCREMENT, sale_snapshot_id INTEGER NOT NULL REFERENCES showroom_store_sales(id) ON DELETE cascade, store_id INTEGER NOT NULL REFERENCES showroom_stores(id) ON DELETE cascade, ... brand_id INTEGER REFERENCES brands(id) ON DELETE set null, category_id INTEGER REFERENCES categories(id) ON DELETE set null, subcategory_id INTEGER REFERENCES subcategories(id) ON DELETE set null, original_price text, original_price_cents integer, sale_price text, sale_price_cents integer, change_status text NOT NULL DEFAULT 'new', deal_score integer, research_tier text, ... );\n-- + sale_cycles, sale_item_images, sale_item_colors (UNIQUE color_id+sale_item_id), sale_watch, sale_scrape_runs, sale_research_clusters, weekly_sale_ad\n-- + ALTER showroom_stores ADD is_online_only; ALTER showroom_store_sales ADD page_markdown;",
       },
     ],
@@ -164,7 +164,7 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
         "PREVIEW (wcrp-claude-sales-clearance-page-b0c752):\n  ✓ GET /api/showroom-sales → 200 (regression)\n  ✓ GET /api/showroom-sales/facets → 200 (regression)\n  ✓ POST /backfill → 200\n  backfill: {\"snapshotsSeen\":14,\"snapshotsBackfilled\":3,\"snapshotsSkipped\":0,\"itemsInserted\":29,\"itemsExpected\":29}\n  ✓ count parity: itemsInserted === itemsExpected on first run\n  re-run: {\"itemsInserted\":0,\"snapshotsBackfilled\":0,\"snapshotsSkipped\":3}\n  ✓ idempotent: second run inserts 0 items\n  8 passed, 0 failed\n\nPRODUCTION (regression guard, pre-merge):\n  ✓ GET /api/showroom-sales → 200 (regression)\n  ✓ GET /api/showroom-sales/facets → 200 (regression)\n    POST /backfill → 404 on prod (pending merge/deploy) — expected\n  3 passed, 0 failed\n\nAlso: tsc --noEmit clean on all new/edited files; pnpm run build ✓; migration applied via pnpm run migrate:remote and all 8 tables + is_online_only + page_markdown confirmed present on remote D1 via wrangler d1 execute.",
       migrations: [
         {
-          tag: "0148_gifted_wolverine",
+          tag: "0148_keen_vance_astro",
           appliedRemote: true,
           note: "Applied via pnpm run migrate:remote; 8 tables + 2 columns verified on remote D1.",
         },

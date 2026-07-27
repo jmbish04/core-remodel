@@ -299,12 +299,12 @@ export const CHANGELOG: ChangelogEntry[] = [
     summary:
       "Clearance items lived as a JSON blob inside one showroom_store_sales row per page, so they could not be filtered by color/size, given per-item images, watched, or diffed across weeks. Phase A promotes each item to a real sale_items row and lands the whole data spine for the overhaul — image + color mapping tables, a per-cycle table, scrape-run logging, watch list, research clusters, and the weekly-ad record — all additive (migration 0148). A backfill route explodes the existing isCurrent snapshots into rows.",
     changes: [
-      { kind: "migration", text: "0148_gifted_wolverine: 8 new tables (sale_cycles, sale_items, sale_item_images, sale_item_colors, sale_watch, sale_scrape_runs, sale_research_clusters, weekly_sale_ad) + showroom_stores.is_online_only + showroom_store_sales.page_markdown. Additive; applied + verified on remote D1." },
+      { kind: "migration", text: "0148_keen_vance_astro: 8 new tables (sale_cycles, sale_items, sale_item_images, sale_item_colors, sale_watch, sale_scrape_runs, sale_research_clusters, weekly_sale_ad) + showroom_stores.is_online_only + showroom_store_sales.page_markdown. Additive; applied + verified on remote D1." },
       { kind: "added", text: "sale_items promotes ClearanceItem: brand/category/subcategory FKs into the shared config vocab (+ verbatim *_text fallback when no id matched), prices as text+cents, colors via a colors def + sale_item_colors mapping, size/condition/warranty/qty, damage notes + deal insight as markdown+html, cross-cycle change_status + deal_score/research_tier columns." },
       { kind: "added", text: "backfillSaleItems() explodes isCurrent showroom_store_sales.clearanceDetailsJson.items[] into sale_items — single-row inserts batched (sale_items is ~40 cols, so multi-row would blow D1's 100 bound-param cap), idempotent (skips snapshots that already have rows)." },
       { kind: "added", text: "POST /api/showroom-sales/backfill (access-gated) runs the one-shot; 14 current snapshots → 29 items on first run, exact count-parity, 0 on re-run." },
     ],
-    migrations: ["0148_gifted_wolverine"],
+    migrations: ["0148_keen_vance_astro"],
     status: "staged",
   },
   {
