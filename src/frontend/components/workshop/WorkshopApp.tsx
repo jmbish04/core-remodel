@@ -411,7 +411,7 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
         />
       </div>
 
-      <FurnishingsDialog node={furnishingsNode} onClose={() => setFurnishingsNode(null)} />
+      <FurnishingsDialog node={furnishingsNode} roomId={roomId} onClose={() => setFurnishingsNode(null)} />
 
       <ExtractClippingDialog
         node={extractNode}
