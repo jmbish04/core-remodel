@@ -113,6 +113,50 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "0032-visit-log-rest-crud": {
+    slug: "0032-visit-log-rest-crud",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0032 V2a · REST CRUD over showroom_visit_log",
+    problem:
+      "V1 reconciled the schema, but there was no way to read, create, finalize, or delete a visit log except the telemetry pipeline's internal writes. The Visit Logs workspace and the voice loop both need a real CRUD surface, and the parity rule says REST and MCP go through one service to the same table.",
+    approach:
+      "A plain-Hono admin-gated router at /api/showroom-visit-logs (matching drive-lists.ts): list with ?status=pending|completed (pending = anything not SUBMITTED) + ?storeId, get, create, patch/finalize, delete. The store name is JOINed from showroom_stores on every read — never denormalized. Rating is validated 1-5 with Zod at the boundary (the API-layer guard that stands in for the CHECK SQLite can't ALTER-ADD). A new DRAFT status supports the human 'save draft' flow; because status is a TEXT column, adding the enum value is TS-only and db:generate emits no migration. MCP twins + the workspace UI follow as V2b/V2c.",
+    apiChanges: [
+      "GET /api/showroom-visit-logs?status=&storeId=&limit= — list, store name JOINed.",
+      "GET /api/showroom-visit-logs/:id — one.",
+      "POST /api/showroom-visit-logs — create (defaults DRAFT).",
+      "PATCH /api/showroom-visit-logs/:id — update/finalize (recomputes dwell).",
+      "DELETE /api/showroom-visit-logs/:id.",
+    ],
+    filesTouched: [
+      "src/backend/api/routes/showroom-visit-logs.ts (new)",
+      "src/backend/api/index.ts (mount)",
+      "src/backend/db/schema/showroom/visit_log.ts (status += DRAFT, TS-only)",
+    ],
+    migrations: [],
+    diagrams: [
+      {
+        caption: "One service, two clients (parity)",
+        code: `flowchart LR
+  UI[Visit Logs workspace - V2b] --> REST["/api/showroom-visit-logs"]
+  VOICE[Claude voice/chat - V2b MCP] --> MCP[visit-log MCP tools]
+  REST --> T[(showroom_visit_log)]
+  MCP --> T
+  REST -. JOIN .-> S[(showroom_stores name)]`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_288.mjs",
+      command: "pnpm run db:generate  &&  pnpm run build  &&  pnpm run test:pr 288 -- --preview",
+      ranAt: "2026-07-27",
+      output:
+        "db:generate → 'No schema changes' (DRAFT enum add is TS-only, no migration).\n" +
+        "tsc --noEmit clean on the new route + index.ts + visit_log.ts. pnpm run build\n" +
+        "green (exit 0). QC pr_288 exercises list + create→get→patch(finalize)→delete\n" +
+        "round-trip incl. the rating=99 → 400 guard; run against preview + prod.",
+      migrations: [],
+    },
+  },
   "0032-visit-log-reconcile": {
     slug: "0032-visit-log-reconcile",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",

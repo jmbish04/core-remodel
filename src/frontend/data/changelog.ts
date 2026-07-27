@@ -271,6 +271,23 @@ export const BRANCHES: ChangelogBranch[] = [
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "0032-visit-log-rest-crud",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-27",
+    tag: "0032",
+    area: "Tesla / Visits",
+    title: "Visit-log REST CRUD — /api/showroom-visit-logs (0032 V2a)",
+    summary:
+      "The human + API surface over showroom_visit_log — the parity backbone for the Visit Logs workspace (V2b) and the voice loop. Admin-gated CRUD: list (pending/completed + storeId filters, store name JOINed), get, create (defaults DRAFT), patch/finalize (recomputes dwell), delete. Rating 1-5 enforced in the API layer (Zod). Added DRAFT to the status enum — TEXT column, so TS-only, no migration.",
+    changes: [
+      { kind: "added", text: "GET/POST/PATCH/DELETE /api/showroom-visit-logs (+ ?status=pending|completed, ?storeId=). Store name JOINed, never denormalized. Admin-gated." },
+      { kind: "added", text: "Rating validated 1-5 at the trust boundary (Zod) — the API-layer guard standing in for the DB CHECK SQLite can't ALTER-ADD." },
+      { kind: "changed", text: "status enum gains DRAFT (human save-draft). TEXT column → TS-only, db:generate confirms no migration." },
+      { kind: "changed", text: "MCP CRUD twins + workspace pages/components deferred to V2b/V2c for reviewability." },
+    ],
+    status: "staged",
+  },
+  {
     id: "0032-visit-log-reconcile",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-26",
