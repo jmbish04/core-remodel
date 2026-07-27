@@ -416,6 +416,7 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
 
       <FreeformEditDialog
         node={freeformEditNode}
+        references={materialSwapRefs}
         onResult={(child) => board.insertChildNode(child)}
         onClose={() => setFreeformEditNode(null)}
       />
