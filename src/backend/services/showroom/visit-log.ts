@@ -72,7 +72,10 @@ export interface ListVisitLogsArgs {
 }
 
 export async function listVisitLogs(db: Db, args: ListVisitLogsArgs = {}) {
-  const limit = Math.min(Math.max(args.limit ?? 200, 1), 500);
+  // Guard against a NaN limit (a non-numeric ?limit= parses to NaN upstream) —
+  // .limit(NaN) is meaningless; fall back to the default, then clamp.
+  const rawLimit = typeof args.limit === "number" && Number.isFinite(args.limit) ? args.limit : 200;
+  const limit = Math.min(Math.max(rawLimit, 1), 500);
   const conds = [];
   if (args.status === "pending") conds.push(inArray(showroomVisitLog.status, [...PENDING_STATUSES]));
   else if (args.status === "completed") conds.push(eq(showroomVisitLog.status, "SUBMITTED"));
@@ -155,13 +158,17 @@ export async function createVisitLog(db: Db, w: VisitLogWrite): Promise<number |
 export async function updateVisitLog(db: Db, id: number, w: VisitLogWrite): Promise<boolean> {
   assertRating(w.rating);
   const [existing] = await db
-    .select({ id: showroomVisitLog.id, arrivalAt: showroomVisitLog.arrivalAt })
+    .select({
+      id: showroomVisitLog.id,
+      arrivalAt: showroomVisitLog.arrivalAt,
+      departureAt: showroomVisitLog.departureAt,
+    })
     .from(showroomVisitLog)
     .where(eq(showroomVisitLog.id, id))
     .limit(1);
   if (!existing) return false;
 
-  const patch: Record<string, unknown> = { updatedAt: new Date() };
+  const patch: Partial<typeof showroomVisitLog.$inferInsert> = { updatedAt: new Date() };
   const keys = [
     "storeId",
     "driveListId",
@@ -175,11 +182,16 @@ export async function updateVisitLog(db: Db, id: number, w: VisitLogWrite): Prom
     "latitude",
     "longitude",
   ] as const;
-  for (const k of keys) if (k in w) patch[k] = w[k];
+  // Skip keys whose value is undefined — an absent field must not null a column.
+  for (const k of keys) if (w[k] !== undefined) (patch as Record<string, unknown>)[k] = w[k];
   if (w.arrivalAt) patch.arrivalAt = w.arrivalAt;
   if (w.departureAt !== undefined) patch.departureAt = w.departureAt;
-  const arrForDwell = w.arrivalAt ?? existing.arrivalAt ?? null;
-  if (w.departureAt && arrForDwell) patch.dwellSeconds = dwell(arrForDwell, w.departureAt);
+  // Recompute dwell whenever EITHER end changes (arrival-only edits used to leave it stale).
+  if (w.arrivalAt !== undefined || w.departureAt !== undefined) {
+    const arr = w.arrivalAt ?? existing.arrivalAt ?? null;
+    const dep = w.departureAt !== undefined ? w.departureAt : existing.departureAt ?? null;
+    patch.dwellSeconds = dwell(arr, dep);
+  }
 
   await db.update(showroomVisitLog).set(patch).where(eq(showroomVisitLog.id, id)).run();
   return true;

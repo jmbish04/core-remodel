@@ -76,6 +76,9 @@ const writeBody = z.object({
   departureAt: isoOrEpoch.optional(),
 });
 
+/** PATCH accepts any subset — defined once at module scope, not per request. */
+const updateBody = writeBody.partial();
+
 /** Map a validated body to the service's VisitLogWrite (dates parsed). */
 function toWrite(b: z.infer<typeof writeBody>): VisitLogWrite {
   const w: VisitLogWrite = { ...b, arrivalAt: undefined, departureAt: undefined };
@@ -96,7 +99,7 @@ showroomVisitLogsRouter.post("/", async (c) => {
 showroomVisitLogsRouter.patch("/:id", async (c) => {
   const id = Number.parseInt(c.req.param("id"), 10);
   if (!Number.isFinite(id)) return c.json({ error: "Invalid id" }, 400);
-  const parsed = writeBody.partial().safeParse(await c.req.json().catch(() => ({})));
+  const parsed = updateBody.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: "Invalid body", detail: parsed.error.issues }, 400);
   const ok = await updateVisitLog(drizzle(c.env.DB), id, toWrite(parsed.data));
   if (!ok) return c.json({ error: "Not found" }, 404);
