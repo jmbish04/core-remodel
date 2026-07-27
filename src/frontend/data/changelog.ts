@@ -59,6 +59,8 @@ export const BRANCHES: ChangelogBranch[] = [
       "Foundation for the 0037 Shopping & Sourcing refactor. The flat 15-item shopping sidebar (tiny text, no submenus, no collapse) becomes a nested, icon'd, collapsible tree. SidebarItem is now recursive (optional href/icon/children/navigateOnExpand); NavNode renders arbitrary-depth submenus that start collapsed and auto-expand the active branch's ancestors — a navigateOnExpand parent both navigates to its section landing and expands, while a separate chevron peeks in place. Per-section + per-item lucide icons; group-header text bumped 10px→xs. New collapse-to-rail: AdminSidebar toggles w-64 ↔ a w-14 icon rail (section icons + expand/home/config), persisted in a remodel_sidebar_collapsed cookie; BaseLayout seeds it server-side and drives the fixed aside AND the content padding off a single --sidebar-w CSS var, so the layout reflows with no SSR flash. The shopping group is re-authored into three submenus (Showrooms / Brands & Products / Purchase Ops → Review); net-new leaves (Review dashboard, Invoices, Deliveries, Concierge) join in later phases so the nav never 404s. No migration, no API — pure frontend. Bundle renamed 0032→0037 to dodge an ordinal collision with concurrent property_origin_config work.",
     date: "2026-07-26",
     status: "staged",
+    prNumber: 277,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/277",
   },
   {
     branch: "claude/changelist-phases-live-updates-6cfa61",

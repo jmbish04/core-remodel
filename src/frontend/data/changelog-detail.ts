@@ -202,12 +202,17 @@ export function isItemActive(currentPath: string, item: SidebarItem): boolean {
   end note`,
       },
     ],
+    prNumber: 277,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/277",
     verification: {
-      qcScript: "scripts/qc/pr_PENDING.mjs",
-      command: "npx tsc --noEmit (touched files) && pnpm run build && browser preview (astro dev)",
+      qcScript: "scripts/qc/pr_277.mjs",
+      command: "pnpm run test:pr 277 -- --preview   # branch preview\npnpm run test:pr 277                # production (regression guard)",
       ranAt: "2026-07-26",
+      source:
+        "// SSR smoke: every shopping page still 200s with the sidebar in the HTML;\n// on --preview the new-IA markers (Purchase Ops, Sourcing Tools, data-sidebar-collapsed)\n// must be present; on prod (pre-merge) they're reported 'pending merge/deploy', not failed.",
       output:
-        "tsc --noEmit: 0 errors in the touched sidebar/layout files. pnpm run build: '✓ built in 42.40s … [build] Complete!'. Browser preview (astro dev, /admin/shopping/schedule): nested tree renders — Brands & Products auto-expanded (Materials active), Showrooms collapsed, Purchase Ops→Review nested; collapse toggle turns the sidebar into a w-14 icon rail and the content reflows left (the previously-clipped ROOMS stat card becomes visible); expand round-trips. QC script + preview-deploy run recorded on the PR.",
+        "PREVIEW (wcrp-claude-shopping-sourcing-sidebar-41f368):\n  ✓ target reachable\n  ✓ GET /admin/shopping → 200\n  ✓ GET /admin/shopping/schedule → 200\n  ✓ GET /admin/shopping/showrooms → 200\n  ✓ GET /admin/shopping/wishlist → 200\n  ✓ hub renders the shopping shell\n  ✓ new IA markers present (Purchase Ops + Sourcing Tools)\n  ✓ collapse-to-rail seed on <html> (data-sidebar-collapsed)\n  8 passed, 0 failed\n\nPRODUCTION (regression guard, pre-merge):\n  ✓ target reachable\n  ✓ GET /admin/shopping → 200\n  ✓ GET /admin/shopping/schedule → 200\n  ✓ GET /admin/shopping/showrooms → 200\n  ✓ GET /admin/shopping/wishlist → 200\n  ✓ hub renders the shopping shell\n    new IA markers not on prod yet — pending merge/deploy (expected pre-merge)\n  6 passed, 0 failed\n\nAlso: tsc --noEmit clean on touched files; pnpm run build '✓ built in 42.40s'; browser preview confirmed nested tree, auto-expand, collapse-to-rail reflow + expand round-trip.",
+      migrations: [],
     },
   },
   "changelog-live-phases": {
