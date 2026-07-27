@@ -48,6 +48,7 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { StoreVisitsSection } from "@/components/visits/StoreVisitsSection";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -90,9 +91,9 @@ import type { HoursJson } from "./intake/hours-types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-export type SectionKey = "brands-products" | "contacts" | "notes" | "photos";
+export type SectionKey = "brands-products" | "contacts" | "notes" | "photos" | "visits";
 
-const VALID_SECTIONS: SectionKey[] = ["brands-products", "contacts", "notes", "photos"];
+const VALID_SECTIONS: SectionKey[] = ["brands-products", "contacts", "notes", "photos", "visits"];
 
 function isSectionKey(v: string | undefined | null): v is SectionKey {
   return v != null && (VALID_SECTIONS as string[]).includes(v);
@@ -1003,6 +1004,12 @@ export function StoreViewportApp({
         icon: <StickyNote className="size-5" />,
       },
       {
+        key: "visits",
+        title: "Visits",
+        description: "Arrivals, dwell & your visit notes",
+        icon: <MapPin className="size-5" />,
+      },
+      {
         key: "photos",
         title: "Showroom photos",
         description: `${galleryPhotos.length + photos.length} photo${
@@ -1296,6 +1303,8 @@ export function StoreViewportApp({
             onEditNote={openEditNote}
             onDeleteNote={setDeleteNoteTarget}
           />
+        ) : section === "visits" ? (
+          <StoreVisitsSection storeId={id} />
         ) : (
           <PhotosSection
             galleryPhotos={galleryPhotos}

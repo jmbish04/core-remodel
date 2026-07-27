@@ -113,6 +113,63 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "0032-visit-logs-workspace": {
+    slug: "0032-visit-logs-workspace",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0032 V2c · the Visit Logs workspace (frontend)",
+    code: [],
+    problem:
+      "V1 shipped the schema, V2a the REST CRUD, V2b the MCP twins through one shared service. There was still no human surface: staged visits (a Tesla soft-arrival, an AI-staged note) had nowhere to be reviewed or finalized, and a store's visit history wasn't visible in its viewport. The point of running off many location sources — knowing HOW each visit was captured and how far the fix was — was invisible.",
+    approach:
+      "Build the workspace on the existing REST + service (no new API, no schema). Shared components first (src/frontend/components/visits/): status/type/source chips (SourceBadge maps the REAL gps_source enum, so provenance is legible), a shared StarRating, a ShowroomAutocomplete (ComboboxWithOther; OTHER creates a bare store), a controlled VisitLogEditor (PlateJS notes → md+html, segmented engagement control, arrival/departure), and a GpsEvidence panel reusing DriveMapThumb for the one-marker fix map. Then the pages: a list with Pending (anything not SUBMITTED) vs Completed tabs, a detail/finalize view (evidence + editor + this-store timeline + sticky Save-draft/Submit/Delete bar), and a manual create page (gps_source=manual). The store viewport gains a 'visits' SectionKey + bento tile whose section floats pending visits to the top with a finalize nudge, then history — reading the admin-gated ?storeId= filter (not a new ungated store sub-route). Sidebar 'Visit Logs' entry. Fixed a latent drift found along the way: the store [section].astro allow-list omitted 'contacts', so /store/:id/contacts silently fell back.",
+    apiChanges: [
+      "None — frontend only. Reads GET /api/showroom-visit-logs (+ ?status, ?storeId) and GET/POST /api/showroom-stores, all live since V2a/V2b.",
+    ],
+    filesTouched: [
+      "src/frontend/components/visits/* (new — types, api, Badges, StarRating, ShowroomAutocomplete, VisitLogEditor, GpsEvidence, VisitCard, VisitLogsListApp, VisitLogDetailApp, VisitLogNewApp, StoreVisitsSection)",
+      "src/frontend/pages/admin/shopping/showrooms/visitlogs.astro, visitlogs/[id].astro, visitlogs/new.astro (new)",
+      "src/frontend/components/showroom/StoreViewportApp.tsx (+visits SectionKey, bento tile, render branch)",
+      "src/frontend/pages/admin/shopping/store/[id]/[section].astro (allow-list: +contacts +visits)",
+      "src/frontend/components/sidebar/nav-groups.ts (+Visit Logs entry), scripts/qc/pr_292.mjs",
+    ],
+    migrations: [],
+    diagrams: [
+      {
+        caption: "Workspace IA — one service, three pages + the store section, all reading the V2a/V2b surface",
+        code: `flowchart TD
+  NAV[Sidebar · Visit Logs] --> LIST["/visitlogs (list)<br/>Pending | Completed"]
+  LIST --> DET["/visitlogs/:id<br/>evidence + finalize"]
+  LIST --> NEW["/visitlogs/new<br/>manual create"]
+  STORE[Store viewport] --> SEC["visits section<br/>?storeId= filter"]
+  DET --> API[[/api/showroom-visit-logs]]
+  NEW --> API
+  SEC --> API
+  LIST --> API
+  API --> S[[shared visit-log service]]
+  S --> DB[(showroom_visit_log)]
+  classDef n fill:#0f172a,stroke:#38bdf8,color:#e2e8f0;`,
+      },
+      {
+        caption: "A staged visit's lifecycle through the finalize UI",
+        code: `stateDiagram-v2
+  [*] --> PENDING: TESLA_SOFT_ARRIVAL / AI_STAGED / TESLA_STAGED / DRAFT
+  PENDING --> PENDING: Save draft (status DRAFT)
+  PENDING --> SUBMITTED: Submit (rating + notes + store bound)
+  SUBMITTED --> [*]
+  PENDING --> [*]: Delete`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_292.mjs",
+      command: "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 292 -- --preview",
+      ranAt: "2026-07-27",
+      output:
+        "tsc --noEmit clean on the new visits/ surface + StoreViewportApp + nav-groups (filtered from the pre-existing baseline). " +
+        "pnpm run build green (server 113s, client + prerender ✓, exit 0) — the deploy gate for a frontend PR. " +
+        "No schema change → no migration. QC pr_292 (committed) exercises: regression on the data endpoints the workspace consumes (visit-logs pending/completed + store directory + ?storeId=), the new SSR pages (200 on preview; 404-on-prod reported as pending merge/deploy), and a full create→get→submit→delete round-trip through the same REST the pages drive. Runs against preview then prod after deploy.",
+      migrations: [],
+    },
+  },
   "0032-visit-log-mcp-crud": {
     slug: "0032-visit-log-mcp-crud",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
