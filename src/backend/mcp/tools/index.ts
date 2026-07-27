@@ -20,6 +20,7 @@ import { productPhotoTools } from "./product_photos";
 import { roomTools } from "./rooms";
 import { showroomTools } from "./showrooms";
 import { teslaTools } from "./tesla";
+import { visitTools } from "./visits";
 import { workflowTools } from "./workflow";
 
 /** All tool groups, in the order they appear on the docs page. */
@@ -31,6 +32,7 @@ export const ALL_TOOL_GROUPS: RemodelTool[] = [
   ...showroomTools,
   ...driveTools,
   ...teslaTools,
+  ...visitTools,
   ...brandTools,
   ...productTools,
   ...productPhotoTools,
