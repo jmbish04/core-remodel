@@ -112,9 +112,17 @@ export async function stageSoftArrival(env: Env, fix: ParkFix): Promise<StageRes
       latitude: fix.latitude,
       longitude: fix.longitude,
       // Attestation strength + provenance (0032 V1): how far the park was from the
-      // matched store, and the raw fix + active-drive id for the receipts drawer.
+      // matched store, and explicit fix fields + active-drive id for the receipts
+      // drawer (serialize named fields, not the raw object, so it can't bloat or
+      // carry an unexpected non-serializable shape).
       matchDistanceM: store.distanceM,
-      provenanceJson: JSON.stringify({ fix, driveListId: active.id, matchedStoreId: store.id }),
+      provenanceJson: JSON.stringify({
+        latitude: fix.latitude,
+        longitude: fix.longitude,
+        gpsSource: fix.gpsSource,
+        driveListId: active.id,
+        matchedStoreId: store.id,
+      }),
     })
     .returning({ id: showroomVisitLog.id });
 

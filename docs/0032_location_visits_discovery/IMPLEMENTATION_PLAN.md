@@ -384,6 +384,15 @@ flowchart TD
 
 ---
 
+## 11. Design-review follow-ups (from codra review of V1 PR #286 — fold into L0/L1/V2)
+- **Detector state atomicity (L1).** KV read-modify-write of `loc:detector:<subjectId>` can race if two sources feed the same subject concurrently. Serialize per-subject ingestion (a small Durable Object keyed by subjectId, or a documented "one active source at a time" invariant), OR accept that a single subject = one physical car/phone rarely emits concurrently and document it. Decide before L1 ships.
+- **`ctx.waitUntil` for the ingress (L0).** `ingestLocationFix` runs the detector + pipeline as background work; every caller (device-location POST, manual-here, MCP `report_location`) MUST hand that work to `ctx.waitUntil()` or a Worker will drop it after responding.
+- **Partial-unique index on D1 (L1).** Verify drizzle/D1 actually emits the `park_sessions (subject_id) WHERE status='parked'` partial unique before relying on it; fall back to a computed "open-park key" + app check if not.
+- **AI-fix provenance sink (L0).** `report_location` (ai source) must persist to an existing sink — `device_location` with `source='ai'` — so AI-staged visits are auditable/debuggable.
+- **notes_html XSS (V2).** Persisted PlateJS html must be sanitized server-side on write (the repo's existing sanitize-on-write path), never rendered raw.
+- **subjectId scoping (note).** Single-operator app (0022 N3), so literal `phone`/`ai` keys are safe now; if multi-user ever lands, encode the user (`phone:<userId>`).
+- **Hono + zod-openapi (V2/L0 routes).** New routes (`/api/showroom-visit-logs`, `manual-here`) should use the project's OpenAPIHono + `createRoute` + Zod v4 boundary validation where the surrounding router does; match the file's existing convention.
+
 ## 10. Decisions (all CONFIRMED 2026-07-26)
 1. **D-1 — visit_type = engagement depth; contact_log stays separate + gains an optional visit FK.** ✅ (§5.1)
 2. **D-2 — "exactly one of store_id / hitl_queue_id" enforced only once confirmed; neither-yet allowed while an unconfirmed auto-arrival.** ✅ (§5.1)

@@ -87,7 +87,7 @@ export const showroomVisitLog = sqliteTable(
       .notNull()
       .default("SOFT_ARRIVAL"),
 
-    /** 1–5 star rating; range enforced by the CHECK below AND the API. Null until reviewed. */
+    /** 1–5 star rating; range enforced in the API/service layer (no DB CHECK — see note below). Null until reviewed. */
     rating: integer("rating"),
 
     /** Rich-text visit notes — markdown is source of truth, html is the render cache. */
