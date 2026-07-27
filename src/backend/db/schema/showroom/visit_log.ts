@@ -61,24 +61,49 @@ export const showroomVisitLog = sqliteTable(
       .notNull()
       .default("TESLA_SOFT_ARRIVAL"),
 
-    /** How the visit happened. */
+    /**
+     * @deprecated Contact axis, mislabeled here. The contact channel (phone/email/
+     * in-person) belongs on `showroom_store_contact_log.type` — see 0032 D-1. Kept
+     * for back-compat with rows written before the split; new code sets `visitType`.
+     */
     type: text("type", { enum: ["PHONE", "EMAIL", "SHOWROOM_IN_PERSON"] })
       .notNull()
       .default("SHOWROOM_IN_PERSON"),
 
-    /** 1–5 star rating (app/API-enforced range); null until reviewed. */
+    /**
+     * ENGAGEMENT DEPTH of the visit (0032 D-1) — the quality signal for the visit
+     * history / future GPS-attested reviews. Auto-arrivals stage as SOFT_ARRIVAL;
+     * the human classifies the real depth when finalizing in the Visit Logs workspace.
+     */
+    visitType: text("visit_type", {
+      enum: [
+        "SOFT_ARRIVAL",
+        "BROWSED_NO_CONTACT",
+        "BRIEF_NO_HELP",
+        "FULL_SESSION",
+        "APPOINTMENT",
+      ],
+    })
+      .notNull()
+      .default("SOFT_ARRIVAL"),
+
+    /** 1–5 star rating; range enforced by the CHECK below AND the API. Null until reviewed. */
     rating: integer("rating"),
 
     /** Rich-text visit notes — markdown is source of truth, html is the render cache. */
     notesMarkdown: text("notes_markdown"),
     notesHtml: text("notes_html"),
 
-    /** Provenance of the arrival fix. */
+    /** Provenance of the arrival fix — which location source staged it (0032 §3). */
     gpsSource: text("gps_source", {
-      enum: ["tesla-telemetry", "tesla-webhook", "device", "manual"],
+      enum: ["tesla-telemetry", "tesla-poll", "tesla-webhook", "device", "phone", "ai", "manual"],
     }),
     latitude: real("latitude"),
     longitude: real("longitude"),
+    /** How far the park fix was from the matched store, metres — attestation strength (0022 §5.1). */
+    matchDistanceM: real("match_distance_m"),
+    /** Raw fix + active-drive id + match reasoning, JSON — the provenance packet (0022 §5.1). */
+    provenanceJson: text("provenance_json"),
 
     /** The soft-arrival row this staged row finalized (self-reference; UNIQUE below). */
     softArrivalId: integer("soft_arrival_id").references(
@@ -101,6 +126,10 @@ export const showroomVisitLog = sqliteTable(
     softArrivalUniq: uniqueIndex("showroom_visit_log_soft_arrival_uniq")
       .on(t.softArrivalId)
       .where(sql`${t.softArrivalId} IS NOT NULL`),
+    // NOTE: rating is a 1–5 scale, enforced in the API/service layer (0032 V2), NOT a DB
+    // CHECK. SQLite can't ALTER-ADD a CHECK to an existing table without a full rebuild,
+    // which drizzle-kit won't auto-generate — so a DB check() here would drift from the
+    // migration. Kept out on purpose; validate on write.
   }),
 );
 

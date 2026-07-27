@@ -107,10 +107,14 @@ export async function stageSoftArrival(env: Env, fix: ParkFix): Promise<StageRes
       driveListId: active.id,
       arrivalAt: new Date(),
       status: "TESLA_SOFT_ARRIVAL",
-      type: "SHOWROOM_IN_PERSON",
+      // Engagement depth is unknown until the human classifies it; default handles it.
       gpsSource: fix.gpsSource,
       latitude: fix.latitude,
       longitude: fix.longitude,
+      // Attestation strength + provenance (0032 V1): how far the park was from the
+      // matched store, and the raw fix + active-drive id for the receipts drawer.
+      matchDistanceM: store.distanceM,
+      provenanceJson: JSON.stringify({ fix, driveListId: active.id, matchedStoreId: store.id }),
     })
     .returning({ id: showroomVisitLog.id });
 
@@ -159,6 +163,8 @@ export async function finalizeSoftArrivals(env: Env): Promise<FinalizeResult> {
       gpsSource: showroomVisitLog.gpsSource,
       latitude: showroomVisitLog.latitude,
       longitude: showroomVisitLog.longitude,
+      matchDistanceM: showroomVisitLog.matchDistanceM,
+      provenanceJson: showroomVisitLog.provenanceJson,
     })
     .from(showroomVisitLog)
     .where(
@@ -187,10 +193,11 @@ export async function finalizeSoftArrivals(env: Env): Promise<FinalizeResult> {
         departureAt: now,
         dwellSeconds,
         status: "TESLA_STAGED",
-        type: "SHOWROOM_IN_PERSON",
         gpsSource: soft.gpsSource,
         latitude: soft.latitude,
         longitude: soft.longitude,
+        matchDistanceM: soft.matchDistanceM,
+        provenanceJson: soft.provenanceJson,
         softArrivalId: soft.id,
       })
       .onConflictDoNothing({ target: showroomVisitLog.softArrivalId })
