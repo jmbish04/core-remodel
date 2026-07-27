@@ -21,6 +21,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
       { href: "/admin/designs/moodboards", label: "Mood Boards" },
       { href: "/admin/designs/decision-room", label: "Decision Room" },
       { href: "/admin/designs/floorplan-regions", label: "Floorplan Regions" },
+      { href: "/admin/designs/furnishings", label: "Furnishings" },
       { href: "/admin/pmo/components", label: "PMO Components" },
     ],
   },

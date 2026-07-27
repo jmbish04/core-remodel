@@ -82,6 +82,7 @@ export * from "./images/workstation_boards";
 export * from "./images/board_nodes";
 export * from "./images/photo_collections";
 export * from "./images/sample_clippings";
+export * from "./images/furnishing_items";
 
 export * from "./home/questionnaire";
 

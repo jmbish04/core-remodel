@@ -1,0 +1,21 @@
+---
+import { FurnishingsRoomApp } from "@/components/FurnishingsRoomApp";
+import BaseLayout from "@/layouts/BaseLayout.astro";
+---
+
+<BaseLayout
+  title="Admin - Designs / Furnishings - 126 Colby - Remodel Mission Control"
+  description="A room's shopping list — everything extracted from its renders, ready to source."
+>
+  <main class="container mx-auto px-4 py-8">
+    <div class="mb-8">
+      <h1 class="mb-2 text-3xl font-semibold tracking-tight">Furnishings</h1>
+      <p class="text-muted-foreground">
+        A room's shopping list, pulled from its renders. Mark what you've got,
+        dismiss what you don't want, click through to find products.
+      </p>
+    </div>
+
+    <FurnishingsRoomApp client:only="react" />
+  </main>
+</BaseLayout>

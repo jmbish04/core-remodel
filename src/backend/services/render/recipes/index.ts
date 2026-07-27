@@ -59,6 +59,27 @@ export const GRID_LOCK = [
   "- Do NOT change the room's architecture, dimensions, or camera between panels.",
 ].join("\n");
 
+/** sketch → photoreal: keep the drawn composition, render it real. */
+export const SKETCH_LOCK = [
+  "- PRESERVE the drawn composition, layout, proportions, and viewpoint of the sketch.",
+  "- Render it as a photorealistic interior, materializing the sketched design intent with believable materials, lighting, and depth.",
+  "- Do NOT add rooms, walls, or major elements the sketch does not imply.",
+].join("\n");
+
+/** 2D elevation → photoreal: keep the elevation, add materials + depth. */
+export const ELEVATION_LOCK = [
+  "- PRESERVE EXACTLY: the elevation's proportions, every opening/door/window/cabinet position, and the head-on framing.",
+  "- Render it as a photorealistic front-on view with realistic materials, finishes, hardware, and subtle depth/shadow.",
+  "- Do NOT move, add, or remove any element from the drawing.",
+].join("\n");
+
+/** closed cabinet/wardrobe → interior reveal: open it, keep the shell. */
+export const REVEAL_LOCK = [
+  "- PRESERVE the cabinet/wardrobe's exterior position, size, style, and the surrounding scene.",
+  "- OPEN the doors/drawers and reveal a plausible, tidily organized interior — that is the goal.",
+  "- Do NOT change the room, the camera, or the unit's outer dimensions.",
+].join("\n");
+
 /** Recipe ids wired end-to-end. */
 export type RecipeId =
   | "material-swap"
@@ -68,7 +89,10 @@ export type RecipeId =
   | "tone-unify"
   | "lighting-enhance"
   | "plan-to-isometric"
-  | "evolution-grid";
+  | "evolution-grid"
+  | "sketch-to-render"
+  | "elevation-render"
+  | "cabinet-reveal";
 
 /**
  * How a recipe hands images to `runStage`:
@@ -192,6 +216,44 @@ export const RECIPES: Record<RecipeId, RecipeDef> = {
       "Render this floor plan as a clean, furnished 3D isometric dollhouse with low walls.",
     guardrail: ISO_LOCK,
     referencesHeader: "Style reference images (material/palette only):",
+  },
+  "sketch-to-render": {
+    id: "sketch-to-render",
+    label: "Make my sketch real",
+    category: "concept",
+    stageType: "stage_3_LP_finish",
+    inputMode: "references",
+    intro:
+      "You are an expert architectural visualizer. Turn the provided hand-drawn sketch into a photorealistic interior based on the user's request.",
+    defaultUserRequest: "Render this sketch photorealistically, keeping its composition and intent.",
+    guardrail: SKETCH_LOCK,
+    referencesHeader: "Style reference images (material/palette only):",
+  },
+  "elevation-render": {
+    id: "elevation-render",
+    label: "Render this elevation",
+    category: "technical",
+    stageType: "stage_3_LP_finish",
+    inputMode: "references",
+    intro:
+      "You are an expert architectural renderer. Turn the provided 2D elevation drawing into a photorealistic head-on view based on the user's request.",
+    defaultUserRequest:
+      "Render this elevation photorealistically with real materials and finishes, head-on.",
+    guardrail: ELEVATION_LOCK,
+    referencesHeader: "Style reference images (material/palette only):",
+  },
+  "cabinet-reveal": {
+    id: "cabinet-reveal",
+    label: "Open it up",
+    category: "detail",
+    stageType: "stage_3_LP_finish",
+    inputMode: "references",
+    intro:
+      "You are an expert architectural photo editor. Open the closed cabinet / wardrobe in the provided image and reveal a tidy, organized interior, per the user's request.",
+    defaultUserRequest:
+      "Open the doors and drawers and show a plausible, well-organized interior.",
+    guardrail: REVEAL_LOCK,
+    referencesHeader: "Reference images (interior style only):",
   },
   "evolution-grid": {
     id: "evolution-grid",

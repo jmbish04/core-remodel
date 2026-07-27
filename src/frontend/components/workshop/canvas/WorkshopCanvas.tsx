@@ -56,6 +56,9 @@ interface WorkshopCanvasProps {
   onFloorPlanFurnish: (node: BoardNode) => void;
   onPlanToIsometric: (node: BoardNode) => void;
   onEvolutionGrid: (node: BoardNode) => void;
+  onSketchToRender: (node: BoardNode) => void;
+  onElevationRender: (node: BoardNode) => void;
+  onCabinetReveal: (node: BoardNode) => void;
   onExtractFurnishings: (node: BoardNode) => void;
   onToneUnify: (node: BoardNode) => void;
   onLightingEnhance: (node: BoardNode) => void;
@@ -102,6 +105,9 @@ export function WorkshopCanvas({
   onFloorPlanFurnish,
   onPlanToIsometric,
   onEvolutionGrid,
+  onSketchToRender,
+  onElevationRender,
+  onCabinetReveal,
   onExtractFurnishings,
   onToneUnify,
   onLightingEnhance,
@@ -653,6 +659,9 @@ export function WorkshopCanvas({
         onFloorPlanFurnish={onFloorPlanFurnish}
         onPlanToIsometric={onPlanToIsometric}
         onEvolutionGrid={onEvolutionGrid}
+        onSketchToRender={onSketchToRender}
+        onElevationRender={onElevationRender}
+        onCabinetReveal={onCabinetReveal}
         onExtractFurnishings={onExtractFurnishings}
         onToneUnify={onToneUnify}
         onLightingEnhance={onLightingEnhance}

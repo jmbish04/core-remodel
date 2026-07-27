@@ -36,6 +36,7 @@ import { drizzle } from "drizzle-orm/d1";
 
 import {
   boardNodes,
+  furnishingItems,
   photoCollectionItems,
   photoCollections,
   renderSessions,
@@ -1039,7 +1040,7 @@ workshopRouter.openapi(
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// POST /nodes/:id/recipe — extract | material-swap | mix | clay-to-photoreal | floor-plan-furnish | tone-unify | lighting-enhance | plan-to-isometric | evolution-grid
+// POST /nodes/:id/recipe — extract | material-swap | mix | clay-to-photoreal | floor-plan-furnish | tone-unify | lighting-enhance | plan-to-isometric | evolution-grid | sketch-to-render | elevation-render | cabinet-reveal
 // ─────────────────────────────────────────────────────────────────────────────
 
 const RecipeExtractParams = z.object({
@@ -1075,6 +1076,9 @@ const RecipeRequestSchema = z.discriminatedUnion("recipe", [
   z.object({ recipe: z.literal("lighting-enhance"), params: RecipePromptOnlyParams }),
   z.object({ recipe: z.literal("plan-to-isometric"), params: RecipePromptOnlyParams }),
   z.object({ recipe: z.literal("evolution-grid"), params: RecipePromptOnlyParams }),
+  z.object({ recipe: z.literal("sketch-to-render"), params: RecipePromptOnlyParams }),
+  z.object({ recipe: z.literal("elevation-render"), params: RecipePromptOnlyParams }),
+  z.object({ recipe: z.literal("cabinet-reveal"), params: RecipePromptOnlyParams }),
 ]);
 
 /** Get-or-create the room's Workshop render session (idempotent by roomId). */
@@ -1124,7 +1128,7 @@ workshopRouter.openapi(
       500: { description: "Server error", content: { "application/json": { schema: ErrorSchema } } },
     },
     tags: ["workshop"],
-    summary: "Run a node-action recipe (extract | material-swap | mix | clay-to-photoreal | floor-plan-furnish | tone-unify | lighting-enhance | plan-to-isometric | evolution-grid)",
+    summary: "Run a node-action recipe (extract | material-swap | mix | clay-to-photoreal | floor-plan-furnish | tone-unify | lighting-enhance | plan-to-isometric | evolution-grid | sketch-to-render | elevation-render | cabinet-reveal)",
     operationId: "runNodeRecipe",
   }),
   async (c) => {
@@ -1318,11 +1322,24 @@ workshopRouter.openapi(
 // POST /nodes/:id/extract-furnishings — vision → shopping-list items (recipe 6.1)
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** A persisted furnishing row (wire shape). */
 const FurnishingItemSchema = z.object({
+  id: z.string(),
   label: z.string(),
   category: z.string(),
   note: z.string(),
+  status: z.string(),
 });
+
+function serializeFurnishing(row: typeof furnishingItems.$inferSelect) {
+  return {
+    id: row.id,
+    label: row.label,
+    category: row.category,
+    note: row.note,
+    status: row.status,
+  };
+}
 
 workshopRouter.openapi(
   createRoute({
@@ -1331,7 +1348,7 @@ workshopRouter.openapi(
     request: { params: z.object({ id: z.string() }) },
     responses: {
       200: {
-        description: "Detected furnishings/materials",
+        description: "Detected + persisted furnishings/materials",
         content: {
           "application/json": {
             schema: z.object({ success: z.literal(true), items: z.array(FurnishingItemSchema) }),
@@ -1341,7 +1358,7 @@ workshopRouter.openapi(
       404: { description: "Node not found", content: { "application/json": { schema: ErrorSchema } } },
       500: { description: "Extraction failed", content: { "application/json": { schema: ErrorSchema } } },
     },
-    summary: "Extract furnishings/materials from a node image",
+    summary: "Extract + persist furnishings/materials from a node image",
     operationId: "extractFurnishings",
   }),
   async (c) => {
@@ -1351,11 +1368,159 @@ workshopRouter.openapi(
       const node = await db.select().from(boardNodes).where(eq(boardNodes.id, id)).get();
       if (!node) return c.json({ error: "Node not found" }, 404);
 
-      const items = await extractFurnishings(c.env, node.cfImageUrl);
-      return c.json({ success: true as const, items }, 200);
+      const board = await db
+        .select()
+        .from(workstationBoards)
+        .where(eq(workstationBoards.id, node.boardId))
+        .get();
+      if (!board) return c.json({ error: "Board not found" }, 404);
+
+      const detected = await extractFurnishings(c.env, node.cfImageUrl);
+
+      // Re-extract replaces this node's prior rows (delete-by-node + insert), atomic.
+      const rows = detected.map((it) => ({
+        id: crypto.randomUUID(),
+        roomId: board.roomId,
+        sourceNodeId: node.id,
+        label: it.label,
+        category: it.category,
+        note: it.note,
+      }));
+      // db.batch requires a non-empty tuple; the delete-by-node is always first.
+      const deleteStmt = db.delete(furnishingItems).where(eq(furnishingItems.sourceNodeId, node.id));
+      const insertStmts = rows.map((row) => db.insert(furnishingItems).values(row));
+      await db.batch([deleteStmt, ...insertStmts]);
+
+      const saved = await db
+        .select()
+        .from(furnishingItems)
+        .where(eq(furnishingItems.sourceNodeId, node.id))
+        .all();
+      return c.json({ success: true as const, items: saved.map(serializeFurnishing) }, 200);
     } catch (err) {
       console.error("[workshop] POST /nodes/:id/extract-furnishings failed:", err);
       return c.json({ error: "Failed to extract furnishings" }, 500);
     }
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /nodes/:id/furnishings — this node's already-extracted items (no re-scan)
+// ─────────────────────────────────────────────────────────────────────────────
+
+workshopRouter.openapi(
+  createRoute({
+    method: "get",
+    path: "/nodes/{id}/furnishings",
+    request: { params: z.object({ id: z.string() }) },
+    responses: {
+      200: {
+        description: "This node's saved furnishings",
+        content: {
+          "application/json": {
+            schema: z.object({ success: z.literal(true), items: z.array(FurnishingItemSchema) }),
+          },
+        },
+      },
+    },
+    summary: "List a node's already-extracted furnishings",
+    operationId: "listNodeFurnishings",
+  }),
+  async (c) => {
+    const { id } = c.req.valid("param");
+    const db = drizzle(c.env.DB);
+    const saved = await db
+      .select()
+      .from(furnishingItems)
+      .where(eq(furnishingItems.sourceNodeId, id))
+      .all();
+    return c.json({ success: true as const, items: saved.map(serializeFurnishing) }, 200);
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PATCH /furnishings/:id — curate (dismiss / adopt, link a product)
+// ─────────────────────────────────────────────────────────────────────────────
+
+workshopRouter.openapi(
+  createRoute({
+    method: "patch",
+    path: "/furnishings/{id}",
+    request: {
+      params: z.object({ id: z.string() }),
+      body: {
+        content: {
+          "application/json": {
+            schema: z.object({
+              status: z.enum(["detected", "dismissed", "adopted"]).optional(),
+              productId: z.number().nullable().optional(),
+            }),
+          },
+        },
+      },
+    },
+    responses: {
+      200: {
+        description: "Updated furnishing",
+        content: {
+          "application/json": {
+            schema: z.object({ success: z.literal(true), item: FurnishingItemSchema }),
+          },
+        },
+      },
+      404: { description: "Not found", content: { "application/json": { schema: ErrorSchema } } },
+    },
+    summary: "Curate a furnishing (dismiss / adopt / link product)",
+    operationId: "patchFurnishing",
+  }),
+  async (c) => {
+    const { id } = c.req.valid("param");
+    const body = c.req.valid("json");
+    const db = drizzle(c.env.DB);
+    const existing = await db.select().from(furnishingItems).where(eq(furnishingItems.id, id)).get();
+    if (!existing) return c.json({ error: "Not found" }, 404);
+
+    await db
+      .update(furnishingItems)
+      .set({ ...body, updatedAt: new Date() })
+      .where(eq(furnishingItems.id, id))
+      .run();
+    const updated = await db.select().from(furnishingItems).where(eq(furnishingItems.id, id)).get();
+    if (!updated) return c.json({ error: "Not found" }, 404);
+    return c.json({ success: true as const, item: serializeFurnishing(updated) }, 200);
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /rooms/:roomId/furnishings — the room's saved shopping list
+// ─────────────────────────────────────────────────────────────────────────────
+
+workshopRouter.openapi(
+  createRoute({
+    method: "get",
+    path: "/rooms/{roomId}/furnishings",
+    request: { params: z.object({ roomId: z.coerce.number() }) },
+    responses: {
+      200: {
+        description: "The room's persisted furnishings",
+        content: {
+          "application/json": {
+            schema: z.object({ success: z.literal(true), items: z.array(FurnishingItemSchema) }),
+          },
+        },
+      },
+    },
+    summary: "List a room's saved furnishings",
+    operationId: "listRoomFurnishings",
+  }),
+  async (c) => {
+    const { roomId } = c.req.valid("param");
+    const db = drizzle(c.env.DB);
+    const saved = await db
+      .select()
+      .from(furnishingItems)
+      .where(eq(furnishingItems.roomId, roomId))
+      .all();
+    return c.json({ success: true as const, items: saved.map(serializeFurnishing) }, 200);
   },
 );
