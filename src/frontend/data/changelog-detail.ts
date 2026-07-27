@@ -122,7 +122,7 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
     problem:
       "The single auth gate `isRequestAuthenticated` (used by both the `_worker.ts` SSR admin gate and the `requireAccessAuth` API middleware) accepted ONLY the `remodel_access` cookie, and that cookie's value is `SHA-256(WORKER_API_KEY)`. A browser gets it by logging in; a server-to-server client only has the RAW key and no way to present the hash. So the codra review bot — which holds `WORKER_API_KEY` and tries to exercise the APIs a PR touches — and the QC scripts both failed every admin-gated call with 401.",
     approach:
-      "Widen the gate to accept either form of the same secret. A new `getBearerKeyFromRequest` reads `Authorization: Bearer <key>` (case-insensitive) or the `x-worker-api-key` header; if it equals `WORKER_API_KEY` (constant-time compare) the request is authed. The cookie path still works — now matching either the raw key or its SHA-256 — so the browser is unaffected. `===` on the secret was replaced with a constant-time compare on both paths to avoid an early-exit timing leak. Because everything funnels through this one function, no per-route changes were needed.",
+      "Widen the gate to accept the same secret over a second CHANNEL — a header — without weakening the cookie. A new `getBearerKeyFromRequest` reads `Authorization: Bearer <key>` (case-insensitive) or the `x-worker-api-key` header; if it equals `WORKER_API_KEY` (constant-time compare) the request is authed. The cookie path is unchanged: it still matches ONLY `SHA-256(key)`, never the raw key — so a stolen/exfiltrated cookie still can't be turned back into the reusable secret. (An earlier revision also accepted the raw key in the cookie for 'robustness'; the codra security review correctly flagged that as defeating the hashed-cookie design, so it was removed — raw key is header-only.) `===` on the secret was replaced with a constant-time compare on both paths to avoid an early-exit timing leak. Everything funnels through this one function, so no per-route changes were needed.",
     apiChanges: [
       "isRequestAuthenticated (shared gate) — now also accepts Authorization: Bearer <WORKER_API_KEY> and x-worker-api-key: <WORKER_API_KEY>. No new routes; every admin-gated endpoint gains the header auth path.",
     ],
@@ -138,12 +138,9 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
   // 1) raw key via header (codra / QC)
   const bearer = getBearerKeyFromRequest(request);
   if (bearer && timingSafeEqual(bearer, apiKey)) return true;
-  // 2) remodel_access cookie = SHA-256(key) (browser), or the raw key
+  // 2) remodel_access cookie = SHA-256(key) ONLY (browser); never the raw key
   const cookie = getAccessCookieFromRequest(request);
-  if (cookie) {
-    if (timingSafeEqual(cookie, apiKey)) return true;
-    if (timingSafeEqual(cookie, await hashString(apiKey))) return true;
-  }
+  if (cookie && timingSafeEqual(cookie, await hashString(apiKey))) return true;
   return false;
 }`,
       },

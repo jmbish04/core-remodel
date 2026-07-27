@@ -132,12 +132,14 @@ function getBearerKeyFromRequest(request: Request): string | null {
 }
 
 /**
- * Auth accepts EITHER form of the same secret:
- *  1. the raw WORKER_API_KEY, via `Authorization: Bearer` / `x-worker-api-key`
- *     (server-to-server clients that hold the key — codra, QC scripts); or
- *  2. the `remodel_access` cookie, which the browser sets to SHA-256(key).
- * For robustness the cookie is also accepted when it holds the raw key, so a
- * client that drops the key straight into the cookie still authenticates.
+ * Auth accepts EITHER form of the same secret, by channel:
+ *  1. the RAW WORKER_API_KEY, but ONLY via `Authorization: Bearer` /
+ *     `x-worker-api-key` (server-to-server clients that hold the key — codra,
+ *     QC scripts); and
+ *  2. the `remodel_access` cookie, which must be SHA-256(key) — never the raw
+ *     key. The cookie deliberately stores only the hash so a stolen cookie
+ *     (XSS, theft) never yields the reusable secret; accepting the raw key in
+ *     the cookie would defeat that, so we do not.
  */
 export async function isRequestAuthenticated(request: Request, env: Env): Promise<boolean> {
   const apiKey = (await env.WORKER_API_KEY.get())?.trim() || "";
@@ -145,18 +147,15 @@ export async function isRequestAuthenticated(request: Request, env: Env): Promis
     return false;
   }
 
-  // 1) Raw key via header (bearer / x-worker-api-key).
+  // 1) Raw key via header only (bearer / x-worker-api-key).
   const bearerKey = getBearerKeyFromRequest(request);
   if (bearerKey && timingSafeEqual(bearerKey, apiKey)) {
     return true;
   }
 
-  // 2) The remodel_access cookie: SHA-256(key) (browser), or the raw key.
+  // 2) The remodel_access cookie — SHA-256(key) ONLY, never the raw key.
   const cookieValue = getAccessCookieFromRequest(request);
   if (cookieValue) {
-    if (timingSafeEqual(cookieValue, apiKey)) {
-      return true;
-    }
     const expectedHash = await hashString(apiKey);
     if (expectedHash && timingSafeEqual(cookieValue, expectedHash)) {
       return true;

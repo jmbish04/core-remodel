@@ -56,7 +56,7 @@ export const BRANCHES: ChangelogBranch[] = [
     branch: "claude/api-auth-bearer",
     title: "Auth · accept the raw WORKER_API_KEY as a Bearer token (fix codra API tests)",
     summary:
-      "The admin/API auth gate (isRequestAuthenticated) accepted ONLY the remodel_access cookie, whose value is SHA-256(WORKER_API_KEY) — so a server-to-server client that holds the raw key (the codra review bot, QC scripts) could not authenticate and every API test it ran against a PR's impacted endpoints failed with 401. The gate now also accepts the raw key via Authorization: Bearer <key> or an x-worker-api-key header (and the cookie holding the raw key), using a constant-time compare, alongside the existing hashed-cookie browser path. One change to the shared gate covers both the SSR admin gate in _worker.ts and the requireAccessAuth API middleware. No schema, no migration.",
+      "The admin/API auth gate (isRequestAuthenticated) accepted ONLY the remodel_access cookie, whose value is SHA-256(WORKER_API_KEY) — so a server-to-server client that holds the raw key (the codra review bot, QC scripts) could not authenticate and every API test it ran against a PR's impacted endpoints failed with 401. The gate now also accepts the raw key via Authorization: Bearer <key> or an x-worker-api-key header (header channel ONLY), using a constant-time compare, alongside the existing hashed-cookie browser path. The cookie stays SHA-256-only — it never accepts the raw key, so a stolen cookie still can't yield the reusable secret (per the codra security review). One change to the shared gate covers both the SSR admin gate in _worker.ts and the requireAccessAuth API middleware. No schema, no migration.",
     date: "2026-07-27",
     status: "staged",
     prNumber: 285,
@@ -324,7 +324,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     summary:
       "The auth gate accepted only the remodel_access cookie (= SHA-256 of WORKER_API_KEY), so server-to-server clients holding the raw key — the codra review bot, QC scripts — couldn't authenticate and their API tests 401'd. The gate now also accepts the raw key via Authorization: Bearer / x-worker-api-key header. No schema.",
     changes: [
-      { kind: "fixed", text: "isRequestAuthenticated now accepts the raw WORKER_API_KEY via 'Authorization: Bearer <key>' or an 'x-worker-api-key' header (and the cookie holding the raw key), in addition to the existing remodel_access cookie = SHA-256(key)." },
+      { kind: "fixed", text: "isRequestAuthenticated now accepts the raw WORKER_API_KEY via 'Authorization: Bearer <key>' or an 'x-worker-api-key' header (header channel only), in addition to the existing remodel_access cookie = SHA-256(key). The cookie remains hash-only — it does not accept the raw key, so a stolen cookie can't reveal the reusable secret (codra security review)." },
       { kind: "changed", text: "Both comparisons use a constant-time compare instead of ===, so the secret-matching paths don't leak via early-exit timing." },
       { kind: "added", text: "One change to the shared gate covers both the _worker.ts SSR admin gate and the requireAccessAuth API middleware — codra and QC can now hit admin-gated endpoints with just the key." },
     ],
