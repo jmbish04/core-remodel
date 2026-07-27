@@ -46,7 +46,10 @@ async function main() {
   // scanning for rendered text.
   const html = page.text || "";
   const islandWired = html.includes("ShowroomsDirectoryApp");
-  const groupedDefault = /initialTab["']?\s*[:=]\s*["']?grouped/i.test(html) || html.includes("grouped");
+  // The SSR-serialized island prop is the only reliable distinguisher: this PR
+  // sets initialTab="grouped" (old prod = "map"). Astro encodes it as
+  // `initialTab&quot;:[0,&quot;grouped&quot;` — match either entity or raw quotes.
+  const groupedDefault = /initialTab(?:&quot;|")?:\[0,(?:&quot;|")?grouped/.test(html);
   if (isPreview) {
     c.ok("ShowroomsDirectoryApp island present in SSR HTML", islandWired,
       "island component not referenced");
