@@ -3,6 +3,21 @@
  * `showroom_store_sales.clearanceDetailsJson.items[]` JSON blobs into real
  * `sale_items` rows (0038 Phase A).
  *
+ * NOT a change-detector. This only SEEDS the initial rows from data already on
+ * file; it never fetches a live page. "Did this listing change?" is answered by
+ * the weekly sweep's diff pass (Phase B), which re-scrapes the page, extracts
+ * fresh rows, and diffs them against the prior cycle by `matchKey`
+ * (url -> sku -> brand+model) to set `changeStatus`. The rows this backfill
+ * writes are simply the BASELINE that first diff compares against.
+ *
+ * Skipping an already-backfilled snapshot therefore loses no change signal:
+ * `showroom_store_sales` snapshots are IMMUTABLE (one row per distinct
+ * `contentHash`; a changed page produces a brand-new snapshot row, never an
+ * edit to an old one). So a snapshot's items never change under it — backfilling
+ * it once is complete, and a page change surfaces as a new snapshot id that the
+ * sweep (not this) processes. (Re-deriving old rows after an extraction-logic
+ * improvement is a separate, deliberate refresh/force path — not this guard.)
+ *
  * Scope: only `isCurrent` snapshots — "what's on sale now". Historical snapshots
  * keep their JSON; we do not need exploded pre-0038 history. Idempotent by item
  * COUNT: a snapshot whose `sale_items` count already equals its expected item
