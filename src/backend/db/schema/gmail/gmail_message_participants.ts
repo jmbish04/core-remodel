@@ -2,6 +2,11 @@ import { sql } from "drizzle-orm";
 import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 import { gmailMessages } from "./gmail_messages";
+// Direct leaf imports — avoid circular reference through the domain barrels.
+import { showroomStores } from "../showroom/stores";
+import { showroomStoreContacts } from "../showroom/contacts";
+import { companies } from "../directory/companies";
+import { companyContacts } from "../directory/company_contacts";
 
 /**
  * Gmail Comms Hub — Message Participants
@@ -65,6 +70,39 @@ export const gmailMessageParticipants = sqliteTable(
 
     /** "from" for the message sender, "to" for To+Cc recipients. */
     role: text("role", { enum: ["from", "to"] }).notNull(),
+
+    /**
+     * Finer-grained recipient position than `role` (0039). `role` folds Cc into
+     * "to" and has no Bcc; this preserves the exact header the address came
+     * from. Nullable so pre-0039 rows (role-only) stay valid.
+     */
+    recipientType: text("recipient_type", { enum: ["FROM", "TO", "CC", "BCC"] }),
+
+    /** Display-name parts parsed from the header (e.g. "Nancy" "Ruiz"). */
+    firstName: text("first_name"),
+    lastName: text("last_name"),
+
+    /**
+     * Identity resolution (0039). The ingest gate fills whichever pair applies
+     * when this participant's domain matches a known entity: a showroom store +
+     * its contact, or a directory company (contractor) + its contact. FKs, never
+     * denormalized names — join for display. `set null` so deleting the entity
+     * doesn't fan a cascade through provenance rows.
+     */
+    showroomStoreId: integer("showroom_store_id").references(() => showroomStores.id, {
+      onDelete: "set null",
+    }),
+    showroomStoreContactId: integer("showroom_store_contact_id").references(
+      () => showroomStoreContacts.id,
+      { onDelete: "set null" },
+    ),
+    contractorBusinessId: integer("contractor_business_id").references(() => companies.id, {
+      onDelete: "set null",
+    }),
+    contractorBusinessContactId: integer("contractor_business_contact_id").references(
+      () => companyContacts.id,
+      { onDelete: "set null" },
+    ),
 
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()

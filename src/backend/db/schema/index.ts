@@ -129,6 +129,7 @@ export * from "./services/index";
 export * from "./gmail/gmail_threads";
 export * from "./gmail/gmail_messages";
 export * from "./gmail/gmail_message_participants";
+export * from "./gmail/gmail_message_attachments";
 
 // worker emails (Cloudflare Email Routing inbound)
 export * from "./emails/index";
