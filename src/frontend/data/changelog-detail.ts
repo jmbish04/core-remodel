@@ -113,6 +113,103 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "0037-shopping-sidebar-ia": {
+    slug: "0037-shopping-sidebar-ia",
+    branch: "claude/shopping-sourcing-sidebar-41f368",
+    subtitle: "Shopping & Sourcing · Phase 0 of the 0037 refactor (nav + IA foundation)",
+    introduction:
+      "For anyone touching the admin sidebar: the nav item model is no longer flat. This is the foundation the rest of the 0037 Shopping refactor (grouped tables, ecommerce, concierge agent) builds on, so it ships alone and additive.",
+    problem:
+      "The Shopping & Sourcing sidebar had grown into a flat list of 15 links in 10px text, with no grouping, no icons, and no way to tuck it away. The nav data model (`SidebarItem` in shared.tsx) was strictly `{ href, label, badgeCount? }` — one level only — so the desired structure (Showrooms / Brands & Products / Purchase Ops, with Review nested a third level down) was not even expressible. And no sidebar anywhere in the app could collapse: `AdminSidebar` was a hardcoded `w-64` and `BaseLayout` offset the content by a hardcoded `md:pl-64`.",
+    approach:
+      "Additive, pure-frontend. `SidebarItem` becomes a recursive tree — `href`, `icon`, `children[]`, `navigateOnExpand` all optional — so existing flat groups keep working untouched while shopping gets arbitrary-depth submenus. A new `NavNode` renders each node: a leaf is a `NavLink`; a node with children is a collapsible submenu, seeded open from the SSR path when a descendant is active (no post-hydration flip), collapsed otherwise. A `navigateOnExpand` parent is a link that navigates to its section landing AND expands; a separate chevron button peeks in place without navigating. Collapse-to-rail: `AdminSidebar` gains a toggle between `w-64` and a `w-14` icon rail (one icon per admin section + expand/home/config), persisted in a `remodel_sidebar_collapsed` cookie. The reflow is done without React owning the layout: `BaseLayout` reads the cookie server-side, stamps `data-sidebar-collapsed` on `<html>`, and both the fixed aside width and the content padding read a single `--sidebar-w` CSS var keyed on that attribute — so one client toggle reflows the whole page and the SSR HTML already has the right width (no flash). Icons added per section and per shopping item; group-header text bumped 10px→xs.",
+    apiChanges: ["None — pure frontend. No routes, no schema, no migration."],
+    filesTouched: [
+      "src/frontend/components/sidebar/shared.tsx (recursive SidebarItem/NavGroupDef; isItemActive + sumBadges; NavLink icon; new NavNode; RenderGroup renders NavNodes + group icon + xs header)",
+      "src/frontend/components/sidebar/nav-groups.ts (per-section icons; shopping group re-authored into the nested tree)",
+      "src/frontend/components/sidebar/AdminSidebar.tsx (collapsed prop + state + cookie; AdminRail; collapse toggle in header; aside width via --sidebar-w)",
+      "src/frontend/layouts/BaseLayout.astro (cookie seed → data-sidebar-collapsed on <html>; --sidebar-w CSS var; content padding + aside width off the var)",
+      "src/frontend/pages/admin/shopping.astro (hub landing regrouped to the three sections; standard page shell with icon header)",
+      "docs/0037_shopping_sourcing_refactor/ (planning bundle; renamed from 0032 to avoid an ordinal collision)",
+    ],
+    migrations: [],
+    code: [
+      {
+        title: "Recursive item model + active-branch test (shared.tsx)",
+        lang: "tsx",
+        code: `export type SidebarItem = {
+  href?: string;              // optional: a pure grouping node just toggles
+  label: string;
+  icon?: LucideIcon;
+  badgeCount?: number;
+  children?: SidebarItem[];   // nesting
+  navigateOnExpand?: boolean; // parent link that navigates AND expands
+};
+
+export function isItemActive(currentPath: string, item: SidebarItem): boolean {
+  if (item.href && isPathActive(currentPath, item.href)) return true;
+  return (item.children ?? []).some((c) => isItemActive(currentPath, c));
+}`,
+      },
+      {
+        title: "One CSS var drives both the aside and the content padding (BaseLayout.astro)",
+        lang: "tsx",
+        code: `const sidebarCollapsed =
+  isAdmin && Astro.cookies.get("remodel_sidebar_collapsed")?.value === "1";
+// <html ... data-sidebar-collapsed={sidebarCollapsed ? "1" : "0"}>
+// :root { --sidebar-w: 16rem; }
+// :root[data-sidebar-collapsed="1"] { --sidebar-w: 3.5rem; }
+// aside:    md:[width:var(--sidebar-w)]
+// content:  md:[padding-left:var(--sidebar-w)]  → reflows together, no flash`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Target shopping IA — three nested submenus",
+        title: "Information architecture",
+        code: `flowchart TD
+  S[Shopping & Sourcing]:::grp
+  S --> SR[Showrooms<br/>label → /shopping/showrooms]:::sub
+  SR --> SR1[Drive Lists]
+  SR --> SR2[Contacts]
+  SR --> SR3[Sales & Clearance]
+  SR --> SR4[Showroom Intake]
+  S --> BP[Brands & Products<br/>label → /shopping/brands]:::sub
+  BP --> BP1[Materials]
+  BP --> BP2[Products]
+  BP --> BP3[Wishlist]
+  BP --> BP4[Deep Research]
+  BP --> BP5[Shopping Journal]
+  S --> PO[Purchase Ops]:::sub
+  PO --> RV[Review]:::sub
+  RV --> RV1[Price Cards]
+  RV --> RV2[Product Photos]
+  PO --> PO1[Receipt Review]
+  classDef grp fill:#1e293b,stroke:#38bdf8,color:#e2e8f0;
+  classDef sub fill:#0f172a,stroke:#64748b,color:#e2e8f0;`,
+      },
+      {
+        caption: "Collapse-to-rail state (cookie-persisted, SSR-seeded)",
+        title: "Sidebar collapse",
+        code: `stateDiagram-v2
+  [*] --> Expanded
+  Expanded --> Rail: click collapse (cookie=1, --sidebar-w=3.5rem)
+  Rail --> Expanded: click expand (cookie=0, --sidebar-w=16rem)
+  note right of Rail
+    aside + content padding
+    both read --sidebar-w,
+    so they reflow together
+  end note`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_PENDING.mjs",
+      command: "npx tsc --noEmit (touched files) && pnpm run build && browser preview (astro dev)",
+      ranAt: "2026-07-26",
+      output:
+        "tsc --noEmit: 0 errors in the touched sidebar/layout files. pnpm run build: '✓ built in 42.40s … [build] Complete!'. Browser preview (astro dev, /admin/shopping/schedule): nested tree renders — Brands & Products auto-expanded (Materials active), Showrooms collapsed, Purchase Ops→Review nested; collapse toggle turns the sidebar into a w-14 icon rail and the content reflows left (the previously-clipped ROOMS stat card becomes visible); expand round-trips. QC script + preview-deploy run recorded on the PR.",
+    },
+  },
   "changelog-live-phases": {
     slug: "changelog-live-phases",
     branch: "claude/changelist-phases-live-updates-6cfa61",
