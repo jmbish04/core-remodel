@@ -1,0 +1,15 @@
+---
+/**
+ * @fileoverview Tesla location config page — `/admin/config/tesla`.
+ * Thin shell mounting `<TeslaLocationConfigApp>` (ConfigShell inside).
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { TeslaLocationConfigApp } from "@/components/config/TeslaLocationConfigApp";
+---
+
+<BaseLayout
+  title="Tesla Location — Configuration"
+  description="Home/work coordinates, proximity radii, and dwell thresholds for the park detector."
+>
+  <TeslaLocationConfigApp client:only="react" />
+</BaseLayout>

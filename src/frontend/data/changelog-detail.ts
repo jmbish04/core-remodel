@@ -113,6 +113,75 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "0032-tesla-location-config": {
+    slug: "0032-tesla-location-config",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0032 C1 · Tesla location & proximity config",
+    code: [],
+    problem:
+      "The source-agnostic park detector (L1) and the proximity scan (D1) both need configuration the user can set: where home and work are (so a park there pauses a drive instead of staging a visit), how close counts as 'at' a showroom, how long a stop must last to register, and whether to spend Places quota scanning for undiscovered showrooms on an unexpected park. None of it was settable — the keys existed only in the plan.",
+    approach:
+      "A /admin/config/tesla page in ConfigShell, three cards, over existing endpoints (no schema, no new API). Recording reuses the EXISTING tesla_telemetry_recording_enabled flag via PATCH /api/config/tesla — the same flag the integrations page toggles, so there is one source of truth and no split-brain (the spec's tesla_record_telemetry key was never implemented; reusing the real one is the right call). Home & Work use a new GeocodeAddressField that resolves a typed address to coordinates through the /api/places autocomplete+details proxy; 'use project address as home' pulls the primary property's already-geocoded coords from /api/admin/properties. Proximity & dwell writes the tesla_* / loc_* numeric + boolean keys as KV into project_system_variables through the batch-safe POST /api/admin/config (the route that was once broken by db.transaction() and is now db.batch()).",
+    apiChanges: [
+      "None — frontend only. Reads/writes GET+POST /api/admin/config, GET+PATCH /api/config/tesla, GET /api/admin/properties, GET /api/places/autocomplete + /details.",
+    ],
+    filesTouched: [
+      "src/frontend/components/config/TeslaLocationConfigApp.tsx (new — the 3-card island)",
+      "src/frontend/components/config/GeocodeAddressField.tsx (new — Places address→coords)",
+      "src/frontend/pages/admin/config/tesla.astro (new)",
+      "src/frontend/components/config/config-nav.ts (+Tesla Location under Integrations)",
+      "scripts/qc/pr_293.mjs",
+    ],
+    migrations: [],
+    diagrams: [
+      {
+        caption: "Two config stores, one page — recording reuses the existing flag; location is new KV",
+        code: `flowchart TD
+  PAGE["/admin/config/tesla (3 cards)"] --> REC[Recording card]
+  PAGE --> HW[Home & Work card]
+  PAGE --> PX[Proximity & dwell card]
+  REC -->|PATCH| CT["/api/config/tesla<br/>tesla_telemetry_recording_enabled"]
+  HW -->|autocomplete+details| PL["/api/places proxy → coords"]
+  HW -->|use project address| PR["/api/admin/properties"]
+  HW -->|POST| AC["/api/admin/config (KV, db.batch)"]
+  PX -->|POST| AC
+  AC --> DB[(project_system_variables)]
+  classDef n fill:#0f172a,stroke:#38bdf8,color:#e2e8f0;`,
+      },
+      {
+        caption: "The config keys and what reads them (L1/D1, next passes)",
+        code: `flowchart LR
+  subgraph KEYS["tesla_* / loc_* KV"]
+    A[tesla_home_lat/lng<br/>tesla_work_lat/lng]
+    B[tesla_home_work_radius_m 150]
+    C[tesla_proximity_radius_m 250]
+    D[loc_dwell_min_seconds 300]
+    E[loc_park_radius_m 60<br/>loc_depart_radius_m 120]
+    F[tesla_location_stale_seconds 300]
+    G[tesla_proximity_scan_enabled]
+  end
+  A --> L1[park detector · L1]
+  B --> L1
+  D --> L1
+  E --> L1
+  F --> L1
+  C --> D1[proximity scan · D1]
+  G --> D1`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_293.mjs",
+      command: "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 293 -- --preview",
+      ranAt: "2026-07-27",
+      output:
+        "tsc --noEmit clean on the new config components + page + config-nav (filtered from the pre-existing baseline). " +
+        "pnpm run build green (exit 0) — the deploy gate for a frontend PR. No schema change → no migration. " +
+        "QC pr_293 (committed): regression on the endpoints the page reads (config KV, /api/config/tesla, primary property), " +
+        "the new SSR page render (200 on preview; 404-on-prod = pending), and a PREVIEW-ONLY config KV write round-trip " +
+        "(scratch key written, read back, blanked — prod config never polluted). Runs against preview then prod after deploy.",
+      migrations: [],
+    },
+  },
   "0032-visit-logs-workspace": {
     slug: "0032-visit-logs-workspace",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
