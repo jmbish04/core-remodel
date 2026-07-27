@@ -54,9 +54,13 @@ export const showroomVisitLog = sqliteTable(
     /** departure − arrival, seconds — stored on finalize for cheap sort/report. */
     dwellSeconds: integer("dwell_seconds"),
 
-    /** Lifecycle: staged by AI, staged/finalized by Tesla telemetry, or human-submitted. */
+    /**
+     * Lifecycle: staged by AI, staged/finalized by Tesla telemetry, a human-created
+     * DRAFT saved-but-not-finished, or human-SUBMITTED. (TEXT column — adding an enum
+     * value is a TS-only change, no migration.)
+     */
     status: text("status", {
-      enum: ["AI_STAGED", "TESLA_SOFT_ARRIVAL", "TESLA_STAGED", "SUBMITTED"],
+      enum: ["AI_STAGED", "TESLA_SOFT_ARRIVAL", "TESLA_STAGED", "DRAFT", "SUBMITTED"],
     })
       .notNull()
       .default("TESLA_SOFT_ARRIVAL"),

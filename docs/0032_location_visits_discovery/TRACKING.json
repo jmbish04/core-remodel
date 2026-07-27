@@ -17,8 +17,8 @@
   "phases": [
     { "key": "L0", "name": "LocationFix ingress + source adapters", "owner": "this_pass", "status": "pending", "prNumber": null, "mapsTo": ["0023:ING-03", "new"] },
     { "key": "L1", "name": "Source-agnostic park/dwell detector + park_sessions", "owner": "this_pass", "status": "pending", "prNumber": null, "mapsTo": ["#178 tesla_park_sessions", "0022:P3-SVC-01"] },
-    { "key": "V1", "name": "showroom_visit_log reconcile to 0022 §5.1", "owner": "this_pass", "status": "pending", "prNumber": null, "mapsTo": ["0022:P1-DB-01", "0023:P1-DB-01"], "blockedOn": ["user confirm D-1 visit_type split", "user confirm D-2 XOR nullability"] },
-    { "key": "V2", "name": "Visit Logs workspace + REST CRUD + MCP CRUD + store section", "owner": "this_pass", "status": "pending", "prNumber": null, "mapsTo": ["0022:P1", "0022:§14.1"] },
+    { "key": "V1", "name": "showroom_visit_log reconcile to 0022 §5.1", "owner": "this_pass", "status": "done", "prNumber": 286, "migration": "0147 (applied to remote 2026-07-27)", "mapsTo": ["0022:P1-DB-01", "0023:P1-DB-01"], "note": "visit_type (engagement) + match_distance_m + provenance_json shipped; hitl_queue_id/XOR deferred to D1; rating enforced in API layer" },
+    { "key": "V2", "name": "Visit Logs workspace + REST CRUD + MCP CRUD + store section", "owner": "this_pass", "status": "in_progress", "prNumber": null, "mapsTo": ["0022:P1", "0022:§14.1"], "note": "V2a = REST + MCP CRUD (backend parity) first; V2b = workspace pages + shared components" },
     { "key": "C1", "name": "Tesla config completion (home/work, radii, stale, dwell)", "owner": "this_pass", "status": "pending", "prNumber": null, "mapsTo": ["0022:P2"] },
     { "key": "D1", "name": "proximityScan service + HITL queue + exclusions + decision 1.d + Park-Finds page", "owner": "shared", "status": "pending", "prNumber": null, "mapsTo": ["0022:P4"] },
     { "key": "D2", "name": "Discovery finder (search tables + find_showrooms + realtime DO + pages + voice)", "owner": "another_agent", "status": "not_started", "prNumber": null, "mapsTo": ["0022:P7"] },
