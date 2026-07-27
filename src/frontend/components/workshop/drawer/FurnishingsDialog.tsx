@@ -9,7 +9,8 @@
 // ---------------------------------------------------------------------------
 
 import { useEffect, useState } from "react";
-import { PackageSearch, Search, Sparkles, X } from "lucide-react";
+import { PackagePlus, PackageSearch, Search, Sparkles, X } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -31,6 +32,8 @@ import type { BoardNode } from "../types";
 
 interface FurnishingsDialogProps {
   node: BoardNode | null;
+  /** The room this board belongs to — target for "Add to materials". */
+  roomId: string;
   onClose: () => void;
 }
 
@@ -39,7 +42,7 @@ function productSearchUrl(label: string): string {
   return `/admin/products?search=${encodeURIComponent(label)}`;
 }
 
-export function FurnishingsDialog({ node, onClose }: FurnishingsDialogProps) {
+export function FurnishingsDialog({ node, roomId, onClose }: FurnishingsDialogProps) {
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [items, setItems] = useState<FurnishingItem[]>([]);
@@ -88,6 +91,29 @@ export function FurnishingsDialog({ node, onClose }: FurnishingsDialogProps) {
     });
   };
 
+  // Promote an item into this room's Materials Schedule (same POST /api/materials
+  // as the room furnishings page), then mark the furnishing adopted + remove it.
+  const addToMaterials = async (item: FurnishingItem) => {
+    try {
+      const res = await fetch("/api/materials", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: item.label,
+          roomId: Number(roomId),
+          notes: [item.category, item.note].filter(Boolean).join(" · ") || null,
+        }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      void patchFurnishing(item.id, { status: "adopted" }).catch(() => {});
+      setItems((prev) => prev.filter((it) => it.id !== item.id));
+      toast.success(`Added “${item.label}” to the Materials Schedule.`);
+    } catch {
+      toast.error("Couldn’t add to materials — try again.");
+    }
+  };
+
   return (
     <Dialog open={Boolean(node)} onOpenChange={(open) => (!open ? onClose() : undefined)}>
       <DialogContent className="max-w-lg">
@@ -129,6 +155,15 @@ export function FurnishingsDialog({ node, onClose }: FurnishingsDialogProps) {
                   </span>
                   <Search className="size-4 shrink-0 text-muted-foreground" />
                 </a>
+                <button
+                  type="button"
+                  aria-label={`Add ${item.label} to materials`}
+                  title="Add to Materials Schedule"
+                  onClick={() => void addToMaterials(item)}
+                  className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground outline-none hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <PackagePlus className="size-4" />
+                </button>
                 <button
                   type="button"
                   aria-label={`Dismiss ${item.label}`}
