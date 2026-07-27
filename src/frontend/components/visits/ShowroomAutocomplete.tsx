@@ -46,7 +46,11 @@ export function ShowroomAutocomplete({
     <ComboboxWithOther
       options={options}
       value={value == null ? null : String(value)}
-      onChange={(v) => onChange(v == null ? null : Number(v))}
+      onChange={(v) => {
+        // Guard against a non-numeric option value ever reaching the parent as NaN.
+        const n = v == null ? null : Number(v);
+        onChange(n != null && Number.isFinite(n) ? n : null);
+      }}
       onCreateOther={async (label) => {
         try {
           const store = await createStore(label);

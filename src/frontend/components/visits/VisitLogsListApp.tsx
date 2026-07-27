@@ -76,12 +76,14 @@ export function VisitLogsListApp({ initialTab = "pending" }: { initialTab?: Tab 
             );
           })}
         </div>
-        <a href="/admin/shopping/showrooms/visitlogs/new">
-          <Button size="sm" className="gap-1.5">
-            <Plus className="size-4" />
-            New visit log
-          </Button>
-        </a>
+        <Button
+          size="sm"
+          className="gap-1.5"
+          render={<a href="/admin/shopping/showrooms/visitlogs/new" />}
+        >
+          <Plus className="size-4" />
+          New visit log
+        </Button>
       </div>
 
       {rows == null ? (

@@ -58,12 +58,15 @@ export function StoreVisitsSection({ storeId }: { storeId: number }) {
             </span>
           )}
         </p>
-        <a href="/admin/shopping/showrooms/visitlogs/new">
-          <Button size="sm" variant="outline" className="gap-1.5">
-            <Plus className="size-4" />
-            Log a visit
-          </Button>
-        </a>
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1.5"
+          render={<a href="/admin/shopping/showrooms/visitlogs/new" />}
+        >
+          <Plus className="size-4" />
+          Log a visit
+        </Button>
       </div>
 
       {pending.length > 0 && (

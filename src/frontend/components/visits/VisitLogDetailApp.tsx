@@ -45,12 +45,14 @@ function toInput(d: EditorDraft): VisitLogInput {
 export function VisitLogDetailApp({ id }: { id: number }) {
   const [visit, setVisit] = useState<VisitLog | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [draft, setDraft] = useState<EditorDraft | null>(null);
   const [others, setOthers] = useState<VisitLog[]>([]);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const v = await getVisitLog(id);
       setVisit(v);
@@ -63,7 +65,9 @@ export function VisitLogDetailApp({ id }: { id: number }) {
       }
     } catch (e) {
       console.error("[visits/detail] load", e);
-      toast.error(e instanceof Error ? e.message : "Could not load visit");
+      const msg = e instanceof Error ? e.message : "Could not load visit";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setLoading(false);
     }
@@ -122,10 +126,24 @@ export function VisitLogDetailApp({ id }: { id: number }) {
     [visit],
   );
 
-  if (loading || !visit || !draft) {
+  if (loading) {
     return (
       <div className="flex min-h-[300px] items-center justify-center text-muted-foreground">
         <Loader2 className="size-6 animate-spin" />
+      </div>
+    );
+  }
+
+  if (!visit || !draft) {
+    return (
+      <div className="flex min-h-[300px] flex-col items-center justify-center gap-3 text-center text-muted-foreground">
+        <p className="text-sm">{error ?? "Visit not found."}</p>
+        <Button variant="outline" size="sm" onClick={() => void load()}>
+          Retry
+        </Button>
+        <a href="/admin/shopping/showrooms/visitlogs" className="text-xs hover:text-foreground">
+          Back to all visit logs
+        </a>
       </div>
     );
   }

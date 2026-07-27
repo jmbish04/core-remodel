@@ -26,7 +26,10 @@ export function GpsEvidence({
   capturedAt: string | null;
   source: GpsSource | null;
 }) {
-  const hasFix = latitude != null && longitude != null;
+  // `!= null` keeps TS's aliased-condition narrowing (latitude→number in the
+  // block); Number.isFinite also rejects NaN/Infinity from bad data.
+  const hasFix =
+    latitude != null && longitude != null && Number.isFinite(latitude) && Number.isFinite(longitude);
   const distance = formatDistance(matchDistanceM);
   const captured = capturedAt ? new Date(capturedAt) : null;
 

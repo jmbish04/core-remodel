@@ -92,13 +92,15 @@ export const VISIT_TYPE_LABEL: Record<VisitType, string> = {
   APPOINTMENT: "Appointment",
 };
 
+/** Pending = not submitted. Derived from PENDING_STATUSES so the two can't drift. */
 export function isPending(status: VisitStatus): boolean {
-  return status !== "SUBMITTED";
+  return PENDING_STATUSES.includes(status);
 }
 
-/** dwellSeconds → a short human string ("42 min", "1 h 5 min", "—"). */
+/** dwellSeconds → a short human string ("<1 min", "42 min", "1 h 5 min", "—"). */
 export function formatDwell(seconds: number | null | undefined): string {
   if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) return "—";
+  if (seconds < 60) return "<1 min";
   const mins = Math.round(seconds / 60);
   if (mins < 60) return `${mins} min`;
   const h = Math.floor(mins / 60);
@@ -106,8 +108,8 @@ export function formatDwell(seconds: number | null | undefined): string {
   return m === 0 ? `${h} h` : `${h} h ${m} min`;
 }
 
-/** metres → "40 m away" / "1.2 km away" / "" when unknown. */
+/** metres → "40 m away" / "1.2 km away" / "" when unknown or nonsensical. */
 export function formatDistance(m: number | null | undefined): string {
-  if (m == null || !Number.isFinite(m)) return "";
+  if (m == null || !Number.isFinite(m) || m < 0) return "";
   return m < 1000 ? `${Math.round(m)} m away` : `${(m / 1000).toFixed(1)} km away`;
 }

@@ -7,6 +7,8 @@
  * rating is the shared StarRating; visit_type is a segmented control over the
  * fixed enum (no OTHER, so no combobox).
  */
+import type { ReactNode } from "react";
+
 import { OverviewNoteEditor } from "@/components/showroom/OverviewNoteEditor";
 import { cn } from "@/lib/utils";
 
@@ -41,7 +43,7 @@ function localInputToIso(v: string): string | null {
   return Number.isFinite(d.getTime()) ? d.toISOString() : null;
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="space-y-1.5">
       <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</label>
