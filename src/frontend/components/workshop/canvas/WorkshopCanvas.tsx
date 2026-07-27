@@ -59,6 +59,7 @@ interface WorkshopCanvasProps {
   onSketchToRender: (node: BoardNode) => void;
   onElevationRender: (node: BoardNode) => void;
   onCabinetReveal: (node: BoardNode) => void;
+  onFreeformEdit: (node: BoardNode) => void;
   onExtractFurnishings: (node: BoardNode) => void;
   onToneUnify: (node: BoardNode) => void;
   onLightingEnhance: (node: BoardNode) => void;
@@ -108,6 +109,7 @@ export function WorkshopCanvas({
   onSketchToRender,
   onElevationRender,
   onCabinetReveal,
+  onFreeformEdit,
   onExtractFurnishings,
   onToneUnify,
   onLightingEnhance,
@@ -662,6 +664,7 @@ export function WorkshopCanvas({
         onSketchToRender={onSketchToRender}
         onElevationRender={onElevationRender}
         onCabinetReveal={onCabinetReveal}
+        onFreeformEdit={onFreeformEdit}
         onExtractFurnishings={onExtractFurnishings}
         onToneUnify={onToneUnify}
         onLightingEnhance={onLightingEnhance}

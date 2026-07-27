@@ -24,6 +24,7 @@ export interface ContextMenuState {
 interface NodeContextMenuProps {
   state: ContextMenuState | null;
   onClose: () => void;
+  onFreeformEdit: (node: BoardNode) => void;
   onExtractClipping: (node: BoardNode) => void;
   onMaterialSwap: (node: BoardNode) => void;
   onMix: (node: BoardNode) => void;
@@ -47,6 +48,7 @@ const ITEM_CLASS =
 export function NodeContextMenu({
   state,
   onClose,
+  onFreeformEdit,
   onExtractClipping,
   onMaterialSwap,
   onMix,
@@ -104,6 +106,20 @@ export function NodeContextMenu({
       </div>
       <button
         ref={firstItemRef}
+        type="button"
+        role="menuitem"
+        className={ITEM_CLASS}
+        onClick={() => run(onFreeformEdit)}
+      >
+        <Wand2 className="size-4 text-muted-foreground" />
+        <span>
+          Edit with words…
+          <span className="block text-[11px] text-muted-foreground">
+            Describe any change — add, remove, restyle
+          </span>
+        </span>
+      </button>
+      <button
         type="button"
         role="menuitem"
         className={ITEM_CLASS}
