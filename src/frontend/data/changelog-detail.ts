@@ -215,6 +215,52 @@ export function isItemActive(currentPath: string, item: SidebarItem): boolean {
       migrations: [],
     },
   },
+  "0037-showrooms-grouped-table": {
+    slug: "0037-showrooms-grouped-table",
+    branch: "claude/showrooms-grouped-table",
+    subtitle: "Shopping & Sourcing · Phase 2 of the 0037 refactor (Showrooms grouped-table)",
+    prNumber: 282,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/282",
+    problem:
+      "The Showrooms directory was a dense card UI with three overlapping views (map / list-by-category / directory-by-city) grouped behind an accordion. It wasted vertical space, buried the region picker in a chip row, and had no way to regroup or scan stores as a table. The homeowner wanted a single grouped experience: pick a region (tabbed, with counts), group how they like, see what's open right now, and one-tap navigate the car to a store.",
+    approach:
+      "Reworked `ShowroomsDirectoryApp` in place, wired to the SAME live fetch (`/api/showroom-stores?include=categories,ratings` + the three `meta/*` endpoints) — no mock data, no new endpoints. Region tabs come from the existing `HUB_LABEL` map; a `useDeviceLocation` hook reuses the existing device-location report to auto-select the nearest region (SF fallback). A group-by switcher buckets the active region's stores (Sales Category default / Rating / Flagship / Closing Time), open stores sorted by earliest close via the existing `hours-status` helpers, closed stores folded into one expandable banner. Cards reuse `ShowroomMergedCard`; rows are a new compact accessible table. The detail modal reads `hoursJson` for a full weekly schedule and posts to the real `POST /api/tesla/navigate` for Tesla nav (Google Maps uses the standard dir URL). The map view is preserved behind a Grouped/Map toggle; the retired list/directory tabs redirect to grouped.",
+    apiChanges: ["None — pure frontend. Reuses existing /api/showroom-stores + meta/* and POST /api/tesla/navigate. No schema, no migration."],
+    filesTouched: [
+      "src/frontend/components/showroom/ShowroomsDirectoryApp.tsx (region tabs, group-by switcher, closed-collapse, cards/rows, detail modal + Tesla nav; downlevel-iteration spreads → Array.from)",
+      "src/frontend/pages/admin/shopping/showrooms.astro (default tab map → grouped)",
+      "src/frontend/pages/admin/shopping/showrooms/[tab].astro (valid tabs grouped|map; retired list/directory redirect to grouped)",
+    ],
+    migrations: [],
+    code: [],
+    diagrams: [
+      {
+        caption: "Region tab → group → render pipeline",
+        title: "Grouped-table data flow",
+        code: `flowchart LR
+  F[fetch /api/showroom-stores + meta/*]:::b --> R{active region tab}:::d
+  R --> FL[filters: search / type / open-now / visit]:::b
+  FL --> G{group by}:::d
+  G --> GC[Sales Category default]
+  G --> GR[Rating]
+  G --> GF[Flagship]
+  G --> GT[Closing Time]
+  GC --> S[open first, earliest close;<br/>closed → collapse banner]:::b
+  S --> V{cards / rows}:::d
+  V --> MODAL[detail modal:<br/>hours · Maps · Tesla nav]:::b
+  classDef b fill:#0f172a,stroke:#38bdf8,color:#e2e8f0;
+  classDef d fill:#3f1e5f,stroke:#c084fc,color:#e2e8f0;`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_282.mjs",
+      command: "pnpm run test:pr 282 -- --preview   # branch preview\npnpm run test:pr 282                # production (regression guard)",
+      ranAt: "2026-07-26",
+      output:
+        "tsc --noEmit: 0 errors in ShowroomsDirectoryApp.tsx. pnpm run build: ✓ Complete. Preview deploy verified against production D1 (wcrp-claude-showrooms-grouped-table): region tabs with live counts (All 158 / SF 30 / South Bay 24 / Peninsula 19 / East Bay 75 / North Bay 8 / Central Valley 1), Sales-Category grouping with per-group avg rating + open-now, and closed-collapse banners ('12 closed now — SCIC SAN FRANCISCO, …') all render; no console errors on mount. QC harness pr_282 runs preview + prod (see PR).",
+      migrations: [],
+    },
+  },
   "changelog-live-phases": {
     slug: "changelog-live-phases",
     branch: "claude/changelist-phases-live-updates-6cfa61",
