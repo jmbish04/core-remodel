@@ -6,6 +6,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
+import { showroomStoreLocations } from "./store_location";
 import { showroomStores } from "./stores";
 
 /**
@@ -37,6 +38,17 @@ export const showroomStoreHours = sqliteTable(
       .notNull()
       .references(() => showroomStores.id, { onDelete: "cascade" }),
 
+    /**
+     * Optional FK → showroom_store_locations.id (plan 0031, 1:many). Hours can be
+     * brand-wide (locationId null) OR specific to one physical site — a chain's SF
+     * store keeps different hours than its Belmont store. Both FKs are kept on
+     * purpose (extra-cautious): store_id groups a brand's hours, location_id pins
+     * the exact site. Nullable so existing brand-level rows are unaffected.
+     */
+    locationId: integer("location_id").references(() => showroomStoreLocations.id, {
+      onDelete: "cascade",
+    }),
+
     /** Day of week this window applies to (one row per open day). */
     day: text("day", {
       enum: [
@@ -63,9 +75,11 @@ export const showroomStoreHours = sqliteTable(
       .default(sql`(unixepoch())`),
   },
   (table) => ({
-    // At most one window per (showroom, day) — writers replace-all per store.
-    showroomDayUnique: uniqueIndex("showroom_hours_showroom_day_unique").on(
+    // At most one window per (showroom, location, day). Brand-wide rows have a
+    // null locationId; per-site rows pin a location. Writers replace-all per scope.
+    showroomLocationDayUnique: uniqueIndex("showroom_hours_store_location_day_unique").on(
       table.showroomId,
+      table.locationId,
       table.day,
     ),
   }),
