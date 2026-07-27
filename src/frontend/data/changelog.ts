@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/api-auth-bearer",
+    title: "Auth · accept the raw WORKER_API_KEY as a Bearer token (fix codra API tests)",
+    summary:
+      "The admin/API auth gate (isRequestAuthenticated) accepted ONLY the remodel_access cookie, whose value is SHA-256(WORKER_API_KEY) — so a server-to-server client that holds the raw key (the codra review bot, QC scripts) could not authenticate and every API test it ran against a PR's impacted endpoints failed with 401. The gate now also accepts the raw key via Authorization: Bearer <key> or an x-worker-api-key header (and the cookie holding the raw key), using a constant-time compare, alongside the existing hashed-cookie browser path. One change to the shared gate covers both the SSR admin gate in _worker.ts and the requireAccessAuth API middleware. No schema, no migration.",
+    date: "2026-07-27",
+    status: "staged",
+    prNumber: 285,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/285",
+  },
+  {
     branch: "claude/showrooms-grouped-table",
     title: "Showrooms · grouped-table rebuild (0037 Phase 2)",
     summary:
@@ -302,6 +312,21 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "added", text: "visit_type = engagement depth of the visit (the quality signal for visit history / future GPS-attested reviews), separate from the contact channel which lives on showroom_store_contact_log.type." },
       { kind: "changed", text: "stageSoftArrival/finalizeSoftArrivals populate match_distance_m (park-to-store distance) + provenance_json (raw fix + active-drive id); gps_source enum widened (+ tesla-poll, phone, ai)." },
       { kind: "changed", text: "hitl_queue_id + the store/hitl XOR rule deferred to D1 (avoids a dangling FK before the showroom_store_hitl_queue table exists)." },
+    ],
+    status: "staged",
+  },
+  {
+    id: "api-auth-bearer",
+    branch: "claude/api-auth-bearer",
+    date: "2026-07-27",
+    area: "Auth",
+    title: "Accept raw WORKER_API_KEY as a Bearer token",
+    summary:
+      "The auth gate accepted only the remodel_access cookie (= SHA-256 of WORKER_API_KEY), so server-to-server clients holding the raw key — the codra review bot, QC scripts — couldn't authenticate and their API tests 401'd. The gate now also accepts the raw key via Authorization: Bearer / x-worker-api-key header. No schema.",
+    changes: [
+      { kind: "fixed", text: "isRequestAuthenticated now accepts the raw WORKER_API_KEY via 'Authorization: Bearer <key>' or an 'x-worker-api-key' header (and the cookie holding the raw key), in addition to the existing remodel_access cookie = SHA-256(key)." },
+      { kind: "changed", text: "Both comparisons use a constant-time compare instead of ===, so the secret-matching paths don't leak via early-exit timing." },
+      { kind: "added", text: "One change to the shared gate covers both the _worker.ts SSR admin gate and the requireAccessAuth API middleware — codra and QC can now hit admin-gated endpoints with just the key." },
     ],
     status: "staged",
   },

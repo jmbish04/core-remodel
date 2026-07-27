@@ -113,6 +113,64 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "api-auth-bearer": {
+    slug: "api-auth-bearer",
+    branch: "claude/api-auth-bearer",
+    subtitle: "Auth · raw-key Bearer path so codra + QC can hit admin-gated APIs",
+    prNumber: 285,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/285",
+    problem:
+      "The single auth gate `isRequestAuthenticated` (used by both the `_worker.ts` SSR admin gate and the `requireAccessAuth` API middleware) accepted ONLY the `remodel_access` cookie, and that cookie's value is `SHA-256(WORKER_API_KEY)`. A browser gets it by logging in; a server-to-server client only has the RAW key and no way to present the hash. So the codra review bot — which holds `WORKER_API_KEY` and tries to exercise the APIs a PR touches — and the QC scripts both failed every admin-gated call with 401.",
+    approach:
+      "Widen the gate to accept either form of the same secret. A new `getBearerKeyFromRequest` reads `Authorization: Bearer <key>` (case-insensitive) or the `x-worker-api-key` header; if it equals `WORKER_API_KEY` (constant-time compare) the request is authed. The cookie path still works — now matching either the raw key or its SHA-256 — so the browser is unaffected. `===` on the secret was replaced with a constant-time compare on both paths to avoid an early-exit timing leak. Because everything funnels through this one function, no per-route changes were needed.",
+    apiChanges: [
+      "isRequestAuthenticated (shared gate) — now also accepts Authorization: Bearer <WORKER_API_KEY> and x-worker-api-key: <WORKER_API_KEY>. No new routes; every admin-gated endpoint gains the header auth path.",
+    ],
+    filesTouched: ["src/backend/utils/access.ts (getBearerKeyFromRequest + timingSafeEqual; isRequestAuthenticated rewritten)"],
+    migrations: [],
+    code: [
+      {
+        title: "The widened gate (access.ts)",
+        lang: "ts",
+        code: `export async function isRequestAuthenticated(request: Request, env: Env): Promise<boolean> {
+  const apiKey = (await env.WORKER_API_KEY.get())?.trim() || "";
+  if (!apiKey) return false;
+  // 1) raw key via header (codra / QC)
+  const bearer = getBearerKeyFromRequest(request);
+  if (bearer && timingSafeEqual(bearer, apiKey)) return true;
+  // 2) remodel_access cookie = SHA-256(key) (browser), or the raw key
+  const cookie = getAccessCookieFromRequest(request);
+  if (cookie) {
+    if (timingSafeEqual(cookie, apiKey)) return true;
+    if (timingSafeEqual(cookie, await hashString(apiKey))) return true;
+  }
+  return false;
+}`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Who authenticates, and how",
+        title: "Two credential forms, one gate",
+        code: `flowchart LR
+  B[Browser]:::b -->|remodel_access cookie<br/>= SHA-256 key| G{isRequestAuthenticated}:::d
+  C[codra / QC<br/>holds raw key]:::b -->|Authorization: Bearer key<br/>or x-worker-api-key| G
+  G -->|match, constant-time| OK[authed]:::ok
+  G -->|no match| NO[401]:::no
+  classDef b fill:#0f172a,stroke:#38bdf8,color:#e2e8f0;
+  classDef d fill:#3f1e5f,stroke:#c084fc,color:#e2e8f0;
+  classDef ok fill:#1f4d2e,stroke:#4ade80,color:#e2e8f0;
+  classDef no fill:#4d1f1f,stroke:#f87171,color:#e2e8f0;`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_285.mjs",
+      command: "pnpm run test:pr 285 -- --preview   # branch preview (fix present)\npnpm run test:pr 285                # production (regression guard)",
+      ranAt: "2026-07-27",
+      output: "PENDING — filled after preview deploy + QC run (bearer-auth 200 on preview, 401 on prod-pending, cookie regression green).",
+      migrations: [],
+    },
+  },
   "0032-visit-log-rest-crud": {
     slug: "0032-visit-log-rest-crud",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
