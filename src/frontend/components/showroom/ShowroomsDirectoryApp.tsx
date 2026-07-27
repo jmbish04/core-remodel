@@ -19,17 +19,20 @@ import {
   AppWindow,
   Archive,
   Armchair,
+  Award,
   Blocks,
   CalendarClock,
   ChevronDown,
   Clock,
   DoorOpen,
   Droplets,
+  ExternalLink,
   Flame,
   Globe,
   Grid3x3,
   Instagram,
   Layers,
+  LayoutGrid,
   LayoutList,
   Lightbulb,
   Loader2,
@@ -37,9 +40,11 @@ import {
   Map as MapIcon,
   MapPin,
   Moon,
+  Navigation,
   PaintBucket,
   Phone,
   Plus,
+  Rows3,
   RotateCcw,
   Search,
   Star,
@@ -92,6 +97,7 @@ import {
 } from "./intake/hours-types";
 import {
   computeShowroomStatus,
+  fmtHm,
   isOpenNow as isOpenNowStructured,
   pstNow,
   type HourRow,
@@ -167,7 +173,13 @@ interface City {
   hubName: string | null;
 }
 
-type ViewMode = "map" | "list" | "directory";
+type ViewMode = "grouped" | "map";
+
+/** How the grouped experience buckets the active region's stores. */
+type GroupBy = "category" | "rating" | "flagship" | "closing";
+
+/** Cards vs compact table within a group. */
+type Layout = "cards" | "rows";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -618,87 +630,31 @@ function ShowroomCard({ store, pst }: { store: Store; pst: PstNow }) {
   );
 }
 
-// ─── Stats Bar ────────────────────────────────────────────────────────────────
-
-function StatsBar({ stores }: { stores: Store[] }) {
-  const stats = useMemo(() => {
-    const hubCounts = new Map<string, number>();
-    let ratedCount = 0;
-    let ratingSum = 0;
-    let flagshipCount = 0;
-
-    for (const s of stores) {
-      if (s.hubRoute) hubCounts.set(s.hubRoute, (hubCounts.get(s.hubRoute) ?? 0) + 1);
-      if (s.onlineRating !== null) {
-        ratedCount++;
-        ratingSum += s.onlineRating;
-      }
-      if (s.isFlagshipLocation) flagshipCount++;
-    }
-
-    return {
-      total: stores.length,
-      hubCounts,
-      avgRating: ratedCount > 0 ? Math.round((ratingSum / ratedCount) * 10) / 10 : null,
-      flagshipCount,
-    };
-  }, [stores]);
-
-  return (
-    <div className="flex flex-wrap gap-4 rounded-lg bg-card p-3 text-xs ring-1 ring-border/40">
-      <div>
-        <span className="text-muted-foreground">Total</span>
-        <span className="ml-1.5 font-semibold text-foreground">{stats.total}</span>
-      </div>
-      {Object.keys(HUBS).map((h) => (
-        <div key={h}>
-          <span className="text-muted-foreground">{HUB_LABEL[h]}</span>
-          <span className="ml-1 font-semibold text-foreground">{stats.hubCounts.get(h) ?? 0}</span>
-        </div>
-      ))}
-      <div>
-        <span className="text-muted-foreground">Avg Online</span>
-        <span className="ml-1.5 font-semibold text-foreground">
-          {stats.avgRating !== null ? `${stats.avgRating}★` : "—"}
-        </span>
-      </div>
-      <div>
-        <span className="text-muted-foreground">Flagship</span>
-        <span className="ml-1.5 font-semibold text-amber-400">{stats.flagshipCount}</span>
-      </div>
-    </div>
-  );
-}
-
 // ─── Filter Bar ───────────────────────────────────────────────────────────────
 
 interface Filters {
   search: string;
-  hub: string | null;
   categories: string[];
   /** Business-model type filter — a showroom_store_type id, or null for all. */
   type: number | null;
-  pricePoint: string | null;
-  minRating: number | null;
-  appointmentOnly: boolean;
-  flagship: boolean;
   openNow: boolean;
   visited: "all" | "visited" | "unvisited";
 }
 
 const EMPTY_FILTERS: Filters = {
   search: "",
-  hub: null,
   categories: [],
   type: null,
-  pricePoint: null,
-  minRating: null,
-  appointmentOnly: false,
-  flagship: false,
   openNow: false,
   visited: "all",
 };
 
+/**
+ * The lean filter bar for the grouped experience. Region is a top-level tab
+ * strip (not a filter here); grouping is a separate switcher. This bar carries
+ * search, business-model type, an Open-Now toggle (live PST), a visit-status
+ * segment, and the category multi-select.
+ */
 function FilterBar({
   filters,
   onChange,
@@ -712,7 +668,6 @@ function FilterBar({
   allTypes: StoreType[];
   pst: PstNow;
 }) {
-
   const hasActiveFilters = JSON.stringify(filters) !== JSON.stringify(EMPTY_FILTERS);
 
   return (
@@ -721,7 +676,7 @@ function FilterBar({
       <div className="relative">
         <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
-          placeholder="Search showrooms…"
+          placeholder="Search by name or category…"
           value={filters.search}
           onChange={(e) => onChange({ ...filters, search: e.target.value })}
           className="pl-8"
@@ -729,29 +684,6 @@ function FilterBar({
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">
-        {/* Hub chips — city/region labels only, no hub letter */}
-        <Button
-          size="sm"
-          variant={filters.hub === null ? "default" : "outline"}
-          onClick={() => onChange({ ...filters, hub: null })}
-          className="h-7 text-[11px]"
-        >
-          All
-        </Button>
-        {Object.keys(HUBS).map((route) => (
-          <Button
-            key={route}
-            size="sm"
-            variant={filters.hub === route ? "default" : "outline"}
-            onClick={() => onChange({ ...filters, hub: filters.hub === route ? null : route })}
-            className="h-7 text-[11px]"
-          >
-            {HUB_LABEL[route]}
-          </Button>
-        ))}
-
-        <div className="mx-1 h-5 w-px bg-border/40" />
-
         {/* Open Now — shows the current PST time */}
         <Button
           size="sm"
@@ -770,8 +702,8 @@ function FilterBar({
           {(
             [
               { id: "all", label: "All" },
-              { id: "visited", label: "Visited" },
               { id: "unvisited", label: "Unvisited" },
+              { id: "visited", label: "Visited" },
             ] as const
           ).map((opt) => (
             <button
@@ -788,21 +720,6 @@ function FilterBar({
             </button>
           ))}
         </div>
-
-        <div className="mx-1 h-5 w-px bg-border/40" />
-
-        {/* Price chips */}
-        {PRICE_POINTS.map((pp) => (
-          <Button
-            key={pp}
-            size="sm"
-            variant={filters.pricePoint === pp ? "default" : "outline"}
-            onClick={() => onChange({ ...filters, pricePoint: filters.pricePoint === pp ? null : pp })}
-            className="h-7 font-mono text-[11px]"
-          >
-            {pp}
-          </Button>
-        ))}
 
         {allTypes.length > 0 ? (
           <>
@@ -831,40 +748,7 @@ function FilterBar({
 
         <div className="mx-1 h-5 w-px bg-border/40" />
 
-        {/* Rating chips */}
-        {[3, 4, 5].map((r) => (
-          <Button
-            key={r}
-            size="sm"
-            variant={filters.minRating === r ? "default" : "outline"}
-            onClick={() => onChange({ ...filters, minRating: filters.minRating === r ? null : r })}
-            className="h-7 gap-0.5 text-[11px]"
-          >
-            {r}+ <Star className="size-3 fill-amber-400 text-amber-400" />
-          </Button>
-        ))}
-
-        <div className="mx-1 h-5 w-px bg-border/40" />
-
-        {/* Toggle chips */}
-        <Button
-          size="sm"
-          variant={filters.appointmentOnly ? "default" : "outline"}
-          onClick={() => onChange({ ...filters, appointmentOnly: !filters.appointmentOnly })}
-          className="h-7 text-[11px]"
-        >
-          Appt Only
-        </Button>
-        <Button
-          size="sm"
-          variant={filters.flagship ? "default" : "outline"}
-          onClick={() => onChange({ ...filters, flagship: !filters.flagship })}
-          className="h-7 text-[11px]"
-        >
-          Flagship
-        </Button>
-
-        {/* Category dropdown */}
+        {/* Category multi-select */}
         <CategorySelector
           allCategories={allCategories}
           selected={filters.categories}
@@ -894,13 +778,12 @@ function FilterBar({
   );
 }
 
-// ─── View Toggle ──────────────────────────────────────────────────────────────
+// ─── View Toggle (Grouped / Map) ────────────────────────────────────────────────
 
 function ViewToggle({ value, onChange }: { value: ViewMode; onChange: (v: ViewMode) => void }) {
   const views: { id: ViewMode; label: string; Icon: ComponentType<{ className?: string }> }[] = [
+    { id: "grouped", label: "Grouped", Icon: LayoutList },
     { id: "map", label: "Map", Icon: MapIcon },
-    { id: "list", label: "List", Icon: LayoutList },
-    { id: "directory", label: "Directory", Icon: Users },
   ];
 
   return (
@@ -1100,7 +983,7 @@ function MapView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
   }, [stores]);
 
   const hubEntries = useMemo(
-    () => [...byHub.entries()].sort((a, b) => hubRouteRank(a[0]) - hubRouteRank(b[0])),
+    () => Array.from(byHub.entries()).sort((a, b) => hubRouteRank(a[0]) - hubRouteRank(b[0])),
     [byHub],
   );
   const hubKeys = useMemo(() => hubEntries.map(([route]) => route), [hubEntries]);
@@ -1286,158 +1169,804 @@ function MapView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
   );
 }
 
-// ─── List View (grouped by category) ───────────────────────────────────────────
+// ─── Grouped Experience ─────────────────────────────────────────────────────────
 
-function GroupedView({
-  groups,
+/** Enum weekday → JS getDay() index — for pulling today's row out of `hours`. */
+const DAY_ENUM_INDEX: Record<string, number> = {
+  SUNDAY: 0,
+  MONDAY: 1,
+  TUESDAY: 2,
+  WEDNESDAY: 3,
+  THURSDAY: 4,
+  FRIDAY: 5,
+  SATURDAY: 6,
+};
+
+/** Best rating we have for a store: prefer Google, else the aggregate online one. */
+function bestRating(s: Store): number | null {
+  return s.googleRating ?? s.onlineRating ?? null;
+}
+
+/** Minutes-since-midnight the store closes TODAY, or null if closed today. */
+function closeMinutesToday(s: Store, pst: PstNow): number | null {
+  const row = s.hours.find((h) => DAY_ENUM_INDEX[h.day] === pst.day);
+  return row ? row.closeHour * 60 + row.closeMinute : null;
+}
+
+/** Average best-rating over a group (1-decimal), or null if none are rated. */
+function avgRatingOf(stores: Store[]): number | null {
+  let sum = 0;
+  let n = 0;
+  for (const s of stores) {
+    const r = bestRating(s);
+    if (r != null) {
+      sum += r;
+      n++;
+    }
+  }
+  return n > 0 ? Math.round((sum / n) * 10) / 10 : null;
+}
+
+/** Nearest region (by squared-degree distance) among those that have stores. */
+function nearestRegion(loc: { lat: number; lng: number }, available: string[]): string | null {
+  let best: string | null = null;
+  let bestDist = Infinity;
+  for (const r of available) {
+    const hub = HUBS[r];
+    if (!hub) continue;
+    const d = (hub.lat - loc.lat) ** 2 + (hub.lng - loc.lng) ** 2;
+    if (d < bestDist) {
+      bestDist = d;
+      best = r;
+    }
+  }
+  return best;
+}
+
+/**
+ * Bucket the active region's stores by the chosen dimension. A category store
+ * appears under EACH of its categories. Groups come back in display order.
+ */
+function groupStores(stores: Store[], groupBy: GroupBy, pst: PstNow): [string, Store[]][] {
+  const map = new Map<string, Store[]>();
+  const push = (k: string, s: Store) => map.set(k, [...(map.get(k) ?? []), s]);
+
+  if (groupBy === "category") {
+    for (const s of stores) {
+      if (s.categories.length === 0) push("Uncategorized", s);
+      else for (const c of s.categories) push(c, s);
+    }
+    return Array.from(map.entries()).sort((a, b) => {
+      if ((a[0] === "Uncategorized") !== (b[0] === "Uncategorized"))
+        return a[0] === "Uncategorized" ? 1 : -1;
+      return b[1].length - a[1].length;
+    });
+  }
+
+  if (groupBy === "rating") {
+    for (const s of stores) {
+      const r = bestRating(s);
+      push(r == null ? "Unrated" : `${Math.floor(r)}★`, s);
+    }
+    return Array.from(map.entries()).sort((a, b) => {
+      const av = a[0] === "Unrated" ? -1 : parseInt(a[0], 10);
+      const bv = b[0] === "Unrated" ? -1 : parseInt(b[0], 10);
+      return bv - av; // highest rating first, "Unrated" last
+    });
+  }
+
+  if (groupBy === "flagship") {
+    for (const s of stores)
+      push(s.isFlagshipLocation ? "Flagship locations" : "Other locations", s);
+    return Array.from(map.entries()).sort((a, b) =>
+      a[0] === "Flagship locations" ? -1 : b[0] === "Flagship locations" ? 1 : 0,
+    );
+  }
+
+  // closing time — open stores bucketed by close time; closed → one bucket.
+  for (const s of stores) {
+    const cm = isOpenNowStructured(s.hours, pst) ? closeMinutesToday(s, pst) : null;
+    push(cm == null ? "Currently Closed" : `Closes ${fmtHm(Math.floor(cm / 60), cm % 60)}`, s);
+  }
+  return Array.from(map.entries()).sort((a, b) => {
+    const closedA = a[0] === "Currently Closed";
+    const closedB = b[0] === "Currently Closed";
+    if (closedA !== closedB) return closedA ? 1 : -1;
+    return (closeMinutesToday(a[1][0], pst) ?? 0) - (closeMinutesToday(b[1][0], pst) ?? 0);
+  });
+}
+
+/** Split a group into open-now (earliest close first) and closed-now stores. */
+function partitionGroup(stores: Store[], pst: PstNow): { open: Store[]; closed: Store[] } {
+  const open: Store[] = [];
+  const closed: Store[] = [];
+  for (const s of stores) (isOpenNowStructured(s.hours, pst) ? open : closed).push(s);
+  open.sort(
+    (a, b) => (closeMinutesToday(a, pst) ?? Infinity) - (closeMinutesToday(b, pst) ?? Infinity),
+  );
+  return { open, closed };
+}
+
+// ── detail-modal helpers ─────────────────────────────────────────────────────
+
+/** Weekly-hours render order (Mon→Sun) with each day's JS index for "today". */
+const WEEK_ROWS: { key: DayKey; label: string; idx: number }[] = [
+  { key: "mon", label: "Monday", idx: 1 },
+  { key: "tue", label: "Tuesday", idx: 2 },
+  { key: "wed", label: "Wednesday", idx: 3 },
+  { key: "thu", label: "Thursday", idx: 4 },
+  { key: "fri", label: "Friday", idx: 5 },
+  { key: "sat", label: "Saturday", idx: 6 },
+  { key: "sun", label: "Sunday", idx: 0 },
+];
+
+/** "HH:MM" 24-hour string → "5:00 PM"; passes odd input through unchanged. */
+function fmtClock(hhmm: string): string {
+  const [h, m] = hhmm.split(":").map((n) => parseInt(n, 10));
+  return Number.isFinite(h) && Number.isFinite(m) ? fmtHm(h, m) : hhmm;
+}
+
+/** Google Maps directions URL — Tesla's browser offers one-tap Navigate on these. */
+function mapsNavUrl(s: Store): string {
+  const dest =
+    s.latitude != null && s.longitude != null
+      ? `${s.latitude},${s.longitude}`
+      : `${s.name} ${s.locationAddress ?? ""}`.trim();
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(dest)}`;
+}
+
+/** POST the destination to the real Tessie bridge; toast on success/failure. */
+async function sendToTesla(s: Store) {
+  try {
+    const label = [s.name, s.locationAddress].filter(Boolean).join(", ");
+    const body =
+      s.latitude != null && s.longitude != null
+        ? { lat: s.latitude, lng: s.longitude, destination: label }
+        : { destination: label };
+    const res = await fetch("/api/tesla/navigate", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+    if (!res.ok || data.ok === false) throw new Error(data.error ?? `Failed (${res.status})`);
+    toast.success("Destination sent to your Tesla");
+  } catch (e) {
+    console.error("[showrooms/tesla-nav]", e);
+    toast.error(e instanceof Error ? e.message : "Tesla navigation failed");
+  }
+}
+
+/** Tesla "T" wordmark glyph (same path as the drives viewport). */
+function TeslaGlyph({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden className={className}>
+      <path d="M12 4.6c2.3 0 4.2.5 5.1 1.3l1.1-1.9C16.9 3.3 14.6 2.9 12 2.9s-4.9.4-6.2 1.1l1.1 1.9c.9-.8 2.8-1.3 5.1-1.3zM12 6.2c-2 0-3.6.3-4.4.8l1.5 2.4c.6-.3 1.6-.5 2.9-.5s2.3.2 2.9.5l1.5-2.4c-.8-.5-2.4-.8-4.4-.8zM10.9 10.2v9.9h2.2v-9.9c-.4 0-.7-.1-1.1-.1s-.7.1-1.1.1z" />
+    </svg>
+  );
+}
+
+const DETAIL_STATUS_CHIP: Record<string, string> = {
+  open: "bg-emerald-500/15 text-emerald-300 ring-1 ring-emerald-500/30",
+  "closing-soon": "bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30",
+  closed: "bg-rose-500/15 text-rose-300 ring-1 ring-rose-500/30",
+};
+const DETAIL_STATUS_LABEL: Record<string, string> = {
+  open: "Open",
+  "closing-soon": "Closing soon",
+  closed: "Closed",
+};
+
+/** Full-detail quick-look modal opened from a card or row click. */
+function StoreDetailModal({
+  store,
   pst,
-  withCategoryIcon = false,
+  onClose,
 }: {
-  groups: [string, Store[]][];
+  store: Store | null;
   pst: PstNow;
-  /** List tab: render a colorful lucide icon chip in each group header. */
-  withCategoryIcon?: boolean;
+  onClose: () => void;
 }) {
+  const s = store;
+  const status = s ? computeShowroomStatus(s.hours, pst) : null;
+  const rating = s ? bestRating(s) : null;
+  const heroSrc = s ? (s.heroImageCfImagesUrl ?? s.iconCfImagesUrl) : null;
+  const reviewCount = s ? (s.userRatingCount ?? s.onlineRatingCount) : 0;
+
+  return (
+    <Dialog open={s != null} onOpenChange={(next) => !next && onClose()}>
+      {s && (
+        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {s.name}
+              {s.pricePoint && (
+                <span className="font-mono text-sm text-emerald-300">{s.pricePoint}</span>
+              )}
+            </DialogTitle>
+            <DialogDescription>
+              {[s.cityName ?? s.hubName, s.typeName].filter(Boolean).join(" · ") ||
+                "Showroom details"}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            {/* Photo */}
+            <div className="relative aspect-video overflow-hidden rounded-lg bg-card ring-1 ring-border/40">
+              {heroSrc ? (
+                <img src={heroSrc} alt="" className="size-full object-cover" />
+              ) : (
+                <div
+                  className={`flex size-full items-center justify-center text-3xl font-semibold ${avatarColor(s.name)}`}
+                >
+                  {s.name.slice(0, 2).toUpperCase()}
+                </div>
+              )}
+            </div>
+
+            {/* Facts */}
+            <div className="space-y-3">
+              <div className="flex flex-wrap items-center gap-3 text-sm">
+                {rating != null && (
+                  <span className="inline-flex items-center gap-1">
+                    <Star className="size-4 fill-amber-400 text-amber-400" />
+                    <span className="font-semibold">{rating.toFixed(1)}</span>
+                    {reviewCount ? (
+                      <span className="text-muted-foreground">({reviewCount})</span>
+                    ) : null}
+                  </span>
+                )}
+                {s.userRating != null && (
+                  <span className="inline-flex items-center gap-1">
+                    <Star className="size-4 fill-sky-400 text-sky-400" />
+                    <span className="font-semibold">{s.userRating.toFixed(1)}</span>
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground/70">
+                      your rating
+                    </span>
+                  </span>
+                )}
+              </div>
+              {status && (
+                <div className="flex items-center gap-2 text-sm">
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${DETAIL_STATUS_CHIP[status.status]}`}
+                  >
+                    {DETAIL_STATUS_LABEL[status.status]}
+                  </span>
+                  <span className="text-muted-foreground">{status.label}</span>
+                </div>
+              )}
+              {s.categories.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {s.categories.map((c) => (
+                    <Badge
+                      key={c}
+                      variant="secondary"
+                      className="px-1.5 py-0 text-[10px] font-normal"
+                    >
+                      {c}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+              {s.locationAddress && (
+                <p className="flex items-start gap-1.5 text-sm text-muted-foreground">
+                  <MapPin className="mt-0.5 size-4 shrink-0" />
+                  {s.locationAddress}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Weekly hours */}
+          <div className="mt-2">
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Weekly hours
+            </h3>
+            {s.hoursJson ? (
+              <div className="divide-y divide-border/40 overflow-hidden rounded-lg bg-card ring-1 ring-border/40">
+                {WEEK_ROWS.map(({ key, label, idx }) => {
+                  const w = s.hoursJson?.[key];
+                  const today = idx === pst.day;
+                  return (
+                    <div
+                      key={key}
+                      className={`flex items-center justify-between px-3 py-1.5 text-sm ${today ? "bg-primary/5" : ""}`}
+                    >
+                      <span
+                        className={today ? "font-semibold text-foreground" : "text-muted-foreground"}
+                      >
+                        {label}
+                        {today ? " · Today" : ""}
+                      </span>
+                      <span className={w ? "text-foreground" : "text-muted-foreground/60"}>
+                        {w ? `${fmtClock(w.open)} – ${fmtClock(w.close)}` : "Closed"}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Hours not available yet.</p>
+            )}
+            {s.isAppointmentOnly && (
+              <p className="mt-2 inline-flex items-center gap-1 text-[11px] text-violet-300">
+                <CalendarClock className="size-3" /> By appointment
+              </p>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className="mt-4 flex flex-wrap items-center gap-2">
+            {s.phoneNumber && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                render={<a href={telHref(s.phoneNumber)} />}
+              >
+                <Phone className="size-3.5" /> Call
+              </Button>
+            )}
+            {s.websiteUrl && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5"
+                render={<a href={s.websiteUrl} target="_blank" rel="noreferrer" />}
+              >
+                <Globe className="size-3.5" /> Website
+              </Button>
+            )}
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              render={<a href={mapsNavUrl(s)} target="_blank" rel="noreferrer" />}
+            >
+              <Navigation className="size-3.5" /> Google Maps
+            </Button>
+            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => sendToTesla(s)}>
+              <TeslaGlyph className="size-3.5" /> Tesla Nav
+            </Button>
+            <Button
+              size="sm"
+              className="ml-auto gap-1.5"
+              render={<a href={`/admin/shopping/store/${s.id}`} />}
+            >
+              <ExternalLink className="size-3.5" /> View full details
+            </Button>
+          </div>
+        </DialogContent>
+      )}
+    </Dialog>
+  );
+}
+
+/** One compact table row — the whole row opens the detail modal. */
+function StoreRow({ store, pst, onOpen }: { store: Store; pst: PstNow; onOpen: () => void }) {
+  const status = computeShowroomStatus(store.hours, pst);
+  const rating = bestRating(store);
+  const heroSrc = store.heroImageCfImagesUrl ?? store.iconCfImagesUrl;
+  const stop = (e: React.MouseEvent) => e.stopPropagation();
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+      className="flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-muted/40"
+    >
+      <div className="size-9 shrink-0 overflow-hidden rounded-md bg-card ring-1 ring-border/40">
+        {heroSrc ? (
+          <img src={heroSrc} alt="" className="size-full object-cover" />
+        ) : (
+          <div
+            className={`flex size-full items-center justify-center text-[10px] font-semibold ${avatarColor(store.name)}`}
+          >
+            {store.name.slice(0, 2).toUpperCase()}
+          </div>
+        )}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="truncate text-sm font-medium">{store.name}</span>
+          {store.pricePoint && (
+            <span className="font-mono text-[10px] text-emerald-300">{store.pricePoint}</span>
+          )}
+        </div>
+        <span className="truncate text-xs text-muted-foreground">
+          {store.cityName ?? store.hubName ?? ""}
+        </span>
+      </div>
+      {store.typeName && (
+        <span
+          className="hidden shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-medium sm:inline-flex"
+          style={
+            store.typeColor
+              ? { backgroundColor: `${store.typeColor}1f`, color: store.typeColor }
+              : undefined
+          }
+        >
+          {store.typeName}
+        </span>
+      )}
+      <span className="hidden w-14 shrink-0 items-center gap-1 text-xs sm:flex">
+        {rating != null ? (
+          <>
+            <Star className="size-3.5 fill-amber-400 text-amber-400" />
+            {rating.toFixed(1)}
+          </>
+        ) : (
+          <span className="text-muted-foreground/50">—</span>
+        )}
+      </span>
+      <span className="hidden w-44 shrink-0 sm:block">
+        {status ? (
+          <span className="flex items-center gap-1.5 text-[11px]">
+            <span
+              className={`size-2 shrink-0 rounded-full ${status.status === "open" ? "bg-emerald-400" : status.status === "closing-soon" ? "bg-amber-400" : "bg-rose-400"}`}
+            />
+            <span className="truncate text-muted-foreground">{status.label}</span>
+          </span>
+        ) : (
+          <span className="text-[11px] text-muted-foreground/50">Hours unknown</span>
+        )}
+      </span>
+      <span className="flex shrink-0 items-center gap-2" onClick={stop}>
+        {store.phoneNumber && (
+          <a
+            href={telHref(store.phoneNumber)}
+            aria-label="Call"
+            className="text-sky-400 hover:text-sky-300"
+          >
+            <Phone className="size-4" />
+          </a>
+        )}
+        {store.websiteUrl && (
+          <a
+            href={store.websiteUrl}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Website"
+            className="text-muted-foreground hover:text-foreground"
+          >
+            <Globe className="size-4" />
+          </a>
+        )}
+      </span>
+    </div>
+  );
+}
+
+/**
+ * One group's body: open stores first (earliest close first), closed stores
+ * folded into a single expandable banner. Cards or rows per the layout toggle.
+ */
+function GroupSection({
+  stores,
+  pst,
+  layout,
+  onOpenDetail,
+}: {
+  stores: Store[];
+  pst: PstNow;
+  layout: Layout;
+  onOpenDetail: (s: Store) => void;
+}) {
+  const [showClosed, setShowClosed] = useState(false);
+  const { open, closed } = useMemo(() => partitionGroup(stores, pst), [stores, pst]);
+
+  const renderStores = (list: Store[], dimmed: boolean) =>
+    layout === "cards" ? (
+      <div className={`grid gap-3 sm:grid-cols-2 xl:grid-cols-3 ${dimmed ? "opacity-60" : ""}`}>
+        {list.map((s) => (
+          <div
+            key={s.id}
+            className="cursor-pointer"
+            onClick={(e) => {
+              // The card's stretched <a> bubbles here; cancel its navigation and
+              // open the modal instead. Inner tel/website links stopPropagation.
+              e.preventDefault();
+              onOpenDetail(s);
+            }}
+          >
+            <ShowroomMergedCard store={s} pst={pst} href={`/admin/shopping/store/${s.id}`} />
+          </div>
+        ))}
+      </div>
+    ) : (
+      <div
+        className={`divide-y divide-border/40 overflow-hidden rounded-lg bg-card ring-1 ring-border/40 ${dimmed ? "opacity-60" : ""}`}
+      >
+        {list.map((s) => (
+          <StoreRow key={s.id} store={s} pst={pst} onOpen={() => onOpenDetail(s)} />
+        ))}
+      </div>
+    );
+
+  return (
+    <div className="space-y-3">
+      {open.length > 0 ? renderStores(open, false) : closed.length === 0 ? <EmptyState /> : null}
+      {closed.length > 0 && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowClosed((v) => !v)}
+            aria-expanded={showClosed}
+            className="flex w-full items-center gap-2 rounded-lg bg-muted/30 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/50"
+          >
+            <ChevronDown
+              className={`size-3.5 shrink-0 transition-transform ${showClosed ? "" : "-rotate-90"}`}
+            />
+            <span className="shrink-0 font-medium text-foreground">{closed.length} closed now</span>
+            <span className="truncate">— {closed.map((s) => s.name).join(", ")}</span>
+          </button>
+          {showClosed && <div className="mt-3">{renderStores(closed, true)}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Non-category group-header icon chip. */
+function GroupIcon({ groupBy }: { groupBy: GroupBy }) {
+  const Icon = groupBy === "rating" ? Star : groupBy === "flagship" ? Award : Clock;
+  return (
+    <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+      <Icon className="size-4" />
+    </span>
+  );
+}
+
+/** The grouped accordion + shared detail modal for the active region's stores. */
+function GroupedExperience({
+  stores,
+  pst,
+  groupBy,
+  layout,
+}: {
+  stores: Store[];
+  pst: PstNow;
+  groupBy: GroupBy;
+  layout: Layout;
+}) {
+  const groups = useMemo(() => groupStores(stores, groupBy, pst), [stores, groupBy, pst]);
   const orderedKeys = useMemo(() => groups.map(([label]) => label), [groups]);
   const { openKey, toggle } = useAccordionGroup(orderedKeys);
+  const [detail, setDetail] = useState<Store | null>(null);
 
   if (groups.length === 0) return <EmptyState />;
+
   return (
     <div>
       {groups.map(([label, groupStores]) => {
-        const style = withCategoryIcon ? categoryIconStyleFor(label) : null;
+        const openN = groupStores.filter((s) => isOpenNowStructured(s.hours, pst)).length;
+        const avg = avgRatingOf(groupStores);
+        const style = groupBy === "category" ? categoryIconStyleFor(label) : null;
         return (
           <CollapsibleGroup
             key={label}
             open={openKey === label}
             onToggle={() => toggle(label)}
-            className="mt-10 first:mt-0"
+            className="mt-8 first:mt-0"
             header={
               <>
-                {style && (
+                {style ? (
                   <span
                     className={`flex size-7 shrink-0 items-center justify-center rounded-lg ${style.className}`}
                   >
                     <style.Icon className="size-4" />
                   </span>
+                ) : (
+                  <GroupIcon groupBy={groupBy} />
                 )}
                 <h2 className="text-base font-semibold">{label}</h2>
                 <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
                   {groupStores.length}
                 </span>
+                <span className="flex items-center gap-2 text-[11px] text-muted-foreground">
+                  {avg != null && (
+                    <span className="inline-flex items-center gap-0.5">
+                      <Star className="size-3 fill-amber-400 text-amber-400" />
+                      {avg.toFixed(1)}
+                    </span>
+                  )}
+                  <span className="inline-flex items-center gap-1">
+                    <span className="size-1.5 rounded-full bg-emerald-400" />
+                    {openN} open
+                  </span>
+                </span>
                 <span className="ml-auto h-px flex-1 bg-border/40" />
               </>
             }
           >
-            <CardGrid stores={groupStores} pst={pst} />
+            <GroupSection
+              stores={groupStores}
+              pst={pst}
+              layout={layout}
+              onOpenDetail={setDetail}
+            />
           </CollapsibleGroup>
         );
       })}
+      <StoreDetailModal store={detail} pst={pst} onClose={() => setDetail(null)} />
     </div>
   );
 }
 
-function ListView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
-  const groups = useMemo(() => {
-    const map = new Map<string, Store[]>();
-    for (const s of stores) {
-      if (s.categories.length === 0) {
-        map.set("Uncategorized", [...(map.get("Uncategorized") ?? []), s]);
-      } else {
-        for (const cat of s.categories) {
-          map.set(cat, [...(map.get(cat) ?? []), s]);
-        }
-      }
-    }
-    return [...map.entries()].sort((a, b) => b[1].length - a[1].length);
-  }, [stores]);
+// ─── Region tabs, switchers, locator strip ──────────────────────────────────────
 
-  return <GroupedView groups={groups} pst={pst} withCategoryIcon />;
-}
-
-// ─── Directory View (condensed field sheet, grouped by hub city) ────────────────
-
-/** Dense contact card — the compact variant of the canonical merged card. */
-function DirectoryCard({ store, pst }: { store: Store; pst: PstNow }) {
+/** Region tab strip with live badge counts + an "All" tab. */
+function RegionTabs({
+  counts,
+  total,
+  active,
+  onSelect,
+}: {
+  counts: Map<string, number>;
+  total: number;
+  active: string | null;
+  onSelect: (r: string | null) => void;
+}) {
+  const regions = Object.keys(HUBS).filter((r) => (counts.get(r) ?? 0) > 0);
+  const chip = (key: string, label: string, count: number, isActive: boolean, onClick: () => void) => (
+    <button
+      key={key}
+      type="button"
+      onClick={onClick}
+      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition ${
+        isActive
+          ? "bg-primary/15 text-primary ring-1 ring-primary/40"
+          : "bg-card text-muted-foreground ring-1 ring-border/40 hover:text-foreground"
+      }`}
+    >
+      {label}
+      <span
+        className={`rounded-full px-1.5 text-[10px] font-semibold ${isActive ? "bg-primary/20 text-primary" : "bg-muted text-muted-foreground"}`}
+      >
+        {count}
+      </span>
+    </button>
+  );
   return (
-    <ShowroomMergedCard
-      store={store}
-      pst={pst}
-      href={`/admin/shopping/store/${store.id}`}
-      compact
-    />
+    <div className="flex flex-wrap gap-1.5">
+      {chip("all", "All", total, active === null, () => onSelect(null))}
+      {regions.map((r) =>
+        chip(r, HUB_LABEL[r] ?? r, counts.get(r) ?? 0, active === r, () => onSelect(r)),
+      )}
+    </div>
   );
 }
 
-/** Sort hub groups: known hubs in geographic order, then alpha, "Other" last. */
-const HUB_GROUP_ORDER: Record<string, number> = {
-  "SF Design District": 0,
-  "Silicon Valley & South Bay": 1,
-  "Peninsula / Mid-Market": 2,
-  "East Bay": 3,
-  "North Bay": 4,
-  "Sacramento / Capital": 5,
-  "Central Coast": 6,
-  "Central Valley": 7,
-  "Los Angeles / SoCal": 8,
-  "San Diego": 9,
-  "North State": 10,
-};
+const GROUP_OPTIONS: { id: GroupBy; label: string; Icon: ComponentType<{ className?: string }> }[] = [
+  { id: "category", label: "Category", Icon: Grid3x3 },
+  { id: "rating", label: "Rating", Icon: Star },
+  { id: "flagship", label: "Flagship", Icon: Award },
+  { id: "closing", label: "Closing time", Icon: Clock },
+];
 
-function DirectoryView({ stores, pst }: { stores: Store[]; pst: PstNow }) {
-  const groups = useMemo(() => {
-    const map = new Map<string, Store[]>();
-    for (const s of stores) {
-      // Group by the map-hub city name so Alameda/Emeryville/Hayward → "East Bay".
-      const hub = s.hubName ?? "Other";
-      map.set(hub, [...(map.get(hub) ?? []), s]);
-    }
-    return [...map.entries()].sort((a, b) => {
-      const aOther = a[0] === "Other";
-      const bOther = b[0] === "Other";
-      if (aOther !== bOther) return aOther ? 1 : -1; // Other last
-      const ao = HUB_GROUP_ORDER[a[0]];
-      const bo = HUB_GROUP_ORDER[b[0]];
-      if (ao !== undefined && bo !== undefined) return ao - bo;
-      if (ao !== undefined) return -1;
-      if (bo !== undefined) return 1;
-      return a[0].localeCompare(b[0]);
-    });
-  }, [stores]);
-
-  const orderedKeys = useMemo(() => groups.map(([hub]) => hub), [groups]);
-  const { openKey, toggle } = useAccordionGroup(orderedKeys);
-
-  if (groups.length === 0) return <EmptyState />;
-
+function GroupBySwitcher({ value, onChange }: { value: GroupBy; onChange: (g: GroupBy) => void }) {
   return (
-    <div>
-      {groups.map(([hub, hubStores]) => (
-        <CollapsibleGroup
-          key={hub}
-          open={openKey === hub}
-          onToggle={() => toggle(hub)}
-          className="mt-8 first:mt-0"
-          header={
-            <>
-              <MapPin className="size-4 text-sky-400" />
-              <h2 className="text-sm font-semibold uppercase tracking-wide">{hub}</h2>
-              <span className="font-mono text-[10px] uppercase tracking-[0.25em] text-muted-foreground">
-                {hubStores.length}
-              </span>
-              <span className="ml-auto h-px flex-1 bg-border/40" />
-            </>
-          }
+    <div className="flex items-center gap-1.5">
+      <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Group by</span>
+      <div className="flex gap-1 rounded-lg bg-card p-0.5 ring-1 ring-border/40">
+        {GROUP_OPTIONS.map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => onChange(id)}
+            className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition ${
+              value === id
+                ? "bg-primary/10 text-primary ring-1 ring-primary/30"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <Icon className="size-3.5" />
+            {label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function LayoutToggle({ value, onChange }: { value: Layout; onChange: (l: Layout) => void }) {
+  const opts: { id: Layout; label: string; Icon: ComponentType<{ className?: string }> }[] = [
+    { id: "cards", label: "Cards", Icon: LayoutGrid },
+    { id: "rows", label: "Rows", Icon: Rows3 },
+  ];
+  return (
+    <div className="flex gap-1 rounded-lg bg-card p-0.5 ring-1 ring-border/40">
+      {opts.map(({ id, label, Icon }) => (
+        <button
+          key={id}
+          type="button"
+          onClick={() => onChange(id)}
+          className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[11px] font-medium transition ${
+            value === id
+              ? "bg-primary/10 text-primary ring-1 ring-primary/30"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
         >
-          <div className="flex flex-col gap-2">
-            {hubStores.map((s) => (
-              <DirectoryCard key={s.id} store={s} pst={pst} />
-            ))}
-          </div>
-        </CollapsibleGroup>
+          <Icon className="size-3.5" />
+          {label}
+        </button>
       ))}
     </div>
   );
+}
+
+/**
+ * Compact header locator strip — a framed bar with a pulsing "you are here" dot
+ * (respects prefers-reduced-motion), the active region label, and a live count.
+ * The maplibre map lives in the Map view; this is the cheap always-on locator.
+ */
+function HeaderLocatorStrip({
+  userLoc,
+  regionLabel,
+  count,
+}: {
+  userLoc: { lng: number; lat: number } | null;
+  regionLabel: string;
+  count: number;
+}) {
+  return (
+    <div className="flex items-center gap-3 rounded-lg bg-card px-3 py-2 ring-1 ring-border/40">
+      <span className="relative flex size-3 items-center justify-center">
+        {userLoc ? (
+          <>
+            <span className="absolute inline-flex size-3 rounded-full bg-sky-400/50 motion-safe:animate-ping" />
+            <span className="relative inline-flex size-2 rounded-full bg-sky-500" />
+          </>
+        ) : (
+          <span className="inline-flex size-2 rounded-full bg-muted-foreground/40" />
+        )}
+      </span>
+      <MapPin className="size-4 text-sky-400" aria-hidden />
+      <span className="text-sm font-medium">{regionLabel}</span>
+      <span className="text-xs text-muted-foreground">
+        {count} showroom{count === 1 ? "" : "s"}
+      </span>
+      <span className="ml-auto text-[11px] text-muted-foreground/70">
+        {userLoc ? "Your location is on" : "Location off"}
+      </span>
+    </div>
+  );
+}
+
+/** Best-effort device geolocation + a fire-and-forget report to the server. */
+function useDeviceLocation(): { lng: number; lat: number } | null {
+  const [loc, setLoc] = useState<{ lng: number; lat: number } | null>(null);
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !("geolocation" in navigator)) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLoc({ lng: pos.coords.longitude, lat: pos.coords.latitude });
+        void fetch("/api/showroom-stores/device-location", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            source: "browser",
+          }),
+        }).catch(() => {});
+      },
+      () => {
+        /* denied / unavailable — region falls back to SF */
+      },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300_000 },
+    );
+  }, []);
+  return loc;
 }
 
 // ─── Add Showroom Modal ───────────────────────────────────────────────────────
@@ -2459,13 +2988,13 @@ function AddShowroomModal({ cities, onCreated }: { cities: City[]; onCreated: ()
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 
-const VALID_TABS: ViewMode[] = ["map", "list", "directory"];
+const VALID_TABS: ViewMode[] = ["grouped", "map"];
 
 function isViewMode(v: string | undefined | null): v is ViewMode {
   return v != null && (VALID_TABS as string[]).includes(v);
 }
 
-export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: ViewMode }) {
+export function ShowroomsDirectoryApp({ initialTab = "grouped" }: { initialTab?: ViewMode }) {
   const [allStores, setAllStores] = useState<Store[]>([]);
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<Category[]>([]);
@@ -2474,6 +3003,17 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
   const [filters, setFilters] = useState<Filters>({ ...EMPTY_FILTERS });
   const [viewMode, setViewMode] = useState<ViewMode>(initialTab);
   const [pst, setPst] = useState<PstNow>(() => pstNow());
+  // Grouped-experience controls.
+  const [region, setRegion] = useState<string | null>(null);
+  const [regionSource, setRegionSource] = useState<"none" | "default" | "geo" | "user">("none");
+  const [groupBy, setGroupBy] = useState<GroupBy>("category");
+  const [layout, setLayout] = useState<Layout>("cards");
+  const userLoc = useDeviceLocation();
+
+  const selectRegion = useCallback((r: string | null) => {
+    setRegionSource("user");
+    setRegion(r);
+  }, []);
 
   // Tab ↔ URL sync. Clicking a tab pushes /admin/shopping/showrooms/<tab>;
   // browser back/forward (popstate) restores the tab from the path.
@@ -2490,7 +3030,7 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
   useEffect(() => {
     const onPop = () => {
       const seg = window.location.pathname.split("/").filter(Boolean).pop();
-      setViewMode(isViewMode(seg) ? seg : "map");
+      setViewMode(isViewMode(seg) ? seg : "grouped");
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -2560,23 +3100,19 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
     fetchMeta();
   }, [fetchStores, fetchMeta]);
 
+  // Everything EXCEPT region — so region tab counts stay live as filters change.
   const filtered = useMemo(() => {
     const q = filters.search.trim().toLowerCase();
     return allStores.filter((s) => {
-      if (filters.hub && s.hubRoute !== filters.hub) return false;
       if (
         q &&
         !s.name.toLowerCase().includes(q) &&
+        !s.categories.some((c) => c.toLowerCase().includes(q)) &&
         !(s.cityName ?? "").toLowerCase().includes(q) &&
         !(s.inventoryFocus ?? "").toLowerCase().includes(q)
       )
         return false;
-      if (filters.pricePoint && s.pricePoint !== filters.pricePoint) return false;
       if (filters.type != null && s.typeId !== filters.type) return false;
-      if (filters.minRating !== null && (s.onlineRating === null || s.onlineRating < filters.minRating))
-        return false;
-      if (filters.appointmentOnly && !s.isAppointmentOnly) return false;
-      if (filters.flagship && !s.isFlagshipLocation) return false;
       if (filters.openNow && !isOpenNowStructured(s.hours, pst)) return false;
       if (filters.visited === "visited" && s.userRating == null) return false;
       if (filters.visited === "unvisited" && s.userRating != null) return false;
@@ -2589,14 +3125,54 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
     });
   }, [allStores, filters, pst]);
 
+  // Live per-region counts (only California hubs we recognize) from `filtered`.
+  const regionCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const s of filtered) {
+      if (s.hubRoute && HUBS[s.hubRoute]) m.set(s.hubRoute, (m.get(s.hubRoute) ?? 0) + 1);
+    }
+    return m;
+  }, [filtered]);
+
+  // Region-narrowed set fed to both the grouped experience and the map.
+  const regionStores = useMemo(
+    () => (region == null ? filtered : filtered.filter((s) => s.hubRoute === region)),
+    [filtered, region],
+  );
+
+  // First load with no location yet → default to SF (or the first region that
+  // has stores). Runs once, then yields to geolocation / the user's own pick.
+  useEffect(() => {
+    if (loading || regionSource !== "none") return;
+    const avail = Object.keys(HUBS).filter((r) => (regionCounts.get(r) ?? 0) > 0);
+    if (avail.length === 0) return;
+    setRegionSource("default");
+    setRegion(avail.includes("A") ? "A" : avail[0]);
+  }, [loading, regionCounts, regionSource]);
+
+  // Geolocation resolved → auto-select the NEAREST region with stores, unless
+  // the user has already picked one manually.
+  useEffect(() => {
+    if (!userLoc || regionSource === "user") return;
+    const avail = Object.keys(HUBS).filter((r) => (regionCounts.get(r) ?? 0) > 0);
+    const nearest = nearestRegion(userLoc, avail);
+    if (nearest) {
+      setRegionSource("geo");
+      setRegion(nearest);
+    }
+  }, [userLoc, regionCounts, regionSource]);
+
+  const regionLabel = region == null ? "All regions" : (HUB_LABEL[region] ?? region);
+
   return (
     <main className="container mx-auto max-w-6xl px-4 py-10">
       {/* Header */}
-      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Showrooms</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Bay Area sourcing hubs. Filter, browse, and add showrooms for your renovation.
+            Bay Area sourcing hubs, grouped and live. Pick a region, group how you like, and see
+            what's open right now.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -2606,12 +3182,44 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
         </div>
       </div>
 
-      {/* Stats Bar */}
-      {!loading && <StatsBar stores={allStores} />}
+      {/* Header locator strip (cheap always-on locator; the map lives in Map view) */}
+      <div className="mb-4">
+        <HeaderLocatorStrip userLoc={userLoc} regionLabel={regionLabel} count={regionStores.length} />
+      </div>
+
+      {/* Region tabs with live counts */}
+      <div className="space-y-1">
+        <RegionTabs
+          counts={regionCounts}
+          total={filtered.length}
+          active={region}
+          onSelect={selectRegion}
+        />
+        {regionSource === "geo" && region != null && (
+          <p className="flex items-center gap-1 text-[11px] text-muted-foreground/70">
+            <Navigation className="size-3" />
+            Auto-selected by your location
+          </p>
+        )}
+      </div>
+
+      {/* Grouping + layout controls (grouped view only) */}
+      {viewMode === "grouped" && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <GroupBySwitcher value={groupBy} onChange={setGroupBy} />
+          <LayoutToggle value={layout} onChange={setLayout} />
+        </div>
+      )}
 
       {/* Filter Bar */}
       <div className="mb-5 mt-4">
-        <FilterBar filters={filters} onChange={setFilters} allCategories={categories} allTypes={types} pst={pst} />
+        <FilterBar
+          filters={filters}
+          onChange={setFilters}
+          allCategories={categories}
+          allTypes={types}
+          pst={pst}
+        />
       </div>
 
       {/* Content */}
@@ -2620,11 +3228,9 @@ export function ShowroomsDirectoryApp({ initialTab = "map" }: { initialTab?: Vie
           <Loader2 className="size-6 animate-spin" />
         </div>
       ) : viewMode === "map" ? (
-        <MapView stores={filtered} pst={pst} />
-      ) : viewMode === "list" ? (
-        <ListView stores={filtered} pst={pst} />
+        <MapView stores={regionStores} pst={pst} />
       ) : (
-        <DirectoryView stores={filtered} pst={pst} />
+        <GroupedExperience stores={regionStores} pst={pst} groupBy={groupBy} layout={layout} />
       )}
     </main>
   );

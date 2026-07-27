@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/showrooms-grouped-table",
+    title: "Showrooms · grouped-table rebuild (0037 Phase 2)",
+    summary:
+      "The Showrooms directory becomes a grouped, space-efficient table wired to live data. Region tabs (SF / South Bay / Peninsula / East Bay / North Bay / Central Valley / All) carry live counts and auto-select the nearest region by geolocation; a group-by switcher (Sales Category default / Rating / Flagship / Closing Time) buckets the active region, open stores first sorted by earliest close, closed stores folded into an expandable 'N closed now' banner. Cards ↔ Rows toggle; a detail modal with full weekly hours + Call / Website / Google Maps / Tesla Nav (POST /api/tesla/navigate) / View full details. The map view is preserved behind a Grouped/Map toggle. Reuses the existing fetch, ShowroomMergedCard, hours-status helpers and Manage/Add modals — no new data endpoints, no migration. Default tab map→grouped; retired list/directory deep-links redirect to grouped.",
+    date: "2026-07-26",
+    status: "staged",
+    prNumber: 282,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/282",
+  },
+  {
     branch: "claude/shopping-sourcing-sidebar-41f368",
     title: "Shopping · nested collapsible sidebar + IA (0037 Phase 0)",
     summary:
@@ -275,6 +285,24 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "added", text: "BaseLayout seeds the collapse state server-side from the cookie and drives BOTH the fixed aside width AND the content padding off a single --sidebar-w CSS var keyed on <html data-sidebar-collapsed>, so one client toggle reflows the layout with no flash." },
       { kind: "changed", text: "Per-section and per-item lucide icons added; group-header text bumped from text-[10px] to text-xs for readability." },
       { kind: "changed", text: "Shopping group re-authored into three nested submenus — Showrooms (Drive Lists, Contacts, Sales & Clearance, Showroom Intake), Brands & Products (Materials, Products, Wishlist, Deep Research, Shopping Journal), Purchase Ops → Review (Price Cards, Product Photos) + Receipt Review — and the /admin/shopping hub landing regrouped to match, on the standard page shell." },
+    ],
+    status: "staged",
+  },
+  {
+    id: "0037-showrooms-grouped-table",
+    branch: "claude/showrooms-grouped-table",
+    date: "2026-07-26",
+    area: "Shopping",
+    title: "Showrooms grouped-table (0037 Phase 2)",
+    summary:
+      "The Showrooms directory is rebuilt from a card/hub-accordion into a grouped, space-efficient table wired to live data — region tabs with live counts + geolocation, a group-by switcher, closed-store collapse, a cards/rows toggle, and a detail modal with Google Maps + Tesla navigation. No new endpoints, no migration.",
+    changes: [
+      { kind: "added", text: "Region tabs (from HUB_LABEL: SF / South Bay / Peninsula / East Bay / North Bay / Central Valley / All) with live badge counts; geolocation auto-selects the nearest region (falls back to SF), with a subtle 'auto-selected by location' note." },
+      { kind: "added", text: "Group-by switcher — Sales Category (default) / Rating / Flagship / Closing Time; each group header shows count + avg rating + open-now count." },
+      { kind: "added", text: "Open stores sort first by earliest closing time; closed stores fold into an expandable 'N closed now — name, name…' banner (dimmed cards/rows on expand)." },
+      { kind: "added", text: "Cards ↔ Rows toggle (cards reuse ShowroomMergedCard; rows are a compact keyboard-accessible table). Lean filter bar: search, business-model type chips, Open Now (via hours-status), visit status (All/Unvisited/Visited)." },
+      { kind: "added", text: "Detail modal — full 7-day hours (today highlighted) + Call (tel:) / Website / Google Maps nav / Tesla Nav (POST /api/tesla/navigate) / View full details." },
+      { kind: "changed", text: "Default tab map→grouped; view toggle is Grouped/Map (the old list/directory views were superseded by grouping; their deep-links redirect to grouped). Map view preserved. Reuses the existing fetch + meta endpoints — no new data endpoints." },
     ],
     status: "staged",
   },
