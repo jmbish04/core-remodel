@@ -309,6 +309,13 @@
       "when": 1785105541205,
       "tag": "0143_thick_black_bird",
       "breakpoints": true
+    },
+    {
+      "idx": 144,
+      "version": "6",
+      "when": 1785112833604,
+      "tag": "0144_vengeful_elektra",
+      "breakpoints": true
     }
   ]
 }
