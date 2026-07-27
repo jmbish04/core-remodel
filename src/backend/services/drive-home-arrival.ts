@@ -25,7 +25,8 @@
  */
 import { projectSystemVariables } from "@backend/db";
 import { GoogleMapsService } from "@backend/services/google/maps";
-import { eq, inArray } from "drizzle-orm";
+import { getPrimaryProperty } from "@backend/services/property";
+import { eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
@@ -107,24 +108,16 @@ export async function getHomeCoords(
     return { latitude: lat, longitude: lng };
   }
 
-  // Not cached — build the address from the permit config and geocode it once.
-  const rows = await db
-    .select({ key: projectSystemVariables.variableKey, value: projectSystemVariables.valueText })
-    .from(projectSystemVariables)
-    .where(
-      inArray(projectSystemVariables.variableKey, [
-        "permits_target_address",
-        "permits_target_city",
-        "permits_target_zip",
-      ]),
-    )
-    .all();
-  const cfg = new Map(rows.map((r) => [r.key, r.value]));
-  const street = cfg.get("permits_target_address");
-  if (!street) return null;
-  const query = [street, cfg.get("permits_target_city"), cfg.get("permits_target_zip")]
-    .filter(Boolean)
-    .join(", ");
+  // Not cached — resolve the origin from the single property reader (the
+  // `properties` table, else the legacy permit-config KV). If the table already
+  // carries coordinates, trust them and skip the geocode entirely.
+  const property = await getPrimaryProperty(db);
+  if (!property) return null;
+  if (property.latitude != null && property.longitude != null) {
+    return { latitude: property.latitude, longitude: property.longitude };
+  }
+  const query = property.formattedAddress;
+  if (!query) return null;
 
   try {
     const place = await new GoogleMapsService(env).placesTextSearch(query);
