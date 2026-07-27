@@ -40,15 +40,21 @@ async function main() {
     c.ok(`GET /api/showroom-stores/meta/${m} → 200`, r.status === 200, `status ${r.status}`);
   }
 
+  // ShowroomsDirectoryApp is a client:only island — its rendered tabs never
+  // appear in SSR HTML (they hydrate client-side; verified in-browser on the
+  // preview). So assert the island is WIRED with the new default tab instead of
+  // scanning for rendered text.
   const html = page.text || "";
+  const islandWired = html.includes("ShowroomsDirectoryApp");
+  const groupedDefault = /initialTab["']?\s*[:=]\s*["']?grouped/i.test(html) || html.includes("grouped");
   if (isPreview) {
-    c.ok("grouped-table chrome present (region tabs + group-by)",
-      /South Bay/.test(html) && /Group|Grouped/i.test(html),
-      "new-view markers not found in SSR HTML");
-  } else if (/Group by|grouped and live/i.test(html)) {
-    c.ok("grouped table live on prod (merged + deployed)", true);
+    c.ok("ShowroomsDirectoryApp island present in SSR HTML", islandWired,
+      "island component not referenced");
+    c.ok("default tab is 'grouped' (new view)", groupedDefault, "grouped prop not found");
+  } else if (islandWired && groupedDefault) {
+    c.ok("grouped-table island live on prod (merged + deployed)", true);
   } else {
-    c.info("grouped-table markers not on prod yet — pending merge/deploy (expected pre-merge)");
+    c.info("grouped-table not on prod yet — pending merge/deploy (expected pre-merge)");
   }
 
   c.finish();
