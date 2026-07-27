@@ -321,6 +321,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "added", text: "GeocodeAddressField — Places-autocomplete address→coords via /api/places (typeahead + details)." },
       { kind: "added", text: "tesla_* / loc_* config keys (home/work coords+address, proximity/home-work/park/depart radii, dwell_min, stale_seconds, scan_enabled) written via POST /api/admin/config (db.batch)." },
       { kind: "changed", text: "Recording master switch reuses the existing tesla_telemetry_recording_enabled flag (not the spec's unused tesla_record_telemetry) — avoids a split-brain recording flag." },
+      { kind: "fixed", text: "Codra follow-ups: GeocodeAddressField now sequences/aborts autocomplete requests (no stale overwrite), guards state after unmount, and surfaces a resolve failure; QC pr_293 gates the config write on the ACTUAL base (not a CLI flag) with a per-run key + verified cleanup; NumField caps length + label association." },
     ],
     status: "staged",
   },
