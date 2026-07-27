@@ -308,6 +308,22 @@ export const CHANGELOG: ChangelogEntry[] = [
     status: "staged",
   },
   {
+    id: "0032-visit-log-mcp-crud",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-27",
+    tag: "0032",
+    area: "Tesla / Visits",
+    title: "Visit-log MCP CRUD + shared service (0032 V2b)",
+    summary:
+      "Adds the MCP twins of the visit-log REST routes and extracts the ONE service both call, so the human surface (V2a #288) and the voice loop can't drift. New MCP 'visits' domain: list/get/create/update/delete_visit_log, stage_showroom_visit (AI_STAGED draft from a note), finalize_visit_log (→SUBMITTED). Rating 1-5 guarded in the service; store name JOINed. No migration.",
+    changes: [
+      { kind: "added", text: "services/showroom/visit-log.ts — the single path REST + MCP both call (list/get/create/update/delete + rating guard + dwell)." },
+      { kind: "changed", text: "/api/showroom-visit-logs refactored to delegate to the shared service (no duplicated logic)." },
+      { kind: "added", text: "MCP 'visits' domain (7 tools) — full CRUD + stage_showroom_visit + finalize_visit_log. 121 tools total; auto-renders on /connect/tools." },
+    ],
+    status: "staged",
+  },
+  {
     id: "0032-visit-log-rest-crud",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-27",
