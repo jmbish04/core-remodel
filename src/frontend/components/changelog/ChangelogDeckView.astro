@@ -31,21 +31,33 @@ function extractMermaidSlides(markdown: string | null | undefined): { title: str
   const out: { title: string; code: string }[] = [];
   let heading = "";
   let inFence = false;
+  let fenceLang = "";
   let buf: string[] = [];
   let n = 0;
   for (const line of markdown.split("\n")) {
     const fence = line.match(/^```(\w*)/);
-    if (!inFence && fence) {
-      if (fence[1] === "mermaid") { inFence = true; buf = []; }
+    if (fence) {
+      if (!inFence) {
+        // Opening ANY fence — track its language so non-mermaid blocks are
+        // skipped entirely (their content must not be scanned for headings).
+        inFence = true;
+        fenceLang = fence[1];
+        if (fenceLang === "mermaid") buf = [];
+      } else {
+        // Closing the current fence — emit only if it was a mermaid block.
+        if (fenceLang === "mermaid") {
+          n += 1;
+          out.push({ title: heading || `Diagram ${n}`, code: buf.join("\n") });
+        }
+        inFence = false;
+        fenceLang = "";
+      }
       continue;
     }
-    if (inFence && /^```/.test(line)) {
-      n += 1;
-      out.push({ title: heading || `Diagram ${n}`, code: buf.join("\n") });
-      inFence = false;
-      continue;
+    if (inFence) {
+      if (fenceLang === "mermaid") buf.push(line);
+      continue; // never treat fenced content as a heading
     }
-    if (inFence) { buf.push(line); continue; }
     const h = line.match(/^#{1,4}\s+(.*)/);
     if (h) heading = h[1].replace(/[*`]/g, "").trim();
   }
