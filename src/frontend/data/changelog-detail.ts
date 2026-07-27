@@ -113,6 +113,56 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "0032-visit-log-reconcile": {
+    slug: "0032-visit-log-reconcile",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0032 V1 · reconcile showroom_visit_log toward 0022 §5.1",
+    problem:
+      "The shipped showroom_visit_log is a subset of the 0022 §5.1 spec: its `type` column holds a CONTACT axis (PHONE/EMAIL/SHOWROOM_IN_PERSON), there's no engagement-depth signal, and no GPS-attestation fields. The Visit Logs workspace (V2) and the future GPS-attested review moat need the visit graded by how deep the visit actually went and how strong the location match was.",
+    approach:
+      "Add visit_type as the engagement axis — SOFT_ARRIVAL (auto-staged, unclassified), BROWSED_NO_CONTACT (walked through, spoke to no one), BRIEF_NO_HELP (asked, got pointed), FULL_SESSION (on the floor pulling samples), APPOINTMENT — separate from the deprecated contact-axis `type` (which belongs on showroom_store_contact_log). Add match_distance_m (how far the park was from the matched store = attestation strength) and provenance_json (raw fix + active-drive id). Widen gps_source (+ tesla-poll, phone, ai) for the coming multi-source ingress. stageSoftArrival/finalizeSoftArrivals populate the provenance fields. Rating stays 1-5 but is enforced in the API/service layer — SQLite can't ALTER-ADD a CHECK to an existing table without a full rebuild, which drizzle-kit won't auto-generate, so a schema check() would drift from the migration. hitl_queue_id + the store/hitl XOR rule are deferred to D1 (they need the showroom_store_hitl_queue table).",
+    apiChanges: ["No new route in V1 (GET /api/tesla/visits gains the columns for V2)."],
+    filesTouched: [
+      "src/backend/db/schema/showroom/visit_log.ts (visit_type, match_distance_m, provenance_json; widened gps_source)",
+      "src/backend/services/tesla/visit-sessions.ts (populate provenance on stage + finalize)",
+      "drizzle/0147_lovely_silver_sable.sql",
+    ],
+    migrations: [
+      {
+        tag: "0147",
+        sql: "ALTER TABLE showroom_visit_log ADD visit_type text DEFAULT 'SOFT_ARRIVAL' NOT NULL; ADD match_distance_m real; ADD provenance_json text;",
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Two axes: engagement (visit) vs channel (contact)",
+        code: `erDiagram
+  showroom_visit_log {
+    text visit_type "ADD — engagement depth"
+    text type "DEPRECATED — contact axis moves out"
+    real match_distance_m "ADD — attestation"
+    text provenance_json "ADD — raw fix"
+  }
+  showroom_store_contact_log {
+    text type "PHONE|EMAIL|SHOWROOM_IN_PERSON"
+    int showroom_visit_log_id "links a contact to a visit (D1)"
+  }
+  showroom_visit_log ||--o{ showroom_store_contact_log : "in-person contact during a visit"`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_286.mjs",
+      command: "pnpm run db:generate  &&  pnpm run build  &&  pnpm run test:pr 286 -- --preview",
+      ranAt: "2026-07-26",
+      output:
+        "db:generate → 0147_lovely_silver_sable.sql (3 ADD COLUMNs; no CHECK emitted —\n" +
+        "SQLite ALTER limitation, rating enforced in the API layer). tsc --noEmit clean on\n" +
+        "visit_log.ts + visit-sessions.ts. pnpm run build green (server built ~132s).\n" +
+        "migrate:local full-chain replay against fresh local D1 run before merge. Remote\n" +
+        "migration applied via the Deploy (manual) action (run_migrations:true).",
+      migrations: [{ tag: "0147", applied: false }],
+    },
+  },
   "0037-shopping-sidebar-ia": {
     slug: "0037-shopping-sidebar-ia",
     branch: "claude/shopping-sourcing-sidebar-41f368",
