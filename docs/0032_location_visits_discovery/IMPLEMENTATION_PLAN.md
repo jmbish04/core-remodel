@@ -169,7 +169,7 @@ stateDiagram-v2
 ```
 
 **Detector state** lives in KV (`CACHE`, key `loc:detector:<subjectId>`), never a growing table — mirrors the existing `tesla:last-shift:<vin>` pattern. Constants (config-driven, §7):
-- `DWELL_MIN` (default **8 min** — a real showroom stop, not a red light). Lower than #178's 10 to catch quick peeks; tune from data.
+- `DWELL_MIN` (default **5 min**, config-adjustable — a real showroom stop, not a red light; low enough to catch a quick slab-yard peek). CONFIRMED 2026-07-26.
 - `PARK_RADIUS_M` (default 60 m — "same spot across fixes").
 - `DEPART_RADIUS_M` (default 120 m — "the car left").
 - `MOVE_EPS_M` (default 40 m — GPS jitter floor).
@@ -253,7 +253,7 @@ erDiagram
   - **`showroom_visit_log.visit_type` = engagement depth of the visit** — `SOFT_ARRIVAL` (auto-staged, not yet classified) · `BROWSED_NO_CONTACT` (walked through, spoke to no one) · `BRIEF_NO_HELP` (asked someone, got pointed, no real engagement) · `FULL_SESSION` (worked the floor, pulled samples, real consultation) · `APPOINTMENT` (scheduled). This is the quality signal that matters for the future sale of the app.
   - **`showroom_store_contact_log` = who/how you communicated** — `type` = `PHONE | EMAIL | SHOWROOM_IN_PERSON`, PLUS an **optional `showroom_visit_log_id` FK** (0022 §5.3). So an in-person contact made *during* a visit links back to that visit and carries `type = SHOWROOM_IN_PERSON`; a phone/email contact stands alone with a null visit link. This lets "who did I actually talk to on the floor that day" be a first-class, queryable fact.
   - Migrate the mislabeled existing `type` values onto the right axis.
-- **D-2.** Add `hitl_queue_id` + the XOR `CHECK ((store_id IS NOT NULL) <> (hitl_queue_id IS NOT NULL))`. But note: existing rows can have `store_id NULL` (unresolved soft arrival) — the XOR would reject those. **Proposed:** XOR applies only to non-`SOFT_ARRIVAL` statuses, or allow both-null while `SOFT_ARRIVAL`. Confirm.
+- **D-2 (CONFIRMED 2026-07-26).** Add `hitl_queue_id`. The "exactly one of store_id / hitl_queue_id" rule is enforced **only once the visit is confirmed** (status `SUBMITTED`, and for `TESLA_STAGED`/`DRAFT` where a target is known); while a row is still an unconfirmed `TESLA_SOFT_ARRIVAL`/`AI_STAGED` auto-arrival, "neither yet" is allowed. Implemented as a partial CHECK (`status IN (...) → the XOR holds`) plus service-layer validation on finalize.
 - **D-3.** `match_distance_m` + `provenance_json` are additive/nullable — safe.
 
 ### 5.2 New tables (0022 §5.2 / §5.7)
@@ -363,7 +363,7 @@ flowchart TD
 ---
 
 ## 7. Config keys (`project_system_variables`, category `tesla`)
-`tesla_record_telemetry` (master) · `tesla_primary_residence_address` + `tesla_home_lat/_lng` · `tesla_work_address` + `tesla_work_lat/_lng` · `tesla_proximity_radius_m` (250) · `tesla_home_work_radius_m` (150) · `tesla_proximity_scan_enabled` · `tesla_location_stale_seconds` (300) · **new:** `loc_dwell_min_seconds` (480) · `loc_park_radius_m` (60) · `loc_depart_radius_m` (120). Reuses `GET/POST /api/admin/config`.
+`tesla_record_telemetry` (master) · `tesla_primary_residence_address` + `tesla_home_lat/_lng` · `tesla_work_address` + `tesla_work_lat/_lng` · `tesla_proximity_radius_m` (250) · `tesla_home_work_radius_m` (150) · `tesla_proximity_scan_enabled` · `tesla_location_stale_seconds` (300) · **new:** `loc_dwell_min_seconds` (300 = 5 min) · `loc_park_radius_m` (60) · `loc_depart_radius_m` (120). Reuses `GET/POST /api/admin/config`.
 
 ---
 
@@ -384,9 +384,10 @@ flowchart TD
 
 ---
 
-## 10. Open questions for the review
-1. **D-1 / D-2 (§5.1)** — confirm the `visit_type` split and the XOR-vs-soft-arrival nullability rule.
-2. **DWELL_MIN** — 8 min default OK, or tune (a slab yard peek can be <5 min)?
-3. **Phone as a first-class driver** — should a phone fix alone (no Tesla) be allowed to stage visits, or only corroborate? (Proposed: yes, first-class — it's the cheapest always-available source.)
-4. **AI-supplied coordinates** — a dedicated `report_location` MCP tool that feeds the detector, or fold into `create_visit_log`'s existing coords? (Proposed: a thin `report_location` so "I'm parked at X" drives the same pipeline.)
-5. **D2/N1/K1 ownership** — confirm they're a separate later pass so this one stays shippable.
+## 10. Decisions (all CONFIRMED 2026-07-26)
+1. **D-1 — visit_type = engagement depth; contact_log stays separate + gains an optional visit FK.** ✅ (§5.1)
+2. **D-2 — "exactly one of store_id / hitl_queue_id" enforced only once confirmed; neither-yet allowed while an unconfirmed auto-arrival.** ✅ (§5.1)
+3. **DWELL_MIN = 5 min, config-adjustable.** ✅ (§3.3)
+4. **Phone is a first-class source** — a phone fix alone can stage a visit (no Tesla required). ✅
+5. **AI-supplied coords via a dedicated `report_location` MCP tool** that feeds the detector (so "I'm at the stone place" stages the visit like the car would). ✅
+6. **D2 / N1 / K1 are a separate later pass** so 0032 (L0–V2, C1, D1) stays independently shippable. ✅
