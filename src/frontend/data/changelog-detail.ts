@@ -113,6 +113,48 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "0032-visit-log-mcp-crud": {
+    slug: "0032-visit-log-mcp-crud",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0032 V2b · MCP CRUD twins + the one shared service",
+    code: [],
+    problem:
+      "V2a shipped the visit-log REST routes with their DB logic inline. The voice loop needs the same operations as MCP tools — and if MCP re-implemented the queries, the two surfaces would drift (different defaults, different rating guards, the classic split-brain).",
+    approach:
+      "Extract services/showroom/visit-log.ts as the single path: list (pending/completed/by-store), get, create, update, delete — with the rating 1–5 guard (the API-layer replacement for the DB CHECK SQLite can't add) and dwell computation, store name JOINed on read. Refactor the REST route to delegate to it, then add a new MCP 'visits' domain whose 7 tools are thin wrappers over the SAME service: list/get/create/update/delete_visit_log, stage_showroom_visit (forces AI_STAGED — a draft from a voice note), finalize_visit_log (forces SUBMITTED). Registered in ALL_TOOL_GROUPS (121 tools; auto-renders on /connect/tools).",
+    apiChanges: [
+      "MCP: list/get/create/update/delete_visit_log, stage_showroom_visit, finalize_visit_log (category 'visits').",
+      "REST /api/showroom-visit-logs unchanged externally — now delegates to the shared service.",
+    ],
+    filesTouched: [
+      "src/backend/services/showroom/visit-log.ts (new — shared service)",
+      "src/backend/api/routes/showroom-visit-logs.ts (delegate to service)",
+      "src/backend/mcp/tools/visits/* (7 tools + _shared + index)",
+      "src/backend/mcp/tools/index.ts (register visitTools)",
+    ],
+    migrations: [],
+    diagrams: [
+      {
+        caption: "REST + MCP through one service — no drift",
+        code: `flowchart LR
+  UI[Admin UI / REST client] --> R[/api/showroom-visit-logs]
+  VOICE[Claude voice + MCP] --> M[visits domain: 7 tools]
+  R --> S[[shared visit-log service: rating guard, dwell, JOIN]]
+  M --> S
+  S --> DB[(showroom_visit_log)]`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_290.mjs",
+      command: "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 290 -- --preview",
+      ranAt: "2026-07-27",
+      output:
+        "tsc --noEmit clean on the visits domain + service + route + tools/index.ts. " +
+        "pnpm run build green. Tool count 114 → 121 (+7 visits). No schema change → no migration. " +
+        "QC pr_290 runs the CRUD round-trip (create DRAFT → get → finalize → rating-999 rejected → delete).",
+      migrations: [],
+    },
+  },
   "0038-sales-schema-phase-a": {
     slug: "0038-sales-schema-phase-a",
     branch: "claude/sales-clearance-page-b0c752",

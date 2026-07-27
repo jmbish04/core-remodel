@@ -41,8 +41,13 @@ export const writeShape = {
   departureAt: isoOrEpoch.optional().describe("When it ended — sets dwell"),
 } as const;
 
-const toDate = (v: string | number | undefined): Date | undefined =>
-  v == null ? undefined : new Date(typeof v === "number" ? v : Date.parse(v));
+const toDate = (v: string | number | undefined): Date | undefined => {
+  if (v == null) return undefined;
+  const ms = typeof v === "number" ? v : Date.parse(v);
+  // Reject an unparseable date — new Date(NaN) is an Invalid Date that would slip
+  // past a `?? null` guard and persist garbage.
+  return Number.isFinite(ms) ? new Date(ms) : undefined;
+};
 
 /** Map validated MCP input to the service's VisitLogWrite (dates parsed). */
 export function toWrite(input: Record<string, unknown>): VisitLogWrite {
