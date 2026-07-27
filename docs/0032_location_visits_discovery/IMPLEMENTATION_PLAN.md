@@ -234,8 +234,8 @@ erDiagram
         int departure_at "EXISTING"
         int dwell_seconds "EXISTING"
         text status "EXISTING: AI_STAGED|TESLA_SOFT_ARRIVAL|TESLA_STAGED|SUBMITTED"
-        text visit_type "ADD — WALK_IN_* | APPOINTMENT | SOFT_ARRIVAL (split from contact type)"
-        text type "EXISTING but MISNAMED: PHONE|EMAIL|SHOWROOM_IN_PERSON → deprecate/migrate"
+        text visit_type "ADD — engagement depth: SOFT_ARRIVAL | BROWSED_NO_CONTACT | BRIEF_NO_HELP | FULL_SESSION | APPOINTMENT"
+        text type "EXISTING but MISNAMED (contact axis) → migrate to visit_type; contact axis lives on contact_log"
         int rating "EXISTING — ADD CHECK 1..5"
         text notes_markdown "EXISTING"
         text notes_html "EXISTING"
@@ -249,7 +249,10 @@ erDiagram
 ```
 
 **Reconciliation decisions to confirm with the user (flagged, not silently chosen):**
-- **D-1.** The shipped `type` column holds `PHONE|EMAIL|SHOWROOM_IN_PERSON` (a *contact* axis). 0022 wants `type` to be the *visit* axis (`WALK_IN_*`, `APPOINTMENT`, `SOFT_ARRIVAL`). **Proposed:** add `visit_type` for the 0022 axis; keep the contact axis on `showroom_store_contact_log.type` (its rightful home). Migrate existing rows.
+- **D-1 (CONFIRMED 2026-07-26).** Two separate entities, cleanly split:
+  - **`showroom_visit_log.visit_type` = engagement depth of the visit** — `SOFT_ARRIVAL` (auto-staged, not yet classified) · `BROWSED_NO_CONTACT` (walked through, spoke to no one) · `BRIEF_NO_HELP` (asked someone, got pointed, no real engagement) · `FULL_SESSION` (worked the floor, pulled samples, real consultation) · `APPOINTMENT` (scheduled). This is the quality signal that matters for the future sale of the app.
+  - **`showroom_store_contact_log` = who/how you communicated** — `type` = `PHONE | EMAIL | SHOWROOM_IN_PERSON`, PLUS an **optional `showroom_visit_log_id` FK** (0022 §5.3). So an in-person contact made *during* a visit links back to that visit and carries `type = SHOWROOM_IN_PERSON`; a phone/email contact stands alone with a null visit link. This lets "who did I actually talk to on the floor that day" be a first-class, queryable fact.
+  - Migrate the mislabeled existing `type` values onto the right axis.
 - **D-2.** Add `hitl_queue_id` + the XOR `CHECK ((store_id IS NOT NULL) <> (hitl_queue_id IS NOT NULL))`. But note: existing rows can have `store_id NULL` (unresolved soft arrival) — the XOR would reject those. **Proposed:** XOR applies only to non-`SOFT_ARRIVAL` statuses, or allow both-null while `SOFT_ARRIVAL`. Confirm.
 - **D-3.** `match_distance_m` + `provenance_json` are additive/nullable — safe.
 
