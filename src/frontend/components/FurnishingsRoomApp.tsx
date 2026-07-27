@@ -8,7 +8,8 @@
 // ---------------------------------------------------------------------------
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, PackageSearch, Search, X } from "lucide-react";
+import { Check, PackagePlus, PackageSearch, Search, X } from "lucide-react";
+import { toast } from "sonner";
 
 import { RoomSelect } from "@/components/ui/room-select";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -45,6 +46,33 @@ export function FurnishingsRoomApp() {
   const dismiss = (id: string) => {
     setItems((prev) => prev.filter((it) => it.id !== id));
     void patchFurnishing(id, { status: "dismissed" }).catch(() => {});
+  };
+
+  // Promote a furnishing into the room's Materials Schedule (the existing
+  // per-room material_schedule_items, which drive product-match + budget). On
+  // success the furnishing is marked adopted so it reads as "handled".
+  const addToMaterials = async (item: FurnishingItem) => {
+    if (roomId == null) return;
+    try {
+      const res = await fetch("/api/materials", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          title: item.label,
+          roomId,
+          notes: [item.category, item.note].filter(Boolean).join(" · ") || null,
+        }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      setItems((prev) =>
+        prev.map((it) => (it.id === item.id ? { ...it, status: "adopted" } : it)),
+      );
+      void patchFurnishing(item.id, { status: "adopted" }).catch(() => {});
+      toast.success(`Added “${item.label}” to the Materials Schedule.`);
+    } catch {
+      toast.error("Couldn’t add to materials — try again.");
+    }
   };
 
   const toggleAdopted = (item: FurnishingItem) => {
@@ -146,6 +174,15 @@ export function FurnishingsRoomApp() {
                         </span>
                         <Search className="size-4 shrink-0 text-muted-foreground" />
                       </a>
+                      <button
+                        type="button"
+                        aria-label={`Add ${item.label} to materials`}
+                        title="Add to Materials Schedule"
+                        onClick={() => void addToMaterials(item)}
+                        className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground outline-none hover:bg-foreground/[0.06] hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        <PackagePlus className="size-4" />
+                      </button>
                       <button
                         type="button"
                         aria-label={`Dismiss ${item.label}`}
