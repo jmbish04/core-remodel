@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/shopping-sourcing-sidebar-41f368",
+    title: "Shopping · nested collapsible sidebar + IA (0037 Phase 0)",
+    summary:
+      "Foundation for the 0037 Shopping & Sourcing refactor. The flat 15-item shopping sidebar (tiny text, no submenus, no collapse) becomes a nested, icon'd, collapsible tree. SidebarItem is now recursive (optional href/icon/children/navigateOnExpand); NavNode renders arbitrary-depth submenus that start collapsed and auto-expand the active branch's ancestors — a navigateOnExpand parent both navigates to its section landing and expands, while a separate chevron peeks in place. Per-section + per-item lucide icons; group-header text bumped 10px→xs. New collapse-to-rail: AdminSidebar toggles w-64 ↔ a w-14 icon rail (section icons + expand/home/config), persisted in a remodel_sidebar_collapsed cookie; BaseLayout seeds it server-side and drives the fixed aside AND the content padding off a single --sidebar-w CSS var, so the layout reflows with no SSR flash. The shopping group is re-authored into three submenus (Showrooms / Brands & Products / Purchase Ops → Review); net-new leaves (Review dashboard, Invoices, Deliveries, Concierge) join in later phases so the nav never 404s. No migration, no API — pure frontend. Bundle renamed 0032→0037 to dodge an ordinal collision with concurrent property_origin_config work.",
+    date: "2026-07-26",
+    status: "staged",
+    prNumber: 277,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/277",
+  },
+  {
     branch: "claude/changelist-phases-live-updates-6cfa61",
     title: "Changelog · phase-grouped, live-updating preview tasks (websocket + poll)",
     summary:
@@ -250,6 +260,24 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "0037-shopping-sidebar-ia",
+    branch: "claude/shopping-sourcing-sidebar-41f368",
+    date: "2026-07-26",
+    area: "Shopping",
+    title: "Nested collapsible shopping sidebar + IA (0037 Phase 0)",
+    summary:
+      "The flat 15-item Shopping & Sourcing sidebar (tiny 10px text, no submenus, no way to collapse it) becomes a nested, icon'd, collapsible tree, and the whole admin sidebar gains a collapse-to-rail toggle that reflows the page with no SSR flash. Pure frontend — no migration, no API.",
+    changes: [
+      { kind: "changed", text: "SidebarItem is now a recursive tree: optional href, icon, children[], and navigateOnExpand (a submenu parent that both navigates to its section landing and expands). Additive — existing flat groups are unchanged." },
+      { kind: "added", text: "NavNode renders arbitrary-depth submenus, collapsed by default, auto-expanding the active branch's ancestors from the SSR path (no post-hydration flip). A navigateOnExpand parent is a link; a separate chevron button peeks in place without leaving the page." },
+      { kind: "added", text: "Collapse-to-rail: AdminSidebar toggles w-64 ↔ a w-14 icon rail (one icon per admin section + expand/home/config), persisted in a remodel_sidebar_collapsed cookie." },
+      { kind: "added", text: "BaseLayout seeds the collapse state server-side from the cookie and drives BOTH the fixed aside width AND the content padding off a single --sidebar-w CSS var keyed on <html data-sidebar-collapsed>, so one client toggle reflows the layout with no flash." },
+      { kind: "changed", text: "Per-section and per-item lucide icons added; group-header text bumped from text-[10px] to text-xs for readability." },
+      { kind: "changed", text: "Shopping group re-authored into three nested submenus — Showrooms (Drive Lists, Contacts, Sales & Clearance, Showroom Intake), Brands & Products (Materials, Products, Wishlist, Deep Research, Shopping Journal), Purchase Ops → Review (Price Cards, Product Photos) + Receipt Review — and the /admin/shopping hub landing regrouped to match, on the standard page shell." },
+    ],
+    status: "staged",
+  },
   {
     id: "changelog-live-phases",
     branch: "claude/changelist-phases-live-updates-6cfa61",

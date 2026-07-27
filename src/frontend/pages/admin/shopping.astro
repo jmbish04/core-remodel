@@ -1,25 +1,48 @@
 ---
 import BaseLayout from "@/layouts/BaseLayout.astro";
 
-// Hub-and-spoke landing: this page is the home for ALL sourcing & shopping tools.
-// The sidebar surfaces only the high-traffic few; every tool is reachable here.
-const links = [
-  { href: "/admin/shopping/showrooms", title: "Showrooms", desc: "Bay Area hub directory: map, list, and field directory." },
-  { href: "/admin/shopping/contacts", title: "Contacts", desc: "Phonebook of showroom reps — call/email in one tap, bulk-import business cards." },
-  { href: "/admin/shopping/schedule", title: "Materials Schedule", desc: "The master list of materials to source." },
-  { href: "/admin/shopping/products", title: "Products", desc: "Cross-store product catalog." },
-  { href: "/admin/shopping/wishlist", title: "Wishlist", desc: "Curated wants by room + cross-room collections." },
-  { href: "/admin/products", title: "All Products (Global)", desc: "Every product across all brands & showrooms." },
-  { href: "/admin/shopping/journal", title: "Shopping Journal", desc: "Log showroom trips, pricing, and contractor interviews." },
-  { href: "/admin/shopping/research", title: "Deep Research", desc: "Plan-gated sourcing research." },
-  { href: "/admin/shopping/compare", title: "Compare", desc: "Side-by-side product decisions." },
-  { href: "/admin/shopping/gaps", title: "Coverage Gaps", desc: "Product areas with no showroom coverage yet." },
-  { href: "/admin/shopping/scan", title: "Field Scan", desc: "Capture products at showrooms." },
-  { href: "/admin/shopping/intake", title: "Add Showroom", desc: "Google-powered intake: search, auto-fill, review, save." },
-  { href: "/admin/shopping/brands", title: "Brands", desc: "Brand directory with auto-scraped icons + type badges." },
-  { href: "/admin/config/brands/types", title: "Brand Types", desc: "Manage brand type definitions (plumbing, lighting, ...)." },
-  { href: "/admin/shopping/closets", title: "Closet Research", desc: "Closet systems & storage sourcing." },
-  { href: "/admin/shopping/progress", title: "Build Progress", desc: "Phased build-out tracker." },
+// Hub-and-spoke landing: home for ALL sourcing & shopping tools. The sidebar
+// surfaces the high-traffic few (nested under Showrooms / Brands & Products /
+// Purchase Ops); this page mirrors that IA and lists every tool, including the
+// ones the sidebar omits.
+const sections: { title: string; links: { href: string; title: string; desc: string }[] }[] = [
+  {
+    title: "Showrooms",
+    links: [
+      { href: "/admin/shopping/showrooms", title: "Showrooms", desc: "Bay Area hub directory: map, list, and field directory." },
+      { href: "/admin/shopping/drives", title: "Drive Lists", desc: "Plan sourcing-day routes across showrooms." },
+      { href: "/admin/shopping/contacts", title: "Contacts", desc: "Phonebook of showroom reps — call/email in one tap, bulk-import business cards." },
+      { href: "/admin/shopping/sales", title: "Sales & Clearance", desc: "Active promotions and clearance across showrooms." },
+      { href: "/admin/shopping/intake", title: "Add Showroom", desc: "Google-powered intake: search, auto-fill, review, save." },
+      { href: "/admin/shopping/gaps", title: "Coverage Gaps", desc: "Product areas with no showroom coverage yet." },
+      { href: "/admin/shopping/scan", title: "Field Scan", desc: "Capture products at showrooms." },
+    ],
+  },
+  {
+    title: "Brands & Products",
+    links: [
+      { href: "/admin/shopping/schedule", title: "Materials", desc: "The master list of materials to source." },
+      { href: "/admin/shopping/brands", title: "Brands & Products", desc: "Brand directory with auto-scraped icons + type badges." },
+      { href: "/admin/shopping/products", title: "Products", desc: "Cross-store product catalog." },
+      { href: "/admin/products", title: "All Products (Global)", desc: "Every product across all brands & showrooms." },
+      { href: "/admin/shopping/wishlist", title: "Wishlist", desc: "Curated wants by room + cross-room collections." },
+      { href: "/admin/shopping/research", title: "Deep Research", desc: "Plan-gated sourcing research." },
+      { href: "/admin/shopping/journal", title: "Shopping Journal", desc: "Log showroom trips, pricing, and contractor interviews." },
+      { href: "/admin/shopping/compare", title: "Compare", desc: "Side-by-side product decisions." },
+      { href: "/admin/shopping/closets", title: "Closet Research", desc: "Closet systems & storage sourcing." },
+      { href: "/admin/shopping/progress", title: "Build Progress", desc: "Phased build-out tracker." },
+    ],
+  },
+  {
+    title: "Purchase Ops",
+    links: [
+      { href: "/admin/shopping/photo-review", title: "Price-Card Review", desc: "Review scraped price cards before they become observations." },
+      { href: "/admin/shopping/product-photo-hitl", title: "Product-Photo Review", desc: "Confirm bucketed product-photo candidates into products." },
+      { href: "/admin/shopping/receipt-review", title: "Receipt Review", desc: "Reconcile emailed receipts into materials." },
+      { href: "/admin/shopping/photo-intake", title: "Showroom Intake", desc: "Bulk photo intake wizard for showroom stacks." },
+      { href: "/admin/config/brands/types", title: "Brand Types", desc: "Manage brand type definitions (plumbing, lighting, ...)." },
+    ],
+  },
 ];
 ---
 
@@ -27,22 +50,48 @@ const links = [
   title="Sourcing and Shopping tools — The Monolith"
   description="Launchpad for the sourcing & shopping suite: showrooms, materials, products, journal, research, compare, and field scan."
 >
-  <main class="container mx-auto max-w-4xl px-4 py-10">
-    <h1 class="text-2xl font-semibold tracking-tight">Sourcing and Shopping tools</h1>
-    <p class="mt-1 text-sm text-muted-foreground">Materials-driven sourcing across Bay Area showrooms.</p>
-
-    <div class="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
-      {
-        links.map((l) => (
-          <a
-            href={l.href}
-            class="rounded-lg bg-card p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] transition-colors hover:bg-muted/40"
-          >
-            <div class="font-medium">{l.title}</div>
-            <div class="mt-0.5 text-sm text-muted-foreground">{l.desc}</div>
-          </a>
-        ))
-      }
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 flex items-center gap-2 text-3xl font-bold tracking-tight">
+        <svg
+          class="size-6 text-muted-foreground"
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M15 11v-1a3 3 0 0 0-3-3v0a3 3 0 0 0-3 3v1" />
+          <path d="m5 11-1 9a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1l-1-9" />
+          <path d="M4 11h16l-1.6-6.4A2 2 0 0 0 16.5 3h-9a2 2 0 0 0-1.9 1.6L4 11Z" />
+        </svg>
+        Sourcing and Shopping tools
+      </h1>
+      <p class="text-muted-foreground">Materials-driven sourcing across Bay Area showrooms.</p>
     </div>
+
+    {
+      sections.map((section) => (
+        <section class="mb-8">
+          <h2 class="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+            {section.title}
+          </h2>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {section.links.map((l) => (
+              <a
+                href={l.href}
+                class="rounded-lg bg-card p-4 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] transition-colors hover:bg-muted/40"
+              >
+                <div class="font-medium">{l.title}</div>
+                <div class="mt-0.5 text-sm text-muted-foreground">{l.desc}</div>
+              </a>
+            ))}
+          </div>
+        </section>
+      ))
+    }
   </main>
 </BaseLayout>
