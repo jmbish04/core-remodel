@@ -308,6 +308,24 @@ export const CHANGELOG: ChangelogEntry[] = [
     status: "staged",
   },
   {
+    id: "0032-visit-logs-workspace",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-27",
+    tag: "0032",
+    area: "Tesla / Visits",
+    title: "Visit Logs workspace — pages, components & store section (0032 V2c)",
+    summary:
+      "The human surface for showroom visits, built on the V2a REST + V2b service. A Visit Logs workspace at /admin/shopping/showrooms/visitlogs: Pending (anything not SUBMITTED) vs Completed tabs, a detail/finalize view with a GPS-evidence mini-map (coords + match_distance_m + source + captured-at), and a manual create page. New shared components (VisitStatusBadge, VisitTypeChip, SourceBadge, StarRating, ShowroomAutocomplete, VisitLogEditor) — SourceBadge maps the REAL gps_source enum so every visit shows HOW it was captured. Store viewport gains a Visits section (pending float to the top with a finalize nudge, then history). Sidebar 'Visit Logs' entry. Frontend-only — no schema, no new API (reads the admin-gated ?storeId= filter; ShowroomAutocomplete's OTHER creates a bare store). Also fixed a latent drift: the store [section].astro allow-list was missing 'contacts', so /store/:id/contacts silently fell back.",
+    changes: [
+      { kind: "added", text: "Visit Logs workspace — list (pending/completed tabs), detail/finalize (GPS evidence + editor + this-store timeline), and manual new page." },
+      { kind: "added", text: "src/frontend/components/visits/ — Badges (status/type/source), StarRating, ShowroomAutocomplete, VisitLogEditor (PlateJS notes), GpsEvidence (reuses DriveMapThumb), VisitCard, api.ts." },
+      { kind: "added", text: "Store viewport 'visits' section (SectionKey + bento tile) — pending visits float up with a finalize nudge, then history." },
+      { kind: "added", text: "Sidebar 'Visit Logs' entry under Showrooms." },
+      { kind: "fixed", text: "store [section].astro allow-list was missing 'contacts' (and now 'visits') — /store/:id/contacts had silently fallen back to brands-products." },
+    ],
+    status: "staged",
+  },
+  {
     id: "0032-visit-log-mcp-crud",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-27",

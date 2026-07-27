@@ -1,0 +1,32 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { VisitLogNewApp } from "@/components/visits/VisitLogNewApp";
+---
+
+<BaseLayout title="New visit log — The Monolith" description="Record a manual showroom visit.">
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 flex items-center gap-2 text-3xl font-bold tracking-tight">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="size-6 text-muted-foreground"
+          aria-hidden="true"
+        >
+          <path d="M5 12h14"></path>
+          <path d="M12 5v14"></path>
+        </svg>
+        New visit log
+      </h1>
+      <p class="text-muted-foreground">Bind a showroom, capture engagement, rating, and notes.</p>
+    </div>
+    <VisitLogNewApp client:only="react" />
+  </main>
+</BaseLayout>
