@@ -133,6 +133,16 @@ export const showroomStores = sqliteTable("showroom_stores", {
   isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
 
   /**
+   * Online-only flag (0038) — this row is a web-only clearance source with no
+   * physical showroom (no address / GPS). Added from the Sale Scan Health page
+   * so web retailers' sales can be tracked alongside physical showrooms; drive
+   * routing + map features should exclude these.
+   */
+  isOnlineOnly: integer("is_online_only", { mode: "boolean" })
+    .notNull()
+    .default(false),
+
+  /**
    * Large-selection flag — indicates a warehouse-scale or unusually broad
    * inventory (e.g. "Massive, dual-wing facility").  Replaces the free-text
    * `scale` field for intake filtering; `scale` is retained for legacy display.

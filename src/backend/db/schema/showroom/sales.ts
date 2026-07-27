@@ -94,6 +94,13 @@ export const showroomStoreSales = sqliteTable(
       .notNull(),
 
     /**
+     * Full Browser-Rendering markdown of the clearance page (0038). Captured
+     * alongside the structured extraction so a re-parse never needs to re-fetch,
+     * and so the exploded `sale_items` rows have their source of truth on file.
+     */
+    pageMarkdown: text("page_markdown"),
+
+    /**
      * Stable hash of the page's extracted text. The cron compares this against
      * the newest row for the same link and skips the write when equal — this is
      * the "only record when content changed" guard.

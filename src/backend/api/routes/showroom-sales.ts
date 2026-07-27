@@ -30,6 +30,7 @@ import {
   type ClearanceItem,
 } from "@backend/db/schema/showroom/index";
 import { sweepShowroomSales } from "@backend/services/showroom/sales";
+import { backfillSaleItems } from "@backend/services/showroom/sales-backfill";
 
 export const showroomSalesRouter = new Hono<{ Bindings: Env }>();
 
@@ -385,4 +386,14 @@ showroomSalesRouter.post("/sweep", async (c) => {
     limit: Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 100) : 20,
   });
   return c.json({ ok: true, ...summary });
+});
+
+/**
+ * POST /backfill — one-shot migration of legacy `clearanceDetailsJson.items[]`
+ * blobs into `sale_items` rows (0038 Phase A). Idempotent: snapshots that
+ * already have rows are skipped, so it is safe to re-run.
+ */
+showroomSalesRouter.post("/backfill", async (c) => {
+  const result = await backfillSaleItems(c.env);
+  return c.json({ ok: true, ...result });
 });
