@@ -308,6 +308,23 @@ export const CHANGELOG: ChangelogEntry[] = [
     status: "staged",
   },
   {
+    id: "0032-tesla-location-config",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-27",
+    tag: "0032",
+    area: "Tesla / Visits",
+    title: "Tesla location config — home/work, proximity & dwell (0032 C1)",
+    summary:
+      "The settings page the source-agnostic park detector (L1) and proximity scan (D1) will read: /admin/config/tesla, three cards in ConfigShell. Recording (reuses the EXISTING tesla_telemetry_recording_enabled flag via /api/config/tesla — one source of truth, no split-brain with the integrations page). Home & Work (Places-autocomplete address → coordinates via the /api/places proxy; 'use project address as home' pulls the primary property's geocoded coords). Proximity & dwell (scan-enabled switch + proximity/home-work/park/depart radii, dwell-min, stale-seconds). All location keys are KV in project_system_variables via the batch-safe POST /api/admin/config — no schema, no new API, no migration.",
+    changes: [
+      { kind: "added", text: "/admin/config/tesla page (ConfigShell) + config-nav 'Tesla Location' entry under Integrations." },
+      { kind: "added", text: "GeocodeAddressField — Places-autocomplete address→coords via /api/places (typeahead + details)." },
+      { kind: "added", text: "tesla_* / loc_* config keys (home/work coords+address, proximity/home-work/park/depart radii, dwell_min, stale_seconds, scan_enabled) written via POST /api/admin/config (db.batch)." },
+      { kind: "changed", text: "Recording master switch reuses the existing tesla_telemetry_recording_enabled flag (not the spec's unused tesla_record_telemetry) — avoids a split-brain recording flag." },
+    ],
+    status: "staged",
+  },
+  {
     id: "0032-visit-logs-workspace",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-27",
