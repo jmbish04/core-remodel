@@ -50,6 +50,7 @@ import { nearestAspectRatio } from "../../services/render/prompt-kit";
 import { RECIPES, buildRecipePrompt } from "../../services/render/recipes";
 import { runStage } from "../../services/render/stage-runner";
 import { extractFurnishings } from "../../services/workshop/furnishing-extraction";
+import { freeformEdit, MAX_EDIT_REFERENCES } from "../../services/workshop/freeform-edit";
 import {
   resolveFloorPlanDrawer,
   resolveInspirationDrawer,
@@ -1049,11 +1050,11 @@ const RecipeExtractParams = z.object({
   isGlobal: z.boolean().optional(),
 });
 const RecipeMaterialSwapParams = z.object({
-  referenceCfImageUrls: z.array(z.url()).min(1).max(10),
+  referenceCfImageUrls: z.array(z.url()).min(1).max(14),
   prompt: z.string().min(1).optional(),
 });
 const RecipeMixParams = z.object({
-  clippingIds: z.array(z.string()).min(1).max(10),
+  clippingIds: z.array(z.string()).min(1).max(14),
   prompt: z.string().min(1).optional(),
 });
 
@@ -1314,6 +1315,94 @@ workshopRouter.openapi(
     } catch (err) {
       console.error("[workshop] POST /nodes/:id/recipe failed:", err);
       return c.json({ error: "Failed to run recipe" }, 500);
+    }
+  },
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /nodes/:id/edit — freeform conversational edit (Gemini interactions)
+//   add/remove/change, ≤14 references, optional inpainting mask, thinking text.
+//   Multi-turn = chain: run the next edit against the returned child node.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const FreeformEditRequestSchema = z.object({
+  prompt: z.string().min(1),
+  referenceCfImageUrls: z.array(z.url()).max(MAX_EDIT_REFERENCES).optional(),
+  /** Base64 PNG inpainting mask (no data: prefix). */
+  maskBase64: z.string().optional(),
+});
+
+workshopRouter.openapi(
+  createRoute({
+    method: "post",
+    path: "/nodes/{id}/edit",
+    request: {
+      params: z.object({ id: z.string() }),
+      body: { content: { "application/json": { schema: FreeformEditRequestSchema } } },
+    },
+    responses: {
+      201: {
+        description: "Edited image as a new child node + the model's thoughts",
+        content: {
+          "application/json": {
+            schema: z.object({
+              success: z.literal(true),
+              node: BoardNodeSchema,
+              thoughts: z.string(),
+            }),
+          },
+        },
+      },
+      404: { description: "Node not found", content: { "application/json": { schema: ErrorSchema } } },
+      500: { description: "Edit failed", content: { "application/json": { schema: ErrorSchema } } },
+    },
+    summary: "Freeform conversational edit of a node image",
+    operationId: "freeformEditNode",
+  }),
+  async (c) => {
+    try {
+      const { id } = c.req.valid("param");
+      const body = c.req.valid("json");
+      const db = drizzle(c.env.DB);
+      const node = await db.select().from(boardNodes).where(eq(boardNodes.id, id)).get();
+      if (!node) return c.json({ error: "Node not found" }, 404);
+
+      const result = await freeformEdit(c.env, {
+        imageUrl: node.cfImageUrl,
+        prompt: body.prompt,
+        referenceCfImageUrls: body.referenceCfImageUrls,
+        maskBase64: body.maskBase64,
+      });
+
+      const childId = crypto.randomUUID();
+      await db
+        .insert(boardNodes)
+        .values({
+          id: childId,
+          boardId: node.boardId,
+          kind: "image" as const,
+          cfImageUrl: result.deliveryUrl,
+          sourceType: "render" as const,
+          sourceId: null,
+          renderCanvasId: null,
+          parentNodeId: node.id,
+          x: node.x + 40,
+          y: node.y + node.height + 60,
+          width: node.width,
+          height: node.height,
+        })
+        .run();
+
+      const childNode = await db.select().from(boardNodes).where(eq(boardNodes.id, childId)).get();
+      if (!childNode) return c.json({ error: "Failed to create result node" }, 500);
+
+      return c.json(
+        { success: true as const, node: serializeNode(childNode), thoughts: result.thoughts },
+        201,
+      );
+    } catch (err) {
+      console.error("[workshop] POST /nodes/:id/edit failed:", err);
+      return c.json({ error: "Failed to edit image" }, 500);
     }
   },
 );

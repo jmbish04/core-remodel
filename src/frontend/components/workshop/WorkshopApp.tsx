@@ -22,6 +22,7 @@ import { PilesRail, DRAG_MIME } from "./piles/PilesRail";
 import { SampleDrawer } from "./drawer/SampleDrawer";
 import { ExtractClippingDialog } from "./drawer/ExtractClippingDialog";
 import { FurnishingsDialog } from "./drawer/FurnishingsDialog";
+import { FreeformEditDialog } from "./recipes/FreeformEditDialog";
 import {
   RecipeDialog,
   type RecipeReference,
@@ -63,6 +64,7 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
   // Dialog targets.
   const [extractNode, setExtractNode] = useState<BoardNode | null>(null);
   const [furnishingsNode, setFurnishingsNode] = useState<BoardNode | null>(null);
+  const [freeformEditNode, setFreeformEditNode] = useState<BoardNode | null>(null);
   const [recipeState, setRecipeState] = useState<{
     recipe: "material-swap" | "mix";
     node: BoardNode;
@@ -388,6 +390,7 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
             onCabinetReveal={(node) =>
               handleRunRecipe(node, "cabinet-reveal", { referenceCfImageUrls: [] })
             }
+            onFreeformEdit={(node) => setFreeformEditNode(node)}
             onExtractFurnishings={(node) => setFurnishingsNode(node)}
             onPlaceImage={() => setDrawerOpen(true)}
           />
@@ -410,6 +413,12 @@ function WorkshopBoard({ roomId }: { roomId: string }) {
           onSetClippingGlobal={setClippingGlobal}
         />
       </div>
+
+      <FreeformEditDialog
+        node={freeformEditNode}
+        onResult={(child) => board.insertChildNode(child)}
+        onClose={() => setFreeformEditNode(null)}
+      />
 
       <FurnishingsDialog node={furnishingsNode} roomId={roomId} onClose={() => setFurnishingsNode(null)} />
 

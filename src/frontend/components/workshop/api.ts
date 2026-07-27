@@ -247,6 +247,25 @@ export async function getRoomFurnishings(roomId: number | string): Promise<Furni
   return data.items;
 }
 
+/** Result of a freeform conversational edit. */
+export interface FreeformEditResult {
+  node: BoardNode;
+  /** The model's thinking / narration for this edit (may be empty). */
+  thoughts: string;
+}
+
+/** Run one freeform edit turn on a node; returns the new child node + thoughts. */
+export async function editNode(
+  nodeId: string,
+  body: { prompt: string; referenceCfImageUrls?: string[]; maskBase64?: string },
+): Promise<FreeformEditResult> {
+  const { data } = await request<FreeformEditResult>(
+    `/nodes/${encodeURIComponent(nodeId)}/edit`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+  return data;
+}
+
 /** Curate a furnishing — dismiss / adopt / link a product. */
 export async function patchFurnishing(
   id: string,
