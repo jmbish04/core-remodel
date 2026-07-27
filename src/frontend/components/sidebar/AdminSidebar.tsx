@@ -1,4 +1,12 @@
-import { ArrowLeft, Home, LogOut, Menu, Settings } from "lucide-react";
+import {
+  ArrowLeft,
+  Home,
+  LogOut,
+  Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Settings,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { HealthStatusBadge } from "@/components/health/HealthStatusBadge";
 import { Icons } from "@/components/Icons";
@@ -11,13 +19,93 @@ import { cn } from "@/lib/utils";
 import { ADMIN_NAV_GROUPS } from "./nav-groups";
 import {
   DocsTree,
+  isGroupActive,
   type NavGroupDef,
   NavLink,
   RenderGroup,
+  type SidebarItem,
   useCurrentHash,
   useCurrentPath,
   useOpenNavGroups,
 } from "./shared";
+
+/** First reachable href in an item subtree — the rail's per-section landing. */
+function firstHref(items: SidebarItem[]): string | undefined {
+  for (const item of items) {
+    if (item.href) return item.href;
+    const nested = firstHref(item.children ?? []);
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
+/** Writes the collapse cookie + the `<html>` data attribute that drives the
+ * `--sidebar-w` CSS var (so the fixed aside AND the content padding reflow
+ * together, matching the SSR value BaseLayout seeded from the same cookie). */
+function persistCollapsed(collapsed: boolean) {
+  document.cookie = `remodel_sidebar_collapsed=${collapsed ? "1" : "0"}; path=/; max-age=31536000; samesite=lax`;
+  document.documentElement.dataset.sidebarCollapsed = collapsed ? "1" : "0";
+}
+
+/** The collapsed icon rail: one button per admin section (navigates to its
+ * landing + re-expands), plus expand / home / config affordances. */
+function AdminRail({ currentPath, onExpand }: { currentPath: string; onExpand: () => void }) {
+  return (
+    <div className="flex h-full flex-col items-center gap-1 py-3">
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        aria-label="Expand sidebar"
+        title="Expand sidebar"
+        onClick={onExpand}
+      >
+        <PanelLeftOpen className="size-4" />
+      </Button>
+      <a
+        href="/admin"
+        title="Mission Control"
+        aria-label="Mission Control"
+        className={cn(buttonVariants({ variant: currentPath === "/" ? "secondary" : "ghost", size: "icon-sm" }))}
+      >
+        <Home className="size-4" />
+      </a>
+      <Separator className="my-1 w-8" />
+      <div className="flex flex-1 flex-col items-center gap-1 overflow-y-auto overscroll-contain">
+        {ADMIN_NAV_GROUPS.map((group) => {
+          const Icon = group.icon ?? Home;
+          const href = firstHref(group.items) ?? "/admin";
+          const active = isGroupActive(currentPath, group);
+          return (
+            <a
+              key={group.id}
+              href={href}
+              title={group.label}
+              aria-label={group.label}
+              onClick={onExpand}
+              className={cn(
+                buttonVariants({ variant: active ? "secondary" : "ghost", size: "icon-sm" }),
+              )}
+            >
+              <Icon className="size-4" />
+            </a>
+          );
+        })}
+      </div>
+      <Separator className="my-1 w-8" />
+      <a
+        href="/admin/config"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Configuration"
+        aria-label="Configuration"
+        className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
+      >
+        <Settings className="size-4" />
+      </a>
+    </div>
+  );
+}
 
 function AdminSidebarLinks({
   currentPath,
@@ -80,6 +168,7 @@ function AdminSidebarContent({
   loggingOut,
   onLogout,
   onNavigate,
+  onCollapse,
 }: {
   currentPath: string;
   currentHash: string;
@@ -87,14 +176,28 @@ function AdminSidebarContent({
   loggingOut: boolean;
   onLogout: () => void;
   onNavigate?: () => void;
+  onCollapse?: () => void;
 }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center gap-2 px-3 py-3">
-        <Home className="size-4 text-muted-foreground" />
+        <Home className="size-4 shrink-0 text-muted-foreground" />
         <a href="/admin" className="truncate text-sm font-semibold" onClick={onNavigate}>
           {siteConfig.name}
         </a>
+        {onCollapse ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Collapse sidebar"
+            title="Collapse sidebar"
+            onClick={onCollapse}
+            className="ml-auto shrink-0"
+          >
+            <PanelLeftClose className="size-4" />
+          </Button>
+        ) : null}
       </div>
 
       <Separator />
@@ -165,12 +268,21 @@ function AdminSidebarContent({
   );
 }
 
-export function AdminSidebar({ currentPath: currentPathProp }: { currentPath?: string } = {}) {
+export function AdminSidebar({
+  currentPath: currentPathProp,
+  collapsed: collapsedProp = false,
+}: { currentPath?: string; collapsed?: boolean } = {}) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(collapsedProp);
   const [uploadsPendingCount, setUploadsPendingCount] = useState(0);
   const [loggingOut, setLoggingOut] = useState(false);
   const currentPath = useCurrentPath(currentPathProp);
   const currentHash = useCurrentHash();
+
+  const setCollapsedPersisted = (next: boolean) => {
+    setCollapsed(next);
+    persistCollapsed(next);
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -220,14 +332,19 @@ export function AdminSidebar({ currentPath: currentPathProp }: { currentPath?: s
 
   return (
     <>
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 border-r border-border/40 bg-background/90 backdrop-blur md:block">
-        <AdminSidebarContent
-          currentPath={currentPath}
-          currentHash={currentHash}
-          uploadsPendingCount={uploadsPendingCount}
-          loggingOut={loggingOut}
-          onLogout={handleLogout}
-        />
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 border-r border-border/40 bg-background/90 backdrop-blur transition-[width] duration-200 md:block md:[width:var(--sidebar-w)]">
+        {collapsed ? (
+          <AdminRail currentPath={currentPath} onExpand={() => setCollapsedPersisted(false)} />
+        ) : (
+          <AdminSidebarContent
+            currentPath={currentPath}
+            currentHash={currentHash}
+            uploadsPendingCount={uploadsPendingCount}
+            loggingOut={loggingOut}
+            onLogout={handleLogout}
+            onCollapse={() => setCollapsedPersisted(true)}
+          />
+        )}
       </aside>
 
       <div className="sticky top-0 z-40 flex h-12 items-center gap-2 border-b border-border/40 bg-background/90 px-3 backdrop-blur md:hidden">

@@ -1,3 +1,25 @@
+import {
+  Archive,
+  BadgePercent,
+  ClipboardCheck,
+  Cog,
+  Contact,
+  FileText,
+  HardHat,
+  Heart,
+  Home,
+  Images,
+  Layers,
+  ListChecks,
+  NotebookPen,
+  Package,
+  PencilRuler,
+  Route,
+  ScanLine,
+  Store,
+  Telescope,
+  Wallet,
+} from "lucide-react";
 import type { NavGroupDef } from "./shared";
 
 /**
@@ -14,6 +36,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     id: "plan",
     label: "Plan",
     admin: true,
+    icon: PencilRuler,
     items: [
       { href: "/admin/planning/measure", label: "Live Floor Plan" },
       { href: "/admin/measurements", label: "Measurements" },
@@ -28,6 +51,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     id: "budget",
     label: "Budget",
     admin: true,
+    icon: Wallet,
     items: [
       { href: "/admin/budget/tracker", label: "Budget Tracker" },
       { href: "/admin/budget/dashboard", label: "Budget Triage Matrix" },
@@ -38,6 +62,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     id: "contractors",
     label: "Contractors",
     admin: true,
+    icon: HardHat,
     items: [
       { href: "/admin/inbox/all", label: "All Inboxes" },
       { href: "/admin/inbox", label: "Email Inbox" },
@@ -54,31 +79,68 @@ export const NAV_GROUPS: NavGroupDef[] = [
     ],
   },
   {
+    // 0037 IA: three nested submenus (Showrooms / Brands & Products / Purchase
+    // Ops). Net-new leaves from the plan (Review dashboard, Invoices, Deliveries,
+    // Concierge) are added in their build phases so the nav never points at a
+    // route that 404s. Submenu parents with `navigateOnExpand` both expand and
+    // navigate to their section landing.
     id: "shopping",
     label: "Shopping & Sourcing",
     admin: true,
+    icon: Store,
     items: [
-      { href: "/admin/shopping", label: "Sourcing & Shopping tools" },
-      { href: "/admin/shopping/showrooms", label: "Showrooms" },
-      { href: "/admin/shopping/contacts", label: "Contacts" },
-      { href: "/admin/shopping/drives", label: "Showroom Drives" },
-      { href: "/admin/shopping/schedule", label: "Materials Schedule" },
-      { href: "/admin/shopping/products", label: "Products" },
-      { href: "/admin/shopping/brands", label: "Brands" },
-      { href: "/admin/shopping/photo-intake", label: "Showroom Intake" },
-      { href: "/admin/shopping/photo-review", label: "Price-Card Review" },
-      { href: "/admin/shopping/product-photo-hitl", label: "Product-Photo Review" },
-      { href: "/admin/shopping/receipt-review", label: "Receipt Review" },
-      { href: "/admin/shopping/wishlist", label: "Wishlist" },
-      { href: "/admin/shopping/sales", label: "Sales & Clearance" },
-      { href: "/admin/shopping/journal", label: "Shopping Journal" },
-      { href: "/admin/shopping/research", label: "Deep Research" },
+      { href: "/admin/shopping", label: "Sourcing Tools", icon: ClipboardCheck },
+      {
+        href: "/admin/shopping/showrooms",
+        label: "Showrooms",
+        icon: Store,
+        navigateOnExpand: true,
+        children: [
+          { href: "/admin/shopping/drives", label: "Drive Lists", icon: Route },
+          { href: "/admin/shopping/contacts", label: "Contacts", icon: Contact },
+          { href: "/admin/shopping/sales", label: "Sales & Clearance", icon: BadgePercent },
+          { href: "/admin/shopping/photo-intake", label: "Showroom Intake", icon: ScanLine },
+        ],
+      },
+      {
+        href: "/admin/shopping/brands",
+        label: "Brands & Products",
+        icon: Package,
+        navigateOnExpand: true,
+        children: [
+          { href: "/admin/shopping/schedule", label: "Materials", icon: Layers },
+          { href: "/admin/shopping/products", label: "Products", icon: Package },
+          { href: "/admin/shopping/wishlist", label: "Wishlist", icon: Heart },
+          { href: "/admin/shopping/research", label: "Deep Research", icon: Telescope },
+          { href: "/admin/shopping/journal", label: "Shopping Journal", icon: NotebookPen },
+        ],
+      },
+      {
+        label: "Purchase Ops",
+        icon: ListChecks,
+        children: [
+          {
+            label: "Review",
+            icon: ClipboardCheck,
+            children: [
+              { href: "/admin/shopping/photo-review", label: "Price Cards", icon: ScanLine },
+              {
+                href: "/admin/shopping/product-photo-hitl",
+                label: "Product Photos",
+                icon: Images,
+              },
+            ],
+          },
+          { href: "/admin/shopping/receipt-review", label: "Receipt Review", icon: FileText },
+        ],
+      },
     ],
   },
   {
     id: "photos",
     label: "Photos & Renders",
     admin: true,
+    icon: Images,
     items: [
       { href: "/admin/prepare/uploads", label: "Uploads" },
       { href: "/admin/prepare/review", label: "Review" },
@@ -92,6 +154,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     id: "documents",
     label: "Documents & Research",
     admin: true,
+    icon: FileText,
     items: [
       { href: "/admin/docs", label: "Documents" },
       { href: "/admin/docs/views", label: "Doc Views" },
@@ -103,6 +166,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     id: "system",
     label: "System",
     admin: true,
+    icon: Cog,
     items: [
       { href: "/admin", label: "Analytics" },
       { href: "/admin/plans", label: "Plans" },
@@ -134,6 +198,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     id: "home-tour",
     label: "Home Tour",
     admin: false,
+    icon: Home,
     items: [
       { href: "/floor-plan", label: "Floor Plan" },
       { href: "/kitchen-layout", label: "Kitchen Layout" },
@@ -145,6 +210,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     id: "records",
     label: "Records",
     admin: false,
+    icon: Archive,
     items: [
       { href: "/docs", label: "Documents" },
       { href: "/supporting-docs", label: "Project Records" },

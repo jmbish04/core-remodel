@@ -21,12 +21,24 @@ const currentPath = (Astro.url.pathname.replace(/\/+$/, "") || "/");
 // (public/contractor groups + Enter Admin Portal). Selected server-side from
 // the normalized path so the correct sidebar is in the SSR HTML.
 const isAdmin = currentPath === "/admin" || currentPath.startsWith("/admin/");
+
+// Collapse-to-rail state, seeded from the cookie so the SSR HTML already has the
+// right width (no post-hydration flash). Only meaningful on admin pages — the
+// PublicSidebar has no collapse, so its content stays offset by the full width.
+const sidebarCollapsed = isAdmin && Astro.cookies.get("remodel_sidebar_collapsed")?.value === "1";
 ---
 
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en" class="dark" data-sidebar-collapsed={sidebarCollapsed ? "1" : "0"}>
   <head>
     <HeadSEO title={title} description={description} ogImage={ogImage} />
+    <style is:global>
+      /* Sidebar width token: the fixed aside and the content padding both read
+         it, so one client-side flip of `data-sidebar-collapsed` on <html>
+         reflows the whole layout. Seeded server-side from the cookie. */
+      :root { --sidebar-w: 16rem; }
+      :root[data-sidebar-collapsed="1"] { --sidebar-w: 3.5rem; }
+    </style>
     <script is:inline>
       (() => {
         try {
@@ -48,11 +60,11 @@ const isAdmin = currentPath === "/admin" || currentPath.startsWith("/admin/");
   >
     <div class="bg-background relative z-10 min-h-svh">
       {isAdmin ? (
-        <AdminSidebar client:load currentPath={currentPath} />
+        <AdminSidebar client:load currentPath={currentPath} collapsed={sidebarCollapsed} />
       ) : (
         <PublicSidebar client:load currentPath={currentPath} />
       )}
-      <div class="flex min-h-svh w-full min-w-0 md:pl-64">
+      <div class="flex min-h-svh w-full min-w-0 transition-[padding] duration-200 md:[padding-left:var(--sidebar-w)]">
         <div class="flex min-h-svh min-w-0 flex-1 flex-col">
           <AppHeader client:load />
           {isAdmin && <AdminTeslaAlert client:only="react" />}
