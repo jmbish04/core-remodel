@@ -113,6 +113,53 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "0032-park-finds-page": {
+    slug: "0032-park-finds-page",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0032 D1b · Park-Finds workspace (discovery review inbox)",
+    code: [],
+    problem:
+      "D1a shipped the proximity-scan HITL queue (showroom_store_hitl_queue) + the REST/MCP surface to decide candidates, but the only way to review a park-find was over MCP or raw API. The user needs a workspace — see what the car discovered, and approve or reject each in one place.",
+    approach:
+      "A thin Astro shell (/admin/shopping/showrooms/hitl.astro, mirroring the Visit Logs page — class not className, container mx-auto px-4 py-8 pb-12, header with a 24px inline Telescope glyph) mounts a ParkFindsApp React island that reads GET /api/showroom-hitl-queue and splits candidates into two tabs: Awaiting review (TBD) and Decided. Each card shows the guessed name, a category chip, the AI one-liner, the drive it was found on (JOINed title, never denormalized), a one-marker mini-map (reusing the lazy DriveMapThumb), and the scan distance parsed from proximity_scan_json. TBD cards carry three actions built on the ProductPhotoHitl busy→POST→toast→refetch pattern: Add to directory (decide PROCESS → promotes to a real showroom_stores row), Not relevant (decide DO_NOT_PROCESS + addExclusion), and Decide later (local dismiss, no server call). The sidebar gains a Park-Finds entry under Showrooms with a live TBD-count badge — AdminSidebar fetches the count, threads parkFindsPendingCount down through the nested nav group, and refreshes it on a 'park-finds-updated' window event fired after each decision. Frontend only: no schema, API, or MCP change — it's the human surface over D1a's shared hitl-queue service, so it and decide_park_find stay in lockstep.",
+    apiChanges: [
+      "None. Consumes the existing D1a endpoints: GET /api/showroom-hitl-queue (+ ?decision=TBD) and POST /api/showroom-hitl-queue/:id/decide.",
+    ],
+    filesTouched: [
+      "src/frontend/pages/admin/shopping/showrooms/hitl.astro (new)",
+      "src/frontend/components/park-finds/ParkFindsApp.tsx + ParkFindCard.tsx + api.ts + types.ts (new)",
+      "src/frontend/components/sidebar/nav-groups.ts (Park-Finds entry) + AdminSidebar.tsx (TBD-count badge wiring)",
+      "src/frontend/data/changelog.ts + changelog-detail.ts, scripts/qc/pr_302.mjs",
+    ],
+    migrations: [],
+    diagrams: [
+      {
+        caption: "The review loop — read the queue, decide a card, refetch + poke the badge",
+        code: `sequenceDiagram
+  participant U as User
+  participant P as ParkFindsApp
+  participant R as /api/showroom-hitl-queue
+  participant S as hitl-queue service
+  U->>P: open /admin/shopping/showrooms/hitl
+  P->>R: GET (list candidates + pending count)
+  R-->>P: { candidates, pending }
+  U->>P: Add to directory / Not relevant
+  P->>R: POST /:id/decide
+  R->>S: PROCESS → showroom_stores (+re-point visit/detour)<br/>DO_NOT_PROCESS → exclusion
+  S-->>P: { ok, storeId? / exclusionId? }
+  P->>R: refetch list
+  P->>P: dispatch 'park-finds-updated' → sidebar badge updates`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_302.mjs",
+      command: "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 302 -- --preview",
+      ranAt: "2026-07-29",
+      output:
+        "tsc --noEmit clean on all new park-finds files + the AdminSidebar/nav-groups changes. pnpm run build green (exit 0, Server built in ~92s). Frontend-only — no schema/API/MCP change, so no migration. QC pr_302 checks the /admin/shopping/showrooms/hitl page route + a regression on the D1a /api/showroom-hitl-queue endpoint it consumes (the authed run needs the tokens CLI / a real cookie, so from an unauthenticated sandbox it asserts route existence, not the gated body).",
+      migrations: [],
+    },
+  },
   "0032-park-finds-discovery": {
     slug: "0032-park-finds-discovery",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",

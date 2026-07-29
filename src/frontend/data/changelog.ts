@@ -308,6 +308,22 @@ export const CHANGELOG: ChangelogEntry[] = [
     status: "staged",
   },
   {
+    id: "0032-park-finds-page",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-29",
+    tag: "0032",
+    area: "Tesla / Visits",
+    title: "Park-Finds workspace — the discovery review inbox (0032 D1b)",
+    summary:
+      "The frontend for D1a's proximity-scan HITL queue: a /admin/shopping/showrooms/hitl page (thin Astro shell mirroring the Visit Logs workspace) mounting a ParkFindsApp island that reads GET /api/showroom-hitl-queue and shows each park-find as a card — guessed name, category chip, AI one-liner, the drive it was found on, a one-marker mini-map (reusing DriveMapThumb), and the scan distance from the park point. Two tabs (Awaiting review = TBD, Decided). Each TBD card carries the three decisions: Add to directory (POST decide PROCESS → promotes to a real store), Not relevant (decide DO_NOT_PROCESS + addExclusion so it never re-surfaces), and Decide later (local dismiss). A sidebar Park-Finds entry under Showrooms shows a live TBD-count badge (fetched in AdminSidebar, threaded through to the nested nav item, refreshed on decision via a window event). Frontend only — no schema/API/MCP change; it's the UI over D1a's shared service.",
+    changes: [
+      { kind: "added", text: "src/frontend/pages/admin/shopping/showrooms/hitl.astro + components/park-finds/ (ParkFindsApp, ParkFindCard, api.ts, types.ts)." },
+      { kind: "added", text: "Sidebar Park-Finds nav entry under Showrooms with a live TBD-count badge (AdminSidebar fetches /api/showroom-hitl-queue?decision=TBD, threads parkFindsPendingCount to the nested item, refreshes on a 'park-finds-updated' event)." },
+      { kind: "changed", text: "Reuses DriveMapThumb for the card mini-map; mirrors the V2c VisitLogsListApp fetch/tab/card structure and ProductPhotoHitl's busy→POST→refetch action pattern." },
+    ],
+    status: "staged",
+  },
+  {
     id: "0032-park-finds-discovery",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-29",
