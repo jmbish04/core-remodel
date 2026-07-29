@@ -20,7 +20,7 @@ import { showroomExclusions } from "@backend/db/schema/showroom/exclusions";
 import { showroomStoreHitlQueue } from "@backend/db/schema/showroom/store_hitl_queue";
 import { showroomStores } from "@backend/db/schema/showroom/stores";
 import { showroomVisitLog } from "@backend/db/schema/showroom/visit_log";
-import { and, desc, eq, isNotNull } from "drizzle-orm";
+import { and, desc, eq, isNotNull, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 export const HITL_DECISIONS = ["TBD", "PROCESS", "DO_NOT_PROCESS"] as const;
@@ -78,14 +78,13 @@ export async function getHitlCandidate(db: Db, id: number) {
   return row ?? null;
 }
 
-/** Count TBD candidates — the Park-Finds sidebar badge. */
+/** Count TBD candidates — the Park-Finds sidebar badge. A SQL aggregate, not a row load. */
 export async function countPending(db: Db): Promise<number> {
-  const rows = await db
-    .select({ id: showroomStoreHitlQueue.id })
+  const [row] = await db
+    .select({ c: sql<number>`count(*)` })
     .from(showroomStoreHitlQueue)
-    .where(eq(showroomStoreHitlQueue.userDecision, "TBD"))
-    .all();
-  return rows.length;
+    .where(eq(showroomStoreHitlQueue.userDecision, "TBD"));
+  return Number(row?.c ?? 0);
 }
 
 export interface DecideArgs {
@@ -131,6 +130,17 @@ export async function decideHitlCandidate(
     .where(eq(showroomStoreHitlQueue.id, id))
     .limit(1);
   if (!cand) return { ok: false, reason: "not-found" };
+
+  // Idempotent: a candidate already at the requested decision is a no-op success —
+  // never re-run store creation / re-pointing (or a second exclusion) on a retry.
+  if (cand.userDecision === args.decision) {
+    return {
+      ok: true,
+      decision: args.decision,
+      storeId: cand.storeId ?? undefined,
+      reason: "already-decided",
+    };
+  }
 
   if (args.decision === "PROCESS") {
     // Reuse an existing store by place_id (the unique key) if one already exists,

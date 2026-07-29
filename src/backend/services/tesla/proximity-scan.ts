@@ -33,7 +33,7 @@ import { showroomVisitLog } from "@backend/db/schema/showroom/visit_log";
 import { haversineMeters } from "@backend/services/drive-geo-match";
 import { GoogleMapsService } from "@backend/services/google/maps";
 import type { GpsSource } from "@backend/services/tesla/visit-sessions";
-import { and, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 /**
@@ -150,13 +150,16 @@ export async function proximityScan(
     if (ranked.length === 0) return { scanned: true, reason: "no-candidates" };
 
     const db = drizzle(env.DB);
+    // The ≤10 candidate place ids drive every dedup lookup — filter by them (an
+    // inArray over ≤10 values, well under D1's 100-param cap) instead of scanning
+    // the whole stores / exclusions / queue tables on every park.
     const candidatePlaceIds = ranked.map((r) => r.p.placeId);
 
     // Already a registered store? (exact place_id match — the robust dedupe key.)
     const knownStores = await db
       .select({ placeId: showroomStores.placeId })
       .from(showroomStores)
-      .where(isNotNull(showroomStores.placeId))
+      .where(inArray(showroomStores.placeId, candidatePlaceIds))
       .all();
     const knownPlaceIds = new Set(knownStores.map((s) => s.placeId).filter(Boolean) as string[]);
 
@@ -164,7 +167,7 @@ export async function proximityScan(
     const exclusions = await db
       .select({ placeId: showroomExclusions.placeId })
       .from(showroomExclusions)
-      .where(isNotNull(showroomExclusions.placeId))
+      .where(inArray(showroomExclusions.placeId, candidatePlaceIds))
       .all();
     const excludedPlaceIds = new Set(exclusions.map((e) => e.placeId).filter(Boolean) as string[]);
 
@@ -175,7 +178,7 @@ export async function proximityScan(
       .where(
         and(
           eq(showroomStoreHitlQueue.userDecision, "TBD"),
-          isNotNull(showroomStoreHitlQueue.placeId),
+          inArray(showroomStoreHitlQueue.placeId, candidatePlaceIds),
         ),
       )
       .all();
@@ -204,7 +207,7 @@ export async function proximityScan(
     const driveListId = active?.id;
 
     const place = fresh.p;
-    const categoryGuess = place.primaryType ?? place.types[0] ?? null;
+    const categoryGuess = place.primaryType ?? place.types?.[0] ?? null;
     const name = place.displayName ?? "Unknown place";
     const description = buildOneLiner(name, categoryGuess, place.formattedAddress);
     const scanPacket = {

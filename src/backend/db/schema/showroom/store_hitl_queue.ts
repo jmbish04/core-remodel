@@ -69,6 +69,7 @@ export const showroomStoreHitlQueue = sqliteTable(
     decisionIdx: index("showroom_store_hitl_queue_decision_idx").on(t.userDecision),
     placeIdx: index("showroom_store_hitl_queue_place_idx").on(t.placeId),
     driveIdx: index("showroom_store_hitl_queue_drive_idx").on(t.driveListId),
+    storeIdx: index("showroom_store_hitl_queue_store_idx").on(t.storeId),
   }),
 );
 

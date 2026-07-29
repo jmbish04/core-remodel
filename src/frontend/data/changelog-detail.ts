@@ -216,14 +216,20 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
       command: "npx tsc --noEmit  &&  pnpm run build  &&  node <scratch>/d1test  &&  pnpm run test:pr 301 -- --preview",
       ranAt: "2026-07-29",
       output:
-        "tsc --noEmit clean on all touched D1a files (the only tsc errors are the pre-existing 'visits' ToolCategory baseline from #290, untouched here). pnpm run build green (exit 0, Server built in ~93s). " +
+        "tsc --noEmit clean on all touched D1a files (the only tsc errors are the pre-existing 'visits' ToolCategory baseline from #290, untouched here). pnpm run build green (exit 0, Server built in ~94s). " +
         "db:generate produced 0153_wealthy_mephistopheles.sql — 2 CREATE TABLE + 6 additive ADD COLUMN + indexes incl. the partial-unique showroom_exclusions_place_uniq; the drive_lists.status 'paused' widen correctly emits NO SQL (TEXT column). " +
-        "The migration's risky statements (inline-REFERENCES ADD COLUMN, the table-qualified partial-unique WHERE) were validated on a scratch SQLite via node:sqlite — all applied, and the partial index correctly allowed 1 place_id row + 2 NULLs. QC pr_301 asserts the new /api/showroom-hitl-queue surface + the two MCP tools in the catalog + a visit-logs/tesla regression (a live proximity scan needs a real park at an unregistered place, exercised on a drive, not synthesizable in QC).",
+        "The migration's risky statements (inline-REFERENCES ADD COLUMN, the table-qualified partial-unique WHERE) were validated on a scratch SQLite via node:sqlite — all applied, and the partial index correctly allowed 1 place_id row + 2 NULLs. QC pr_301 asserts the new /api/showroom-hitl-queue surface + the two MCP tools in the catalog + a visit-logs/tesla regression (a live proximity scan needs a real park at an unregistered place, exercised on a drive, not synthesizable in QC). " +
+        "Codra approved (no blocking issues); applied its substantive off-diff findings: dedup queries now filter by candidate place_ids (was full-scanning three tables per park — dead-variable bug), decideHitlCandidate is now truly idempotent (early short-circuit on an already-decided candidate), countPending uses count(*), and FK indexes were added on hitl_queue.store_id + park_sessions.hitl_queue_id (migration 0154). Re-ran tsc + build green after the fixes.",
       migrations: [
         {
           tag: "0153_wealthy_mephistopheles",
           appliedRemote: false,
           note: "Applies on the D1a deploy's migrate:remote step (run_migrations:true) — additive/nullable, so concurrent branch previews keep working against the shared D1. A failed CREATE TABLE fails the deploy.",
+        },
+        {
+          tag: "0154_closed_centennial",
+          appliedRemote: false,
+          note: "FK indexes on park_sessions.hitl_queue_id + showroom_store_hitl_queue.store_id (codra follow-up). Additive; applies on the same deploy.",
         },
       ],
     },

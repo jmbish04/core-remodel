@@ -70,6 +70,7 @@ export const parkSessions = sqliteTable(
   (t) => ({
     subjectIdx: index("park_sessions_subject_idx").on(t.subjectId),
     statusIdx: index("park_sessions_status_idx").on(t.status),
+    hitlQueueIdx: index("park_sessions_hitl_queue_idx").on(t.hitlQueueId),
     // At most one OPEN park per subject — the detector's "am I already parked?"
     // invariant, enforced in the DB (drizzle-kit emits the WHERE clause).
     oneOpenPerSubject: uniqueIndex("park_sessions_one_open_uniq")
