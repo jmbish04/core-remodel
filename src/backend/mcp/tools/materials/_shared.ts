@@ -25,11 +25,11 @@ export function materialDto(m: typeof materialScheduleItems.$inferSelect, roomNa
     title: m.title,
     roomId: m.roomId,
     roomName,
-    brand: m.brand,
-    model: m.model,
     notes: m.notes,
     isPurchased: m.isPurchased ?? false,
-    purchasedShowroomProductId: m.purchasedShowroomProductId,
+    isReturned: m.isReturned ?? false,
+    isActive: m.isActive ?? true,
+    productId: m.productId,
   };
 }
 
@@ -39,11 +39,11 @@ export const materialDtoSchema = looseObject({
   title: z.string().nullable(),
   roomId: z.number().int(),
   roomName: z.string().nullable(),
-  brand: z.string().nullable(),
-  model: z.string().nullable(),
   notes: z.string().nullable(),
   isPurchased: z.boolean(),
-  purchasedShowroomProductId: z.number().int().nullable(),
+  isReturned: z.boolean(),
+  isActive: z.boolean(),
+  productId: z.number().int().nullable(),
 });
 
 /** A category/subcategory reference as returned on a material (name JOINED, never stored). */

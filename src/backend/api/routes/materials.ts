@@ -37,8 +37,6 @@ const specInputSchema = z.object({
 const createMaterialSchema = z.object({
   title: z.string().min(1),
   roomId: z.number().int().positive(),
-  brand: z.string().optional().nullable(),
-  model: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
   specs: z.array(specInputSchema).optional(),
 });
@@ -46,14 +44,14 @@ const createMaterialSchema = z.object({
 const updateMaterialSchema = z.object({
   title: z.string().min(1).optional(),
   roomId: z.number().int().positive().optional(),
-  brand: z.string().optional().nullable(),
-  model: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
+  isReturned: z.boolean().optional(),
+  isActive: z.boolean().optional(),
 });
 
 const purchasedSchema = z.object({
   isPurchased: z.boolean(),
-  purchasedShowroomProductId: z.number().int().positive().optional().nullable(),
+  productId: z.number().int().positive().optional().nullable(),
 });
 
 // .max(50): the validation below binds one parameter per id via inArray, and
@@ -100,6 +98,10 @@ materialsRouter.get("/", async (c) => {
     .$dynamic();
 
   const conditions = [];
+  // Soft-delete: hide is_active=false rows unless explicitly requested.
+  if (c.req.query("includeInactive") !== "true") {
+    conditions.push(eq(materialScheduleItems.isActive, true));
+  }
   if (search) conditions.push(like(materialScheduleItems.title, `%${search}%`));
   if (roomId !== null) conditions.push(eq(materialScheduleItems.roomId, roomId));
   if (purchased === "true" || purchased === "false") {
@@ -193,11 +195,11 @@ materialsRouter.get("/:id", async (c) => {
     .orderBy(materialRequiredSpecs.id);
 
   let purchasedProduct = null;
-  if (material.purchasedShowroomProductId) {
+  if (material.productId) {
     const [product] = await db
       .select()
       .from(showroomStoreProducts)
-      .where(eq(showroomStoreProducts.id, material.purchasedShowroomProductId));
+      .where(eq(showroomStoreProducts.id, material.productId));
     purchasedProduct = product ?? null;
   }
 
@@ -275,20 +277,23 @@ materialsRouter.put("/:id", async (c) => {
 });
 
 /**
- * DELETE /:id — Delete a material (cascades its required specs).
+ * DELETE /:id — SOFT-delete a material (sets is_active=false). Never hard-deletes:
+ * materials are referenced by receipts, mappings, budgets and wishlist rows, so a
+ * hard delete would cascade-remove real history. Reads filter is_active.
  */
 materialsRouter.delete("/:id", async (c) => {
   const id = parseId(c.req.param("id"));
   if (id === null) return c.json({ error: "Invalid material id" }, 400);
   const db = drizzle(c.env.DB);
 
-  const [deleted] = await db
-    .delete(materialScheduleItems)
+  const [deactivated] = await db
+    .update(materialScheduleItems)
+    .set({ isActive: false, updatedAt: sql`(unixepoch())` })
     .where(eq(materialScheduleItems.id, id))
     .returning();
-  if (!deleted) return c.json({ error: "Material not found" }, 404);
+  if (!deactivated) return c.json({ error: "Material not found" }, 404);
 
-  return c.json({ success: true });
+  return c.json({ success: true, softDeleted: true });
 });
 
 /**
@@ -314,7 +319,7 @@ materialsRouter.put("/:id/purchased", async (c) => {
     .update(materialScheduleItems)
     .set({
       isPurchased: parsed.data.isPurchased,
-      purchasedShowroomProductId: parsed.data.purchasedShowroomProductId ?? null,
+      productId: parsed.data.productId ?? null,
       updatedAt: sql`(unixepoch())`,
     })
     .where(eq(materialScheduleItems.id, id))

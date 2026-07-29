@@ -25,11 +25,11 @@ interface Material {
   title: string;
   roomId: number;
   roomName: string | null;
-  brand: string | null;
-  model: string | null;
   notes: string | null;
   isPurchased: boolean | null;
-  purchasedShowroomProductId: number | null;
+  isReturned: boolean | null;
+  isActive: boolean | null;
+  productId: number | null;
 }
 
 interface RequiredSpec {
@@ -145,7 +145,7 @@ function MaterialCard({ material, onChange, onDelete }: { material: Material; on
       await api(`/api/materials/${material.id}/purchased`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isPurchased: !material.isPurchased, purchasedShowroomProductId: material.purchasedShowroomProductId }),
+        body: JSON.stringify({ isPurchased: !material.isPurchased, productId: material.productId }),
       });
       onChange();
     } catch (e) {
@@ -171,9 +171,6 @@ function MaterialCard({ material, onChange, onDelete }: { material: Material; on
             {open ? <ChevronDown className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" /> : <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />}
             <span>
               <span className="font-medium">{material.title}</span>
-              {(material.brand || material.model) && (
-                <span className="ml-2 text-xs text-muted-foreground">{[material.brand, material.model].filter(Boolean).join(" · ")}</span>
-              )}
             </span>
           </button>
           <div className="flex shrink-0 items-center gap-2">
@@ -219,10 +216,8 @@ function AddMaterialDialog({ onCreated }: { onCreated: () => void }) {
   const [form, setForm] = useState<{
     title: string;
     roomId: number | null;
-    brand: string;
-    model: string;
     notes: string;
-  }>({ title: "", roomId: null, brand: "", model: "", notes: "" });
+  }>({ title: "", roomId: null, notes: "" });
 
   const submit = async () => {
     if (!form.title.trim()) {
@@ -241,13 +236,11 @@ function AddMaterialDialog({ onCreated }: { onCreated: () => void }) {
         body: JSON.stringify({
           title: form.title.trim(),
           roomId: form.roomId,
-          brand: form.brand.trim() || null,
-          model: form.model.trim() || null,
           notes: form.notes.trim() || null,
         }),
       });
       toast.success("Material added");
-      setForm({ title: "", roomId: null, brand: "", model: "", notes: "" });
+      setForm({ title: "", roomId: null, notes: "" });
       setOpen(false);
       onCreated();
     } catch (e) {
@@ -277,14 +270,6 @@ function AddMaterialDialog({ onCreated }: { onCreated: () => void }) {
               <Label htmlFor="m-room">Room</Label>
               <RoomSelect value={form.roomId} onChange={(roomId) => setForm({ ...form, roomId })} placeholder="Select a room" />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="m-brand">Brand</Label>
-              <Input id="m-brand" value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} placeholder="(optional)" />
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="m-model">Model</Label>
-            <Input id="m-model" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} placeholder="(optional)" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="m-notes">Notes</Label>

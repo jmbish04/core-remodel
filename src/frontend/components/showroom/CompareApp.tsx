@@ -122,7 +122,7 @@ export function CompareApp() {
       await api(`/api/materials/${p.materialId}/purchased`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isPurchased: true, purchasedShowroomProductId: p.id }),
+        body: JSON.stringify({ isPurchased: true, productId: p.id }),
       });
       toast.success(`Marked "${p.itemName}" as the choice for its material`);
     } catch (e) {

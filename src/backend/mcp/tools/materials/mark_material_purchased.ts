@@ -13,10 +13,10 @@ export const markMaterialPurchased = defineTool({
     category: "materials",
     title: "Mark material purchased",
     description:
-      "Flag a material as purchased (sets isPurchased=true) and optionally record the showroom product it was bought as (purchasedShowroomProductId). This only flips the purchase flag — it does NOT record the actual dollar amount; log real spend with the budget expense tool separately. Validates the material exists.",
+      "Flag a material as purchased (sets isPurchased=true) and optionally record the showroom product it was bought as (productId). This only flips the purchase flag — it does NOT record the actual dollar amount; log real spend with the budget expense tool separately. Validates the material exists.",
     inputShape: {
       materialId: z.number().int().positive().describe("Material id (from list_materials)"),
-      purchasedShowroomProductId: z
+      productId: z
         .number()
         .int()
         .positive()
@@ -31,7 +31,7 @@ export const markMaterialPurchased = defineTool({
     },
     examples: [
       { title: "Just mark purchased", args: { materialId: 5 } },
-      { title: "With product", args: { materialId: 5, purchasedShowroomProductId: 88 } },
+      { title: "With product", args: { materialId: 5, productId: 88 } },
     ],
     handler: async ({ env, db }, input) => {
       const [material] = await db
@@ -42,11 +42,11 @@ export const markMaterialPurchased = defineTool({
       if (!material) {
         toolError(`Material ${input.materialId} not found. Call list_materials for valid ids.`);
       }
-      const patch: { isPurchased: boolean; purchasedShowroomProductId?: number } = {
+      const patch: { isPurchased: boolean; productId?: number } = {
         isPurchased: true,
       };
-      if (input.purchasedShowroomProductId != null) {
-        patch.purchasedShowroomProductId = input.purchasedShowroomProductId;
+      if (input.productId != null) {
+        patch.productId = input.productId;
       }
       await db
         .update(materialScheduleItems)
