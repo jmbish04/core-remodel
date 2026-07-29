@@ -11,6 +11,7 @@ import {
 
 import { driveLists } from "../drives/drive_lists";
 import { driveListStops } from "../drives/drive_list_stops";
+import { showroomStoreHitlQueue } from "./store_hitl_queue";
 import { showroomStores } from "./stores";
 
 /**
@@ -42,6 +43,18 @@ export const showroomVisitLog = sqliteTable(
 
     /** The showroom visited. Nullable only while a soft arrival is unresolved. */
     storeId: integer("store_id").references(() => showroomStores.id, { onDelete: "cascade" }),
+
+    /**
+     * The park-find HITL candidate this visit is against, when the visit was staged
+     * for an UNREGISTERED place (decision 1.d — see `showroom_store_hitl_queue`). XOR
+     * with `storeId` at confirm time (0032 D-2): a SUBMITTED/TESLA_STAGED/DRAFT visit
+     * carries exactly one of store_id / hitl_queue_id; an unconfirmed soft arrival may
+     * carry neither yet. Enforced in the service/API layer, not a DB CHECK (SQLite
+     * can't ALTER-ADD a CHECK without a full table rebuild drizzle-kit won't emit).
+     */
+    hitlQueueId: integer("hitl_queue_id").references(() => showroomStoreHitlQueue.id, {
+      onDelete: "set null",
+    }),
 
     /** Drive context, when the visit came from a drive (nullable for a cold/manual visit). */
     driveListId: integer("drive_list_id").references(() => driveLists.id, { onDelete: "set null" }),
@@ -124,6 +137,7 @@ export const showroomVisitLog = sqliteTable(
   },
   (t) => ({
     storeIdx: index("showroom_visit_log_store_idx").on(t.storeId),
+    hitlQueueIdx: index("showroom_visit_log_hitl_queue_idx").on(t.hitlQueueId),
     statusIdx: index("showroom_visit_log_status_idx").on(t.status),
     driveIdx: index("showroom_visit_log_drive_idx").on(t.driveListId),
     // At most one finalized row per soft arrival — makes drive-away finalize idempotent.

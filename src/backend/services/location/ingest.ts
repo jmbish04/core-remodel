@@ -25,6 +25,7 @@ import {
   type GpsSource,
   stageSoftArrival,
 } from "@backend/services/tesla/visit-sessions";
+import { proximityScan } from "@backend/services/tesla/proximity-scan";
 import { deviceLocation } from "@backend/db/schema/system/device-location";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -94,6 +95,10 @@ export interface DetectorIngestResult {
   staged: boolean;
   visitLogId?: number;
   storeId?: number;
+  /** Park-find (decision 1.d) candidate id, when a proximity scan staged one. */
+  hitlQueueId?: number;
+  /** Why the proximity scan did/didn't stage, for the receipts. */
+  scanReason?: string;
   finalized: number;
 }
 type DetectorEventName = "park" | "drive-away" | null;
@@ -120,14 +125,49 @@ export async function ingestViaDetector(env: Env, fix: LocationFix): Promise<Det
   });
 
   if (det.event === "park") {
+    const gpsSource = toGpsSource(fix.source);
     const stage = await stageSoftArrival(env, {
       latitude: fix.latitude,
       longitude: fix.longitude,
-      gpsSource: toGpsSource(fix.source),
+      gpsSource,
     });
+    // 1.b / 1.c — matched a registered showroom: link the park session and we're done.
     if (stage.staged && stage.visitLogId != null && det.parkSessionId != null) {
       await linkVisitToParkSession(env, det.parkSessionId, stage.visitLogId, stage.storeId);
     }
+    if (stage.staged) {
+      return {
+        event: "park",
+        parkSessionId: det.parkSessionId,
+        staged: true,
+        visitLogId: stage.visitLogId,
+        storeId: stage.storeId,
+        finalized: 0,
+      };
+    }
+
+    // 1.d — parked, but 1.b/1.c missed (no registered showroom nearby, or no active
+    //       drive to match a stop on). Scan for an UNREGISTERED remodel find and stage
+    //       it for review. `already-open` means a soft arrival already exists — skip
+    //       the (billable) scan.
+    if (stage.reason === "no-showroom-nearby" || stage.reason === "no-active-drive") {
+      const scan = await proximityScan(env, {
+        latitude: fix.latitude,
+        longitude: fix.longitude,
+        gpsSource,
+        parkSessionId: det.parkSessionId,
+      });
+      return {
+        event: "park",
+        parkSessionId: det.parkSessionId,
+        staged: scan.reason === "created",
+        visitLogId: scan.visitLogId,
+        hitlQueueId: scan.hitlQueueId,
+        scanReason: scan.reason,
+        finalized: 0,
+      };
+    }
+
     return {
       event: "park",
       parkSessionId: det.parkSessionId,

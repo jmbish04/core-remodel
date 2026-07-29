@@ -113,6 +113,127 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "0032-park-finds-discovery": {
+    slug: "0032-park-finds-discovery",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0032 D1a · proximity scan + Park-Finds HITL discovery queue",
+    code: [],
+    problem:
+      "The park pipeline could only stage a visit when a park matched a registered showroom (decision 1.c) or a stop on the active drive (1.b). Park somewhere new — a tile yard you'd never logged — and nothing happened: no capture, no prompt, no discovery. The 0022 plan's decision 1.d closes that, but doing it safely is the hard part: you must NOT invent a showroom_stores row from a Places guess (that poisons the directory, budget takeoffs, and comparisons, and nothing downstream can tell it was a guess — the AGENTS.md 'resolve an ambiguous parent' rule). It has to be staged for a human, and the spend has to be bounded so a park can't run up a Places bill.",
+    approach:
+      "On a confirmed PARK where 1.a–1.c all miss, ingestViaDetector runs proximityScan (services/tesla/proximity-scan.ts): a single Google Places searchNearby restricted to remodel-relevant includedTypes (furniture/home-goods/hardware/home-improvement — so a gas station never surfaces; this is the deterministic, $0 stand-in for the plan's Gemini relevance gate, which is a documented follow-up), then dedupe the best candidate against registered stores (by place_id), the exclusion set, and the open TBD queue. A survivor is STAGED as three linked writes — a showroom_store_hitl_queue candidate (TBD), a detour stop on the active drive (is_detour → the candidate), and a discovery soft arrival (showroom_visit_log with hitl_queue_id and no store_id, XOR-ok while unconfirmed) — and the park_sessions row is linked to the find. A human (Park-Finds page, D1b) or a chat (MCP) then decides: PROCESS promotes the candidate to a real showroom_stores row (flagged is_identified_by_proximity_scan, or links an existing store by place_id) and re-points the visit + detour stop at it; DO_NOT_PROCESS rejects it and can drop a showroom_exclusions row so it never re-surfaces. Cost is bounded structurally: the detector emits 'park' exactly once per park, so the scan runs once; it's gated by tesla_proximity_scan_enabled AND placesNearby's own per-SKU quota hard-disable (returns [] when the Places bucket is spent). REST (/api/showroom-hitl-queue) and MCP (list_park_finds/decide_park_find) both go through the one hitl-queue service, so the page and the voice loop decide identically.",
+    apiChanges: [
+      "NEW REST /api/showroom-hitl-queue (admin-gated): GET / (list + ?decision=TBD|PROCESS|DO_NOT_PROCESS + pending count), GET /:id, POST /:id/decide { decision, addExclusion?, reasonMarkdown? }.",
+      "NEW MCP list_park_finds (READ_ONLY) + decide_park_find (WRITE) in the showrooms domain — 2 tools added to the registry.",
+      "No change to existing routes; the proximity scan is internal (runs off waitUntil on the detector's PARK).",
+    ],
+    filesTouched: [
+      "src/backend/db/schema/showroom/store_hitl_queue.ts + exclusions.ts (new) + showroom/index.ts (barrel)",
+      "src/backend/db/schema/showroom/visit_log.ts, showroom/stores.ts, drives/drive_lists.ts, drives/drive_list_stops.ts, system/park-sessions.ts (column adds)",
+      "src/backend/services/tesla/proximity-scan.ts (new — decision 1.d)",
+      "src/backend/services/showroom/hitl-queue.ts (new — shared list/decide service)",
+      "src/backend/services/location/ingest.ts (wire 1.d into ingestViaDetector)",
+      "src/backend/api/routes/showroom-hitl-queue.ts (new) + api/index.ts (mount)",
+      "src/backend/mcp/tools/showrooms/list_park_finds.ts + decide_park_find.ts (new) + showrooms/index.ts",
+      "drizzle/0153_wealthy_mephistopheles.sql, scripts/qc/pr_301.mjs",
+    ],
+    migrations: [
+      {
+        tag: "0153_wealthy_mephistopheles",
+        sql: "CREATE TABLE showroom_store_hitl_queue ( id INTEGER PRIMARY KEY AUTOINCREMENT, name text NOT NULL, description text, latitude real, longitude real, place_id text, store_id integer REFERENCES showroom_stores(id) ON DELETE set null, user_decision text DEFAULT 'TBD' NOT NULL, drive_list_id integer REFERENCES drive_lists(id) ON DELETE set null, proximity_scan_json text, category_guess text, created_at integer DEFAULT (unixepoch()) NOT NULL, updated_at integer DEFAULT (unixepoch()) NOT NULL );\nCREATE TABLE showroom_exclusions ( id INTEGER PRIMARY KEY AUTOINCREMENT, place_id text, name text, latitude real, longitude real, reason_markdown text, reason_html text, source text DEFAULT 'manual' NOT NULL, created_at integer DEFAULT (unixepoch()) NOT NULL, updated_at integer DEFAULT (unixepoch()) NOT NULL );\nALTER TABLE park_sessions ADD hitl_queue_id integer REFERENCES showroom_store_hitl_queue(id);\nALTER TABLE showroom_stores ADD is_identified_by_proximity_scan integer DEFAULT false NOT NULL;\nALTER TABLE showroom_stores ADD proximity_scan_json text;\nALTER TABLE showroom_visit_log ADD hitl_queue_id integer REFERENCES showroom_store_hitl_queue(id);\nALTER TABLE drive_list_stops ADD is_detour integer DEFAULT false NOT NULL;\nALTER TABLE drive_list_stops ADD hitl_queue_id integer REFERENCES showroom_store_hitl_queue(id);\nCREATE UNIQUE INDEX showroom_exclusions_place_uniq ON showroom_exclusions (place_id) WHERE \"showroom_exclusions\".\"place_id\" IS NOT NULL;\n-- + supporting indexes on decision/place/drive/hitl_queue.",
+      },
+    ],
+    diagrams: [
+      {
+        caption: "The park decision tree — 1.d is the new branch (parked near nothing known)",
+        code: `flowchart TD
+  P[PARK EVENT<br/>from any source] --> A{1.a home/work?}
+  A -- yes --> AP[pause active drives] --> Z[stop]
+  A -- no --> B{1.b stop on<br/>active drive?}
+  B -- yes --> BS[soft arrival · store_id] --> W[await DRIVE-AWAY]
+  B -- no --> C{1.c near a<br/>registered showroom?}
+  C -- yes --> CS[soft arrival · store_id] --> W
+  C -- no --> D[["1.d proximityScan (NEW)"]]
+  D --> D0{remodel-relevant<br/>Places hit, not known/excluded?}
+  D0 -- no --> Z
+  D0 -- yes --> D1[hitl_queue candidate · TBD]
+  D1 --> D2[detour stop · is_detour]
+  D2 --> D3[discovery soft arrival · hitl_queue_id]
+  D3 --> W
+  classDef n fill:#3b2f0b,stroke:#fbbf24,color:#fff7e0;
+  class D,D0,D1,D2,D3 n;`,
+      },
+      {
+        caption: "New tables + the columns that point at a park-find candidate",
+        code: `erDiagram
+  showroom_store_hitl_queue {
+    int id PK
+    text name
+    text description "AI one-liner"
+    real latitude
+    real longitude
+    text place_id "dedupe key"
+    int store_id FK "on approve"
+    text user_decision "TBD|PROCESS|DO_NOT_PROCESS"
+    int drive_list_id FK
+    text proximity_scan_json
+    text category_guess
+  }
+  showroom_exclusions {
+    int id PK
+    text place_id "match key (partial-unique)"
+    text name
+    text reason_markdown
+    text source "manual|ai"
+  }
+  showroom_store_hitl_queue |o--o| showroom_stores : "approve → store"
+  showroom_store_hitl_queue ||--o{ showroom_visit_log : "discovery visit (hitl_queue_id)"
+  showroom_store_hitl_queue |o--o{ drive_list_stops : "detour (is_detour)"
+  showroom_store_hitl_queue |o--o| park_sessions : "park resolved to find"`,
+      },
+      {
+        caption: "Scan → stage → decide (one Places call per park; the decision promotes or excludes)",
+        code: `sequenceDiagram
+  participant DET as park-detector
+  participant ING as ingestViaDetector
+  participant PS as proximityScan
+  participant GP as Google Places
+  participant DB as D1
+  DET->>ING: PARK event
+  ING->>ING: stageSoftArrival → no-showroom-nearby
+  ING->>PS: proximityScan(lat,lng)
+  PS->>GP: searchNearby (remodel types, quota-gated)
+  GP-->>PS: candidates
+  PS->>DB: dedupe vs stores / exclusions / open queue
+  PS->>DB: hitl_queue (TBD) + detour stop + discovery visit
+  Note over DB: later — human or MCP decides
+  DB->>DB: PROCESS → showroom_stores + re-point visit/detour
+  DB->>DB: DO_NOT_PROCESS → optional exclusion`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_301.mjs",
+      command: "npx tsc --noEmit  &&  pnpm run build  &&  node <scratch>/d1test  &&  pnpm run test:pr 301 -- --preview",
+      ranAt: "2026-07-29",
+      output:
+        "tsc --noEmit clean on all touched D1a files (the only tsc errors are the pre-existing 'visits' ToolCategory baseline from #290, untouched here). pnpm run build green (exit 0, Server built in ~94s). " +
+        "db:generate produced 0153_wealthy_mephistopheles.sql — 2 CREATE TABLE + 6 additive ADD COLUMN + indexes incl. the partial-unique showroom_exclusions_place_uniq; the drive_lists.status 'paused' widen correctly emits NO SQL (TEXT column). " +
+        "The migration's risky statements (inline-REFERENCES ADD COLUMN, the table-qualified partial-unique WHERE) were validated on a scratch SQLite via node:sqlite — all applied, and the partial index correctly allowed 1 place_id row + 2 NULLs. QC pr_301 asserts the new /api/showroom-hitl-queue surface + the two MCP tools in the catalog + a visit-logs/tesla regression (a live proximity scan needs a real park at an unregistered place, exercised on a drive, not synthesizable in QC). " +
+        "Codra approved (no blocking issues); applied its substantive off-diff findings: dedup queries now filter by candidate place_ids (was full-scanning three tables per park — dead-variable bug), decideHitlCandidate is now truly idempotent (early short-circuit on an already-decided candidate), countPending uses count(*), and FK indexes were added on hitl_queue.store_id + park_sessions.hitl_queue_id (migration 0154). Re-ran tsc + build green after the fixes.",
+      migrations: [
+        {
+          tag: "0153_wealthy_mephistopheles",
+          appliedRemote: false,
+          note: "Applies on the D1a deploy's migrate:remote step (run_migrations:true) — additive/nullable, so concurrent branch previews keep working against the shared D1. A failed CREATE TABLE fails the deploy.",
+        },
+        {
+          tag: "0154_closed_centennial",
+          appliedRemote: false,
+          note: "FK indexes on park_sessions.hitl_queue_id + showroom_store_hitl_queue.store_id (codra follow-up). Additive; applies on the same deploy.",
+        },
+      ],
+    },
+  },
   "0032-park-dwell-detector": {
     slug: "0032-park-dwell-detector",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
