@@ -18,11 +18,13 @@ import { type RemodelTool } from "../../types";
 import { getTeslaStatus } from "./get_tesla_status";
 import { getVehicleLocation } from "./get_vehicle_location";
 import { listTeslaEvents } from "./list_tesla_events";
+import { reportLocation } from "./report_location";
 import { sendVehicleNavigation } from "./send_vehicle_navigation";
 
 export const teslaTools: RemodelTool[] = [
   getTeslaStatus,
   getVehicleLocation,
   listTeslaEvents,
+  reportLocation,
   sendVehicleNavigation,
 ];
