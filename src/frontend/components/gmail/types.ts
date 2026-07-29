@@ -79,6 +79,25 @@ export interface ThreadsByDomainResponse {
   threads: GmailInboxThreadItem[];
 }
 
+/** A domain-matched thread carrying its per-message unread count (0040 P4). */
+export interface GmailInboxThreadItemWithUnread extends GmailInboxThreadItem {
+  unread: number;
+}
+
+export interface ShowroomThreadsByDomainResponse {
+  success: true;
+  domains: string[];
+  emails: string[];
+  /** Total unread messages across all matched threads — the hero badge count. */
+  unreadCount: number;
+  threads: GmailInboxThreadItemWithUnread[];
+}
+
+export interface MarkReadResponse {
+  success: true;
+  marked: number;
+}
+
 export interface ThreadDetailResponse {
   success: true;
   thread: GmailThreadDetail;
@@ -155,6 +174,22 @@ export const gmailApi = {
     return request<ThreadsByDomainResponse>(
       `/companies/${companyId}/threads-by-domain`,
       { signal },
+    );
+  },
+
+  /** `GET /api/gmail/showrooms/:storeId/threads-by-domain` (0040 P4, + unread). */
+  listShowroomThreadsByDomain(storeId: number, signal?: AbortSignal) {
+    return request<ShowroomThreadsByDomainResponse>(
+      `/showrooms/${storeId}/threads-by-domain`,
+      { signal },
+    );
+  },
+
+  /** `POST /api/gmail/threads/:threadId/mark-read` (0040 P4). */
+  markThreadRead(threadId: string) {
+    return request<MarkReadResponse>(
+      `/threads/${encodeURIComponent(threadId)}/mark-read`,
+      { method: "POST" },
     );
   },
 

@@ -23,10 +23,19 @@
  */
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
-import { desc, eq, inArray, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, like, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { companies, companyContacts, contacts, gmailMessages, gmailThreads } from "@backend/db";
+import {
+  companies,
+  companyContacts,
+  contacts,
+  gmailMessages,
+  gmailThreads,
+  showroomPocs,
+  showroomStoreContacts,
+  showroomStores,
+} from "@backend/db";
 import type { GmailMessage, GmailMessageInsert, GmailThread } from "@backend/db";
 
 import { getGmailAccessToken } from "@backend/services/gmail/auth";
@@ -696,6 +705,134 @@ gmailRouter.openapi(
     }
   },
 );
+
+/**
+ * GET /api/gmail/showrooms/:storeId/threads-by-domain — Gmail threads matched to a
+ * showroom's email domains/addresses, with per-message unread counts (0040 P4).
+ *
+ * Showrooms have no companyId, so there are no FK-tagged threads — matching is
+ * purely by the store's emails (store email + main POC email + every POC and
+ * store-contact email), bucketed by splitCandidateEmails and looked up via the
+ * indexed participants table, exactly like the company route.
+ *
+ * Response: { success, domains, emails, unreadCount, threads: [{ ...item, unread }] }.
+ */
+gmailRouter.get("/showrooms/:storeId/threads-by-domain", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("storeId"));
+  if (!Number.isFinite(storeId)) return c.json({ error: "Invalid store id" }, 400);
+
+  try {
+    const [store] = await db
+      .select({ id: showroomStores.id, name: showroomStores.name, email: showroomStores.emailAddress, pocEmail: showroomStores.mainPocEmailAddress })
+      .from(showroomStores)
+      .where(eq(showroomStores.id, storeId))
+      .limit(1);
+    if (!store) return c.json({ error: "Showroom not found" }, 404);
+
+    const pocRows = await db
+      .select({ email: showroomPocs.email })
+      .from(showroomPocs)
+      .where(eq(showroomPocs.showroomId, storeId))
+      .all();
+    const contactRows = await db
+      .select({ email: showroomStoreContacts.emailAddress })
+      .from(showroomStoreContacts)
+      .where(eq(showroomStoreContacts.storeId, storeId))
+      .all();
+
+    const candidateEmails = [
+      store.email,
+      store.pocEmail,
+      ...pocRows.map((r) => r.email),
+      ...contactRows.map((r) => r.email),
+    ].filter((e): e is string => Boolean(e && e.trim()));
+
+    const { privateDomains, publicEmails } = splitCandidateEmails(candidateEmails);
+
+    const threadIds =
+      privateDomains.length > 0 || publicEmails.length > 0
+        ? await findThreadIdsByParticipants(db, { privateDomains, publicEmails })
+        : [];
+
+    if (threadIds.length === 0) {
+      return c.json(
+        { success: true as const, domains: privateDomains, emails: publicEmails, unreadCount: 0, threads: [] },
+        200,
+      );
+    }
+
+    // Fetch the threads + their messages, chunked for the bound-param cap.
+    const threads: GmailThread[] = [];
+    for (let i = 0; i < threadIds.length; i += D1_MAX_BOUND_PARAMS) {
+      const chunk = threadIds.slice(i, i + D1_MAX_BOUND_PARAMS);
+      const rows = await db.select().from(gmailThreads).where(inArray(gmailThreads.threadId, chunk)).all();
+      threads.push(...rows);
+    }
+    const msgsByThread = new Map<string, GmailMessage[]>();
+    const allIds = threads.map((t) => t.threadId);
+    for (let i = 0; i < allIds.length; i += D1_MAX_BOUND_PARAMS) {
+      const chunk = allIds.slice(i, i + D1_MAX_BOUND_PARAMS);
+      const rows = await db.select().from(gmailMessages).where(inArray(gmailMessages.threadId, chunk)).all();
+      for (const m of rows) {
+        const list = msgsByThread.get(m.threadId) ?? [];
+        list.push(m);
+        msgsByThread.set(m.threadId, list);
+      }
+    }
+
+    let unreadCount = 0;
+    const items = threads.map((thread) => {
+      const msgs = msgsByThread.get(thread.threadId) ?? [];
+      const unread = msgs.filter((m) => m.readAt == null).length;
+      unreadCount += unread;
+      return { ...buildInboxThreadItem(thread, store.name, msgs), unread };
+    });
+    items.sort((a, b) => {
+      const at = a.lastMessage?.date ? new Date(a.lastMessage.date).getTime() : -1;
+      const bt = b.lastMessage?.date ? new Date(b.lastMessage.date).getTime() : -1;
+      return bt - at;
+    });
+
+    return c.json(
+      { success: true as const, domains: privateDomains, emails: publicEmails, unreadCount, threads: items },
+      200,
+    );
+  } catch (err) {
+    console.error("[gmail] GET /showrooms/:storeId/threads-by-domain error:", err);
+    return c.json({ error: "Failed to list showroom threads" }, 500);
+  }
+});
+
+/**
+ * POST /api/gmail/threads/:threadId/mark-read — mark every message in a thread as
+ * read (0040 P4). Called when a thread is opened in a viewer; idempotent.
+ * Response: { success, marked } — how many messages flipped unread → read.
+ */
+gmailRouter.post("/threads/:threadId/mark-read", async (c) => {
+  const db = drizzle(c.env.DB);
+  const threadId = c.req.param("threadId");
+  if (!threadId) return c.json({ error: "Invalid thread id" }, 400);
+
+  try {
+    const unread = await db
+      .select({ id: gmailMessages.id })
+      .from(gmailMessages)
+      .where(and(eq(gmailMessages.threadId, threadId), sql`${gmailMessages.readAt} IS NULL`))
+      .all();
+    if (unread.length > 0) {
+      await db
+        .update(gmailMessages)
+        .set({ readAt: new Date() })
+        .where(and(eq(gmailMessages.threadId, threadId), sql`${gmailMessages.readAt} IS NULL`))
+        .run();
+    }
+    return c.json({ success: true as const, marked: unread.length }, 200);
+  } catch (err) {
+    console.error("[gmail] POST /threads/:threadId/mark-read error:", err);
+    return c.json({ error: "Failed to mark thread read" }, 500);
+  }
+});
 
 // ════════════════════════════════════════════════════════════════════════════
 // GET /threads/:threadId

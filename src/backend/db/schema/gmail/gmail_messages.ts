@@ -56,6 +56,14 @@ export const gmailMessages = sqliteTable(
      */
     ragUuid: text("rag_uuid").notNull(),
 
+    /**
+     * When this message was marked read (0040 P4). NULL = unread. Single-user
+     * system, so a per-message timestamp is enough — no per-user join table. The
+     * migration backfills existing rows to created_at (historical = read) so the
+     * showroom inbox badge doesn't light up for the entire back-catalogue.
+     */
+    readAt: integer("read_at", { mode: "timestamp" }),
+
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),
