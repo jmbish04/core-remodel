@@ -148,12 +148,17 @@ export async function ingestLocationFix(
   }
 
   // 3. Home/work arrival ends the active drive (a discrete report is stationary).
+  let homeCheckFailed = false;
   if (!opts.skipHomeArrival) {
     try {
       const home = await maybeEndActiveDriveOnHomeArrival(env, {
         latitude: fix.latitude,
         longitude: fix.longitude,
-        at: fix.capturedAt != null ? new Date(fix.capturedAt) : undefined,
+        // A non-finite/absent capturedAt must not become an Invalid Date.
+        at:
+          fix.capturedAt != null && Number.isFinite(fix.capturedAt)
+            ? new Date(fix.capturedAt)
+            : undefined,
         source: toHomeSource(fix.source),
         stopped: true,
       });
@@ -161,11 +166,14 @@ export async function ingestLocationFix(
       result.homeReason = home.reason;
     } catch (err) {
       console.error("[location/ingest] home-arrival check failed:", err);
+      homeCheckFailed = true;
     }
   }
 
   // 4. Not home → stage a soft arrival if near a registered showroom on the drive.
-  if (!result.homeEnded) {
+  //    Fail SAFE: if the home check threw we can't be sure this isn't home, so we
+  //    do NOT stage (better a missed stage than a soft arrival logged at home).
+  if (!result.homeEnded && !homeCheckFailed) {
     try {
       const stage = await stageSoftArrival(env, {
         latitude: fix.latitude,
