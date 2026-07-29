@@ -74,6 +74,7 @@ import {
 import { assessIntakeQuality } from "@backend/utils/showroom-quality";
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
 import { getAgentByName } from "agents";
+import { renderNoteHtml, sanitizeNoteHtml } from "@backend/services/notes/markdown";
 import { eq, desc, asc, and, like, inArray, ne, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -3981,11 +3982,20 @@ showroomStoresRouter.put("/photos/:imageId/note", async (c) => {
     return c.json({ success: false, error: parsed.error.message }, 400);
   }
 
+  // Markdown is the source of truth: derive the HTML cache from it. When only a
+  // legacy HTML value is supplied, sanitize it rather than storing verbatim.
+  const noteMarkdown = parsed.data.noteMarkdown?.trim() ? parsed.data.noteMarkdown : null;
+  const noteHtml = noteMarkdown
+    ? renderNoteHtml(noteMarkdown)
+    : parsed.data.noteHtml?.trim()
+      ? sanitizeNoteHtml(parsed.data.noteHtml)
+      : null;
+
   const [updated] = await db
     .update(showroomImages)
     .set({
-      noteHtml: parsed.data.noteHtml ?? null,
-      noteMarkdown: parsed.data.noteMarkdown ?? null,
+      noteHtml,
+      noteMarkdown,
       updatedAt: new Date(),
     } as Partial<typeof showroomImages.$inferInsert>)
     .where(eq(showroomImages.id, imageId))
@@ -4286,6 +4296,130 @@ showroomStoresRouter.delete("/:id/photos/:imageId", async (c) => {
   }
 
   return c.json({ success: true });
+});
+
+/**
+ * PATCH /:id/photos/:imageId — Edit an image's altText and/or re-tag its kind.
+ *
+ * Works for ANY image kind on the store (visit or a sweep-discovered
+ * storefront/showroom/logo/map/unknown row). Ownership is enforced: the image
+ * must belong to `:id`, so a caller can't touch another store's image (IDOR).
+ *
+ * Request body (both optional):
+ *   { "altText": "Entry display", "imageKind": "storefront" }
+ *
+ * Response 200: { "photo": { ...updatedRow } }
+ */
+showroomStoresRouter.patch("/:id/photos/:imageId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const imageId = Number(c.req.param("imageId"));
+  if (!Number.isFinite(storeId) || !Number.isFinite(imageId)) {
+    return c.json({ success: false, error: "Invalid id" }, 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  const patchSchema = z.object({
+    altText: z.string().optional().nullable(),
+    imageKind: z.enum(["visit", "storefront", "showroom", "logo", "map", "unknown"]).optional(),
+  });
+  const parsed = patchSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+
+  // Ownership guard — the image must belong to this store.
+  const [image] = await db
+    .select({ id: showroomImages.id })
+    .from(showroomImages)
+    .where(and(eq(showroomImages.id, imageId), eq(showroomImages.storeId, storeId)))
+    .limit(1);
+  if (!image) return c.json({ success: false, error: "Image not found" }, 404);
+
+  const patch: Partial<typeof showroomImages.$inferInsert> = { updatedAt: new Date() };
+  if ("altText" in parsed.data) patch.altText = parsed.data.altText ?? null;
+  if (parsed.data.imageKind !== undefined) patch.imageKind = parsed.data.imageKind;
+
+  const [updated] = await db
+    .update(showroomImages)
+    .set(patch)
+    .where(eq(showroomImages.id, imageId))
+    .returning();
+
+  return c.json({ photo: updated });
+});
+
+/**
+ * POST /:id/photos/bulk-delete — Delete several images at once (multi-select).
+ *
+ * Every id must belong to `:id` — the delete is scoped by storeId so a stray or
+ * hostile id in the list can't remove another store's image (IDOR). Cloudflare
+ * Images cleanup is best-effort per row.
+ *
+ * Request body: { "imageIds": [12, 15, 19] }
+ * Response 200: { "success": true, "deleted": 3 }
+ */
+showroomStoresRouter.post("/:id/photos/bulk-delete", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isFinite(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  const parsed = z.object({ imageIds: z.array(z.number().int().positive()).min(1) }).safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+  const ids = [...new Set(parsed.data.imageIds)];
+
+  // Select only the rows that actually belong to this store (ownership filter).
+  // Chunk the IN list at 20 to stay under D1's 100 bound-parameter cap.
+  const owned: { id: number; cfImageId: string | null }[] = [];
+  for (let i = 0; i < ids.length; i += 20) {
+    const part = ids.slice(i, i + 20);
+    const rows = await db
+      .select({ id: showroomImages.id, cfImageId: showroomImages.cfImageId })
+      .from(showroomImages)
+      .where(and(eq(showroomImages.storeId, storeId), inArray(showroomImages.id, part)));
+    owned.push(...rows);
+  }
+  if (owned.length === 0) return c.json({ success: true, deleted: 0 });
+
+  const ownedIds = owned.map((r) => r.id);
+  for (let i = 0; i < ownedIds.length; i += 20) {
+    const part = ownedIds.slice(i, i + 20);
+    await db.delete(showroomImages).where(inArray(showroomImages.id, part));
+  }
+
+  // Best-effort Cloudflare Images cleanup for the deleted rows.
+  const cfIds = owned.map((r) => r.cfImageId).filter((v): v is string => Boolean(v));
+  if (cfIds.length > 0) {
+    try {
+      const { accountId, apiTokens } = await resolveCloudflareImagesCredentials(c.env);
+      if (accountId && apiTokens.length > 0) {
+        const [primaryToken, ...fallbackApiTokens] = apiTokens;
+        const processor = new ImageProcessorService(c.env, accountId, primaryToken, { fallbackApiTokens });
+        for (const cfId of cfIds) await processor.deleteFromCloudflareImages(cfId);
+      }
+    } catch (err) {
+      console.error("[showroom-stores] bulk photo CF Images delete error:", err);
+    }
+  }
+
+  return c.json({ success: true, deleted: ownedIds.length });
 });
 
 /**
