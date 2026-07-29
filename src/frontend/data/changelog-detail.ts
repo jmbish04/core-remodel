@@ -113,6 +113,67 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "0032-locationfix-ingress": {
+    slug: "0032-locationfix-ingress",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0032 L0 · the source-agnostic location ingress",
+    code: [],
+    problem:
+      "Visit capture was welded to the Tesla streaming DO: only a 500ms telemetry frame that transitioned into Park could stage a soft arrival. A phone GPS ping, an AI-supplied coordinate, or a manual 'I'm here' had no way to drive the same pipeline — so the whole feature depended on a billable always-on socket, exactly the coupling the user asked to remove ('make it work off Tessie poll / phone / AI').",
+    approach:
+      "One seam: a source-agnostic LocationFix ({lat,lng,when,source,shiftState?,…}) and one ingestLocationFix(env, fix) that records provenance then runs the SAME park pipeline the DO already runs — matchAndMarkVisited (check off a drive stop) → maybeEndActiveDriveOnHomeArrival (home/work ends the drive) → stageSoftArrival (near a registered showroom on the active drive). It never auto-navigates, so a stray phone ping can't command the car. Wired the NEW discrete sources through it: POST /api/tesla/manual-here (manual), MCP report_location (ai → persisted to device_location source=ai for auditability), and the existing /device-location route now additively runs the pipeline in the background (waitUntil; record:false + skipHomeArrival:true so nothing double-writes or double-ends). Deliberately did NOT rewire the live streaming DO or the 120s poller — safely unifying them needs the dwell/park DETECTOR (L1) that tracks prior state to fire a drive-away; doing it here would risk the live park pipeline with no detector to close the dwell. No new table, no migration — provenance reuses device_location (free-text source column).",
+    apiChanges: [
+      "NEW POST /api/tesla/manual-here — a manual location fix runs the park pipeline; returns the IngestResult.",
+      "NEW MCP report_location (ai source) — reports a coordinate, stages a visit, records device_location source=ai. 122 tools.",
+      "CHANGED POST /api/showroom-stores/device-location — same response, now also runs the pipeline in the background.",
+    ],
+    filesTouched: [
+      "src/backend/services/location/ingest.ts (new — LocationFix + ingestLocationFix)",
+      "src/backend/services/tesla/visit-sessions.ts (widen GpsSource union to the full enum)",
+      "src/backend/api/routes/tesla.ts (+POST /manual-here)",
+      "src/backend/api/routes/showroom-stores.ts (device-location → additive background ingest)",
+      "src/backend/mcp/tools/tesla/report_location.ts (new) + tesla/index.ts (register)",
+      "scripts/qc/pr_295.mjs",
+    ],
+    migrations: [],
+    diagrams: [
+      {
+        caption: "Every source normalizes to one LocationFix and calls one ingress",
+        code: `flowchart LR
+  P["phone · /device-location"] --> ING[[ingestLocationFix]]
+  A["ai · report_location MCP"] --> ING
+  M["manual · /api/tesla/manual-here"] --> ING
+  ST["tesla-stream DO"] -.->|rewired in L1| ING
+  PO["tesla-poll 120s"] -.->|rewired in L1| ING
+  ING --> REC["record provenance<br/>device_location (phone/ai/manual)"]
+  ING --> MAT["matchAndMarkVisited<br/>(check off stop, no auto-nav)"]
+  ING --> HOME["home/work → end drive"]
+  ING --> STG["stageSoftArrival<br/>near a showroom on the active drive"]
+  classDef dim fill:#1e293b,stroke:#475569,color:#94a3b8;
+  class ST,PO dim`,
+      },
+      {
+        caption: "L0 lands the ingress + discrete sources; L1 adds the detector then rewires the live paths",
+        code: `flowchart TD
+  L0["L0 · ingress + phone/ai/manual<br/>(this PR — no migration)"] --> L1["L1 · park/dwell detector<br/>+ park_sessions (migration)<br/>+ rewire DO & poller"]
+  L1 --> DONE["all sources unified<br/>+ automatic drive-away from any source"]
+  classDef done fill:#1f4d2e,stroke:#4ade80,color:#e2e8f0;
+  class L0 done`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_295.mjs",
+      command: "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 295 -- --preview",
+      ranAt: "2026-07-27",
+      output:
+        "tsc --noEmit clean on the new ingress + visit-sessions + tesla route + showroom-stores route + the report_location tool. " +
+        "pnpm run build green (exit 0). Tool count → 122 (+report_location). No schema change → no migration. " +
+        "QC pr_295 (committed): regression on tesla status + visit-logs, the new /api/tesla/manual-here (200 + IngestResult; an " +
+        "offshore fix records but matches/stages nothing), and that the additive ingest left /device-location's response shape intact. " +
+        "Writes gated preview-only (each records a device_location fix). Runs against preview then prod after deploy.",
+      migrations: [],
+    },
+  },
   "0032-tesla-location-config": {
     slug: "0032-tesla-location-config",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",

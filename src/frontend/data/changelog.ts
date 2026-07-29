@@ -308,6 +308,23 @@ export const CHANGELOG: ChangelogEntry[] = [
     status: "staged",
   },
   {
+    id: "0032-locationfix-ingress",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-27",
+    tag: "0032",
+    area: "Tesla / Visits",
+    title: "LocationFix ingress — phone / AI / manual as first-class sources (0032 L0)",
+    summary:
+      "The decoupling seam: a source-agnostic LocationFix + one ingestLocationFix(env, fix) that records provenance and runs the SAME park pipeline the streaming DO runs — match a drive stop, home/work check, stage a soft arrival near a showroom on the active drive. Now a phone ping, an AI-supplied coordinate, or a manual 'I'm here' stages a visit exactly like a 500ms telemetry frame — the 'make it work off Tessie poll / phone / AI' ask. NEW: POST /api/tesla/manual-here, MCP report_location (ai source → device_location source=ai), and the existing /device-location route additively runs the pipeline in the background. No new table, no migration: provenance reuses device_location (free-text source). SAFELY SCOPED: the live streaming DO and 120s poller are deliberately NOT rewired here — that needs the dwell/park detector (L1, next) which tracks prior state for drive-away. Until L1, a soft arrival staged from a discrete source finalizes via the DO's stream drive-away or manually in the Visit Logs workspace.",
+    changes: [
+      { kind: "added", text: "services/location/ingest.ts — LocationFix/LocationSource + ingestLocationFix (record → match → home → stage), no auto-nav." },
+      { kind: "added", text: "POST /api/tesla/manual-here (manual source); MCP report_location (ai source, 122 tools)." },
+      { kind: "changed", text: "/api/showroom-stores/device-location additively runs the park pipeline in the background (waitUntil) — phone is now a first-class source; response shape unchanged." },
+      { kind: "changed", text: "visit-sessions GpsSource union widened to the full gps_source enum (+ tesla-poll, phone, ai) to match the V1 column." },
+    ],
+    status: "staged",
+  },
+  {
     id: "0032-tesla-location-config",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-27",

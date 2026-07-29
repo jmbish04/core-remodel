@@ -23,8 +23,15 @@ import { drizzle } from "drizzle-orm/d1";
 /** A park counts as "at" a showroom within this many metres. */
 export const SHOWROOM_MATCH_RADIUS_M = 250;
 
-/** Where an arrival fix came from — matches the gps_source column's enum. */
-export type GpsSource = "tesla-telemetry" | "tesla-webhook" | "device" | "manual";
+/** Where an arrival fix came from — matches the gps_source column's enum (0032). */
+export type GpsSource =
+  | "tesla-telemetry"
+  | "tesla-poll"
+  | "tesla-webhook"
+  | "device"
+  | "phone"
+  | "ai"
+  | "manual";
 
 export interface ParkFix {
   latitude: number;

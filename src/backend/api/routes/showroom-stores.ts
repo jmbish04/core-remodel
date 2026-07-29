@@ -46,6 +46,7 @@ import {
 import { deviceLocation } from "@backend/db/schema/system/device-location";
 import { classifyBayAreaRegion } from "@backend/lib/bay-area-region";
 import { maybeEndActiveDriveOnHomeArrival } from "@backend/services/drive-home-arrival";
+import { ingestLocationFix } from "@backend/services/location/ingest";
 import { businessCardService } from "@backend/services/business-card";
 import { faviconService } from "@backend/services/favicon";
 import { GoogleMapsService } from "@backend/services/google/maps";
@@ -2258,6 +2259,23 @@ showroomStoresRouter.post("/device-location", async (c) => {
     source: "device",
     stopped: true,
   });
+
+  // 0032 L0: a phone fix is now a first-class location source — also run the park
+  // pipeline (match a drive stop + stage a soft arrival near a showroom). Additive:
+  // record:false (row inserted above) and skipHomeArrival:true (ran above). Handed
+  // to waitUntil so it never blocks or drops after the response.
+  c.executionCtx.waitUntil(
+    ingestLocationFix(
+      c.env,
+      {
+        source: "phone",
+        latitude: d.latitude,
+        longitude: d.longitude,
+        accuracyMeters: d.accuracyMeters ?? null,
+      },
+      { record: false, skipHomeArrival: true },
+    ).catch((err) => console.error("[device-location] ingest failed:", err)),
+  );
 
   return c.json({ success: true, id: row.id, homeArrival });
 });

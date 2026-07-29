@@ -26,6 +26,7 @@
 import { driveListStops, driveLists, showroomStores, showroomVisitLog } from "@backend/db";
 import { teslaTelemetryEvents, teslaWebhookEvents } from "@backend/db/schema/tesla";
 import { matchAndMarkVisited } from "@backend/services/drive-geo-match";
+import { ingestLocationFix } from "@backend/services/location/ingest";
 import {
   maybeEndActiveDriveOnHomeArrival,
   type HomeArrivalResult,
@@ -57,6 +58,7 @@ import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
+import { z } from "zod";
 
 const teslaRouter = new Hono<{ Bindings: Env }>();
 
@@ -146,6 +148,31 @@ teslaRouter.post("/navigate", async (c) => {
  */
 teslaRouter.post("/poll", async (c) => {
   return c.json(await pollVehicleForActiveDrive(c.env));
+});
+
+/**
+ * POST /api/tesla/manual-here — a manual "I'm here" location fix (0032 L0).
+ *
+ * The human's escape hatch when no automatic source has a fresh fix: report a
+ * coordinate and run the same park pipeline every source runs (match a drive
+ * stop, home/work check, stage a soft arrival near a showroom). Awaited so the
+ * caller sees what it did. Admin-gated by the router middleware.
+ */
+const manualHereSchema = z.object({
+  latitude: z.number().finite(),
+  longitude: z.number().finite(),
+  accuracyMeters: z.number().finite().optional().nullable(),
+});
+teslaRouter.post("/manual-here", async (c) => {
+  const parsed = manualHereSchema.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
+  const result = await ingestLocationFix(c.env, {
+    source: "manual",
+    latitude: parsed.data.latitude,
+    longitude: parsed.data.longitude,
+    accuracyMeters: parsed.data.accuracyMeters ?? null,
+  });
+  return c.json({ success: true, result });
 });
 
 /**
