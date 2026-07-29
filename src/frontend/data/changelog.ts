@@ -321,7 +321,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "added", text: "Sidebar Park-Finds nav entry under Showrooms with a live TBD-count badge (AdminSidebar fetches /api/showroom-hitl-queue?decision=TBD, threads parkFindsPendingCount to the nested item, refreshes on a 'park-finds-updated' event)." },
       { kind: "changed", text: "Reuses DriveMapThumb for the card mini-map; mirrors the V2c VisitLogsListApp fetch/tab/card structure and ProductPhotoHitl's busy→POST→refetch action pattern." },
     ],
-    status: "staged",
+    status: "shipped",
   },
   {
     id: "0032-park-finds-discovery",
@@ -343,7 +343,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "fixed", text: "Codra follow-ups: proximity-scan dedup queries now filter by the ≤10 candidate place_ids (inArray) instead of full-scanning stores/exclusions/queue on every park (dead-variable bug); decideHitlCandidate short-circuits an already-decided candidate (real idempotency, was only documented); countPending uses count(*) not a row load; place.types?.[0] optional-chained; FK indexes added on hitl_queue.store_id + park_sessions.hitl_queue_id (migration 0154)." },
       { kind: "migration", text: "0154_closed_centennial — CREATE INDEX on park_sessions.hitl_queue_id + showroom_store_hitl_queue.store_id (FK indexes)." },
     ],
-    status: "staged",
+    status: "shipped",
   },
   {
     id: "0032-park-dwell-detector",
@@ -362,7 +362,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "changed", text: "tesla-poller now feeds the detector additively (existing match/home untouched) — poll-only drives get the full visit lifecycle." },
       { kind: "migration", text: "0149_eager_bishop — CREATE TABLE park_sessions + partial-unique index (status='parked')." },
     ],
-    status: "staged",
+    status: "shipped",
   },
   {
     id: "0032-locationfix-ingress",
@@ -380,7 +380,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "changed", text: "visit-sessions GpsSource union widened to the full gps_source enum (+ tesla-poll, phone, ai) to match the V1 column." },
       { kind: "fixed", text: "Codra follow-ups: coordinate range bounds on manual-here + report_location (lat -90..90 / lng -180..180 / accuracy ≥0); capturedAt finite-guard before new Date; home-check error now fails SAFE (skips staging so a DB blip at home can't log a false showroom visit); QC no longer POSTs manual-here on prod." },
     ],
-    status: "staged",
+    status: "shipped",
   },
   {
     id: "0032-tesla-location-config",
@@ -398,7 +398,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "changed", text: "Recording master switch reuses the existing tesla_telemetry_recording_enabled flag (not the spec's unused tesla_record_telemetry) — avoids a split-brain recording flag." },
       { kind: "fixed", text: "Codra follow-ups: GeocodeAddressField now sequences/aborts autocomplete requests (no stale overwrite), guards state after unmount, and surfaces a resolve failure; QC pr_293 gates the config write on the ACTUAL base (not a CLI flag) with a per-run key + verified cleanup; NumField caps length + label association." },
     ],
-    status: "staged",
+    status: "shipped",
   },
   {
     id: "0032-visit-logs-workspace",
@@ -416,7 +416,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "added", text: "Sidebar 'Visit Logs' entry under Showrooms." },
       { kind: "fixed", text: "store [section].astro allow-list was missing 'contacts' (and now 'visits') — /store/:id/contacts had silently fallen back to brands-products." },
     ],
-    status: "staged",
+    status: "shipped",
   },
   {
     id: "0032-visit-log-mcp-crud",
@@ -432,7 +432,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "changed", text: "/api/showroom-visit-logs refactored to delegate to the shared service (no duplicated logic)." },
       { kind: "added", text: "MCP 'visits' domain (7 tools) — full CRUD + stage_showroom_visit + finalize_visit_log. 121 tools total; auto-renders on /connect/tools." },
     ],
-    status: "staged",
+    status: "shipped",
   },
   {
     id: "0032-visit-log-rest-crud",
@@ -449,7 +449,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "changed", text: "status enum gains DRAFT (human save-draft). TEXT column → TS-only, db:generate confirms no migration." },
       { kind: "changed", text: "MCP CRUD twins + workspace pages/components deferred to V2b/V2c for reviewability." },
     ],
-    status: "staged",
+    status: "shipped",
   },
   {
     id: "0032-visit-log-reconcile",
@@ -467,7 +467,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "changed", text: "stageSoftArrival/finalizeSoftArrivals populate match_distance_m (park-to-store distance) + provenance_json (raw fix + active-drive id); gps_source enum widened (+ tesla-poll, phone, ai)." },
       { kind: "changed", text: "hitl_queue_id + the store/hitl XOR rule deferred to D1 (avoids a dangling FK before the showroom_store_hitl_queue table exists)." },
     ],
-    status: "staged",
+    status: "shipped",
   },
   {
     id: "api-auth-bearer",
