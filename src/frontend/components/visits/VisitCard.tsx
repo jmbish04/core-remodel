@@ -11,6 +11,7 @@ import { ArrowRight, CalendarClock, Route } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 
+import { NoteBody } from "@/components/showroom/NoteBody";
 import { SourceBadge, VisitStatusBadge, VisitTypeChip } from "./Badges";
 import { StarsReadOnly } from "./StarRating";
 import { formatDistance, formatDwell, isPending, type VisitLog } from "./types";
@@ -24,6 +25,14 @@ function fmtWhen(iso: string | null): string {
     : "—";
 }
 
+/**
+ * One visit-log row.
+ *
+ * @param visit - the visit-log record to render (status, type, source, arrival +
+ *   dwell, rating, and a read-only Markdown note preview via {@link NoteBody}).
+ * @param hideStore - omit the store-name header (for the store viewport, where the
+ *   store is already the page context). Defaults to false.
+ */
 export function VisitCard({ visit, hideStore = false }: { visit: VisitLog; hideStore?: boolean }) {
   const pending = isPending(visit.status);
   const distance = formatDistance(visit.matchDistanceM);
@@ -61,6 +70,13 @@ export function VisitCard({ visit, hideStore = false }: { visit: VisitLog; hideS
               </span>
             )}
           </div>
+          {(visit.notesMarkdown?.trim() || visit.notesHtml?.trim()) && (
+            <NoteBody
+              className="line-clamp-3 text-muted-foreground"
+              markdown={visit.notesMarkdown}
+              html={visit.notesHtml}
+            />
+          )}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-2">
           <StarsReadOnly rating={visit.rating} />

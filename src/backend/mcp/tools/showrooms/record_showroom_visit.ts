@@ -1,4 +1,5 @@
 import { showroomStores, storeNotes } from "@backend/db";
+import { renderNoteHtml } from "@backend/services/notes/markdown";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -7,12 +8,27 @@ import { looseObject, urlField } from "../../schemas";
 import { showroomUrl } from "../../urls";
 import { defineTool, WRITE } from "../../types";
 
+/**
+ * `record_showroom_visit` — log a completed showroom visit in a single call.
+ *
+ * Input: `{ showroomId, rating (1–5), note (Markdown), tags? }`. The Markdown
+ * `note` is the source of truth; render-ready HTML is derived server-side via
+ * {@link renderNoteHtml} and written to `showroom_stores.ratingContextHtml` and
+ * the mirrored `store_notes.contentHtml` — callers never send HTML.
+ *
+ * Effects: sets the store's latest-visit `rating` + `ratingContextMarkdown`/`Html`
+ * and inserts a `store_notes` row titled `Visit — N★`. Rejects an empty note or an
+ * unknown `showroomId`.
+ *
+ * Returns `{ recorded, store, note, url }` — the updated store row, the new note
+ * row, and the showroom's workspace URL.
+ */
 export const recordShowroomVisit = defineTool({
   name: "record_showroom_visit",
   category: "showrooms",
   title: "Record a showroom visit",
   description:
-    "Log a completed showroom visit in one call: sets the store's latest-visit `rating` (1-5) and `ratingContextMarkdown` (also mirrored to `ratingContextHtml`) AND appends a `store_notes` visit note with the same Markdown body. Optional `tags` are attached to the note. Validates the showroom exists first.",
+    "Log a completed showroom visit in one call: sets the store's latest-visit `rating` (1-5) and `ratingContextMarkdown` AND appends a matching `store_notes` visit note. `note` is Markdown — the source of truth; render-ready HTML (`ratingContextHtml`, note `contentHtml`) is derived server-side, so send Markdown only, never HTML. Optional `tags` attach to the note. Validates the showroom exists first.",
   inputShape: {
     showroomId: z.number().int().positive().describe("Showroom store id (from list_showrooms)"),
     rating: z.number().int().min(1).max(5).describe("Star rating for this visit, 1-5"),
@@ -49,12 +65,14 @@ export const recordShowroomVisit = defineTool({
       toolError(`Showroom ${input.showroomId} not found. Call list_showrooms for valid ids.`);
     }
 
+    const noteHtml = renderNoteHtml(note);
+
     await db
       .update(showroomStores)
       .set({
         rating: input.rating,
         ratingContextMarkdown: note,
-        ratingContextHtml: note,
+        ratingContextHtml: noteHtml,
       })
       .where(eq(showroomStores.id, input.showroomId))
       .run();
@@ -65,6 +83,7 @@ export const recordShowroomVisit = defineTool({
         storeId: input.showroomId,
         title: `Visit — ${input.rating}★`,
         contentMarkdown: note,
+        contentHtml: noteHtml,
         note,
         tagsJson: input.tags ? JSON.stringify(input.tags) : undefined,
       })
