@@ -111,11 +111,13 @@ function AdminSidebarLinks({
   currentPath,
   currentHash,
   uploadsPendingCount,
+  parkFindsPendingCount,
   onNavigate,
 }: {
   currentPath: string;
   currentHash: string;
   uploadsPendingCount: number;
+  parkFindsPendingCount: number;
   onNavigate?: () => void;
 }) {
   const { openNavGroups, toggleNavGroup } = useOpenNavGroups(ADMIN_NAV_GROUPS, currentPath);
@@ -133,17 +135,34 @@ function AdminSidebarLinks({
 
       {ADMIN_NAV_GROUPS.map((group) => {
         // Photos surfaces the pending-uploads badge on the Uploads item.
-        const resolved: NavGroupDef =
-          group.id === "photos"
-            ? {
-                ...group,
-                items: group.items.map((item) =>
-                  item.href === "/admin/prepare/uploads"
-                    ? { ...item, badgeCount: uploadsPendingCount }
-                    : item,
-                ),
-              }
-            : group;
+        let resolved: NavGroupDef = group;
+        if (group.id === "photos") {
+          resolved = {
+            ...group,
+            items: group.items.map((item) =>
+              item.href === "/admin/prepare/uploads"
+                ? { ...item, badgeCount: uploadsPendingCount }
+                : item,
+            ),
+          };
+        } else if (group.id === "shopping" && parkFindsPendingCount > 0) {
+          // Park-Finds sits under Showrooms → children — surface the TBD count there.
+          resolved = {
+            ...group,
+            items: group.items.map((item) =>
+              item.href === "/admin/shopping/showrooms" && item.children
+                ? {
+                    ...item,
+                    children: item.children.map((child) =>
+                      child.href === "/admin/shopping/showrooms/hitl"
+                        ? { ...child, badgeCount: parkFindsPendingCount }
+                        : child,
+                    ),
+                  }
+                : item,
+            ),
+          };
+        }
         return (
           <RenderGroup
             key={resolved.id}
@@ -165,6 +184,7 @@ function AdminSidebarContent({
   currentPath,
   currentHash,
   uploadsPendingCount,
+  parkFindsPendingCount,
   loggingOut,
   onLogout,
   onNavigate,
@@ -173,6 +193,7 @@ function AdminSidebarContent({
   currentPath: string;
   currentHash: string;
   uploadsPendingCount: number;
+  parkFindsPendingCount: number;
   loggingOut: boolean;
   onLogout: () => void;
   onNavigate?: () => void;
@@ -210,6 +231,7 @@ function AdminSidebarContent({
           currentPath={currentPath}
           currentHash={currentHash}
           uploadsPendingCount={uploadsPendingCount}
+          parkFindsPendingCount={parkFindsPendingCount}
           onNavigate={onNavigate}
         />
       </div>
@@ -275,6 +297,7 @@ export function AdminSidebar({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(collapsedProp);
   const [uploadsPendingCount, setUploadsPendingCount] = useState(0);
+  const [parkFindsPendingCount, setParkFindsPendingCount] = useState(0);
   const [loggingOut, setLoggingOut] = useState(false);
   const currentPath = useCurrentPath(currentPathProp);
   const currentHash = useCurrentHash();
@@ -318,6 +341,29 @@ export function AdminSidebar({
     };
   }, []);
 
+  // Park-Finds TBD count — the discovery review inbox badge (0032 D1b).
+  useEffect(() => {
+    let mounted = true;
+    const fetchParkFinds = async () => {
+      try {
+        const response = await fetch("/api/showroom-hitl-queue?decision=TBD", {
+          credentials: "include",
+        });
+        const payload = (await response.json()) as { pending?: number };
+        if (mounted && response.ok) setParkFindsPendingCount(payload.pending ?? 0);
+      } catch {
+        // Keep the sidebar resilient; no-op on badge fetch failures.
+      }
+    };
+    const onUpdated = () => void fetchParkFinds();
+    void fetchParkFinds();
+    window.addEventListener("park-finds-updated", onUpdated);
+    return () => {
+      mounted = false;
+      window.removeEventListener("park-finds-updated", onUpdated);
+    };
+  }, []);
+
   const handleLogout = async () => {
     setLoggingOut(true);
     try {
@@ -340,6 +386,7 @@ export function AdminSidebar({
             currentPath={currentPath}
             currentHash={currentHash}
             uploadsPendingCount={uploadsPendingCount}
+            parkFindsPendingCount={parkFindsPendingCount}
             loggingOut={loggingOut}
             onLogout={handleLogout}
             onCollapse={() => setCollapsedPersisted(true)}
@@ -393,6 +440,7 @@ export function AdminSidebar({
               currentPath={currentPath}
               currentHash={currentHash}
               uploadsPendingCount={uploadsPendingCount}
+              parkFindsPendingCount={parkFindsPendingCount}
               loggingOut={loggingOut}
               onLogout={handleLogout}
               onNavigate={() => setMobileOpen(false)}

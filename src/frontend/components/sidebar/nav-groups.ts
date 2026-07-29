@@ -100,6 +100,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
         children: [
           { href: "/admin/shopping/drives", label: "Drive Lists", icon: Route },
           { href: "/admin/shopping/showrooms/visitlogs", label: "Visit Logs", icon: MapPinCheck },
+          { href: "/admin/shopping/showrooms/hitl", label: "Park-Finds", icon: Telescope },
           { href: "/admin/shopping/contacts", label: "Contacts", icon: Contact },
           { href: "/admin/shopping/sales", label: "Sales & Clearance", icon: BadgePercent },
           { href: "/admin/shopping/photo-intake", label: "Showroom Intake", icon: ScanLine },
