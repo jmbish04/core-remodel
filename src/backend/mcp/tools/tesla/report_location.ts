@@ -23,9 +23,9 @@ export const reportLocation = defineTool({
     "The fix is recorded to device_location (source=ai) for the receipts trail. Does NOT command the " +
     "car — use send_vehicle_navigation for that. Report a fix only when you actually know where the user is.",
   inputShape: {
-    latitude: z.number().describe("Decimal degrees."),
-    longitude: z.number().describe("Decimal degrees."),
-    accuracyMeters: z.number().optional().describe("Reported accuracy radius, metres."),
+    latitude: z.number().finite().gte(-90).lte(90).describe("Decimal degrees, -90..90."),
+    longitude: z.number().finite().gte(-180).lte(180).describe("Decimal degrees, -180..180."),
+    accuracyMeters: z.number().finite().nonnegative().optional().describe("Reported accuracy radius, metres."),
   },
   annotations: WRITE,
   outputShape: {

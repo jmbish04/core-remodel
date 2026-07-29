@@ -159,13 +159,13 @@ teslaRouter.post("/poll", async (c) => {
  * caller sees what it did. Admin-gated by the router middleware.
  */
 const manualHereSchema = z.object({
-  latitude: z.number().finite(),
-  longitude: z.number().finite(),
-  accuracyMeters: z.number().finite().optional().nullable(),
+  latitude: z.number().finite().gte(-90).lte(90),
+  longitude: z.number().finite().gte(-180).lte(180),
+  accuracyMeters: z.number().finite().nonnegative().optional().nullable(),
 });
 teslaRouter.post("/manual-here", async (c) => {
   const parsed = manualHereSchema.safeParse(await c.req.json().catch(() => null));
-  if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
+  if (!parsed.success) return c.json({ error: "Invalid coordinates (lat -90..90, lng -180..180)." }, 400);
   const result = await ingestLocationFix(c.env, {
     source: "manual",
     latitude: parsed.data.latitude,

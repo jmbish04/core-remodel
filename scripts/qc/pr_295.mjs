@@ -19,7 +19,8 @@ import { assertReachable, createChecks, createClient, resolveBase, WORKER_BASE }
 
 const client = createClient();
 const checks = createChecks();
-const onProd = client.base === WORKER_BASE;
+// Gate every side-effecting write on the ACTUAL base — manual-here and
+// device-location each record a device_location fix, so they run preview-only.
 const isPreviewBase = client.base !== WORKER_BASE;
 
 // Null Island-ish: far from any showroom / home, so match/home/stage all no-op.
@@ -56,14 +57,9 @@ try {
       `→ ${JSON.stringify(r ?? {}).slice(0, 160)}`,
     );
   } else {
-    const here = await client.post("/api/tesla/manual-here", OCEAN);
-    if (here.status === 404) {
-      checks.info("PENDING: /api/tesla/manual-here not on prod yet (404; needs merge+deploy)");
-    } else {
-      // Present on prod post-deploy: assert it responds, but don't over-assert
-      // (an active drive near the ocean is impossible, so it's still a clean no-op).
-      checks.ok("POST /api/tesla/manual-here → 200 (prod, post-deploy)", here.status === 200, `→ ${here.status}`);
-    }
+    // On prod, do NOT POST — manual-here records a device_location fix and the
+    // fileoverview promises no junk writes to prod. It's exercised on the preview.
+    checks.info("SKIP: /api/tesla/manual-here write not run on prod (records a fix; verified on preview)");
   }
 
   // ── 3. Additive ingest didn't break the existing device-location route ──

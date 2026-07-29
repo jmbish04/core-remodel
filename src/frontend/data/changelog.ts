@@ -321,6 +321,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "added", text: "POST /api/tesla/manual-here (manual source); MCP report_location (ai source, 122 tools)." },
       { kind: "changed", text: "/api/showroom-stores/device-location additively runs the park pipeline in the background (waitUntil) — phone is now a first-class source; response shape unchanged." },
       { kind: "changed", text: "visit-sessions GpsSource union widened to the full gps_source enum (+ tesla-poll, phone, ai) to match the V1 column." },
+      { kind: "fixed", text: "Codra follow-ups: coordinate range bounds on manual-here + report_location (lat -90..90 / lng -180..180 / accuracy ≥0); capturedAt finite-guard before new Date; home-check error now fails SAFE (skips staging so a DB blip at home can't log a false showroom visit); QC no longer POSTs manual-here on prod." },
     ],
     status: "staged",
   },
