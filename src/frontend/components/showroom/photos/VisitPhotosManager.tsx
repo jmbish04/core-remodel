@@ -8,7 +8,7 @@
  * them or group them into a new folder. Clicking a stack opens the folder modal
  * (rename, describe, price, add/remove members, delete).
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { FolderPlus, Loader2, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -80,8 +80,21 @@ export function VisitPhotosManager({
     void loadGroups();
   }, [loadGroups]);
 
-  const loose = photos.filter((p) => p.groupId == null);
-  const membersOf = (groupId: number) => photos.filter((p) => p.groupId === groupId);
+  // Bucket photos once per `photos` change instead of re-filtering every render.
+  const { loose, membersByGroup } = useMemo(() => {
+    const looseList: ShowroomPhoto[] = [];
+    const byGroup = new Map<number, ShowroomPhoto[]>();
+    for (const p of photos) {
+      if (p.groupId == null) looseList.push(p);
+      else {
+        const list = byGroup.get(p.groupId) ?? [];
+        list.push(p);
+        byGroup.set(p.groupId, list);
+      }
+    }
+    return { loose: looseList, membersByGroup: byGroup };
+  }, [photos]);
+  const membersOf = (groupId: number) => membersByGroup.get(groupId) ?? [];
   const openGroup = groups.find((g) => g.id === openGroupId) ?? null;
 
   const toggle = (id: number) =>
@@ -237,6 +250,7 @@ export function VisitPhotosManager({
       {/* Folder detail modal */}
       {openGroup && (
         <FolderModal
+          key={openGroup.id}
           storeId={storeId}
           group={openGroup}
           members={membersOf(openGroup.id)}

@@ -51,7 +51,7 @@ try {
   }
   if (!target) {
     checks.info("No store with >= 2 visit photos found; skipping the folder round-trip.");
-    checks.finish();
+    checks.finish(); // finish() calls process.exit(), so execution halts here.
   }
 
   const { id: storeId, ids } = target;
