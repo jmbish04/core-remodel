@@ -20,9 +20,15 @@
  */
 import { matchAndMarkVisited } from "@backend/services/drive-geo-match";
 import { maybeEndActiveDriveOnHomeArrival } from "@backend/services/drive-home-arrival";
-import { type GpsSource, stageSoftArrival } from "@backend/services/tesla/visit-sessions";
+import {
+  finalizeSoftArrivals,
+  type GpsSource,
+  stageSoftArrival,
+} from "@backend/services/tesla/visit-sessions";
 import { deviceLocation } from "@backend/db/schema/system/device-location";
 import { drizzle } from "drizzle-orm/d1";
+
+import { linkVisitToParkSession, processFix } from "./park-detector";
 
 /** Where a fix came from. `tesla-stream`/`tesla-poll` self-record their own evidence. */
 export type LocationSource = "tesla-stream" | "tesla-poll" | "phone" | "ai" | "manual";
@@ -34,8 +40,11 @@ export interface LocationFix {
   /** Epoch ms the fix was taken; defaults to now. */
   capturedAt?: number;
   source: LocationSource;
-  /** Present only for Tesla sources; phone/ai/manual carry no gear. */
-  shiftState?: "P" | "R" | "N" | "D" | null;
+  /**
+   * Gear, present only for Tesla sources (phone/ai/manual carry none). A raw
+   * string ("P"|"R"|"N"|"D" in practice) — the detector only tests `=== "P"`.
+   */
+  shiftState?: string | null;
   speed?: number | null;
   headingDeg?: number | null;
   accuracyMeters?: number | null;
@@ -70,6 +79,71 @@ export interface IngestResult {
   visitLogId?: number;
   storeId?: number;
   stageReason?: string;
+}
+
+/** A stable detector subject for a fix — the vin for Tesla, else the source name. */
+function subjectFor(fix: LocationFix): string {
+  if (fix.subjectId) return fix.subjectId;
+  if (fix.source === "tesla-stream" || fix.source === "tesla-poll") return fix.vin || "tesla";
+  return fix.source; // "phone" | "ai" | "manual"
+}
+
+export interface DetectorIngestResult {
+  event: DetectorEventName;
+  parkSessionId?: number;
+  staged: boolean;
+  visitLogId?: number;
+  storeId?: number;
+  finalized: number;
+}
+type DetectorEventName = "park" | "drive-away" | null;
+
+/**
+ * Continuous-source ingress (0032 L1): feed a fix to the park/dwell detector and,
+ * on a confirmed PARK, stage a soft arrival (linked to the park session); on
+ * DRIVE-AWAY, finalize open soft arrivals. This is what gives a poll-only or
+ * phone-only drive the full visit lifecycle the 500ms stream used to own — no
+ * stream, no per-frame billing. Callers (the poller) hand this to `waitUntil`.
+ *
+ * Unlike `ingestLocationFix`, this does NOT match stops or run the home check —
+ * the poller already does both; this adds only the detector-driven stage/finalize.
+ */
+export async function ingestViaDetector(env: Env, fix: LocationFix): Promise<DetectorIngestResult> {
+  const det = await processFix(env, {
+    subjectId: subjectFor(fix),
+    source: fix.source,
+    latitude: fix.latitude,
+    longitude: fix.longitude,
+    capturedAt: fix.capturedAt ?? Date.now(),
+    shiftState: fix.shiftState ?? null,
+    speed: fix.speed ?? null,
+  });
+
+  if (det.event === "park") {
+    const stage = await stageSoftArrival(env, {
+      latitude: fix.latitude,
+      longitude: fix.longitude,
+      gpsSource: toGpsSource(fix.source),
+    });
+    if (stage.staged && stage.visitLogId != null && det.parkSessionId != null) {
+      await linkVisitToParkSession(env, det.parkSessionId, stage.visitLogId, stage.storeId);
+    }
+    return {
+      event: "park",
+      parkSessionId: det.parkSessionId,
+      staged: stage.staged,
+      visitLogId: stage.visitLogId,
+      storeId: stage.storeId,
+      finalized: 0,
+    };
+  }
+
+  if (det.event === "drive-away") {
+    const fin = await finalizeSoftArrivals(env);
+    return { event: "drive-away", parkSessionId: det.parkSessionId, staged: false, finalized: fin.finalized };
+  }
+
+  return { event: null, parkSessionId: det.parkSessionId, staged: false, finalized: 0 };
 }
 
 /** LocationFix.source → the visit-log gps_source enum value. */

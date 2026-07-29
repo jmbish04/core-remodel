@@ -29,6 +29,7 @@
 import { teslaWebhookEvents } from "@backend/db/schema/tesla";
 import { matchAndMarkVisited } from "@backend/services/drive-geo-match";
 import { maybeEndActiveDriveOnHomeArrival } from "@backend/services/drive-home-arrival";
+import { type DetectorIngestResult, ingestViaDetector } from "@backend/services/location/ingest";
 import { getActiveDriveSlug } from "@backend/services/drive-lists";
 import { getVehicleState, sendNavigation, tessieConfigured } from "@backend/services/tesla";
 import { getStreamControl, isAutoNavigateEnabled, isWithinStreamWindow } from "@backend/services/tesla/gating";
@@ -134,6 +135,25 @@ export async function pollVehicleForActiveDrive(env: Env): Promise<PollResult> {
     stopped: parked,
   });
 
+  // 0032 L1: feed every poll fix to the source-agnostic park/dwell detector, which
+  // stages a soft arrival on a confirmed PARK and finalizes on DRIVE-AWAY. This is
+  // what gives a poll-only drive (streaming DO off) the full visit lifecycle the
+  // 500ms stream used to own — no per-frame billing. Best-effort: a detector error
+  // must never fail the poll itself.
+  let detector: DetectorIngestResult | null = null;
+  try {
+    detector = await ingestViaDetector(env, {
+      source: "tesla-poll",
+      latitude: coord.lat,
+      longitude: coord.lng,
+      capturedAt: Date.now(),
+      shiftState: state.shiftState,
+      speed: state.speed,
+    });
+  } catch (err) {
+    console.error("[tesla-poller] detector ingest failed:", err);
+  }
+
   // Record the poll like any other vehicle event, so the drive history and the
   // health screen see the same evidence a webhook would have produced.
   await drizzle(env.TESLA_DB)
@@ -150,6 +170,7 @@ export async function pollVehicleForActiveDrive(env: Env): Promise<PollResult> {
         homeArrival,
         shiftState: state.shiftState,
         parked,
+        detector,
       }),
       data: JSON.stringify({ source: "poll", drive: activeSlug, state }),
     })
