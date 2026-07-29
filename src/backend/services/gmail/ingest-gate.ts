@@ -189,17 +189,35 @@ export interface IngestGateResult {
   failed: number;
 }
 
+export interface RunIngestGateOptions {
+  /**
+   * Restrict the run to these domains only (case-insensitive, normalized).
+   * Used for a bounded first run / ops re-pull of a single vendor. When omitted,
+   * every gated domain is searched.
+   */
+  onlyDomains?: string[];
+}
+
 /**
  * Run the gate: search every gated domain, ingest new matches, and bridge each
  * into the shared `processEmail` pipeline.
  *
  * @param env  Worker env (Gmail auth, DB, R2, AI — all consumed downstream).
  */
-export async function runIngestGate(env: Env): Promise<IngestGateResult> {
+export async function runIngestGate(
+  env: Env,
+  opts: RunIngestGateOptions = {},
+): Promise<IngestGateResult> {
   const db = drizzle(env.DB);
   const token = await getGmailAccessToken(env);
 
-  const domainMap = await collectGatedDomains(db);
+  let domainMap = await collectGatedDomains(db);
+  if (opts.onlyDomains && opts.onlyDomains.length > 0) {
+    const allow = new Set(
+      opts.onlyDomains.map((d) => normalizeDomain(d)).filter((d): d is string => Boolean(d)),
+    );
+    domainMap = new Map([...domainMap].filter(([domain]) => allow.has(domain)));
+  }
   const result: IngestGateResult = {
     domainsSearched: domainMap.size,
     candidates: 0,

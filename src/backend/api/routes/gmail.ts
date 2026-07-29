@@ -967,7 +967,15 @@ gmailRouter.openapi(
     operationId: "triggerGmailIngestGate",
     tags: ["Gmail"],
     summary:
-      "Manually run the ingest gate: pull vendor mail whose domain matches a known showroom/company into the extraction pipeline (fire-and-forget)",
+      "Manually run the ingest gate: pull vendor mail whose domain matches a known showroom/company into the extraction pipeline (fire-and-forget). Optional ?domain= (comma-separated) bounds the run to specific vendor domains.",
+    request: {
+      query: z.object({
+        domain: z
+          .string()
+          .optional()
+          .describe("Comma-separated domain allow-list, e.g. pietrafina.com — bounds the run"),
+      }),
+    },
     responses: {
       202: {
         description: "Ingest gate started",
@@ -981,8 +989,12 @@ gmailRouter.openapi(
   }),
   async (c) => {
     try {
+      const domainParam = c.req.query("domain");
+      const onlyDomains = domainParam
+        ? domainParam.split(",").map((d) => d.trim()).filter(Boolean)
+        : undefined;
       c.executionCtx.waitUntil(
-        runIngestGate(c.env)
+        runIngestGate(c.env, { onlyDomains })
           .then((r) =>
             console.log(
               `[gmail] /ingest-gate: domains=${r.domainsSearched} candidates=${r.candidates} ` +
