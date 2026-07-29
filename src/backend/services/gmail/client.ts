@@ -118,15 +118,18 @@ export async function searchMessages(
 // ─── Get message (full) ───────────────────────────────────────────────────────
 
 export interface GmailMessagePart {
+  /** Set on attachment parts (empty/absent on inline body parts). */
+  filename?: string;
   mimeType?: string;
-  body?: { data?: string; size?: number };
+  body?: { data?: string; size?: number; attachmentId?: string };
   parts?: GmailMessagePart[];
 }
 
 export interface GmailMessagePayload {
   headers?: { name: string; value: string }[];
+  filename?: string;
   mimeType?: string;
-  body?: { data?: string; size?: number };
+  body?: { data?: string; size?: number; attachmentId?: string };
   parts?: GmailMessagePart[];
 }
 

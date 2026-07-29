@@ -18,6 +18,7 @@ import { backfillShowroomPlacesData } from "./backend/services/showroom/places-b
 import { sweepShowroomSales } from "./backend/services/showroom/sales";
 import { ingestCompanyEmails } from "./backend/services/gmail/ingestion";
 import { ingestInboxLabel } from "./backend/services/gmail/inbox-label";
+import { runIngestGate } from "./backend/services/gmail/ingest-gate";
 import {
   getDeviceIdFromRequest,
   isRequestAuthenticated,
@@ -385,6 +386,22 @@ const legacyHandler: ExportedHandler<Env> = {
             }
           })
           .catch((err) => console.error("[scheduled] gmail inbox-label ingestion failed:", err)),
+      );
+      // 0039 ingest gate: pull vendor mail from the personal inbox whose
+      // sender/recipient domain matches a known showroom or contractor company,
+      // and bridge each into the shared extraction pipeline. Domain-filtered at
+      // the Gmail search, so non-matching mail is never fetched (zero AI/OCR).
+      ctx.waitUntil(
+        runIngestGate(env)
+          .then((r) => {
+            if (r.newMessages > 0 || r.failed > 0) {
+              console.log(
+                `[scheduled] gmail ingest-gate: domains=${r.domainsSearched} candidates=${r.candidates} ` +
+                  `new=${r.newMessages} processed=${r.processed} failed=${r.failed}`,
+              );
+            }
+          })
+          .catch((err) => console.error("[scheduled] gmail ingest-gate failed:", err)),
       );
       return;
     }

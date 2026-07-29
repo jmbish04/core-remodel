@@ -35,8 +35,17 @@ export const gmailMessages = sqliteTable(
 
     subject: text("subject"),
 
-    /** Full message body content — always captured on ingestion. */
+    /**
+     * Full message body content — always captured on ingestion.
+     * Legacy single-body column, kept for back-compat. New ingestion also
+     * populates the split `body_plain_txt` / `body_html` columns below.
+     */
     body: text("body"),
+
+    /** Plain-text body (0039). Preferred for md5 / classification input. */
+    bodyPlainTxt: text("body_plain_txt"),
+    /** HTML body (0039). Sanitized on render. */
+    bodyHtml: text("body_html"),
 
     /** Optional Workers AI–generated summary of the message body. */
     aiSummary: text("ai_summary"),

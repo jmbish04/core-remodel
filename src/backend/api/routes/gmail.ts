@@ -32,6 +32,7 @@ import type { GmailMessage, GmailMessageInsert, GmailThread } from "@backend/db"
 import { getGmailAccessToken } from "@backend/services/gmail/auth";
 import { buildComposeRaw, buildReplyAllRaw, sendMessage } from "@backend/services/gmail/client";
 import { ingestCompanyEmails } from "@backend/services/gmail/ingestion";
+import { runIngestGate } from "@backend/services/gmail/ingest-gate";
 import {
   buildParticipantRows,
   findThreadIdsByParticipants,
@@ -951,6 +952,61 @@ gmailRouter.openapi(
     } catch (err) {
       console.error("[gmail] POST /ingest error:", err);
       return c.json({ error: "Failed to start ingestion" }, 500);
+    }
+  },
+);
+
+// ════════════════════════════════════════════════════════════════════════════
+// POST /ingest-gate — manual trigger for the 0039 domain-matched vendor pull
+// ════════════════════════════════════════════════════════════════════════════
+
+gmailRouter.openapi(
+  createRoute({
+    method: "post",
+    path: "/ingest-gate",
+    operationId: "triggerGmailIngestGate",
+    tags: ["Gmail"],
+    summary:
+      "Manually run the ingest gate: pull vendor mail whose domain matches a known showroom/company into the extraction pipeline (fire-and-forget). Optional ?domain= (comma-separated) bounds the run to specific vendor domains.",
+    request: {
+      query: z.object({
+        domain: z
+          .string()
+          .optional()
+          .describe("Comma-separated domain allow-list, e.g. pietrafina.com — bounds the run"),
+      }),
+    },
+    responses: {
+      202: {
+        description: "Ingest gate started",
+        content: { "application/json": { schema: ingestResponseSchema } },
+      },
+      500: {
+        description: "Server error",
+        content: { "application/json": { schema: errorSchema } },
+      },
+    },
+  }),
+  async (c) => {
+    try {
+      const domainParam = c.req.query("domain");
+      const onlyDomains = domainParam
+        ? domainParam.split(",").map((d) => d.trim()).filter(Boolean)
+        : undefined;
+      c.executionCtx.waitUntil(
+        runIngestGate(c.env, { onlyDomains })
+          .then((r) =>
+            console.log(
+              `[gmail] /ingest-gate: domains=${r.domainsSearched} candidates=${r.candidates} ` +
+                `new=${r.newMessages} processed=${r.processed} failed=${r.failed}`,
+            ),
+          )
+          .catch((err) => console.error("[gmail] /ingest-gate background run failed:", err)),
+      );
+      return c.json({ success: true as const, started: true as const }, 202);
+    } catch (err) {
+      console.error("[gmail] POST /ingest-gate error:", err);
+      return c.json({ error: "Failed to start ingest gate" }, 500);
     }
   },
 );
