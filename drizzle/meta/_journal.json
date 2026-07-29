@@ -351,6 +351,13 @@
       "when": 1785288671000,
       "tag": "0149_eager_bishop",
       "breakpoints": true
+    },
+    {
+      "idx": 150,
+      "version": "6",
+      "when": 1785298548613,
+      "tag": "0150_bumpy_ezekiel",
+      "breakpoints": true
     }
   ]
 }
