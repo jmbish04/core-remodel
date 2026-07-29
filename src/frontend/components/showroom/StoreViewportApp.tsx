@@ -71,6 +71,7 @@ import { type ShowroomPhoto } from "./photos/ShowroomPhotoPolaroid";
 import { VisitPhotosManager } from "./photos/VisitPhotosManager";
 import { GooglePhotosButton } from "@/components/google-photos/GooglePhotosButton";
 import { ShowroomBento, type ShowroomBentoSection } from "./bento/ShowroomBento";
+import { ShowroomGmailPanel } from "@/components/gmail/ShowroomGmailPanel";
 import { PhotoStack } from "./PhotoStack";
 import { ShowroomGalleryModal, type GalleryPhoto } from "./ShowroomGalleryModal";
 import { EditStoreModal, type EditableStore } from "./EditStoreModal";
@@ -538,6 +539,10 @@ export function StoreViewportApp({
   const [galleryPhotos, setGalleryPhotos] = useState<GalleryPhoto[]>([]);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [galleryStartIndex, setGalleryStartIndex] = useState(0);
+
+  // Inbox (0040 P4).
+  const [inboxOpen, setInboxOpen] = useState(false);
+  const [inboxUnread, setInboxUnread] = useState(0);
 
   // Modal state.
   const [visitOpen, setVisitOpen] = useState(false);
@@ -1244,6 +1249,29 @@ export function StoreViewportApp({
           >
             <Package className="size-3.5" /> Associate products
           </Button>
+          <Button
+            size="sm"
+            variant={inboxOpen ? "default" : "outline"}
+            className="relative gap-1.5"
+            aria-label={`Inbox${inboxUnread > 0 ? ` (${inboxUnread} unread)` : ""}`}
+            onClick={() => setInboxOpen((v) => !v)}
+          >
+            <Mail className="size-3.5" /> Inbox
+            {inboxUnread > 0 ? (
+              <span className="ml-0.5 inline-flex min-w-5 items-center justify-center rounded-full bg-sky-500 px-1.5 text-[11px] font-semibold text-white">
+                {inboxUnread}
+              </span>
+            ) : null}
+          </Button>
+        </div>
+
+        {/* Inbox panel — always mounted so the badge populates on load; toggled open. */}
+        <div className={inboxOpen ? "mt-5" : "hidden"}>
+          <ShowroomGmailPanel
+            storeId={id}
+            storeName={store.name}
+            onUnreadChange={setInboxUnread}
+          />
         </div>
 
         </div>
