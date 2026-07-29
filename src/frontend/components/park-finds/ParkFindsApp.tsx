@@ -35,22 +35,11 @@ export function ParkFindsApp({ initialTab = "pending" }: { initialTab?: Tab }) {
     }
   }, []);
 
+  // One fetch implementation (`load`) for both mount and post-decision refetch, so
+  // the two paths can't diverge.
   useEffect(() => {
-    let alive = true;
-    void (async () => {
-      try {
-        const data = await listParkFinds();
-        if (alive) setCandidates(data.candidates);
-      } catch (e) {
-        console.error("[park-finds/list] load", e);
-        toast.error(e instanceof Error ? e.message : "Could not load park finds");
-        if (alive) setCandidates([]);
-      }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, []);
+    void load();
+  }, [load]);
 
   // After a server decision, refetch the whole list so counts + membership are honest,
   // and poke the sidebar so its TBD badge updates.
