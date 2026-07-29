@@ -8,6 +8,21 @@ import { looseObject, urlField } from "../../schemas";
 import { showroomUrl } from "../../urls";
 import { defineTool, WRITE } from "../../types";
 
+/**
+ * `record_showroom_visit` — log a completed showroom visit in a single call.
+ *
+ * Input: `{ showroomId, rating (1–5), note (Markdown), tags? }`. The Markdown
+ * `note` is the source of truth; render-ready HTML is derived server-side via
+ * {@link renderNoteHtml} and written to `showroom_stores.ratingContextHtml` and
+ * the mirrored `store_notes.contentHtml` — callers never send HTML.
+ *
+ * Effects: sets the store's latest-visit `rating` + `ratingContextMarkdown`/`Html`
+ * and inserts a `store_notes` row titled `Visit — N★`. Rejects an empty note or an
+ * unknown `showroomId`.
+ *
+ * Returns `{ recorded, store, note, url }` — the updated store row, the new note
+ * row, and the showroom's workspace URL.
+ */
 export const recordShowroomVisit = defineTool({
   name: "record_showroom_visit",
   category: "showrooms",

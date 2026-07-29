@@ -25,6 +25,14 @@ function fmtWhen(iso: string | null): string {
     : "—";
 }
 
+/**
+ * One visit-log row.
+ *
+ * @param visit - the visit-log record to render (status, type, source, arrival +
+ *   dwell, rating, and a read-only Markdown note preview via {@link NoteBody}).
+ * @param hideStore - omit the store-name header (for the store viewport, where the
+ *   store is already the page context). Defaults to false.
+ */
 export function VisitCard({ visit, hideStore = false }: { visit: VisitLog; hideStore?: boolean }) {
   const pending = isPending(visit.status);
   const distance = formatDistance(visit.matchDistanceM);

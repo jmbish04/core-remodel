@@ -8,7 +8,7 @@
  * SQLite can't add to an existing table).
  */
 import { showroomStores, showroomVisitLog } from "@backend/db";
-import { renderNoteHtml } from "@backend/services/notes/markdown";
+import { renderNoteHtml, sanitizeNoteHtml } from "@backend/services/notes/markdown";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -126,10 +126,18 @@ export interface VisitLogWrite {
  * a column. (html-only writes are left as-is; the frontend renders from Markdown.)
  */
 function deriveNotesHtml(w: VisitLogWrite): void {
-  if (w.notesMarkdown === undefined) return;
-  const md = w.notesMarkdown?.trim() ? w.notesMarkdown : null;
-  w.notesMarkdown = md;
-  w.notesHtml = md ? renderNoteHtml(md) : null;
+  if (w.notesMarkdown !== undefined) {
+    const md = w.notesMarkdown?.trim() ? w.notesMarkdown : null;
+    w.notesMarkdown = md;
+    w.notesHtml = md ? renderNoteHtml(md) : null;
+    return;
+  }
+  // html-only write (no Markdown source, e.g. a legacy REST payload): never trust
+  // it verbatim — sanitize before it reaches the DB so the render cache can't
+  // carry live markup.
+  if (typeof w.notesHtml === "string") {
+    w.notesHtml = w.notesHtml.trim() ? sanitizeNoteHtml(w.notesHtml) : null;
+  }
 }
 
 /** Reject an out-of-range rating (the API-layer guard replacing the DB CHECK). */

@@ -27,10 +27,14 @@ function escapeHtml(input: string): string {
 
 /** Inline marks: bold (`**x**`/`__x__`), italic (`*x*`/`_x_`), links. */
 function renderInline(raw: string): string {
-  let out = escapeHtml(raw);
+  // Strip the sentinel char so input can't forge the link placeholder below.
+  let out = escapeHtml(raw.replace(/\uE000/g, ""));
 
   // Extract links to placeholder tokens FIRST so the bold/italic passes can't
-  // inject <strong>/<em> into a URL containing `_`/`*`. Restored after.
+  // inject <strong>/<em> into a URL containing `_`/`*`. The sentinel is wrapped in
+  // U+E000 (a private-use codepoint) — which escapeHtml leaves untouched and which
+  // we stripped from the input above — so no user-typed text (e.g. "LINK0") can
+  // collide with it.
   const links: string[] = [];
   out = out.replace(
     /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
@@ -38,17 +42,19 @@ function renderInline(raw: string): string {
       links.push(
         `<a href="${url}" target="_blank" rel="noopener noreferrer">${text}</a>`,
       );
-      return `LINKZZ${links.length - 1}`;
+      return `\uE000LINK${links.length - 1}\uE000`;
     },
   );
 
   // Bold before italic so `**x**` isn't consumed by the single-char italic rule.
   out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   out = out.replace(/__([^_]+)__/g, "<strong>$1</strong>");
-  out = out.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
-  out = out.replace(/(^|[^_])_([^_\n]+)_/g, "$1<em>$2</em>");
+  // Zero-width lookarounds so a delimiter can't eat the neighbouring character
+  // (the old `(^|[^*])` form broke adjacent emphasis like `*a**b*`).
+  out = out.replace(/(?<!\*)\*(?!\*)([^*\n]+?)\*(?!\*)/g, "<em>$1</em>");
+  out = out.replace(/(?<!_)_(?!_)([^_\n]+?)_(?!_)/g, "<em>$1</em>");
 
-  out = out.replace(/LINKZZ(\d+)/g, (_m, i: string) => links[Number(i)]);
+  out = out.replace(/\uE000LINK(\d+)\uE000/g, (_m, i: string) => links[Number(i)]);
   return out;
 }
 
@@ -112,19 +118,23 @@ export function renderNoteHtml(markdown: string | null | undefined): string {
 }
 
 /**
- * Normalize a note write into the {markdown, html} pair we persist.
+ * Defense-in-depth sanitizer for note HTML that did NOT come from renderNoteHtml
+ * — i.e. a caller-supplied / legacy `*_html` blob we cannot round-trip through
+ * Markdown. Strips the script/style/iframe/object/embed elements, event-handler
+ * attributes, and `javascript:` URIs that a stored-XSS payload needs. This is NOT
+ * a general-purpose HTML sanitizer.
  *
- * Markdown is the source of truth: when present, HTML is ALWAYS derived from it
- * (any caller-supplied HTML is ignored — that is the anti-bypass guarantee). When
- * only legacy HTML is supplied with no Markdown, it is passed through unchanged so
- * we don't destroy pre-existing content we can't round-trip.
+ * ponytail: deliberately dependency-free. A full sanitizer (isomorphic-dompurify
+ * / sanitize-html) is large and this Worker already fights the 10 MiB script
+ * limit, while notes are authored only by the single trusted homeowner. If notes
+ * ever accept third-party input, swap this for isomorphic-dompurify.
  */
-export function normalizeNoteContent(input: {
-  markdown?: string | null;
-  html?: string | null;
-}): { markdown: string | null; html: string | null } {
-  const markdown = input.markdown?.trim() ? input.markdown : null;
-  if (markdown) return { markdown, html: renderNoteHtml(markdown) };
-  const html = input.html?.trim() ? input.html : null;
-  return { markdown: null, html };
+export function sanitizeNoteHtml(html: string): string {
+  return html
+    .replace(/<\s*(script|style|iframe|object|embed)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, "")
+    .replace(/<\s*(script|style|iframe|object|embed)\b[^>]*\/?>/gi, "")
+    .replace(/\son\w+\s*=\s*"[^"]*"/gi, "")
+    .replace(/\son\w+\s*=\s*'[^']*'/gi, "")
+    .replace(/\son\w+\s*=\s*[^\s>]+/gi, "")
+    .replace(/((?:href|src)\s*=\s*)(["'])\s*javascript:[^"']*\2/gi, '$1$2#$2');
 }

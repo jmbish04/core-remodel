@@ -90,6 +90,30 @@ try {
       checks.info(`cleanup DELETE /api/showroom-visit-logs/${id} → ${del.status}`);
     }
   }
+
+  // ── P1b: an html-only write (no Markdown) is sanitized before persist ──────
+  const dirtyHtml = "<p onclick=\"steal()\">hi</p><script>alert('xss')</script>";
+  const created2 = await client.post("/api/showroom-visit-logs", { status: "DRAFT", notesHtml: dirtyHtml });
+  if (created2.status === 401) {
+    checks.info("POST (html-only) → 401 (gated). Skipping P1b.");
+  } else if (![200, 201].includes(created2.status)) {
+    checks.info(`P1b — html-only draft create → ${created2.status} (skipping)`);
+  } else {
+    const id2 = created2.json?.id ?? created2.json?.visit?.id ?? created2.json?.data?.id;
+    if (id2 != null) {
+      const got2 = await client.get(`/api/showroom-visit-logs/${id2}`);
+      const v2 = got2.json?.visit ?? got2.json?.data ?? got2.json ?? {};
+      const html2 = v2.notesHtml ?? "";
+      const clean = !/<script/i.test(html2) && !/onclick/i.test(html2);
+      if (!clean && !isPreview) {
+        checks.info("P1b — prod did not sanitize html-only write (pending merge/deploy; expected pre-merge).");
+      } else {
+        checks.ok("P1b — html-only write is sanitized (<script>/onclick stripped)", clean, `html=${JSON.stringify(html2).slice(0, 140)}`);
+      }
+      const del2 = await client.req("DELETE", `/api/showroom-visit-logs/${id2}`);
+      checks.info(`cleanup DELETE /api/showroom-visit-logs/${id2} → ${del2.status}`);
+    }
+  }
 } catch (err) {
   checks.ok("QC completed without an unhandled error", false, (err && err.message) || String(err));
 }

@@ -135,6 +135,17 @@ Generalize the visit-only note/delete surface to **every `showroom_images` row**
   `imageKind` restriction to remove; they work for any kind already. Add a
   `PATCH /photos/:imageId` for `altText` + `imageKind` re-tagging, and a bulk
   `DELETE` for multi-select. Note bodies go through `renderNoteHtml` (P1).
+- **Ownership guard (IDOR):** every mutation that takes both `:id` (store) and an
+  `imageId` MUST verify the image's `storeId === :id` before writing/deleting (a
+  bare `WHERE id = imageId` lets a caller touch another store's image). The
+  bulk-delete verifies every id belongs to `:id` in one `WHERE storeId AND
+  inArray(id, …)` (chunked at 20 for the param cap). This also retro-hardens the
+  existing single `DELETE /:id/photos/:imageId`, which currently deletes by
+  `imageId` alone.
+- **No imageKind backfill needed (verified):** the only user-upload path
+  (`POST /:id/photos`, incl. the Google Photos picker, which reuses it) always
+  writes `imageKind='visit'`, so the P0 filter hides only scraped rows — no
+  legitimate visit photo is tagged `null`/`unknown`.
 - **Google Photos → CF upload (unify):** when the picker returns selections for a
   showroom, upload each to Cloudflare Images through the **same** path as file
   upload (`POST /:id/photos`), producing `showroom_images` rows with
@@ -168,7 +179,7 @@ erDiagram
     text description_html "render cache (renderNoteHtml)"
     text price_text "verbatim, e.g. $1,299 / pair"
     int price_cents "numeric, sort/compare"
-    text cover_image_id "optional → showroom_images.id for the stack top"
+    int cover_image_id "optional FK → showroom_images.id (INT, matches the PK) for the stack top"
     int sort_order
     int is_active "soft-delete"
     int created_at
