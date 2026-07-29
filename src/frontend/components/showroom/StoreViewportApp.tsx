@@ -61,6 +61,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { EntityDocumentsPanel } from "@/components/documents";
 import { noteEditorHref } from "@/components/notes";
+import { NoteBody } from "./NoteBody";
 
 import { ScrapeResultsModal } from "./ScrapeResultsModal";
 import { RecordVisitModal } from "./visit/RecordVisitModal";
@@ -506,10 +507,6 @@ function ScrapeBadge({
     </button>
   );
 }
-
-/** Author-trusted PlateJS HTML block (rating context / note snippets). */
-const PROSE_CLASS =
-  "prose prose-sm prose-invert max-w-none text-sm leading-relaxed [&_a]:text-sky-400 [&_h1]:mb-1 [&_h1]:mt-2 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:mb-1 [&_h2]:mt-2 [&_h2]:text-base [&_h2]:font-semibold [&_h3]:mb-1 [&_h3]:mt-2 [&_h3]:text-sm [&_h3]:font-semibold [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5";
 
 // ─── Main component ─────────────────────────────────────────────────────────────
 
@@ -1215,13 +1212,11 @@ export function StoreViewportApp({
               </span>
               {store.rating !== null ? <VisitStars rating={store.rating} /> : null}
             </div>
-            {store.ratingContextHtml ? (
-              <div
-                className={`mt-2 ${PROSE_CLASS}`}
-                // Single trusted homeowner's own authored content, escaped at write time.
-                dangerouslySetInnerHTML={{ __html: store.ratingContextHtml }}
-              />
-            ) : null}
+            <NoteBody
+              className="mt-2"
+              markdown={store.ratingContextMarkdown}
+              html={store.ratingContextHtml}
+            />
           </div>
         ) : null}
 
@@ -2116,11 +2111,11 @@ function NotesSection({
                     </span>
                   ) : null}
                 </div>
-                {note.contentHtml ? (
-                  <div
-                    className={`mt-1.5 line-clamp-3 ${PROSE_CLASS}`}
-                    // Single trusted homeowner's own authored content, escaped at write time.
-                    dangerouslySetInnerHTML={{ __html: note.contentHtml }}
+                {note.contentMarkdown?.trim() || note.contentHtml?.trim() ? (
+                  <NoteBody
+                    className="mt-1.5 line-clamp-3"
+                    markdown={note.contentMarkdown}
+                    html={note.contentHtml}
                   />
                 ) : (
                   <p className="mt-1.5 text-xs text-muted-foreground/70">No content.</p>

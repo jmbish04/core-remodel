@@ -3821,10 +3821,18 @@ showroomStoresRouter.get("/:id/photos", async (c) => {
     return c.json({ success: false, error: "Invalid store id" }, 400);
   }
 
+  // Only homeowner-uploaded visit photos belong in the "Your visit photos" card.
+  // The sourcing sweep writes storefront/showroom/logo/map/unknown rows into the
+  // same table, so an unfiltered read leaks scraped website imagery here.
   const photos = await db
     .select()
     .from(showroomImages)
-    .where(eq(showroomImages.storeId, storeId))
+    .where(
+      and(
+        eq(showroomImages.storeId, storeId),
+        eq(showroomImages.imageKind, "visit"),
+      ),
+    )
     .orderBy(desc(showroomImages.createdAt));
 
   return c.json({ photos });
@@ -3931,7 +3939,7 @@ showroomStoresRouter.post("/:id/photos", async (c) => {
 
   const [inserted] = await db
     .insert(showroomImages)
-    .values(imageInsertValues as unknown as typeof showroomImages.$inferInsert)
+    .values(imageInsertValues)
     .returning();
 
   return c.json({ photo: inserted }, 201);

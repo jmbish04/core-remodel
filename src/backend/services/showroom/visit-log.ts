@@ -8,6 +8,7 @@
  * SQLite can't add to an existing table).
  */
 import { showroomStores, showroomVisitLog } from "@backend/db";
+import { renderNoteHtml } from "@backend/services/notes/markdown";
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
@@ -116,6 +117,21 @@ export interface VisitLogWrite {
   departureAt?: Date | null;
 }
 
+/**
+ * Notes: Markdown is the source of truth. Whenever a write supplies
+ * `notesMarkdown`, (re)derive `notesHtml` server-side from it via `renderNoteHtml`
+ * and IGNORE any caller-supplied html — this is the anti-bypass guarantee that
+ * keeps raw Markdown (and injected markup) out of the render cache. A write that
+ * omits `notesMarkdown` leaves both fields untouched so a partial patch can't null
+ * a column. (html-only writes are left as-is; the frontend renders from Markdown.)
+ */
+function deriveNotesHtml(w: VisitLogWrite): void {
+  if (w.notesMarkdown === undefined) return;
+  const md = w.notesMarkdown?.trim() ? w.notesMarkdown : null;
+  w.notesMarkdown = md;
+  w.notesHtml = md ? renderNoteHtml(md) : null;
+}
+
 /** Reject an out-of-range rating (the API-layer guard replacing the DB CHECK). */
 function assertRating(rating: number | null | undefined): void {
   if (rating != null && (!Number.isInteger(rating) || rating < 1 || rating > 5)) {
@@ -130,6 +146,7 @@ function dwell(arrival: Date | null | undefined, departure: Date | null | undefi
 
 export async function createVisitLog(db: Db, w: VisitLogWrite): Promise<number | undefined> {
   assertRating(w.rating);
+  deriveNotesHtml(w);
   const arrival = w.arrivalAt ?? new Date();
   const departure = w.departureAt ?? null;
   const [row] = await db
@@ -157,6 +174,7 @@ export async function createVisitLog(db: Db, w: VisitLogWrite): Promise<number |
 /** Returns false when the id doesn't exist. */
 export async function updateVisitLog(db: Db, id: number, w: VisitLogWrite): Promise<boolean> {
   assertRating(w.rating);
+  deriveNotesHtml(w);
   const [existing] = await db
     .select({
       id: showroomVisitLog.id,

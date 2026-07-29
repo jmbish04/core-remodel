@@ -32,8 +32,16 @@ export const writeShape = {
     .optional()
     .describe("Engagement depth: SOFT_ARRIVAL | BROWSED_NO_CONTACT | BRIEF_NO_HELP | FULL_SESSION | APPOINTMENT"),
   rating: z.number().int().min(1).max(5).nullable().optional().describe("1–5 stars (or null)"),
-  notesMarkdown: z.string().nullable().optional().describe("PlateJS markdown (source of truth)"),
-  notesHtml: z.string().nullable().optional().describe("PlateJS html (render cache)"),
+  notesMarkdown: z
+    .string()
+    .nullable()
+    .optional()
+    .describe("Visit notes as Markdown — the source of truth. Send Markdown, not HTML."),
+  notesHtml: z
+    .string()
+    .nullable()
+    .optional()
+    .describe("Render cache — DERIVED server-side from notesMarkdown; a value sent here is ignored when notesMarkdown is present."),
   gpsSource: z.enum(GPS_SOURCES).nullable().optional(),
   latitude: z.number().nullable().optional(),
   longitude: z.number().nullable().optional(),

@@ -31,7 +31,9 @@ export const showroomImages = sqliteTable(
 
     altText: text("alt_text"),
     imageKind: text("image_kind", {
-      enum: ["storefront", "showroom", "logo", "map", "unknown"],
+      // "visit" = homeowner-uploaded visit photo; the rest are discovered by the
+      // sourcing sweep. The "Your visit photos" card must only ever show "visit".
+      enum: ["visit", "storefront", "showroom", "logo", "map", "unknown"],
     })
       .notNull()
       .default("unknown"),
