@@ -34,8 +34,13 @@ export const driveLists = sqliteTable(
      */
     notes: text("notes"),
 
-    /** Lifecycle label: draft → active (drivable) → completed → archived. */
-    status: text("status", { enum: ["draft", "active", "completed", "archived"] })
+    /**
+     * Lifecycle label: draft → active (drivable) → completed → archived. `paused`
+     * (0032 D1) = the day's drive is suspended because the car parked at home/work
+     * (decision 1.a); it can be re-activated. (TEXT column — adding a value is a
+     * TS-only change, no migration.)
+     */
+    status: text("status", { enum: ["draft", "active", "completed", "archived", "paused"] })
       .notNull()
       .default("active"),
 

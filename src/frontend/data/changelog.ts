@@ -308,6 +308,26 @@ export const CHANGELOG: ChangelogEntry[] = [
     status: "staged",
   },
   {
+    id: "0032-park-finds-discovery",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-29",
+    tag: "0032",
+    area: "Tesla / Visits",
+    title: "Park-Finds — proximity scan + HITL discovery queue (0032 D1a)",
+    summary:
+      "Decision 1.d of the park pipeline: when the car parks somewhere that is NOT home/work, NOT a stop on the active drive, and NOT a registered showroom, a proximity scan asks Google Places 'what remodel-relevant business is right here?' and, if it finds a plausible one that isn't already in the directory and isn't excluded, STAGES it for human review instead of guessing a store into existence (the 'resolve an ambiguous parent' rule). The stage is three linked writes: a showroom_store_hitl_queue candidate (TBD), a detour stop on the active drive (is_detour → the candidate), and a discovery soft arrival (visit_log with hitl_queue_id, no store_id). Approve → promotes to a real showroom_stores row (flagged proximity-scan-discovered) and re-points the visit + detour at it; reject → optional showroom_exclusions row so it never re-surfaces. Cost-bounded: the scan runs at most ONCE per park (the detector emits 'park' once) and only when 1.a–1.c all miss, gated by tesla_proximity_scan_enabled AND the Maps per-SKU quota hard-disable; remodel-relevance is the Places includedTypes filter (a Gemini one-liner/relevance pass is a documented follow-up). REST /api/showroom-hitl-queue + MCP list_park_finds/decide_park_find go through one shared service (parity). Backend only — the Park-Finds admin page is D1b.",
+    migrations: ["0153"],
+    changes: [
+      { kind: "added", text: "showroom_store_hitl_queue + showroom_exclusions tables (migration 0153); column adds: showroom_visit_log.hitl_queue_id, drive_list_stops.is_detour/hitl_queue_id, showroom_stores.is_identified_by_proximity_scan/proximity_scan_json, park_sessions.hitl_queue_id; drive_lists.status += 'paused' (TEXT, no SQL)." },
+      { kind: "added", text: "services/tesla/proximity-scan.ts — decision 1.d: placesNearby (remodel includedTypes) → dedupe vs registered stores / exclusions / open queue → stage hitl candidate + detour stop + discovery soft arrival + link park session. Never throws; runs off waitUntil." },
+      { kind: "added", text: "services/showroom/hitl-queue.ts — shared list/get/count/decide service; PROCESS promotes to showroom_stores (or links by place_id) and re-points the visit + detour, DO_NOT_PROCESS optionally writes an exclusion." },
+      { kind: "added", text: "REST /api/showroom-hitl-queue (list + ?decision filter + pending count, GET :id, POST :id/decide) and MCP list_park_finds / decide_park_find — both through the one service." },
+      { kind: "changed", text: "ingestViaDetector wires decision 1.d: on PARK, when stageSoftArrival returns no-showroom-nearby / no-active-drive, run the proximity scan." },
+      { kind: "migration", text: "0153_wealthy_mephistopheles — 2 CREATE TABLE (hitl_queue, exclusions) + 6 additive ADD COLUMN + indexes incl. partial-unique showroom_exclusions_place_uniq." },
+    ],
+    status: "staged",
+  },
+  {
     id: "0032-park-dwell-detector",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-29",

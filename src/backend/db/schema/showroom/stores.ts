@@ -83,6 +83,18 @@ export const showroomStores = sqliteTable("showroom_stores", {
   longitude: real("longitude"),
 
   /**
+   * True when this store originated as a park-find (0032 D1): the car parked here,
+   * a proximity scan flagged it, a human approved the HITL candidate, and it was
+   * promoted into the directory. Distinguishes machine-discovered stores from
+   * hand-entered / scraped ones for provenance + review filters.
+   */
+  isIdentifiedByProximityScan: integer("is_identified_by_proximity_scan", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  /** The proximity-scan packet that surfaced this store, JSON — kept for provenance. */
+  proximityScanJson: text("proximity_scan_json"),
+
+  /**
    * Region hub CAPTURED for this specific location, derived from its address /
    * coordinates at intake (see `classifyBayAreaRegion`). Denormalized onto the
    * store so the directory filter and map are region-accurate WITHOUT joining

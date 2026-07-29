@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+import { showroomStoreHitlQueue } from "../showroom/store_hitl_queue";
 import { showroomStores } from "../showroom/stores";
 import { driveLists } from "./drive_lists";
 
@@ -86,6 +87,18 @@ export const driveListStops = sqliteTable(
     skipped: integer("skipped", { mode: "boolean" }).notNull().default(false),
     skippedAt: integer("skipped_at", { mode: "timestamp" }),
 
+    /**
+     * A detour stop injected by the park pipeline's decision 1.d (0032 D1): the car
+     * parked at an unregistered place that the proximity scan flagged as a possible
+     * remodel find, so a stop was appended to the active drive pointing at the
+     * `showroom_store_hitl_queue` candidate. `false` for every hand-planned stop.
+     */
+    isDetour: integer("is_detour", { mode: "boolean" }).notNull().default(false),
+    /** The park-find candidate this detour stop represents (null unless `isDetour`). */
+    hitlQueueId: integer("hitl_queue_id").references(() => showroomStoreHitlQueue.id, {
+      onDelete: "set null",
+    }),
+
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),
@@ -93,6 +106,7 @@ export const driveListStops = sqliteTable(
   (table) => ({
     driveIdx: index("drive_list_stops_drive_idx").on(table.driveListId),
     showroomIdx: index("drive_list_stops_showroom_idx").on(table.showroomStoreId),
+    hitlQueueIdx: index("drive_list_stops_hitl_queue_idx").on(table.hitlQueueId),
   }),
 );
 
