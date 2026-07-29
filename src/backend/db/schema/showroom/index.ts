@@ -18,6 +18,7 @@ export * from "./product_images";
 export * from "./product_intake";
 export * from "./product_specs";
 export * from "./showroom_images";
+export * from "./image_groups";
 export * from "./sweep_sessions";
 export * from "./gaps";
 export * from "./pocs";

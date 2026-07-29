@@ -7,6 +7,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 
+import { showroomImageGroups } from "./image_groups";
 import { showroomStores } from "./stores";
 
 /**
@@ -23,6 +24,15 @@ export const showroomImages = sqliteTable(
     storeId: integer("store_id")
       .notNull()
       .references(() => showroomStores.id, { onDelete: "cascade" }),
+
+    /**
+     * Optional folder this photo belongs to (0040 P3). NULL = a loose photo shown
+     * outside any stack. ON DELETE SET NULL so deleting a group loosens its photos
+     * rather than destroying them.
+     */
+    groupId: integer("group_id").references(() => showroomImageGroups.id, {
+      onDelete: "set null",
+    }),
 
     sourceUrl: text("source_url").notNull(),
     sourcePageUrl: text("source_page_url"),

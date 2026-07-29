@@ -67,7 +67,8 @@ import { ScrapeResultsModal } from "./ScrapeResultsModal";
 import { RecordVisitModal } from "./visit/RecordVisitModal";
 import { AssociateBrandsModal } from "./associate/AssociateBrandsModal";
 import { AssociateProductsModal } from "./associate/AssociateProductsModal";
-import { ShowroomPhotoPolaroid, type ShowroomPhoto } from "./photos/ShowroomPhotoPolaroid";
+import { type ShowroomPhoto } from "./photos/ShowroomPhotoPolaroid";
+import { VisitPhotosManager } from "./photos/VisitPhotosManager";
 import { GooglePhotosButton } from "@/components/google-photos/GooglePhotosButton";
 import { ShowroomBento, type ShowroomBentoSection } from "./bento/ShowroomBento";
 import { PhotoStack } from "./PhotoStack";
@@ -664,21 +665,6 @@ export function StoreViewportApp({
       toast.error("Failed to delete photo.");
     }
   }, [id, loadGalleryPhotos, loadStore]);
-
-  const deleteVisitPhoto = useCallback(async (imageId: number) => {
-    try {
-      const res = await fetch(`/api/showroom-stores/${id}/photos/${imageId}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      if (!res.ok) throw new Error(`Failed (${res.status})`);
-      toast.success("Visit photo deleted.");
-      void loadPhotos();
-    } catch (e) {
-      console.error("[store/delete-visit-photo]", e);
-      toast.error("Failed to delete photo.");
-    }
-  }, [id, loadPhotos]);
 
   useEffect(() => {
     setLoading(true);
@@ -1302,18 +1288,19 @@ export function StoreViewportApp({
           <StoreVisitsSection storeId={id} />
         ) : (
           <PhotosSection
+            storeId={id}
             galleryPhotos={galleryPhotos}
             photos={photos}
             uploading={uploading}
             onUploadClick={() => setUploadOpen(true)}
             onImportFiles={uploadPhotos}
             onPhotoSaved={loadPhotos}
+            onChanged={loadPhotos}
             onOpenGallery={(index) => {
               setGalleryStartIndex(index);
               setGalleryOpen(true);
             }}
             onDeleteGalleryPhoto={deleteGalleryPhoto}
-            onDeleteVisitPhoto={deleteVisitPhoto}
           />
         )}
       </div>
@@ -2196,25 +2183,27 @@ function GalleryThumb({
  *      upload affordance right in the collection.
  */
 function PhotosSection({
+  storeId,
   galleryPhotos,
   photos,
   uploading,
   onUploadClick,
   onImportFiles,
   onPhotoSaved,
+  onChanged,
   onOpenGallery,
   onDeleteGalleryPhoto,
-  onDeleteVisitPhoto,
 }: {
+  storeId: number;
   galleryPhotos: GalleryPhoto[];
   photos: ShowroomPhoto[];
   uploading: boolean;
   onUploadClick: () => void;
   onImportFiles: (files: File[]) => void | Promise<void>;
   onPhotoSaved: () => void;
+  onChanged: () => void;
   onOpenGallery: (index: number) => void;
   onDeleteGalleryPhoto: (photoId: number) => void;
-  onDeleteVisitPhoto: (imageId: number) => void;
 }) {
   return (
     <div className="space-y-6">
@@ -2291,27 +2280,12 @@ function PhotosSection({
           </div>
         </div>
 
-        {photos.length === 0 ? (
-          <p className="mt-3 text-sm text-muted-foreground">
-            No photos yet. Upload a shot from your visit.
-          </p>
-        ) : (
-          <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
-            {photos.map((photo) => (
-              <div key={photo.id} className="group/vphoto relative">
-                <ShowroomPhotoPolaroid photo={photo} onSaved={onPhotoSaved} />
-                <button
-                  type="button"
-                  onClick={() => onDeleteVisitPhoto(photo.id)}
-                  className="absolute right-1 top-1 z-10 flex size-6 items-center justify-center rounded-full bg-black/60 text-white opacity-0 transition-opacity hover:bg-destructive group-hover/vphoto:opacity-100"
-                  title="Delete photo"
-                >
-                  <Trash2 className="size-3" />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+        <VisitPhotosManager
+          storeId={storeId}
+          photos={photos}
+          onChanged={onChanged}
+          onPhotoSaved={onPhotoSaved}
+        />
       </div>
     </div>
   );
