@@ -33,6 +33,7 @@ import {
   productImages,
   productSpecs,
   showroomImages,
+  showroomImageGroups,
   sourcingSweepSessions,
   showroomPocs,
   showroomProductMappings,
@@ -4420,6 +4421,302 @@ showroomStoresRouter.post("/:id/photos/bulk-delete", async (c) => {
   }
 
   return c.json({ success: true, deleted: ownedIds.length });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ─── IMAGE GROUPS (photo folders / stacks) — 0040 P3 ─────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/** Verify a set of image ids belong to a store; returns the owned subset. */
+async function ownedImageIds(
+  db: ReturnType<typeof drizzle>,
+  storeId: number,
+  ids: number[],
+): Promise<number[]> {
+  const unique = [...new Set(ids)];
+  const owned: number[] = [];
+  for (let i = 0; i < unique.length; i += 20) {
+    const part = unique.slice(i, i + 20);
+    const rows = await db
+      .select({ id: showroomImages.id })
+      .from(showroomImages)
+      .where(and(eq(showroomImages.storeId, storeId), inArray(showroomImages.id, part)));
+    owned.push(...rows.map((r) => r.id));
+  }
+  return owned;
+}
+
+/**
+ * GET /:id/image-groups — list active folders for a store, each with its member
+ * count and a cover delivery URL (the group's coverImageId, else its newest
+ * member). Loose photos are the `/photos` rows with a null group_id.
+ */
+showroomStoresRouter.get("/:id/image-groups", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isFinite(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  const groups = await db
+    .select()
+    .from(showroomImageGroups)
+    .where(and(eq(showroomImageGroups.storeId, storeId), eq(showroomImageGroups.isActive, true)))
+    .orderBy(asc(showroomImageGroups.sortOrder), desc(showroomImageGroups.createdAt));
+
+  // Members for this store's grouped photos (one query, then bucket in JS).
+  const members = await db
+    .select({
+      id: showroomImages.id,
+      groupId: showroomImages.groupId,
+      deliveryUrl: showroomImages.deliveryUrl,
+    })
+    .from(showroomImages)
+    .where(eq(showroomImages.storeId, storeId));
+
+  const byGroup = new Map<number, { id: number; deliveryUrl: string }[]>();
+  for (const m of members) {
+    if (m.groupId == null) continue;
+    const list = byGroup.get(m.groupId) ?? [];
+    list.push({ id: m.id, deliveryUrl: m.deliveryUrl });
+    byGroup.set(m.groupId, list);
+  }
+
+  const result = groups.map((g) => {
+    const mem = byGroup.get(g.id) ?? [];
+    const cover =
+      (g.coverImageId != null ? mem.find((m) => m.id === g.coverImageId)?.deliveryUrl : null) ??
+      mem[0]?.deliveryUrl ??
+      null;
+    return { ...g, memberCount: mem.length, coverDeliveryUrl: cover };
+  });
+
+  return c.json({ groups: result });
+});
+
+/**
+ * POST /:id/image-groups — create a folder and (optionally) move photos into it.
+ *
+ * Body: { name, descriptionMarkdown?, priceText?, priceCents?, coverImageId?,
+ *         imageIds?: number[] }. descriptionHtml is derived server-side; imageIds
+ * are ownership-filtered before their group_id is set.
+ */
+showroomStoresRouter.post("/:id/image-groups", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isFinite(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  const schema = z.object({
+    name: z.string().trim().min(1),
+    descriptionMarkdown: z.string().optional().nullable(),
+    priceText: z.string().optional().nullable(),
+    priceCents: z.number().int().optional().nullable(),
+    coverImageId: z.number().int().positive().optional().nullable(),
+    imageIds: z.array(z.number().int().positive()).optional(),
+  });
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+
+  const [store] = await db
+    .select({ id: showroomStores.id })
+    .from(showroomStores)
+    .where(eq(showroomStores.id, storeId))
+    .limit(1);
+  if (!store) return c.json({ success: false, error: "Showroom not found" }, 404);
+
+  const md = parsed.data.descriptionMarkdown?.trim() ? parsed.data.descriptionMarkdown : null;
+  const [group] = await db
+    .insert(showroomImageGroups)
+    .values({
+      storeId,
+      name: parsed.data.name.trim(),
+      descriptionMarkdown: md,
+      descriptionHtml: md ? renderNoteHtml(md) : null,
+      priceText: parsed.data.priceText?.trim() ? parsed.data.priceText : null,
+      priceCents: parsed.data.priceCents ?? null,
+      coverImageId: parsed.data.coverImageId ?? null,
+    })
+    .returning();
+
+  // Move the given photos into the new group (ownership-filtered, chunked).
+  if (parsed.data.imageIds?.length && group) {
+    const owned = await ownedImageIds(db, storeId, parsed.data.imageIds);
+    for (let i = 0; i < owned.length; i += 20) {
+      const part = owned.slice(i, i + 20);
+      await db
+        .update(showroomImages)
+        .set({ groupId: group.id, updatedAt: new Date() } as Partial<typeof showroomImages.$inferInsert>)
+        .where(inArray(showroomImages.id, part));
+    }
+  }
+
+  return c.json({ group }, 201);
+});
+
+/**
+ * PATCH /:id/image-groups/:groupId — rename / re-describe / re-price / re-cover /
+ * reorder a folder. descriptionHtml is re-derived when descriptionMarkdown is set.
+ */
+showroomStoresRouter.patch("/:id/image-groups/:groupId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const groupId = Number(c.req.param("groupId"));
+  if (!Number.isFinite(storeId) || !Number.isFinite(groupId)) {
+    return c.json({ success: false, error: "Invalid id" }, 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  const schema = z.object({
+    name: z.string().trim().min(1).optional(),
+    descriptionMarkdown: z.string().optional().nullable(),
+    priceText: z.string().optional().nullable(),
+    priceCents: z.number().int().optional().nullable(),
+    coverImageId: z.number().int().positive().optional().nullable(),
+    sortOrder: z.number().int().optional(),
+  });
+  const parsed = schema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+
+  // Ownership: the group must belong to this store.
+  const [group] = await db
+    .select({ id: showroomImageGroups.id })
+    .from(showroomImageGroups)
+    .where(and(eq(showroomImageGroups.id, groupId), eq(showroomImageGroups.storeId, storeId)))
+    .limit(1);
+  if (!group) return c.json({ success: false, error: "Group not found" }, 404);
+
+  const patch: Partial<typeof showroomImageGroups.$inferInsert> = { updatedAt: new Date() };
+  if (parsed.data.name !== undefined) patch.name = parsed.data.name.trim();
+  if ("descriptionMarkdown" in parsed.data) {
+    const md = parsed.data.descriptionMarkdown?.trim() ? parsed.data.descriptionMarkdown : null;
+    patch.descriptionMarkdown = md;
+    patch.descriptionHtml = md ? renderNoteHtml(md) : null;
+  }
+  if ("priceText" in parsed.data) patch.priceText = parsed.data.priceText?.trim() ? parsed.data.priceText : null;
+  if ("priceCents" in parsed.data) patch.priceCents = parsed.data.priceCents ?? null;
+  if ("coverImageId" in parsed.data) patch.coverImageId = parsed.data.coverImageId ?? null;
+  if (parsed.data.sortOrder !== undefined) patch.sortOrder = parsed.data.sortOrder;
+
+  const [updated] = await db
+    .update(showroomImageGroups)
+    .set(patch)
+    .where(eq(showroomImageGroups.id, groupId))
+    .returning();
+
+  return c.json({ group: updated });
+});
+
+/**
+ * POST /:id/image-groups/:groupId/members — add/remove photos.
+ * Body: { add?: number[], remove?: number[] }. `add` sets group_id (ownership
+ * filtered); `remove` clears group_id back to loose (only for rows in THIS group).
+ */
+showroomStoresRouter.post("/:id/image-groups/:groupId/members", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const groupId = Number(c.req.param("groupId"));
+  if (!Number.isFinite(storeId) || !Number.isFinite(groupId)) {
+    return c.json({ success: false, error: "Invalid id" }, 400);
+  }
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ success: false, error: "Invalid JSON body" }, 400);
+  }
+
+  const parsed = z
+    .object({
+      add: z.array(z.number().int().positive()).optional(),
+      remove: z.array(z.number().int().positive()).optional(),
+    })
+    .safeParse(body);
+  if (!parsed.success) {
+    return c.json({ success: false, error: parsed.error.message }, 400);
+  }
+
+  const [group] = await db
+    .select({ id: showroomImageGroups.id })
+    .from(showroomImageGroups)
+    .where(and(eq(showroomImageGroups.id, groupId), eq(showroomImageGroups.storeId, storeId)))
+    .limit(1);
+  if (!group) return c.json({ success: false, error: "Group not found" }, 404);
+
+  if (parsed.data.add?.length) {
+    const owned = await ownedImageIds(db, storeId, parsed.data.add);
+    for (let i = 0; i < owned.length; i += 20) {
+      const part = owned.slice(i, i + 20);
+      await db
+        .update(showroomImages)
+        .set({ groupId, updatedAt: new Date() } as Partial<typeof showroomImages.$inferInsert>)
+        .where(inArray(showroomImages.id, part));
+    }
+  }
+  if (parsed.data.remove?.length) {
+    const owned = await ownedImageIds(db, storeId, parsed.data.remove);
+    for (let i = 0; i < owned.length; i += 20) {
+      const part = owned.slice(i, i + 20);
+      await db
+        .update(showroomImages)
+        .set({ groupId: null, updatedAt: new Date() } as Partial<typeof showroomImages.$inferInsert>)
+        .where(and(eq(showroomImages.groupId, groupId), inArray(showroomImages.id, part)));
+    }
+  }
+
+  return c.json({ success: true });
+});
+
+/**
+ * DELETE /:id/image-groups/:groupId — soft-delete a folder and loosen its photos
+ * (their group_id → null). The photos themselves are never deleted here.
+ */
+showroomStoresRouter.delete("/:id/image-groups/:groupId", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  const groupId = Number(c.req.param("groupId"));
+  if (!Number.isFinite(storeId) || !Number.isFinite(groupId)) {
+    return c.json({ success: false, error: "Invalid id" }, 400);
+  }
+
+  const [group] = await db
+    .select({ id: showroomImageGroups.id })
+    .from(showroomImageGroups)
+    .where(and(eq(showroomImageGroups.id, groupId), eq(showroomImageGroups.storeId, storeId)))
+    .limit(1);
+  if (!group) return c.json({ success: false, error: "Group not found" }, 404);
+
+  // Loosen members first so no row is left pointing at an inactive group, then
+  // soft-delete the group. (Two statements — D1 has no transactions.)
+  await db
+    .update(showroomImages)
+    .set({ groupId: null, updatedAt: new Date() } as Partial<typeof showroomImages.$inferInsert>)
+    .where(eq(showroomImages.groupId, groupId));
+  await db
+    .update(showroomImageGroups)
+    .set({ isActive: false, updatedAt: new Date() } as Partial<typeof showroomImageGroups.$inferInsert>)
+    .where(eq(showroomImageGroups.id, groupId));
+
+  return c.json({ success: true });
 });
 
 /**
