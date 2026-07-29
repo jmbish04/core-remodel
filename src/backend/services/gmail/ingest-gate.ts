@@ -62,6 +62,10 @@ import {
   buildParticipantRows,
   insertParticipants,
 } from "./participants";
+import { isGatedDomain, normalizeDomain } from "./ingest-gate-domains";
+
+// Re-export so existing importers (route filter) keep resolving from here.
+export { normalizeDomain } from "./ingest-gate-domains";
 
 /** D1's hard cap on bound parameters per statement. */
 const D1_MAX_BOUND_PARAMS = 100;
@@ -69,38 +73,10 @@ const D1_MAX_BOUND_PARAMS = 100;
 /** Cap on new messages pulled per domain per run — keeps a cron tick bounded. */
 const MAX_NEW_MESSAGES_PER_DOMAIN = 25;
 
-/**
- * Addresses/domains that are OURS and must never trigger a match, even though
- * they appear on every thread. Domains match by suffix; exact addresses match
- * the whole address (they live on public providers we can't domain-exclude).
- */
-const EXCLUDED_DOMAINS = new Set<string>(["126colby.com", "hacolby.app"]);
-const EXCLUDED_EXACT_ADDRESSES = new Set<string>([
-  "jmbish04@gmail.com",
-  "jasonowyong87@gmail.com",
-]);
-
 /** What a matched domain resolves to — a showroom store, a company, or both. */
 interface DomainMatch {
   showroomStoreId?: number;
   companyId?: number;
-}
-
-/**
- * Normalize a website URL (or bare host) to a lowercased registrable-ish
- * domain: strip scheme, `www.`, any path/query, and a trailing dot. Returns
- * null for anything that doesn't yield a host with a dot.
- */
-export function normalizeDomain(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  let host = raw.trim().toLowerCase();
-  host = host.replace(/^[a-z][a-z0-9+.-]*:\/\//, ""); // scheme
-  host = host.replace(/^www\./, "");
-  host = host.split("/")[0].split("?")[0].split("#")[0]; // path/query/fragment
-  host = host.split("@").pop() ?? host; // in case a full email slipped in
-  host = host.replace(/\.$/, "");
-  if (!host.includes(".")) return null;
-  return host;
 }
 
 /**
@@ -121,7 +97,7 @@ export async function collectGatedDomains(
     .all();
   for (const row of linkRows) {
     const domain = normalizeDomain(row.url);
-    if (!domain || EXCLUDED_DOMAINS.has(domain) || PUBLIC_EMAIL_DOMAINS.has(domain)) continue;
+    if (!domain || !isGatedDomain(domain, PUBLIC_EMAIL_DOMAINS)) continue;
     const entry = map.get(domain) ?? {};
     entry.showroomStoreId ??= row.storeId;
     map.set(domain, entry);
@@ -134,7 +110,7 @@ export async function collectGatedDomains(
     .all();
   for (const row of companyRows) {
     const domain = normalizeDomain(row.website);
-    if (!domain || EXCLUDED_DOMAINS.has(domain) || PUBLIC_EMAIL_DOMAINS.has(domain)) continue;
+    if (!domain || !isGatedDomain(domain, PUBLIC_EMAIL_DOMAINS)) continue;
     const entry = map.get(domain) ?? {};
     entry.companyId ??= row.id;
     map.set(domain, entry);
