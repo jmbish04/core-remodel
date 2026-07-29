@@ -106,8 +106,11 @@ async function readScanConfig(env: Env): Promise<ScanConfig> {
     const radiusN = Number(by.get("tesla_proximity_radius_m"));
     const radiusM = Number.isFinite(radiusN) && radiusN > 0 ? radiusN : DEFAULT_SCAN_RADIUS_M;
     return { enabled, radiusM };
-  } catch {
-    return { enabled: true, radiusM: DEFAULT_SCAN_RADIUS_M };
+  } catch (err) {
+    // Fail CLOSED: a config-read error (D1 blip / misconfig) must NOT default to
+    // running billable Places calls. Better a missed park-find than surprise spend.
+    console.error("[proximity-scan] readScanConfig failed — disabling scan:", err);
+    return { enabled: false, radiusM: DEFAULT_SCAN_RADIUS_M };
   }
 }
 
@@ -122,6 +125,19 @@ export async function proximityScan(
   input: ProximityScanInput,
 ): Promise<ProximityScanResult> {
   try {
+    // Reject a non-finite / out-of-range fix before spending a Places call on it —
+    // a bad coordinate can't produce a real park-find and would just burn quota.
+    if (
+      !Number.isFinite(input.latitude) ||
+      !Number.isFinite(input.longitude) ||
+      input.latitude < -90 ||
+      input.latitude > 90 ||
+      input.longitude < -180 ||
+      input.longitude > 180
+    ) {
+      return { scanned: false, reason: "error" };
+    }
+
     const cfg = await readScanConfig(env);
     if (!cfg.enabled) return { scanned: false, reason: "disabled" };
 
@@ -258,7 +274,9 @@ export async function proximityScan(
           .values({
             driveListId,
             name,
-            city: place.formattedAddress ?? null,
+            // The Places `formattedAddress` is a full address — it belongs in
+            // `address`, not `city` (which is a city name for display/geocoding).
+            address: place.formattedAddress ?? null,
             latitude: place.location?.latitude ?? input.latitude,
             longitude: place.location?.longitude ?? input.longitude,
             note: description,

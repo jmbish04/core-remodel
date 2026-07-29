@@ -131,12 +131,14 @@ export async function decideHitlCandidate(
     .limit(1);
   if (!cand) return { ok: false, reason: "not-found" };
 
-  // Idempotent: a candidate already at the requested decision is a no-op success —
-  // never re-run store creation / re-pointing (or a second exclusion) on a retry.
-  if (cand.userDecision === args.decision) {
+  // Terminal decisions are immutable. Re-issuing the SAME decision is an idempotent
+  // no-op (never re-runs store creation / re-pointing on a retry); a DIFFERENT
+  // decision on an already-decided candidate is REJECTED — flipping a PROCESS to
+  // DO_NOT_PROCESS would orphan the created store + the re-pointed visit/stop rows.
+  if (cand.userDecision !== "TBD") {
     return {
-      ok: true,
-      decision: args.decision,
+      ok: cand.userDecision === args.decision,
+      decision: cand.userDecision,
       storeId: cand.storeId ?? undefined,
       reason: "already-decided",
     };
