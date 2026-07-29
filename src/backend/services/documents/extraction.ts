@@ -87,11 +87,10 @@ async function extractTextFromImage(env: Env, buf: ArrayBuffer): Promise<string>
 }
 
 /**
- * Convert a PDF buffer to markdown via liteparse-wasm (local, no API call).
- * Falls back to Workers AI `toMarkdown` if WASM fails.
- *
- * For DOCX/XLSX/HTML, uses Workers AI `toMarkdown` directly (liteparse
- * only handles PDF).
+ * Convert a document buffer (PDF/DOCX/XLSX/HTML) to markdown via Workers AI
+ * `env.AI.toMarkdown` — the canonical Workers path for text extraction. PDFs
+ * previously ran a bundled liteparse WASM binary, removed because its 4.7 MiB
+ * blob pushed the Worker past Cloudflare's 10 MiB script-size limit.
  */
 async function extractTextFromDocument(
   env: Env,
@@ -99,19 +98,6 @@ async function extractTextFromDocument(
   mimeType: string,
   buf: ArrayBuffer,
 ): Promise<string> {
-  const isPdf = mimeType.includes("pdf") || name.toLowerCase().endsWith(".pdf");
-
-  if (isPdf) {
-    try {
-      const { parsePdfToMarkdown } = await import("@backend/services/documents/liteparse");
-      const markdown = await parsePdfToMarkdown(buf);
-      if (markdown) return markdown;
-    } catch (err) {
-      console.warn("[extraction] liteparse-wasm failed, falling back to AI.toMarkdown:", err);
-    }
-  }
-
-  // Fallback / non-PDF: Workers AI toMarkdown
   const blob = new Blob([buf], { type: mimeType });
   const result = await env.AI.toMarkdown({ name, blob });
   if (result.format === "error") {

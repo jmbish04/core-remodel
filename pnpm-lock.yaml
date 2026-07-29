@@ -70,9 +70,6 @@ importers:
       '@hookform/resolvers':
         specifier: ^5.4.0
         version: 5.4.0(react-hook-form@7.80.0(react@19.2.5))
-      '@llamaindex/liteparse-wasm':
-        specifier: ^2.4.2
-        version: 2.4.2
       '@modelcontextprotocol/sdk':
         specifier: 1.29.0
         version: 1.29.0(@cfworker/json-schema@4.1.1)(zod@4.4.2)
@@ -2202,10 +2199,6 @@ packages:
 
   '@juggle/resize-observer@3.4.0':
     resolution: {integrity: sha512-dfLbk+PwWvFzSxwk3n5ySL0hfBog779o8h68wK/7/APo/7cgyWp5jcXockbxdk5kFRkbeXWm4Fbi9FrdN381sA==}
-
-  '@llamaindex/liteparse-wasm@2.4.2':
-    resolution: {integrity: sha512-OHGE6InuxS4ESovs2JgX31wsqumDpadhKktW6vQAX4a1DG92yeE25ZaagAQ9OHtsOCmH4whPXdMEZyzmR/QmWg==}
-    engines: {node: '>=18.0.0'}
 
   '@mapbox/jsonlint-lines-primitives@2.0.2':
     resolution: {integrity: sha512-rY0o9A5ECsTQRVhv7tL/OyDpGAoUB4tTvLiW1DSzQGq4bvTPhNw1VpSNjDJc5GFZ2XuyOtSWSVN05qOtcD71qQ==}
@@ -9679,8 +9672,6 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.5.5
 
   '@juggle/resize-observer@3.4.0': {}
-
-  '@llamaindex/liteparse-wasm@2.4.2': {}
 
   '@mapbox/jsonlint-lines-primitives@2.0.2': {}
 

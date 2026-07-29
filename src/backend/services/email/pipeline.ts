@@ -27,7 +27,6 @@ import { workerEmailInvoiceLineItems } from "@backend/db/schema/emails/worker_em
 import { workerEmailContracts } from "@backend/db/schema/emails/worker_email_contracts";
 import { workerEmailStagedCompanies } from "@backend/db/schema/emails/worker_email_staged_companies";
 import { companies } from "@backend/db/schema/directory/companies";
-import { parsePdfToMarkdown } from "@backend/services/documents/liteparse";
 import { analyzeWithGemini, type AiAnalysis } from "./classify";
 import { isHealthcheckSubject } from "@backend/services/health/email-loopback-markers";
 import { registerShowroomContactFromEmail } from "./showroom-contact-autopopulate";
@@ -215,9 +214,12 @@ interface AttachmentRecord {
 }
 
 /**
- * Extract text from PDF/DOCX/XLSX attachments for AI analysis. PDFs use the
- * liteparse WASM path (local, no external call) with a Workers-AI `toMarkdown`
- * fallback; Office docs go straight to `toMarkdown`.
+ * Extract text from PDF/DOCX/XLSX attachments for AI analysis. Everything goes
+ * through Workers AI `env.AI.toMarkdown` — the canonical Workers path for
+ * document text extraction (see services/documents/health.ts). PDF parsing used
+ * to run a bundled liteparse WASM binary locally, but that blob was 4.7 MiB and
+ * pushed the Worker past Cloudflare's 10 MiB script-size limit, so it was
+ * removed in favour of the toMarkdown path both branches already fell back to.
  */
 async function extractAttachmentText(
   attachments: AttachmentRecord[],
@@ -232,60 +234,22 @@ async function extractAttachmentText(
       att.mimeType?.includes("word") ||
       att.mimeType?.includes("officedocument") ||
       att.filename?.match(/\.(docx?|xlsx?)$/i);
+    if (!isPdf && !isDoc) continue;
 
-    if (isPdf) {
-      try {
-        const object = await env.ARTIFACTS_BUCKET.get(att.r2Key);
-        if (object) {
-          const buf = await object.arrayBuffer();
-          const markdown = await parsePdfToMarkdown(buf);
-          if (markdown) {
-            attachmentText += `\n\n--- Attachment: ${att.filename} ---\n${markdown}`;
-          }
-        }
-      } catch (err) {
-        console.error(
-          `[email-pipeline] liteparse-wasm failed for ${att.filename}:`,
-          err,
-        );
-        // Fallback to Workers AI toMarkdown if WASM fails.
-        try {
-          const object = await env.ARTIFACTS_BUCKET.get(att.r2Key);
-          if (object) {
-            const buf = await object.arrayBuffer();
-            const blob = new Blob([buf], { type: att.mimeType });
-            const result = await env.AI.toMarkdown({
-              name: att.filename,
-              blob,
-            });
-            if (result.format !== "error") {
-              attachmentText += `\n\n--- Attachment: ${att.filename} ---\n${result.data}`;
-            }
-          }
-        } catch (fallbackErr) {
-          console.error(
-            `[email-pipeline] AI.toMarkdown fallback also failed for ${att.filename}:`,
-            fallbackErr,
-          );
-        }
+    try {
+      const object = await env.ARTIFACTS_BUCKET.get(att.r2Key);
+      if (!object) continue;
+      const buf = await object.arrayBuffer();
+      const blob = new Blob([buf], { type: att.mimeType });
+      const result = await env.AI.toMarkdown({ name: att.filename, blob });
+      if (result.format !== "error") {
+        attachmentText += `\n\n--- Attachment: ${att.filename} ---\n${result.data}`;
       }
-    } else if (isDoc) {
-      try {
-        const object = await env.ARTIFACTS_BUCKET.get(att.r2Key);
-        if (object) {
-          const buf = await object.arrayBuffer();
-          const blob = new Blob([buf], { type: att.mimeType });
-          const result = await env.AI.toMarkdown({ name: att.filename, blob });
-          if (result.format !== "error") {
-            attachmentText += `\n\n--- Attachment: ${att.filename} ---\n${result.data}`;
-          }
-        }
-      } catch (err) {
-        console.error(
-          `[email-pipeline] toMarkdown failed for ${att.filename}:`,
-          err,
-        );
-      }
+    } catch (err) {
+      console.error(
+        `[email-pipeline] toMarkdown failed for ${att.filename}:`,
+        err,
+      );
     }
   }
 
