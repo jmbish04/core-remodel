@@ -106,6 +106,7 @@ export * from "./system/gemini-usage";
 // gemini_usage_log to compute what a call actually cost.
 export * from "./system/pricing";
 export * from "./system/device-location";
+export * from "./system/park-sessions";
 
 export * from "./dialer/prospects";
 export * from "./dialer/state";

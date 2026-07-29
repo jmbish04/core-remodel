@@ -113,6 +113,96 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "0032-park-dwell-detector": {
+    slug: "0032-park-dwell-detector",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0032 L1 · source-agnostic park/dwell detector + park_sessions",
+    code: [],
+    problem:
+      "L0 let any source stage a visit, but only the 500ms streaming DO could detect a PARK (a shift-into-P edge) and a DRIVE-AWAY (P→moving) to open and close a visit automatically. The 120s poller only checked off stops — it never staged a soft arrival and had no way to fire a drive-away, so a poll-only drive (the whole point of turning the billable stream off) couldn't capture a visit's dwell.",
+    approach:
+      "A source-agnostic detector (services/location/park-detector.ts) turns a per-subject fix stream into PARK / DRIVE-AWAY events two ways: when a gear is present (Tesla) it's edge-triggered on the shiftState transition (instant, precise); when it isn't (phone/AI) it falls back to a dwell heuristic — successive fixes within PARK_RADIUS_M for ≥ DWELL_MIN is a park, and moving > DEPART_RADIUS_M from the park anchor is a drive-away. Hot state lives in KV (loc:detector:<subjectId>) — self-replacing, never a growing table (the $700-runaway lesson) — and a confirmed park also writes a park_sessions row so an in-flight visit survives a worker eviction (the KV state can be rebuilt from the open row). Thresholds read from the C1 config keys with defaults. The poller is wired ADDITIVELY: its proven matchAndMarkVisited + home-arrival logic is untouched, and a new best-effort ingestViaDetector call gives it detector-driven staging + finalize. The streaming DO keeps its in-memory shift detection — rewiring it onto the shared detector is a documented follow-up (it already works, so no reason to risk the live socket path in this PR). Concurrency: state is per-subject and a single car/phone doesn't emit concurrent fixes (the poller stands down while the stream carries), so the KV read-modify-write needs no locking — documented per plan §11.",
+    apiChanges: [
+      "None external. New internal services: park-detector (processFix / open+settle park_sessions / linkVisitToParkSession) and ingest.ingestViaDetector.",
+    ],
+    filesTouched: [
+      "src/backend/db/schema/system/park-sessions.ts (new) + schema/index.ts (barrel)",
+      "src/backend/services/location/park-detector.ts (new — the FSM + KV state + park_sessions lifecycle)",
+      "src/backend/services/location/ingest.ts (+ingestViaDetector)",
+      "src/backend/services/tesla-poller.ts (additive detector feed)",
+      "drizzle/0149_eager_bishop.sql, scripts/qc/pr_297.mjs",
+    ],
+    migrations: [
+      {
+        tag: "0149_eager_bishop",
+        sql: "CREATE TABLE park_sessions ( id INTEGER PRIMARY KEY AUTOINCREMENT, subject_id text NOT NULL, drive_list_id integer REFERENCES drive_lists(id) ON DELETE set null, stop_id integer REFERENCES drive_list_stops(id) ON DELETE set null, store_id integer REFERENCES showroom_stores(id) ON DELETE set null, latitude real, longitude real, source text NOT NULL, parked_at integer DEFAULT (unixepoch()) NOT NULL, departed_at integer, dwell_seconds integer, status text DEFAULT 'parked' NOT NULL, visit_log_id integer REFERENCES showroom_visit_log(id) ON DELETE set null, created_at integer DEFAULT (unixepoch()) NOT NULL, updated_at integer DEFAULT (unixepoch()) NOT NULL );\nCREATE INDEX park_sessions_subject_idx ON park_sessions (subject_id);\nCREATE INDEX park_sessions_status_idx ON park_sessions (status);\nCREATE UNIQUE INDEX park_sessions_one_open_uniq ON park_sessions (subject_id) WHERE \"park_sessions\".\"status\" = 'parked';",
+      },
+    ],
+    diagrams: [
+      {
+        caption: "The detector state machine — one path with a gear, one without",
+        code: `stateDiagram-v2
+  direction LR
+  [*] --> MOVING
+  MOVING --> SETTLING : stopped (speed≈0)
+  SETTLING --> MOVING : moved > PARK_RADIUS_M<br/>(discarded)
+  SETTLING --> PARKED : dwell ≥ DWELL_MIN<br/>→ PARK EVENT
+  MOVING --> PARKED : shiftState → P<br/>→ PARK EVENT (instant)
+  PARKED --> MOVING : shiftState P→drive<br/>OR moved > DEPART_RADIUS_M<br/>→ DRIVE-AWAY EVENT
+  PARKED --> PARKED : still parked (no event)`,
+      },
+      {
+        caption: "park_sessions — the durable anchor, keyed on subject (vin | phone | ai)",
+        code: `erDiagram
+  park_sessions {
+    int id PK
+    text subject_id "vin | phone | ai"
+    int drive_list_id FK
+    int store_id FK
+    real latitude
+    real longitude
+    text source
+    int parked_at
+    int departed_at "null while open"
+    int dwell_seconds
+    text status "parked|settled|discarded"
+    int visit_log_id FK "the staged visit"
+  }
+  park_sessions ||--o| showroom_visit_log : "stages"
+  park_sessions }o--o| drive_lists : "during"
+  park_sessions }o--o| showroom_stores : "at"`,
+      },
+      {
+        caption: "The poller gains the full lifecycle — additively",
+        code: `flowchart LR
+  POLL["tesla-poller (120s)"] --> M["matchAndMarkVisited<br/>(existing, untouched)"]
+  POLL --> H["home/work check<br/>(existing, untouched)"]
+  POLL --> D[["ingestViaDetector (NEW)"]]
+  D --> DET["park-detector<br/>KV state + park_sessions"]
+  DET -->|PARK| S["stageSoftArrival"]
+  DET -->|DRIVE-AWAY| F["finalizeSoftArrivals"]
+  classDef n fill:#0f172a,stroke:#38bdf8,color:#e2e8f0;`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_297.mjs",
+      command: "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 297 -- --preview",
+      ranAt: "2026-07-29",
+      output:
+        "tsc --noEmit clean on the new detector + schema + ingest + poller. pnpm run build green (exit 0). " +
+        "db:generate produced 0149_eager_bishop.sql — exactly one CREATE TABLE park_sessions + the partial-unique " +
+        "index (WHERE status='parked'), verified. QC pr_297: regression on tesla status + visit-logs and that the " +
+        "poll path still self-gates after the additive detector wiring (a real park/drive-away is exercised on a live " +
+        "poll-only drive, not synthesizable in QC). The dwell FSM is unit-reasoned in the detector.",
+      migrations: [
+        {
+          tag: "0149_eager_bishop",
+          appliedRemote: true,
+          note: "Applied via the deploy's migrate:remote step (run_migrations:true); a failed CREATE TABLE fails the deploy.",
+        },
+      ],
+    },
+  },
   "0032-locationfix-ingress": {
     slug: "0032-locationfix-ingress",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",

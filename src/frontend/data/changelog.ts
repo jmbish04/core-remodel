@@ -308,6 +308,25 @@ export const CHANGELOG: ChangelogEntry[] = [
     status: "staged",
   },
   {
+    id: "0032-park-dwell-detector",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-29",
+    tag: "0032",
+    area: "Tesla / Visits",
+    title: "Source-agnostic park/dwell detector + park_sessions (0032 L1)",
+    summary:
+      "The piece that lets a poll-only drive (streaming DO off) capture visits like the 500ms stream. A source-agnostic detector turns a fix stream into PARK / DRIVE-AWAY events two ways: a shiftState transition (Tesla, edge-triggered, instant) OR a dwell heuristic (phone/AI, no gear — within PARK_RADIUS_M for ≥ DWELL_MIN is a park; moved > DEPART_RADIUS_M is a drive-away). Hot state is KV (loc:detector:<subjectId>, self-replacing — no growing table, the $700-runaway lesson); a confirmed park also writes a park_sessions anchor row so an in-flight visit survives a worker eviction. Thresholds come from the C1 config keys. The 120s poller now feeds the detector ADDITIVELY (its proven match/home logic is untouched) — so a poll-only drive gets automatic soft-arrival staging AND drive-away finalize, which the poller couldn't do before. The streaming DO keeps its in-memory shift detection for now (its rewire onto the detector is a documented follow-up — it already works).",
+    migrations: ["0149"],
+    changes: [
+      { kind: "added", text: "park_sessions table (subject_id-keyed, partial-unique one-open-per-subject) — the detector's durable anchor. Migration 0149." },
+      { kind: "added", text: "services/location/park-detector.ts — shiftState-transition OR dwell FSM, KV state, park_sessions lifecycle (open/settle), config-driven thresholds." },
+      { kind: "added", text: "ingestViaDetector — runs the detector, stages a soft arrival on PARK (linked to the park session), finalizes on DRIVE-AWAY." },
+      { kind: "changed", text: "tesla-poller now feeds the detector additively (existing match/home untouched) — poll-only drives get the full visit lifecycle." },
+      { kind: "migration", text: "0149_eager_bishop — CREATE TABLE park_sessions + partial-unique index (status='parked')." },
+    ],
+    status: "staged",
+  },
+  {
     id: "0032-locationfix-ingress",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-27",
