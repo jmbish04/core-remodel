@@ -51,6 +51,37 @@ export const gmailMessages = sqliteTable(
     aiSummary: text("ai_summary"),
 
     /**
+     * Deterministic content classification (0041) — set at ingestion by a
+     * pure text-pattern matcher, NO AI. Drives inbox foldering.
+     *   normal      — ordinary correspondence (default).
+     *   promotional — marketing blast (also sets is_spam=1).
+     *   receipt|invoice|quote — a purchase document (routed to the receipt
+     *     parser); shown in the Receipts folder.
+     */
+    classification: text("classification", {
+      enum: ["normal", "promotional", "receipt", "invoice", "quote"],
+    })
+      .notNull()
+      .default("normal"),
+
+    /**
+     * Spam flag (0041). Deterministic — set when the lowercased body matches a
+     * known marketing/bulk phrase (see spam_rationale). Spam is still ingested
+     * (so sale/deal blasts and app-health checks remain visible) but lands in
+     * the inbox's Spam folder instead of the main list.
+     */
+    isSpam: integer("is_spam", { mode: "boolean" }).notNull().default(false),
+
+    /**
+     * Why is_spam was set — the exact phrase that matched (e.g. "unsubscribe").
+     * Auto-generated from the pattern hit, NOT AI. NULL when not spam.
+     */
+    spamRationale: text("spam_rationale"),
+
+    /** Soft-delete (0041). NULL = live; set = in Trash. */
+    deletedAt: integer("deleted_at", { mode: "timestamp" }),
+
+    /**
      * UUID used as the Vectorize vector id for this message's body embedding.
      * Vectorize metadata stored alongside the vector: `{ rag_uuid, message_id, thread_id }`.
      */

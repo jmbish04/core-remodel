@@ -153,7 +153,10 @@ export interface ExtractedMessage {
   subject: string;
   date: string;
   messageIdHeader: string | null;
+  /** Best-effort plaintext body (text/plain, else stripped HTML, else snippet). */
   body: string;
+  /** Raw text/html body when present (0041). Sanitized on render, not here. */
+  html: string | null;
 }
 
 function getHeader(headers: { name: string; value: string }[] | undefined, name: string): string {
@@ -212,7 +215,7 @@ export function extractMessage(message: GmailMessageFull): ExtractedMessage {
   const { plain, html } = extractBodyFromPart(message.payload);
   const body = plain ?? (html ? stripHtmlTags(html) : message.snippet ?? "");
 
-  return { from, to, cc, subject, date, messageIdHeader, body };
+  return { from, to, cc, subject, date, messageIdHeader, body, html: html ?? null };
 }
 
 // ─── Send ─────────────────────────────────────────────────────────────────────
@@ -317,7 +320,11 @@ export interface ReplyAllInput {
   subject: string;
   inReplyTo?: string | null;
   references?: string | null;
+  /** Plaintext body (always sent — the text/plain fallback part). */
   body: string;
+  /** Optional rich HTML body (0041). When present the message is sent as
+   *  multipart/alternative (text + html). */
+  html?: string | null;
 }
 
 function escapeHeaderValue(value: string): string {
@@ -336,24 +343,52 @@ export function buildReplyAllRaw(input: ReplyAllInput): string {
     ? input.subject.trim()
     : `Re: ${input.subject.trim()}`;
 
-  const lines = [
+  const headers = [
     `From: ${escapeHeaderValue(input.from)}`,
     `To: ${escapeHeaderValue(input.to.join(", "))}`,
   ];
 
   if (input.cc && input.cc.length > 0) {
-    lines.push(`Cc: ${escapeHeaderValue(input.cc.join(", "))}`);
+    headers.push(`Cc: ${escapeHeaderValue(input.cc.join(", "))}`);
   }
 
-  lines.push(`Subject: ${escapeHeaderValue(subject)}`);
-  lines.push("MIME-Version: 1.0");
-  lines.push('Content-Type: text/plain; charset="UTF-8"');
+  headers.push(`Subject: ${escapeHeaderValue(subject)}`);
+  headers.push("MIME-Version: 1.0");
+  if (input.inReplyTo) headers.push(`In-Reply-To: ${escapeHeaderValue(input.inReplyTo)}`);
+  if (input.references) headers.push(`References: ${escapeHeaderValue(input.references)}`);
 
-  if (input.inReplyTo) lines.push(`In-Reply-To: ${escapeHeaderValue(input.inReplyTo)}`);
-  if (input.references) lines.push(`References: ${escapeHeaderValue(input.references)}`);
-
-  const raw = `${lines.join("\r\n")}\r\n\r\n${input.body}`;
+  const raw = buildMimeBody(headers, input.body, input.html);
   return base64UrlEncodeFromString(raw);
+}
+
+/**
+ * Assemble the RFC-822 message from headers + a plaintext body and an optional
+ * HTML body. With HTML, emits `multipart/alternative` (text/plain + text/html)
+ * so clients that can't render HTML fall back to the plaintext part.
+ */
+function buildMimeBody(headers: string[], text: string, html?: string | null): string {
+  if (!html || !html.trim()) {
+    return `${[...headers, 'Content-Type: text/plain; charset="UTF-8"'].join("\r\n")}\r\n\r\n${text}`;
+  }
+  // Fixed boundary is fine — content is not attacker-controlled here, and the
+  // parts never contain the boundary token.
+  const boundary = "----=_remodel_alt_boundary";
+  const parts = [
+    `--${boundary}`,
+    'Content-Type: text/plain; charset="UTF-8"',
+    "Content-Transfer-Encoding: 7bit",
+    "",
+    text,
+    "",
+    `--${boundary}`,
+    'Content-Type: text/html; charset="UTF-8"',
+    "Content-Transfer-Encoding: 7bit",
+    "",
+    html,
+    "",
+    `--${boundary}--`,
+  ].join("\r\n");
+  return `${[...headers, `Content-Type: multipart/alternative; boundary="${boundary}"`].join("\r\n")}\r\n\r\n${parts}`;
 }
 
 /** Plain (non-reply) compose — same MIME construction, no threading headers, no "Re:" prefix. */

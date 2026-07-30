@@ -50,6 +50,7 @@ import type { RouteDecision } from "@backend/services/email/types";
 // chunk). Keep it lazy.
 
 import { getGmailAccessToken } from "./auth";
+import { classifyMessage } from "./classify-message";
 import {
   extractMessage,
   getMessage,
@@ -280,6 +281,14 @@ async function ingestAndBridgeMessage(
   // Message row.
   const ragUuid = crypto.randomUUID();
   const toRecipients = [...extracted.to, ...extracted.cc];
+  const attachments = collectAttachmentParts(full.payload);
+  // Deterministic gating (0041) — spam flag + purchase-doc classification, no AI.
+  const gate = classifyMessage({
+    from: extracted.from ?? "",
+    subject: extracted.subject ?? "",
+    body: extracted.body,
+    hasAttachments: attachments.length > 0,
+  });
   const [inserted] = await db
     .insert(gmailMessages)
     .values({
@@ -291,6 +300,10 @@ async function ingestAndBridgeMessage(
       subject: extracted.subject ?? null,
       body: extracted.body,
       bodyPlainTxt: extracted.body,
+      bodyHtml: extracted.html,
+      classification: gate.classification,
+      isSpam: gate.isSpam,
+      spamRationale: gate.spamRationale,
       ragUuid,
     })
     .onConflictDoNothing()
@@ -322,7 +335,6 @@ async function ingestAndBridgeMessage(
   await applyResolutionFks(db, messageRowId, match);
 
   // Attachment provenance (cheap metadata only; OCR is processEmail's job).
-  const attachments = collectAttachmentParts(full.payload);
   for (const att of attachments) {
     const ext = att.filename.includes(".")
       ? att.filename.split(".").pop()?.toLowerCase() ?? null

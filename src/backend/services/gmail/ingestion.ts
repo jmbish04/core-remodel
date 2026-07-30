@@ -28,11 +28,27 @@ import {
 } from "@backend/db";
 
 import { getGmailAccessToken } from "./auth";
-import { extractMessage, getMessage, searchMessages } from "./client";
+import { classifyMessage } from "./classify-message";
+import {
+  extractMessage,
+  getMessage,
+  searchMessages,
+  type GmailMessagePart,
+  type GmailMessagePayload,
+} from "./client";
 import { PUBLIC_EMAIL_DOMAINS, buildParticipantRows, insertParticipants } from "./participants";
 
 /** D1's hard limit on bound parameters per statement (see documents/db-helpers.ts). */
 const D1_MAX_BOUND_PARAMS = 100;
+
+/** True if the payload tree contains any part with a filename (an attachment). */
+function payloadHasAttachment(
+  part: GmailMessagePart | GmailMessagePayload | undefined,
+): boolean {
+  if (!part) return false;
+  if ("filename" in part && part.filename && part.filename.trim() !== "") return true;
+  return (part.parts ?? []).some((child) => payloadHasAttachment(child));
+}
 
 /** Cap on new messages ingested per company per run — keeps cron ticks bounded. */
 const MAX_NEW_MESSAGES_PER_COMPANY = 25;
@@ -357,6 +373,13 @@ export async function ingestCompanyEmails(env: Env): Promise<IngestCompanyEmails
       }
 
       const ragUuid = crypto.randomUUID();
+      // Deterministic gating (0041) — spam flag + purchase-doc classification, no AI.
+      const gate = classifyMessage({
+        from: extracted.from ?? "",
+        subject: extracted.subject ?? "",
+        body: extracted.body,
+        hasAttachments: payloadHasAttachment(full.payload),
+      });
       messageStatements.push(
         db
           .insert(gmailMessages)
@@ -368,6 +391,11 @@ export async function ingestCompanyEmails(env: Env): Promise<IngestCompanyEmails
             toRecipientsJson: JSON.stringify([...extracted.to, ...extracted.cc]),
             subject: extracted.subject || null,
             body: extracted.body,
+            bodyPlainTxt: extracted.body,
+            bodyHtml: extracted.html,
+            classification: gate.classification,
+            isSpam: gate.isSpam,
+            spamRationale: gate.spamRationale,
             ragUuid,
           })
           .onConflictDoNothing(),

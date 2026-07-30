@@ -3165,7 +3165,7 @@ export function ShowroomsDirectoryApp({ initialTab = "grouped" }: { initialTab?:
   const regionLabel = region == null ? "All regions" : (HUB_LABEL[region] ?? region);
 
   return (
-    <main className="container mx-auto max-w-6xl px-4 py-10">
+    <main className="w-full px-4 py-10 md:px-8">
       {/* Header */}
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
