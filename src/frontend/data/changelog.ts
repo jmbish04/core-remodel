@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/showroom-inbox-filtering-0294ec",
+    title: "Store Inbox + ingestion gating + full-width pages (0041)",
+    summary:
+      "Three connected workstreams. (1) Full-width viewport/data pages — the store/material/product/compare/showrooms-directory/products-browse islands were pinned to container mx-auto max-w-Nxl; dropped to w-full so they use the page. (2) A standalone full-page inbox at /admin/shopping/store/[id]/inbox (StoreInboxApp) auto-scoped to one showroom: Inbox/Receipts/Spam/Trash folders + counts, delete (soft→Trash), mark read/unread, a PlateJS reply that sends real multipart/alternative HTML, the AI-draft button fixed (was silently 500ing on a raw.response envelope mismatch — now reads choices[0].message.content), attachment cards + embedded-image gallery, a quoted-reply toggle, spam/receipt badges, and an MCP-reply hint; the viewport Inbox button now navigates here. (3) Deterministic (no-AI) ingestion gating: classifyMessage flags spam by phrase AND sender (rejuvenation@e.rejuvenation.com + e./email. bulk subdomains) with a stored rationale, tags receipt|invoice|quote + ($|attachment) (extraction already runs via the Path-B processEmail bridge), and trimQuotedReply collapses reply tails; HTML body is now captured. POST /backfill-classification re-classifies history (idempotent; flagged 28/62 on first run). Also carries buildShowroomMatchSpec — the showroom inbox matches its OWN domain domain-wide and contacts by exact address, fixing the earlier cross-company flood. Migration 0158 (additive): classification/is_spam/spam_rationale/deleted_at on gmail_messages + gmail_message_images.",
+    date: "2026-07-30",
+    status: "staged",
+    prNumber: 310,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/310",
+  },
+  {
     branch: "claude/sales-clearance-page-b0c752",
     title: "Sales & Clearance · Phase A — sale_items schema + backfill (0038)",
     summary:
@@ -290,6 +300,25 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "0041-store-inbox",
+    branch: "claude/showroom-inbox-filtering-0294ec",
+    date: "2026-07-30",
+    area: "Shopping",
+    title: "Store inbox + ingestion gating + full-width pages (0041)",
+    summary:
+      "The per-showroom inbox was a cramped inline panel showing a flood of other companies' mail, replies were plaintext, the AI-draft button silently failed, and marketing blasts had nowhere to go. This ships a standalone full-page inbox scoped to one showroom with folders (Inbox/Receipts/Spam/Trash), delete + read/unread, a PlateJS HTML reply, attachment/embedded-image display, and deterministic (no-AI) spam/receipt gating at ingestion — plus widens the cramped viewport pages to full width.",
+    changes: [
+      { kind: "migration", text: "0158_famous_warpath: gmail_messages gains classification (enum), is_spam, spam_rationale, deleted_at; new gmail_message_images table. Additive; applied + verified on remote D1 (idempotent-tolerated on re-apply)." },
+      { kind: "added", text: "Full-page inbox at /admin/shopping/store/[id]/inbox (StoreInboxApp): Inbox/Receipts/Spam/Trash folders + counts, auto-scoped to the showroom, reusing GmailThreadList; the viewport Inbox button now navigates here." },
+      { kind: "added", text: "Deterministic classifyMessage (no AI): spam by phrase + sender (rejuvenation@e.rejuvenation.com + e./email. bulk subdomains) with stored rationale; receipt|invoice|quote + ($|attachment) tagged; trimQuotedReply collapses reply tails. Wired into both ingest paths; HTML body now captured." },
+      { kind: "added", text: "Routes: DELETE /threads/:id (soft→Trash), POST /threads/:id/mark-unread, ?folder= + counts on the showroom inbox, attachments/images on GET /threads/:id, HTML multipart/alternative reply, POST /backfill-classification (idempotent; flagged 28/62 on first run)." },
+      { kind: "fixed", text: "AI-draft button was silently returning 500 on a raw.response envelope mismatch; now reads choices[0].message.content and surfaces the real error." },
+      { kind: "changed", text: "Viewport/data pages (store/material/product/compare/showrooms-directory/products-browse) widened from container mx-auto max-w-Nxl to full width." },
+    ],
+    migrations: ["0158_famous_warpath"],
+    status: "staged",
+  },
   {
     id: "0038-sales-schema-phase-a",
     branch: "claude/sales-clearance-page-b0c752",

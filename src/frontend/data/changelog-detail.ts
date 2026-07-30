@@ -113,6 +113,74 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "0041-store-inbox": {
+    slug: "0041-store-inbox",
+    branch: "claude/showroom-inbox-filtering-0294ec",
+    subtitle: "0041 · store inbox + deterministic ingestion gating + full-width pages",
+    introduction:
+      "The per-showroom inbox got its own full page, real folders, and rich replies — and a no-AI classifier that keeps marketing blasts out of the main list while routing receipts to the existing parser. Plus a layout fix that lets viewport/data pages use the full page width.",
+    problem:
+      "The inbox was a cramped h-560 inline panel inside the store viewport that got cut off, showed a flood of other companies' mail (it domain-matched every POC/contact email — usually reps at OTHER companies), had no delete/mark-unread, plaintext-only replies, an AI-draft button that silently 500'd, and no place for marketing blasts. Separately, viewport/data pages were pinned to container mx-auto max-w-Nxl, wasting the page.",
+    approach:
+      "Three workstreams. (1) Layout: drop the width cap on the viewport/data islands (w-full px-4 py-10 md:px-8); modals + reading/form pages stay narrow. (2) A standalone StoreInboxApp at /admin/shopping/store/[id]/inbox — a full-height two-pane mail surface with a folders rail (Inbox/Receipts/Spam/Trash) whose counts + filtering are server-side via ?folder=. Reading pane renders body as PLAINTEXT (quoted tail collapsed behind a toggle) + a gallery of embedded images served from our own Cloudflare Images URLs — never raw email HTML (XSS). Reply is the repo's PlateJS editor, sent as multipart/alternative. draft-assist reads choices[0].message.content (the envelope bug) and surfaces the real error. (3) Ingestion: classifyMessage is a pure, deterministic matcher — spam by phrase AND sender (an exact flagged-address list incl. rejuvenation@e.rejuvenation.com, plus e./email./mktg. bulk subdomains) recording the matched phrase in spam_rationale; receipt|invoice|quote + ($|attachment) sets a receipt classification (the Path-B ingest gate already bridges every gated message into processEmail for the actual line-item extraction). trimQuotedReply collapses reply tails. Both ingest insert sites and a new idempotent POST /backfill-classification route share it. Also carries buildShowroomMatchSpec: the showroom inbox matches its OWN domain (website links + store email) domain-wide and POC/contact emails by EXACT address — the root-cause fix for the cross-company flood.",
+    apiChanges: [
+      "GET /api/gmail/showrooms/:id/threads-by-domain?folder=inbox|receipts|spam|trash — per-folder filtering + counts + isSpam/isReceipt/spamRationale tags.",
+      "DELETE /api/gmail/threads/:threadId — soft-delete (deleted_at) → Trash.",
+      "POST /api/gmail/threads/:threadId/mark-unread — inverse of mark-read.",
+      "GET /api/gmail/threads/:threadId — now returns attachments[] + images[] + per-message bodyHtml/bodyVisible/bodyQuoted/classification/isSpam.",
+      "POST /api/gmail/threads/:threadId/reply — accepts { body?, markdown?, html? }; HTML sent as multipart/alternative.",
+      "POST /api/gmail/backfill-classification — cursor-paged, idempotent re-classify of existing mail.",
+    ],
+    filesTouched: [
+      "src/backend/services/gmail/classify-message.ts (+ .test.ts) — new deterministic classifier + trimQuotedReply",
+      "src/backend/services/gmail/participants.ts (buildShowroomMatchSpec, + showroom-match-spec.test.ts)",
+      "src/backend/services/gmail/client.ts (extractMessage returns html; buildReplyAllRaw multipart), ingestion.ts, ingest-gate.ts (wire classifier)",
+      "src/backend/api/routes/gmail.ts (delete/mark-unread/folder+counts/attachments/html-reply/draft-fix/backfill)",
+      "src/backend/db/schema/gmail/gmail_messages.ts (+4 cols), gmail_message_images.ts (new), schema/index.ts",
+      "src/frontend/components/gmail/StoreInboxApp.tsx (new), types.ts; src/frontend/pages/admin/shopping/store/[id]/inbox.astro (new)",
+      "6 viewport/data islands widened; drizzle/0158_famous_warpath.sql; scripts/qc/pr_310.mjs; docs/0041_store_inbox/",
+    ],
+    migrations: [
+      {
+        tag: "0158_famous_warpath",
+        sql: "ALTER TABLE gmail_messages ADD classification text DEFAULT 'normal' NOT NULL;\nALTER TABLE gmail_messages ADD is_spam integer DEFAULT false NOT NULL;\nALTER TABLE gmail_messages ADD spam_rationale text;\nALTER TABLE gmail_messages ADD deleted_at integer;\nCREATE TABLE gmail_message_images ( id INTEGER PRIMARY KEY AUTOINCREMENT, gmail_message_id INTEGER NOT NULL REFERENCES gmail_messages(id) ON DELETE cascade, content_id text, cf_image_id text, delivery_url text NOT NULL, mime_type text, created_at integer DEFAULT (unixepoch()) NOT NULL );",
+      },
+    ],
+    code: [
+      {
+        title: "Deterministic spam gating — sender rules win the rationale, phrases fall back (classify-message.ts)",
+        lang: "ts",
+        code: "const sender = parseEmailAddress(input.from ?? \"\");\nif (sender) {\n  if (SPAM_SENDER_ADDRESSES.has(sender.email)) {\n    isSpam = true; spamRationale = `sender: ${sender.email}`;\n  } else if (BULK_SENDER_SUBDOMAINS.some((p) => sender.domain.startsWith(p))) {\n    isSpam = true; spamRationale = `bulk sender: ${sender.domain}`;\n  }\n}\nif (!isSpam) {\n  for (const phrase of SPAM_PHRASES) {\n    if (body.includes(phrase)) { isSpam = true; spamRationale = phrase; break; }\n  }\n}",
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Ingestion gating — deterministic, no AI. Spam foldered, receipts routed to the existing parser.",
+        code: "flowchart TD\n  msg[\"raw Gmail message\"] --> ext[\"extractMessage (+html, +trimQuotedReply)\"]\n  ext --> gate[\"classifyMessage — pure text match\"]\n  gate -->|\"sender/phrase spam\"| spam[\"is_spam=1<br/>spam_rationale\"]\n  gate -->|\"receipt|invoice|quote + ($|attachment)\"| rc[\"classification=receipt<br/>→ Path-B processEmail parser\"]\n  gate -->|\"else\"| norm[\"normal\"]\n  spam --> GM[(gmail_messages)]\n  rc --> GM\n  norm --> GM\n  GM --> folder[\"?folder= inbox|receipts|spam|trash\"]\n  folder --> page[\"/admin/shopping/store/:id/inbox\"]\n  classDef new fill:#1f4d2e,stroke:#4ade80\n  class spam,rc,folder,page new",
+      },
+      {
+        caption: "Schema delta — 0158 (additive).",
+        code: "erDiagram\n  gmail_messages ||--o{ gmail_message_images : has\n  gmail_messages {\n    string classification \"NEW: normal|promotional|receipt|invoice|quote\"\n    int is_spam \"NEW\"\n    string spam_rationale \"NEW — matched phrase, no AI\"\n    datetime deleted_at \"NEW — soft delete (Trash)\"\n    string body_html \"now populated\"\n  }\n  gmail_message_images {\n    string content_id \"cid ref\"\n    string cf_image_id\n    string delivery_url\n  }",
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_310.mjs",
+      command:
+        "node scripts/qc/pr_310.mjs --preview   # branch preview — full new surface\nnode scripts/qc/pr_310.mjs             # production (regression guard)",
+      ranAt: "2026-07-30",
+      source:
+        "// preview: all 4 folders 200 with counts + folder echo; getThread returns attachments[]/images[]\n// + bodyVisible/bodyQuoted/classification/isSpam; Rejuvenation foldered Spam with rationale;\n// backfill idempotent; reply-without-body → 400; draft-assist-without-threadId → 400.\n// prod: new folder/counts shape absent (main) → reported 'pending merge', legacy route still 200.",
+      output:
+        "PREVIEW (wcrp-claude-showroom-inbox-filtering-0294ec):\n  ✓ target reachable\n  ✓ folder=inbox → 200 with counts + folder echo\n  ✓ folder=receipts → 200 with counts + folder echo\n  ✓ folder=spam → 200 with counts + folder echo\n  ✓ folder=trash → 200 with counts + folder echo\n  ✓ getThread returns attachments[] + images[] arrays\n  ✓ message carries bodyVisible/bodyQuoted/classification/isSpam\n  ✓ rejuvenation@e.rejuvenation.com foldered as Spam with rationale\n  ✓ POST /backfill-classification → 200 (idempotent)\n  ✓ reply with no body/markdown/html → 400\n  ✓ draft-assist without threadId → 400\n  11 passed, 0 failed\n\n  backfill (whole mailbox): 1 page, processed=62, spamFlagged=28\n\nPRODUCTION (regression guard, pre-merge):\n  ✓ target reachable\n    folder/counts shape absent → running against main (pre-merge). Pending deploy; regression-only.\n  ✓ legacy showroom inbox still returns 200 (regression)\n  2 passed, 0 failed\n\nAlso: classify-message.test.ts + showroom-match-spec.test.ts pass; tsc --noEmit clean on all touched files; pnpm run build ✓; migration 0158 applied via pnpm run migrate:remote (6 idempotent statements tolerated) + columns/table verified on remote D1.",
+      migrations: [
+        {
+          tag: "0158_famous_warpath",
+          appliedRemote: true,
+          note: "Applied via pnpm run migrate:remote; classification/is_spam/spam_rationale/deleted_at + gmail_message_images verified on remote D1.",
+        },
+      ],
+    },
+  },
   "0032-park-finds-page": {
     slug: "0032-park-finds-page",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
