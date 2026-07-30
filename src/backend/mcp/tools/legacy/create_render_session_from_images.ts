@@ -1,4 +1,5 @@
 import { renderSessions, showroomImages } from "@backend/db";
+import { referenceSchema } from "@backend/services/render/references";
 import { inArray } from "drizzle-orm";
 import { z } from "zod";
 
@@ -21,12 +22,14 @@ export const createRenderSessionFromImages = defineTool({
     roomId: z.number().optional().describe("Optional room id this session belongs to."),
     showroomImageIds: z
       .array(z.number().int().positive())
+      .max(500)
       .optional()
       .describe("showroom_images ids to seed as inspiration references (resolved to CF URLs)."),
     references: z
-      .array(z.object({ url: z.string().url(), label: z.string().optional() }))
+      .array(referenceSchema)
+      .max(500)
       .optional()
-      .describe("Explicit reference images as {url,label}."),
+      .describe("Explicit reference images as {url,label} (http(s) urls)."),
   },
   annotations: WRITE,
   examples: [

@@ -9,6 +9,20 @@
 import { showroomImages } from "@backend/db";
 import { eq, inArray } from "drizzle-orm";
 import type { DrizzleD1Database } from "drizzle-orm/d1";
+import { z } from "zod";
+
+/**
+ * A reference image URL restricted to http(s) — blocks `javascript:`/`data:`/
+ * `file:` schemes that could become a stored-XSS or SSRF vector when the studio
+ * renders the ref in an <img src> / <a href>.
+ */
+export const httpUrlSchema = z
+  .string()
+  .url()
+  .refine((u) => /^https?:\/\//i.test(u), { message: "must be an http(s) URL" });
+
+/** A single {url,label} reference, url restricted to http(s). */
+export const referenceSchema = z.object({ url: httpUrlSchema, label: z.string().optional() });
 
 export interface ImageRefInput {
   showroomImageIds?: number[];
@@ -63,7 +77,11 @@ export function parseSeedRefs(json: string | null | undefined): ImageRef[] {
   try {
     const parsed = JSON.parse(json);
     return Array.isArray(parsed)
-      ? parsed.filter((r): r is ImageRef => Boolean(r && typeof r.url === "string"))
+      ? parsed.filter(
+          (r): r is ImageRef =>
+            Boolean(r && typeof r.url === "string") &&
+            (r.label === undefined || typeof r.label === "string"),
+        )
       : [];
   } catch {
     return [];

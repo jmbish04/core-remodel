@@ -146,7 +146,7 @@ export function VisitPhotosManager({
         }),
       });
       toast.success("Render session created — opening the studio…");
-      window.location.assign(`/admin/builder?session=${r.id}`);
+      window.location.assign(`/admin/builder?session=${encodeURIComponent(r.id)}`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to create render session");
     } finally {

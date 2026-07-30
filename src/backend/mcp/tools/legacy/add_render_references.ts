@@ -1,5 +1,10 @@
 import { renderSessions } from "@backend/db";
-import { mergeRefs, parseSeedRefs, resolveShowroomImageRefs } from "@backend/services/render/references";
+import {
+  mergeRefs,
+  parseSeedRefs,
+  referenceSchema,
+  resolveShowroomImageRefs,
+} from "@backend/services/render/references";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -26,11 +31,16 @@ export const addRenderReferences = defineTool({
       .positive()
       .optional()
       .describe("A showroom image-group (folder) id — adds every photo in it."),
-    showroomImageIds: z.array(z.number().int().positive()).optional().describe("Individual showroom_images ids."),
-    references: z
-      .array(z.object({ url: z.string().url(), label: z.string().optional() }))
+    showroomImageIds: z
+      .array(z.number().int().positive())
+      .max(500)
       .optional()
-      .describe("Explicit reference images as {url,label}."),
+      .describe("Individual showroom_images ids."),
+    references: z
+      .array(referenceSchema)
+      .max(500)
+      .optional()
+      .describe("Explicit reference images as {url,label} (http(s) urls)."),
   },
   annotations: WRITE,
   examples: [

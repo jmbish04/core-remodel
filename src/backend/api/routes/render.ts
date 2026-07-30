@@ -13,12 +13,12 @@ import {
   showroomImages,
   showroomStores,
 } from "@backend/db";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, isNotNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
 
-import { mergeRefs, resolveShowroomImageRefs } from "../../services/render/references";
+import { mergeRefs, referenceSchema, resolveShowroomImageRefs } from "../../services/render/references";
 import { runStage } from "../../services/render/stage-runner";
 import type { StageType } from "../../services/render/types";
 
@@ -92,10 +92,8 @@ renderRouter.post(
     z.object({
       name: z.string().min(1),
       roomId: z.number().nullable().optional(),
-      showroomImageIds: z.array(z.number().int().positive()).optional(),
-      references: z
-        .array(z.object({ url: z.string().url(), label: z.string().optional() }))
-        .optional(),
+      showroomImageIds: z.array(z.number().int().positive()).max(500).optional(),
+      references: z.array(referenceSchema).max(500).optional(),
     }),
   ),
   async (c) => {
@@ -174,12 +172,16 @@ renderRouter.get("/reference-folders", async (c) => {
     .from(showroomImageGroups)
     .innerJoin(showroomStores, eq(showroomImageGroups.storeId, showroomStores.id))
     .where(eq(showroomImageGroups.isActive, true))
-    .orderBy(desc(showroomImageGroups.createdAt));
+    .orderBy(desc(showroomImageGroups.createdAt))
+    .all();
 
-  // Bucket every grouped photo once to derive count + cover per folder.
+  // Bucket grouped photos to derive count + cover per folder. Only rows that
+  // actually belong to a folder — never scan the whole images table.
   const grouped = await db
     .select({ id: showroomImages.id, groupId: showroomImages.groupId, url: showroomImages.deliveryUrl })
-    .from(showroomImages);
+    .from(showroomImages)
+    .where(isNotNull(showroomImages.groupId))
+    .all();
   const byGroup = new Map<number, { id: number; url: string }[]>();
   for (const m of grouped) {
     if (m.groupId == null) continue;
@@ -209,10 +211,8 @@ renderRouter.post(
     "json",
     z.object({
       imageGroupId: z.number().int().positive().optional(),
-      showroomImageIds: z.array(z.number().int().positive()).optional(),
-      references: z
-        .array(z.object({ url: z.string().url(), label: z.string().optional() }))
-        .optional(),
+      showroomImageIds: z.array(z.number().int().positive()).max(500).optional(),
+      references: z.array(referenceSchema).max(500).optional(),
     }),
   ),
   async (c) => {
