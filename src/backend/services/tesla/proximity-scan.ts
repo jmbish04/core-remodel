@@ -32,6 +32,7 @@ import { showroomStores } from "@backend/db/schema/showroom/stores";
 import { showroomVisitLog } from "@backend/db/schema/showroom/visit_log";
 import { haversineMeters } from "@backend/services/drive-geo-match";
 import { GoogleMapsService } from "@backend/services/google/maps";
+import { generateStructured, type JsonSchemaNode } from "@backend/services/structured-output";
 import type { GpsSource } from "@backend/services/tesla/visit-sessions";
 import { and, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
@@ -66,8 +67,11 @@ export interface ProximityScanResult {
     | "already-known"
     | "excluded"
     | "already-queued"
+    | "not-relevant"
     | "created"
     | "error";
+  /** Whether the Gemini relevance pass ran and what it concluded (for the receipts). */
+  aiRelevance?: RelevanceAssessment | null;
   hitlQueueId?: number;
   detourStopId?: number;
   visitLogId?: number;
@@ -111,6 +115,94 @@ async function readScanConfig(env: Env): Promise<ScanConfig> {
     // running billable Places calls. Better a missed park-find than surprise spend.
     console.error("[proximity-scan] readScanConfig failed — disabling scan:", err);
     return { enabled: false, radiusM: DEFAULT_SCAN_RADIUS_M };
+  }
+}
+
+/** Gemini's remodel-relevance verdict + a review one-liner for the Park-Finds card. */
+export interface RelevanceAssessment {
+  /** Would someone doing a HOME REMODEL actually shop here? The precision gate (D0). */
+  isRemodelRelevant: boolean;
+  /** A concrete remodel category (e.g. "tile & stone", "plumbing fixtures"), or null. */
+  category: string | null;
+  /** One-sentence hint for the reviewer. */
+  oneLiner: string;
+}
+
+const RELEVANCE_SCHEMA: JsonSchemaNode = {
+  type: "object",
+  properties: {
+    isRemodelRelevant: {
+      type: "boolean",
+      description:
+        "True ONLY if a homeowner mid-renovation would genuinely shop here for finishes, " +
+        "fixtures, materials, or furnishings (tile/stone, plumbing, lighting, cabinetry, " +
+        "flooring, countertops, appliances, hardware, furniture, decor). False for generic " +
+        "big-box, mattress/electronics/grocery/auto/restaurant, or anything not remodel-related.",
+    },
+    category: {
+      type: "string",
+      nullable: true,
+      description: "Short remodel category, e.g. 'tile & stone' or 'plumbing fixtures'. Null if unsure.",
+    },
+    oneLiner: {
+      type: "string",
+      description: "One concise sentence for the reviewer: what this place is and why it was flagged.",
+    },
+  },
+  required: ["isRemodelRelevant", "oneLiner"],
+};
+
+/** Cap the model call so a hung request can't hold the caller's `waitUntil` open. */
+const GEMINI_TIMEOUT_MS = 10_000;
+
+interface PlaceLike {
+  displayName: string | null;
+  formattedAddress: string | null;
+  primaryType: string | null;
+  types: string[];
+  rating: number | null;
+  userRatingCount: number | null;
+}
+
+/**
+ * Ask Gemini whether a nearby Places hit is REALLY a remodel showroom (the plan's
+ * "Places + Gemini" gate) and get a category + one-liner for the review card. The
+ * Places `includedTypes` filter is a coarse pre-filter; this is the precision pass —
+ * it rejects a `furniture_store` that's actually a mattress outlet. Best-effort: on
+ * a timeout / model / parse failure it returns null and the caller falls back to the
+ * deterministic Places-type heuristic, so a Gemini outage never breaks a park-find.
+ */
+async function assessRemodelRelevance(
+  env: Env,
+  place: PlaceLike,
+): Promise<RelevanceAssessment | null> {
+  try {
+    const prompt =
+      "A vehicle just parked next to this business. Decide whether it is a place someone " +
+      "doing a home remodel would shop at.\n\n" +
+      `Name: ${place.displayName ?? "(unknown)"}\n` +
+      `Google primary type: ${place.primaryType ?? "(none)"}\n` +
+      `Google types: ${place.types.join(", ") || "(none)"}\n` +
+      `Address: ${place.formattedAddress ?? "(unknown)"}\n` +
+      `Rating: ${place.rating ?? "n/a"} (${place.userRatingCount ?? 0} reviews)`;
+
+    const result = await Promise.race([
+      generateStructured<RelevanceAssessment>(env, {
+        feature: "proximity_scan_relevance",
+        prompt,
+        schema: RELEVANCE_SCHEMA,
+        temperature: 0,
+        maxTokens: 300,
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("gemini relevance timeout")), GEMINI_TIMEOUT_MS),
+      ),
+    ]);
+    return result.data;
+  } catch (err) {
+    // Never silent: log it, then let the caller fall back to the Places heuristic.
+    console.error("[proximity-scan] relevance assessment failed (falling back to Places heuristic):", err);
+    return null;
   }
 }
 
@@ -223,9 +315,21 @@ export async function proximityScan(
     const driveListId = active?.id;
 
     const place = fresh.p;
-    const categoryGuess = place.primaryType ?? place.types?.[0] ?? null;
     const name = place.displayName ?? "Unknown place";
-    const description = buildOneLiner(name, categoryGuess, place.formattedAddress);
+
+    // Precision gate (decision D0): the Places includedTypes filter got us a
+    // plausible remodel type; Gemini confirms it's REALLY a remodel showroom and
+    // writes the card's category + one-liner. Best-effort — null on any failure, and
+    // we fall back to the deterministic Places heuristic rather than block the find.
+    const ai = await assessRemodelRelevance(env, place);
+    if (ai && ai.isRemodelRelevant === false) {
+      // Confidently irrelevant (e.g. a mattress outlet tagged furniture_store) — skip.
+      return { scanned: true, reason: "not-relevant", aiRelevance: ai };
+    }
+
+    const heuristicCategory = place.primaryType ?? place.types?.[0] ?? null;
+    const categoryGuess = ai?.category ?? heuristicCategory;
+    const description = ai?.oneLiner ?? buildOneLiner(name, heuristicCategory, place.formattedAddress);
     const scanPacket = {
       parkedAt: { latitude: input.latitude, longitude: input.longitude },
       chosen: {
@@ -236,6 +340,8 @@ export async function proximityScan(
         rating: place.rating,
         userRatingCount: place.userRatingCount,
       },
+      // The AI verdict (or null when it didn't run) — provenance for the receipts.
+      aiRelevance: ai,
       considered: ranked.slice(0, 5).map((r) => ({
         placeId: r.p.placeId,
         name: r.p.displayName,
@@ -344,6 +450,7 @@ export async function proximityScan(
       detourStopId,
       visitLogId,
       driveListId,
+      aiRelevance: ai,
       candidate: { placeId: place.placeId, name, categoryGuess, distanceM: fresh.distanceM },
     };
   } catch (err) {

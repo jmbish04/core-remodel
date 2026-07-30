@@ -308,6 +308,21 @@ export const CHANGELOG: ChangelogEntry[] = [
     status: "staged",
   },
   {
+    id: "0032-park-finds-gemini",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-30",
+    tag: "0032",
+    area: "Tesla / Visits",
+    title: "Proximity scan gains a Gemini relevance pass (0032 D1 follow-up)",
+    summary:
+      "Completes decision 1.d to the plan's 'Places + Gemini' spec. The Places includedTypes filter is a coarse pre-filter (it lets through a furniture_store that's really a mattress outlet); a new best-effort Gemini structured-output pass (via the shared generateStructured service, feature 'proximity_scan_relevance') is the PRECISION gate — it judges whether a homeowner mid-remodel would actually shop there (isRemodelRelevant), and writes the candidate's category + one-liner for the Park-Finds card. A confident 'not relevant' skips staging; anything else is staged as before. Fail-safe: on a 10s timeout / model / parse failure it returns null and the scan falls back to the deterministic Places-type heuristic, so a Gemini outage never breaks a park-find (and the whole call still runs off waitUntil, never throwing). Usage auto-logs to gemini_usage_log. Backend only — the AI one-liner + category flow to the existing card with no frontend change.",
+    changes: [
+      { kind: "added", text: "services/tesla/proximity-scan.ts assessRemodelRelevance(): generateStructured Gemini call (JSON schema {isRemodelRelevant, category, oneLiner}), 10s Promise.race timeout, null-on-failure fallback to the Places heuristic." },
+      { kind: "changed", text: "proximityScan: a confident isRemodelRelevant=false returns reason 'not-relevant' (no stage); otherwise the AI category/one-liner replace the Places-type guess on the hitl candidate (description/categoryGuess) + are stored in proximity_scan_json.aiRelevance for the receipts." },
+    ],
+    status: "staged",
+  },
+  {
     id: "0032-park-finds-page",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-29",
