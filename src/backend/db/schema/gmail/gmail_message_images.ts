@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 import { gmailMessages } from "./gmail_messages";
 
@@ -45,6 +45,13 @@ export const gmailMessageImages = sqliteTable(
   },
   (table) => ({
     messageIdx: index("gmail_message_images_message_id_idx").on(table.gmailMessageId),
+    // One row per (message, cid) — makes the on-view upload's onConflictDoNothing
+    // a hard guarantee against duplicate rows even if two views race. (SQLite
+    // treats NULL content_id values as distinct, which is fine.)
+    messageCidUnique: uniqueIndex("gmail_message_images_msg_cid_unique").on(
+      table.gmailMessageId,
+      table.contentId,
+    ),
   }),
 );
 

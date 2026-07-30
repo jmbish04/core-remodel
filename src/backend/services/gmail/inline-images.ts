@@ -12,7 +12,7 @@
  * actually opens get uploaded, so a spam blast's images never cost storage
  * unless someone looks at it.
  */
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import { gmailMessageImages, gmailMessages } from "@backend/db";
@@ -40,17 +40,32 @@ export async function ensureMessageImages(
   db: ReturnType<typeof drizzle>,
   message: Pick<GmailMessage, "id" | "messageId" | "imagesExtracted">,
 ): Promise<GmailMessageImage[]> {
-  if (message.imagesExtracted) {
-    return db.select().from(gmailMessageImages).where(eq(gmailMessageImages.gmailMessageId, message.id)).all();
-  }
+  const currentRows = () =>
+    db.select().from(gmailMessageImages).where(eq(gmailMessageImages.gmailMessageId, message.id)).all();
 
-  // Resolve CF Images credentials once; if unavailable, leave the flag false so
-  // a later configured run can still populate images.
+  if (message.imagesExtracted) return currentRows();
+
+  // Atomically CLAIM the extraction: flip images_extracted false→true and only
+  // proceed if THIS request won the flip. A concurrent viewer that loses the
+  // race returns the current rows instead of fetching + uploading again. On
+  // failure we reset the flag so a later view retries. (Combined with the
+  // UNIQUE(gmail_message_id, content_id) index, duplicate rows are impossible.)
+  const claimed = await db
+    .update(gmailMessages)
+    .set({ imagesExtracted: true })
+    .where(and(eq(gmailMessages.id, message.id), eq(gmailMessages.imagesExtracted, false)))
+    .returning({ id: gmailMessages.id })
+    .all();
+  if (claimed.length === 0) return currentRows();
+
+  // Resolve CF Images credentials; if unavailable, release the claim so a later
+  // configured run can still populate images.
   const { accountId, apiTokens } = await resolveCloudflareImagesCredentials(env);
   const [primaryToken, ...fallbackApiTokens] = apiTokens ?? [];
   if (!accountId || !primaryToken) {
     console.warn("[gmail] inline-images: Cloudflare Images not configured — skipping");
-    return db.select().from(gmailMessageImages).where(eq(gmailMessageImages.gmailMessageId, message.id)).all();
+    await db.update(gmailMessages).set({ imagesExtracted: false }).where(eq(gmailMessages.id, message.id)).run();
+    return currentRows();
   }
   const processor = new ImageProcessorService(env, accountId, primaryToken, { fallbackApiTokens });
 
@@ -88,17 +103,15 @@ export async function ensureMessageImages(
         console.error(`[gmail] inline-images: failed image cid=${img.contentId} on msg ${message.messageId}:`, err);
       }
     }
-
-    // Mark checked regardless of how many uploaded, so we never re-fetch this
-    // message from Gmail just to rediscover it has no (more) inline images.
-    await db
-      .update(gmailMessages)
-      .set({ imagesExtracted: true })
-      .where(eq(gmailMessages.id, message.id))
-      .run();
+    // The claim already set images_extracted=true; individual per-image failures
+    // above are logged + skipped, and the message stays "checked" so we never
+    // re-fetch it from Gmail just to rediscover it has no (more) inline images.
   } catch (err) {
+    // A whole-message failure (Gmail fetch, etc.): release the claim so a later
+    // view retries rather than leaving the message permanently "checked".
     console.error(`[gmail] inline-images: extraction failed for msg ${message.messageId}:`, err);
+    await db.update(gmailMessages).set({ imagesExtracted: false }).where(eq(gmailMessages.id, message.id)).run();
   }
 
-  return db.select().from(gmailMessageImages).where(eq(gmailMessageImages.gmailMessageId, message.id)).all();
+  return currentRows();
 }

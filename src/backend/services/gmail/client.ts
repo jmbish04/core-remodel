@@ -52,7 +52,7 @@ function base64UrlEncodeFromString(input: string): string {
 }
 
 /** Very small HTML-tag stripper for text/html fallback bodies (best-effort, not a full parser). */
-function stripHtmlTags(html: string): string {
+export function stripHtmlTags(html: string): string {
   return html
     .replace(/<style[\s\S]*?<\/style>/gi, "")
     .replace(/<script[\s\S]*?<\/script>/gi, "")
@@ -429,29 +429,46 @@ export function buildReplyAllRaw(input: ReplyAllInput): string {
 }
 
 /**
+ * base64-encode a UTF-8 string for a MIME body part, wrapped at 76 chars per
+ * RFC 2045. Using base64 (not 7bit) is required because bodies can contain
+ * UTF-8 (emoji, non-Latin) or long lines, which 7bit forbids.
+ */
+function base64MimeEncode(input: string): string {
+  const bytes = new TextEncoder().encode(input);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/.{76}/g, "$&\r\n");
+}
+
+/**
  * Assemble the RFC-822 message from headers + a plaintext body and an optional
  * HTML body. With HTML, emits `multipart/alternative` (text/plain + text/html)
- * so clients that can't render HTML fall back to the plaintext part.
+ * so clients that can't render HTML fall back to the plaintext part. Both parts
+ * are base64-encoded so UTF-8 content is transmitted verbatim.
  */
 function buildMimeBody(headers: string[], text: string, html?: string | null): string {
+  const textPart = [
+    'Content-Type: text/plain; charset="UTF-8"',
+    "Content-Transfer-Encoding: base64",
+    "",
+    base64MimeEncode(text),
+  ];
+
   if (!html || !html.trim()) {
-    return `${[...headers, 'Content-Type: text/plain; charset="UTF-8"'].join("\r\n")}\r\n\r\n${text}`;
+    return `${[...headers, ...textPart].join("\r\n")}`;
   }
-  // Fixed boundary is fine — content is not attacker-controlled here, and the
-  // parts never contain the boundary token.
+  // Fixed boundary is fine — content is base64-encoded, so a part can never
+  // contain the boundary token.
   const boundary = "----=_remodel_alt_boundary";
   const parts = [
     `--${boundary}`,
-    'Content-Type: text/plain; charset="UTF-8"',
-    "Content-Transfer-Encoding: 7bit",
-    "",
-    text,
+    ...textPart,
     "",
     `--${boundary}`,
     'Content-Type: text/html; charset="UTF-8"',
-    "Content-Transfer-Encoding: 7bit",
+    "Content-Transfer-Encoding: base64",
     "",
-    html,
+    base64MimeEncode(html),
     "",
     `--${boundary}--`,
   ].join("\r\n");

@@ -37,6 +37,11 @@ const FOLDERS: { key: GmailFolder; label: string; icon: React.ComponentType<{ cl
 
 const EMPTY_COUNTS: GmailFolderCounts = { inbox: 0, receipts: 0, spam: 0, trash: 0 };
 
+/** Embedded images are served from Cloudflare Images; never render any other host. */
+function isTrustedImageUrl(url: string): boolean {
+  return /^https:\/\/imagedelivery\.net\//.test(url);
+}
+
 export function StoreInboxApp({ storeId, storeName: storeNameProp }: { storeId: number; storeName?: string }) {
   const [storeName, setStoreName] = React.useState(storeNameProp ?? "Showroom");
   const [folder, setFolder] = React.useState<GmailFolder>("inbox");
@@ -344,10 +349,11 @@ function MessageBlock({
         </div>
       ) : null}
 
-      {/* Embedded images */}
-      {images.length > 0 ? (
+      {/* Embedded images — only render URLs served by Cloudflare Images (these
+          are OUR uploads; guard against any non-CF host sneaking into src). */}
+      {images.filter((i) => isTrustedImageUrl(i.deliveryUrl)).length > 0 ? (
         <div className="mt-4 flex flex-wrap gap-2">
-          {images.map((img) => (
+          {images.filter((i) => isTrustedImageUrl(i.deliveryUrl)).map((img) => (
             <a key={img.id} href={img.deliveryUrl} target="_blank" rel="noreferrer">
               <img
                 src={img.deliveryUrl}

@@ -240,7 +240,7 @@ export async function runIngestGate(
 }
 
 /** The `general` catch-all decision — arbitrary vendor mail, AI decides the type. */
-const GATE_DECISION: RouteDecision = {
+export const GATE_DECISION: RouteDecision = {
   routeId: "general",
   reason: "gmail-ingest-gate: domain matched a known showroom/company",
   profile: CATCH_ALL_PROFILE,
@@ -282,7 +282,11 @@ async function ingestAndBridgeMessage(
   const ragUuid = crypto.randomUUID();
   const toRecipients = [...extracted.to, ...extracted.cc];
   const attachments = collectAttachmentParts(full.payload);
-  // Deterministic gating (0041) — spam flag + purchase-doc classification, no AI.
+  // Deterministic FOLDER tagging (0041) — no AI. This only decides which inbox
+  // folder (Spam/Receipts) a message shows in; it does NOT block ingestion.
+  // Every gated message (spam included, per product intent) is still inserted
+  // AND bridged into processEmail below, so receipts/invoices/contracts get the
+  // full worker-email extraction regardless of this tag.
   const gate = classifyMessage({
     from: extracted.from ?? "",
     subject: extracted.subject ?? "",

@@ -44,7 +44,7 @@ import type { GmailMessage, GmailMessageInsert, GmailThread } from "@backend/db"
 import { getGmailAccessToken } from "@backend/services/gmail/auth";
 import { classifyMessage, trimQuotedReply } from "@backend/services/gmail/classify-message";
 import { ensureMessageImages } from "@backend/services/gmail/inline-images";
-import { buildComposeRaw, buildReplyAllRaw, sendMessage } from "@backend/services/gmail/client";
+import { buildComposeRaw, buildReplyAllRaw, sendMessage, stripHtmlTags } from "@backend/services/gmail/client";
 import { ingestCompanyEmails } from "@backend/services/gmail/ingestion";
 import { runIngestGate } from "@backend/services/gmail/ingest-gate";
 import {
@@ -145,6 +145,9 @@ const draftAssistBodySchema = z.object({
   threadId: z.string().min(1),
   instruction: z.string().optional(),
 });
+
+/** Inbox folders (0041). Invalid/absent values fall back to "inbox". */
+const gmailFolderSchema = z.enum(["inbox", "receipts", "spam", "trash"]).catch("inbox");
 
 // ─── Response schemas ─────────────────────────────────────────────────────────
 
@@ -822,7 +825,7 @@ gmailRouter.get("/showrooms/:storeId/threads-by-domain", async (c) => {
           success: true as const,
           domains: privateDomains,
           emails: publicEmails,
-          folder: (c.req.query("folder") ?? "inbox") as "inbox" | "receipts" | "spam" | "trash",
+          folder: gmailFolderSchema.parse(c.req.query("folder")),
           counts: { inbox: 0, receipts: 0, spam: 0, trash: 0 },
           unreadCount: 0,
           threads: [],
@@ -856,7 +859,7 @@ gmailRouter.get("/showrooms/:storeId/threads-by-domain", async (c) => {
     // carries a purchase document. (Inbox excludes spam; Receipts keeps them.)
     const RECEIPT_KINDS = new Set(["receipt", "invoice", "quote"]);
     type Folder = "inbox" | "receipts" | "spam" | "trash";
-    const requestedFolder = (c.req.query("folder") ?? "inbox") as Folder;
+    const requestedFolder: Folder = gmailFolderSchema.parse(c.req.query("folder"));
 
     const enriched = threads.map((thread) => {
       const msgs = msgsByThread.get(thread.threadId) ?? [];
@@ -864,13 +867,18 @@ gmailRouter.get("/showrooms/:storeId/threads-by-domain", async (c) => {
       const spam = msgs.some((m) => m.isSpam);
       const receipt = msgs.some((m) => RECEIPT_KINDS.has(m.classification));
       const unread = msgs.filter((m) => m.readAt == null && m.deletedAt == null).length;
+      // Spam + receipt co-occur (a promo carrying a real quote): it stays out of
+      // the main Inbox (spam) but still shows under Receipts so purchase docs are
+      // never lost. Non-spam receipts show in both Inbox and Receipts.
       const folders: Folder[] = deleted
         ? ["trash"]
-        : spam
-          ? ["spam"]
-          : receipt
-            ? ["inbox", "receipts"]
-            : ["inbox"];
+        : spam && receipt
+          ? ["spam", "receipts"]
+          : spam
+            ? ["spam"]
+            : receipt
+              ? ["inbox", "receipts"]
+              : ["inbox"];
       return { thread, msgs, unread, folders, spam, receipt };
     });
 
@@ -948,63 +956,95 @@ gmailRouter.post("/threads/:threadId/mark-read", async (c) => {
 /**
  * POST /api/gmail/threads/:threadId/mark-unread — mark every message in a thread
  * unread (0041). Inverse of mark-read; idempotent.
- * Response: { success, marked } — how many messages flipped read → unread.
  */
-gmailRouter.post("/threads/:threadId/mark-unread", async (c) => {
-  const db = drizzle(c.env.DB);
-  const threadId = c.req.param("threadId");
-  if (!threadId) return c.json({ error: "Invalid thread id" }, 400);
-
-  try {
-    const read = await db
-      .select({ id: gmailMessages.id })
-      .from(gmailMessages)
-      .where(and(eq(gmailMessages.threadId, threadId), sql`${gmailMessages.readAt} IS NOT NULL`))
-      .all();
-    if (read.length > 0) {
-      await db
-        .update(gmailMessages)
-        .set({ readAt: null })
-        .where(eq(gmailMessages.threadId, threadId))
-        .run();
+gmailRouter.openapi(
+  createRoute({
+    method: "post",
+    path: "/threads/{threadId}/mark-unread",
+    operationId: "markGmailThreadUnread",
+    tags: ["Gmail"],
+    summary: "Mark every message in a thread unread",
+    request: { params: threadIdParamSchema },
+    responses: {
+      200: {
+        description: "Marked unread",
+        content: {
+          "application/json": {
+            schema: z.object({ success: z.literal(true), marked: z.number().int() }),
+          },
+        },
+      },
+      500: { description: "Server error", content: { "application/json": { schema: errorSchema } } },
+    },
+  }),
+  async (c) => {
+    const { threadId } = c.req.valid("param");
+    const db = drizzle(c.env.DB);
+    try {
+      const read = await db
+        .select({ id: gmailMessages.id })
+        .from(gmailMessages)
+        .where(and(eq(gmailMessages.threadId, threadId), sql`${gmailMessages.readAt} IS NOT NULL`))
+        .all();
+      if (read.length > 0) {
+        await db.update(gmailMessages).set({ readAt: null }).where(eq(gmailMessages.threadId, threadId)).run();
+      }
+      return c.json({ success: true as const, marked: read.length }, 200);
+    } catch (err) {
+      console.error("[gmail] POST /threads/:threadId/mark-unread error:", err);
+      return c.json({ error: "Failed to mark thread unread" }, 500);
     }
-    return c.json({ success: true as const, marked: read.length }, 200);
-  } catch (err) {
-    console.error("[gmail] POST /threads/:threadId/mark-unread error:", err);
-    return c.json({ error: "Failed to mark thread unread" }, 500);
-  }
-});
+  },
+);
 
 /**
  * DELETE /api/gmail/threads/:threadId — soft-delete a thread (0041): stamp
  * deleted_at on every message so it moves to the inbox's Trash folder. Does NOT
  * touch Gmail; this is our local inbox view only. Idempotent.
- * Response: { success, deleted } — messages moved to Trash.
  */
-gmailRouter.delete("/threads/:threadId", async (c) => {
-  const db = drizzle(c.env.DB);
-  const threadId = c.req.param("threadId");
-  if (!threadId) return c.json({ error: "Invalid thread id" }, 400);
-
-  try {
-    const live = await db
-      .select({ id: gmailMessages.id })
-      .from(gmailMessages)
-      .where(and(eq(gmailMessages.threadId, threadId), sql`${gmailMessages.deletedAt} IS NULL`))
-      .all();
-    if (live.length > 0) {
-      await db
-        .update(gmailMessages)
-        .set({ deletedAt: new Date() })
+gmailRouter.openapi(
+  createRoute({
+    method: "delete",
+    path: "/threads/{threadId}",
+    operationId: "deleteGmailThread",
+    tags: ["Gmail"],
+    summary: "Soft-delete a thread (move to Trash) — local inbox view only",
+    request: { params: threadIdParamSchema },
+    responses: {
+      200: {
+        description: "Moved to Trash",
+        content: {
+          "application/json": {
+            schema: z.object({ success: z.literal(true), deleted: z.number().int() }),
+          },
+        },
+      },
+      500: { description: "Server error", content: { "application/json": { schema: errorSchema } } },
+    },
+  }),
+  async (c) => {
+    const { threadId } = c.req.valid("param");
+    const db = drizzle(c.env.DB);
+    try {
+      const live = await db
+        .select({ id: gmailMessages.id })
+        .from(gmailMessages)
         .where(and(eq(gmailMessages.threadId, threadId), sql`${gmailMessages.deletedAt} IS NULL`))
-        .run();
+        .all();
+      if (live.length > 0) {
+        await db
+          .update(gmailMessages)
+          .set({ deletedAt: new Date() })
+          .where(and(eq(gmailMessages.threadId, threadId), sql`${gmailMessages.deletedAt} IS NULL`))
+          .run();
+      }
+      return c.json({ success: true as const, deleted: live.length }, 200);
+    } catch (err) {
+      console.error("[gmail] DELETE /threads/:threadId error:", err);
+      return c.json({ error: "Failed to delete thread" }, 500);
     }
-    return c.json({ success: true as const, deleted: live.length }, 200);
-  } catch (err) {
-    console.error("[gmail] DELETE /threads/:threadId error:", err);
-    return c.json({ error: "Failed to delete thread" }, 500);
-  }
-});
+  },
+);
 
 // ════════════════════════════════════════════════════════════════════════════
 // GET /threads/:threadId
@@ -1161,10 +1201,11 @@ gmailRouter.openapi(
     const { body, markdown, html } = c.req.valid("json");
     const db = drizzle(c.env.DB);
 
-    // Plaintext part: explicit body, else the PlateJS markdown (always present
-    // from the rich composer). The refine guarantees at least one is non-empty.
-    const plainText = (body?.trim() || markdown?.trim() || "").trim();
+    // Plaintext part: explicit body, else the PlateJS markdown, else stripped
+    // from the HTML — never empty when html-only is submitted (7bit/consumers
+    // expect a real text/plain part). The refine guarantees ≥1 input is present.
     const htmlBody = html?.trim() ? html : null;
+    const plainText = (body?.trim() || markdown?.trim() || (htmlBody ? stripHtmlTags(htmlBody) : "")).trim();
 
     try {
       const [latest] = await db
@@ -1513,9 +1554,10 @@ gmailRouter.openapi(
 
       return c.json({ success: true as const, draft }, 200);
     } catch (err) {
+      // Log the real cause server-side; return a generic message so provider/
+      // runtime internals don't leak to the client.
       console.error("[gmail] POST /draft-assist error:", err);
-      const detail = err instanceof Error ? err.message : String(err);
-      return c.json({ error: `Failed to generate draft: ${detail}` }, 500);
+      return c.json({ error: "Failed to generate draft. Please try again." }, 500);
     }
   },
 );
