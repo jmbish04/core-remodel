@@ -454,6 +454,8 @@ export async function analyzeAndPersist(args: AnalyzeArgs): Promise<void> {
       classification: fallbackType,
       classificationConfidence: 0,
       senderCompanyName: null,
+      senderContactName: null,
+      senderContactTitle: null,
       senderBusinessType: null,
       senderPhone: null,
       senderWebsite: null,
@@ -536,10 +538,16 @@ export async function analyzeAndPersist(args: AnalyzeArgs): Promise<void> {
   if (!companyMatch.companyId) {
     try {
       await registerShowroomContactFromEmail(
-        realSenderEmail,
-        analysis.senderCompanyName || realSenderName,
-        analysis.senderPhone,
-        analysis.senderWebsite,
+        {
+          senderEmail: realSenderEmail,
+          // The PERSON's name — from the AI signature read, else the From-header
+          // display name. NEVER the company (that's the store, not the contact).
+          contactName: analysis.senderContactName || realSenderName,
+          contactTitle: analysis.senderContactTitle,
+          companyName: analysis.senderCompanyName,
+          senderPhone: analysis.senderPhone,
+          senderWebsite: analysis.senderWebsite,
+        },
         env,
       );
     } catch (err) {

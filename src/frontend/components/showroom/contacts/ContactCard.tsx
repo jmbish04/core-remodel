@@ -37,6 +37,8 @@ export interface ContactRow {
   id: number;
   storeId: number | null;
   storeName: string | null;
+  /** Store's scraped brand icon (CF Images URL), shown as the card logo. */
+  storeIconUrl?: string | null;
   type: ContactType;
   firstName: string | null;
   lastName: string | null;
@@ -153,6 +155,31 @@ function PhoneLine({
   );
 }
 
+// ─── Store logo ───────────────────────────────────────────────────────────────
+
+/** The store's brand icon, or a lettered fallback tile when none was scraped. */
+function StoreLogo({ iconUrl, name }: { iconUrl?: string | null; name: string | null }) {
+  const letter = name?.trim()?.[0]?.toUpperCase() ?? null;
+  if (iconUrl) {
+    return (
+      <img
+        src={iconUrl}
+        alt={name ? `${name} logo` : "Store logo"}
+        loading="lazy"
+        className="size-9 shrink-0 rounded-lg object-contain bg-muted/40 ring-1 ring-border/40"
+      />
+    );
+  }
+  return (
+    <div
+      className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted/40 text-sm font-semibold text-muted-foreground ring-1 ring-border/40"
+      aria-hidden
+    >
+      {letter ?? <Store className="size-4" />}
+    </div>
+  );
+}
+
 // ─── Card ─────────────────────────────────────────────────────────────────────
 
 export function ContactCard({
@@ -172,31 +199,36 @@ export function ContactCard({
 
   return (
     <div className={`rounded-xl bg-card p-4 ring-1 ring-border/40 ${className ?? ""}`}>
-      {/* Heading + type + draft badges */}
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-sm font-semibold tracking-tight text-card-foreground">{title}</h3>
-        {isGeneral ? <ContactTypeBadge type="GENERAL_CONTACT" /> : <ContactTypeBadge type={c.type} />}
-        {c.isTextingOk ? (
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-300 ring-1 ring-emerald-500/30">
-            <MessageSquare className="size-2.5" /> Texts OK
-          </span>
-        ) : null}
-        {c.isDraft ? (
-          <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-300 ring-1 ring-amber-500/30">
-            Draft
-          </span>
-        ) : null}
-      </div>
+      {/* Logo + (heading + store) + badges */}
+      <div className="flex items-start gap-3">
+        <StoreLogo iconUrl={c.storeIconUrl} name={c.storeName} />
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-sm font-semibold tracking-tight text-card-foreground">{title}</h3>
+            {isGeneral ? <ContactTypeBadge type="GENERAL_CONTACT" /> : <ContactTypeBadge type={c.type} />}
+            {c.isTextingOk ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-300 ring-1 ring-emerald-500/30">
+                <MessageSquare className="size-2.5" /> Texts OK
+              </span>
+            ) : null}
+            {c.isDraft ? (
+              <span className="inline-flex items-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-amber-300 ring-1 ring-amber-500/30">
+                Draft
+              </span>
+            ) : null}
+          </div>
 
-      {/* "at {store}" link — for people, when they belong to a store. */}
-      {showStoreLink && !isGeneral && c.storeId != null && c.storeName ? (
-        <a
-          href={`/admin/shopping/store/${c.storeId}`}
-          className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
-        >
-          <Store className="size-3" /> {c.storeName}
-        </a>
-      ) : null}
+          {/* "at {store}" link — for people, when they belong to a store. */}
+          {showStoreLink && !isGeneral && c.storeId != null && c.storeName ? (
+            <a
+              href={`/admin/shopping/store/${c.storeId}`}
+              className="mt-0.5 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <Store className="size-3" /> {c.storeName}
+            </a>
+          ) : null}
+        </div>
+      </div>
 
       {/* Contact lines */}
       <div className="mt-2.5 flex flex-col gap-1.5 text-[13px]">

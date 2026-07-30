@@ -532,6 +532,7 @@ showroomContactsRouter.get("/", async (c) => {
     .select({
       contact: showroomStoreContacts,
       storeName: showroomStores.name,
+      storeIconUrl: showroomStores.iconCfImagesUrl,
     })
     .from(showroomStoreContacts)
     .leftJoin(showroomStores, eq(showroomStoreContacts.storeId, showroomStores.id))
@@ -544,6 +545,7 @@ showroomContactsRouter.get("/", async (c) => {
     contacts: rows.map((r) => ({
       ...r.contact,
       storeName: r.storeName,
+      storeIconUrl: r.storeIconUrl,
       businessCard: cardMap.get(r.contact.id) ?? null,
     })),
   });
@@ -588,13 +590,17 @@ showroomContactsRouter.get("/:id", async (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isInteger(id)) return c.json({ error: "Invalid id" }, 400);
   const [row] = await db
-    .select({ contact: showroomStoreContacts, storeName: showroomStores.name })
+    .select({
+      contact: showroomStoreContacts,
+      storeName: showroomStores.name,
+      storeIconUrl: showroomStores.iconCfImagesUrl,
+    })
     .from(showroomStoreContacts)
     .leftJoin(showroomStores, eq(showroomStoreContacts.storeId, showroomStores.id))
     .where(eq(showroomStoreContacts.id, id))
     .limit(1);
   if (!row) return c.json({ error: "Contact not found" }, 404);
-  return c.json({ ...row.contact, storeName: row.storeName });
+  return c.json({ ...row.contact, storeName: row.storeName, storeIconUrl: row.storeIconUrl });
 });
 
 const updateContactSchema = personSchema
