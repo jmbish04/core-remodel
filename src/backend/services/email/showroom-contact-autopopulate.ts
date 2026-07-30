@@ -17,13 +17,8 @@ import {
   showroomStoreContacts,
 } from "@backend/db/schema/showroom/index";
 import { fieldOutContacts } from "@backend/api/routes/showroom-contacts";
-import { isExcludedSender } from "@backend/services/gmail/ingest-gate-domains";
-import {
-  inferContactType,
-  looksLikePersonName,
-  parseEmailIdentity,
-  titleCaseName,
-} from "@backend/utils/contact-intake";
+import { inferContactType, parseEmailIdentity } from "@backend/utils/contact-intake";
+import { evaluateContactWorthiness } from "@backend/utils/contact-person-gate";
 
 /** Free/public email providers never domain-match a store. */
 const PUBLIC_EMAIL_DOMAINS = new Set<string>([
@@ -87,14 +82,18 @@ async function matchShowroomStore(
 export interface InboundSender {
   /** Raw From value — may be `Name <addr>`; parsed into name + clean address. */
   senderEmail: string | null;
-  /** The PERSON's name (AI signature read or From display name) — NOT the company. */
-  contactName?: string | null;
+  /** The From display name, when the header carried one (used by the person gate). */
+  fromDisplayName?: string | null;
   /** That person's job title/role, when the AI read one from the signature. */
   contactTitle?: string | null;
   /** The sending COMPANY — used only to match a store, never as the person name. */
   companyName?: string | null;
   senderPhone?: string | null;
   senderWebsite?: string | null;
+  /** Plain-text body — scanned (no AI) for a signature name + bulk-mail tells. */
+  bodyText?: string | null;
+  /** True when the message carried a `List-Unsubscribe` header (bulk mail). */
+  listUnsubscribe?: boolean;
 }
 
 /**
@@ -103,11 +102,13 @@ export interface InboundSender {
  * the HITL inbox can map it. Deduplicates on the sender's clean email. Never
  * throws — the caller wraps this so it can never break classification.
  *
- * The person row stores the PERSON — a title-cased name from the signature/From
- * display and a clean `local@domain` email. The company name only ever feeds
- * store matching (the store owns the company identity); it is never written as
- * the contact's name. When no real person name is present (automated / role
- * mailers) the name is left null so the card falls back to the store name.
+ * A deterministic worker-code gate (`evaluateContactWorthiness`, NO AI) decides
+ * whether the sender is worth a contact at all: automated `no-reply@` mailers,
+ * bulk/marketing blasts (unsubscribe / List-Unsubscribe / view-in-browser), and
+ * senders with no identifiable PERSON are skipped — the email is still captured
+ * upstream, we just don't mint a phonebook contact. When it passes, the row
+ * stores the PERSON — a title-cased name (From display or body signature) + a
+ * clean `local@domain` email. The company name only feeds store matching.
  */
 export async function registerShowroomContactFromEmail(
   sender: InboundSender,
@@ -115,21 +116,23 @@ export async function registerShowroomContactFromEmail(
 ): Promise<void> {
   if (!sender.senderEmail) return;
 
-  // Never auto-register OURSELVES as a vendor contact. justin@126colby.com (and
-  // our personal Gmail addresses) sit on every vendor thread; without this guard
-  // the sender gets added as a "contact" under whichever showroom the thread
-  // matched — e.g. Justin logged as a Pietra Fina contact.
-  if (isExcludedSender(sender.senderEmail)) return;
-
   // Split `Name <addr>` into a display name + a clean lowercased address.
-  const { displayName, email } = parseEmailIdentity(sender.senderEmail);
+  const { email } = parseEmailIdentity(sender.senderEmail);
   if (!email) return;
 
-  // Person name: prefer the AI-read signature name, else the From display name —
-  // but only when it actually looks like a person (not "Kohler Customer Care").
-  const rawName = sender.contactName?.trim() || displayName;
-  const personName =
-    rawName && looksLikePersonName(rawName) ? titleCaseName(rawName) : null;
+  // Deterministic gate: is this a PERSON worth a contact, and what's their name?
+  // Rejects our own addresses, automated senders, bulk mail, and no-person mail.
+  const verdict = evaluateContactWorthiness({
+    fromEmail: sender.senderEmail,
+    fromDisplayName: sender.fromDisplayName,
+    bodyText: sender.bodyText,
+    listUnsubscribe: sender.listUnsubscribe,
+  });
+  if (!verdict.create) {
+    console.log(`[autopopulate] no contact for ${email}: ${verdict.reason}`);
+    return;
+  }
+  const personName = verdict.personName;
 
   const db = drizzle(env.DB);
 
