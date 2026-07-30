@@ -1,5 +1,5 @@
-import { Hammer, Loader2, RefreshCw } from "lucide-react";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { Hammer, Image as ImageIcon, Loader2, RefreshCw } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -50,10 +50,16 @@ interface SessionResponse {
   error?: string;
 }
 
+interface SeedReference {
+  url: string;
+  label?: string;
+}
+
 interface SessionDetailResponse {
   session?: { id: string; heroCanvasId?: string | null };
   canvases?: RenderCanvas[];
   angles?: AngleEntry[];
+  seedReferences?: SeedReference[];
   error?: string;
 }
 
@@ -89,6 +95,7 @@ export function StudioBuilder() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [canvases, setCanvases] = useState<RenderCanvas[]>([]);
   const [angles, setAngles] = useState<AngleEntry[]>([]);
+  const [seedReferences, setSeedReferences] = useState<SeedReference[]>([]);
   const [loadingSession, setLoadingSession] = useState(false);
 
   const [selectedAngleId, setSelectedAngleId] = useState<number | null>(null);
@@ -163,6 +170,7 @@ export function StudioBuilder() {
       const rows = Array.isArray(payload.canvases) ? payload.canvases : [];
       setCanvases(rows);
       setAngles(Array.isArray(payload.angles) ? payload.angles : []);
+      setSeedReferences(Array.isArray(payload.seedReferences) ? payload.seedReferences : []);
       if (!selectedAngleId && payload.angles && payload.angles.length > 0) {
         setSelectedAngleId(payload.angles[0].listingPhotoId);
       }
@@ -172,6 +180,19 @@ export function StudioBuilder() {
       setLoadingSession(false);
     }
   }, [selectedAngleId]);
+
+  // Open a session passed via ?session=<id> — e.g. "Create render session" from a
+  // showroom's selected photos (0041 P2). One-shot on mount.
+  const bootstrappedRef = useRef(false);
+  useEffect(() => {
+    if (bootstrappedRef.current) return;
+    bootstrappedRef.current = true;
+    const sid = new URLSearchParams(window.location.search).get("session");
+    if (sid) {
+      setSessionId(sid);
+      void loadSessionDetail(sid);
+    }
+  }, [loadSessionDetail]);
 
   const startSessionForRoom = useCallback(
     async (roomId: number) => {
@@ -371,6 +392,40 @@ export function StudioBuilder() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Seed inspiration — reference images this session was created from (0041 P2). */}
+      {seedReferences.length > 0 && (
+        <Card className="ring-1 ring-border/40">
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <ImageIcon className="size-4 text-muted-foreground" />
+              <div>
+                <CardTitle className="text-base">Seed inspiration</CardTitle>
+                <CardDescription>
+                  {seedReferences.length} reference image{seedReferences.length === 1 ? "" : "s"} this
+                  session was created from.
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap gap-2">
+              {seedReferences.map((ref) => (
+                <a
+                  key={ref.url}
+                  href={ref.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={ref.label ?? ref.url}
+                  className="block size-20 overflow-hidden rounded-lg ring-1 ring-border/40 transition hover:ring-sky-400"
+                >
+                  <img src={ref.url} alt={ref.label ?? "reference"} className="size-full object-cover" />
+                </a>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {!selectedRoomId ? (
         <Card className="ring-1 ring-border/40">

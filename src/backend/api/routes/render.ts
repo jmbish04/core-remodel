@@ -9,8 +9,9 @@ import {
   listingPhotos,
   renderCanvases,
   renderSessions,
+  showroomImages,
 } from "@backend/db";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
@@ -72,6 +73,77 @@ renderRouter.post(
   },
 );
 
+/**
+ * POST /api/render/sessions/from-images — create a session seeded with a set of
+ * images' Cloudflare URLs as inspiration references (0041 P2).
+ *
+ * Accepts `showroomImageIds` (resolved to their `deliveryUrl`) and/or explicit
+ * `references` ({url,label}). The seeds are stored on the session and surfaced in
+ * the studio inspiration rail. Bridges showroom photos (numeric ids, CF URLs) into
+ * the render pipeline without forcing them into the UUID `images` table.
+ */
+renderRouter.post(
+  "/sessions/from-images",
+  zValidator(
+    "json",
+    z.object({
+      name: z.string().min(1),
+      roomId: z.number().nullable().optional(),
+      showroomImageIds: z.array(z.number().int().positive()).optional(),
+      references: z
+        .array(z.object({ url: z.string().url(), label: z.string().optional() }))
+        .optional(),
+    }),
+  ),
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const body = c.req.valid("json");
+
+    const refs: { url: string; label?: string }[] = [];
+    for (const r of body.references ?? []) refs.push({ url: r.url, label: r.label });
+
+    // Resolve showroom image ids → deliveryUrl. Chunk at 20 for D1's param cap.
+    const ids = [...new Set(body.showroomImageIds ?? [])];
+    for (let i = 0; i < ids.length; i += 20) {
+      const part = ids.slice(i, i + 20);
+      const rows = await db
+        .select({ id: showroomImages.id, url: showroomImages.deliveryUrl, alt: showroomImages.altText })
+        .from(showroomImages)
+        .where(inArray(showroomImages.id, part));
+      for (const r of rows) refs.push({ url: r.url, label: r.alt ?? `#${r.id}` });
+    }
+
+    if (refs.length === 0) {
+      return c.json({ error: "No images resolved — pass showroomImageIds or references." }, 400);
+    }
+
+    const id = crypto.randomUUID();
+    await db
+      .insert(renderSessions)
+      .values({
+        id,
+        roomId: body.roomId ?? null,
+        name: body.name,
+        seedReferenceUrlsJson: JSON.stringify(refs),
+      })
+      .run();
+    return c.json({ id, seedReferences: refs }, 201);
+  },
+);
+
+/** Parse a session's seed-reference JSON into [{url,label}] (never throws). */
+function parseSeedReferences(json: string | null): { url: string; label?: string }[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json);
+    return Array.isArray(parsed)
+      ? parsed.filter((r): r is { url: string; label?: string } => Boolean(r && typeof r.url === "string"))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 // GET /api/render/sessions/:id
 renderRouter.get("/sessions/:id", async (c) => {
   const db = drizzle(c.env.DB);
@@ -87,7 +159,7 @@ renderRouter.get("/sessions/:id", async (c) => {
     .from(renderCanvases)
     .where(eq(renderCanvases.sessionId, id))
     .all();
-  return c.json({ session, canvases });
+  return c.json({ session, canvases, seedReferences: parseSeedReferences(session.seedReferenceUrlsJson) });
 });
 
 // POST /api/render/stage

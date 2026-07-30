@@ -21,6 +21,10 @@ export const renderSessions = sqliteTable("render_sessions", {
   // Soft reference to the canonical hero render_canvases.id (no hard FK to avoid a
   // render_sessions <-> render_canvases cycle).
   heroCanvasId: text("hero_canvas_id"),
+  // 0041 P2: seed inspiration references a session was created from — JSON
+  // [{ url, label }]. Populated when a session is spun up from a set of images
+  // (e.g. selected showroom photos); surfaced in the studio inspiration rail.
+  seedReferenceUrlsJson: text("seed_reference_urls_json"),
   datetimeCreated: integer("datetime_created", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),

@@ -9,7 +9,7 @@
  * (rename, describe, price, add/remove members, delete).
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { FolderPlus, Loader2, Trash2, X } from "lucide-react";
+import { FolderPlus, Loader2, Trash2, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -133,6 +133,27 @@ export function VisitPhotosManager({
     }
   };
 
+  const createRenderSession = async () => {
+    if (selected.size === 0) return;
+    setBusy(true);
+    try {
+      const r = await jsonFetch<{ id: string }>(`/api/render/sessions/from-images`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          name: `Showroom photos (${selected.size})`,
+          showroomImageIds: [...selected],
+        }),
+      });
+      toast.success("Render session created — opening the studio…");
+      window.location.assign(`/admin/builder?session=${r.id}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to create render session");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const deleteSelected = async () => {
     if (selected.size === 0) return;
     setBusy(true);
@@ -164,6 +185,9 @@ export function VisitPhotosManager({
           <div className="ml-auto flex items-center gap-2">
             <Button size="sm" variant="outline" className="gap-1.5" disabled={busy} onClick={() => setNamingOpen(true)}>
               <FolderPlus className="size-3.5" /> Group into folder
+            </Button>
+            <Button size="sm" variant="outline" className="gap-1.5" disabled={busy} onClick={createRenderSession}>
+              <Wand2 className="size-3.5" /> Create render session
             </Button>
             <Button size="sm" variant="destructive" className="gap-1.5" disabled={busy} onClick={deleteSelected}>
               {busy ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />} Delete

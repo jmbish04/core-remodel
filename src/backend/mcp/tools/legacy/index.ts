@@ -1,6 +1,7 @@
 import type { RemodelTool } from "../../types";
 
 import { createRenderSession } from "./create_render_session";
+import { createRenderSessionFromImages } from "./create_render_session_from_images";
 import { listRoomAngles } from "./list_room_angles";
 import { runRenderStage } from "./run_render_stage";
 import { generateMoodBoardTool } from "./generate_mood_board";
@@ -12,6 +13,7 @@ import { getMeasurementCoverageTool } from "./get_measurement_coverage";
 
 export const legacyTools: RemodelTool[] = [
   createRenderSession,
+  createRenderSessionFromImages,
   listRoomAngles,
   runRenderStage,
   generateMoodBoardTool,
