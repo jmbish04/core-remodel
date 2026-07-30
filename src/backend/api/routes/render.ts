@@ -9,13 +9,16 @@ import {
   listingPhotos,
   renderCanvases,
   renderSessions,
+  showroomImageGroups,
   showroomImages,
+  showroomStores,
 } from "@backend/db";
-import { eq, inArray } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
 
+import { mergeRefs, resolveShowroomImageRefs } from "../../services/render/references";
 import { runStage } from "../../services/render/stage-runner";
 import type { StageType } from "../../services/render/types";
 
@@ -99,19 +102,10 @@ renderRouter.post(
     const db = drizzle(c.env.DB);
     const body = c.req.valid("json");
 
-    const refs: { url: string; label?: string }[] = [];
-    for (const r of body.references ?? []) refs.push({ url: r.url, label: r.label });
-
-    // Resolve showroom image ids → deliveryUrl. Chunk at 20 for D1's param cap.
-    const ids = [...new Set(body.showroomImageIds ?? [])];
-    for (let i = 0; i < ids.length; i += 20) {
-      const part = ids.slice(i, i + 20);
-      const rows = await db
-        .select({ id: showroomImages.id, url: showroomImages.deliveryUrl, alt: showroomImages.altText })
-        .from(showroomImages)
-        .where(inArray(showroomImages.id, part));
-      for (const r of rows) refs.push({ url: r.url, label: r.alt ?? `#${r.id}` });
-    }
+    const refs = await resolveShowroomImageRefs(db, {
+      showroomImageIds: body.showroomImageIds,
+      references: body.references,
+    });
 
     if (refs.length === 0) {
       return c.json({ error: "No images resolved — pass showroomImageIds or references." }, 400);
@@ -161,6 +155,85 @@ renderRouter.get("/sessions/:id", async (c) => {
     .all();
   return c.json({ session, canvases, seedReferences: parseSeedReferences(session.seedReferenceUrlsJson) });
 });
+
+/**
+ * GET /api/render/reference-folders — list active showroom photo folders
+ * (showroom_image_groups) for the "add reference from folder" picker (0041 P3).
+ * Each carries its store name, member count, and a cover delivery URL.
+ */
+renderRouter.get("/reference-folders", async (c) => {
+  const db = drizzle(c.env.DB);
+  const groups = await db
+    .select({
+      id: showroomImageGroups.id,
+      name: showroomImageGroups.name,
+      storeId: showroomImageGroups.storeId,
+      storeName: showroomStores.name,
+      coverImageId: showroomImageGroups.coverImageId,
+    })
+    .from(showroomImageGroups)
+    .innerJoin(showroomStores, eq(showroomImageGroups.storeId, showroomStores.id))
+    .where(eq(showroomImageGroups.isActive, true))
+    .orderBy(desc(showroomImageGroups.createdAt));
+
+  // Bucket every grouped photo once to derive count + cover per folder.
+  const grouped = await db
+    .select({ id: showroomImages.id, groupId: showroomImages.groupId, url: showroomImages.deliveryUrl })
+    .from(showroomImages);
+  const byGroup = new Map<number, { id: number; url: string }[]>();
+  for (const m of grouped) {
+    if (m.groupId == null) continue;
+    const list = byGroup.get(m.groupId) ?? [];
+    list.push({ id: m.id, url: m.url });
+    byGroup.set(m.groupId, list);
+  }
+
+  const folders = groups.map((g) => {
+    const mem = byGroup.get(g.id) ?? [];
+    const cover =
+      (g.coverImageId != null ? mem.find((m) => m.id === g.coverImageId)?.url : null) ?? mem[0]?.url ?? null;
+    return { id: g.id, name: g.name, storeId: g.storeId, storeName: g.storeName, memberCount: mem.length, coverUrl: cover };
+  });
+  return c.json({ folders });
+});
+
+/**
+ * POST /api/render/sessions/:id/references — add inspiration references to an
+ * existing session (0041 P3). Accepts `imageGroupId` (all photos in a folder),
+ * `showroomImageIds`, and/or explicit `references`. Merges into the seed list
+ * (deduped by url) and returns the updated set.
+ */
+renderRouter.post(
+  "/sessions/:id/references",
+  zValidator(
+    "json",
+    z.object({
+      imageGroupId: z.number().int().positive().optional(),
+      showroomImageIds: z.array(z.number().int().positive()).optional(),
+      references: z
+        .array(z.object({ url: z.string().url(), label: z.string().optional() }))
+        .optional(),
+    }),
+  ),
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const id = c.req.param("id");
+    const session = await db.select().from(renderSessions).where(eq(renderSessions.id, id)).get();
+    if (!session) return c.json({ error: "Session not found" }, 404);
+
+    const added = await resolveShowroomImageRefs(db, c.req.valid("json"));
+    if (added.length === 0) {
+      return c.json({ error: "No images resolved — pass imageGroupId, showroomImageIds, or references." }, 400);
+    }
+    const merged = mergeRefs(parseSeedReferences(session.seedReferenceUrlsJson), added);
+    await db
+      .update(renderSessions)
+      .set({ seedReferenceUrlsJson: JSON.stringify(merged), datetimeLastModified: new Date() })
+      .where(eq(renderSessions.id, id))
+      .run();
+    return c.json({ seedReferences: merged });
+  },
+);
 
 // POST /api/render/stage
 renderRouter.post(
