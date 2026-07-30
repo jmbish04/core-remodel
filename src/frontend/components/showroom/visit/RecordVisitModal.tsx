@@ -380,6 +380,7 @@ export function RecordVisitModal({
   const [metContact, setMetContact] = useState<YesNo>(null);
   // Existing points of contact on this showroom (for the "select who you met" step).
   const [existingPocs, setExistingPocs] = useState<PocOption[]>([]);
+  const [pocsLoaded, setPocsLoaded] = useState(false);
   const [selectedPocId, setSelectedPocId] = useState<number | null>(null);
   const [addingNew, setAddingNew] = useState(false);
   const [gotCard, setGotCard] = useState<YesNo>(null);
@@ -404,6 +405,7 @@ export function RecordVisitModal({
       setRatingNote({ html: "", markdown: "" });
       setMetContact(null);
       setExistingPocs([]);
+      setPocsLoaded(false);
       setSelectedPocId(null);
       setAddingNew(false);
       setGotCard(null);
@@ -431,6 +433,10 @@ export function RecordVisitModal({
         if (active) setExistingPocs(data.pocs ?? []);
       } catch {
         /* non-fatal — the modal still works with manual/new entry */
+      } finally {
+        // Mark loaded either way so an empty list is treated as "add new" only
+        // AFTER the fetch settles — avoids flashing the new-contact form first.
+        if (active) setPocsLoaded(true);
       }
     })();
     return () => {
@@ -579,7 +585,8 @@ export function RecordVisitModal({
   // ── Step navigation guards ──────────────────────────────────────────────────
   // "Adding new" = the showroom has no known contacts, or the user explicitly
   // chose to enter someone new instead of picking an existing contact.
-  const isAddingNew = metContact === "yes" && (addingNew || existingPocs.length === 0);
+  const isAddingNew =
+    metContact === "yes" && (addingNew || (pocsLoaded && existingPocs.length === 0));
   const selectedPoc = existingPocs.find((p) => p.id === selectedPocId) ?? null;
   const canLeaveStep2 =
     metContact === "no" ||
