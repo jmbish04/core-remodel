@@ -57,6 +57,22 @@ flowchart LR
 - Reading pane empty → "Select a message."
 - Spam row → small amber `Spam · {rationale}` badge; Receipt row → `Receipt` badge.
 
+## Security (as built)
+
+- **No raw email HTML is rendered.** The reading pane renders the **plaintext**
+  body (`bodyVisible`, quoted tail collapsed), NOT inbound `bodyHtml` — this
+  removes the stored-XSS vector from third-party email markup. `bodyHtml` is
+  stored for the pipeline/future use but never injected into the admin DOM.
+- **Embedded images** are rendered only from our own Cloudflare Images
+  (`imagedelivery.net`) URLs, guarded by `isTrustedImageUrl` on the client.
+- **PlateJS reply HTML** is produced by the editor's escaped markdown→HTML
+  converter (no arbitrary user HTML), base64-encoded into the MIME part, sent to
+  Gmail. It is not rendered back as raw HTML in the admin UI.
+- **Auth + scoping:** all `/api/gmail/*` routes are admin-gated
+  (`requireAccessAuth`); the showroom inbox is scoped server-side to the store's
+  own domain + contacts via `buildShowroomMatchSpec`. Single-admin system
+  (justin@126colby.com), so per-thread ownership is not separately enforced.
+
 ## Parity / reuse
 
 - Do not pull `sidebar-09` via `shadcn add` (rewrites shared primitives). Port
