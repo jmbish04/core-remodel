@@ -668,10 +668,10 @@ roomsRouter.get("/catalog", async (c) => {
   }
 });
 
+// Public read: the floor plan links every room dot here, and the floor plan +
+// room catalog are already public. Writes below stay gated; per-visitor editing
+// affordances gate on GET /api/access/status in the client, not on this read.
 roomsRouter.get("/code/:roomCode/detail", async (c) => {
-  const accessError = await ensureAccess(c);
-  if (accessError) return accessError;
-
   try {
     const roomCode = c.req.param("roomCode");
     const detail = await loadRoomDetail(c.env, roomCode);
