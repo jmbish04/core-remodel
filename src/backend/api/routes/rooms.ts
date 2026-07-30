@@ -668,10 +668,19 @@ roomsRouter.get("/catalog", async (c) => {
   }
 });
 
-// Public read: the floor plan links every room dot here, and the floor plan +
-// room catalog are already public. Writes below stay gated; per-visitor editing
-// affordances gate on GET /api/access/status in the client, not on this read.
-roomsRouter.get("/code/:roomCode/detail", async (c) => {
+/**
+ * GET /code/:roomCode/public
+ *
+ * The ONLY unauthenticated room read. Built for sharing a room with vendors /
+ * showrooms: it exposes just the room's name/dimensions and its listing +
+ * inspiration PHOTOS — never budget, estimates, options, docs, or AI metadata.
+ * Keep it that way; when real RBAC lands, this stays the public-safe surface.
+ *
+ * ponytail: reuses loadRoomDetail and projects to the safe subset, so it runs a
+ * few queries (budget/estimates/docs) whose results are discarded. Fine for a
+ * low-traffic share page; swap for a photos-only loader if it ever gets hot.
+ */
+roomsRouter.get("/code/:roomCode/public", async (c) => {
   try {
     const roomCode = c.req.param("roomCode");
     const detail = await loadRoomDetail(c.env, roomCode);
@@ -679,21 +688,58 @@ roomsRouter.get("/code/:roomCode/detail", async (c) => {
       return c.json({ error: "Room not found" }, 404);
     }
 
-    // Public callers get the full product payload (rooms, photos, budget,
-    // estimates, options, docs), but NOT the homeowner's raw AI-authoring
-    // metadata: `lastUserPrompt`/`lastVoiceTranscript` are private dictation
-    // that the client only ever renders inside the authed editor. Null them
-    // for unauthenticated callers so they never travel over the public wire.
-    const authenticated = await isRequestAuthenticated(c.req.raw, c.env);
-    const summary =
-      detail.summary && !authenticated
-        ? { ...detail.summary, lastUserPrompt: null, lastVoiceTranscript: null }
-        : detail.summary;
+    const pickImage = (img: { id: string; displayName?: string | null; cfImageIdOriginal: string; cfImageIdOptimized?: string | null }) => ({
+      id: img.id,
+      displayName: img.displayName ?? null,
+      cfImageIdOriginal: img.cfImageIdOriginal,
+      cfImageIdOptimized: img.cfImageIdOptimized ?? null,
+    });
+
+    return c.json({
+      success: true,
+      room: {
+        roomCode,
+        displayName: detail.room.displayName,
+        floorName: detail.room.floorName,
+        asIsUse: detail.room.asIsUse,
+        dimensionLabel: detail.room.dimensionLabel,
+        sqft: detail.room.sqft,
+      },
+      listingImages: detail.listingImages.map(pickImage),
+      // One flat gallery of every inspiration photo tied to this room (direct +
+      // whole-level + whole-home), which is what a vendor cares to see.
+      inspirationImages: [
+        ...detail.inspirationDirect,
+        ...detail.inspirationLevel,
+        ...detail.inspirationHome,
+      ].map(pickImage),
+    });
+  } catch (error) {
+    // Public route: log the detail server-side, return a generic message so no
+    // internal error text (db errors, service names, paths) reaches a vendor.
+    console.error("[rooms] public room load failed", error);
+    return c.json({ error: "Failed to load room" }, 500);
+  }
+});
+
+// Homeowner-only. This returns the full product payload — budget, estimates,
+// options, supporting docs, AI-authoring metadata — so it stays gated until we
+// have real RBAC. Unauthenticated vendor sharing goes through the photos-only
+// `/code/:roomCode/public` endpoint above, never this one.
+roomsRouter.get("/code/:roomCode/detail", async (c) => {
+  const accessError = await ensureAccess(c);
+  if (accessError) return accessError;
+
+  try {
+    const roomCode = c.req.param("roomCode");
+    const detail = await loadRoomDetail(c.env, roomCode);
+    if (!detail) {
+      return c.json({ error: "Room not found" }, 404);
+    }
 
     return c.json({
       success: true,
       ...detail,
-      summary,
       roomStats: {
         listingPhotoCount: detail.listingImages.length,
         // Direct inspiration (room-scoped) count — used for the room badge
