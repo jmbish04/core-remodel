@@ -389,6 +389,9 @@ export async function processEmail(args: ProcessEmailArgs): Promise<void> {
     bodyText,
     attachments: attachmentRecords,
     companyMatch,
+    listUnsubscribe: email.headers.some(
+      (h: { key: string }) => h.key.toLowerCase() === "list-unsubscribe",
+    ),
   });
 }
 
@@ -412,6 +415,8 @@ export interface AnalyzeArgs {
   bodyText: string;
   attachments: AttachmentRecord[];
   companyMatch: { companyId: number | null };
+  /** True when the inbound message carried a `List-Unsubscribe` header (bulk mail). */
+  listUnsubscribe?: boolean;
 }
 
 /**
@@ -424,7 +429,7 @@ export interface AnalyzeArgs {
 export async function analyzeAndPersist(args: AnalyzeArgs): Promise<void> {
   const {
     db, env, emailId, decision, subject,
-    realSenderEmail, realSenderName, bodyText, attachments, companyMatch,
+    realSenderEmail, realSenderName, bodyText, attachments, companyMatch, listUnsubscribe,
   } = args;
   // ── Phase 5: AI classification + extraction (depth per route) ────────────
   const attachmentText = await extractAttachmentText(attachments, env);
@@ -454,6 +459,7 @@ export async function analyzeAndPersist(args: AnalyzeArgs): Promise<void> {
       classification: fallbackType,
       classificationConfidence: 0,
       senderCompanyName: null,
+      senderContactTitle: null,
       senderBusinessType: null,
       senderPhone: null,
       senderWebsite: null,
@@ -536,10 +542,18 @@ export async function analyzeAndPersist(args: AnalyzeArgs): Promise<void> {
   if (!companyMatch.companyId) {
     try {
       await registerShowroomContactFromEmail(
-        realSenderEmail,
-        analysis.senderCompanyName || realSenderName,
-        analysis.senderPhone,
-        analysis.senderWebsite,
+        {
+          senderEmail: realSenderEmail,
+          // The From-header display name — the deterministic gate uses this (plus
+          // the body signature) to identify a real person. NEVER the company.
+          fromDisplayName: realSenderName,
+          contactTitle: analysis.senderContactTitle,
+          companyName: analysis.senderCompanyName,
+          senderPhone: analysis.senderPhone,
+          senderWebsite: analysis.senderWebsite,
+          bodyText,
+          listUnsubscribe,
+        },
         env,
       );
     } catch (err) {

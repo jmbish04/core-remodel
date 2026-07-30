@@ -22,6 +22,8 @@ export interface AiAnalysis {
   classification: string;
   classificationConfidence: number;
   senderCompanyName: string | null;
+  /** The sending person's job title/role, from the signature (for the type badge). */
+  senderContactTitle: string | null;
   senderBusinessType: string | null;
   senderPhone: string | null;
   senderWebsite: string | null;
@@ -224,6 +226,7 @@ Respond with ONLY valid JSON matching this schema:
   "classification": "invoice" | "contract" | "change_order" | "estimate" | "receipt" | "shipping" | "general",
   "classificationConfidence": 0.0-1.0,
   "senderCompanyName": "string or null",
+  "senderContactTitle": "string or null (the sending person's job title/role from the signature, e.g. 'Sales Consultant', 'Estimator', 'Showroom Manager')",
   "senderBusinessType": "string or null (e.g. 'General Contractor', 'Architect', 'Plumber', 'Material Vendor')",
   "senderPhone": "string or null",
   "senderWebsite": "string or null",
@@ -341,6 +344,7 @@ export async function analyzeWithGemini(
       classification: "general",
       classificationConfidence: 0.3,
       senderCompanyName: null,
+      senderContactTitle: null,
       senderBusinessType: null,
       senderPhone: null,
       senderWebsite: null,
