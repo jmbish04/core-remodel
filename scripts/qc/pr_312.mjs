@@ -27,25 +27,37 @@ check("catalog public (200)", catalog.status === 200, `status=${catalog.status}`
 const rooms = (catalog.json?.floors || []).flatMap((f) => f.rooms || []);
 const roomCode = rooms.find((r) => r.roomCode)?.roomCode;
 check("catalog yields a roomCode", !!roomCode, `roomCode=${roomCode}`);
-
-if (roomCode) {
-  // 2. THE FIX: detail read is public.
-  const pub = await c.get(`/api/rooms/code/${roomCode}/detail`, { auth: false });
-  check("detail read public (200) — the fix", pub.status === 200, `status=${pub.status} ${pub.text?.slice(0, 140)}`);
-  check(
-    "public detail returns full payload",
-    pub.json?.success === true && !!pub.json?.room && Array.isArray(pub.json?.listingImages),
-    `success=${pub.json?.success} room=${pub.json?.room?.displayName} listing=${pub.json?.listingImages?.length}`,
-  );
-
-  // 3. Authenticated read unchanged.
-  const authed = await c.get(`/api/rooms/code/${roomCode}/detail`);
-  check("detail read authenticated (200) — regression", authed.status === 200, `status=${authed.status}`);
-
-  // 4. Writes on the same router stay gated unauthenticated.
-  const write = await c.patch(`/api/rooms/code/${roomCode}/profile`, { asIsUse: "qc-should-never-persist" }, { auth: false });
-  check("write still 401 unauthenticated — gate intact", write.status === 401, `status=${write.status}`);
-  info(`tested roomCode=${roomCode}`);
+// Without a roomCode the fix checks below never run — fail loudly instead of
+// exiting 0 with "no checks failed".
+if (!roomCode) {
+  info("no roomCode in catalog — cannot exercise the fix, aborting");
+  process.exit(1);
 }
+
+// 2. THE FIX: detail read is public.
+const pub = await c.get(`/api/rooms/code/${roomCode}/detail`, { auth: false });
+check("detail read public (200) — the fix", pub.status === 200, `status=${pub.status} ${pub.text?.slice(0, 140)}`);
+check(
+  "public detail returns full payload",
+  pub.json?.success === true && !!pub.json?.room && Array.isArray(pub.json?.listingImages),
+  `success=${pub.json?.success} room=${pub.json?.room?.displayName} listing=${pub.json?.listingImages?.length}`,
+);
+// Homeowner AI-authoring metadata must NOT leak to unauthenticated callers.
+check(
+  "public payload strips lastUserPrompt/lastVoiceTranscript",
+  !pub.json?.summary || (pub.json.summary.lastUserPrompt == null && pub.json.summary.lastVoiceTranscript == null),
+  `prompt=${JSON.stringify(pub.json?.summary?.lastUserPrompt)} transcript=${JSON.stringify(pub.json?.summary?.lastVoiceTranscript)}`,
+);
+
+// 3. Authenticated read unchanged.
+const authed = await c.get(`/api/rooms/code/${roomCode}/detail`);
+check("detail read authenticated (200) — regression", authed.status === 200, `status=${authed.status}`);
+
+// 4. Writes on the same router stay gated unauthenticated. Target a NON-EXISTENT
+// room with an empty body so that even if the gate were broken, nothing can
+// mutate a real record (auth is checked before the row lookup → 401, not 404).
+const write = await c.patch(`/api/rooms/code/__qc-nonexistent-room__/profile`, {}, { auth: false });
+check("write still 401 unauthenticated — gate intact", write.status === 401, `status=${write.status}`);
+info(`tested roomCode=${roomCode}`);
 
 process.exit(summary().failed === 0 ? 0 : 1);

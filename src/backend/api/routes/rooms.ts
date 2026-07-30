@@ -679,9 +679,21 @@ roomsRouter.get("/code/:roomCode/detail", async (c) => {
       return c.json({ error: "Room not found" }, 404);
     }
 
+    // Public callers get the full product payload (rooms, photos, budget,
+    // estimates, options, docs), but NOT the homeowner's raw AI-authoring
+    // metadata: `lastUserPrompt`/`lastVoiceTranscript` are private dictation
+    // that the client only ever renders inside the authed editor. Null them
+    // for unauthenticated callers so they never travel over the public wire.
+    const authenticated = await isRequestAuthenticated(c.req.raw, c.env);
+    const summary =
+      detail.summary && !authenticated
+        ? { ...detail.summary, lastUserPrompt: null, lastVoiceTranscript: null }
+        : detail.summary;
+
     return c.json({
       success: true,
       ...detail,
+      summary,
       roomStats: {
         listingPhotoCount: detail.listingImages.length,
         // Direct inspiration (room-scoped) count — used for the room badge
