@@ -144,8 +144,10 @@ export async function registerShowroomContactFromEmail(
     .limit(1);
   if (existing) return;
 
-  // Match the store by company name / person name / domain (company preferred).
-  const storeId = await matchShowroomStore(email, sender.companyName || personName, env);
+  // Match the store by email domain, then company name — NEVER the person name
+  // (a surname can collide with an unrelated showroom name). personName is for
+  // the contact row only.
+  const storeId = await matchShowroomStore(email, sender.companyName ?? null, env);
 
   await fieldOutContacts(
     db,

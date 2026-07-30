@@ -43,6 +43,7 @@ assert.ok(EXCLUDED_EXACT_ADDRESSES.has("jasonowyong87@gmail.com"));
 // ── isExcludedSender: never auto-register ourselves as a vendor contact ─────
 assert.equal(isExcludedSender("justin@126colby.com"), true, "our domain excluded");
 assert.equal(isExcludedSender("justin bishop <justin@126colby.com>"), true, "raw From header form");
+assert.equal(isExcludedSender("<Justin> <justin@126colby.com>"), true, "bracketed display before address");
 assert.equal(isExcludedSender("JUSTIN@126Colby.com"), true, "case-insensitive");
 assert.equal(isExcludedSender("anyone@sub.126colby.com"), true, "subdomain excluded");
 assert.equal(isExcludedSender("x@hacolby.app"), true, "worker domain excluded");

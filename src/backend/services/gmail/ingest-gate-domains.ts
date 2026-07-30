@@ -60,9 +60,11 @@ export function isGatedDomain(domain: string, publicProviders: ReadonlySet<strin
 export function isExcludedSender(email: string | null | undefined): boolean {
   if (!email) return false;
   // Sender may arrive as a raw `Name <addr>` header — pull the bracketed address
-  // when present, else use the whole string. Then strip any stray angle bracket.
+  // when present, else use the whole string. Require an `@` inside the brackets
+  // so a bracketed display name (`<Justin> <justin@x.com>`) can't be grabbed
+  // instead of the real address. Then strip any stray angle bracket.
   const raw = email.trim().toLowerCase();
-  const addr = (raw.match(/<([^>]+)>/)?.[1] ?? raw).replace(/[<>]/g, "").trim();
+  const addr = (raw.match(/<([^>]+@[^>]+)>/)?.[1] ?? raw).replace(/[<>]/g, "").trim();
   if (EXCLUDED_EXACT_ADDRESSES.has(addr)) return true;
   const domain = addr.split("@").pop();
   if (!domain) return false;
