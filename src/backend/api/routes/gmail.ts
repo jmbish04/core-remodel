@@ -43,6 +43,7 @@ import type { GmailMessage, GmailMessageInsert, GmailThread } from "@backend/db"
 
 import { getGmailAccessToken } from "@backend/services/gmail/auth";
 import { classifyMessage, trimQuotedReply } from "@backend/services/gmail/classify-message";
+import { ensureMessageImages } from "@backend/services/gmail/inline-images";
 import { buildComposeRaw, buildReplyAllRaw, sendMessage } from "@backend/services/gmail/client";
 import { ingestCompanyEmails } from "@backend/services/gmail/ingestion";
 import { runIngestGate } from "@backend/services/gmail/ingest-gate";
@@ -1073,6 +1074,12 @@ gmailRouter.openapi(
               .where(inArray(gmailMessageAttachments.gmailMessageId, msgIds))
               .all()
           : [];
+
+      // Embedded images: upload cid: images to Cloudflare Images on first view
+      // (idempotent, guarded by images_extracted), then read the full set.
+      for (const m of msgs) {
+        if (!m.imagesExtracted) await ensureMessageImages(c.env, db, m);
+      }
       const imageRows =
         msgIds.length > 0
           ? await db

@@ -82,6 +82,16 @@ export const gmailMessages = sqliteTable(
     deletedAt: integer("deleted_at", { mode: "timestamp" }),
 
     /**
+     * Whether this message's embedded (cid:) images have been extracted +
+     * uploaded to Cloudflare Images yet (0041). Guards the on-view upload so a
+     * message is fetched from Gmail + uploaded at most once, even when it has
+     * no inline images (true = checked, regardless of how many were found).
+     */
+    imagesExtracted: integer("images_extracted", { mode: "boolean" })
+      .notNull()
+      .default(false),
+
+    /**
      * UUID used as the Vectorize vector id for this message's body embedding.
      * Vectorize metadata stored alongside the vector: `{ rag_uuid, message_id, thread_id }`.
      */

@@ -121,6 +121,8 @@ export interface GmailMessagePart {
   /** Set on attachment parts (empty/absent on inline body parts). */
   filename?: string;
   mimeType?: string;
+  /** Part-level MIME headers (Content-ID / Content-Disposition live here). */
+  headers?: { name: string; value: string }[];
   body?: { data?: string; size?: number; attachmentId?: string };
   parts?: GmailMessagePart[];
 }
@@ -216,6 +218,71 @@ export function extractMessage(message: GmailMessageFull): ExtractedMessage {
   const body = plain ?? (html ? stripHtmlTags(html) : message.snippet ?? "");
 
   return { from, to, cc, subject, date, messageIdHeader, body, html: html ?? null };
+}
+
+export interface InlineImagePart {
+  /** Content-ID with angle brackets stripped — matches `src="cid:<this>"`. */
+  contentId: string;
+  mimeType: string;
+  /** Gmail attachment id (fetch bytes via getAttachmentBytes) when not inline. */
+  attachmentId?: string;
+  /** base64url image bytes when Gmail inlined them directly on the part. */
+  inlineData?: string;
+}
+
+/**
+ * Walk a message payload for EMBEDDED (inline) images — image/* parts carrying a
+ * `Content-ID` header, which the HTML body references as `src="cid:...">`. These
+ * are distinct from downloadable attachments (handled elsewhere). Returns one
+ * entry per inline image with either an `attachmentId` (fetch separately) or
+ * `inlineData` (bytes already present).
+ */
+export function collectInlineImageParts(
+  part: GmailMessagePart | GmailMessagePayload | undefined,
+): InlineImagePart[] {
+  if (!part) return [];
+  const out: InlineImagePart[] = [];
+
+  const mime = part.mimeType ?? "";
+  if (mime.startsWith("image/")) {
+    const cidHeader = (part.headers ?? []).find((h) => h.name.toLowerCase() === "content-id");
+    if (cidHeader?.value) {
+      const contentId = cidHeader.value.trim().replace(/^<|>$/g, "");
+      if (contentId) {
+        out.push({
+          contentId,
+          mimeType: mime,
+          attachmentId: part.body?.attachmentId,
+          inlineData: part.body?.attachmentId ? undefined : part.body?.data,
+        });
+      }
+    }
+  }
+
+  for (const child of part.parts ?? []) out.push(...collectInlineImageParts(child));
+  return out;
+}
+
+/** Fetch one attachment's raw bytes (Gmail returns base64url in `data`). */
+export async function getAttachmentBytes(
+  token: string,
+  messageId: string,
+  attachmentId: string,
+): Promise<Uint8Array> {
+  const res = await gmailFetch(token, `/messages/${messageId}/attachments/${attachmentId}`);
+  const data = (await res.json()) as { data?: string; size?: number };
+  return base64UrlToBytes(data.data ?? "");
+}
+
+/** Decode a base64url string to raw bytes. */
+export function base64UrlToBytes(b64url: string): Uint8Array {
+  if (!b64url) return new Uint8Array(0);
+  const normalized = b64url.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }
 
 // ─── Send ─────────────────────────────────────────────────────────────────────
