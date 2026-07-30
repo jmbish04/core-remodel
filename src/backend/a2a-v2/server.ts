@@ -373,10 +373,29 @@ export class GAS_A2A extends Agent<Env> {
   ): Promise<Response> {
     const encoder = new TextEncoder();
 
+    // Heartbeat: cellular NATs and iOS idle-kill SSE sockets after ~30s of silence.
+    // A `: ping` comment frame keeps it warm between agent events (clients ignore
+    // lines starting with ':'). Only the streaming path idles — a single response
+    // closes immediately, so the heartbeat only runs for the generator branch.
+    let heartbeat: ReturnType<typeof setInterval> | undefined;
+    const stopHeartbeat = () => {
+      if (heartbeat !== undefined) {
+        clearInterval(heartbeat);
+        heartbeat = undefined;
+      }
+    };
+
     const stream = new ReadableStream<Uint8Array>({
       async start(controller) {
         try {
           if (isAsyncJsonRpcGenerator(payload)) {
+            heartbeat = setInterval(() => {
+              try {
+                controller.enqueue(encoder.encode(": ping\n\n"));
+              } catch {
+                stopHeartbeat(); // controller already closed
+              }
+            }, 15_000);
             for await (const event of payload) {
               controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
             }
@@ -391,8 +410,12 @@ export class GAS_A2A extends Agent<Env> {
             ),
           );
         } finally {
+          stopHeartbeat();
           controller.close();
         }
+      },
+      cancel() {
+        stopHeartbeat(); // client disconnected — drop the timer
       },
     });
 
