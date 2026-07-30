@@ -9,12 +9,16 @@ import {
   listingPhotos,
   renderCanvases,
   renderSessions,
+  showroomImageGroups,
+  showroomImages,
+  showroomStores,
 } from "@backend/db";
-import { eq } from "drizzle-orm";
+import { desc, eq, isNotNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
 
+import { mergeRefs, referenceSchema, resolveShowroomImageRefs } from "../../services/render/references";
 import { runStage } from "../../services/render/stage-runner";
 import type { StageType } from "../../services/render/types";
 
@@ -72,6 +76,66 @@ renderRouter.post(
   },
 );
 
+/**
+ * POST /api/render/sessions/from-images — create a session seeded with a set of
+ * images' Cloudflare URLs as inspiration references (0041 P2).
+ *
+ * Accepts `showroomImageIds` (resolved to their `deliveryUrl`) and/or explicit
+ * `references` ({url,label}). The seeds are stored on the session and surfaced in
+ * the studio inspiration rail. Bridges showroom photos (numeric ids, CF URLs) into
+ * the render pipeline without forcing them into the UUID `images` table.
+ */
+renderRouter.post(
+  "/sessions/from-images",
+  zValidator(
+    "json",
+    z.object({
+      name: z.string().min(1),
+      roomId: z.number().nullable().optional(),
+      showroomImageIds: z.array(z.number().int().positive()).max(500).optional(),
+      references: z.array(referenceSchema).max(500).optional(),
+    }),
+  ),
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const body = c.req.valid("json");
+
+    const refs = await resolveShowroomImageRefs(db, {
+      showroomImageIds: body.showroomImageIds,
+      references: body.references,
+    });
+
+    if (refs.length === 0) {
+      return c.json({ error: "No images resolved — pass showroomImageIds or references." }, 400);
+    }
+
+    const id = crypto.randomUUID();
+    await db
+      .insert(renderSessions)
+      .values({
+        id,
+        roomId: body.roomId ?? null,
+        name: body.name,
+        seedReferenceUrlsJson: JSON.stringify(refs),
+      })
+      .run();
+    return c.json({ id, seedReferences: refs }, 201);
+  },
+);
+
+/** Parse a session's seed-reference JSON into [{url,label}] (never throws). */
+function parseSeedReferences(json: string | null): { url: string; label?: string }[] {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json);
+    return Array.isArray(parsed)
+      ? parsed.filter((r): r is { url: string; label?: string } => Boolean(r && typeof r.url === "string"))
+      : [];
+  } catch {
+    return [];
+  }
+}
+
 // GET /api/render/sessions/:id
 renderRouter.get("/sessions/:id", async (c) => {
   const db = drizzle(c.env.DB);
@@ -87,8 +151,89 @@ renderRouter.get("/sessions/:id", async (c) => {
     .from(renderCanvases)
     .where(eq(renderCanvases.sessionId, id))
     .all();
-  return c.json({ session, canvases });
+  return c.json({ session, canvases, seedReferences: parseSeedReferences(session.seedReferenceUrlsJson) });
 });
+
+/**
+ * GET /api/render/reference-folders — list active showroom photo folders
+ * (showroom_image_groups) for the "add reference from folder" picker (0041 P3).
+ * Each carries its store name, member count, and a cover delivery URL.
+ */
+renderRouter.get("/reference-folders", async (c) => {
+  const db = drizzle(c.env.DB);
+  const groups = await db
+    .select({
+      id: showroomImageGroups.id,
+      name: showroomImageGroups.name,
+      storeId: showroomImageGroups.storeId,
+      storeName: showroomStores.name,
+      coverImageId: showroomImageGroups.coverImageId,
+    })
+    .from(showroomImageGroups)
+    .innerJoin(showroomStores, eq(showroomImageGroups.storeId, showroomStores.id))
+    .where(eq(showroomImageGroups.isActive, true))
+    .orderBy(desc(showroomImageGroups.createdAt))
+    .all();
+
+  // Bucket grouped photos to derive count + cover per folder. Only rows that
+  // actually belong to a folder — never scan the whole images table.
+  const grouped = await db
+    .select({ id: showroomImages.id, groupId: showroomImages.groupId, url: showroomImages.deliveryUrl })
+    .from(showroomImages)
+    .where(isNotNull(showroomImages.groupId))
+    .all();
+  const byGroup = new Map<number, { id: number; url: string }[]>();
+  for (const m of grouped) {
+    if (m.groupId == null) continue;
+    const list = byGroup.get(m.groupId) ?? [];
+    list.push({ id: m.id, url: m.url });
+    byGroup.set(m.groupId, list);
+  }
+
+  const folders = groups.map((g) => {
+    const mem = byGroup.get(g.id) ?? [];
+    const cover =
+      (g.coverImageId != null ? mem.find((m) => m.id === g.coverImageId)?.url : null) ?? mem[0]?.url ?? null;
+    return { id: g.id, name: g.name, storeId: g.storeId, storeName: g.storeName, memberCount: mem.length, coverUrl: cover };
+  });
+  return c.json({ folders });
+});
+
+/**
+ * POST /api/render/sessions/:id/references — add inspiration references to an
+ * existing session (0041 P3). Accepts `imageGroupId` (all photos in a folder),
+ * `showroomImageIds`, and/or explicit `references`. Merges into the seed list
+ * (deduped by url) and returns the updated set.
+ */
+renderRouter.post(
+  "/sessions/:id/references",
+  zValidator(
+    "json",
+    z.object({
+      imageGroupId: z.number().int().positive().optional(),
+      showroomImageIds: z.array(z.number().int().positive()).max(500).optional(),
+      references: z.array(referenceSchema).max(500).optional(),
+    }),
+  ),
+  async (c) => {
+    const db = drizzle(c.env.DB);
+    const id = c.req.param("id");
+    const session = await db.select().from(renderSessions).where(eq(renderSessions.id, id)).get();
+    if (!session) return c.json({ error: "Session not found" }, 404);
+
+    const added = await resolveShowroomImageRefs(db, c.req.valid("json"));
+    if (added.length === 0) {
+      return c.json({ error: "No images resolved — pass imageGroupId, showroomImageIds, or references." }, 400);
+    }
+    const merged = mergeRefs(parseSeedReferences(session.seedReferenceUrlsJson), added);
+    await db
+      .update(renderSessions)
+      .set({ seedReferenceUrlsJson: JSON.stringify(merged), datetimeLastModified: new Date() })
+      .where(eq(renderSessions.id, id))
+      .run();
+    return c.json({ seedReferences: merged });
+  },
+);
 
 // POST /api/render/stage
 renderRouter.post(

@@ -1,0 +1,1 @@
+ALTER TABLE `render_sessions` ADD `seed_reference_urls_json` text;

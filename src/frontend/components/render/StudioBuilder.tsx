@@ -1,5 +1,5 @@
-import { Hammer, Loader2, RefreshCw } from "lucide-react";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { FolderOpen, Hammer, Image as ImageIcon, Loader2, RefreshCw } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { RoomSelect } from "@/components/ui/room-select";
 import { cn } from "@/lib/utils";
 
@@ -50,10 +56,25 @@ interface SessionResponse {
   error?: string;
 }
 
+interface SeedReference {
+  url: string;
+  label?: string;
+}
+
+interface ReferenceFolder {
+  id: number;
+  name: string;
+  storeId: number;
+  storeName: string | null;
+  memberCount: number;
+  coverUrl: string | null;
+}
+
 interface SessionDetailResponse {
   session?: { id: string; heroCanvasId?: string | null };
   canvases?: RenderCanvas[];
   angles?: AngleEntry[];
+  seedReferences?: SeedReference[];
   error?: string;
 }
 
@@ -89,7 +110,13 @@ export function StudioBuilder() {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [canvases, setCanvases] = useState<RenderCanvas[]>([]);
   const [angles, setAngles] = useState<AngleEntry[]>([]);
+  const [seedReferences, setSeedReferences] = useState<SeedReference[]>([]);
   const [loadingSession, setLoadingSession] = useState(false);
+
+  // 0041 P3 — "add reference from folder" picker.
+  const [folderPickerOpen, setFolderPickerOpen] = useState(false);
+  const [referenceFolders, setReferenceFolders] = useState<ReferenceFolder[]>([]);
+  const [addingRefs, setAddingRefs] = useState(false);
 
   const [selectedAngleId, setSelectedAngleId] = useState<number | null>(null);
   const [selectedStage, setSelectedStage] = useState<StageBucket>("stage_1");
@@ -163,6 +190,7 @@ export function StudioBuilder() {
       const rows = Array.isArray(payload.canvases) ? payload.canvases : [];
       setCanvases(rows);
       setAngles(Array.isArray(payload.angles) ? payload.angles : []);
+      setSeedReferences(Array.isArray(payload.seedReferences) ? payload.seedReferences : []);
       if (!selectedAngleId && payload.angles && payload.angles.length > 0) {
         setSelectedAngleId(payload.angles[0].listingPhotoId);
       }
@@ -172,6 +200,54 @@ export function StudioBuilder() {
       setLoadingSession(false);
     }
   }, [selectedAngleId]);
+
+  // Open a session passed via ?session=<id> — e.g. "Create render session" from a
+  // showroom's selected photos (0041 P2). One-shot on mount.
+  const bootstrappedRef = useRef(false);
+  useEffect(() => {
+    if (bootstrappedRef.current) return;
+    bootstrappedRef.current = true;
+    const sid = new URLSearchParams(window.location.search).get("session");
+    if (sid) {
+      setSessionId(sid);
+      void loadSessionDetail(sid);
+    }
+  }, [loadSessionDetail]);
+
+  const openFolderPicker = useCallback(async () => {
+    setFolderPickerOpen(true);
+    try {
+      const res = await fetch("/api/render/reference-folders");
+      const data = (await res.json()) as { folders?: ReferenceFolder[] };
+      setReferenceFolders(data.folders ?? []);
+    } catch {
+      toast.error("Failed to load photo folders");
+    }
+  }, []);
+
+  const addFolderRefs = useCallback(
+    async (folderId: number) => {
+      if (!sessionId) return;
+      setAddingRefs(true);
+      try {
+        const res = await fetch(`/api/render/sessions/${sessionId}/references`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ imageGroupId: folderId }),
+        });
+        const data = (await res.json()) as { seedReferences?: SeedReference[]; error?: string };
+        if (!res.ok) throw new Error(data.error ?? "Failed to add references");
+        setSeedReferences(data.seedReferences ?? []);
+        toast.success("References added to the session");
+        setFolderPickerOpen(false);
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Failed to add references");
+      } finally {
+        setAddingRefs(false);
+      }
+    },
+    [sessionId],
+  );
 
   const startSessionForRoom = useCallback(
     async (roomId: number) => {
@@ -371,6 +447,85 @@ export function StudioBuilder() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Inspiration references — seeded from showroom photos + added from folders (0041 P2/P3). */}
+      {sessionId && (
+        <Card className="ring-1 ring-border/40">
+          <CardHeader className="flex flex-row items-center justify-between gap-3 pb-3">
+            <div className="flex items-center gap-2">
+              <ImageIcon className="size-4 text-muted-foreground" />
+              <div>
+                <CardTitle className="text-base">Inspiration references</CardTitle>
+                <CardDescription>
+                  {seedReferences.length > 0
+                    ? `${seedReferences.length} reference image${seedReferences.length === 1 ? "" : "s"} feeding this session.`
+                    : "No references yet — add photos from a showroom folder."}
+                </CardDescription>
+              </div>
+            </div>
+            <Button variant="outline" size="sm" className="gap-2" onClick={openFolderPicker}>
+              <FolderOpen className="size-4" /> Add from folder
+            </Button>
+          </CardHeader>
+          {seedReferences.length > 0 && (
+            <CardContent>
+              <div className="flex flex-wrap gap-2">
+                {seedReferences.map((ref) => (
+                  <a
+                    key={ref.url}
+                    href={ref.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={ref.label ?? ref.url}
+                    className="block size-20 overflow-hidden rounded-lg ring-1 ring-border/40 transition hover:ring-sky-400"
+                  >
+                    <img src={ref.url} alt={ref.label ?? "reference"} className="size-full object-cover" />
+                  </a>
+                ))}
+              </div>
+            </CardContent>
+          )}
+        </Card>
+      )}
+
+      {/* Folder picker modal (0041 P3). */}
+      <Dialog open={folderPickerOpen} onOpenChange={setFolderPickerOpen}>
+        <DialogContent className="max-h-[80vh] overflow-y-auto sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add references from a showroom folder</DialogTitle>
+          </DialogHeader>
+          {referenceFolders.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              No photo folders yet. Group showroom photos into a folder first.
+            </p>
+          ) : (
+            <div className="grid gap-2">
+              {referenceFolders.map((f) => (
+                <button
+                  key={f.id}
+                  type="button"
+                  disabled={addingRefs}
+                  onClick={() => void addFolderRefs(f.id)}
+                  className="flex items-center gap-3 rounded-lg bg-card p-2.5 text-left ring-1 ring-border/40 transition hover:ring-sky-400 disabled:opacity-50"
+                >
+                  <div className="size-12 shrink-0 overflow-hidden rounded-md bg-muted">
+                    {f.coverUrl ? (
+                      <img src={f.coverUrl} alt="" className="size-full object-cover" />
+                    ) : null}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium">{f.name}</div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {f.storeName ?? "Showroom"} · {f.memberCount} photo{f.memberCount === 1 ? "" : "s"}
+                    </div>
+                  </div>
+                  {addingRefs ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
+                </button>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {!selectedRoomId ? (
         <Card className="ring-1 ring-border/40">
