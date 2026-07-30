@@ -17,6 +17,7 @@ import {
   showroomStoreContacts,
 } from "@backend/db/schema/showroom/index";
 import { fieldOutContacts } from "@backend/api/routes/showroom-contacts";
+import { isExcludedSender } from "@backend/services/gmail/ingest-gate-domains";
 
 /** Free/public email providers never domain-match a store. */
 const PUBLIC_EMAIL_DOMAINS = new Set<string>([
@@ -90,6 +91,13 @@ export async function registerShowroomContactFromEmail(
   env: Env,
 ): Promise<void> {
   if (!senderEmail) return;
+
+  // Never auto-register OURSELVES as a vendor contact. justin@126colby.com (and
+  // our personal Gmail addresses) sit on every vendor thread; without this guard
+  // the sender gets added as a "contact" under whichever showroom the thread
+  // matched — e.g. Justin logged as a Pietra Fina contact.
+  if (isExcludedSender(senderEmail)) return;
+
   const db = drizzle(env.DB);
 
   // Dedup: skip when a contact already carries this email.

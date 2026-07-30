@@ -8,6 +8,7 @@ import assert from "node:assert/strict";
 import {
   EXCLUDED_DOMAINS,
   EXCLUDED_EXACT_ADDRESSES,
+  isExcludedSender,
   isGatedDomain,
   normalizeDomain,
 } from "./ingest-gate-domains";
@@ -38,6 +39,19 @@ assert.ok(EXCLUDED_DOMAINS.has("126colby.com"));
 assert.ok(EXCLUDED_DOMAINS.has("hacolby.app"));
 assert.ok(EXCLUDED_EXACT_ADDRESSES.has("jmbish04@gmail.com"));
 assert.ok(EXCLUDED_EXACT_ADDRESSES.has("jasonowyong87@gmail.com"));
+
+// ── isExcludedSender: never auto-register ourselves as a vendor contact ─────
+assert.equal(isExcludedSender("justin@126colby.com"), true, "our domain excluded");
+assert.equal(isExcludedSender("justin bishop <justin@126colby.com>"), true, "raw From header form");
+assert.equal(isExcludedSender("JUSTIN@126Colby.com"), true, "case-insensitive");
+assert.equal(isExcludedSender("anyone@sub.126colby.com"), true, "subdomain excluded");
+assert.equal(isExcludedSender("x@hacolby.app"), true, "worker domain excluded");
+assert.equal(isExcludedSender("jmbish04@gmail.com"), true, "personal gmail excluded");
+assert.equal(isExcludedSender("jasonowyong87@gmail.com"), true, "personal gmail excluded");
+assert.equal(isExcludedSender("nancy@pietrafina.com"), false, "real vendor allowed");
+assert.equal(isExcludedSender("someoneelse@gmail.com"), false, "other gmail allowed");
+assert.equal(isExcludedSender(null), false);
+assert.equal(isExcludedSender(""), false);
 
 // ── the Pietra Fina path end-to-end: sender address → gated vendor domain ───
 const d = normalizeDomain("nancy@pietrafina.com");
