@@ -7,7 +7,7 @@
  * "Copied" state, and stops click propagation so it works as an overlay on a
  * clickable card.
  */
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -28,6 +28,14 @@ export function CopyButton({
   size?: "sm" | "md";
 }) {
   const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<number | null>(null);
+
+  // Clear any pending reset on unmount so we never setState on an unmounted node.
+  useEffect(() => {
+    return () => {
+      if (resetTimer.current != null) window.clearTimeout(resetTimer.current);
+    };
+  }, []);
 
   const copy = useCallback(
     async (e: React.MouseEvent) => {
@@ -41,7 +49,9 @@ export function CopyButton({
           window.prompt("Copy this value:", value);
         }
         setCopied(true);
-        window.setTimeout(() => setCopied(false), 1500);
+        // Restart the reset timer so rapid re-clicks don't clear "Copied" early.
+        if (resetTimer.current != null) window.clearTimeout(resetTimer.current);
+        resetTimer.current = window.setTimeout(() => setCopied(false), 1500);
       } catch {
         window.prompt("Copy this value:", value);
       }

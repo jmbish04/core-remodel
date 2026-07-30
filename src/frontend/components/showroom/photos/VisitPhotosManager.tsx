@@ -219,12 +219,14 @@ export function VisitPhotosManager({
               >
                 {selected.has(photo.id) ? "✓" : ""}
               </button>
-              <CopyButton
-                value={photo.deliveryUrl}
-                label={`#${photo.id}`}
-                title={`Copy image URL (#${photo.id})`}
-                className="absolute right-1 top-1 z-20 opacity-0 group-hover/vphoto:opacity-100"
-              />
+              {photo.deliveryUrl ? (
+                <CopyButton
+                  value={photo.deliveryUrl}
+                  label={`#${photo.id}`}
+                  title={`Copy image URL (#${photo.id})`}
+                  className="absolute right-1 top-1 z-20 opacity-0 transition-opacity group-hover/vphoto:opacity-100 group-focus-within/vphoto:opacity-100"
+                />
+              ) : null}
               <ShowroomPhotoPolaroid photo={photo} onSaved={onPhotoSaved} />
             </div>
           ))}
@@ -380,12 +382,14 @@ function FolderModal({
                   >
                     <X className="size-3" />
                   </button>
-                  <CopyButton
-                    value={m.deliveryUrl}
-                    label={`#${m.id}`}
-                    title={`Copy image URL (#${m.id})`}
-                    className="absolute bottom-1 left-1 opacity-0 group-hover/mem:opacity-100"
-                  />
+                  {m.deliveryUrl ? (
+                    <CopyButton
+                      value={m.deliveryUrl}
+                      label={`#${m.id}`}
+                      title={`Copy image URL (#${m.id})`}
+                      className="absolute bottom-1 left-1 opacity-0 transition-opacity group-hover/mem:opacity-100 group-focus-within/mem:opacity-100"
+                    />
+                  ) : null}
                 </div>
               ))}
             </div>
