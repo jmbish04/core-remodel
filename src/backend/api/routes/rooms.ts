@@ -715,13 +715,10 @@ roomsRouter.get("/code/:roomCode/public", async (c) => {
       ].map(pickImage),
     });
   } catch (error) {
-    return c.json(
-      {
-        error: "Failed to load room",
-        details: error instanceof Error ? error.message : "Unknown error",
-      },
-      500,
-    );
+    // Public route: log the detail server-side, return a generic message so no
+    // internal error text (db errors, service names, paths) reaches a vendor.
+    console.error("[rooms] public room load failed", error);
+    return c.json({ error: "Failed to load room" }, 500);
   }
 });
 

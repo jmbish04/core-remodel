@@ -22,6 +22,22 @@ const c = createClient({ base: BASE });
 const { ok: check, info, summary } = createChecks();
 console.log(`QC pr_315 (public room gallery) against ${BASE}\n`);
 
+const PRIVATE_KEYS = ["budget", "estimates", "scenarioPlans", "visionNodes", "supportingDocuments", "actionItems", "summary"];
+
+/** Every private key found ANYWHERE in the payload (nested objects/arrays too). */
+function deepFindPrivateKeys(value, found = new Set()) {
+  if (Array.isArray(value)) {
+    for (const item of value) deepFindPrivateKeys(item, found);
+  } else if (value && typeof value === "object") {
+    for (const [k, v] of Object.entries(value)) {
+      if (PRIVATE_KEYS.includes(k)) found.add(k);
+      deepFindPrivateKeys(v, found);
+    }
+  }
+  return found;
+}
+
+async function run() {
 // 1. Catalog is public and gives us a real room to test.
 const catalog = await c.get("/api/rooms/catalog", { auth: false });
 check("catalog public (200)", catalog.status === 200, `status=${catalog.status}`);
@@ -50,15 +66,15 @@ check(
     Array.isArray(pub.json?.inspirationImages),
   `room=${pub.json?.room?.displayName} listing=${pub.json?.listingImages?.length} inspiration=${pub.json?.inspirationImages?.length}`,
 );
-// The whole point: no private surface may appear on the public payload.
-const PRIVATE_KEYS = ["budget", "estimates", "scenarioPlans", "visionNodes", "supportingDocuments", "actionItems", "summary"];
-const leaked = PRIVATE_KEYS.filter((k) => k in (pub.json || {}));
-check("public payload leaks no private keys", leaked.length === 0, `leaked=${leaked.join(",") || "none"}`);
-// Images carry only delivery ids, not internal columns.
-const sample = pub.json?.listingImages?.[0] || pub.json?.inspirationImages?.[0];
-if (sample) {
-  const allowed = new Set(["id", "displayName", "cfImageIdOriginal", "cfImageIdOptimized"]);
-  const extra = Object.keys(sample).filter((k) => !allowed.has(k));
+// The whole point: no private surface may appear ANYWHERE on the public payload
+// (top-level or nested inside room/images).
+const leaked = [...deepFindPrivateKeys(pub.json)];
+check("public payload leaks no private keys (deep)", leaked.length === 0, `leaked=${leaked.join(",") || "none"}`);
+// Every image object carries only delivery ids, not internal columns.
+const allowed = new Set(["id", "displayName", "cfImageIdOriginal", "cfImageIdOptimized"]);
+const allImages = [...(pub.json?.listingImages || []), ...(pub.json?.inspirationImages || [])];
+if (allImages.length > 0) {
+  const extra = [...new Set(allImages.flatMap((img) => Object.keys(img).filter((k) => !allowed.has(k))))];
   check("public image objects expose only delivery fields", extra.length === 0, `extra=${extra.join(",") || "none"}`);
 } else {
   info("no images on this room — image-shape check skipped");
@@ -69,5 +85,15 @@ if (sample) {
 const write = await c.patch(`/api/rooms/code/__qc-nonexistent-room__/profile`, {}, { auth: false });
 check("write still 401 unauthenticated — gate intact", write.status === 401, `status=${write.status}`);
 info(`tested roomCode=${roomCode}`);
+}
+
+// Wrap so a thrown network error still fails loudly with a non-zero exit rather
+// than crashing before summary() runs.
+try {
+  await run();
+} catch (err) {
+  console.error("QC crashed:", err instanceof Error ? err.message : err);
+  process.exit(1);
+}
 
 process.exit(summary().failed === 0 ? 0 : 1);

@@ -59,7 +59,7 @@ export function PublicRoomGalleryApp({ roomCode }: { roomCode: string }) {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch(`/api/rooms/code/${roomCode}/public`);
+        const res = await fetch(`/api/rooms/code/${encodeURIComponent(roomCode)}/public`);
         if (res.status === 404) {
           if (!cancelled) setNotFound(true);
           return;
