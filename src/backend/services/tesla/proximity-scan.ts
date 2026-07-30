@@ -186,6 +186,7 @@ async function assessRemodelRelevance(
       `Address: ${place.formattedAddress ?? "(unknown)"}\n` +
       `Rating: ${place.rating ?? "n/a"} (${place.userRatingCount ?? 0} reviews)`;
 
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const result = await Promise.race([
       generateStructured<RelevanceAssessment>(env, {
         feature: "proximity_scan_relevance",
@@ -194,11 +195,21 @@ async function assessRemodelRelevance(
         temperature: 0,
         maxTokens: 300,
       }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("gemini relevance timeout")), GEMINI_TIMEOUT_MS),
-      ),
-    ]);
-    return result.data;
+      new Promise<never>((_, reject) => {
+        // Keep the handle so we can clear it — a dangling timer would keep the
+        // isolate alive and fire reject() into an already-settled promise.
+        timer = setTimeout(() => reject(new Error("gemini relevance timeout")), GEMINI_TIMEOUT_MS);
+      }),
+    ]).finally(() => {
+      if (timer) clearTimeout(timer);
+    });
+    // `category` is nullable but NOT required, so the model may omit it → undefined.
+    // Pin it to null so the value matches the `string | null` contract downstream.
+    return {
+      isRemodelRelevant: result.data.isRemodelRelevant === true,
+      category: result.data.category ?? null,
+      oneLiner: result.data.oneLiner ?? "",
+    };
   } catch (err) {
     // Never silent: log it, then let the caller fall back to the Places heuristic.
     console.error("[proximity-scan] relevance assessment failed (falling back to Places heuristic):", err);
