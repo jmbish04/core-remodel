@@ -128,6 +128,7 @@ export interface RelevanceAssessment {
   oneLiner: string;
 }
 
+/** Gemini `responseSchema` for the relevance pass — the shape `assessRemodelRelevance` returns. */
 const RELEVANCE_SCHEMA: JsonSchemaNode = {
   type: "object",
   properties: {
@@ -155,6 +156,7 @@ const RELEVANCE_SCHEMA: JsonSchemaNode = {
 /** Cap the model call so a hung request can't hold the caller's `waitUntil` open. */
 const GEMINI_TIMEOUT_MS = 10_000;
 
+/** The subset of a `placesNearby` result the relevance pass reads (already normalized by GoogleMapsService). */
 interface PlaceLike {
   displayName: string | null;
   formattedAddress: string | null;
@@ -164,14 +166,6 @@ interface PlaceLike {
   userRatingCount: number | null;
 }
 
-/**
- * Ask Gemini whether a nearby Places hit is REALLY a remodel showroom (the plan's
- * "Places + Gemini" gate) and get a category + one-liner for the review card. The
- * Places `includedTypes` filter is a coarse pre-filter; this is the precision pass —
- * it rejects a `furniture_store` that's actually a mattress outlet. Best-effort: on
- * a timeout / model / parse failure it returns null and the caller falls back to the
- * deterministic Places-type heuristic, so a Gemini outage never breaks a park-find.
- */
 /** Clip + strip control chars from untrusted Places text before it enters a prompt. */
 function clean(value: string | null | undefined, max = 120): string {
   if (!value) return "";
@@ -183,6 +177,14 @@ function clean(value: string | null | undefined, max = 120): string {
   return out.trim();
 }
 
+/**
+ * Ask Gemini whether a nearby Places hit is REALLY a remodel showroom (the plan's
+ * "Places + Gemini" gate) and get a category + one-liner for the review card. The
+ * Places `includedTypes` filter is a coarse pre-filter; this is the precision pass —
+ * it rejects a `furniture_store` that's actually a mattress outlet. Best-effort: on
+ * a timeout / model / parse failure it returns null and the caller falls back to the
+ * deterministic Places-type heuristic, so a Gemini outage never breaks a park-find.
+ */
 async function assessRemodelRelevance(
   env: Env,
   place: PlaceLike,
