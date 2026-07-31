@@ -338,6 +338,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     changes: [
       { kind: "added", text: "10 MCP tools in src/backend/mcp/tools/showrooms/: find_showrooms, list_showroom_searches, get_showroom_search, get_search_revisions, finalize_showroom_search, import_search_results, exclude_search_result, add_showroom_exclusion, list_showroom_exclusions, remove_showroom_exclusion — registered in tools/showrooms/index.ts." },
       { kind: "changed", text: "Each tool calls the identical discovery-search.ts function its REST twin uses (findShowrooms/listSearches/getSearch/getSearchRevisions/finalizeSearch/importSearchResults/excludeSearchResult/addExclusion/listExclusions/removeExclusion) — one service, two callers." },
+    ],
     status: "staged",
   },
   {
