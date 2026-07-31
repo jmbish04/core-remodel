@@ -75,6 +75,12 @@ async function run() {
   const bad = await req("POST", "/api/guest/register", { body: { firstName: "", email: "nope" } });
   check("register invalid → 400", bad.status === 400, `status=${bad.status}`);
 
+  // 2b. A non-http(s) company URL (e.g. javascript:) must be rejected (stored-XSS guard).
+  const badUrl = await req("POST", "/api/guest/register", {
+    body: { firstName: "X", lastName: "Y", email: "qc-badurl@example.test", phone: "5", companyWebsiteUrl: "javascript:alert(1)" },
+  });
+  check("register rejects non-http(s) website → 400", badUrl.status === 400, `status=${badUrl.status}`);
+
   // 3. Valid registration → 200 + cookie, no cookieId echoed.
   const reg = await req("POST", "/api/guest/register", {
     body: { firstName: "QC", lastName: "Vendor", email: EMAIL, phone: "555-0100", companyWebsiteUrl: "https://example.test" },

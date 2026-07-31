@@ -18,13 +18,30 @@ import { getGuestFromRequest, setGuestCookie } from "@backend/utils/guest-access
  */
 const guestRouter = new Hono<{ Bindings: Env }>();
 
+/** A company URL must be a real http(s) URL — never a `javascript:` scheme that
+ *  could become stored XSS if ever rendered as an <a href>. */
+const httpUrl = z
+  .string()
+  .trim()
+  .max(500)
+  .url("A valid website URL is required")
+  .refine((u) => /^https?:\/\//i.test(u), "Website must start with http:// or https://");
+
 const registerSchema = z.object({
   firstName: z.string().trim().min(1, "First name is required").max(120),
   lastName: z.string().trim().min(1, "Last name is required").max(120),
+  // Lowercased here so the (case-sensitive) unique index can never hold two rows
+  // for the same address; every read below also queries the lowercased value.
   email: z.string().trim().toLowerCase().email("A valid email is required").max(320),
   phone: z.string().trim().max(60).optional().nullable(),
-  companyWebsiteUrl: z.string().trim().max(500).optional().nullable(),
+  companyWebsiteUrl: httpUrl.optional().nullable(),
 });
+
+/** Keep an existing value when the incoming one is blank (empty string counts as
+ *  blank, which `??` would not). Prevents a returning guest wiping their card. */
+function preferNonBlank(next: string | null | undefined, existing: string | null): string | null {
+  return next && next.trim() ? next : existing;
+}
 
 function publicGuest(row: typeof guestContacts.$inferSelect) {
   // Never echo the cookie id back to the client.
@@ -65,8 +82,8 @@ guestRouter.post("/register", async (c) => {
         .set({
           firstName: input.firstName,
           lastName: input.lastName,
-          phone: input.phone ?? existing.phone,
-          companyWebsiteUrl: input.companyWebsiteUrl ?? existing.companyWebsiteUrl,
+          phone: preferNonBlank(input.phone, existing.phone),
+          companyWebsiteUrl: preferNonBlank(input.companyWebsiteUrl, existing.companyWebsiteUrl),
           lastSeenAt: new Date(),
         })
         .where(eq(guestContacts.id, existing.id))

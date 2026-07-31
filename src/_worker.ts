@@ -177,24 +177,6 @@ const legacyHandler: ExportedHandler<Env> = {
       }
     }
 
-    // Vendor portal host (remodel.hacolby.app, or ?_portal=1 for testing): it
-    // serves ONLY the guest portal. Root lands on the floor plan; the admin app
-    // and the homeowner login page are not reachable here — a vendor should never
-    // see them. API requests fall through (guest + public endpoints work; every
-    // homeowner endpoint stays gated by its own auth, independent of host).
-    if (isGuestPortalRequest(request) && !url.pathname.startsWith("/api/")) {
-      if (url.pathname === "/") {
-        return Response.redirect(`${url.origin}/floor-plan`, 302);
-      }
-      if (
-        url.pathname === "/admin" ||
-        url.pathname.startsWith("/admin/") ||
-        url.pathname === "/access"
-      ) {
-        return Response.redirect(`${url.origin}/floor-plan`, 302);
-      }
-    }
-
     // Device-scoped landing preference: an authed device that has chosen a
     // default landing page (from /admin/config/device) is redirected there when
     // it hits the app root exactly. The choice lives in D1 keyed by the device's
@@ -236,6 +218,22 @@ const legacyHandler: ExportedHandler<Env> = {
     const isProtectedPath = protectedPaths.some(
       (path) => url.pathname === path || url.pathname.startsWith(`${path}/`),
     );
+
+    // Vendor portal host (remodel.hacolby.app, or ?_portal=1 on a non-prod host):
+    // it serves ONLY the guest portal. Root lands on the floor plan; every
+    // homeowner-protected surface (the full `protectedPaths` denylist) plus the
+    // login page are redirected away — a vendor should never see them. Reusing
+    // `protectedPaths` means a newly-added protected route is covered automatically.
+    // API requests fall through (guest + public endpoints work; every homeowner
+    // endpoint stays gated by its own auth, independent of host).
+    if (isGuestPortalRequest(request) && !url.pathname.startsWith("/api/")) {
+      if (url.pathname === "/") {
+        return Response.redirect(`${url.origin}/floor-plan`, 302);
+      }
+      if (isProtectedPath || url.pathname === "/access") {
+        return Response.redirect(`${url.origin}/floor-plan`, 302);
+      }
+    }
 
     if (
       url.pathname.startsWith("/api/realtime/estimates") ||

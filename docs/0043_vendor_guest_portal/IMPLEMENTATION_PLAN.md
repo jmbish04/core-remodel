@@ -245,9 +245,9 @@ Success criteria per phase live in the D1 `plan_tasks` rows (seeded via the feat
 
 ## 9. Security & privacy
 
-- **Distinct cookie.** `remodel_guest` is an opaque uuid mapped to a `guest_contacts` row. It is NOT `remodel_access` and grants **zero** homeowner/admin access. The gate only ever unlocks portal pages + the already-public room endpoints.
+- **Distinct cookie.** `remodel_guest` is an opaque uuid mapped to a `guest_contacts` row, set with `HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=1y`. It is NOT `remodel_access` and grants **zero** homeowner/admin access. The gate only ever unlocks portal pages + the already-public room endpoints.
 - **No private data on the wire.** The portal consumes only `/api/rooms/catalog` and `/api/rooms/code/:code/public` — both photos/name/dimensions only (verified in PR #315 QC).
-- **Signed invite links.** `/welcome?t=` carries an HMAC-signed email (key = `WORKER_API_KEY`); a bad signature just means "no prefill", never access.
+- **Signed invite links.** `/welcome?t=` carries an HMAC-signed email; a bad signature just means "no prefill", never access. The signing key comes from a Secrets Store binding accessed via `env.<BINDING>.get()` — either the existing `WORKER_API_KEY` binding or a dedicated `GUEST_INVITE_SIGNING_KEY` binding (decided in P5). Never a plaintext var or inline literal.
 - **Frictionless ≠ verified.** Anyone can type any email; acceptable because the gated content is non-sensitive marketing photos. Documented, not a bug.
 - **Tracking scope.** `guest_page_views` records path + room + UA/referer for guests only; no cross-site data, no third parties.
 

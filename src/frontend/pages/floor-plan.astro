@@ -12,10 +12,18 @@ const { env } = Astro.locals.runtime;
 // plan is gated behind guest registration. The homeowner (authed) always passes;
 // otherwise a registered guest passes; everyone else sees the registration wall.
 const isPortal = isGuestPortalRequest(Astro.request);
-const allowed = isPortal
-  ? (await isRequestAuthenticated(Astro.request, env)) ||
-    (await isGuestRegistered(Astro.request, env))
-  : true;
+// Default-deny for portal requests: a malformed cookie / D1 hiccup that throws
+// falls back to the registration wall rather than 500-ing the page.
+let allowed = !isPortal;
+if (isPortal) {
+  try {
+    allowed =
+      (await isRequestAuthenticated(Astro.request, env)) ||
+      (await isGuestRegistered(Astro.request, env));
+  } catch {
+    allowed = false;
+  }
+}
 ---
 
 {

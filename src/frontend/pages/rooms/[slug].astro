@@ -10,11 +10,25 @@ import { isGuestPortalRequest, isGuestRegistered } from "@backend/utils/guest-ac
 const roomCode = Astro.params.slug || "";
 const { env } = Astro.locals.runtime;
 
-const authed = await isRequestAuthenticated(Astro.request, env);
 const isPortal = isGuestPortalRequest(Astro.request);
+// Default-deny on error: a thrown auth check falls back to the public gallery
+// (main host) or the registration wall (portal), never a 500.
+let authed = false;
+try {
+  authed = await isRequestAuthenticated(Astro.request, env);
+} catch {
+  authed = false;
+}
 // On the vendor portal, a room page requires an authed homeowner or a registered
 // guest; otherwise show the registration wall (never the photos).
-const guestAllowed = authed || (await isGuestRegistered(Astro.request, env));
+let guestAllowed = authed;
+if (isPortal && !authed) {
+  try {
+    guestAllowed = await isGuestRegistered(Astro.request, env);
+  } catch {
+    guestAllowed = false;
+  }
+}
 ---
 
 {

@@ -29,7 +29,7 @@ flowchart LR
 - Copy: **"See the plans & photos"** → *"126 Colby is a full remodel. Drop your digital business card and step inside."*
 - Fields (all required except noted): First name · Last name · Email · Phone · Company website URL.
 - One primary button: **"Enter"**. No password, no confirm step.
-- On the `/welcome?t=` path, **email is pre-filled** and read-only-ish (editable, but filled).
+- On the `/welcome?t=` path, **email is pre-filled** from the signed token as an **editable default** — the field stays editable so they can correct a typo; it is not locked.
 - Returning guest (cookie or matched email) never sees this — straight to the floor plan.
 - Uses the reusable inputs; website via a URL input; no multi-selects, no currency.
 

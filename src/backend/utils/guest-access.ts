@@ -22,14 +22,25 @@ const GUEST_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 365;
 export const GUEST_PORTAL_HOST = "remodel.hacolby.app";
 
 /**
+ * Hosts on which the `?_portal=1` testing override is IGNORED: the production
+ * worker domain and the portal host itself. This stops a user-controlled query
+ * param from forcing chrome-less/gate routing on production. The override stays
+ * usable on preview workers (wcrp-*.workers.dev) and localhost so the portal can
+ * be exercised where the custom domain doesn't resolve.
+ */
+const OVERRIDE_DISALLOWED_HOSTS = new Set([GUEST_PORTAL_HOST, "core-remodel.hacolby.workers.dev"]);
+
+/**
  * Is this request for the vendor portal? True when it arrives on the portal
- * host, OR carries a `_portal=1` override (so the portal can be exercised on the
- * workers.dev / preview hosts, which never resolve to the custom domain).
+ * host, or carries a `_portal=1` override on a non-production host.
  */
 export function isGuestPortalRequest(request: Request): boolean {
   const url = new URL(request.url);
   if (url.hostname === GUEST_PORTAL_HOST) return true;
-  return url.searchParams.get("_portal") === "1";
+  if (url.searchParams.get("_portal") === "1" && !OVERRIDE_DISALLOWED_HOSTS.has(url.hostname)) {
+    return true;
+  }
+  return false;
 }
 
 function readCookie(request: Request, name: string): string | null {
