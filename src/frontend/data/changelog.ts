@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/showroom-360-tour-links-0fd2ac",
+    title: "Showroom 360° tour — Photos bento + Street View auto-tour",
+    summary:
+      "Surfaces a showroom's 360° walkthrough in the Photos bento: the manual SHOWROOM_TOUR link renders as an embed/open card, and when absent a free Street View probe offers an auto-tour whose billable render is quota-gated + logged.",
+    date: "2026-07-31",
+    status: "staged",
+    prNumber: 322,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/322",
+  },
+  {
     branch: "claude/showroom-inbox-filtering-0294ec",
     title: "Store Inbox + ingestion gating + full-width pages (0041)",
     summary:
@@ -300,6 +310,22 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "showroom-360-tour",
+    branch: "claude/showroom-360-tour-links-0fd2ac",
+    date: "2026-07-31",
+    area: "Showrooms",
+    title: "360° tour in the Photos bento + Street View auto-tour",
+    summary:
+      "A showroom's 360° walkthrough now lives in the Photos bento. When the store has a manual SHOWROOM_TOUR link (already in the link vocab) it renders as a TourCard — Matterport URLs embed inline, other tours open in a new tab — and the Photos tile gets a '· 360° tour' badge. When there is no manual link, a Street View fallback probes the store's coordinates with the FREE StreetViewService.getPanorama() (Google bills only the rendered panorama, never the check) and, if coverage exists, offers an 'Open tour' button. The billable StreetViewPanorama render is deferred behind that click and gated: it first calls POST /api/showroom-stores/:id/streetview-render, which enforces a new count-based street_view SKU cap (4,500/mo, under Google's 5,000 free Pro events) and logs the event into google_maps_usage_log. The browser Maps JS key is served at runtime from the existing GOOGLE_MAPS_API secrets-store binding via an auth-gated GET /api/places/maps-js-key, never baked into the client bundle. No schema change, no migration.",
+    changes: [
+      { kind: "added", text: "Photos bento TourCard: renders a manual SHOWROOM_TOUR link (Matterport inline <iframe>; other tours open-in-tab) + a '· 360° tour' badge on the Photos tile." },
+      { kind: "added", text: "StreetViewTour component: free getPanorama() detection at the store's lat/lng (radius 50, source DEFAULT to include indoor photospheres); renders nothing when no coverage; billable StreetViewPanorama deferred behind an explicit click." },
+      { kind: "added", text: "street_view SKU added to the count-based Maps quota (MAPS_API_QUOTAS 4,500/mo) + skuForUsageBucket mapping; POST /api/showroom-stores/:id/streetview-render enforces isUnderApiQuota + logs each render to google_maps_usage_log (403 over cap)." },
+      { kind: "added", text: "GET /api/places/maps-js-key serves the browser Maps JS key from the GOOGLE_MAPS_API secrets-store binding at runtime (behind requireAccessAuth), so it is never bundled at build time." },
+    ],
+    status: "staged",
+  },
   {
     id: "0032-discovery-mcp-tools",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",

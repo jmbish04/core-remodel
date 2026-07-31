@@ -41,6 +41,14 @@ export const MAPS_API_QUOTAS = {
   geocoding: 8_000,
   /** Routes API: computeRoutes, computeRouteMatrix. */
   routes: 8_000,
+  /**
+   * Dynamic Street View (Pro SKU) — a billable event fires ONCE per
+   * `StreetViewPanorama` object rendered in the browser (the free
+   * `StreetViewService.getPanorama()` detection is NOT billed, so it is never
+   * counted here). Google grants 5,000 free Pro events/mo; capped below that so
+   * we never spill into paid territory. Logged as `endpoint: "streetview:render"`.
+   */
+  street_view: 4_500,
 } as const;
 
 export type MapsApiSku = keyof typeof MAPS_API_QUOTAS;
@@ -57,6 +65,7 @@ export function skuForUsageBucket(bucket: string): MapsApiSku | null {
     return "routes";
   }
   if (b.startsWith("geocode") || b.includes("reverse")) return "geocoding";
+  if (b.startsWith("streetview") || b.includes("street_view")) return "street_view";
   if (
     b.startsWith("places:") ||
     b.includes("autocomplete") ||
@@ -226,7 +235,7 @@ export class GoogleMapsService {
     month: string;
   }> {
     const { byEndpoint, total, month } = await this.getMonthlyUsage();
-    const bySku: Record<MapsApiSku, number> = { places: 0, geocoding: 0, routes: 0 };
+    const bySku: Record<MapsApiSku, number> = { places: 0, geocoding: 0, routes: 0, street_view: 0 };
     for (const [bucket, count] of Object.entries(byEndpoint)) {
       const sku = skuForUsageBucket(bucket);
       if (sku) bySku[sku] += Number(count);
