@@ -167,6 +167,11 @@ function parseGraph(raw: string): SceneGraph {
   }
 }
 
+/** Public parser for a stored graph_json blob (permissive; {} on garbage). */
+export function parseGraphJson(raw: string): SceneGraph {
+  return parseGraph(raw);
+}
+
 function parseRendering(raw: string | null): SceneRenderingMetadata | null {
   if (!raw) return null;
   try {
