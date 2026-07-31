@@ -22,6 +22,22 @@
 
 ---
 
+## 1b · Approved composition
+
+Three comps were rendered and reviewed (`comps.html` in this folder). The outcome was not a winner — it was a **synthesis**, because the three turned out not to be competitors:
+
+| Comp | Becomes | Why |
+|---|---|---|
+| **A · Parallel Tracks** | **Home** | The only composition that answers *"which rooms can I talk to a contractor about"* in one glance. The threshold does its hardest work as a single shared vertical crossing every room track. Scales to twenty rooms as a list. |
+| **C · Atelier-Led** | **The Room screen** | It reads as your house rather than a dashboard — which is where the doctrine already put the atelier. Wrong as a landing (it hides the whole-project read), right as the place you actually work. |
+| **B · The Network** | **A blast-radius lens**, entered from an impact | Shows that a bath was reopened *through a shared wall* — geometry doing what A can only footnote. Has no readiness read at all, and hand-placed geometry does not auto-layout, so it is a lens and never a landing. |
+
+**Approved as-is; the world was confirmed to hold.** Both the flagged risks were cleared: the dark ground stands (with light co-primary and authored equally), and Comp B's dependency labels — *"shared wall"*, *"panel capacity"* — are accepted as real, which makes the ripple rule library load-bearing rather than optional.
+
+**Do not literalize from the comps:** every colour value, the stop spacing and pixel geometry, and all figures, counts, and dates, which are synthetic placeholders on real room names.
+
+---
+
 ## 2 · Which layer leads where
 
 | Destination | Leads | Why |
