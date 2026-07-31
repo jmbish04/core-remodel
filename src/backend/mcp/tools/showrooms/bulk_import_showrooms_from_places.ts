@@ -24,7 +24,11 @@ export const bulkImportShowroomsFromPlaces = defineTool({
     "call queues the whole set, so you do NOT spend tokens calling import_showroom_from_place once per store. " +
     "Duplicates and blanks are dropped; ids already present as a located store are recorded as `done`/exists by " +
     "the loop (never re-imported). Returns a `batchId` — poll `check_bulk_intake_status` with it to watch progress " +
-    "and catch any id that got stuck. Quota-metered per id (Places + Gemini).",
+    "and catch any id that got stuck. To keep each durable step short and reliable, the background loop skips the " +
+    "slow inline Gemini review analysis (the AI-inferred appointment/flagship flags) — every other field and the " +
+    "full enrichment (photos, brands, website scrape, AI research, categories, Google's own review summary) still " +
+    "run; use import_showroom_from_place on a single store if you want the inline review AI immediately. " +
+    "Quota-metered per id (Places).",
   inputShape: {
     placeIds: z
       .array(z.string().min(1))
