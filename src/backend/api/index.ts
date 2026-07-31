@@ -53,6 +53,8 @@ import studioRouter from "./routes/studio";
 import driveListsRouter from "./routes/drive-lists";
 import showroomVisitLogsRouter from "./routes/showroom-visit-logs";
 import showroomHitlQueueRouter from "./routes/showroom-hitl-queue";
+import showroomSearchesRouter from "./routes/showroom-searches";
+import showroomExclusionsRouter from "./routes/showroom-exclusions";
 import teslaRouter from "./routes/tesla";
 import { portalRouter } from "./routes/portal";
 import { guestRouter } from "./routes/guest";
@@ -256,6 +258,8 @@ app.route("/api/studio", studioRouter);
 app.route("/api/drive-lists", driveListsRouter);
 app.route("/api/showroom-visit-logs", showroomVisitLogsRouter);
 app.route("/api/showroom-hitl-queue", showroomHitlQueueRouter);
+app.route("/api/showroom-searches", showroomSearchesRouter);
+app.route("/api/showroom-exclusions", showroomExclusionsRouter);
 // Tesla/Tessie: /status + /navigate are admin-gated inside the router; /webhook
 // is public but secret-verified (Tessie can't send the admin cookie).
 app.route("/api/tesla", teslaRouter);

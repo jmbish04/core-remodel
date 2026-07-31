@@ -301,6 +301,23 @@ export const BRANCHES: ChangelogBranch[] = [
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "0032-discovery-search-engine",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-31",
+    tag: "0032",
+    area: "Discovery",
+    title: "find_showrooms engine + discovery REST (0032 D2c-1)",
+    summary:
+      "The worker-orchestrated finder (0022 §14.2): find_showrooms takes a location + optional query (and optional model-submitted aiResults), runs a Google Places text sweep, dedupes candidates (by place_id, else name+address), flags which are already in the directory or on the not-interested list, ranks + classifies them with one best-effort Gemini call (validated place_ids, deterministic Places-type heuristic on any failure), and persists a numbered revision + its result rows — then publishes to the slug's DiscoveryHub so an open finder page streams live. Cost-safe: the Places sweep only runs when usePlaces is set AND the Places SKU is under quota (a MAPS_QUOTA_EXCEEDED throw degrades to AI-only with used_places=false, never a failure). One discovery-search.ts service backs BOTH the REST routes and (in D2c-2) the MCP tools, so the finder page and a voice session never drift. Slug actions with no re-search: list / get / revisions / finalize / import (promote results into showroom_stores, mirroring the HITL PROCESS path) / exclude (add a permanent exclusion off the slug). Plus full exclusions CRUD (add / list / remove). REST only in this slice; MCP parity + finder pages follow.",
+    changes: [
+      { kind: "added", text: "services/showroom/discovery-search.ts — findShowrooms orchestration (Places sweep + dedupe + directory/exclusion flag + Gemini rank + revision/result persistence + DiscoveryHub publish) + slug actions (list/get/revisions/finalize/import/exclude) + exclusions CRUD. One service, REST+MCP parity." },
+      { kind: "added", text: "REST /api/showroom-searches (POST create/refine, GET list, GET :slug, GET :slug/revisions, POST :slug/finalize|import|exclude) + /api/showroom-exclusions (GET/POST, DELETE :id). Plain-Hono, admin-gated." },
+      { kind: "changed", text: "Cost-safety: Places sweep gated by usePlaces + the per-SKU quota hard-disable (AI-only fallback); Gemini rank is best-effort with a validated-placeId guard + heuristic fallback; result inserts chunked to ≤3 rows/statement (D1 100-param cap)." },
+      { kind: "fixed", text: "Review hardening (codra + graphite): the revision-replace + result-inserts + search-status-update now run as one all-or-nothing db.batch (no half-written revision on a partial failure); reasonHtml is sanitized on write (sanitizeNoteHtml) against stored XSS; import no longer copies always-null address parts onto the new store (address backfills from place_id, as the HITL PROCESS path does); an exclusion now requires a place_id or name; and the revision source is classified from the deduped set. Declined with reasons: single-operator app has no admin-role gate beyond the shared access cookie (isRequestAuthenticated is the authz, as on all 17 admin routes); plain-Hono matches the sibling route convention; list limits are already clamped in the service; addExclusionRow already dedupes by place_id." },
+    ],
+    status: "staged",
+  },
+  {
     id: "0032-discovery-realtime-hub",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-31",

@@ -113,6 +113,75 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "0032-discovery-search-engine": {
+    slug: "0032-discovery-search-engine",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0032 D2c-1 · find_showrooms engine + discovery REST",
+    code: [],
+    problem:
+      "D2a gave the finder its tables and D2b its realtime channel, but nothing fills them. 0022 §14.2 asks for a worker-orchestrated find_showrooms: the model (or the finder UI) asks 'what remodel showrooms are near here?', and the WORKER does the Places scrape, dedupes against what's already known, ranks with AI, and owns the persisted, shareable result — the model only orchestrates. It must be cost-safe (Places is billed) and must never drift between the finder page and a voice session.",
+    approach:
+      "One service, services/showroom/discovery-search.ts, backs both REST (this slice) and MCP (D2c-2) — the parity seam, exactly like hitl-queue.ts backs the park-find REST + tools. findShowrooms: (1) resolve the search row — mint a new unique slug, or bump an existing slug's revision; (2) gather candidates — the model's aiResults (source 'ai') plus a placesTextSearchMany sweep (source 'places') when usePlaces is set; (3) dedupe by place_id (else name+address); (4) flag in_directory (join showroom_stores by place_id) + is_excluded (join showroom_exclusions) via inArray over the candidate ids; (5) rank/classify with ONE Gemini structured call that returns a verdict per place_id — validated against the live candidate set so a hallucinated id is dropped, best-effort with a 12s timeout and a deterministic Places-type heuristic fallback; (6) drop confident 'not relevant' + excludeCategories, sort by relevance, and persist a numbered showroom_search_revision + its showroom_search_result rows (chunked ≤3/statement for D1's 100-param cap, replacing the slug's prior results); (7) update the search (status ready, current_revision, result_count, summary) and publish results_ready to the slug's DiscoveryHub. Cost safety mirrors proximityScan: the Places sweep is the only billed call and placesTextSearchMany throws MAPS_QUOTA_EXCEEDED when the SKU is spent — caught, degrading to AI-only with used_places=false rather than failing. Slug actions do NOT re-search: list/get/revisions/finalize, import (promote selected results into showroom_stores — reuse-by-place_id-else-create, exactly the HITL PROCESS path, stamping imported_at), and exclude (add a permanent showroom_exclusions row off the slug so the place never resurfaces). Plus exclusions CRUD (add idempotent-by-place_id / list / remove). FK rule honored throughout: a result relates to its store by existing_store_id and its hiding exclusion by matched_exclusion_id — names are JOINed, never copied.",
+    apiChanges: [
+      "NEW POST /api/showroom-searches (create/refine) · GET / (list) · GET /:slug · GET /:slug/revisions · POST /:slug/finalize · POST /:slug/import {resultIds} · POST /:slug/exclude {resultId,reason}.",
+      "NEW GET/POST /api/showroom-exclusions · DELETE /api/showroom-exclusions/:id.",
+      "services/showroom/discovery-search.ts: findShowrooms + listSearches/getSearch/getSearchRevisions/finalizeSearch/importSearchResults/excludeSearchResult + addExclusion/listExclusions/removeExclusion.",
+    ],
+    filesTouched: [
+      "src/backend/services/showroom/discovery-search.ts (new — the engine)",
+      "src/backend/api/routes/showroom-searches.ts (new)",
+      "src/backend/api/routes/showroom-exclusions.ts (new)",
+      "src/backend/api/index.ts (mount both routers)",
+      "scripts/qc/pr_326.mjs",
+    ],
+    migrations: [],
+    diagrams: [
+      {
+        caption: "find_showrooms — one revision: gather → dedupe → flag → rank → persist → publish",
+        code: `flowchart TD
+  A["find_showrooms(near, query?, aiResults?, usePlaces)"] --> B{new slug or refine?}
+  B -->|new| C[mint unique slug · revision 1]
+  B -->|refine| C2[bump slug revision]
+  C --> D[gather candidates]
+  C2 --> D
+  D --> D1["aiResults (source ai)"]
+  D --> D2{usePlaces &amp; quota ok?}
+  D2 -->|yes| P["placesTextSearchMany (source places)"]
+  D2 -->|no / MAPS_QUOTA_EXCEEDED| AO["AI-only · used_places=false"]
+  D1 --> M[dedupe by place_id / name+address]
+  P --> M
+  AO --> M
+  M --> F["flag in_directory + is_excluded (inArray)"]
+  F --> R["Gemini rank — validated place_ids · heuristic fallback"]
+  R --> S["persist revision + result rows (chunk ≤3/stmt)"]
+  S --> U["update search: ready, current_revision, summary"]
+  U --> PUB["publishDiscoveryEvent → DiscoveryHub (results_ready)"]
+  classDef ai fill:#3a2a3f,stroke:#c084fc,color:#f5e8ff;
+  class R,AO ai;
+  classDef safe fill:#1f4d2e,stroke:#4ade80,color:#eaffea;
+  class D2,S safe;`,
+      },
+      {
+        caption: "One service, two callers (parity) — REST now, MCP in D2c-2",
+        code: `flowchart LR
+  UI[Finder UI] --> REST["/api/showroom-searches*"]
+  MCP["MCP find_showrooms + slug actions (D2c-2)"] --> SVC
+  REST --> SVC["discovery-search.ts (the one service)"]
+  SVC --> DB[(showroom_search / _revision / _result)]
+  SVC --> HUB[DiscoveryHub realtime]
+  SVC --> STORES[(showroom_stores · import)]
+  SVC --> EXC[(showroom_exclusions)]`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_326.mjs",
+      command: "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 326 -- --preview --sweep",
+      ranAt: "2026-07-31",
+      output:
+        "tsc --noEmit clean on discovery-search.ts + both route files + api/index.ts. pnpm run build green (exit 0, ~120s). No D1 schema (tables shipped in D2a/0163). QC pr_326 proves the two new endpoints are wired + a regression on the shared park-find sink; the full write path (create→get→revisions) runs with --sweep AI-only (usePlaces:false + a synthetic aiResult) to avoid live Places billing + prod row-pollution. The live Places+Gemini path is exercised on a real finder search.",
+      migrations: [],
+    },
+  },
   "0032-discovery-realtime-hub": {
     slug: "0032-discovery-realtime-hub",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
