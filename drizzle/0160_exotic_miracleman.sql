@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX `gmail_message_images_msg_cid_unique` ON `gmail_message_images` (`gmail_message_id`,`content_id`);

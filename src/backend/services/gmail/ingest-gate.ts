@@ -49,7 +49,10 @@ import type { RouteDecision } from "@backend/services/email/types";
 // @astrojs/cloudflare build (`astro:build:done` ENOENT on a moved `_astro`
 // chunk). Keep it lazy.
 
+import { sanitizeNoteHtml } from "@backend/services/notes/markdown";
+
 import { getGmailAccessToken } from "./auth";
+import { classifyMessage } from "./classify-message";
 import {
   extractMessage,
   getMessage,
@@ -239,10 +242,15 @@ export async function runIngestGate(
 }
 
 /** The `general` catch-all decision — arbitrary vendor mail, AI decides the type. */
-const GATE_DECISION: RouteDecision = {
+export const GATE_DECISION: RouteDecision = {
   routeId: "general",
   reason: "gmail-ingest-gate: domain matched a known showroom/company",
   profile: CATCH_ALL_PROFILE,
+  // 0042 trust gate: Gmail is the user's personal mailbox — anyone can email it,
+  // so run only the NON-AI work (text extraction + embeddings) and wait for the
+  // user to approve before the AI reads/interprets the content.
+  source: "gmail",
+  deferAiUntilApproval: true,
 };
 
 /**
@@ -280,6 +288,18 @@ async function ingestAndBridgeMessage(
   // Message row.
   const ragUuid = crypto.randomUUID();
   const toRecipients = [...extracted.to, ...extracted.cc];
+  const attachments = collectAttachmentParts(full.payload);
+  // Deterministic FOLDER tagging (0041) — no AI. This only decides which inbox
+  // folder (Spam/Receipts) a message shows in; it does NOT block ingestion.
+  // Every gated message (spam included, per product intent) is still inserted
+  // AND bridged into processEmail below, so receipts/invoices/contracts get the
+  // full worker-email extraction regardless of this tag.
+  const gate = classifyMessage({
+    from: extracted.from ?? "",
+    subject: extracted.subject ?? "",
+    body: extracted.body,
+    hasAttachments: attachments.length > 0,
+  });
   const [inserted] = await db
     .insert(gmailMessages)
     .values({
@@ -291,6 +311,10 @@ async function ingestAndBridgeMessage(
       subject: extracted.subject ?? null,
       body: extracted.body,
       bodyPlainTxt: extracted.body,
+      bodyHtml: extracted.html ? sanitizeNoteHtml(extracted.html) : null,
+      classification: gate.classification,
+      isSpam: gate.isSpam,
+      spamRationale: gate.spamRationale,
       ragUuid,
     })
     .onConflictDoNothing()
@@ -322,7 +346,6 @@ async function ingestAndBridgeMessage(
   await applyResolutionFks(db, messageRowId, match);
 
   // Attachment provenance (cheap metadata only; OCR is processEmail's job).
-  const attachments = collectAttachmentParts(full.payload);
   for (const att of attachments) {
     const ext = att.filename.includes(".")
       ? att.filename.split(".").pop()?.toLowerCase() ?? null

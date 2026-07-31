@@ -40,7 +40,7 @@ export function ShowroomGmailPanel({
     setError(null);
 
     gmailApi
-      .listShowroomThreadsByDomain(storeId, controller.signal)
+      .listShowroomThreadsByDomain(storeId, "inbox", controller.signal)
       .then((data) => {
         if (!active) return;
         setDomains(data.domains);

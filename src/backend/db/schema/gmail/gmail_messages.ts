@@ -44,11 +44,58 @@ export const gmailMessages = sqliteTable(
 
     /** Plain-text body (0039). Preferred for md5 / classification input. */
     bodyPlainTxt: text("body_plain_txt"),
-    /** HTML body (0039). Sanitized on render. */
+    /**
+     * HTML body (0039). SANITIZED ON WRITE via sanitizeNoteHtml (0041 hardening)
+     * at both ingest sites + the reply path — script/style/iframe/object/embed
+     * tags, on* handlers, and javascript: URLs are stripped before storage, so
+     * the column never holds active content. (The reading pane still renders
+     * plaintext `bodyVisible`, not this.)
+     */
     bodyHtml: text("body_html"),
 
     /** Optional Workers AI–generated summary of the message body. */
     aiSummary: text("ai_summary"),
+
+    /**
+     * Deterministic content classification (0041) — set at ingestion by a
+     * pure text-pattern matcher, NO AI. Drives inbox foldering.
+     *   normal      — ordinary correspondence (default).
+     *   promotional — marketing blast (also sets is_spam=1).
+     *   receipt|invoice|quote — a purchase document (routed to the receipt
+     *     parser); shown in the Receipts folder.
+     */
+    classification: text("classification", {
+      enum: ["normal", "promotional", "receipt", "invoice", "quote"],
+    })
+      .notNull()
+      .default("normal"),
+
+    /**
+     * Spam flag (0041). Deterministic — set when the lowercased body matches a
+     * known marketing/bulk phrase (see spam_rationale). Spam is still ingested
+     * (so sale/deal blasts and app-health checks remain visible) but lands in
+     * the inbox's Spam folder instead of the main list.
+     */
+    isSpam: integer("is_spam", { mode: "boolean" }).notNull().default(false),
+
+    /**
+     * Why is_spam was set — the exact phrase that matched (e.g. "unsubscribe").
+     * Auto-generated from the pattern hit, NOT AI. NULL when not spam.
+     */
+    spamRationale: text("spam_rationale"),
+
+    /** Soft-delete (0041). NULL = live; set = in Trash. */
+    deletedAt: integer("deleted_at", { mode: "timestamp" }),
+
+    /**
+     * Whether this message's embedded (cid:) images have been extracted +
+     * uploaded to Cloudflare Images yet (0041). Guards the on-view upload so a
+     * message is fetched from Gmail + uploaded at most once, even when it has
+     * no inline images (true = checked, regardless of how many were found).
+     */
+    imagesExtracted: integer("images_extracted", { mode: "boolean" })
+      .notNull()
+      .default(false),
 
     /**
      * UUID used as the Vectorize vector id for this message's body embedding.

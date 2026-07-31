@@ -229,7 +229,7 @@ export function GmailThreadView({
     const forThread = threadId;
     setSending(true);
     try {
-      await gmailApi.reply(forThread, body);
+      await gmailApi.reply(forThread, { body });
       if (activeThreadIdRef.current !== forThread) return; // switched threads mid-send
       toast.success("Reply sent.");
       setReplyBody("");

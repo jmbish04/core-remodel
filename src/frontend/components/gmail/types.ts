@@ -48,8 +48,46 @@ export interface GmailMessage {
   toRecipients: string[];
   subject: string | null;
   body: string | null;
+  /** Sanitized HTML body when available (0041). */
+  bodyHtml: string | null;
+  /** Plaintext body with the quoted-reply tail removed (0041). */
+  bodyVisible: string | null;
+  /** The removed quoted/forwarded tail (0041), "" when none. */
+  bodyQuoted: string;
+  classification: string;
+  isSpam: boolean;
   aiSummary: string | null;
   ragUuid: string;
+}
+
+/** A downloadable attachment on a message (0041). Matches `attachmentSchema`. */
+export interface GmailAttachment {
+  id: number;
+  gmailMessageId: number;
+  fileName: string | null;
+  fileExt: string | null;
+  fileMimetype: string | null;
+  fileSizeBytes: number | null;
+}
+
+/** An embedded (inline) image served from Cloudflare Images (0041). */
+export interface GmailEmbeddedImage {
+  id: number;
+  gmailMessageId: number;
+  contentId: string | null;
+  deliveryUrl: string;
+  mimeType: string | null;
+}
+
+/** The inbox folders (0041). */
+export type GmailFolder = "inbox" | "receipts" | "spam" | "trash";
+
+/** Per-folder thread counts for the folder rail. */
+export interface GmailFolderCounts {
+  inbox: number;
+  receipts: number;
+  spam: number;
+  trash: number;
 }
 
 /** Thread header. Matches `threadDetailSchema` in gmail.ts. */
@@ -82,13 +120,21 @@ export interface ThreadsByDomainResponse {
 /** A domain-matched thread carrying its per-message unread count (0040 P4). */
 export interface GmailInboxThreadItemWithUnread extends GmailInboxThreadItem {
   unread: number;
+  /** 0041 — folder tagging for badges. */
+  isSpam?: boolean;
+  isReceipt?: boolean;
+  spamRationale?: string | null;
 }
 
 export interface ShowroomThreadsByDomainResponse {
   success: true;
   domains: string[];
   emails: string[];
-  /** Total unread messages across all matched threads — the hero badge count. */
+  /** The folder these threads were filtered to (0041). */
+  folder: GmailFolder;
+  /** Per-folder thread counts for the folder rail (0041). */
+  counts: GmailFolderCounts;
+  /** Total unread messages in the Inbox folder — the hero badge count. */
   unreadCount: number;
   threads: GmailInboxThreadItemWithUnread[];
 }
@@ -98,10 +144,17 @@ export interface MarkReadResponse {
   marked: number;
 }
 
+export interface DeleteThreadResponse {
+  success: true;
+  deleted: number;
+}
+
 export interface ThreadDetailResponse {
   success: true;
   thread: GmailThreadDetail;
   messages: GmailMessage[];
+  attachments: GmailAttachment[];
+  images: GmailEmbeddedImage[];
 }
 
 export interface ReplyResponse {
@@ -177,10 +230,10 @@ export const gmailApi = {
     );
   },
 
-  /** `GET /api/gmail/showrooms/:storeId/threads-by-domain` (0040 P4, + unread). */
-  listShowroomThreadsByDomain(storeId: number, signal?: AbortSignal) {
+  /** `GET /api/gmail/showrooms/:storeId/threads-by-domain?folder=` (0040 P4 / 0041). */
+  listShowroomThreadsByDomain(storeId: number, folder: GmailFolder = "inbox", signal?: AbortSignal) {
     return request<ShowroomThreadsByDomainResponse>(
-      `/showrooms/${storeId}/threads-by-domain`,
+      `/showrooms/${storeId}/threads-by-domain?folder=${folder}`,
       { signal },
     );
   },
@@ -193,6 +246,22 @@ export const gmailApi = {
     );
   },
 
+  /** `POST /api/gmail/threads/:threadId/mark-unread` (0041). */
+  markThreadUnread(threadId: string) {
+    return request<MarkReadResponse>(
+      `/threads/${encodeURIComponent(threadId)}/mark-unread`,
+      { method: "POST" },
+    );
+  },
+
+  /** `DELETE /api/gmail/threads/:threadId` — soft-delete → Trash (0041). */
+  deleteThread(threadId: string) {
+    return request<DeleteThreadResponse>(
+      `/threads/${encodeURIComponent(threadId)}`,
+      { method: "DELETE" },
+    );
+  },
+
   /** `GET /api/gmail/threads/:threadId` — thread header + messages. */
   getThread(threadId: string, signal?: AbortSignal) {
     return request<ThreadDetailResponse>(
@@ -201,11 +270,14 @@ export const gmailApi = {
     );
   },
 
-  /** `POST /api/gmail/threads/:threadId/reply` — reply-all + send. */
-  reply(threadId: string, body: string) {
+  /**
+   * `POST /api/gmail/threads/:threadId/reply` — reply-all + send. Accepts a
+   * plaintext `body` and/or the PlateJS `{ markdown, html }` pair (0041).
+   */
+  reply(threadId: string, payload: { body?: string; markdown?: string; html?: string }) {
     return request<ReplyResponse>(
       `/threads/${encodeURIComponent(threadId)}/reply`,
-      { method: "POST", body: JSON.stringify({ body }) },
+      { method: "POST", body: JSON.stringify(payload) },
     );
   },
 

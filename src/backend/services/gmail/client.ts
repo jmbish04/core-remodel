@@ -52,7 +52,7 @@ function base64UrlEncodeFromString(input: string): string {
 }
 
 /** Very small HTML-tag stripper for text/html fallback bodies (best-effort, not a full parser). */
-function stripHtmlTags(html: string): string {
+export function stripHtmlTags(html: string): string {
   return html
     .replace(/<style[\s\S]*?<\/style>/gi, "")
     .replace(/<script[\s\S]*?<\/script>/gi, "")
@@ -121,6 +121,8 @@ export interface GmailMessagePart {
   /** Set on attachment parts (empty/absent on inline body parts). */
   filename?: string;
   mimeType?: string;
+  /** Part-level MIME headers (Content-ID / Content-Disposition live here). */
+  headers?: { name: string; value: string }[];
   body?: { data?: string; size?: number; attachmentId?: string };
   parts?: GmailMessagePart[];
 }
@@ -153,7 +155,10 @@ export interface ExtractedMessage {
   subject: string;
   date: string;
   messageIdHeader: string | null;
+  /** Best-effort plaintext body (text/plain, else stripped HTML, else snippet). */
   body: string;
+  /** Raw text/html body when present (0041). Sanitized on render, not here. */
+  html: string | null;
 }
 
 function getHeader(headers: { name: string; value: string }[] | undefined, name: string): string {
@@ -212,7 +217,79 @@ export function extractMessage(message: GmailMessageFull): ExtractedMessage {
   const { plain, html } = extractBodyFromPart(message.payload);
   const body = plain ?? (html ? stripHtmlTags(html) : message.snippet ?? "");
 
-  return { from, to, cc, subject, date, messageIdHeader, body };
+  return { from, to, cc, subject, date, messageIdHeader, body, html: html ?? null };
+}
+
+export interface InlineImagePart {
+  /** Content-ID with angle brackets stripped — matches `src="cid:<this>"`. */
+  contentId: string;
+  mimeType: string;
+  /** Gmail attachment id (fetch bytes via getAttachmentBytes) when not inline. */
+  attachmentId?: string;
+  /** base64url image bytes when Gmail inlined them directly on the part. */
+  inlineData?: string;
+}
+
+/**
+ * Walk a message payload for EMBEDDED (inline) images — image/* parts carrying a
+ * `Content-ID` header, which the HTML body references as `src="cid:...">`. These
+ * are distinct from downloadable attachments (handled elsewhere). Returns one
+ * entry per inline image with either an `attachmentId` (fetch separately) or
+ * `inlineData` (bytes already present).
+ */
+export function collectInlineImageParts(
+  part: GmailMessagePart | GmailMessagePayload | undefined,
+): InlineImagePart[] {
+  if (!part) return [];
+  const out: InlineImagePart[] = [];
+
+  const mime = part.mimeType ?? "";
+  if (mime.startsWith("image/")) {
+    const cidHeader = (part.headers ?? []).find((h) => h.name.toLowerCase() === "content-id");
+    if (cidHeader?.value) {
+      const contentId = cidHeader.value.trim().replace(/^<|>$/g, "");
+      if (contentId) {
+        out.push({
+          contentId,
+          mimeType: mime,
+          attachmentId: part.body?.attachmentId,
+          inlineData: part.body?.attachmentId ? undefined : part.body?.data,
+        });
+      }
+    }
+  }
+
+  for (const child of part.parts ?? []) out.push(...collectInlineImageParts(child));
+  return out;
+}
+
+/** Fetch one attachment's raw bytes (Gmail returns base64url in `data`). */
+export async function getAttachmentBytes(
+  token: string,
+  messageId: string,
+  attachmentId: string,
+): Promise<Uint8Array> {
+  // gmailFetch throws on non-2xx, so a body here is a 200. Validate the shape
+  // rather than trusting the cast — a malformed/unexpected envelope yields no
+  // bytes instead of a runtime surprise.
+  const res = await gmailFetch(token, `/messages/${messageId}/attachments/${attachmentId}`);
+  const data: unknown = await res.json();
+  const b64 =
+    data && typeof data === "object" && typeof (data as { data?: unknown }).data === "string"
+      ? (data as { data: string }).data
+      : "";
+  return base64UrlToBytes(b64);
+}
+
+/** Decode a base64url string to raw bytes. */
+export function base64UrlToBytes(b64url: string): Uint8Array {
+  if (!b64url) return new Uint8Array(0);
+  const normalized = b64url.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4)) % 4);
+  const binary = atob(padded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
 }
 
 // ─── Send ─────────────────────────────────────────────────────────────────────
@@ -317,7 +394,11 @@ export interface ReplyAllInput {
   subject: string;
   inReplyTo?: string | null;
   references?: string | null;
+  /** Plaintext body (always sent — the text/plain fallback part). */
   body: string;
+  /** Optional rich HTML body (0041). When present the message is sent as
+   *  multipart/alternative (text + html). */
+  html?: string | null;
 }
 
 function escapeHeaderValue(value: string): string {
@@ -336,24 +417,69 @@ export function buildReplyAllRaw(input: ReplyAllInput): string {
     ? input.subject.trim()
     : `Re: ${input.subject.trim()}`;
 
-  const lines = [
+  const headers = [
     `From: ${escapeHeaderValue(input.from)}`,
     `To: ${escapeHeaderValue(input.to.join(", "))}`,
   ];
 
   if (input.cc && input.cc.length > 0) {
-    lines.push(`Cc: ${escapeHeaderValue(input.cc.join(", "))}`);
+    headers.push(`Cc: ${escapeHeaderValue(input.cc.join(", "))}`);
   }
 
-  lines.push(`Subject: ${escapeHeaderValue(subject)}`);
-  lines.push("MIME-Version: 1.0");
-  lines.push('Content-Type: text/plain; charset="UTF-8"');
+  headers.push(`Subject: ${escapeHeaderValue(subject)}`);
+  headers.push("MIME-Version: 1.0");
+  if (input.inReplyTo) headers.push(`In-Reply-To: ${escapeHeaderValue(input.inReplyTo)}`);
+  if (input.references) headers.push(`References: ${escapeHeaderValue(input.references)}`);
 
-  if (input.inReplyTo) lines.push(`In-Reply-To: ${escapeHeaderValue(input.inReplyTo)}`);
-  if (input.references) lines.push(`References: ${escapeHeaderValue(input.references)}`);
-
-  const raw = `${lines.join("\r\n")}\r\n\r\n${input.body}`;
+  const raw = buildMimeBody(headers, input.body, input.html);
   return base64UrlEncodeFromString(raw);
+}
+
+/**
+ * base64-encode a UTF-8 string for a MIME body part, wrapped at 76 chars per
+ * RFC 2045. Using base64 (not 7bit) is required because bodies can contain
+ * UTF-8 (emoji, non-Latin) or long lines, which 7bit forbids.
+ */
+function base64MimeEncode(input: string): string {
+  const bytes = new TextEncoder().encode(input);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary).replace(/.{76}/g, "$&\r\n");
+}
+
+/**
+ * Assemble the RFC-822 message from headers + a plaintext body and an optional
+ * HTML body. With HTML, emits `multipart/alternative` (text/plain + text/html)
+ * so clients that can't render HTML fall back to the plaintext part. Both parts
+ * are base64-encoded so UTF-8 content is transmitted verbatim.
+ */
+function buildMimeBody(headers: string[], text: string, html?: string | null): string {
+  const textPart = [
+    'Content-Type: text/plain; charset="UTF-8"',
+    "Content-Transfer-Encoding: base64",
+    "",
+    base64MimeEncode(text),
+  ];
+
+  if (!html || !html.trim()) {
+    return `${[...headers, ...textPart].join("\r\n")}`;
+  }
+  // Fixed boundary is fine — content is base64-encoded, so a part can never
+  // contain the boundary token.
+  const boundary = "----=_remodel_alt_boundary";
+  const parts = [
+    `--${boundary}`,
+    ...textPart,
+    "",
+    `--${boundary}`,
+    'Content-Type: text/html; charset="UTF-8"',
+    "Content-Transfer-Encoding: base64",
+    "",
+    base64MimeEncode(html),
+    "",
+    `--${boundary}--`,
+  ].join("\r\n");
+  return `${[...headers, `Content-Type: multipart/alternative; boundary="${boundary}"`].join("\r\n")}\r\n\r\n${parts}`;
 }
 
 /** Plain (non-reply) compose — same MIME construction, no threading headers, no "Re:" prefix. */

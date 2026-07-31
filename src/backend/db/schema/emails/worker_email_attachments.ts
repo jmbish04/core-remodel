@@ -36,6 +36,16 @@ export const workerEmailAttachments = sqliteTable(
      */
     ragUuid: text("rag_uuid"),
 
+    /** Extracted text (0042) — non-AI `toMarkdown` for PDF/Office; NULL for images/unknown. */
+    extractedText: text("extracted_text"),
+    /**
+     * OCR extraction state (0042):
+     *   extracted     → non-AI text extracted (PDF/Office)
+     *   needs_ai_ocr  → an image; real OCR needs a vision model (gated by approval)
+     *   none          → not a text-bearing document
+     */
+    ocrStatus: text("ocr_status").notNull().default("none"),
+
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),

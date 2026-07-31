@@ -30,20 +30,27 @@ import {
   companies,
   companyContacts,
   contacts,
+  gmailMessageAttachments,
+  gmailMessageImages,
   gmailMessages,
   gmailThreads,
   showroomPocs,
   showroomStoreContacts,
+  showroomStoreLinks,
   showroomStores,
 } from "@backend/db";
 import type { GmailMessage, GmailMessageInsert, GmailThread } from "@backend/db";
 
 import { getGmailAccessToken } from "@backend/services/gmail/auth";
-import { buildComposeRaw, buildReplyAllRaw, sendMessage } from "@backend/services/gmail/client";
+import { classifyMessage, trimQuotedReply } from "@backend/services/gmail/classify-message";
+import { ensureMessageImages } from "@backend/services/gmail/inline-images";
+import { sanitizeNoteHtml } from "@backend/services/notes/markdown";
+import { buildComposeRaw, buildReplyAllRaw, sendMessage, stripHtmlTags } from "@backend/services/gmail/client";
 import { ingestCompanyEmails } from "@backend/services/gmail/ingestion";
 import { runIngestGate } from "@backend/services/gmail/ingest-gate";
 import {
   buildParticipantRows,
+  buildShowroomMatchSpec,
   findThreadIdsByParticipants,
   insertParticipants,
   splitCandidateEmails,
@@ -110,9 +117,19 @@ const backfillParticipantsQuerySchema = z.object({
 
 // ─── Request body schemas ─────────────────────────────────────────────────────
 
-const replyBodySchema = z.object({
-  body: z.string().min(1),
-});
+const replyBodySchema = z
+  .object({
+    // Plaintext body (legacy). Optional now that html/markdown are accepted,
+    // but at least one of body/markdown/html must be present (refined below).
+    body: z.string().optional(),
+    /** Markdown source from the PlateJS composer (0041). */
+    markdown: z.string().optional(),
+    /** Rendered HTML from the PlateJS composer (0041); sent as a text/html part. */
+    html: z.string().optional(),
+  })
+  .refine((v) => Boolean(v.body?.trim() || v.markdown?.trim() || v.html?.trim()), {
+    message: "reply requires body, markdown, or html",
+  });
 
 const composeBodySchema = z.object({
   to: z.array(z.email()).min(1),
@@ -129,6 +146,9 @@ const draftAssistBodySchema = z.object({
   threadId: z.string().min(1),
   instruction: z.string().optional(),
 });
+
+/** Inbox folders (0041). Invalid/absent values fall back to "inbox". */
+const gmailFolderSchema = z.enum(["inbox", "receipts", "spam", "trash"]).catch("inbox");
 
 // ─── Response schemas ─────────────────────────────────────────────────────────
 
@@ -151,6 +171,14 @@ const messageSchema = z.object({
   toRecipients: z.array(z.string()),
   subject: z.string().nullable(),
   body: z.string().nullable(),
+  /** Sanitized HTML body when available (0041). */
+  bodyHtml: z.string().nullable(),
+  /** Plaintext body with the quoted-reply tail removed (0041). */
+  bodyVisible: z.string().nullable(),
+  /** The removed quoted/forwarded tail (0041), shown behind a toggle. "" if none. */
+  bodyQuoted: z.string(),
+  classification: z.string(),
+  isSpam: z.boolean(),
   aiSummary: z.string().nullable(),
   ragUuid: z.string(),
 });
@@ -161,6 +189,25 @@ const threadDetailSchema = z.object({
   subject: z.string().nullable(),
   timestampSent: z.union([z.date(), z.number()]).nullable(),
   companyId: z.number().nullable(),
+});
+
+/** A downloadable attachment on a message (0041) — metadata only. */
+const attachmentSchema = z.object({
+  id: z.number(),
+  gmailMessageId: z.number(),
+  fileName: z.string().nullable(),
+  fileExt: z.string().nullable(),
+  fileMimetype: z.string().nullable(),
+  fileSizeBytes: z.number().nullable(),
+});
+
+/** An embedded (inline) image uploaded to Cloudflare Images (0041). */
+const embeddedImageSchema = z.object({
+  id: z.number(),
+  gmailMessageId: z.number(),
+  contentId: z.string().nullable(),
+  deliveryUrl: z.string(),
+  mimeType: z.string().nullable(),
 });
 
 /** The most recent message on a thread, as summarized in list views. */
@@ -197,6 +244,7 @@ function parseToRecipients(json: string): string[] {
 }
 
 function serializeMessage(row: GmailMessage) {
+  const { visible, quoted } = trimQuotedReply(row.bodyPlainTxt ?? row.body ?? "");
   return {
     id: row.id,
     threadId: row.threadId,
@@ -206,6 +254,11 @@ function serializeMessage(row: GmailMessage) {
     toRecipients: parseToRecipients(row.toRecipientsJson),
     subject: row.subject,
     body: row.body,
+    bodyHtml: row.bodyHtml,
+    bodyVisible: visible,
+    bodyQuoted: quoted,
+    classification: row.classification,
+    isSpam: row.isSpam,
     aiSummary: row.aiSummary,
     ragUuid: row.ragUuid,
   };
@@ -740,15 +793,27 @@ gmailRouter.get("/showrooms/:storeId/threads-by-domain", async (c) => {
       .from(showroomStoreContacts)
       .where(eq(showroomStoreContacts.storeId, storeId))
       .all();
+    const websiteRows = await db
+      .select({ url: showroomStoreLinks.url })
+      .from(showroomStoreLinks)
+      .where(and(eq(showroomStoreLinks.storeId, storeId), eq(showroomStoreLinks.type, "WEBSITE")))
+      .all();
 
-    const candidateEmails = [
-      store.email,
-      store.pocEmail,
-      ...pocRows.map((r) => r.email),
-      ...contactRows.map((r) => r.email),
-    ].filter((e): e is string => Boolean(e && e.trim()));
-
-    const { privateDomains, publicEmails } = splitCandidateEmails(candidateEmails);
+    // A showroom's inbox must show only ITS OWN correspondence. Match the
+    // showroom's own domain (store email + WEBSITE links) domain-wide, but
+    // match POC/store-contact emails by EXACT address only — those are often
+    // reps whose domain belongs to another company, and domain-matching them
+    // is what floods the inbox with unrelated companies. See buildShowroomMatchSpec.
+    const notBlank = (e: string | null): e is string => Boolean(e && e.trim());
+    const { privateDomains, publicEmails } = buildShowroomMatchSpec({
+      ownEmails: [store.email].filter(notBlank),
+      websiteUrls: websiteRows.map((r) => r.url).filter(notBlank),
+      contactEmails: [
+        store.pocEmail,
+        ...pocRows.map((r) => r.email),
+        ...contactRows.map((r) => r.email),
+      ].filter(notBlank),
+    });
 
     const threadIds =
       privateDomains.length > 0 || publicEmails.length > 0
@@ -757,7 +822,15 @@ gmailRouter.get("/showrooms/:storeId/threads-by-domain", async (c) => {
 
     if (threadIds.length === 0) {
       return c.json(
-        { success: true as const, domains: privateDomains, emails: publicEmails, unreadCount: 0, threads: [] },
+        {
+          success: true as const,
+          domains: privateDomains,
+          emails: publicEmails,
+          folder: gmailFolderSchema.parse(c.req.query("folder")),
+          counts: { inbox: 0, receipts: 0, spam: 0, trash: 0 },
+          unreadCount: 0,
+          threads: [],
+        },
         200,
       );
     }
@@ -781,13 +854,52 @@ gmailRouter.get("/showrooms/:storeId/threads-by-domain", async (c) => {
       }
     }
 
-    let unreadCount = 0;
-    const items = threads.map((thread) => {
+    // Folder foldering (0041). A thread lands in a folder from its messages'
+    // classification/isSpam/deletedAt: Trash if soft-deleted; else Spam if any
+    // message is spam; else it's in Inbox — and additionally in Receipts when it
+    // carries a purchase document. (Inbox excludes spam; Receipts keeps them.)
+    const RECEIPT_KINDS = new Set(["receipt", "invoice", "quote"]);
+    type Folder = "inbox" | "receipts" | "spam" | "trash";
+    const requestedFolder: Folder = gmailFolderSchema.parse(c.req.query("folder"));
+
+    const enriched = threads.map((thread) => {
       const msgs = msgsByThread.get(thread.threadId) ?? [];
-      const unread = msgs.filter((m) => m.readAt == null).length;
-      unreadCount += unread;
-      return { ...buildInboxThreadItem(thread, store.name, msgs), unread };
+      const deleted = msgs.some((m) => m.deletedAt != null);
+      const spam = msgs.some((m) => m.isSpam);
+      const receipt = msgs.some((m) => RECEIPT_KINDS.has(m.classification));
+      const unread = msgs.filter((m) => m.readAt == null && m.deletedAt == null).length;
+      // Spam + receipt co-occur (a promo carrying a real quote): it stays out of
+      // the main Inbox (spam) but still shows under Receipts so purchase docs are
+      // never lost. Non-spam receipts show in both Inbox and Receipts.
+      const folders: Folder[] = deleted
+        ? ["trash"]
+        : spam && receipt
+          ? ["spam", "receipts"]
+          : spam
+            ? ["spam"]
+            : receipt
+              ? ["inbox", "receipts"]
+              : ["inbox"];
+      return { thread, msgs, unread, folders, spam, receipt };
     });
+
+    // Per-folder counts (threads) + Inbox unread for the folder rail + badge.
+    const counts = { inbox: 0, receipts: 0, spam: 0, trash: 0 };
+    let unreadCount = 0;
+    for (const e of enriched) {
+      for (const f of e.folders) counts[f] += 1;
+      if (e.folders.includes("inbox")) unreadCount += e.unread;
+    }
+
+    const items = enriched
+      .filter((e) => e.folders.includes(requestedFolder))
+      .map((e) => ({
+        ...buildInboxThreadItem(e.thread, store.name, e.msgs),
+        unread: e.unread,
+        isSpam: e.spam,
+        isReceipt: e.receipt,
+        spamRationale: e.msgs.find((m) => m.spamRationale)?.spamRationale ?? null,
+      }));
     items.sort((a, b) => {
       const at = a.lastMessage?.date ? new Date(a.lastMessage.date).getTime() : -1;
       const bt = b.lastMessage?.date ? new Date(b.lastMessage.date).getTime() : -1;
@@ -795,7 +907,15 @@ gmailRouter.get("/showrooms/:storeId/threads-by-domain", async (c) => {
     });
 
     return c.json(
-      { success: true as const, domains: privateDomains, emails: publicEmails, unreadCount, threads: items },
+      {
+        success: true as const,
+        domains: privateDomains,
+        emails: publicEmails,
+        folder: requestedFolder,
+        counts,
+        unreadCount,
+        threads: items,
+      },
       200,
     );
   } catch (err) {
@@ -834,6 +954,99 @@ gmailRouter.post("/threads/:threadId/mark-read", async (c) => {
   }
 });
 
+/**
+ * POST /api/gmail/threads/:threadId/mark-unread — mark every message in a thread
+ * unread (0041). Inverse of mark-read; idempotent.
+ */
+gmailRouter.openapi(
+  createRoute({
+    method: "post",
+    path: "/threads/{threadId}/mark-unread",
+    operationId: "markGmailThreadUnread",
+    tags: ["Gmail"],
+    summary: "Mark every message in a thread unread",
+    request: { params: threadIdParamSchema },
+    responses: {
+      200: {
+        description: "Marked unread",
+        content: {
+          "application/json": {
+            schema: z.object({ success: z.literal(true), marked: z.number().int() }),
+          },
+        },
+      },
+      500: { description: "Server error", content: { "application/json": { schema: errorSchema } } },
+    },
+  }),
+  async (c) => {
+    const { threadId } = c.req.valid("param");
+    const db = drizzle(c.env.DB);
+    try {
+      const read = await db
+        .select({ id: gmailMessages.id })
+        .from(gmailMessages)
+        .where(and(eq(gmailMessages.threadId, threadId), sql`${gmailMessages.readAt} IS NOT NULL`))
+        .all();
+      if (read.length > 0) {
+        await db.update(gmailMessages).set({ readAt: null }).where(eq(gmailMessages.threadId, threadId)).run();
+      }
+      return c.json({ success: true as const, marked: read.length }, 200);
+    } catch (err) {
+      console.error("[gmail] POST /threads/:threadId/mark-unread error:", err);
+      return c.json({ error: "Failed to mark thread unread" }, 500);
+    }
+  },
+);
+
+/**
+ * DELETE /api/gmail/threads/:threadId — soft-delete a thread (0041): stamp
+ * deleted_at on every message so it moves to the inbox's Trash folder. Does NOT
+ * touch Gmail; this is our local inbox view only. Idempotent.
+ */
+gmailRouter.openapi(
+  createRoute({
+    method: "delete",
+    path: "/threads/{threadId}",
+    operationId: "deleteGmailThread",
+    tags: ["Gmail"],
+    summary: "Soft-delete a thread (move to Trash) — local inbox view only",
+    request: { params: threadIdParamSchema },
+    responses: {
+      200: {
+        description: "Moved to Trash",
+        content: {
+          "application/json": {
+            schema: z.object({ success: z.literal(true), deleted: z.number().int() }),
+          },
+        },
+      },
+      500: { description: "Server error", content: { "application/json": { schema: errorSchema } } },
+    },
+  }),
+  async (c) => {
+    const { threadId } = c.req.valid("param");
+    const db = drizzle(c.env.DB);
+    try {
+      const live = await db
+        .select({ id: gmailMessages.id })
+        .from(gmailMessages)
+        .where(and(eq(gmailMessages.threadId, threadId), sql`${gmailMessages.deletedAt} IS NULL`))
+        .all();
+      if (live.length > 0) {
+        await db
+          .update(gmailMessages)
+          .set({ deletedAt: new Date() })
+          .where(and(eq(gmailMessages.threadId, threadId), sql`${gmailMessages.deletedAt} IS NULL`))
+          .run();
+      }
+      return c.json({ success: true as const, deleted: live.length }, 200);
+    } catch (err) {
+      console.error("[gmail] DELETE /threads/:threadId error:", err);
+      return c.json({ error: "Failed to delete thread" }, 500);
+    }
+  },
+);
+
 // ════════════════════════════════════════════════════════════════════════════
 // GET /threads/:threadId
 // ════════════════════════════════════════════════════════════════════════════
@@ -857,6 +1070,8 @@ gmailRouter.openapi(
               success: z.literal(true),
               thread: threadDetailSchema,
               messages: z.array(messageSchema),
+              attachments: z.array(attachmentSchema),
+              images: z.array(embeddedImageSchema),
             }),
           },
         },
@@ -890,11 +1105,51 @@ gmailRouter.openapi(
         .where(eq(gmailMessages.threadId, threadId))
         .orderBy(gmailMessages.timestamp);
 
+      // Attachments + embedded images for this thread's messages (0041).
+      const msgIds = msgs.map((m) => m.id);
+      const attachmentRows =
+        msgIds.length > 0
+          ? await db
+              .select()
+              .from(gmailMessageAttachments)
+              .where(inArray(gmailMessageAttachments.gmailMessageId, msgIds))
+              .all()
+          : [];
+
+      // Embedded images: upload cid: images to Cloudflare Images on first view
+      // (idempotent, guarded by images_extracted), then read the full set.
+      for (const m of msgs) {
+        if (!m.imagesExtracted) await ensureMessageImages(c.env, db, m);
+      }
+      const imageRows =
+        msgIds.length > 0
+          ? await db
+              .select()
+              .from(gmailMessageImages)
+              .where(inArray(gmailMessageImages.gmailMessageId, msgIds))
+              .all()
+          : [];
+
       return c.json(
         {
           success: true as const,
           thread: serializeThread(thread),
           messages: msgs.map(serializeMessage),
+          attachments: attachmentRows.map((a) => ({
+            id: a.id,
+            gmailMessageId: a.gmailMessageId,
+            fileName: a.fileName,
+            fileExt: a.fileExt,
+            fileMimetype: a.fileMimetype,
+            fileSizeBytes: a.fileSizeBytes,
+          })),
+          images: imageRows.map((i) => ({
+            id: i.id,
+            gmailMessageId: i.gmailMessageId,
+            contentId: i.contentId,
+            deliveryUrl: i.deliveryUrl,
+            mimeType: i.mimeType,
+          })),
         },
         200,
       );
@@ -944,8 +1199,14 @@ gmailRouter.openapi(
   }),
   async (c) => {
     const { threadId } = c.req.valid("param");
-    const { body } = c.req.valid("json");
+    const { body, markdown, html } = c.req.valid("json");
     const db = drizzle(c.env.DB);
+
+    // Plaintext part: explicit body, else the PlateJS markdown, else stripped
+    // from the HTML — never empty when html-only is submitted (7bit/consumers
+    // expect a real text/plain part). The refine guarantees ≥1 input is present.
+    const htmlBody = html?.trim() ? html : null;
+    const plainText = (body?.trim() || markdown?.trim() || (htmlBody ? stripHtmlTags(htmlBody) : "")).trim();
 
     try {
       const [latest] = await db
@@ -973,7 +1234,8 @@ gmailRouter.openapi(
         // threading server-side.
         inReplyTo: null,
         references: null,
-        body,
+        body: plainText,
+        html: htmlBody,
       });
 
       const token = await getGmailAccessToken(c.env);
@@ -986,7 +1248,9 @@ gmailRouter.openapi(
         fromRecipient: SENDER_EMAIL,
         toRecipientsJson: JSON.stringify([...recipients]),
         subject: latest.subject || null,
-        body,
+        body: plainText,
+        bodyPlainTxt: plainText,
+        bodyHtml: htmlBody ? sanitizeNoteHtml(htmlBody) : null,
         ragUuid: crypto.randomUUID(),
       };
 
@@ -1274,15 +1538,27 @@ gmailRouter.openapi(
         ],
         max_tokens: 1024,
         gateway: { id: c.env.AI_GATEWAY_ID },
-      } as Parameters<typeof c.env.AI.run>[1])) as { response?: string };
+      } as Parameters<typeof c.env.AI.run>[1])) as {
+        response?: string;
+        // Some Workers AI models return the chat-completions envelope instead of
+        // `.response` (documented repo gotcha) — read both before giving up.
+        choices?: { message?: { content?: string } }[];
+      };
 
-      const draft = raw?.response?.trim() ?? "";
-      if (!draft) throw new Error("Workers AI returned an empty draft");
+      const draft = (raw?.response ?? raw?.choices?.[0]?.message?.content ?? "").trim();
+      if (!draft) {
+        // Surface WHAT came back so a real failure (rate-limit, empty content)
+        // isn't hidden behind a generic 500.
+        console.error("[gmail] draft-assist empty draft; envelope:", JSON.stringify(raw)?.slice(0, 500));
+        return c.json({ error: "The model returned an empty draft. Try again." }, 500);
+      }
 
       return c.json({ success: true as const, draft }, 200);
     } catch (err) {
+      // Log the real cause server-side; return a generic message so provider/
+      // runtime internals don't leak to the client.
       console.error("[gmail] POST /draft-assist error:", err);
-      return c.json({ error: "Failed to generate draft" }, 500);
+      return c.json({ error: "Failed to generate draft. Please try again." }, 500);
     }
   },
 );
@@ -1401,6 +1677,132 @@ gmailRouter.openapi(
     } catch (err) {
       console.error("[gmail] POST /backfill-participants error:", err);
       return c.json({ error: "Failed to backfill participants" }, 500);
+    }
+  },
+);
+
+// ════════════════════════════════════════════════════════════════════════════
+// POST /backfill-classification (0041)
+// ════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Re-run the deterministic classifier over EXISTING gmail_messages so the
+ * back-catalogue gets spam/receipt foldering (new rows already get it at
+ * ingestion). Cursor-paged by ascending id; idempotent — re-running just
+ * recomputes the same values. NO AI.
+ */
+gmailRouter.openapi(
+  createRoute({
+    method: "post",
+    path: "/backfill-classification",
+    operationId: "backfillGmailClassification",
+    tags: ["Gmail"],
+    summary: "Re-classify existing gmail_messages (spam/receipt), cursor-paged, idempotent",
+    request: { query: backfillParticipantsQuerySchema },
+    responses: {
+      200: {
+        description: "Backfill page processed",
+        content: {
+          "application/json": {
+            schema: z.object({
+              success: z.literal(true),
+              processedMessages: z.number().int(),
+              spamFlagged: z.number().int(),
+              nextAfterId: z.number().int().nullable(),
+            }),
+          },
+        },
+      },
+      400: { description: "Validation error", content: { "application/json": { schema: errorSchema } } },
+      500: { description: "Server error", content: { "application/json": { schema: errorSchema } } },
+    },
+  }),
+  async (c) => {
+    const { limit: limitRaw, afterId: afterIdRaw } = c.req.valid("query");
+    const limit = limitRaw === undefined ? BACKFILL_DEFAULT_LIMIT : Number(limitRaw);
+    const afterId = afterIdRaw === undefined ? 0 : Number(afterIdRaw);
+    if (!Number.isFinite(limit) || !Number.isInteger(limit) || limit < 1 || limit > BACKFILL_MAX_LIMIT) {
+      return c.json({ error: `limit must be an integer between 1 and ${BACKFILL_MAX_LIMIT}` }, 400);
+    }
+    if (!Number.isFinite(afterId) || !Number.isInteger(afterId) || afterId < 0) {
+      return c.json({ error: "afterId must be a non-negative integer" }, 400);
+    }
+
+    const db = drizzle(c.env.DB);
+    try {
+      const page = await db
+        .select({
+          id: gmailMessages.id,
+          fromRecipient: gmailMessages.fromRecipient,
+          subject: gmailMessages.subject,
+          body: gmailMessages.body,
+          bodyPlainTxt: gmailMessages.bodyPlainTxt,
+        })
+        .from(gmailMessages)
+        .where(sql`${gmailMessages.id} > ${afterId}`)
+        .orderBy(gmailMessages.id)
+        .limit(limit)
+        .all();
+
+      if (page.length === 0) {
+        return c.json(
+          { success: true as const, processedMessages: 0, spamFlagged: 0, nextAfterId: null },
+          200,
+        );
+      }
+
+      // Which of these messages carry attachments (chunked to respect D1's
+      // 100-bound-param cap on the IN list).
+      const pageIds = page.map((p) => p.id);
+      const withAttachments = new Set<number>();
+      for (let i = 0; i < pageIds.length; i += 100) {
+        const chunk = pageIds.slice(i, i + 100);
+        const rows = await db
+          .select({ mid: gmailMessageAttachments.gmailMessageId })
+          .from(gmailMessageAttachments)
+          .where(inArray(gmailMessageAttachments.gmailMessageId, chunk))
+          .all();
+        for (const r of rows) withAttachments.add(r.mid);
+      }
+
+      // Recompute and collect per-row updates.
+      let spamFlagged = 0;
+      const updates = page.map((m) => {
+        const gate = classifyMessage({
+          from: m.fromRecipient,
+          subject: m.subject ?? "",
+          body: m.bodyPlainTxt ?? m.body ?? "",
+          hasAttachments: withAttachments.has(m.id),
+        });
+        if (gate.isSpam) spamFlagged += 1;
+        return db
+          .update(gmailMessages)
+          .set({
+            classification: gate.classification,
+            isSpam: gate.isSpam,
+            spamRationale: gate.spamRationale,
+          })
+          .where(eq(gmailMessages.id, m.id));
+      });
+
+      // One atomic batch per ≤100 statements (each statement is well under the
+      // per-statement bound-param cap).
+      for (let i = 0; i < updates.length; i += 100) {
+        const slice = updates.slice(i, i + 100);
+        if (slice.length === 0) continue;
+        await db.batch(slice as [(typeof slice)[number], ...(typeof slice)[number][]]);
+      }
+
+      const lastId = page[page.length - 1]?.id ?? null;
+      const nextAfterId = page.length === limit ? lastId : null;
+
+      return c.json(
+        { success: true as const, processedMessages: page.length, spamFlagged, nextAfterId },
+        200,
+      );
+    } catch (err) {
+      console.error("[gmail] POST /backfill-classification error:", err);
+      return c.json({ error: "Failed to backfill classification" }, 500);
     }
   },
 );

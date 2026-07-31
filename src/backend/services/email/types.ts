@@ -61,6 +61,21 @@ export interface RouteDecision {
   /** Human-readable reason the route was chosen (persisted for audit). */
   reason: string;
   profile: HandlingProfile;
+  /**
+   * Provenance of the message (0042). `"worker"` = inbound to the worker email
+   * (remodel@hacolby.app) — trusted. `"gmail"` = bridged from the user's Gmail —
+   * treated with caution. Defaults to `"worker"` when unset.
+   */
+  source?: "worker" | "gmail";
+  /**
+   * When true (0042), the pipeline runs only the NON-AI work (attachment text
+   * extraction + embeddings) and then STOPS, marking the email
+   * `ai_status = "pending_approval"` instead of running the Gemini
+   * classification/extraction. A human must approve before AI reads the content.
+   * Set for Gmail-sourced mail — anyone can email the user, so an unprompted LLM
+   * extraction on that content is a prompt-injection + spend surface.
+   */
+  deferAiUntilApproval?: boolean;
 }
 
 /**

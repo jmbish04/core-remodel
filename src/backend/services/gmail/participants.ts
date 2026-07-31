@@ -46,6 +46,8 @@ import { drizzle } from "drizzle-orm/d1";
 import { gmailMessageParticipants } from "@backend/db";
 import type { GmailMessageParticipantInsert } from "@backend/db";
 
+import { normalizeDomain } from "./ingest-gate-domains";
+
 /**
  * Public/consumer email providers — NEVER used for domain-wide matching
  * (ingestion's Gmail search-query construction, and the company↔thread
@@ -233,6 +235,55 @@ export function splitCandidateEmails(rawEmails: string[]): {
     } else {
       privateDomains.add(parsed.domain);
     }
+  }
+
+  return {
+    privateDomains: Array.from(privateDomains),
+    publicEmails: Array.from(publicEmails),
+  };
+}
+
+/**
+ * Build the participant match-spec for a SHOWROOM inbox. Unlike a company
+ * (whose contacts all share the company's own private domain), a showroom's
+ * contacts are frequently sales reps whose email domain belongs to a
+ * DIFFERENT company (a manufacturer/distributor). So the two candidate
+ * sources are matched differently:
+ *
+ *   - `ownEmails` (the store's own address) + `websiteUrls` (its `WEBSITE`
+ *     links) establish the showroom's OWN domain — safe to match domain-wide,
+ *     since every address at `pietrafina.com` is the showroom itself.
+ *   - `contactEmails` (POCs, store contacts, the main-POC email) are matched
+ *     by EXACT address only. Domain-matching them is exactly the bug that
+ *     floods the inbox with every unrelated company a rep also emails.
+ *
+ * Public-provider domains are never matched domain-wide (see
+ * `PUBLIC_EMAIL_DOMAINS`); an own-email on a public domain, and any website
+ * URL that resolves to one, fall back to exact / are dropped respectively.
+ */
+export function buildShowroomMatchSpec(input: {
+  ownEmails: string[];
+  websiteUrls: string[];
+  contactEmails: string[];
+}): { privateDomains: string[]; publicEmails: string[] } {
+  const privateDomains = new Set<string>();
+  const publicEmails = new Set<string>();
+
+  // Own addresses → domain-wide when private, exact when on a public provider.
+  const own = splitCandidateEmails(input.ownEmails);
+  own.privateDomains.forEach((d) => privateDomains.add(d));
+  own.publicEmails.forEach((e) => publicEmails.add(e));
+
+  // Website links → the showroom's own domain, matched domain-wide.
+  for (const url of input.websiteUrls) {
+    const domain = normalizeDomain(url);
+    if (domain && !PUBLIC_EMAIL_DOMAINS.has(domain)) privateDomains.add(domain);
+  }
+
+  // Contacts → EXACT address only, never domain-wide.
+  for (const raw of input.contactEmails) {
+    const parsed = parseEmailAddress(raw);
+    if (parsed) publicEmails.add(parsed.email);
   }
 
   return {

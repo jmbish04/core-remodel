@@ -79,7 +79,7 @@ export function MaterialViewportApp({ id }: { id: number }) {
   if (!material) return <div className="container mx-auto px-4 py-10 text-muted-foreground">Material not found.</div>;
 
   return (
-    <main className="container mx-auto max-w-3xl px-4 py-10">
+    <main className="w-full px-4 py-10 md:px-8">
       <a href="/admin/shopping/schedule" className="inline-flex items-center gap-1 text-[10px] font-mono uppercase tracking-widest text-muted-foreground hover:text-foreground">
         <ArrowLeft className="h-3 w-3" /> Materials Schedule
       </a>

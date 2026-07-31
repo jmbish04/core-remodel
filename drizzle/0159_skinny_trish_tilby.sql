@@ -1,0 +1,1 @@
+ALTER TABLE `gmail_messages` ADD `images_extracted` integer DEFAULT false NOT NULL;

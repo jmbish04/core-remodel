@@ -540,8 +540,8 @@ export function StoreViewportApp({
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [galleryStartIndex, setGalleryStartIndex] = useState(0);
 
-  // Inbox (0040 P4).
-  const [inboxOpen, setInboxOpen] = useState(false);
+  // Inbox unread badge (0040 P4). The button now opens the full-page inbox (0041);
+  // the hidden panel below stays mounted only to keep this count fresh.
   const [inboxUnread, setInboxUnread] = useState(0);
 
   // Modal state.
@@ -1050,7 +1050,7 @@ export function StoreViewportApp({
   const effectiveScrapeStatus: ScrapeStatus = scrapeStatus ?? store.scrapeStatus ?? "idle";
 
   return (
-    <main className="container mx-auto max-w-5xl px-4 py-10">
+    <main className="w-full px-4 py-10 md:px-8">
       <a
         href="/admin/shopping/showrooms"
         className="inline-flex items-center gap-1 font-mono text-[10px] uppercase tracking-widest text-muted-foreground hover:text-foreground"
@@ -1251,10 +1251,10 @@ export function StoreViewportApp({
           </Button>
           <Button
             size="sm"
-            variant={inboxOpen ? "default" : "outline"}
+            variant="outline"
             className="relative gap-1.5"
             aria-label={`Inbox${inboxUnread > 0 ? ` (${inboxUnread} unread)` : ""}`}
-            onClick={() => setInboxOpen((v) => !v)}
+            render={<a href={`/admin/shopping/store/${id}/inbox`} />}
           >
             <Mail className="size-3.5" /> Inbox
             {inboxUnread > 0 ? (
@@ -1265,8 +1265,9 @@ export function StoreViewportApp({
           </Button>
         </div>
 
-        {/* Inbox panel — always mounted so the badge populates on load; toggled open. */}
-        <div className={inboxOpen ? "mt-5" : "hidden"}>
+        {/* Hidden inbox panel — kept mounted only so the unread badge above
+            populates on load; the Inbox button now opens the full-page inbox. */}
+        <div className="hidden">
           <ShowroomGmailPanel
             storeId={id}
             storeName={store.name}
