@@ -190,6 +190,7 @@ export function StreetViewTour({
           pano: panoId.current,
           visible: true,
           addressControl: false,
+          motionTracking: false,
           motionTrackingControl: false,
           fullscreenControl: true,
         });
