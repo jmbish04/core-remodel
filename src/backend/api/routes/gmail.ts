@@ -955,6 +955,126 @@ gmailRouter.post("/threads/:threadId/mark-read", async (c) => {
 });
 
 /**
+ * POST /api/gmail/threads/:threadId/mark-spam — move a thread to Spam (user
+ * action). Sets is_spam on every message with rationale 'manual'. Reversible
+ * via mark-not-spam.
+ */
+gmailRouter.post("/threads/:threadId/mark-spam", async (c) => {
+  const db = drizzle(c.env.DB);
+  const threadId = c.req.param("threadId");
+  if (!threadId) return c.json({ error: "Invalid thread id" }, 400);
+  try {
+    await db
+      .update(gmailMessages)
+      .set({ isSpam: true, spamRationale: "manual" })
+      .where(eq(gmailMessages.threadId, threadId))
+      .run();
+    return c.json({ success: true as const }, 200);
+  } catch (err) {
+    console.error("[gmail] POST /threads/:threadId/mark-spam error:", err);
+    return c.json({ error: "Failed to mark thread spam" }, 500);
+  }
+});
+
+/** POST /api/gmail/threads/:threadId/mark-not-spam — inverse of mark-spam. */
+gmailRouter.post("/threads/:threadId/mark-not-spam", async (c) => {
+  const db = drizzle(c.env.DB);
+  const threadId = c.req.param("threadId");
+  if (!threadId) return c.json({ error: "Invalid thread id" }, 400);
+  try {
+    await db
+      .update(gmailMessages)
+      .set({ isSpam: false, spamRationale: null })
+      .where(eq(gmailMessages.threadId, threadId))
+      .run();
+    return c.json({ success: true as const }, 200);
+  } catch (err) {
+    console.error("[gmail] POST /threads/:threadId/mark-not-spam error:", err);
+    return c.json({ error: "Failed to unmark thread spam" }, 500);
+  }
+});
+
+/**
+ * GET /api/gmail/inbox?folder=inbox|receipts|spam|trash — the GLOBAL inbox,
+ * folder-aware (0042 fix). Same foldering as the per-showroom inbox but over
+ * ALL recent threads, so spam is split out of the main list everywhere. Caps at
+ * the most recent threads to stay bounded.
+ */
+gmailRouter.get("/inbox", async (c) => {
+  const db = drizzle(c.env.DB);
+  const requestedFolder = gmailFolderSchema.parse(c.req.query("folder"));
+  const RECEIPT_KINDS = new Set(["receipt", "invoice", "quote"]);
+  try {
+    const threads = await db
+      .select()
+      .from(gmailThreads)
+      .orderBy(desc(gmailThreads.timestampSent))
+      .limit(300)
+      .all();
+
+    const msgsByThread = new Map<string, GmailMessage[]>();
+    const ids = threads.map((t) => t.threadId);
+    for (let i = 0; i < ids.length; i += D1_MAX_BOUND_PARAMS) {
+      const chunk = ids.slice(i, i + D1_MAX_BOUND_PARAMS);
+      const rows = await db.select().from(gmailMessages).where(inArray(gmailMessages.threadId, chunk)).all();
+      for (const m of rows) {
+        const list = msgsByThread.get(m.threadId) ?? [];
+        list.push(m);
+        msgsByThread.set(m.threadId, list);
+      }
+    }
+
+    const enriched = threads.map((thread) => {
+      const msgs = msgsByThread.get(thread.threadId) ?? [];
+      const deleted = msgs.some((m) => m.deletedAt != null);
+      const spam = msgs.some((m) => m.isSpam);
+      const receipt = msgs.some((m) => RECEIPT_KINDS.has(m.classification));
+      const unread = msgs.filter((m) => m.readAt == null && m.deletedAt == null).length;
+      const folders = deleted
+        ? (["trash"] as const)
+        : spam && receipt
+          ? (["spam", "receipts"] as const)
+          : spam
+            ? (["spam"] as const)
+            : receipt
+              ? (["inbox", "receipts"] as const)
+              : (["inbox"] as const);
+      return { thread, msgs, unread, folders, spam, receipt };
+    });
+
+    const counts = { inbox: 0, receipts: 0, spam: 0, trash: 0 };
+    let unreadCount = 0;
+    for (const e of enriched) {
+      for (const f of e.folders) counts[f] += 1;
+      if ((e.folders as readonly string[]).includes("inbox")) unreadCount += e.unread;
+    }
+
+    const items = enriched
+      .filter((e) => (e.folders as readonly string[]).includes(requestedFolder))
+      .map((e) => ({
+        ...buildInboxThreadItem(e.thread, "", e.msgs),
+        unread: e.unread,
+        isSpam: e.spam,
+        isReceipt: e.receipt,
+        spamRationale: e.msgs.find((m) => m.spamRationale)?.spamRationale ?? null,
+      }))
+      .sort((a, b) => {
+        const at = a.lastMessage?.date ? new Date(a.lastMessage.date).getTime() : -1;
+        const bt = b.lastMessage?.date ? new Date(b.lastMessage.date).getTime() : -1;
+        return bt - at;
+      });
+
+    return c.json(
+      { success: true as const, folder: requestedFolder, counts, unreadCount, threads: items },
+      200,
+    );
+  } catch (err) {
+    console.error("[gmail] GET /inbox error:", err);
+    return c.json({ error: "Failed to list inbox" }, 500);
+  }
+});
+
+/**
  * POST /api/gmail/threads/:threadId/mark-unread — mark every message in a thread
  * unread (0041). Inverse of mark-read; idempotent.
  */

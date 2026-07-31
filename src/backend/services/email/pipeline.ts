@@ -357,7 +357,14 @@ export async function runImageOcr(
         .set({ extractedText: text, ocrStatus: text ? "extracted" : "none" })
         .where(eq(workerEmailAttachments.id, att.id));
     } catch (err) {
+      // Mark terminal so a permanently-unprocessable image isn't re-OCR'd on
+      // every approve (the selector only picks up ocr_status='needs_ai_ocr').
       console.error(`[email-pipeline] image OCR failed for attachment ${att.id}:`, err);
+      await db
+        .update(workerEmailAttachments)
+        .set({ ocrStatus: "failed" })
+        .where(eq(workerEmailAttachments.id, att.id))
+        .catch(() => {});
     }
   }
 }

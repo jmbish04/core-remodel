@@ -53,27 +53,40 @@ export function AlertsApp() {
   const [loading, setLoading] = React.useState(true);
   const [approving, setApproving] = React.useState<string | null>(null);
 
-  const load = React.useCallback(() => {
-    setLoading(true);
+  // A monotonically-increasing token so a slow in-flight fetch can't overwrite a
+  // newer one's result (fixes concurrent-load races from poll + realtime).
+  const reqRef = React.useRef(0);
+
+  const load = React.useCallback((initial = false) => {
+    const seq = ++reqRef.current;
+    if (initial) setLoading(true);
     fetch("/api/alerts", { credentials: "include" })
-      .then((r) => (r.ok ? (r.json() as Promise<AlertsResponse>) : null))
-      .then((d) => d && setData(d))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      .then((r) => (r.ok ? (r.json() as Promise<AlertsResponse>) : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((d) => {
+        if (seq === reqRef.current) setData(d);
+      })
+      .catch((err) => {
+        // Only surface an error when we have nothing to show — a transient poll
+        // failure with data already on screen shouldn't spam toasts.
+        if (initial) toast.error(err instanceof Error ? err.message : "Failed to load alerts");
+      })
+      .finally(() => {
+        if (initial && seq === reqRef.current) setLoading(false);
+      });
   }, []);
 
   React.useEffect(() => {
-    load();
+    load(true);
     // Live refresh: subscribe to the shared realtime room; re-load on any poke.
     let ws: WebSocket | null = null;
     try {
       const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
       ws = new WebSocket(`${proto}//${window.location.host}/api/realtime/estimates?room=global`);
-      ws.onmessage = () => load();
+      ws.onmessage = () => load(false);
     } catch {
       /* realtime is best-effort; polling below covers it */
     }
-    const poll = window.setInterval(load, 60_000);
+    const poll = window.setInterval(() => load(false), 60_000);
     return () => {
       ws?.close();
       window.clearInterval(poll);
@@ -82,6 +95,10 @@ export function AlertsApp() {
 
   const approveAi = async (alert: Alert) => {
     const emailId = alert.id.split(":")[1];
+    if (!emailId || !/^\d+$/.test(emailId)) {
+      toast.error("Malformed alert — cannot approve.");
+      return;
+    }
     setApproving(alert.id);
     try {
       const res = await fetch(`/api/worker-emails/${emailId}/approve-ai`, {
@@ -112,7 +129,7 @@ export function AlertsApp() {
         <span className="text-sm text-muted-foreground">
           {data ? `${data.counts.total ?? 0} open` : ""}
         </span>
-        <Button size="icon" variant="ghost" className="ml-auto size-8" onClick={load} aria-label="Refresh">
+        <Button size="icon" variant="ghost" className="ml-auto size-8" onClick={() => load(true)} aria-label="Refresh">
           <RefreshCw className="size-4" />
         </Button>
       </div>

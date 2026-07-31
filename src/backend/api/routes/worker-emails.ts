@@ -277,22 +277,35 @@ workerEmailsRouter.post("/:id/approve-ai", async (c) => {
   const emailId = parseInt(c.req.param("id"), 10);
   if (!Number.isFinite(emailId)) return c.json({ error: "Invalid email id" }, 400);
 
-  const [email] = await db.select().from(workerEmails).where(eq(workerEmails.id, emailId)).limit(1);
-  if (!email) return c.json({ error: "Email not found" }, 404);
-  if (email.aiStatus !== "pending_approval") {
-    return c.json({ error: `Email is not pending approval (ai_status=${email.aiStatus})` }, 409);
+  // Atomically CLAIM the transition (pending_approval → processing): only ONE
+  // request wins, so two concurrent approves can't both run OCR + extraction.
+  const claimed = await db
+    .update(workerEmails)
+    .set({ aiStatus: "processing" })
+    .where(and(eq(workerEmails.id, emailId), eq(workerEmails.aiStatus, "pending_approval")))
+    .returning({ id: workerEmails.id })
+    .all();
+  if (claimed.length === 0) {
+    const [row] = await db
+      .select({ aiStatus: workerEmails.aiStatus })
+      .from(workerEmails)
+      .where(eq(workerEmails.id, emailId))
+      .limit(1);
+    if (!row) return c.json({ error: "Email not found" }, 404);
+    return c.json({ error: `Email is not pending approval (ai_status=${row.aiStatus})` }, 409);
   }
 
   try {
     // The AI steps the user just authorized: vision OCR on image attachments,
     // then the deferred Gemini classification/extraction.
     await runImageOcr(db, c.env, emailId);
+    const result = await reprocessEmail(db, c.env, emailId);
+    // Approval metadata + approved status ONLY after success, so a failed run
+    // never leaves a row that looks both approved and failed.
     await db
       .update(workerEmails)
-      .set({ aiApprovedAt: new Date(), aiApprovedBy: "Admin" })
+      .set({ aiStatus: "approved", aiApprovedAt: new Date(), aiApprovedBy: "Admin" })
       .where(eq(workerEmails.id, emailId));
-    const result = await reprocessEmail(db, c.env, emailId);
-    await db.update(workerEmails).set({ aiStatus: "approved" }).where(eq(workerEmails.id, emailId));
 
     // Poke the alerts center (0042 P3) — the item moved from pending to extracted.
     await publishRealtimeEvent(c.env, "global", {

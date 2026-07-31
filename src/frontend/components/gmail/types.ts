@@ -139,6 +139,15 @@ export interface ShowroomThreadsByDomainResponse {
   threads: GmailInboxThreadItemWithUnread[];
 }
 
+/** The GLOBAL folder-aware inbox (all mail) — same shape minus domain scoping. */
+export interface GlobalInboxResponse {
+  success: true;
+  folder: GmailFolder;
+  counts: GmailFolderCounts;
+  unreadCount: number;
+  threads: GmailInboxThreadItemWithUnread[];
+}
+
 export interface MarkReadResponse {
   success: true;
   marked: number;
@@ -246,12 +255,27 @@ export const gmailApi = {
     );
   },
 
+  /** `GET /api/gmail/inbox?folder=` — GLOBAL folder-aware inbox (all mail). */
+  listGlobalInbox(folder: GmailFolder = "inbox", signal?: AbortSignal) {
+    return request<GlobalInboxResponse>(`/inbox?folder=${folder}`, { signal });
+  },
+
   /** `POST /api/gmail/threads/:threadId/mark-unread` (0041). */
   markThreadUnread(threadId: string) {
     return request<MarkReadResponse>(
       `/threads/${encodeURIComponent(threadId)}/mark-unread`,
       { method: "POST" },
     );
+  },
+
+  /** `POST /api/gmail/threads/:threadId/mark-spam` — move to Spam (0042). */
+  markThreadSpam(threadId: string) {
+    return request<{ success: true }>(`/threads/${encodeURIComponent(threadId)}/mark-spam`, { method: "POST" });
+  },
+
+  /** `POST /api/gmail/threads/:threadId/mark-not-spam` — reverse (0042). */
+  markThreadNotSpam(threadId: string) {
+    return request<{ success: true }>(`/threads/${encodeURIComponent(threadId)}/mark-not-spam`, { method: "POST" });
   },
 
   /** `DELETE /api/gmail/threads/:threadId` — soft-delete → Trash (0041). */

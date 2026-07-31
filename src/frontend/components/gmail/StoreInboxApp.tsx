@@ -25,6 +25,7 @@ import {
   type GmailFolder,
   type GmailFolderCounts,
   type GmailInboxThreadItemWithUnread,
+  type ShowroomThreadsByDomainResponse,
   type ThreadDetailResponse,
 } from "./types";
 
@@ -42,13 +43,24 @@ function isTrustedImageUrl(url: string): boolean {
   return /^https:\/\/imagedelivery\.net\//.test(url);
 }
 
-export function StoreInboxApp({ storeId, storeName: storeNameProp }: { storeId: number; storeName?: string }) {
-  const [storeName, setStoreName] = React.useState(storeNameProp ?? "Showroom");
+export function StoreInboxApp({
+  storeId,
+  storeName: storeNameProp,
+  initialThreadId,
+}: {
+  /** Omit for the GLOBAL inbox (all mail); pass a store id to scope to one showroom. */
+  storeId?: number;
+  storeName?: string;
+  /** Deep-link: open this thread on mount (from an alert). */
+  initialThreadId?: string;
+}) {
+  const isGlobal = storeId == null;
+  const [storeName, setStoreName] = React.useState(storeNameProp ?? (isGlobal ? "All Mail" : "Showroom"));
   const [folder, setFolder] = React.useState<GmailFolder>("inbox");
 
-  // Resolve the showroom's name for the header/rail (same endpoint the viewport uses).
+  // Resolve the showroom's name for the header/rail (scoped mode only).
   React.useEffect(() => {
-    if (storeNameProp) return;
+    if (isGlobal || storeNameProp) return;
     const controller = new AbortController();
     fetch(`/api/showroom-stores/${storeId}`, { credentials: "include", signal: controller.signal })
       .then((r) => (r.ok ? (r.json() as Promise<{ name?: string }>) : null))
@@ -57,25 +69,27 @@ export function StoreInboxApp({ storeId, storeName: storeNameProp }: { storeId: 
       })
       .catch(() => {});
     return () => controller.abort();
-  }, [storeId, storeNameProp]);
+  }, [isGlobal, storeId, storeNameProp]);
 
   const [threads, setThreads] = React.useState<GmailInboxThreadItemWithUnread[]>([]);
   const [counts, setCounts] = React.useState<GmailFolderCounts>(EMPTY_COUNTS);
   const [domains, setDomains] = React.useState<string[]>([]);
   const [loadingList, setLoadingList] = React.useState(true);
-  const [selectedThreadId, setSelectedThreadId] = React.useState<string | null>(null);
+  const [selectedThreadId, setSelectedThreadId] = React.useState<string | null>(initialThreadId ?? null);
   const [reloadKey, setReloadKey] = React.useState(0);
 
   React.useEffect(() => {
     const controller = new AbortController();
     setLoadingList(true);
-    gmailApi
-      .listShowroomThreadsByDomain(storeId, folder, controller.signal)
+    const req = isGlobal
+      ? gmailApi.listGlobalInbox(folder, controller.signal)
+      : gmailApi.listShowroomThreadsByDomain(storeId as number, folder, controller.signal);
+    req
       .then((data) => {
         setThreads(data.threads);
         setCounts(data.counts);
-        setDomains([...data.domains, ...data.emails]);
-        // keep selection only if it still exists in this folder
+        const scoped = data as ShowroomThreadsByDomainResponse;
+        setDomains(Array.isArray(scoped.domains) ? [...scoped.domains, ...(scoped.emails ?? [])] : []);
         setSelectedThreadId((cur) => (cur && data.threads.some((t) => t.threadId === cur) ? cur : null));
       })
       .catch((err) => {
@@ -86,7 +100,7 @@ export function StoreInboxApp({ storeId, storeName: storeNameProp }: { storeId: 
         if (!controller.signal.aborted) setLoadingList(false);
       });
     return () => controller.abort();
-  }, [storeId, folder, reloadKey]);
+  }, [isGlobal, storeId, folder, reloadKey]);
 
   const reload = () => setReloadKey((k) => k + 1);
 
@@ -118,10 +132,12 @@ export function StoreInboxApp({ storeId, storeName: storeNameProp }: { storeId: 
             ) : null}
           </button>
         ))}
-        <div className="mt-auto px-2 pb-1 pt-3 text-[10px] leading-relaxed text-muted-foreground">
-          Scoped to {storeName}. Matching:{" "}
-          {domains.length > 0 ? domains.map((d) => `@${d.replace(/^@/, "")}`).join(", ") : "—"}
-        </div>
+        {!isGlobal ? (
+          <div className="mt-auto px-2 pb-1 pt-3 text-[10px] leading-relaxed text-muted-foreground">
+            Scoped to {storeName}. Matching:{" "}
+            {domains.length > 0 ? domains.map((d) => `@${d.replace(/^@/, "")}`).join(", ") : "—"}
+          </div>
+        ) : null}
       </nav>
 
       {/* Thread list */}
@@ -223,6 +239,16 @@ function ThreadReadingPane({
     }
   };
 
+  const setSpam = async (spam: boolean) => {
+    try {
+      await (spam ? gmailApi.markThreadSpam(threadId) : gmailApi.markThreadNotSpam(threadId));
+      toast.success(spam ? "Moved to Spam." : "Marked not spam.");
+      onClosed();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
@@ -248,6 +274,15 @@ function ThreadReadingPane({
           <Button size="sm" variant="outline" className="gap-1.5" onClick={markUnread}>
             <MailOpen className="size-3.5" /> Unread
           </Button>
+          {folder === "spam" ? (
+            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setSpam(false)}>
+              <ShieldAlert className="size-3.5" /> Not spam
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline" className="gap-1.5 text-amber-600" onClick={() => setSpam(true)}>
+              <ShieldAlert className="size-3.5" /> Spam
+            </Button>
+          )}
           {folder !== "trash" ? (
             <Button size="sm" variant="outline" className="gap-1.5 text-destructive" onClick={del}>
               <Trash2 className="size-3.5" /> Delete

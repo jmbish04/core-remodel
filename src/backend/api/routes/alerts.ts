@@ -51,6 +51,7 @@ alertsRouter.get("/", async (c) => {
     db
       .select({
         id: gmailMessages.id,
+        threadId: gmailMessages.threadId,
         subject: gmailMessages.subject,
         from: gmailMessages.fromRecipient,
         ts: gmailMessages.timestamp,
@@ -117,7 +118,8 @@ alertsRouter.get("/", async (c) => {
       title: `New email${m.from ? ` from ${m.from}` : ""}`,
       context: m.subject ?? "(no subject)",
       timestamp: toMs(m.ts),
-      route: `/admin/inbox/gmail`,
+      // Deep-link straight to the thread so a click opens the email, not the list.
+      route: `/admin/inbox/gmail?thread=${encodeURIComponent(m.threadId)}`,
     })),
     ...proposals.map((p) => ({
       id: `room_proposal:${p.id}`,
