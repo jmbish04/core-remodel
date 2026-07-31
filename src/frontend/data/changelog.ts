@@ -327,6 +327,22 @@ export const CHANGELOG: ChangelogEntry[] = [
     status: "staged",
   },
   {
+    id: "0032-discovery-finder-pages",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-31",
+    tag: "0032",
+    area: "Discovery",
+    title: "Discovery-finder pages — the finder UI (0032 D2d, COMPLETES 0032)",
+    summary:
+      "The frontend for the discovery finder, and the final slice of 0032. /admin/shopping/showrooms/finder is a list page with a one-box 'search near… for…' form that runs a search (POST /api/showroom-searches) and lists recent searches with status/result-count chips. /finder/[slug] is the live search viewport: it reads GET /api/showroom-searches/:slug and renders each result as a card (mini-map via DriveMapThumb, type/rating/distance/relevance badges, tel:/website links) with one-click 'Add to directory' (import) and 'Not interested' (exclude) — and it STREAMS updates from the DiscoveryHub WebSocket (/api/showrooms/discovery/ws?slug=…, with a ping keepalive + a 20s poll fallback), so a search kicked off by voice or a refine shows results landing live. A Refine button adds a revision in place; Finalize marks it done. /exclusions is the not-interested admin list (un-exclude to let a place resurface). Plus a sidebar Finder + Not-interested nav entry under Showrooms. All thin Astro shells mounting client:only React islands over the D2c-1 REST + D2b hub — frontend only, no API/D1 change. With this, 0032 is complete: schema (D2a) → realtime hub (D2b) → engine + REST (D2c-1) → MCP tools (D2c-2) → UI (D2d).",
+    changes: [
+      { kind: "added", text: "src/frontend/pages/admin/shopping/showrooms/{finder.astro, finder/[slug].astro, exclusions.astro} — thin shells per studio.astro (class not className, 24px header icon)." },
+      { kind: "added", text: "src/frontend/components/finder/ — FinderApp (list + new-search), FinderDetailApp (viewport, DiscoveryHub WS stream + poll fallback + import/exclude/refine/finalize), ResultCard (DriveMapThumb + badges + actions), ExclusionsApp, api.ts, types.ts." },
+      { kind: "added", text: "Sidebar: Finder + Not-interested nav entries under Showrooms (nav-groups.ts)." },
+    ],
+    status: "staged",
+  },
+  {
     id: "0032-discovery-mcp-tools",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-31",

@@ -113,6 +113,63 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "0032-discovery-finder-pages": {
+    slug: "0032-discovery-finder-pages",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0032 D2d · the finder UI — and 0032 complete",
+    code: [],
+    problem:
+      "The discovery finder had a full backend — tables (D2a), a realtime hub (D2b), the find_showrooms engine + REST (D2c-1), and MCP tools (D2c-2) — but no UI. A voice session could run a search, but a human had no page to see it, watch results land live, or import/exclude them. This is the finder UI, and the last slice of 0032.",
+    approach:
+      "Three thin Astro shells (per studio.astro — `class` not `className`, 24px header icon) mounting client:only React islands over the D2c-1 REST + D2b DiscoveryHub, modelled on the D1b Park-Finds page. (1) /admin/shopping/showrooms/finder — FinderApp: a one-box 'search near… for…' form that POSTs /api/showroom-searches and redirects to the new slug, plus a list of recent searches with status + result-count chips. (2) /finder/[slug] — FinderDetailApp: reads GET /api/showroom-searches/:slug, renders each result via ResultCard (a DriveMapThumb mini-map + type/rating/distance/relevance badges + tel:/website links + 'Add to directory'/'Not interested' actions that call the import/exclude REST and refetch), and STREAMS live updates from the DiscoveryHub WS — it derives the wss:// URL from window.location, sends a 15s `ping` keepalive, refetches on any realtime_event frame, reconnects on close, and runs a 20s poll as a fallback if the socket drops. Refine adds a revision in place; Finalize marks the slug final. (3) /exclusions — ExclusionsApp: the not-interested list with un-exclude. A Finder + Not-interested nav entry lands under Showrooms. Frontend only — no API/D1 change; every action goes through the D2c-1 REST that the MCP tools also call, so the page and a voice session stay in lockstep.",
+    apiChanges: ["None — frontend only. Consumes the D2c-1 REST (/api/showroom-searches*, /api/showroom-exclusions*) + the D2b WS (/api/showrooms/discovery/ws)."],
+    filesTouched: [
+      "src/frontend/pages/admin/shopping/showrooms/finder.astro (new)",
+      "src/frontend/pages/admin/shopping/showrooms/finder/[slug].astro (new)",
+      "src/frontend/pages/admin/shopping/showrooms/exclusions.astro (new)",
+      "src/frontend/components/finder/{FinderApp,FinderDetailApp,ResultCard,ExclusionsApp,api,types}.tsx/ts (new)",
+      "src/frontend/components/sidebar/nav-groups.ts (Finder + Not-interested entries)",
+      "scripts/qc/pr_329.mjs",
+    ],
+    migrations: [],
+    diagrams: [
+      {
+        caption: "The finder viewport streams the DiscoveryHub — a voice search lands live in the browser",
+        code: `sequenceDiagram
+  actor U as Finder viewport /finder/&lt;slug&gt;
+  participant W as Worker
+  participant DO as DiscoveryHub (search:&lt;slug&gt;)
+  participant E as find_showrooms engine
+  U->>W: GET /api/showroom-searches/&lt;slug&gt; (initial)
+  U->>DO: WS /api/showrooms/discovery/ws?slug=&lt;slug&gt;
+  Note over U,DO: + 15s "ping" keepalive, 20s poll fallback
+  E->>DO: publishDiscoveryEvent(results_ready)
+  DO-->>U: realtime_event
+  U->>W: refetch GET /:slug → new results render
+  U->>W: POST /:slug/import {resultIds} → "Add to directory"
+  U->>W: POST /:slug/exclude {resultId} → "Not interested"`,
+      },
+      {
+        caption: "0032 complete — the discovery finder, end to end",
+        code: `flowchart LR
+  A["D2a schema<br/>showroom_search/_revision/_result"] --> C["D2c-1 engine + REST"]
+  B["D2b DiscoveryHub<br/>realtime WS"] --> C
+  C --> D["D2c-2 MCP tools<br/>(voice/chat parity)"]
+  C --> E["D2d finder pages<br/>(this)"]
+  B --> E
+  classDef done fill:#1f4d2e,stroke:#4ade80,color:#eaffea;
+  class A,B,C,D,E done;`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_329.mjs",
+      command: "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 329 -- --preview",
+      ranAt: "2026-07-31",
+      output:
+        "tsc --noEmit clean on all finder components + nav-groups. pnpm run build green (exit 0, ~108s; the 3 new pages prerender + the islands bundle). No API/D1 change. QC pr_329 proves the 3 pages are wired (SSR shell responds, not 404/5xx) + regresses the REST the islands consume and the DiscoveryHub /health gateway the viewport streams; hydration + the live WS + import/exclude are exercised in-browser.",
+      migrations: [],
+    },
+  },
   "0032-discovery-mcp-tools": {
     slug: "0032-discovery-mcp-tools",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
