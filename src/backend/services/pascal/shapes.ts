@@ -169,8 +169,13 @@ function parseGraph(raw: string): SceneGraph {
 
 function parseRendering(raw: string | null): SceneRenderingMetadata | null {
   if (!raw) return null;
-  const parsed = sceneRenderingMetadataSchema.safeParse(JSON.parse(raw));
-  return parsed.success ? parsed.data : null;
+  try {
+    const parsed = sceneRenderingMetadataSchema.safeParse(JSON.parse(raw));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    // Malformed JSON — treat like invalid schema data (don't crash the response).
+    return null;
+  }
 }
 
 export function serializeSceneMeta(

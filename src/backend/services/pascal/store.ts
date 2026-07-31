@@ -284,7 +284,11 @@ export async function saveScene(
   }
   const latestVersion = Math.max(existing.latestVersion ?? 0, version);
 
-  const updateVariant = db
+  // Atomic optimistic concurrency: the version guard lives in the WHERE clause, so
+  // D1 (which serializes writes) lets exactly one of two racing saves win. A
+  // checkpoint from a stale reader matches 0 rows → conflict; the top-of-function
+  // expectedVersion check just gives a fast, clear error before we compute anything.
+  const res = await db
     .update(pascalVariants)
     .set({
       name: input.name,
@@ -304,21 +308,22 @@ export async function saveScene(
       ...(input.thumbnailUrl !== undefined ? { thumbnailUrl: input.thumbnailUrl } : {}),
       datetimeLastModified: now,
     })
-    .where(eq(pascalVariants.id, sceneId));
+    .where(and(eq(pascalVariants.id, sceneId), eq(pascalVariants.version, existing.version)))
+    .run();
 
+  const changed =
+    (res as { meta?: { changes?: number }; rowsAffected?: number }).meta?.changes ??
+    (res as { rowsAffected?: number }).rowsAffected ??
+    0;
+  if (changed === 0) throw new PascalStoreError("version_conflict");
+
+  // Event is an append-only log written after the guarded update commits. Not in the
+  // same atomic unit as the update (a crash between them just drops one log row).
   if (saveMode === "checkpoint") {
-    await db.batch([
-      updateVariant,
-      db.insert(pascalSceneEvents).values({
-        sceneId,
-        version,
-        kind: "checkpoint",
-        graphJson: json,
-        datetimeCreated: now,
-      }),
-    ]);
-  } else {
-    await updateVariant.run();
+    await db
+      .insert(pascalSceneEvents)
+      .values({ sceneId, version, kind: "checkpoint", graphJson: json, datetimeCreated: now })
+      .run();
   }
   const row = await loadScene(env, sceneId);
   if (!row) throw new PascalStoreError("not_found");
@@ -337,11 +342,16 @@ export async function renameScene(
   if (expectedVersion != null && expectedVersion !== existing.version) {
     throw new PascalStoreError("version_conflict");
   }
-  await db
+  const res = await db
     .update(pascalVariants)
     .set({ name, datetimeLastModified: new Date() })
-    .where(eq(pascalVariants.id, sceneId))
+    .where(and(eq(pascalVariants.id, sceneId), eq(pascalVariants.version, existing.version)))
     .run();
+  const changed =
+    (res as { meta?: { changes?: number } }).meta?.changes ??
+    (res as { rowsAffected?: number }).rowsAffected ??
+    0;
+  if (changed === 0) throw new PascalStoreError("version_conflict");
   const row = await loadScene(env, sceneId);
   if (!row) throw new PascalStoreError("not_found");
   return row;

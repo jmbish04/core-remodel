@@ -11,7 +11,8 @@ The user wants to explore renovation **layouts** in a real 3D/2D editor — e.g.
 island placements upstairs"* and *"a few kitchen-table-next-to-island layouts"* — where each idea
 is its own editable floorplan, and snapshots of each get captured back into the project.
 
-Pascal (`pascalorg/editor`) is a client-side WebGPU/Three.js scene editor. It **cannot** run on
+Pascal (`jmbish04/editor`, a fork of `pascalorg/editor`) is a client-side WebGPU/Three.js scene
+editor. It **cannot** run on
 Cloudflare Workers (SSR + WebGPU), so it lives on Vercel. Its stock build is **local-only**
 (*"scenes are not saved"*, IndexedDB) — no backend, no API. So there is **no wire to integrate with
 yet on either side**; both must be built.
@@ -334,7 +335,7 @@ before any write; hallucinated ids are rejected.
 **Phase 1 — Schema + scene store (the wire).**
 - `p1-schema` — `pascal/` drizzle tables + `db:generate` + `migrate:remote` + verify columns.
 - `p1-shapes` — Zod `SceneMeta/SceneWithGraph/ProjectStatus/SceneEvent` + identity-match guard.
-- `p1-rest` — `/api/pascal/v1/*` router (9 routes), optimistic version (409/412), 413 size cap,
+- `p1-rest` — `/api/pascal/v1/*` router (9 routes), optimistic version (409), 413 size cap,
   events append/cursor-read; mount behind WORKER_API_KEY gate.
 - `p1-qc` — `scripts/qc/pr_<n>.mjs` exercising the wire against preview + prod.
 

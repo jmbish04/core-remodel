@@ -72,5 +72,6 @@ export const pascalVariants = sqliteTable("pascal_variants", {
     .default(sql`(unixepoch())`),
   datetimeLastModified: integer("datetime_last_modified", { mode: "timestamp" })
     .notNull()
-    .default(sql`(unixepoch())`),
+    .default(sql`(unixepoch())`)
+    .$onUpdate(() => new Date()),
 });
