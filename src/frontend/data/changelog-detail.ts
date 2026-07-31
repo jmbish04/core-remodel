@@ -290,6 +290,91 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
       migrations: [{ tag: "v17", appliedRemote: false, note: "DO migration applies on the next Deploy (manual) run; no D1 DDL to verify." }],
     },
   },
+  "showroom-360-tour": {
+    slug: "showroom-360-tour",
+    branch: "claude/showroom-360-tour-links-0fd2ac",
+    subtitle: "Showrooms · 360° tour in the Photos bento + Street View auto-tour",
+    prNumber: 322,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/322",
+    problem:
+      "The SHOWROOM_TOUR link type already existed in the link vocabulary and was addable in the intake form, but a showroom's 360° walkthrough was never surfaced anywhere the user actually looks — it sat in the links modal, not in the Photos section. The original ask also wanted the tour auto-detected from Google (Places API or a scraped Matterport URL). Places (New) Details has no virtual-tour field, so it cannot return one; the only automatic path is Google Street View, which is billed — so it had to be wired without risking the $200/5,000-free-event ceiling.",
+    approach:
+      "Two surfaces in the Photos bento. (1) A TourCard renders a store's manual SHOWROOM_TOUR link: a Matterport host embeds inline in an <iframe>; any other tour URL opens in a new tab. The Photos tile description gains a '· 360° tour' badge. (2) When no manual link exists, StreetViewTour probes the store's lat/lng with the FREE StreetViewService.getPanorama() — Google's docs are explicit that only a rendered StreetViewPanorama object is billed, not the service check — so detection is free and runs on mount, rendering nothing when there is no coverage. The billable render is deferred behind an 'Open tour' click that FIRST calls POST /api/showroom-stores/:id/streetview-render; that endpoint runs the count-based isUnderApiQuota('street_view') guard (a new SKU capped at 4,500/mo, below Google's 5,000 free Pro events) and logs the event into the existing google_maps_usage_log — no new tracker, no dollar hardcoding, no schema change. The browser needs a Maps JS key, but the repo keeps every Maps key server-side; rather than bake a public key into the client bundle at build time, GET /api/places/maps-js-key serves it at runtime from the existing GOOGLE_MAPS_API secrets-store binding, behind the same requireAccessAuth gate as the rest of /api/places, so only authenticated sessions receive it.",
+    apiChanges: [
+      "POST /api/showroom-stores/:id/streetview-render — quota gate (isUnderApiQuota('street_view'), 403 QUOTA_LIMIT over cap) + logUsage into google_maps_usage_log with endpoint 'streetview:render'. Called by the client immediately before it instantiates a billable StreetViewPanorama.",
+      "GET /api/places/maps-js-key — returns { key } from the GOOGLE_MAPS_API secrets-store binding (via getGoogleMapsApiKey), 503 when unset. Auth-gated by the existing /api/places/* middleware.",
+      "GET /api/showroom-stores/:id — now exposes placeId (already spread from the row) for render-log context; latitude/longitude were already present.",
+    ],
+    filesTouched: [
+      "src/backend/services/google/maps.ts (street_view SKU in MAPS_API_QUOTAS + getUsageBySku + skuForUsageBucket)",
+      "src/backend/api/routes/showroom-stores.ts (POST /:id/streetview-render)",
+      "src/backend/api/routes/places.ts (GET /maps-js-key)",
+      "src/frontend/components/showroom/photos/StreetViewTour.tsx (new: SDK loader + free probe + gated render)",
+      "src/frontend/components/showroom/StoreViewportApp.tsx (TourCard, tourUrl derivation, Photos-tile badge, StreetViewTour wiring, placeId in StoreDetail)",
+      "scripts/qc/pr_streetview_tour.mjs",
+    ],
+    migrations: [],
+    code: [],
+    diagrams: [
+      {
+        caption: "Free detection on mount, billed render deferred behind a click + server quota gate",
+        code: `sequenceDiagram
+  participant U as User
+  participant C as StreetViewTour (browser)
+  participant K as GET /api/places/maps-js-key
+  participant G as Google Maps JS
+  participant R as POST /:id/streetview-render
+  C->>K: fetch key (auth-gated, from GOOGLE_MAPS_API binding)
+  K-->>C: { key }
+  C->>G: getPanorama(location, radius 50)  [FREE]
+  G-->>C: pano id | ZERO_RESULTS
+  Note over C: no pano → render nothing
+  U->>C: click "Open tour"
+  C->>R: POST (panoId)
+  R->>R: isUnderApiQuota('street_view')?
+  R-->>C: 403 QUOTA_LIMIT → toast, no render
+  R-->>C: { allowed:true } + logUsage(streetview:render)
+  C->>G: new StreetViewPanorama(...)  [BILLED once]`,
+      },
+      {
+        caption: "Where the 360° tour resolves from — manual link wins, Street View is the fallback",
+        code: `flowchart TD
+  A[Photos bento] --> B{SHOWROOM_TOUR link?}
+  B -- yes --> C[TourCard]
+  C --> C1{Matterport host?}
+  C1 -- yes --> C2[inline iframe embed]
+  C1 -- no --> C3[open in new tab]
+  B -- no --> D[StreetViewTour probe]
+  D --> D1{getPanorama finds coverage?}
+  D1 -- no --> D2[render nothing]
+  D1 -- yes --> D3[Open tour → quota gate → StreetViewPanorama]
+  classDef free fill:#1f4d2e,stroke:#4ade80
+  classDef paid fill:#4d1f1f,stroke:#f87171
+  class D,D1,D2 free
+  class D3 paid`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_streetview_tour.mjs",
+      command:
+        "pnpm run deploy:preview  &&  node scripts/qc/pr_streetview_tour.mjs --base <preview> --preview",
+      ranAt: "2026-07-31",
+      output: `QC streetview-tour against https://wcrp-claude-showroom-360-tour-links-0fd2ac.hacolby.workers.dev (preview)
+
+  ✓ maps-js-key 200
+  ✓ maps-js-key returns a key
+  ✓ served key === tokens GOOGLE_MAPS_API
+  ✓ found a store with coords
+  ✓ render guard responds allowed|QUOTA_LIMIT
+  ✓ render logged one usage row
+  ✓ invalid store id → 400
+
+7 passed, 0 failed
+
+tsc --noEmit clean (176 = baseline, 0 new in the touched files). No schema change → no migration.`,
+      migrations: [],
+    },
+  },
   "0032-discovery-search-schema": {
     slug: "0032-discovery-search-schema",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
