@@ -155,3 +155,12 @@ export * from "./changelog/index";
 // Agent run ledger — one agent-agnostic record of every agent execution, its
 // steps and its tool calls. Powers /admin/agents and informed (non-blind) retries.
 export * from "./agents/index";
+
+// Pascal ⇄ Core-Remodel rendering integration (0043) — durable scene store for the
+// Vercel floorplan editor: projects → studies → variants (each variant = one Pascal
+// scene), plus snapshots and an append-only scene-event log.
+export * from "./pascal/pascal_projects";
+export * from "./pascal/pascal_studies";
+export * from "./pascal/pascal_variants";
+export * from "./pascal/pascal_snapshots";
+export * from "./pascal/pascal_scene_events";
