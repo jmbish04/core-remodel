@@ -53,6 +53,9 @@
     // page URLs in MCP tool responses (e.g. the exact bug/budget/showroom page
     // to open) instead of bare paths. No trailing slash.
     "WORKER_URL": "https://core-remodel.hacolby.workers.dev",
+    // Public origin of the Pascal floorplan editor (Vercel). Used to build scene
+    // deep-links (`/scene/:id`) in Pascal API responses + MCP tools. No trailing slash.
+    "PASCAL_EDITOR_URL": "https://3d-remodel.vercel.app",
     "AI_GATEWAY_ID": "core-remodel",
     "CLICKUP_LIST_ID": "901714811766",
     // TODO(justin): fill in a Google Programmable Search Engine "cx" id
