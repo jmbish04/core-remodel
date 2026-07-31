@@ -301,6 +301,23 @@ export const BRANCHES: ChangelogBranch[] = [
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "0032-discovery-realtime-hub",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-31",
+    tag: "0032",
+    area: "Discovery",
+    title: "Discovery-finder realtime hub — DiscoveryHub DO (0032 D2b)",
+    summary:
+      "The realtime spine for the finder: a new Hibernatable-WebSocket Durable Object (DiscoveryHub, wrangler migration v17) that fans out finder events per search slug, so an open /finder/<slug> page streams the search's progress (status → revision_added → results_ready) live instead of polling. It clones the proven EstimateCollabHub pattern exactly — one DO per room 'search:<slug>', ctx.acceptWebSocket + the webSocket* handlers + ctx.getWebSockets() broadcast, a POST /emit fan-out entrypoint, and an app-level ping→pong keepalive. Wired end to end: the class is exported from _worker.ts, bound as DISCOVERY_HUB in wrangler.jsonc (DO binding + v17 new_sqlite_classes), gets a WS gateway route /api/showrooms/discovery/ws|health?slug= (placed before the Hono block, mirroring the estimates + floorplan gateways), and a publishDiscoveryEvent(env, slug, payload) helper (mirrors publishRealtimeEvent) that the D2c finder engine will call after each write. Carries NO alarm and no growing storage, so it's entirely outside the DO-alarm cost-safety surface. No D1 schema change.",
+    changes: [
+      { kind: "added", text: "src/backend/realtime/DiscoveryHub.ts — Hibernatable-WebSocket fan-out DO, one per room 'search:<slug>' (clone of EstimateCollabHub); /emit broadcast + /health + ping→pong." },
+      { kind: "added", text: "publishDiscoveryEvent(env, slug, payload) in realtime/publish.ts — best-effort POST to the slug's DiscoveryHub /emit (the D2c engine publishes status/revision/results here)." },
+      { kind: "added", text: "_worker.ts: export DiscoveryHub + WS gateway route /api/showrooms/discovery/ws|health?slug= (before the Hono block, like the estimates/floorplan gateways)." },
+      { kind: "migration", text: "wrangler.jsonc: DISCOVERY_HUB DO binding + migration tag v17 (new_sqlite_classes: [DiscoveryHub]). DO migration only — no D1 DDL. worker-configuration.d.ts regenerated." },
+    ],
+    status: "staged",
+  },
+  {
     id: "0032-discovery-search-schema",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-31",

@@ -430,6 +430,13 @@
         "name": "TESLA_STREAM",
         "class_name": "TeslaStreamDO",
       },
+      {
+        // 0032 D2: discovery-finder realtime fan-out. One DO per search slug
+        // (room "search:<slug>") streams status/revision/results to an open
+        // finder page. Hibernatable WebSockets; no alarm, no growing storage.
+        "name": "DISCOVERY_HUB",
+        "class_name": "DiscoveryHub",
+      },
     ],
   },
   "migrations": [
@@ -504,6 +511,11 @@
       // 0023 Tesla streaming-ingest connector DO.
       "tag": "v16",
       "new_sqlite_classes": ["TeslaStreamDO"],
+    },
+    {
+      // 0032 D2 discovery-finder realtime fan-out DO.
+      "tag": "v17",
+      "new_sqlite_classes": ["DiscoveryHub"],
     },
   ],
   "worker_loaders": [
