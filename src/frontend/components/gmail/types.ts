@@ -36,6 +36,8 @@ export interface GmailInboxThreadItem {
   companyName: string | null;
   lastMessage: GmailLastMessage | null;
   messageCount: number;
+  /** Showroom/business logo (Cloudflare Images URL) when the sender ties to one (0042). */
+  logoUrl?: string | null;
 }
 
 /** A single message within a thread. Matches `messageSchema` in gmail.ts. */

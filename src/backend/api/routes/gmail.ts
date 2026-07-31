@@ -23,7 +23,7 @@
  */
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
-import { and, desc, eq, inArray, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, like, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
@@ -43,6 +43,7 @@ import type { GmailMessage, GmailMessageInsert, GmailThread } from "@backend/db"
 
 import { getGmailAccessToken } from "@backend/services/gmail/auth";
 import { classifyMessage, trimQuotedReply } from "@backend/services/gmail/classify-message";
+import { normalizeDomain } from "@backend/services/gmail/ingest-gate-domains";
 import { ensureMessageImages } from "@backend/services/gmail/inline-images";
 import { sanitizeNoteHtml } from "@backend/services/notes/markdown";
 import { buildComposeRaw, buildReplyAllRaw, sendMessage, stripHtmlTags } from "@backend/services/gmail/client";
@@ -803,7 +804,7 @@ gmailRouter.get("/showrooms/:storeId/threads-by-domain", async (c) => {
 
   try {
     const [store] = await db
-      .select({ id: showroomStores.id, name: showroomStores.name, email: showroomStores.emailAddress, pocEmail: showroomStores.mainPocEmailAddress })
+      .select({ id: showroomStores.id, name: showroomStores.name, email: showroomStores.emailAddress, pocEmail: showroomStores.mainPocEmailAddress, iconUrl: showroomStores.iconCfImagesUrl })
       .from(showroomStores)
       .where(eq(showroomStores.id, storeId))
       .limit(1);
@@ -908,6 +909,8 @@ gmailRouter.get("/showrooms/:storeId/threads-by-domain", async (c) => {
         unread: e.unread,
         isSpam: e.msgs.some((m) => m.isSpam),
         classification: e.folder,
+        // Scoped inbox: every thread is this showroom's mail → its brand icon.
+        logoUrl: store.iconUrl ?? null,
         spamRationale: e.msgs.find((m) => m.spamRationale)?.spamRationale ?? null,
       }));
     items.sort((a, b) => {
@@ -1047,15 +1050,34 @@ gmailRouter.get("/inbox", async (c) => {
       if (e.folder === "inbox") unreadCount += e.unread;
     }
 
+    // Map showroom WEBSITE-domain → brand icon, so a sender whose domain matches
+    // a showroom shows that showroom's logo instead of initials.
+    const iconByDomain = new Map<string, string>();
+    const linkRows = await db
+      .select({ url: showroomStoreLinks.url, icon: showroomStores.iconCfImagesUrl })
+      .from(showroomStoreLinks)
+      .innerJoin(showroomStores, eq(showroomStoreLinks.storeId, showroomStores.id))
+      .where(and(eq(showroomStoreLinks.type, "WEBSITE"), isNotNull(showroomStores.iconCfImagesUrl)))
+      .all();
+    for (const r of linkRows) {
+      const d = normalizeDomain(r.url);
+      if (d && r.icon) iconByDomain.set(d, r.icon);
+    }
+
     const items = enriched
       .filter((e) => e.folder === requestedFolder)
-      .map((e) => ({
-        ...buildInboxThreadItem(e.thread, "", e.msgs),
-        unread: e.unread,
-        isSpam: e.msgs.some((m) => m.isSpam),
-        classification: e.folder,
-        spamRationale: e.msgs.find((m) => m.spamRationale)?.spamRationale ?? null,
-      }))
+      .map((e) => {
+        const item = buildInboxThreadItem(e.thread, "", e.msgs);
+        const dom = normalizeDomain(item.lastMessage?.from ?? "");
+        return {
+          ...item,
+          unread: e.unread,
+          isSpam: e.msgs.some((m) => m.isSpam),
+          classification: e.folder,
+          logoUrl: dom ? iconByDomain.get(dom) ?? null : null,
+          spamRationale: e.msgs.find((m) => m.spamRationale)?.spamRationale ?? null,
+        };
+      })
       .sort((a, b) => {
         const at = a.lastMessage?.date ? new Date(a.lastMessage.date).getTime() : -1;
         const bt = b.lastMessage?.date ? new Date(b.lastMessage.date).getTime() : -1;
