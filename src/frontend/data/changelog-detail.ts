@@ -113,6 +113,71 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "0032-discovery-realtime-hub": {
+    slug: "0032-discovery-realtime-hub",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0032 D2b · DiscoveryHub realtime fan-out DO",
+    code: [],
+    problem:
+      "The discovery finder (0022 §14.5) runs a Places sweep + Gemini rank that takes several seconds and can be refined into new revisions. A user who opened the shareable /finder/<slug> page — or who is watching it while still talking to the voice assistant that kicked off the search — should see the search go running → ready and each revision's results appear live, not have to refresh. The finder needs a realtime channel keyed per search slug; there was none.",
+    approach:
+      "Stand up DiscoveryHub, a Hibernatable-WebSocket Durable Object cloned from the proven EstimateCollabHub: one instance per room 'search:<slug>' via getByName, ctx.acceptWebSocket(server) to hand the socket to the runtime (so the DO can hibernate while idle sockets stay open and there is no in-memory socket set to lose on eviction), the webSocket* handlers, a private broadcast() over ctx.getWebSockets(), a POST /emit producer entrypoint, a /health socket count, and an app-level ping→pong keepalive. It is wired the same way the existing realtime gateways are: exported from _worker.ts, bound as DISCOVERY_HUB in wrangler.jsonc with a v17 new_sqlite_classes migration (a fresh DO migration tag — the sanctioned way to add a DO here, since production deploys are agent-owned; the branch CI that would collide on tags is disconnected), and given a WS gateway route /api/showrooms/discovery/ws|health?slug= placed BEFORE the Hono block so the upgrade is offloaded to the DO. A publishDiscoveryEvent(env, slug, payload) helper (mirroring publishRealtimeEvent) is the seam the D2c finder engine will call after each write. Crucially, DiscoveryHub carries NO alarm and no growing storage — it is entirely outside the DO-alarm cost-safety surface that the $700 incident hardened. This PR ships the transport only; the events that flow through it arrive with the D2c engine.",
+    apiChanges: [
+      "NEW WS gateway GET /api/showrooms/discovery/ws?slug=<slug> (WebSocket upgrade → DiscoveryHub) + GET /api/showrooms/discovery/health?slug=<slug>.",
+      "NEW realtime/publish.ts publishDiscoveryEvent(env, slug, payload) — POSTs to the slug's DiscoveryHub /emit.",
+      "wrangler.jsonc: DISCOVERY_HUB DO binding + migration tag v17. No REST/D1 change.",
+    ],
+    filesTouched: [
+      "src/backend/realtime/DiscoveryHub.ts (new)",
+      "src/backend/realtime/publish.ts (publishDiscoveryEvent)",
+      "src/_worker.ts (export + WS gateway route)",
+      "wrangler.jsonc (DISCOVERY_HUB binding + v17 migration)",
+      "worker-configuration.d.ts (regenerated)",
+      "scripts/qc/pr_323.mjs",
+    ],
+    migrations: [{ tag: "v17", sql: "-- DO migration only: new_sqlite_classes [\"DiscoveryHub\"] (no D1 DDL)" }],
+    diagrams: [
+      {
+        caption: "One DiscoveryHub per search slug — the engine publishes, open finder pages stream",
+        code: `sequenceDiagram
+  actor U as Finder page /finder/&lt;slug&gt;
+  participant W as Worker (_worker.ts gateway)
+  participant DO as DiscoveryHub (room search:&lt;slug&gt;)
+  participant E as find_showrooms engine (D2c)
+  U->>W: GET /api/showrooms/discovery/ws?slug=&lt;slug&gt;
+  W->>DO: route by slug → acceptWebSocket
+  DO-->>U: 101 Switching Protocols
+  loop while searching
+    E->>DO: publishDiscoveryEvent(slug, {status|revision|results})
+    Note over DO: POST /emit → broadcast()
+    DO-->>U: realtime_event (live, no poll)
+  end
+  U->>DO: "ping"
+  DO-->>U: "pong"`,
+      },
+      {
+        caption: "Where DiscoveryHub sits among the realtime gateways (all before the Hono block)",
+        code: `flowchart TD
+  R["incoming /api/* request"] --> G1{"/api/realtime/estimates|plans?"}
+  G1 -- yes --> E["ESTIMATE_COLLAB.getByName(room)"]
+  G1 -- no --> G2{"/api/room/:name/ws|health?"}
+  G2 -- yes --> F["FLOORPLAN_SESSION.getByName(name)"]
+  G2 -- no --> G3{"/api/showrooms/discovery/ws|health?"}
+  G3 -- yes --> D["DISCOVERY_HUB.getByName(search:slug)"]
+  G3 -- no --> H["Hono API (auth-gated)"]
+  classDef new fill:#1f3a4d,stroke:#38bdf8,color:#e0f2fe;
+  class D,G3 new;`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_323.mjs",
+      command: "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 323 -- --preview",
+      ranAt: "2026-07-31",
+      output:
+        "tsc --noEmit clean on DiscoveryHub.ts + publish.ts + _worker.ts. worker-configuration.d.ts regenerated via wrangler types (DISCOVERY_HUB added to Env). pnpm run build green (exit 0). No D1 schema — DO migration tag v17 only. QC pr_323 proves the DO is wired + reachable (GET /api/showrooms/discovery/health → 200) and regresses the sibling FloorplanSessionDO gateway; the live broadcast needs an open socket + the D2c engine publishing.",
+      migrations: [{ tag: "v17", appliedRemote: false, note: "DO migration applies on the next Deploy (manual) run; no D1 DDL to verify." }],
+    },
+  },
   "0032-discovery-search-schema": {
     slug: "0032-discovery-search-schema",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",

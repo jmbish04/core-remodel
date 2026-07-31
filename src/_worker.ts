@@ -40,6 +40,7 @@ export { BudgetAgent } from "./backend/ai/agents/BudgetAgent";
 export { BidPortfolioAgent } from "./backend/ai/agents/BidPortfolioAgent";
 export { EstimateCollabHub } from "./backend/realtime/EstimateCollabHub";
 export { FloorplanSessionDO } from "./backend/realtime/FloorplanSessionDO";
+export { DiscoveryHub } from "./backend/realtime/DiscoveryHub";
 export { GAS_A2A } from "./backend/a2a-v2/server";
 export { ImageProcessingWorkflow } from "./backend/services/image-processor/workflow.js";
 export { ImageBatchProcessingWorkflow } from "./backend/services/image-processor/batch-workflow";
@@ -255,6 +256,18 @@ const legacyHandler: ExportedHandler<Env> = {
     if (floorplanRoom) {
       const roomName = decodeURIComponent(floorplanRoom[1]);
       const stub = env.FLOORPLAN_SESSION.getByName(roomName);
+      return stub.fetch(request);
+    }
+
+    // Discovery-finder realtime (0032 D2): /api/showrooms/discovery/ws|health?slug=<slug>.
+    // One DiscoveryHub DO per search slug (room "search:<slug>"); the finder engine
+    // publishes status/revision/results events an open finder page streams live.
+    if (
+      url.pathname === "/api/showrooms/discovery/ws" ||
+      url.pathname === "/api/showrooms/discovery/health"
+    ) {
+      const slug = url.searchParams.get("slug")?.trim() || "global";
+      const stub = env.DISCOVERY_HUB.getByName(`search:${slug}`);
       return stub.fetch(request);
     }
 
