@@ -14,6 +14,19 @@ import { getGoogleMapsApiKey } from "@/backend/utils/secrets";
 export const MAPS_MONTHLY_FREE_TIER_LIMIT = 10_000;
 
 /**
+ * The `GOOGLE_MAPS_API` key carries an HTTP-referer restriction (so the key can
+ * ship to the browser for the map/autocomplete widgets). Server-to-server fetch
+ * sends no `Referer`, which Google rejects with
+ * `Requests from referer <empty> are blocked` — silently breaking placeId
+ * onboarding + bulk showroom import. We spoof the worker's own origin, which is
+ * on the key's allowlist (it's the origin the working browser calls send), so
+ * one restricted key serves both surfaces. Any `*.hacolby.workers.dev` referer
+ * matches, so this fixed prod origin also passes from per-branch preview workers.
+ * ponytail: hardcoded origin — never changes; make it env-driven only if the key's referer allowlist does.
+ */
+const GOOGLE_API_REFERER = "https://core-remodel.hacolby.workers.dev/";
+
+/**
  * Per-API monthly request caps — the hard block that keeps a single Google
  * Maps SKU from spilling past the free tier and incurring charges. The $200/mo
  * free credit is a SHARED pool across all Maps APIs, so these per-SKU counts are
@@ -313,6 +326,7 @@ export class GoogleMapsService {
       headers: {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": gmapKey,
+        Referer: GOOGLE_API_REFERER,
         "X-Goog-FieldMask":
           "suggestions.placePrediction.placeId,suggestions.placePrediction.text",
       },
@@ -420,6 +434,7 @@ export class GoogleMapsService {
       method: "GET",
       headers: {
         "X-Goog-Api-Key": gmapKey,
+        Referer: GOOGLE_API_REFERER,
         "X-Goog-FieldMask": fieldMask,
       },
       signal: AbortSignal.timeout(5000),
@@ -1057,6 +1072,7 @@ Rules for each field:
       headers: {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": gmapKey,
+        Referer: GOOGLE_API_REFERER,
         "X-Goog-FieldMask":
           "places.id,places.displayName,places.formattedAddress,places.rating," +
           "places.userRatingCount,places.nationalPhoneNumber,places.websiteUri,places.location",
@@ -1128,7 +1144,8 @@ Rules for each field:
 
     const res = await fetch(url, {
       method: "GET",
-      headers: { "X-Goog-Api-Key": gmapKey, "X-Goog-FieldMask": fieldMask },
+      headers: { "X-Goog-Api-Key": gmapKey,
+        Referer: GOOGLE_API_REFERER, "X-Goog-FieldMask": fieldMask },
       signal: AbortSignal.timeout(5000),
     });
     const data = (await res.json()) as Record<string, unknown>;
@@ -1228,6 +1245,7 @@ Rules for each field:
       headers: {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": gmapKey,
+        Referer: GOOGLE_API_REFERER,
         "X-Goog-FieldMask":
           "places.id,places.displayName,places.formattedAddress,places.rating," +
           "places.userRatingCount,places.nationalPhoneNumber,places.websiteUri," +
@@ -1319,7 +1337,10 @@ Rules for each field:
       `?latlng=${encodeURIComponent(`${latitude},${longitude}`)}&key=${gmapKey}`;
 
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(5000) });
+      const res = await fetch(url, {
+        headers: { Referer: GOOGLE_API_REFERER },
+        signal: AbortSignal.timeout(5000),
+      });
       const data = (await res.json()) as {
         status?: string;
         results?: Array<{
@@ -1416,6 +1437,7 @@ Rules for each field:
         headers: {
           "Content-Type": "application/json",
           "X-Goog-Api-Key": gmapKey,
+        Referer: GOOGLE_API_REFERER,
           "X-Goog-FieldMask":
             "places.id,places.displayName,places.formattedAddress,places.rating," +
             "places.userRatingCount,places.location,places.primaryType,places.types",
@@ -1489,6 +1511,7 @@ Rules for each field:
       headers: {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": gmapKey,
+        Referer: GOOGLE_API_REFERER,
         "X-Goog-FieldMask": "places.id,places.formattedAddress",
       },
       body: JSON.stringify(placesReqBody),
@@ -1517,6 +1540,7 @@ Rules for each field:
       headers: {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": gmapKey,
+        Referer: GOOGLE_API_REFERER,
         "X-Goog-FieldMask": "routes.duration,routes.distanceMeters",
       },
       body: JSON.stringify(routesReqBody),
@@ -1620,6 +1644,7 @@ Rules for each field:
       headers: {
         "Content-Type": "application/json",
         "X-Goog-Api-Key": gmapKey,
+        Referer: GOOGLE_API_REFERER,
         "X-Goog-FieldMask": "originIndex,destinationIndex,duration,distanceMeters,condition",
       },
       body: JSON.stringify(body),
