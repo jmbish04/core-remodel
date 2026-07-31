@@ -47,6 +47,7 @@ export { ImageBatchProcessingWorkflow } from "./backend/services/image-processor
 export { ChecklistRationaleWorkflow } from "./backend/services/checklist-rationale-workflow";
 export { ShowroomScrapeWorkflow } from "./backend/services/showroom-scrape-workflow";
 export { ShowroomOnboardingWorkflow } from "./backend/services/showroom-onboarding-workflow";
+export { ShowroomBulkIntakeWorkflow } from "./backend/services/showroom-bulk-intake-workflow";
 export { BrandResearchWorkflow } from "./backend/services/brand-research-workflow";
 export { ProductResearchWorkflow } from "./backend/services/product-research-workflow";
 export { BucketIntakeWorkflow } from "./backend/services/bucket-intake-workflow";

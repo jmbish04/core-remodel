@@ -121,6 +121,11 @@
       "class_name": "ShowroomOnboardingWorkflow",
     },
     {
+      "name": "showroom-bulk-intake-workflow",
+      "binding": "SHOWROOM_BULK_INTAKE_WORKFLOW",
+      "class_name": "ShowroomBulkIntakeWorkflow",
+    },
+    {
       "name": "brand-research-workflow",
       "binding": "BRAND_RESEARCH_WORKFLOW",
       "class_name": "BrandResearchWorkflow",

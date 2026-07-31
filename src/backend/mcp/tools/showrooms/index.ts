@@ -12,7 +12,9 @@ import { setShowroomLinks } from "./set_showroom_links";
 import { recordShowroomVisit } from "./record_showroom_visit";
 import { searchShowrooms } from "./search_showrooms";
 import { importShowroomFromPlace } from "./import_showroom_from_place";
+import { bulkImportShowroomsFromPlaces } from "./bulk_import_showrooms_from_places";
 import { checkShowroomIntakeStatus } from "./check_showroom_intake_status";
+import { checkBulkIntakeStatus } from "./check_bulk_intake_status";
 import { backfillShowroomGeo } from "./backfill_showroom_geo";
 import { backfillShowroomMedia } from "./backfill_showroom_media";
 import { findKnownShowrooms } from "./find_known_showrooms";
@@ -46,7 +48,9 @@ export const showroomTools: RemodelTool[] = [
   recordShowroomVisit,
   searchShowrooms,
   importShowroomFromPlace,
+  bulkImportShowroomsFromPlaces,
   checkShowroomIntakeStatus,
+  checkBulkIntakeStatus,
   backfillShowroomGeo,
   backfillShowroomMedia,
   findKnownShowrooms,

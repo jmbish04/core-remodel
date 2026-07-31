@@ -3,6 +3,7 @@ export * from "./stores";
 export * from "./store_types";
 export * from "./visit_log";
 export * from "./store_hitl_queue";
+export * from "./bulk_intake";
 export * from "./exclusions";
 export * from "./search";
 export * from "./store_products";

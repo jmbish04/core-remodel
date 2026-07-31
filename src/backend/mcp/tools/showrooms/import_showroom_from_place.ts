@@ -1,9 +1,3 @@
-import { showroomStores } from "@backend/db";
-import { GoogleMapsService } from "@backend/services/google/maps";
-import { mapPlaceDetailsToStoreInput } from "@backend/services/showroom/onboarding";
-import { findDuplicateStore } from "@backend/services/showroom/duplicate-check";
-import type { GooglePlaceDetails } from "@frontend/components/showroom/intake/places-mapper";
-import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { toolError } from "../../format";
@@ -11,7 +5,7 @@ import { looseObject, urlField } from "../../schemas";
 import { showroomUrl } from "../../urls";
 import { defineTool, WRITE_IDEMPOTENT } from "../../types";
 
-import { adoptPlaceLocation, persistPlaceShowroom, rethrowMapsError } from "./_shared";
+import { intakeOnePlace } from "./_shared";
 
 export const importShowroomFromPlace = defineTool({
   name: "import_showroom_from_place",
@@ -47,94 +41,14 @@ export const importShowroomFromPlace = defineTool({
   },
   examples: [{ title: "Import a candidate", args: { placeId: "ChIJN1t_tDeuEmsRUsoyG83frY4" } }],
   handler: async ({ env, db }, input) => {
-    const placeId = input.placeId?.trim();
-    if (!placeId) toolError("`placeId` is required and cannot be empty.");
-
-    // Idempotency: a store with this placeId already exists → return it.
-    const [existing] = await db
-      .select()
-      .from(showroomStores)
-      .where(eq(showroomStores.placeId, placeId))
-      .limit(1);
-    if (existing) {
-      return {
-        created: false,
-        status: "exists",
-        showroomId: existing.id,
-        url: showroomUrl(env, existing.id),
-        region: existing.hubName ?? null,
-        store: existing,
-      };
-    }
-
-    // Fetch Google fields + the Gemini review analysis (aiInference) inline so
-    // MCP onboarding matches the intake form. Non-fatal if Gemini is skipped.
-    let details: Record<string, unknown>;
-    try {
-      details = await new GoogleMapsService(env).placeDetails(placeId);
-    } catch (err) {
-      rethrowMapsError(err);
-    }
-
-    const mapped = mapPlaceDetailsToStoreInput(details as GooglePlaceDetails);
-    if (!mapped) {
-      toolError(`Google returned no usable place for placeId "${placeId}".`);
-    }
-    // Ensure the placeId is stored even if the payload omitted `id`.
-    mapped.values.placeId = mapped.values.placeId ?? placeId;
-
-    // Fuzzy match: an existing ACTIVE store with the same phone/website/address.
-    // Only a match that ALREADY has a placeId is a true duplicate (it is already
-    // located) — return it unchanged. A match WITHOUT a placeId is a bare stub
-    // (e.g. an AI-research entry created by name before it had a location): adopt
-    // this Google location onto it and let onboarding enrich, rather than
-    // rejecting the import. Casting a wide research net then bulk-importing is the
-    // primary flow, so filling stubs in place — not flagging them — is the point.
-    const dup = await findDuplicateStore(db, {
-      placeId: mapped.values.placeId,
-      phoneNumber: mapped.values.phoneNumber,
-      websiteUrl: mapped.websiteUrl,
-      locationAddress: mapped.values.locationAddress,
-    });
-    if (dup?.placeId) {
-      const [existingDup] = await db
-        .select()
-        .from(showroomStores)
-        .where(eq(showroomStores.id, dup.id))
-        .limit(1);
-      if (existingDup) {
-        return {
-          created: false,
-          status: `exists (matched by ${dup.reason})`,
-          showroomId: existingDup.id,
-          url: showroomUrl(env, existingDup.id),
-          region: existingDup.hubName ?? null,
-          store: existingDup,
-        };
-      }
-    }
-    if (dup) {
-      // Bare stub matched by phone/address/website but with no placeId — fill it.
-      const adopted = await adoptPlaceLocation(env, db, dup.id, mapped);
-      return {
-        created: false,
-        status: `located (adopted onto existing store, matched by ${dup.reason})`,
-        showroomId: adopted.id,
-        url: showroomUrl(env, adopted.id),
-        region: adopted.hubName ?? null,
-        store: adopted,
-      };
-    }
-
-    const created = await persistPlaceShowroom(env, db, mapped);
-
+    const r = await intakeOnePlace(env, db, input.placeId);
     return {
-      created: true,
-      status: "processing",
-      showroomId: created.id,
-      url: showroomUrl(env, created.id),
-      region: created.hubName ?? null,
-      store: created,
+      created: r.created,
+      status: r.status,
+      showroomId: r.showroomId,
+      url: showroomUrl(env, r.showroomId),
+      region: r.store.hubName ?? null,
+      store: r.store,
     };
   },
 });
