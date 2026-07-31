@@ -38,12 +38,14 @@ try {
   const docs = await client.get("/api/mcp-docs");
   checks.ok("GET /api/mcp-docs → 200 (MCP catalog)", docs.status === 200, `→ ${docs.status}`);
 
-  let text = "";
-  try {
-    text = typeof docs.text === "function" ? await docs.text() : JSON.stringify(docs.json ?? docs.body ?? "");
-  } catch {
-    /* fall through */
-  }
+  // createClient().get returns { status, json (parsed), text (string) }. Prefer the
+  // raw text; fall back to the parsed json stringified. No swallowed error.
+  const text =
+    typeof docs.text === "string" && docs.text.length > 0
+      ? docs.text
+      : docs.json != null
+        ? JSON.stringify(docs.json)
+        : "";
 
   if (docs.status === 200) {
     for (const name of EXPECTED) {

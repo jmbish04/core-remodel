@@ -31,34 +31,41 @@ export const findShowroomsTool = defineTool({
   inputShape: {
     near: z
       .string()
+      .max(200)
       .optional()
       .describe("Where to search: a 'lat,lng' point, an area name, or 'current-location'."),
-    radiusM: z.number().optional().describe("Search radius in metres (advisory)."),
-    query: z.string().optional().describe("Optional text query; omit for a broad remodel-showroom sweep."),
+    radiusM: z
+      .number()
+      .min(1)
+      .max(100_000)
+      .optional()
+      .describe("Search radius in metres (advisory; 1..100000)."),
+    query: z.string().max(300).optional().describe("Optional text query; omit for a broad remodel-showroom sweep."),
     broad: z.boolean().optional().describe("Force a broad sweep (any remodel showroom)."),
     likeStoreId: z.number().int().optional().describe("Bias toward showrooms like this store id."),
-    excludeCategories: z.array(z.string()).optional().describe("Drop results in these categories."),
-    excludeStoreIds: z.array(z.number().int()).optional().describe("Hide these already-known store ids."),
-    usePlaces: z.boolean().optional().describe("Run the billed Places sweep (default true)."),
+    excludeCategories: z.array(z.string().max(120)).max(50).optional().describe("Drop results in these categories."),
+    excludeStoreIds: z.array(z.number().int()).max(200).optional().describe("Hide these already-known store ids."),
+    usePlaces: z.boolean().default(true).describe("Run the billed Places sweep (default true)."),
     aiResults: z
       .array(
         z.object({
-          placeId: z.string().nullish(),
-          name: z.string(),
-          fullAddress: z.string().nullish(),
+          placeId: z.string().max(300).nullish(),
+          name: z.string().max(300),
+          fullAddress: z.string().max(400).nullish(),
           latitude: z.number().nullish(),
           longitude: z.number().nullish(),
-          category: z.string().nullish(),
-          reasoning: z.string().nullish(),
-          website: z.string().nullish(),
-          phone: z.string().nullish(),
+          category: z.string().max(120).nullish(),
+          reasoning: z.string().max(1000).nullish(),
+          website: z.string().max(500).nullish(),
+          phone: z.string().max(60).nullish(),
         }),
       )
+      .max(50)
       .optional()
       .describe("Candidates you already found (merged with the Places sweep)."),
-    slug: z.string().optional().describe("Refine an existing search slug in place (adds a revision)."),
-    title: z.string().optional().describe("Human label for a new search."),
-    originConversation: z.string().optional().describe("Chat/session ref for the receipts."),
+    slug: z.string().max(128).optional().describe("Refine an existing search slug in place (adds a revision)."),
+    title: z.string().max(200).optional().describe("Human label for a new search."),
+    originConversation: z.string().max(200).optional().describe("Chat/session ref for the receipts."),
   },
   annotations: WRITE,
   outputShape: {
