@@ -54,6 +54,7 @@ import {
   buildShowroomMatchSpec,
   findThreadIdsByParticipants,
   insertParticipants,
+  parseEmailAddress,
   splitCandidateEmails,
 } from "@backend/services/gmail/participants";
 
@@ -1068,7 +1069,8 @@ gmailRouter.get("/inbox", async (c) => {
       .filter((e) => e.folder === requestedFolder)
       .map((e) => {
         const item = buildInboxThreadItem(e.thread, "", e.msgs);
-        const dom = normalizeDomain(item.lastMessage?.from ?? "");
+        // The sender is "Display Name <addr@domain>"; parse the address form.
+        const dom = parseEmailAddress(item.lastMessage?.from ?? "")?.domain ?? null;
         return {
           ...item,
           unread: e.unread,
