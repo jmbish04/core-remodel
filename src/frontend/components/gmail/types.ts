@@ -135,8 +135,8 @@ export interface GmailInboxThreadItemWithUnread extends GmailInboxThreadItem {
   /** 0041/0042 — folder tagging for badges. */
   isSpam?: boolean;
   isReceipt?: boolean;
-  /** The folder this thread resolved to (0042): quotes | receipts | contracts | sales | … */
-  classification?: string;
+  /** The folder this thread resolved to (0042). */
+  classification?: GmailFolder;
   spamRationale?: string | null;
 }
 

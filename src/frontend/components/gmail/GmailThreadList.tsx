@@ -137,8 +137,14 @@ export function GmailThreadList({
                     }`}
                   >
                     <Avatar className="size-9 shrink-0 bg-primary/10 text-primary">
-                      {t.logoUrl ? (
-                        <AvatarImage src={t.logoUrl} alt="" className="object-contain" />
+                      {t.logoUrl && /^https:\/\/imagedelivery\.net\//.test(t.logoUrl) ? (
+                        <AvatarImage
+                          src={t.logoUrl}
+                          alt=""
+                          className="object-contain"
+                          referrerPolicy="no-referrer"
+                          loading="lazy"
+                        />
                       ) : null}
                       <AvatarFallback className="bg-primary/10 text-primary">
                         {from ? initialsFromAddress(from) : "?"}

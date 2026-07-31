@@ -89,19 +89,29 @@ const RECEIPT_KEYWORDS: readonly { word: string; type: MessageClassification }[]
   { word: "estimate", type: "quote" },
 ];
 
-/** Contract / agreement keywords → the Contracts folder. */
+/**
+ * Contract / agreement keywords → the Contracts folder. Matched on WORD
+ * boundaries (see hasWord) so "contract" does not fire on "contractor"/
+ * "subcontractor". Deliberately omits footer-boilerplate like "terms and
+ * conditions" (present in most receipts/marketing) to avoid misrouting.
+ */
 const CONTRACT_KEYWORDS: readonly string[] = [
   "contract",
   "agreement",
   "statement of work",
   "scope of work",
-  "master service",
+  "master service agreement",
   "service agreement",
-  "terms and conditions",
   "docusign",
-  "sign here",
   "for your signature",
+  "for signature",
 ];
+
+/** Escape a phrase and test it on word boundaries within the lowercased haystack. */
+function hasWord(haystack: string, phrase: string): boolean {
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`\\b${escaped}\\b`).test(haystack);
+}
 
 /** Sale / deal keywords → the Sales folder (deals worth seeing, not buried in spam). */
 const SALE_KEYWORDS: readonly string[] = [
@@ -124,13 +134,15 @@ const SALE_KEYWORDS: readonly string[] = [
  * Classify a message from its subject + body (both will be lowercased here) and
  * whether it carries attachments.
  *
- * Rules (see 0041 plan):
- *  - Spam: body contains any SPAM_PHRASES → isSpam, rationale = matched phrase.
- *  - Receipt/invoice/quote: subject OR body contains a purchase keyword AND
- *    (a "$" appears OR the message hasAttachments) → classification = doc type.
- *  - Else normal.
- * Spam and receipt are independent: a promo carrying a real quote is
- * `classification: "quote"` AND `isSpam: true` (kept in Receipts, still flagged).
+ * `isSpam` (sender/phrase) is computed independently of `classification`.
+ * `classification` is one of: normal | promotional | receipt | invoice | quote |
+ * contract | sale, chosen by this precedence (all word-boundary matched):
+ *   1. contract  — a CONTRACT_KEYWORDS term.
+ *   2. receipt / invoice / quote — a RECEIPT_KEYWORDS term AND ($ OR attachment).
+ *   3. sale      — a SALE_KEYWORDS term.
+ *   4. promotional (when isSpam) / normal.
+ * So a promo carrying a real quote is `classification: "quote"` AND
+ * `isSpam: true` — it lands in Quotes (findable), still flagged spam via isSpam.
  */
 export function classifyMessage(input: {
   from?: string;
@@ -176,18 +188,18 @@ export function classifyMessage(input: {
   const hasMoney = haystack.includes("$");
   let classification: MessageClassification = "normal";
 
-  if (CONTRACT_KEYWORDS.some((w) => haystack.includes(w))) {
+  if (CONTRACT_KEYWORDS.some((w) => hasWord(haystack, w))) {
     classification = "contract";
   } else if (hasMoney || input.hasAttachments) {
     for (const { word, type } of RECEIPT_KEYWORDS) {
-      if (haystack.includes(word)) {
+      if (hasWord(haystack, word)) {
         classification = type;
         break;
       }
     }
   }
 
-  if (classification === "normal" && SALE_KEYWORDS.some((w) => haystack.includes(w))) {
+  if (classification === "normal" && SALE_KEYWORDS.some((w) => hasWord(haystack, w))) {
     classification = "sale";
   }
   if (classification === "normal" && isSpam) {

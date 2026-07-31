@@ -42,6 +42,24 @@ import { classifyMessage, trimQuotedReply } from "./classify-message";
   assert.equal(r.classification, "contract");
 }
 
+// ── "contractor"/"terms and conditions" must NOT trip Contracts ─────────────
+{
+  const sub = classifyMessage({
+    subject: "Your subcontractor is on the way",
+    body: "The subcontractor will arrive at 9am.",
+    hasAttachments: false,
+  });
+  assert.equal(sub.classification, "normal", "'subcontractor' is not a contract");
+
+  // A receipt whose footer says "terms and conditions" stays a receipt, not contract.
+  const rc = classifyMessage({
+    subject: "Receipt",
+    body: "Paid $50. See our terms and conditions.",
+    hasAttachments: false,
+  });
+  assert.equal(rc.classification, "receipt");
+}
+
 // ── sale keyword → Sales ────────────────────────────────────────────────────
 {
   const r = classifyMessage({
