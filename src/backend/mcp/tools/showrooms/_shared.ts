@@ -2,12 +2,16 @@
  * @fileoverview Shared helpers for the Showrooms MCP tool domain.
  */
 import { showroomStoreHours, showroomStoreLinks, showroomStores } from "@backend/db";
+import { GoogleMapsService } from "@backend/services/google/maps";
+import { findDuplicateStore } from "@backend/services/showroom/duplicate-check";
 import {
+  mapPlaceDetailsToStoreInput,
   resolveStoreGeoPatch,
   hoursJsonToRows,
   type MappedPlaceStore,
 } from "@backend/services/showroom/onboarding";
 import { collectSocialLinks } from "@backend/services/showroom/social-links";
+import type { GooglePlaceDetails } from "@frontend/components/showroom/intake/places-mapper";
 import { and, eq, isNotNull } from "drizzle-orm";
 
 import type { RemodelDb } from "../../types";
@@ -238,4 +242,89 @@ export async function adoptPlaceLocation(
   });
 
   return updated;
+}
+
+/** Outcome of a single place-id intake. */
+export interface IntakeOnePlaceResult {
+  created: boolean;
+  /** "processing" (new row), "exists…", or "located (adopted…)". */
+  status: string;
+  showroomId: number;
+  store: typeof showroomStores.$inferSelect;
+}
+
+/**
+ * Intake ONE Google place-id — the exact flow `import_showroom_from_place` runs,
+ * extracted so the single tool AND the bulk-intake workflow share identical
+ * behaviour (Places Details → placeId idempotency → dedupe/adopt → insert → kick
+ * onboarding). Throws (toolError / rethrowMapsError) on a hard failure; the bulk
+ * workflow catches per item so one bad id never sinks the batch.
+ */
+export async function intakeOnePlace(
+  env: Env,
+  db: RemodelDb,
+  rawPlaceId: string,
+): Promise<IntakeOnePlaceResult> {
+  const placeId = rawPlaceId?.trim();
+  if (!placeId) toolError("`placeId` is required and cannot be empty.");
+
+  // Idempotency: a store with this placeId already exists → return it.
+  const [existing] = await db
+    .select()
+    .from(showroomStores)
+    .where(eq(showroomStores.placeId, placeId))
+    .limit(1);
+  if (existing) {
+    return { created: false, status: "exists", showroomId: existing.id, store: existing };
+  }
+
+  // Fetch Google fields + Gemini review analysis inline (matches the intake form).
+  let details: Record<string, unknown>;
+  try {
+    details = await new GoogleMapsService(env).placeDetails(placeId);
+  } catch (err) {
+    rethrowMapsError(err);
+  }
+
+  const mapped = mapPlaceDetailsToStoreInput(details as GooglePlaceDetails);
+  if (!mapped) {
+    toolError(`Google returned no usable place for placeId "${placeId}".`);
+  }
+  mapped.values.placeId = mapped.values.placeId ?? placeId;
+
+  // Fuzzy match: only a match that ALREADY has a placeId is a true duplicate.
+  // A match with no placeId is a bare stub — adopt this location onto it.
+  const dup = await findDuplicateStore(db, {
+    placeId: mapped.values.placeId,
+    phoneNumber: mapped.values.phoneNumber,
+    websiteUrl: mapped.websiteUrl,
+    locationAddress: mapped.values.locationAddress,
+  });
+  if (dup?.placeId) {
+    const [existingDup] = await db
+      .select()
+      .from(showroomStores)
+      .where(eq(showroomStores.id, dup.id))
+      .limit(1);
+    if (existingDup) {
+      return {
+        created: false,
+        status: `exists (matched by ${dup.reason})`,
+        showroomId: existingDup.id,
+        store: existingDup,
+      };
+    }
+  }
+  if (dup) {
+    const adopted = await adoptPlaceLocation(env, db, dup.id, mapped);
+    return {
+      created: false,
+      status: `located (adopted onto existing store, matched by ${dup.reason})`,
+      showroomId: adopted.id,
+      store: adopted,
+    };
+  }
+
+  const created = await persistPlaceShowroom(env, db, mapped);
+  return { created: true, status: "processing", showroomId: created.id, store: created };
 }
