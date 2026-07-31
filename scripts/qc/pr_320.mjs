@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * QC for the Vendor Guest Portal — PR 1 (0043 P0+P1+P2).
- * Run: node scripts/qc/pr_guest_portal_p1.mjs --preview   (or bare for prod)
+ * QC for the Vendor Guest Portal — PR #320 (0043 P0+P1+P2).
+ * Run: node scripts/qc/pr_320.mjs --preview   (or bare for prod)
  *
  * Covers the guest identity API + the security boundary:
  *   1. GET /api/guest/me with no cookie → { guest: null }
