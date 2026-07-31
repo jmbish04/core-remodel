@@ -52,6 +52,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { NavigateTeslaButton } from "@/components/tesla/NavigateTeslaButton";
 import { Card, CardContent } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
@@ -874,6 +875,11 @@ export function DriveViewportApp({ slug }: { slug: string }) {
               Make this the active drive
             </Button>
           )}
+        </div>
+
+        {/* Send the whole drive to the car as a multi-waypoint route (0032 N1). */}
+        <div className="mt-3">
+          <NavigateTeslaButton slug={slug} driveListId={drive.id} variant="outline" className="gap-2" />
         </div>
       </header>
 

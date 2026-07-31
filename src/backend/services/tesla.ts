@@ -182,6 +182,57 @@ export async function sendNavigation(env: Env, dest: string): Promise<SendNavRes
   }
 }
 
+/** One stop on a multi-waypoint drive. */
+export interface Waypoint {
+  latitude: number;
+  longitude: number;
+  label?: string;
+}
+
+export interface SendDriveResult extends SendNavResult {
+  /** How the drive was handed to the car. */
+  method?: "single" | "maps-route";
+  /** How many waypoints were sent. */
+  count?: number;
+}
+
+/**
+ * Send a MULTI-STOP drive to the car (0032 N1).
+ *
+ * Tessie's `share` command takes a single `value`, and the Tesla Fleet
+ * `navigation_waypoints_request` (a signed command) is not exposed through
+ * Tessie's share path — so this builds a Google Maps **directions** URL with the
+ * ordered waypoints + final destination and shares THAT, which the car opens as a
+ * routed multi-stop trip. With one waypoint it degrades to `sendNavigation`.
+ *
+ * FOLLOW-UP (documented): a native Fleet-API `navigation_waypoints_request` (via a
+ * signed-command passthrough) would set true in-nav waypoints; the maps-route share
+ * is the working fallback the plan calls for until that spike lands.
+ */
+export async function sendMultiWaypointNavigation(
+  env: Env,
+  waypoints: Waypoint[],
+): Promise<SendDriveResult> {
+  const pts = (waypoints ?? []).filter(
+    (w) => Number.isFinite(w.latitude) && Number.isFinite(w.longitude),
+  );
+  if (pts.length === 0) return { ok: false, error: "No waypoints with coordinates." };
+  if (pts.length === 1) {
+    const r = await sendNavigation(env, `${pts[0].latitude},${pts[0].longitude}`);
+    return { ...r, method: "single", count: 1 };
+  }
+
+  const dest = pts[pts.length - 1];
+  const mids = pts.slice(0, -1);
+  const mapsUrl =
+    "https://www.google.com/maps/dir/?api=1" +
+    `&destination=${dest.latitude},${dest.longitude}` +
+    `&waypoints=${mids.map((w) => `${w.latitude},${w.longitude}`).join("|")}` +
+    "&travelmode=driving";
+  const r = await sendNavigation(env, mapsUrl);
+  return { ...r, method: "maps-route", count: pts.length };
+}
+
 /** A cached snapshot of the car, as Tessie last saw it. */
 export interface VehicleState {
   /** "P" | "R" | "N" | "D", or null when the car is asleep / not reported. */

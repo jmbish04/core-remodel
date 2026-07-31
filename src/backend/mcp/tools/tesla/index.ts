@@ -19,6 +19,7 @@ import { getTeslaStatus } from "./get_tesla_status";
 import { getVehicleLocation } from "./get_vehicle_location";
 import { listTeslaEvents } from "./list_tesla_events";
 import { reportLocation } from "./report_location";
+import { sendDriveToTesla } from "./send_drive_to_tesla";
 import { sendVehicleNavigation } from "./send_vehicle_navigation";
 
 export const teslaTools: RemodelTool[] = [
@@ -27,4 +28,5 @@ export const teslaTools: RemodelTool[] = [
   listTeslaEvents,
   reportLocation,
   sendVehicleNavigation,
+  sendDriveToTesla,
 ];

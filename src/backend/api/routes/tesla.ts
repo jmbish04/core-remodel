@@ -34,6 +34,7 @@ import {
 import {
   getLocation,
   sendNavigation,
+  sendMultiWaypointNavigation,
   tessieConfigured,
   verifyWebhookSecret,
 } from "@backend/services/tesla";
@@ -136,6 +137,64 @@ teslaRouter.post("/navigate", async (c) => {
   const result = await sendNavigation(c.env, dest);
   if (!result.ok) return c.json({ ok: false, error: result.error }, 502);
   return c.json({ ok: true, destination: dest });
+});
+
+/**
+ * POST /api/tesla/navigate-drive — send a whole drive (multi-waypoint) to the car (N1).
+ *
+ * Resolves the drive's stops in order — skipping `skipped` and un-promoted
+ * `suggested` pitstops, and any stop with no usable coordinates — then hands the
+ * routed trip to the car via `sendMultiWaypointNavigation` (a Google Maps
+ * directions share; see the service for the Fleet-API follow-up).
+ */
+teslaRouter.post("/navigate-drive", async (c) => {
+  const body = (await c.req.json().catch(() => ({}))) as { driveListId?: number; slug?: string };
+  const db = drizzle(c.env.DB);
+
+  let driveListId = typeof body.driveListId === "number" ? body.driveListId : null;
+  if (driveListId == null && body.slug) {
+    const [dl] = await db
+      .select({ id: driveLists.id })
+      .from(driveLists)
+      .where(eq(driveLists.slug, body.slug))
+      .limit(1);
+    driveListId = dl?.id ?? null;
+  }
+  if (driveListId == null) return c.json({ error: "Provide { driveListId } or { slug }." }, 400);
+
+  const stops = await db
+    .select({
+      name: driveListStops.name,
+      sortOrder: driveListStops.sortOrder,
+      skipped: driveListStops.skipped,
+      suggested: driveListStops.suggested,
+      lat: driveListStops.latitude,
+      lng: driveListStops.longitude,
+      sLat: showroomStores.latitude,
+      sLng: showroomStores.longitude,
+    })
+    .from(driveListStops)
+    .leftJoin(showroomStores, eq(driveListStops.showroomStoreId, showroomStores.id))
+    .where(eq(driveListStops.driveListId, driveListId))
+    .orderBy(driveListStops.sortOrder)
+    .all();
+
+  const waypoints = stops
+    .filter((s) => !s.skipped && !s.suggested)
+    .map((s) => {
+      const lat = s.lat ?? s.sLat;
+      const lng = s.lng ?? s.sLng;
+      return lat != null && lng != null ? { latitude: lat, longitude: lng, label: s.name } : null;
+    })
+    .filter((w): w is { latitude: number; longitude: number; label: string } => w != null);
+
+  if (waypoints.length === 0) {
+    return c.json({ error: "This drive has no stops with coordinates to navigate." }, 400);
+  }
+
+  const result = await sendMultiWaypointNavigation(c.env, waypoints);
+  if (!result.ok) return c.json({ ok: false, error: result.error }, 502);
+  return c.json({ ok: true, method: result.method, count: result.count });
 });
 
 /**
