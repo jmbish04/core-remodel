@@ -349,6 +349,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     changes: [
       { kind: "added", text: "src/backend/mcp/sse-heartbeat.ts — withSseHeartbeat(inner): splices a 15s `: ping` frame into text/event-stream MCP responses via a ReadableStream controller; non-SSE responses pass through verbatim." },
       { kind: "changed", text: "src/_worker.ts wraps both OAuthProvider apiHandlers (/mcp serve + /mcp/sse serveSSE) with withSseHeartbeat." },
+      { kind: "fixed", text: "Codra hardening: a `cancelled` flag + guarded controller.close()/error() and a trailing .catch() on the pump IIFE prevent an unhandled rejection when the consumer cancels the SSE stream (P1); cancel() now returns the reader.cancel() promise; content-type match is case-insensitive; and Content-Length/Content-Encoding are stripped from the copied headers so the replaced heartbeat body can't be truncated. Declined: restricting the wrapper to /mcp only — it returns the original Response verbatim for non-event-stream types (a provable no-op) and /mcp streamable-HTTP legitimately returns text/event-stream for streaming responses, the transport a voice session rides." },
     ],
     status: "staged",
   },
