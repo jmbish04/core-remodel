@@ -1,30 +1,60 @@
 ---
+import { GuestRegistration } from "@/components/GuestRegistration";
 import { PublicRoomGalleryApp } from "@/components/PublicRoomGalleryApp";
 import { RoomViewApp } from "@/components/RoomViewApp";
 import BaseLayout from "@/layouts/BaseLayout.astro";
+import GuestLayout from "@/layouts/GuestLayout.astro";
 import { isRequestAuthenticated } from "@backend/utils/access";
+import { isGuestPortalRequest, isGuestRegistered } from "@backend/utils/guest-access";
 
 const roomCode = Astro.params.slug || "";
-
-// Server-side split: the homeowner gets the full room view; an unauthenticated
-// visitor (a vendor/showroom we shared the floor plan with) gets the photos-only
-// public gallery. Deciding here means the public bundle never even ships the
-// homeowner view, and there is no client-side auth flash.
 const { env } = Astro.locals.runtime;
-const authed = await isRequestAuthenticated(Astro.request, env);
+
+const isPortal = isGuestPortalRequest(Astro.request);
+// Default-deny on error: a thrown auth check falls back to the public gallery
+// (main host) or the registration wall (portal), never a 500.
+let authed = false;
+try {
+  authed = await isRequestAuthenticated(Astro.request, env);
+} catch {
+  authed = false;
+}
+// On the vendor portal, a room page requires an authed homeowner or a registered
+// guest; otherwise show the registration wall (never the photos).
+let guestAllowed = authed;
+if (isPortal && !authed) {
+  try {
+    guestAllowed = await isGuestRegistered(Astro.request, env);
+  } catch {
+    guestAllowed = false;
+  }
+}
 ---
 
-<BaseLayout
-  title="Room View - 126 Colby - Remodel Mission Control"
-  description="Dedicated room viewport with stored AI summary, room options, budgets, and linked records."
->
-  {
-    authed ? (
-      <main class="container mx-auto px-4 py-8 pb-12">
-        <RoomViewApp client:only="react" roomCode={roomCode} />
-      </main>
-    ) : (
-      <PublicRoomGalleryApp client:only="react" roomCode={roomCode} />
-    )
-  }
-</BaseLayout>
+{
+  isPortal ? (
+    <GuestLayout
+      title="126 Colby — Room Photos"
+      description="Room photos for the 126 Colby remodel."
+    >
+      {guestAllowed ? (
+        <PublicRoomGalleryApp client:only="react" roomCode={roomCode} />
+      ) : (
+        <GuestRegistration client:only="react" />
+      )}
+    </GuestLayout>
+  ) : (
+    <BaseLayout
+      title="Room View - 126 Colby - Remodel Mission Control"
+      description="Dedicated room viewport with stored AI summary, room options, budgets, and linked records."
+    >
+      {authed ? (
+        <main class="container mx-auto px-4 py-8 pb-12">
+          <RoomViewApp client:only="react" roomCode={roomCode} />
+        </main>
+      ) : (
+        <PublicRoomGalleryApp client:only="react" roomCode={roomCode} />
+      )}
+    </BaseLayout>
+  )
+}

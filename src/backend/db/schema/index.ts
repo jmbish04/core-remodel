@@ -33,6 +33,8 @@ export * from "./home/room_ai_summaries";
 export * from "./home/homeowner_messages";
 export * from "./home/visitor_sessions";
 export * from "./home/visitor_events";
+
+export * from "./guests/guest_contacts";
 export * from "./home/planning_participants";
 export * from "./home/planning_epics";
 export * from "./home/planning_tasks";
