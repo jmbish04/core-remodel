@@ -65,7 +65,7 @@ export const gmailMessages = sqliteTable(
      *     parser); shown in the Receipts folder.
      */
     classification: text("classification", {
-      enum: ["normal", "promotional", "receipt", "invoice", "quote"],
+      enum: ["normal", "promotional", "receipt", "invoice", "quote", "contract", "sale"],
     })
       .notNull()
       .default("normal"),

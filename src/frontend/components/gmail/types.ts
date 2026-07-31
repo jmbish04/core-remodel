@@ -80,12 +80,22 @@ export interface GmailEmbeddedImage {
 }
 
 /** The inbox folders (0041). */
-export type GmailFolder = "inbox" | "receipts" | "spam" | "trash";
+export type GmailFolder =
+  | "inbox"
+  | "quotes"
+  | "receipts"
+  | "contracts"
+  | "sales"
+  | "spam"
+  | "trash";
 
 /** Per-folder thread counts for the folder rail. */
 export interface GmailFolderCounts {
   inbox: number;
+  quotes: number;
   receipts: number;
+  contracts: number;
+  sales: number;
   spam: number;
   trash: number;
 }
@@ -120,9 +130,11 @@ export interface ThreadsByDomainResponse {
 /** A domain-matched thread carrying its per-message unread count (0040 P4). */
 export interface GmailInboxThreadItemWithUnread extends GmailInboxThreadItem {
   unread: number;
-  /** 0041 — folder tagging for badges. */
+  /** 0041/0042 — folder tagging for badges. */
   isSpam?: boolean;
   isReceipt?: boolean;
+  /** The folder this thread resolved to (0042): quotes | receipts | contracts | sales | … */
+  classification?: string;
   spamRationale?: string | null;
 }
 

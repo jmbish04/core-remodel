@@ -12,7 +12,7 @@
  * Cloudflare Images URLs — we never inject raw email HTML (XSS).
  */
 import * as React from "react";
-import { Inbox, Receipt, ShieldAlert, Trash2, Mail, Reply, Sparkles, Paperclip, ChevronDown, ChevronRight, RefreshCw, MailOpen, Loader2 } from "lucide-react";
+import { Inbox, Receipt, ShieldAlert, Trash2, Mail, Reply, Sparkles, Paperclip, ChevronDown, ChevronRight, RefreshCw, MailOpen, Loader2, FileText, FileSignature, BadgePercent } from "lucide-react";
 import { toast } from "sonner";
 
 import { OverviewNoteEditor } from "@/components/showroom/OverviewNoteEditor";
@@ -31,12 +31,23 @@ import {
 
 const FOLDERS: { key: GmailFolder; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { key: "inbox", label: "Inbox", icon: Inbox },
+  { key: "quotes", label: "Quotes", icon: FileText },
   { key: "receipts", label: "Receipts", icon: Receipt },
+  { key: "contracts", label: "Contracts", icon: FileSignature },
+  { key: "sales", label: "Sales", icon: BadgePercent },
   { key: "spam", label: "Spam", icon: ShieldAlert },
   { key: "trash", label: "Trash", icon: Trash2 },
 ];
 
-const EMPTY_COUNTS: GmailFolderCounts = { inbox: 0, receipts: 0, spam: 0, trash: 0 };
+const EMPTY_COUNTS: GmailFolderCounts = {
+  inbox: 0,
+  quotes: 0,
+  receipts: 0,
+  contracts: 0,
+  sales: 0,
+  spam: 0,
+  trash: 0,
+};
 
 /** Embedded images are served from Cloudflare Images; never render any other host. */
 function isTrustedImageUrl(url: string): boolean {

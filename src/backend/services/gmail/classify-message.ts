@@ -11,7 +11,14 @@
 
 import { parseEmailAddress } from "./participants";
 
-export type MessageClassification = "normal" | "promotional" | "receipt" | "invoice" | "quote";
+export type MessageClassification =
+  | "normal"
+  | "promotional"
+  | "receipt"
+  | "invoice"
+  | "quote"
+  | "contract"
+  | "sale";
 
 export interface MessageClassificationResult {
   classification: MessageClassification;
@@ -72,13 +79,45 @@ const BULK_SENDER_SUBDOMAINS: readonly string[] = [
   "nl.",
 ];
 
-/** Purchase-document keywords. */
+/** Purchase-document keywords (receipt / invoice / quote — each its own folder). */
 const RECEIPT_KEYWORDS: readonly { word: string; type: MessageClassification }[] = [
   { word: "order confirmation", type: "receipt" },
   { word: "receipt", type: "receipt" },
   { word: "invoice", type: "invoice" },
-  { word: "quote", type: "quote" },
   { word: "quotation", type: "quote" },
+  { word: "quote", type: "quote" },
+  { word: "estimate", type: "quote" },
+];
+
+/** Contract / agreement keywords → the Contracts folder. */
+const CONTRACT_KEYWORDS: readonly string[] = [
+  "contract",
+  "agreement",
+  "statement of work",
+  "scope of work",
+  "master service",
+  "service agreement",
+  "terms and conditions",
+  "docusign",
+  "sign here",
+  "for your signature",
+];
+
+/** Sale / deal keywords → the Sales folder (deals worth seeing, not buried in spam). */
+const SALE_KEYWORDS: readonly string[] = [
+  "clearance",
+  "% off",
+  "on sale",
+  "sale ends",
+  "final sale",
+  "flash sale",
+  "blowout",
+  "markdown",
+  "save up to",
+  "deal of",
+  "limited time",
+  "door buster",
+  "doorbuster",
 ];
 
 /**
@@ -129,19 +168,31 @@ export function classifyMessage(input: {
     }
   }
 
-  // Receipt/invoice/quote.
+  // Classification precedence (each maps to its own inbox folder):
+  //   contract  → agreement/signature keywords
+  //   receipt/invoice/quote → a purchase keyword AND ($ present OR an attachment)
+  //   sale      → deal/clearance keywords
+  //   promotional (spam marketing) / normal
   const hasMoney = haystack.includes("$");
-  let receiptType: MessageClassification | null = null;
-  if (hasMoney || input.hasAttachments) {
+  let classification: MessageClassification = "normal";
+
+  if (CONTRACT_KEYWORDS.some((w) => haystack.includes(w))) {
+    classification = "contract";
+  } else if (hasMoney || input.hasAttachments) {
     for (const { word, type } of RECEIPT_KEYWORDS) {
       if (haystack.includes(word)) {
-        receiptType = type;
+        classification = type;
         break;
       }
     }
   }
 
-  const classification: MessageClassification = receiptType ?? (isSpam ? "promotional" : "normal");
+  if (classification === "normal" && SALE_KEYWORDS.some((w) => haystack.includes(w))) {
+    classification = "sale";
+  }
+  if (classification === "normal" && isSpam) {
+    classification = "promotional";
+  }
 
   return { classification, isSpam, spamRationale };
 }
