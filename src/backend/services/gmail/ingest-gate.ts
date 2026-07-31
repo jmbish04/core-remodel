@@ -49,6 +49,8 @@ import type { RouteDecision } from "@backend/services/email/types";
 // @astrojs/cloudflare build (`astro:build:done` ENOENT on a moved `_astro`
 // chunk). Keep it lazy.
 
+import { sanitizeNoteHtml } from "@backend/services/notes/markdown";
+
 import { getGmailAccessToken } from "./auth";
 import { classifyMessage } from "./classify-message";
 import {
@@ -309,7 +311,7 @@ async function ingestAndBridgeMessage(
       subject: extracted.subject ?? null,
       body: extracted.body,
       bodyPlainTxt: extracted.body,
-      bodyHtml: extracted.html,
+      bodyHtml: extracted.html ? sanitizeNoteHtml(extracted.html) : null,
       classification: gate.classification,
       isSpam: gate.isSpam,
       spamRationale: gate.spamRationale,

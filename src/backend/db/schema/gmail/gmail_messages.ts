@@ -44,7 +44,13 @@ export const gmailMessages = sqliteTable(
 
     /** Plain-text body (0039). Preferred for md5 / classification input. */
     bodyPlainTxt: text("body_plain_txt"),
-    /** HTML body (0039). Sanitized on render. */
+    /**
+     * HTML body (0039). SANITIZED ON WRITE via sanitizeNoteHtml (0041 hardening)
+     * at both ingest sites + the reply path — script/style/iframe/object/embed
+     * tags, on* handlers, and javascript: URLs are stripped before storage, so
+     * the column never holds active content. (The reading pane still renders
+     * plaintext `bodyVisible`, not this.)
+     */
     bodyHtml: text("body_html"),
 
     /** Optional Workers AI–generated summary of the message body. */

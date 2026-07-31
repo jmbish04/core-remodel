@@ -44,6 +44,7 @@ import type { GmailMessage, GmailMessageInsert, GmailThread } from "@backend/db"
 import { getGmailAccessToken } from "@backend/services/gmail/auth";
 import { classifyMessage, trimQuotedReply } from "@backend/services/gmail/classify-message";
 import { ensureMessageImages } from "@backend/services/gmail/inline-images";
+import { sanitizeNoteHtml } from "@backend/services/notes/markdown";
 import { buildComposeRaw, buildReplyAllRaw, sendMessage, stripHtmlTags } from "@backend/services/gmail/client";
 import { ingestCompanyEmails } from "@backend/services/gmail/ingestion";
 import { runIngestGate } from "@backend/services/gmail/ingest-gate";
@@ -1249,7 +1250,7 @@ gmailRouter.openapi(
         subject: latest.subject || null,
         body: plainText,
         bodyPlainTxt: plainText,
-        bodyHtml: htmlBody,
+        bodyHtml: htmlBody ? sanitizeNoteHtml(htmlBody) : null,
         ragUuid: crypto.randomUUID(),
       };
 

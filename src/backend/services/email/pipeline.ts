@@ -276,10 +276,16 @@ async function runNonAiExtraction(
 
     att.extractedText = extractedText;
     att.ocrStatus = ocrStatus;
-    await db
-      .update(workerEmailAttachments)
-      .set({ extractedText, ocrStatus })
-      .where(eq(workerEmailAttachments.id, att.id));
+    try {
+      await db
+        .update(workerEmailAttachments)
+        .set({ extractedText, ocrStatus })
+        .where(eq(workerEmailAttachments.id, att.id));
+    } catch (err) {
+      // Persistence of derived text must never abort the pipeline (the in-memory
+      // record still carries the text for this run's AI pass).
+      console.error(`[email-pipeline] persist extracted_text failed for attachment ${att.id}:`, err);
+    }
   }
 }
 
@@ -381,6 +387,9 @@ export async function processEmail(args: ProcessEmailArgs): Promise<void> {
       routeReason: decision.reason,
       status: "pending",
       source: decision.source ?? "worker",
+      // Explicit (never rely on the fail-closed default): trusted worker email
+      // runs AI inline; Gmail defers to pending_approval.
+      aiStatus: decision.deferAiUntilApproval ? "pending_approval" : "auto_done",
     })
     .returning();
 
@@ -454,10 +463,7 @@ export async function processEmail(args: ProcessEmailArgs): Promise<void> {
   // Gmail-sourced mail defers the AI extraction until a human approves it (see
   // RouteDecision.deferAiUntilApproval). Trusted worker email runs AI inline.
   if (decision.deferAiUntilApproval) {
-    await db
-      .update(workerEmails)
-      .set({ aiStatus: "pending_approval" })
-      .where(eq(workerEmails.id, insertedEmail.id));
+    // ai_status was already set to pending_approval at insert; stop before AI.
     return;
   }
 

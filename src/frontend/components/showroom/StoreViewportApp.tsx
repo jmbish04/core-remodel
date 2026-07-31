@@ -1254,9 +1254,7 @@ export function StoreViewportApp({
             variant="outline"
             className="relative gap-1.5"
             aria-label={`Inbox${inboxUnread > 0 ? ` (${inboxUnread} unread)` : ""}`}
-            onClick={() => {
-              window.location.href = `/admin/shopping/store/${id}/inbox`;
-            }}
+            render={<a href={`/admin/shopping/store/${id}/inbox`} />}
           >
             <Mail className="size-3.5" /> Inbox
             {inboxUnread > 0 ? (

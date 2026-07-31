@@ -28,6 +28,8 @@ import {
 } from "@backend/db";
 
 import { getGmailAccessToken } from "./auth";
+import { sanitizeNoteHtml } from "@backend/services/notes/markdown";
+
 import { classifyMessage } from "./classify-message";
 import {
   extractMessage,
@@ -400,7 +402,7 @@ export async function ingestCompanyEmails(env: Env): Promise<IngestCompanyEmails
             subject: extracted.subject || null,
             body: extracted.body,
             bodyPlainTxt: extracted.body,
-            bodyHtml: extracted.html,
+            bodyHtml: extracted.html ? sanitizeNoteHtml(extracted.html) : null,
             classification: gate.classification,
             isSpam: gate.isSpam,
             spamRationale: gate.spamRationale,

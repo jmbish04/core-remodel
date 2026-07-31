@@ -12,7 +12,7 @@ flowchart LR
   subgraph Page["StoreInboxApp (full height)"]
     F["Folders rail<br/>Inbox·Receipts·Spam·Sent·Trash<br/>+ unread counts"]
     L["Thread list<br/>(search, unread toggle)"]
-    R["Reading pane<br/>header · attachments · body(html) · reply"]
+    R["Reading pane<br/>header · attachments · body(PLAINTEXT bodyVisible, never raw HTML) · reply"]
   end
   F --> L --> R
 ```

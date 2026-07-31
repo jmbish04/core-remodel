@@ -269,9 +269,16 @@ export async function getAttachmentBytes(
   messageId: string,
   attachmentId: string,
 ): Promise<Uint8Array> {
+  // gmailFetch throws on non-2xx, so a body here is a 200. Validate the shape
+  // rather than trusting the cast — a malformed/unexpected envelope yields no
+  // bytes instead of a runtime surprise.
   const res = await gmailFetch(token, `/messages/${messageId}/attachments/${attachmentId}`);
-  const data = (await res.json()) as { data?: string; size?: number };
-  return base64UrlToBytes(data.data ?? "");
+  const data: unknown = await res.json();
+  const b64 =
+    data && typeof data === "object" && typeof (data as { data?: unknown }).data === "string"
+      ? (data as { data: string }).data
+      : "";
+  return base64UrlToBytes(b64);
 }
 
 /** Decode a base64url string to raw bytes. */

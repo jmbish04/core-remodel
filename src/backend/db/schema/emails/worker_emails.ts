@@ -120,6 +120,14 @@ export const workerEmails = sqliteTable(
      *   pending_approval → non-AI work done; awaiting user OK to run AI
      *   approved         → user approved; AI extraction ran
      *   failed           → AI extraction attempted and errored
+     *
+     * INVARIANT: the pipeline ALWAYS sets this explicitly at insert from
+     * decision.deferAiUntilApproval (Gmail → pending_approval, worker →
+     * auto_done), so the column default is never reached in practice. The
+     * default stays `auto_done` only because it is the value 0161 already wrote
+     * to every existing (pre-0042, all worker-sourced) row — changing it would
+     * force a full D1 rebuild of this cascade-parent table for no behavioural
+     * gain. Any NEW insert path MUST set ai_status explicitly.
      */
     aiStatus: text("ai_status").notNull().default("auto_done"),
     aiApprovedAt: integer("ai_approved_at", { mode: "timestamp" }),
