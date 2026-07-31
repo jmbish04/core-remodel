@@ -33,6 +33,7 @@ export const sendDriveToTesla = defineTool({
     ok: z.boolean(),
     method: z.string().optional().describe("'single' or 'maps-route'."),
     count: z.number().int().optional().describe("How many waypoints were sent."),
+    truncated: z.number().int().optional().describe("Stops dropped to fit the Maps URL limit."),
   },
   examples: [
     { title: "By id", args: { driveListId: 12 } },
@@ -54,6 +55,7 @@ export const sendDriveToTesla = defineTool({
         .limit(1);
       driveListId = dl?.id ?? null;
     }
+    // toolError returns `never` (throws), so TS narrows driveListId to number below.
     if (driveListId == null) toolError("Pass a `driveListId` or a drive `slug`.");
 
     const stops = await db
@@ -68,7 +70,7 @@ export const sendDriveToTesla = defineTool({
       })
       .from(driveListStops)
       .leftJoin(showroomStores, eq(driveListStops.showroomStoreId, showroomStores.id))
-      .where(eq(driveListStops.driveListId, driveListId as number))
+      .where(eq(driveListStops.driveListId, driveListId))
       .orderBy(driveListStops.sortOrder)
       .all();
 
@@ -87,6 +89,6 @@ export const sendDriveToTesla = defineTool({
 
     const result = await sendMultiWaypointNavigation(env, waypoints);
     if (!result.ok) toolError(`Tessie rejected the drive: ${result.error}`);
-    return { ok: true, method: result.method, count: result.count };
+    return { ok: true, method: result.method, count: result.count, truncated: result.truncated };
   },
 });

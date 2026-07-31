@@ -11,7 +11,7 @@
  * self-contained so it can drop onto a showroom hero, a drive viewport, or anywhere.
  */
 import { Loader2, Navigation } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -48,7 +48,21 @@ export function NavigateTeslaButton({
   className,
 }: NavigateTeslaButtonProps) {
   const [busy, setBusy] = useState(false);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
   const isDrive = driveListId != null;
+  // A usable target must be present, else the POST would send an empty body.
+  const hasTarget =
+    isDrive ||
+    (latitude != null && longitude != null) ||
+    Boolean(destination?.trim()) ||
+    stopId != null;
 
   async function go() {
     setBusy(true);
@@ -56,29 +70,41 @@ export function NavigateTeslaButton({
       const path = isDrive ? "/api/tesla/navigate-drive" : "/api/tesla/navigate";
       const body = isDrive
         ? { driveListId, slug }
-        : { lat: latitude ?? undefined, lng: longitude ?? undefined, destination, stopId, slug };
+        : {
+            lat: latitude ?? undefined,
+            lng: longitude ?? undefined,
+            destination: destination ?? undefined,
+            stopId,
+            slug,
+          };
       const res = await fetch(path, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = (await res.json().catch(() => ({}))) as {
+      const data = (await res.json().catch(() => null)) as {
         ok?: boolean;
         error?: string;
         count?: number;
-      };
-      if (!res.ok || data.ok === false) throw new Error(data.error ?? `Failed (${res.status})`);
+        truncated?: number;
+      } | null;
+      // Require an explicit ok:true — a 200 with malformed/absent JSON is NOT success.
+      if (!res.ok || data?.ok !== true) throw new Error(data?.error ?? `Failed (${res.status})`);
+      const dropped = data.truncated ? ` (${data.truncated} beyond the maps limit not sent)` : "";
       toast.success(
         isDrive
-          ? `Sent ${data.count ?? ""} stop${data.count === 1 ? "" : "s"} to the car`.replace("  ", " ")
+          ? `Sent ${data.count ?? ""} stop${data.count === 1 ? "" : "s"} to the car${dropped}`.replace(
+              "  ",
+              " ",
+            )
           : "Sent to the car",
       );
     } catch (e) {
       console.error("[NavigateTeslaButton]", e);
       toast.error(e instanceof Error ? e.message : "Could not send to the car");
     } finally {
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }
 
@@ -88,9 +114,9 @@ export function NavigateTeslaButton({
       size={size}
       variant={variant}
       className={className}
-      disabled={busy}
+      disabled={busy || !hasTarget}
       onClick={go}
-      title="Send to the Tesla's navigation"
+      title={hasTarget ? "Send to the Tesla's navigation" : "No destination to send"}
     >
       {busy ? (
         <Loader2 className="size-4 animate-spin" />

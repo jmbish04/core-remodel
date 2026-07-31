@@ -142,10 +142,12 @@ teslaRouter.post("/navigate", async (c) => {
 /**
  * POST /api/tesla/navigate-drive — send a whole drive (multi-waypoint) to the car (N1).
  *
- * Resolves the drive's stops in order — skipping `skipped` and un-promoted
- * `suggested` pitstops, and any stop with no usable coordinates — then hands the
- * routed trip to the car via `sendMultiWaypointNavigation` (a Google Maps
- * directions share; see the service for the Fleet-API follow-up).
+ * Resolves the drive's stops in order — skipping `skipped` stops and pitstop
+ * suggestions the user hasn't added yet (`suggested = true`; promoting one flips it
+ * to false, so `!suggested` keeps every real stop), plus any stop with no usable
+ * coordinates — then hands the routed trip to the car via
+ * `sendMultiWaypointNavigation` (a Google Maps directions share; see the service
+ * for the Fleet-API follow-up).
  */
 teslaRouter.post("/navigate-drive", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as { driveListId?: number; slug?: string };
@@ -194,7 +196,7 @@ teslaRouter.post("/navigate-drive", async (c) => {
 
   const result = await sendMultiWaypointNavigation(c.env, waypoints);
   if (!result.ok) return c.json({ ok: false, error: result.error }, 502);
-  return c.json({ ok: true, method: result.method, count: result.count });
+  return c.json({ ok: true, method: result.method, count: result.count, truncated: result.truncated });
 });
 
 /**

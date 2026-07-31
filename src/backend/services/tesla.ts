@@ -194,7 +194,15 @@ export interface SendDriveResult extends SendNavResult {
   method?: "single" | "maps-route";
   /** How many waypoints were sent. */
   count?: number;
+  /** How many trailing stops were dropped to fit the Maps URL limit (0/undefined = none). */
+  truncated?: number;
 }
+
+/**
+ * Max points in one Google Maps directions share. The URL scheme reliably routes
+ * ~10 total stops; beyond that Maps silently drops the tail, so we cap + report it.
+ */
+const MAX_MAPS_WAYPOINTS = 10;
 
 /**
  * Send a MULTI-STOP drive to the car (0032 N1).
@@ -213,24 +221,32 @@ export async function sendMultiWaypointNavigation(
   env: Env,
   waypoints: Waypoint[],
 ): Promise<SendDriveResult> {
-  const pts = (waypoints ?? []).filter(
+  const all = (waypoints ?? []).filter(
     (w) => Number.isFinite(w.latitude) && Number.isFinite(w.longitude),
   );
-  if (pts.length === 0) return { ok: false, error: "No waypoints with coordinates." };
-  if (pts.length === 1) {
-    const r = await sendNavigation(env, `${pts[0].latitude},${pts[0].longitude}`);
+  if (all.length === 0) return { ok: false, error: "No waypoints with coordinates." };
+  if (all.length === 1) {
+    const r = await sendNavigation(env, `${all[0].latitude},${all[0].longitude}`);
     return { ...r, method: "single", count: 1 };
   }
 
+  // Cap to what a Maps directions URL routes reliably; drop the tail (not the
+  // destination) and report how many so the caller can tell the driver.
+  const truncated = Math.max(0, all.length - MAX_MAPS_WAYPOINTS);
+  const pts = truncated > 0 ? all.slice(0, MAX_MAPS_WAYPOINTS) : all;
+
   const dest = pts[pts.length - 1];
   const mids = pts.slice(0, -1);
+  // NOTE: the raw `|` between waypoints is intentional — `sendNavigation` applies
+  // `encodeURIComponent` to the whole URL as the Tessie `value`, so encoding the
+  // pipe here would double-encode it (`%7C` → `%257C`) and corrupt the share.
   const mapsUrl =
     "https://www.google.com/maps/dir/?api=1" +
     `&destination=${dest.latitude},${dest.longitude}` +
     `&waypoints=${mids.map((w) => `${w.latitude},${w.longitude}`).join("|")}` +
     "&travelmode=driving";
   const r = await sendNavigation(env, mapsUrl);
-  return { ...r, method: "maps-route", count: pts.length };
+  return { ...r, method: "maps-route", count: pts.length, truncated: truncated || undefined };
 }
 
 /** A cached snapshot of the car, as Tessie last saw it. */
