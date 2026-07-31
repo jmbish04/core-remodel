@@ -183,6 +183,7 @@ export interface SaveSceneInput {
   publish?: boolean;
   rendering?: SceneRenderingMetadata | null;
   studyId?: string | null;
+  parentSceneId?: string | null;
 }
 
 /** Create or version-update a scene. Throws PascalStoreError on conflict/too-large/invalid. */
@@ -217,6 +218,7 @@ export async function saveScene(
       id: sceneId,
       studyId: input.studyId ?? null,
       projectId: input.projectId,
+      parentSceneId: input.parentSceneId ?? null,
       name: input.name,
       graphJson: json,
       graphHash,

@@ -18,6 +18,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { floors, measurements, rooms } from "@backend/db";
 
 import type { SceneGraph, SceneRenderingMetadata } from "./shapes";
+import { PascalStoreError } from "./store";
 import type { RemodelDb } from "../../mcp/types";
 
 /** Nominal metric span the floorplan bbox percents map onto (feet). Tunable. */
@@ -59,7 +60,14 @@ export async function generateSeedGraph(
     generatedAt: string;
   },
 ): Promise<SeedResult> {
-  // Resolve the target rooms.
+  // Resolve the target rooms. A scoped project MUST carry its scope id — otherwise
+  // we'd silently fall back to whole-home and seed the wrong room set.
+  if (input.scopeType === "room" && input.roomId == null) {
+    throw new PascalStoreError("invalid", "room-scoped project requires roomId");
+  }
+  if (input.scopeType === "floor" && input.floorId == null) {
+    throw new PascalStoreError("invalid", "floor-scoped project requires floorId");
+  }
   const filters = [eq(rooms.isActive, true)];
   if (input.scopeType === "room" && input.roomId != null) {
     filters.push(eq(rooms.id, input.roomId));

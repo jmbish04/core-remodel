@@ -39,9 +39,10 @@ try {
 
   const byName = new Map(tools.map((t) => [t.name, t]));
 
-  // Regression guard: on a target where none of the new tools are deployed yet
-  // (e.g. prod before merge), report pending instead of failing.
-  if (!EXPECTED.some((n) => byName.has(n))) {
+  // Regression guard: on a target where the catalog is healthy (200) but none of the
+  // new tools are deployed yet (e.g. prod before merge), report pending instead of
+  // failing. A non-2xx catalog is a real failure and must NOT be masked as pending.
+  if (docs.status === 200 && !EXPECTED.some((n) => byName.has(n))) {
     console.log(
       `\n⚠️  pascal tools not in the catalog on ${BASE} — pending merge/deploy. ` +
         `Run against --preview to verify the new surface.\n`,

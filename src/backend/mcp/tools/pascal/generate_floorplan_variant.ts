@@ -39,6 +39,12 @@ export const generateFloorplanVariant = defineTool({
     if (input.fromVariantId) {
       const parent = await loadScene(env, input.fromVariantId);
       if (!parent) return toolError(`Unknown fromVariantId '${input.fromVariantId}'`);
+      // Prevent branching across projects — the parent must belong to this study's project.
+      if (parent.projectId !== project.id) {
+        return toolError(
+          `fromVariantId '${input.fromVariantId}' belongs to a different project`,
+        );
+      }
       const graph = parseGraphJson(parent.graphJson);
       const rendering = {
         coreRemodelProjectId: project.coreRemodelProjectId,

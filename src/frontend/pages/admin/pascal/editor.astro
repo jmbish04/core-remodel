@@ -1,0 +1,88 @@
+---
+/**
+ * @fileoverview 0043 — Embedded Pascal editor.
+ *
+ * Loads the Vercel-hosted Pascal floorplan editor (3d-remodel.vercel.app) inside an
+ * iframe so the user never leaves core-remodel, with a direct link out in case they
+ * need the standalone app (or embedding is blocked by the editor's frame policy).
+ */
+import BaseLayout from "@/layouts/BaseLayout.astro";
+
+const runtimeEnv = (Astro.locals as { runtime?: { env?: Record<string, string> } })
+  ?.runtime?.env;
+const editorUrl = runtimeEnv?.PASCAL_EDITOR_URL ?? "https://3d-remodel.vercel.app";
+---
+
+<BaseLayout
+  title="Layout Editor - 126 Colby - Remodel Mission Control"
+  description="The Pascal 3D/2D floorplan editor, embedded — build and explore layout variants without leaving core-remodel."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-6">
+      <h1 class="mb-2 flex items-center gap-2 text-3xl font-bold tracking-tight">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="24"
+          height="24"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          class="size-6 text-muted-foreground"
+          aria-hidden="true"
+        >
+          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+          <path d="m3.3 7 8.7 5 8.7-5"></path>
+          <path d="M12 22V12"></path>
+        </svg>
+        Layout Editor
+      </h1>
+      <p class="text-muted-foreground">
+        The Pascal floorplan editor, embedded below. Generate variants from chat (MCP)
+        or the Layout Studio, then open one here to shape it in 3D/2D.
+      </p>
+    </div>
+
+    <div class="mb-3 flex flex-wrap items-center gap-3">
+      <a
+        href={editorUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        class="inline-flex items-center gap-2 rounded-md border border-border bg-secondary px-3 py-1.5 text-sm font-medium text-secondary-foreground transition-colors hover:bg-secondary/80"
+      >
+        Open editor in a new tab
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="14"
+          height="14"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M15 3h6v6"></path>
+          <path d="M10 14 21 3"></path>
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+        </svg>
+      </a>
+      <span class="text-xs text-muted-foreground">
+        If the editor doesn't appear below, the app is blocking embedding — use the
+        direct link.
+      </span>
+    </div>
+
+    <iframe
+      src={editorUrl}
+      title="Pascal floorplan editor"
+      class="w-full rounded-lg border border-border bg-card"
+      style="height: calc(100vh - 240px); min-height: 520px;"
+      allow="fullscreen; clipboard-write; clipboard-read"
+      loading="lazy"
+    ></iframe>
+  </main>
+</BaseLayout>

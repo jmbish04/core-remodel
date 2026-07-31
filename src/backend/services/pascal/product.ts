@@ -10,8 +10,10 @@ import { drizzle } from "drizzle-orm/d1";
 
 import { pascalStudies, pascalVariants } from "@backend/db";
 
+import { sanitizeNoteHtml } from "@backend/services/notes/markdown";
+
 import type { SceneGraph, SceneRenderingMetadata } from "./shapes";
-import { loadScene, PascalStoreError, saveScene, slugify } from "./store";
+import { PascalStoreError, saveScene, slugify } from "./store";
 
 type StudyRow = typeof pascalStudies.$inferSelect;
 type VariantRow = typeof pascalVariants.$inferSelect;
@@ -34,7 +36,10 @@ export async function createStudy(
       projectId: input.projectId,
       title: input.title,
       descriptionMarkdown: input.descriptionMarkdown ?? null,
-      descriptionHtml: input.descriptionHtml ?? null,
+      // Sanitize any caller-supplied HTML before it is stored + later rendered.
+      descriptionHtml: input.descriptionHtml
+        ? sanitizeNoteHtml(input.descriptionHtml)
+        : null,
     })
     .run();
   const row = await db.select().from(pascalStudies).where(eq(pascalStudies.id, id)).get();
@@ -101,24 +106,16 @@ export async function createVariant(
       parentSceneId: input.parentSceneId ?? null,
     },
   };
-  const row = await saveScene(env, sceneId, {
+  // Lineage is set atomically in the insert (saveScene takes parentSceneId), so a
+  // failed follow-up write can't leave a variant with lost branch lineage.
+  return saveScene(env, sceneId, {
     name: input.name,
     projectId: input.projectId,
     studyId: input.studyId,
+    parentSceneId: input.parentSceneId ?? null,
     graph: input.graph,
     rendering,
     saveMode: "checkpoint",
     publish: true,
   });
-  // Record branch lineage on the row (SaveSceneInput has no parent field).
-  if (input.parentSceneId) {
-    const db = drizzle(env.DB);
-    await db
-      .update(pascalVariants)
-      .set({ parentSceneId: input.parentSceneId })
-      .where(eq(pascalVariants.id, sceneId))
-      .run();
-    return (await loadScene(env, sceneId)) ?? row;
-  }
-  return row;
 }
