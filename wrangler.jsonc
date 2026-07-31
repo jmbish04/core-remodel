@@ -6,6 +6,10 @@
   "upload_source_maps": true,
   "workers_dev": true,
   "preview_urls": true,
+  // Vendor guest portal (0043): the short, memorable domain vendors/showrooms are
+  // pointed to. `custom_domain` provisions the DNS + TLS on the hacolby.app zone.
+  // Stripped from preview workers by scripts/deploy-preview.mjs (workers.dev only).
+  "routes": [{ "pattern": "remodel.hacolby.app", "custom_domain": true }],
   "rules": [
     { "type": "CompiledWasm", "globs": ["**/*.wasm"], "fallthrough": true }
   ],

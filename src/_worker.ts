@@ -24,6 +24,7 @@ import {
   isRequestAuthenticated,
   isSafeInternalPath,
 } from "./backend/utils/access";
+import { isGuestPortalRequest } from "./backend/utils/guest-access";
 import { getDeviceLandingPath } from "./backend/services/device-preferences";
 import { getActiveDriveLandingPath } from "./backend/services/drive-lists";
 import { handleOAuthAuthorize } from "./backend/mcp/oauth-ui";
@@ -173,6 +174,24 @@ const legacyHandler: ExportedHandler<Env> = {
       if (url.pathname === from || url.pathname.startsWith(`${from}/`)) {
         const rest = url.pathname.slice(from.length);
         return Response.redirect(`${url.origin}${to}${rest}${url.search}`, 301);
+      }
+    }
+
+    // Vendor portal host (remodel.hacolby.app, or ?_portal=1 for testing): it
+    // serves ONLY the guest portal. Root lands on the floor plan; the admin app
+    // and the homeowner login page are not reachable here — a vendor should never
+    // see them. API requests fall through (guest + public endpoints work; every
+    // homeowner endpoint stays gated by its own auth, independent of host).
+    if (isGuestPortalRequest(request) && !url.pathname.startsWith("/api/")) {
+      if (url.pathname === "/") {
+        return Response.redirect(`${url.origin}/floor-plan`, 302);
+      }
+      if (
+        url.pathname === "/admin" ||
+        url.pathname.startsWith("/admin/") ||
+        url.pathname === "/access"
+      ) {
+        return Response.redirect(`${url.origin}/floor-plan`, 302);
       }
     }
 

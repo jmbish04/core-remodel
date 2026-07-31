@@ -1,20 +1,52 @@
 ---
 import { FloorplanGalleryApp } from "@/components/FloorplanGalleryApp";
+import { GuestRegistration } from "@/components/GuestRegistration";
 import BaseLayout from "@/layouts/BaseLayout.astro";
+import GuestLayout from "@/layouts/GuestLayout.astro";
+import { isRequestAuthenticated } from "@backend/utils/access";
+import { isGuestPortalRequest, isGuestRegistered } from "@backend/utils/guest-access";
+
+const { env } = Astro.locals.runtime;
+
+// On the vendor portal (remodel.hacolby.app, or ?_portal=1 for testing) the floor
+// plan is gated behind guest registration. The homeowner (authed) always passes;
+// otherwise a registered guest passes; everyone else sees the registration wall.
+const isPortal = isGuestPortalRequest(Astro.request);
+const allowed = isPortal
+  ? (await isRequestAuthenticated(Astro.request, env)) ||
+    (await isGuestRegistered(Astro.request, env))
+  : true;
 ---
 
-<BaseLayout
-  title="Floor Plan - 126 Colby - Remodel Mission Control"
-  description="Floorplan-first room portal for listing and inspiration media."
->
-  <main class="container mx-auto px-4 py-8 pb-12">
-    <div class="mb-8">
-      <h1 class="mb-2 text-3xl font-bold">Floor Plan View</h1>
-      <p class="text-muted-foreground">
-        Start from the plan, open a room, and review listing plus inspiration context together.
-      </p>
-    </div>
+{
+  isPortal ? (
+    <GuestLayout
+      title="126 Colby — Plans & Photos"
+      description="Floor plan and room photos for the 126 Colby remodel."
+    >
+      {allowed ? (
+        <div class="mx-auto max-w-6xl px-4 py-8">
+          <FloorplanGalleryApp client:only="react" />
+        </div>
+      ) : (
+        <GuestRegistration client:only="react" />
+      )}
+    </GuestLayout>
+  ) : (
+    <BaseLayout
+      title="Floor Plan - 126 Colby - Remodel Mission Control"
+      description="Floorplan-first room portal for listing and inspiration media."
+    >
+      <main class="container mx-auto px-4 py-8 pb-12">
+        <div class="mb-8">
+          <h1 class="mb-2 text-3xl font-bold">Floor Plan View</h1>
+          <p class="text-muted-foreground">
+            Start from the plan, open a room, and review listing plus inspiration context together.
+          </p>
+        </div>
 
-    <FloorplanGalleryApp client:only="react" />
-  </main>
-</BaseLayout>
+        <FloorplanGalleryApp client:only="react" />
+      </main>
+    </BaseLayout>
+  )
+}

@@ -54,6 +54,7 @@ import showroomVisitLogsRouter from "./routes/showroom-visit-logs";
 import showroomHitlQueueRouter from "./routes/showroom-hitl-queue";
 import teslaRouter from "./routes/tesla";
 import { portalRouter } from "./routes/portal";
+import { guestRouter } from "./routes/guest";
 import { planningRouter } from "./routes/planning";
 import { planningExtendedRouter } from "./routes/planning-extended";
 import { pmoRouter } from "./routes/pmo";
@@ -257,6 +258,7 @@ app.route("/api/showroom-hitl-queue", showroomHitlQueueRouter);
 // is public but secret-verified (Tessie can't send the admin cookie).
 app.route("/api/tesla", teslaRouter);
 app.route("/api/portal", portalRouter);
+app.route("/api/guest", guestRouter);
 app.route("/api/planning", planningRouter);
 app.route("/api/planning", planningExtendedRouter);
 // rooms-extended mounts BEFORE roomsRouter so /:roomId/budget-items and
