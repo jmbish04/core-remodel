@@ -338,6 +338,22 @@ export const CHANGELOG: ChangelogEntry[] = [
     status: "staged",
   },
   {
+    id: "0032-nav-multiwaypoint",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-31",
+    tag: "0032",
+    area: "Tesla / Visits",
+    title: "Multi-waypoint 'send drive to car' + reusable NavigateTeslaButton (0032 N1)",
+    summary:
+      "The nav half of 0022 P5. A reusable NavigateTeslaButton drops onto any surface: single-destination on a showroom hero (send the store's coords to the car), or whole-drive on the drive viewport (send every stop as one route). Backend: sendMultiWaypointNavigation builds a Google Maps directions URL from the drive's ordered stops (skipping skipped stops + un-promoted pitstops, and stops with no coords) and shares it via Tessie — the car opens the routed multi-stop trip; a single waypoint degrades to the existing sendNavigation. New REST POST /api/tesla/navigate-drive and MCP send_drive_to_tesla (voice parity) go through the same service. No schema change. A native Fleet-API navigation_waypoints_request (signed command) is a documented follow-up; the maps-route share is the working fallback the plan calls for.",
+    changes: [
+      { kind: "added", text: "services/tesla.ts sendMultiWaypointNavigation(env, waypoints) — Google Maps directions share (maps-route), single-waypoint → sendNavigation." },
+      { kind: "added", text: "POST /api/tesla/navigate-drive { driveListId | slug } + MCP send_drive_to_tesla — resolve ordered drive stops → multi-waypoint send." },
+      { kind: "added", text: "components/tesla/NavigateTeslaButton (reusable) wired onto the showroom hero (single dest) + drive viewport header (whole drive)." },
+    ],
+    status: "staged",
+  },
+  {
     id: "0032-park-finds-gemini",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-30",

@@ -48,6 +48,7 @@ import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { NavigateTeslaButton } from "@/components/tesla/NavigateTeslaButton";
 import { StoreVisitsSection } from "@/components/visits/StoreVisitsSection";
 import {
   AlertDialog,
@@ -1181,6 +1182,15 @@ export function StoreViewportApp({
               links={store.links}
               onOpenLinks={() => setManageLinksOpen(true)}
             />
+            {store.latitude != null && store.longitude != null ? (
+              <div className="mt-2">
+                <NavigateTeslaButton
+                  latitude={store.latitude}
+                  longitude={store.longitude}
+                  className="h-12 gap-2"
+                />
+              </div>
+            ) : null}
           </div>
 
           {/* Office-hours mini-card — click for full hours + contact + map, plus

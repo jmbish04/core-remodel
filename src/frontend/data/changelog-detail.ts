@@ -181,6 +181,53 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
       ],
     },
   },
+  "0032-nav-multiwaypoint": {
+    slug: "0032-nav-multiwaypoint",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0032 N1 · multi-waypoint send-to-car + reusable NavigateTeslaButton",
+    code: [],
+    problem:
+      "The only way to route the car was the single-destination send_vehicle_navigation MCP tool + POST /api/tesla/navigate — no UI button anywhere, and no way to hand a whole planned drive (a multi-stop route) to the car at once. 0022 P5 asked for a reusable NavigateTeslaButton and a multi-waypoint 'send drive to car'.",
+    approach:
+      "Tessie's `share` command takes a single value and the Tesla Fleet `navigation_waypoints_request` (a signed command) isn't exposed through it — so sendMultiWaypointNavigation builds a Google Maps DIRECTIONS URL (destination + ordered waypoints, travelmode=driving) from the drive's stops and shares that one URL, which the car opens as a routed multi-stop trip; one waypoint degrades to the existing single-destination sendNavigation. The drive stops are resolved in sort order, skipping `skipped` stops and un-promoted `suggested` pitstops and any stop with no usable coordinates (its own, else its showroom's). REST POST /api/tesla/navigate-drive and MCP send_drive_to_tesla both call the one service (human + voice parity). The reusable NavigateTeslaButton picks its mode from props — single (lat/lng/destination/stopId) → /navigate, or driveListId → /navigate-drive — with an optimistic busy state + toast, and is wired onto the showroom hero (the store's coords) and the drive viewport header (the whole drive). Backend-only nav service, no schema. A native Fleet-API waypoints request is a documented follow-up.",
+    apiChanges: [
+      "NEW POST /api/tesla/navigate-drive { driveListId | slug } (admin-gated) → multi-waypoint send.",
+      "NEW MCP send_drive_to_tesla (Tesla domain) — voice/chat twin.",
+      "services/tesla.ts += sendMultiWaypointNavigation(env, waypoints).",
+    ],
+    filesTouched: [
+      "src/backend/services/tesla.ts (sendMultiWaypointNavigation)",
+      "src/backend/api/routes/tesla.ts (POST /navigate-drive)",
+      "src/backend/mcp/tools/tesla/send_drive_to_tesla.ts (new) + tesla/index.ts",
+      "src/frontend/components/tesla/NavigateTeslaButton.tsx (new)",
+      "src/frontend/components/drives/DriveViewportApp.tsx + showroom/StoreViewportApp.tsx (wire the button)",
+      "scripts/qc/pr_318.mjs",
+    ],
+    migrations: [],
+    diagrams: [
+      {
+        caption: "One button, two modes → one nav service",
+        code: `flowchart TD
+  B["NavigateTeslaButton"] -->|"lat/lng or stopId"| S["POST /api/tesla/navigate"]
+  B -->|"driveListId"| D["POST /api/tesla/navigate-drive"]
+  MCP1["send_vehicle_navigation"] --> S
+  MCP2["send_drive_to_tesla"] --> D
+  S --> N1["sendNavigation<br/>(Tessie share, single)"]
+  D --> R["resolve ordered stops<br/>(skip skipped/suggested/no-coord)"]
+  R --> M["sendMultiWaypointNavigation"]
+  M -->|"1 stop"| N1
+  M -->|"2+ stops"| N2["Google Maps directions URL<br/>→ Tessie share (maps-route)"]`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_318.mjs",
+      command: "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 318 -- --preview",
+      ranAt: "2026-07-31",
+      output:
+        "tsc --noEmit clean on all N1 files. pnpm run build green (exit 0, ~113s). No schema → no migration. QC pr_318 asserts the new /api/tesla/navigate-drive route is wired + send_drive_to_tesla in the MCP catalog + a regression on the single-destination /navigate route. The actual in-car multi-stop route (a Tessie share of the maps directions URL) needs live Tessie creds + a car and is exercised on a real drive.",
+      migrations: [],
+    },
+  },
   "0032-park-finds-gemini": {
     slug: "0032-park-finds-gemini",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
