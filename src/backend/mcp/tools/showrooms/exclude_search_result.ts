@@ -25,7 +25,9 @@ export const excludeSearchResultTool = defineTool({
     category: z.string().optional().describe("Category to record on the exclusion."),
   },
   annotations: WRITE,
-  outputShape: { ok: z.boolean(), exclusionId: z.number().int().optional(), reason: z.string().optional() },
+  // .nullish() (not .optional()) so a service that ever returns an explicit null for
+  // these fields can't fail MCP output validation.
+  outputShape: { ok: z.boolean(), exclusionId: z.number().int().nullish(), reason: z.string().nullish() },
   examples: [
     {
       title: "Not interested — it's appointment-only",

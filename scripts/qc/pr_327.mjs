@@ -32,27 +32,52 @@ const EXPECTED = [
 
 console.log(`\nQC pr_327 — discovery MCP tools (D2c-2)\n  target: ${resolveBase()} ${isPreview ? "(preview)" : "(production)"}\n`);
 
+function safeJson(s) {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
+/** Collect every `name` string field in the catalog (the tool identifiers), recursively. */
+function collectToolNames(node, out = new Set()) {
+  if (node == null || typeof node !== "object") return out;
+  if (Array.isArray(node)) {
+    for (const item of node) collectToolNames(item, out);
+    return out;
+  }
+  if (typeof node.name === "string") out.add(node.name);
+  for (const v of Object.values(node)) collectToolNames(v, out);
+  return out;
+}
+
 try {
   await assertReachable(client, checks);
 
   const docs = await client.get("/api/mcp-docs");
   checks.ok("GET /api/mcp-docs → 200 (MCP catalog)", docs.status === 200, `→ ${docs.status}`);
 
-  // createClient().get returns { status, json (parsed), text (string) }. Prefer the
-  // raw text; fall back to the parsed json stringified. No swallowed error.
-  const text =
-    typeof docs.text === "string" && docs.text.length > 0
-      ? docs.text
-      : docs.json != null
-        ? JSON.stringify(docs.json)
-        : "";
+  // createClient().get returns { status, json (parsed), text (string) }. Parse the
+  // catalog and assert membership in the REAL tool-name set — not a loose substring
+  // match (which a description or another tool name could satisfy).
+  const catalog = docs.json ?? (docs.text ? safeJson(docs.text) : null);
+  const toolNames = new Set(collectToolNames(catalog));
 
-  if (docs.status === 200) {
+  if (docs.status === 200 && toolNames.size > 0) {
     for (const name of EXPECTED) {
-      checks.ok(`MCP catalog includes '${name}'`, text.includes(`"${name}"`) || text.includes(name), "");
+      checks.ok(`MCP catalog registers '${name}'`, toolNames.has(name), toolNames.has(name) ? "" : "absent");
     }
+  } else if (!isPreview) {
+    // On prod (post-deploy) the catalog MUST be live + parseable — a skip would let QC
+    // pass green while the tools aren't actually catalogued. Fail loudly.
+    checks.ok(
+      "MCP catalog reachable + parseable on production",
+      false,
+      `status=${docs.status}, tool-names parsed=${toolNames.size}`,
+    );
   } else {
-    checks.info(`MCP catalog not reachable here (${docs.status}) — tools verified via tsc + registry on prod after deploy.`);
+    checks.info(`MCP catalog not reachable on this preview target (${docs.status}) — verified on prod post-deploy.`);
   }
 
   checks.info(

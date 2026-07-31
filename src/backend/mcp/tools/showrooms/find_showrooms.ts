@@ -56,7 +56,11 @@ export const findShowroomsTool = defineTool({
           longitude: z.number().nullish(),
           category: z.string().max(120).nullish(),
           reasoning: z.string().max(1000).nullish(),
-          website: z.string().max(500).nullish(),
+          website: z
+            .string()
+            .max(500)
+            .regex(/^https?:\/\//i, "website must be an http(s) URL")
+            .nullish(),
           phone: z.string().max(60).nullish(),
         }),
       )
