@@ -62,7 +62,11 @@ export class ShowroomBulkIntakeWorkflow extends WorkflowEntrypoint<
           .where(match);
 
         try {
-          const r = await intakeOnePlace(env, db, placeId);
+          // skipAi keeps this durable step short — the inline ~90s Gemini review
+          // analysis would get the isolate evicted before the step checkpoints,
+          // hanging the batch. Full enrichment still runs via the onboarding
+          // workflow that intakeOnePlace kicks.
+          const r = await intakeOnePlace(env, db, placeId, { skipAi: true });
           await db
             .update(showroomBulkIntakeItems)
             .set({

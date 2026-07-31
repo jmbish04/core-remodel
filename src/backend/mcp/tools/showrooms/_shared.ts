@@ -264,6 +264,7 @@ export async function intakeOnePlace(
   env: Env,
   db: RemodelDb,
   rawPlaceId: string,
+  opts?: { skipAi?: boolean },
 ): Promise<IntakeOnePlaceResult> {
   const placeId = rawPlaceId?.trim();
   if (!placeId) toolError("`placeId` is required and cannot be empty.");
@@ -278,10 +279,18 @@ export async function intakeOnePlace(
     return { created: false, status: "exists", showroomId: existing.id, store: existing };
   }
 
-  // Fetch Google fields + Gemini review analysis inline (matches the intake form).
+  // Fetch Google fields. `skipAi` skips ONLY the slow inline Gemini review
+  // analysis (aiInference flags) — Google's own review/editorial summaries are in
+  // the Places payload either way, and the rest of enrichment (photos, brands,
+  // website scrape, AI research, categories) runs in the onboarding workflow. The
+  // bulk loop sets skipAi so each durable step stays short (a ~90s Gemini call in
+  // a Workflow step gets the isolate evicted before the step checkpoints, hanging
+  // the batch); the single import tool leaves it off for an immediate full result.
   let details: Record<string, unknown>;
   try {
-    details = await new GoogleMapsService(env).placeDetails(placeId);
+    details = await new GoogleMapsService(env).placeDetails(placeId, undefined, {
+      skipAi: opts?.skipAi,
+    });
   } catch (err) {
     rethrowMapsError(err);
   }
