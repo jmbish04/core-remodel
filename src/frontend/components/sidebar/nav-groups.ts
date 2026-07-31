@@ -66,6 +66,7 @@ export const NAV_GROUPS: NavGroupDef[] = [
     admin: true,
     icon: HardHat,
     items: [
+      { href: "/admin/alerts", label: "Alerts" },
       { href: "/admin/inbox/all", label: "All Inboxes" },
       { href: "/admin/inbox", label: "Email Inbox" },
       { href: "/admin/inbox/gmail", label: "Gmail Inbox" },
