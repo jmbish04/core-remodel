@@ -181,6 +181,48 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
       ],
     },
   },
+  "0032-park-finds-gemini": {
+    slug: "0032-park-finds-gemini",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0032 D1 follow-up · Gemini relevance pass in the proximity scan",
+    code: [],
+    problem:
+      "D1a's proximity scan gated remodel-relevance (decision D0) purely on the Google Places `includedTypes` filter — the deterministic, $0 stand-in the plan flagged for a Gemini upgrade. That filter is coarse: a mattress outlet or a generic big-box tagged `furniture_store` passes it, so a park there would stage a low-value park-find, and the card's category/one-liner were mechanical (a template off the Places type).",
+    approach:
+      "A best-effort Gemini pass (`assessRemodelRelevance`) via the shared `generateStructured` service — Gemini-2.5-flash first, Kimi fallback, auto-logged to `gemini_usage_log` under feature `proximity_scan_relevance`. It takes the chosen candidate (name, Places types, address, rating) and returns a typed `{ isRemodelRelevant, category, oneLiner }` (JSON response schema). A confident `isRemodelRelevant=false` skips staging (new reason `not-relevant`) — the precision the type filter can't give; otherwise the AI `category` + `oneLiner` replace the Places-type guess on the candidate, and the full verdict is stored in `proximity_scan_json.aiRelevance` for the receipts. It is strictly additive to cost-safety: the call is wrapped in a 10s `Promise.race` timeout and a catch that returns null, on which the scan falls back to the original deterministic Places heuristic — so a Gemini outage, timeout, or bad parse never blocks a park-find, and the whole scan still runs off `waitUntil` and never throws.",
+    apiChanges: [
+      "None. Internal to proximityScan; the AI category/one-liner surface on the existing Park-Finds card with no frontend change.",
+    ],
+    filesTouched: [
+      "src/backend/services/tesla/proximity-scan.ts (assessRemodelRelevance + RELEVANCE_SCHEMA + wiring)",
+      "src/frontend/data/changelog.ts + changelog-detail.ts, scripts/qc/pr_314.mjs",
+    ],
+    migrations: [],
+    diagrams: [
+      {
+        caption: "Two-stage relevance — coarse Places filter, then the Gemini precision gate",
+        code: `flowchart TD
+  A[PARK · 1.a-1.c missed] --> B[Places searchNearby<br/>includedTypes = remodel types]
+  B --> C{candidate not known /<br/>excluded / queued?}
+  C -- no --> Z[stop]
+  C -- yes --> D[Gemini assessRemodelRelevance<br/>10s timeout · best-effort]
+  D -- "null (timeout/err)" --> E[fall back to Places-type heuristic]
+  D -- "isRemodelRelevant = false" --> Z2[skip · reason not-relevant]
+  D -- "true (+category, oneLiner)" --> F[stage hitl candidate<br/>AI category + one-liner]
+  E --> F
+  classDef ai fill:#3a2a3f,stroke:#c084fc,color:#f5e8ff;
+  class D,E ai;`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_314.mjs",
+      command: "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 314 -- --preview",
+      ranAt: "2026-07-30",
+      output:
+        "tsc --noEmit clean on proximity-scan.ts. pnpm run build green (exit 0, ~100s). Backend-only — no schema, no migration, no new endpoint. QC pr_314 is a regression on the D1a /api/showroom-hitl-queue sink the scan writes into; the Gemini pass itself fires only on a live park at an unregistered place (not synthesizable in QC) and is fail-safe (null → Places heuristic).",
+      migrations: [],
+    },
+  },
   "0032-park-finds-page": {
     slug: "0032-park-finds-page",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",

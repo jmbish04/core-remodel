@@ -1,15 +1,30 @@
 ---
+import { PublicRoomGalleryApp } from "@/components/PublicRoomGalleryApp";
 import { RoomViewApp } from "@/components/RoomViewApp";
 import BaseLayout from "@/layouts/BaseLayout.astro";
+import { isRequestAuthenticated } from "@backend/utils/access";
 
 const roomCode = Astro.params.slug || "";
+
+// Server-side split: the homeowner gets the full room view; an unauthenticated
+// visitor (a vendor/showroom we shared the floor plan with) gets the photos-only
+// public gallery. Deciding here means the public bundle never even ships the
+// homeowner view, and there is no client-side auth flash.
+const { env } = Astro.locals.runtime;
+const authed = await isRequestAuthenticated(Astro.request, env);
 ---
 
 <BaseLayout
   title="Room View - 126 Colby - Remodel Mission Control"
   description="Dedicated room viewport with stored AI summary, room options, budgets, and linked records."
 >
-  <main class="container mx-auto px-4 py-8 pb-12">
-    <RoomViewApp client:only="react" roomCode={roomCode} />
-  </main>
+  {
+    authed ? (
+      <main class="container mx-auto px-4 py-8 pb-12">
+        <RoomViewApp client:only="react" roomCode={roomCode} />
+      </main>
+    ) : (
+      <PublicRoomGalleryApp client:only="react" roomCode={roomCode} />
+    )
+  }
 </BaseLayout>

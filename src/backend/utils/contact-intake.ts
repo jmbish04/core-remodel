@@ -25,6 +25,55 @@ export const CONTACT_TYPES: readonly ContactType[] = [
   "OTHER",
 ] as const;
 
+/** Title-case a name: "nancy ruiz" → "Nancy Ruiz". Preserves hyphen/apostrophe
+ *  segments ("mary-jane o'neil" → "Mary-Jane O'Neil"). Pass-through for empty. */
+export function titleCaseName(raw: string | null | undefined): string | null {
+  const s = (raw ?? "").trim().replace(/\s+/g, " ");
+  if (!s) return null;
+  return s.replace(/[A-Za-zÀ-ſ]+/g, (w) => w[0].toUpperCase() + w.slice(1).toLowerCase());
+}
+
+/**
+ * Parse an RFC-822 `From`-style value into a display name + clean address.
+ * Handles `Jane Doe <jane@x.com>`, `"Jane Doe" <jane@x.com>`, a bare
+ * `jane@x.com`, and the junk `"jane@x.com" <jane@x.com>` (display == address).
+ * `email` is lowercased and stripped of brackets; `displayName` is null when it
+ * is absent, equals the address, or clearly isn't a name (contains `@`).
+ */
+export function parseEmailIdentity(raw: string | null | undefined): {
+  displayName: string | null;
+  email: string | null;
+} {
+  const s = (raw ?? "").trim();
+  if (!s) return { displayName: null, email: null };
+  // Pull the address token out directly — robust to `Name <addr>`,
+  // `"addr" <addr>`, bare `addr`, and messy quoting the bracket form misses.
+  const m = s.match(/([A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,})/);
+  if (!m) return { displayName: null, email: null };
+  const email = m[1].toLowerCase();
+  // The display name is whatever precedes the address, minus quotes/brackets.
+  const display = s.slice(0, m.index).replace(/[<>"']/g, "").trim();
+  const name = display && !display.includes("@") ? display : null;
+  return { displayName: name, email };
+}
+
+/**
+ * Does a display name look like an actual PERSON (vs a company/role mailer like
+ * "Kohler Customer Care", "orders", "IRG - Stone Slabs & Tiles")? Heuristic:
+ * 2–3 plain alphabetic words, no digits/symbols, and no company/role keyword.
+ * Deliberately conservative — a false "not a person" just falls back to the
+ * store name on the card, which is safe; a false "person" mislabels a brand.
+ */
+export function looksLikePersonName(raw: string | null | undefined): boolean {
+  const s = (raw ?? "").trim().replace(/\s+/g, " ");
+  if (!s) return false;
+  if (/\b(inc|llc|co|corp|ltd|team|orders?|sales|support|care|service|feedback|postmaster|noreply|no-reply|contact|customer|info|store|hello|admin|billing|help)\b/i.test(s))
+    return false;
+  const words = s.split(" ");
+  if (words.length < 2 || words.length > 3) return false;
+  return words.every((w) => /^[A-Za-zÀ-ſ][A-Za-zÀ-ſ'.\-]*$/.test(w));
+}
+
 /** Split "Jane Q. Smith" → { firstName: "Jane", lastName: "Q. Smith" }. */
 export function splitFullName(full: string | null | undefined): {
   firstName: string | null;
@@ -101,16 +150,32 @@ export function parsePhoneField(raw: string | null | undefined): LabeledPhones {
   return out;
 }
 
-/** Infer a contact type from a job title. Defaults to OTHER. */
-export function inferContactType(title: string | null | undefined): ContactType {
+/**
+ * Infer a contact type from a job title, falling back to the email's local-part
+ * (`sales@`, `orders@`, `customercare@`, …) when no title is available — so an
+ * auto-populated contact isn't stuck at OTHER when the address itself carries a
+ * role signal. Defaults to OTHER.
+ */
+export function inferContactType(
+  title: string | null | undefined,
+  email?: string | null,
+): ContactType {
   const t = (title ?? "").toLowerCase();
-  if (!t) return "OTHER";
-  if (/\b(sales|account|rep\b|representative|consultant|advisor|specialist|designer)\b/.test(t))
-    return "SALES";
-  if (/\b(estimat|takeoff|quote)\b/.test(t)) return "ESTIMATOR";
-  if (/\b(manager|director|owner|principal|president|lead|supervisor|gm\b)\b/.test(t))
-    return "MANAGER";
-  if (/\b(customer service|support|service|reception|front desk|concierge)\b/.test(t))
-    return "CUSTOMER_SERVICE";
+  if (t) {
+    if (/\b(sales|account|rep\b|representative|consultant|advisor|specialist|designer)\b/.test(t))
+      return "SALES";
+    if (/\b(estimat\w*|takeoff|quote)\b/.test(t)) return "ESTIMATOR";
+    if (/\b(manager|director|owner|principal|president|lead|supervisor|gm\b)\b/.test(t))
+      return "MANAGER";
+    if (/\b(customer service|support|service|reception|front desk|concierge)\b/.test(t))
+      return "CUSTOMER_SERVICE";
+    return "OTHER";
+  }
+  const local = (email ?? "").toLowerCase().split("@")[0];
+  if (local) {
+    if (/(sales|account)/.test(local)) return "SALES";
+    if (/(estimat|takeoff|quote)/.test(local)) return "ESTIMATOR";
+    if (/(order|support|care|service|feedback|help|customer)/.test(local)) return "CUSTOMER_SERVICE";
+  }
   return "OTHER";
 }
