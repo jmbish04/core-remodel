@@ -33,6 +33,13 @@ export type DuplicateMatch = {
   id: number;
   name: string | null;
   reason: "place_id" | "phone" | "website" | "address";
+  /**
+   * The matched store's own Google `place_id`, or null when it has none. Lets
+   * callers distinguish a store that is ALREADY located (has a placeId → a true
+   * duplicate) from a bare stub matched only by phone/address/website (no
+   * placeId yet → adopt the incoming location rather than reject it).
+   */
+  placeId: string | null;
 };
 
 export type DuplicateCheckInput = {
@@ -89,17 +96,17 @@ export async function findDuplicateStore(
   // 1. place_id
   if (wantPlace) {
     const hit = candidates.find((r) => r.placeId && r.placeId === wantPlace);
-    if (hit) return { id: hit.id, name: hit.name, reason: "place_id" };
+    if (hit) return { id: hit.id, name: hit.name, reason: "place_id", placeId: hit.placeId };
   }
   // 2. phone (digits)
   if (wantPhone.length >= 7) {
     const hit = candidates.find((r) => digits(r.phoneNumber) === wantPhone);
-    if (hit) return { id: hit.id, name: hit.name, reason: "phone" };
+    if (hit) return { id: hit.id, name: hit.name, reason: "phone", placeId: hit.placeId };
   }
   // 3. address (normalized) — cheap, no extra query
   if (wantAddr.length >= 8) {
     const hit = candidates.find((r) => normAddr(r.locationAddress) === wantAddr);
-    if (hit) return { id: hit.id, name: hit.name, reason: "address" };
+    if (hit) return { id: hit.id, name: hit.name, reason: "address", placeId: hit.placeId };
   }
   // 4. website host — needs the links table (URLs live there now). Chunk the
   // id list under D1's 100-bound-param cap.
@@ -116,7 +123,7 @@ export async function findDuplicateStore(
       const match = links.find((l) => host(l.url) === wantHost);
       if (match) {
         const hit = candidates.find((r) => r.id === match.storeId);
-        if (hit) return { id: hit.id, name: hit.name, reason: "website" };
+        if (hit) return { id: hit.id, name: hit.name, reason: "website", placeId: hit.placeId };
       }
     }
   }

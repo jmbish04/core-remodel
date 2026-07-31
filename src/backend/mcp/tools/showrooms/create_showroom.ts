@@ -14,7 +14,7 @@ import { toolError } from "../../format";
 import { looseObject, urlField } from "../../schemas";
 import { defineTool, WRITE } from "../../types";
 import { showroomUrl } from "../../urls";
-import { persistPlaceShowroom, rethrowMapsError } from "./_shared";
+import { adoptPlaceLocation, persistPlaceShowroom, rethrowMapsError } from "./_shared";
 
 export const createShowroom = defineTool({
   name: "create_showroom",
@@ -98,18 +98,21 @@ export const createShowroom = defineTool({
       }
     }
 
-    // ── Duplicate guard (all paths) ───────────────────────────────────────
+    // ── Duplicate guard (MANUAL path only) ────────────────────────────────
     // Reject if an ACTIVE store already matches by place_id / phone / website /
     // address, using whatever the caller provided. Returns the existing row
-    // rather than creating a second copy. The placeId path re-checks the
-    // Google-derived fields below (an existing store may have a different
-    // placeId but the same phone/address).
-    const dupByInput = await findDuplicateStore(db, {
-      placeId: input.placeId,
-      phoneNumber: input.phoneNumber,
-      websiteUrl: input.websiteUrl,
-      locationAddress: input.locationAddress,
-    });
+    // rather than creating a second copy. Skipped on the placeId path: that path
+    // fetches Google details and re-checks below, where a bare stub (a match
+    // with no placeId) is ADOPTED rather than rejected — the early input-only
+    // check has no Google location to adopt, so it must not hard-block here.
+    const dupByInput = input.placeId?.trim()
+      ? null
+      : await findDuplicateStore(db, {
+          placeId: input.placeId,
+          phoneNumber: input.phoneNumber,
+          websiteUrl: input.websiteUrl,
+          locationAddress: input.locationAddress,
+        });
     if (dupByInput) {
       const [existing] = await db
         .select()
@@ -167,15 +170,17 @@ export const createShowroom = defineTool({
         mapped.values.isAppointmentOnly = input.isAppointmentOnly;
       }
 
-      // Re-check against the Google-derived fields: a store with a DIFFERENT
-      // placeId but the same phone/website/address is still the same showroom.
+      // Re-check against the Google-derived fields. A match that ALREADY has a
+      // placeId is a true duplicate (already located) — return it. A match with
+      // NO placeId is a bare stub (same showroom, no location yet): adopt this
+      // Google location onto it instead of rejecting.
       const dupByPlace = await findDuplicateStore(db, {
         placeId: mapped.values.placeId,
         phoneNumber: mapped.values.phoneNumber,
         websiteUrl: mapped.websiteUrl,
         locationAddress: mapped.values.locationAddress,
       });
-      if (dupByPlace) {
+      if (dupByPlace?.placeId) {
         const [existing] = await db
           .select()
           .from(showroomStores)
@@ -190,6 +195,16 @@ export const createShowroom = defineTool({
             url: showroomUrl(env, existing.id),
           };
         }
+      }
+      if (dupByPlace) {
+        const adopted = await adoptPlaceLocation(env, db, dupByPlace.id, mapped);
+        return {
+          created: false,
+          status: `located (adopted onto existing store, matched by ${dupByPlace.reason})`,
+          store: adopted,
+          region: adopted.hubName ?? null,
+          url: showroomUrl(env, adopted.id),
+        };
       }
 
       const created = await persistPlaceShowroom(env, db, mapped);

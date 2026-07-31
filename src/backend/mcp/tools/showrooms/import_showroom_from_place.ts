@@ -11,7 +11,7 @@ import { looseObject, urlField } from "../../schemas";
 import { showroomUrl } from "../../urls";
 import { defineTool, WRITE_IDEMPOTENT } from "../../types";
 
-import { persistPlaceShowroom, rethrowMapsError } from "./_shared";
+import { adoptPlaceLocation, persistPlaceShowroom, rethrowMapsError } from "./_shared";
 
 export const importShowroomFromPlace = defineTool({
   name: "import_showroom_from_place",
@@ -83,15 +83,20 @@ export const importShowroomFromPlace = defineTool({
     // Ensure the placeId is stored even if the payload omitted `id`.
     mapped.values.placeId = mapped.values.placeId ?? placeId;
 
-    // Duplicate guard: an existing ACTIVE store may have a DIFFERENT placeId but
-    // the same phone/website/address — don't create a second copy.
+    // Fuzzy match: an existing ACTIVE store with the same phone/website/address.
+    // Only a match that ALREADY has a placeId is a true duplicate (it is already
+    // located) — return it unchanged. A match WITHOUT a placeId is a bare stub
+    // (e.g. an AI-research entry created by name before it had a location): adopt
+    // this Google location onto it and let onboarding enrich, rather than
+    // rejecting the import. Casting a wide research net then bulk-importing is the
+    // primary flow, so filling stubs in place — not flagging them — is the point.
     const dup = await findDuplicateStore(db, {
       placeId: mapped.values.placeId,
       phoneNumber: mapped.values.phoneNumber,
       websiteUrl: mapped.websiteUrl,
       locationAddress: mapped.values.locationAddress,
     });
-    if (dup) {
+    if (dup?.placeId) {
       const [existingDup] = await db
         .select()
         .from(showroomStores)
@@ -107,6 +112,18 @@ export const importShowroomFromPlace = defineTool({
           store: existingDup,
         };
       }
+    }
+    if (dup) {
+      // Bare stub matched by phone/address/website but with no placeId — fill it.
+      const adopted = await adoptPlaceLocation(env, db, dup.id, mapped);
+      return {
+        created: false,
+        status: `located (adopted onto existing store, matched by ${dup.reason})`,
+        showroomId: adopted.id,
+        url: showroomUrl(env, adopted.id),
+        region: adopted.hubName ?? null,
+        store: adopted,
+      };
     }
 
     const created = await persistPlaceShowroom(env, db, mapped);
