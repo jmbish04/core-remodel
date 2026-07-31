@@ -14,6 +14,7 @@ import { legacyTools } from "./legacy";
 import { materialTools } from "./materials";
 import { memoryTools } from "./memory";
 import { opsTools } from "./ops";
+import { pascalTools } from "./pascal";
 import { priceObservationTools } from "./price_observations";
 import { productTools } from "./products";
 import { productPhotoTools } from "./product_photos";
@@ -42,5 +43,6 @@ export const ALL_TOOL_GROUPS: RemodelTool[] = [
   ...opsTools,
   ...changelogTools,
   ...memoryTools,
+  ...pascalTools,
   ...legacyTools,
 ];
