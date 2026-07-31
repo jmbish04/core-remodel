@@ -211,49 +211,114 @@ interface AttachmentRecord {
   mimeType: string;
   r2Key: string;
   sizeBytes: number;
+  /** Non-AI extracted text (0042) — set by runNonAiExtraction. */
+  extractedText?: string | null;
+  /** 0042: "extracted" | "needs_ai_ocr" | "none". */
+  ocrStatus?: string;
 }
 
 /**
- * Extract text from PDF/DOCX/XLSX attachments for AI analysis. Everything goes
- * through Workers AI `env.AI.toMarkdown` — the canonical Workers path for
- * document text extraction (see services/documents/health.ts). PDF parsing used
- * to run a bundled liteparse WASM binary locally, but that blob was 4.7 MiB and
- * pushed the Worker past Cloudflare's 10 MiB script-size limit, so it was
- * removed in favour of the toMarkdown path both branches already fell back to.
+ * Classify an attachment for non-AI extraction (0042), pure. `document` →
+ * deterministic `toMarkdown` text; `image` → needs a vision model (gated by
+ * approval); `none` → not text-bearing.
  */
-async function extractAttachmentText(
-  attachments: AttachmentRecord[],
+export function attachmentExtractionKind(
+  mimeType: string | undefined | null,
+  filename: string | undefined | null,
+): "document" | "image" | "none" {
+  const mt = mimeType ?? "";
+  const fn = filename ?? "";
+  const isPdf = mt.includes("pdf") || /\.pdf$/i.test(fn);
+  const isDoc =
+    mt.includes("word") || mt.includes("officedocument") || /\.(docx?|xlsx?)$/i.test(fn);
+  if (isPdf || isDoc) return "document";
+  if (mt.startsWith("image/")) return "image";
+  return "none";
+}
+
+/**
+ * NON-AI attachment text extraction (0042). PDF/DOCX/XLSX go through Workers AI
+ * `env.AI.toMarkdown` — which for these document types is a DETERMINISTIC,
+ * library-based conversion (no LLM/vision), the canonical Workers path for
+ * document text (see services/documents/health.ts). Images cannot be OCR'd
+ * without a vision model, so they are flagged `needs_ai_ocr` and left for the
+ * approval-gated AI pass. Persists `extracted_text` + `ocr_status` and mutates
+ * each record in place so the (deferred or immediate) AI pass can read the text
+ * without re-fetching from R2.
+ */
+async function runNonAiExtraction(
+  db: ReturnType<typeof drizzle>,
   env: Env,
-): Promise<string> {
-  let attachmentText = "";
-
+  attachments: AttachmentRecord[],
+): Promise<void> {
   for (const att of attachments) {
-    const isPdf =
-      att.mimeType?.includes("pdf") || att.filename?.endsWith(".pdf");
-    const isDoc =
-      att.mimeType?.includes("word") ||
-      att.mimeType?.includes("officedocument") ||
-      att.filename?.match(/\.(docx?|xlsx?)$/i);
-    if (!isPdf && !isDoc) continue;
+    const kind = attachmentExtractionKind(att.mimeType, att.filename);
 
-    try {
-      const object = await env.ARTIFACTS_BUCKET.get(att.r2Key);
-      if (!object) continue;
-      const buf = await object.arrayBuffer();
-      const blob = new Blob([buf], { type: att.mimeType });
-      const result = await env.AI.toMarkdown({ name: att.filename, blob });
-      if (result.format !== "error") {
-        attachmentText += `\n\n--- Attachment: ${att.filename} ---\n${result.data}`;
+    let extractedText: string | null = null;
+    let ocrStatus = "none";
+
+    if (kind === "document") {
+      try {
+        const object = await env.ARTIFACTS_BUCKET.get(att.r2Key);
+        if (object) {
+          const buf = await object.arrayBuffer();
+          const blob = new Blob([buf], { type: att.mimeType });
+          const result = await env.AI.toMarkdown({ name: att.filename, blob });
+          if (result.format !== "error") extractedText = result.data;
+        }
+      } catch (err) {
+        console.error(`[email-pipeline] toMarkdown failed for ${att.filename}:`, err);
       }
-    } catch (err) {
-      console.error(
-        `[email-pipeline] toMarkdown failed for ${att.filename}:`,
-        err,
-      );
+      ocrStatus = extractedText ? "extracted" : "none";
+    } else if (kind === "image") {
+      ocrStatus = "needs_ai_ocr";
     }
-  }
 
-  return attachmentText;
+    att.extractedText = extractedText;
+    att.ocrStatus = ocrStatus;
+    await db
+      .update(workerEmailAttachments)
+      .set({ extractedText, ocrStatus })
+      .where(eq(workerEmailAttachments.id, att.id));
+  }
+}
+
+/** Combine already-extracted attachment text into the AI prompt input. */
+function buildAttachmentText(attachments: AttachmentRecord[]): string {
+  return attachments
+    .filter((a) => a.extractedText && a.extractedText.trim() !== "")
+    .map((a) => `\n\n--- Attachment: ${a.filename} ---\n${a.extractedText}`)
+    .join("");
+}
+
+/**
+ * Best-effort embedding of email body + extracted attachment text into
+ * Vectorize (0042) — non-interpretive (bge-large), safe to auto-run so the doc
+ * is search/RAG-ready. Never throws into the pipeline.
+ */
+async function embedEmailContent(env: Env, emailId: number, text: string): Promise<void> {
+  const clean = (text ?? "").trim();
+  if (!clean) return;
+  const chunks: string[] = [];
+  for (let i = 0; i < clean.length && chunks.length < 10; i += 1000) {
+    chunks.push(clean.slice(i, i + 1000));
+  }
+  try {
+    const result = (await env.AI.run("@cf/baai/bge-large-en-v1.5", {
+      text: chunks,
+      gateway: { id: env.AI_GATEWAY_ID },
+    } as Parameters<typeof env.AI.run>[1])) as { data: number[][] };
+    const vectors = (result.data ?? [])
+      .map((values, i) => ({
+        id: `email:${emailId}:${i}`,
+        values,
+        metadata: { kind: "worker_email", email_id: emailId },
+      }))
+      .filter((v) => Array.isArray(v.values) && v.values.length > 0);
+    if (vectors.length > 0) await env.VECTOR_INDEX.upsert(vectors);
+  } catch (err) {
+    console.error(`[email-pipeline] embedding failed for email ${emailId}:`, err);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -315,6 +380,7 @@ export async function processEmail(args: ProcessEmailArgs): Promise<void> {
       route: decision.routeId,
       routeReason: decision.reason,
       status: "pending",
+      source: decision.source ?? "worker",
     })
     .returning();
 
@@ -378,6 +444,23 @@ export async function processEmail(args: ProcessEmailArgs): Promise<void> {
       .where(eq(workerEmails.id, insertedEmail.id));
   }
 
+  // ── Phase 4.5: NON-AI extraction + embeddings (0042) ─────────────────────
+  // Always runs — no interpretation, so it's safe on untrusted (Gmail) mail and
+  // leaves the doc text-extracted + vector-indexed and "ready to go".
+  await runNonAiExtraction(db, env, attachmentRecords);
+  await embedEmailContent(env, insertedEmail.id, `${bodyText}${buildAttachmentText(attachmentRecords)}`);
+
+  // ── AI trust gate (0042) ─────────────────────────────────────────────────
+  // Gmail-sourced mail defers the AI extraction until a human approves it (see
+  // RouteDecision.deferAiUntilApproval). Trusted worker email runs AI inline.
+  if (decision.deferAiUntilApproval) {
+    await db
+      .update(workerEmails)
+      .set({ aiStatus: "pending_approval" })
+      .where(eq(workerEmails.id, insertedEmail.id));
+    return;
+  }
+
   await analyzeAndPersist({
     db,
     env,
@@ -427,7 +510,13 @@ export async function analyzeAndPersist(args: AnalyzeArgs): Promise<void> {
     realSenderEmail, realSenderName, bodyText, attachments, companyMatch,
   } = args;
   // ── Phase 5: AI classification + extraction (depth per route) ────────────
-  const attachmentText = await extractAttachmentText(attachments, env);
+  // Text was extracted (non-AI) in processEmail Phase 4.5 and stored on the
+  // records. Fall back to extracting now if a caller passed un-extracted records
+  // (e.g. an older reprocess path) so analysis never loses attachment context.
+  if (attachments.some((a) => a.extractedText === undefined)) {
+    await runNonAiExtraction(db, env, attachments);
+  }
+  const attachmentText = buildAttachmentText(attachments);
 
   // Graceful degradation: if the AI call fails outright (e.g. provider auth /
   // outage), do NOT strand the email at "pending". Fall back to the

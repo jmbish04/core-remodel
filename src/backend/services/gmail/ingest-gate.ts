@@ -244,6 +244,11 @@ export const GATE_DECISION: RouteDecision = {
   routeId: "general",
   reason: "gmail-ingest-gate: domain matched a known showroom/company",
   profile: CATCH_ALL_PROFILE,
+  // 0042 trust gate: Gmail is the user's personal mailbox — anyone can email it,
+  // so run only the NON-AI work (text extraction + embeddings) and wait for the
+  // user to approve before the AI reads/interprets the content.
+  source: "gmail",
+  deferAiUntilApproval: true,
 };
 
 /**

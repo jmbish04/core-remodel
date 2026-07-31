@@ -111,6 +111,20 @@ export const workerEmails = sqliteTable(
     reviewNotes: text("review_notes"),
     reviewedAt: integer("reviewed_at", { mode: "timestamp" }),
 
+    // ── AI trust gate (0042) ─────────────────────────────────────────────
+    /** Provenance: `worker` (trusted, remodel@) or `gmail` (cautious). */
+    source: text("source").notNull().default("worker"),
+    /**
+     * AI extraction lifecycle (0042), independent of `status`:
+     *   auto_done        → AI extraction ran automatically (trusted source)
+     *   pending_approval → non-AI work done; awaiting user OK to run AI
+     *   approved         → user approved; AI extraction ran
+     *   failed           → AI extraction attempted and errored
+     */
+    aiStatus: text("ai_status").notNull().default("auto_done"),
+    aiApprovedAt: integer("ai_approved_at", { mode: "timestamp" }),
+    aiApprovedBy: text("ai_approved_by"),
+
     createdAt: integer("created_at", { mode: "timestamp" })
       .notNull()
       .default(sql`(unixepoch())`),
