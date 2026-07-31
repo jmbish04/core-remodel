@@ -265,6 +265,36 @@ You are an elite Senior Engineer operating within the Google Antigravity IDE fra
 - **Data Persistence:** Drizzle ORM + D1 Serverless SQL Storage Core
 - **Cognitive Orchestration:** @cloudflare/agents SDK Layer
 
+## The renovation-studio MCP server — one file per tool
+
+There are **two** MCP servers in this repo; do not conflate them:
+1. The OAuth connector at `src/backend/mcp/` (0015 — see the "MCP Server" section
+   below). Claude.ai custom connector.
+2. **The bearer-auth "renovation-studio" server at `src/backend/api/routes/mcp/`**
+   (mounted `/api/mcp`) — render, mood-board, measurement, deep-research, and
+   showroom/changelog/business-card tools. This section is about (2).
+
+- **Tool count is whatever lives in `mcp/tools/` on the branch you are on — nothing
+  else.** `mcp/tools/index.ts` (the `TOOLS` array) is the single source of truth.
+  Count with `ls src/backend/api/routes/mcp/tools/*.ts` or read that barrel — never
+  trust memory or another branch.
+- **Layout:**
+  - `index.ts` — transport only (JSON-RPC over streamable HTTP): auth, dispatch,
+    invocation logging, `structuredContent`. No tool logic. Default-exports the router.
+  - `tools/<tool_name>.ts` — **one file per tool.** Filename == MCP tool name. Each
+    exports a `ToolDef` (`types.ts`): `{ name, description, inputSchema, research?, handler }`.
+  - `auth.ts` — worker bearer (`Authorization: Bearer <WORKER_API_KEY>`) OR a scoped
+    Deep Research token (limited to tools flagged `research: true`).
+  - `lib/` — shared render + research helpers. `types.ts` — `ToolDef`/`ToolCtx`.
+- **On `main`: 21 tools.** create_render_session, list_room_angles, run_render_stage,
+  generate_mood_board, list_mood_boards, list_rooms, highlight_wall, add_measurement,
+  list_measurements, get_measurement_coverage, get_deep_research_context,
+  record_deep_research_progress, record_deep_research_source, create_showroom_contact,
+  create_changelog_entry, set_showroom_address, set_showroom_links, set_showroom_hours,
+  list_showroom_contacts, list_failed_business_cards, resolve_business_card.
+- **Add a tool:** drop `tools/<name>.ts` exporting a `ToolDef`, add one line to
+  `tools/index.ts`. That's it — the transport picks it up.
+
 ## Third-party CLIs — read `--help` BEFORE you run it (MANDATORY)
 
 Applies to `shadcn`, `wrangler`, `drizzle-kit`, `npx <anything>` — any CLI that
