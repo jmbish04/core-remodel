@@ -23,7 +23,7 @@
  */
 
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
-import { and, desc, eq, inArray, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, like, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
 import {
@@ -43,6 +43,7 @@ import type { GmailMessage, GmailMessageInsert, GmailThread } from "@backend/db"
 
 import { getGmailAccessToken } from "@backend/services/gmail/auth";
 import { classifyMessage, trimQuotedReply } from "@backend/services/gmail/classify-message";
+import { normalizeDomain } from "@backend/services/gmail/ingest-gate-domains";
 import { ensureMessageImages } from "@backend/services/gmail/inline-images";
 import { sanitizeNoteHtml } from "@backend/services/notes/markdown";
 import { buildComposeRaw, buildReplyAllRaw, sendMessage, stripHtmlTags } from "@backend/services/gmail/client";
@@ -53,6 +54,7 @@ import {
   buildShowroomMatchSpec,
   findThreadIdsByParticipants,
   insertParticipants,
+  parseEmailAddress,
   splitCandidateEmails,
 } from "@backend/services/gmail/participants";
 
@@ -147,8 +149,34 @@ const draftAssistBodySchema = z.object({
   instruction: z.string().optional(),
 });
 
-/** Inbox folders (0041). Invalid/absent values fall back to "inbox". */
-const gmailFolderSchema = z.enum(["inbox", "receipts", "spam", "trash"]).catch("inbox");
+/** Inbox folders — each purchase-doc type is its own folder (0042). */
+const GMAIL_FOLDERS = ["inbox", "quotes", "receipts", "contracts", "sales", "spam", "trash"] as const;
+type GmailFolder = (typeof GMAIL_FOLDERS)[number];
+/** Invalid/absent folder values fall back to "inbox". */
+const gmailFolderSchema = z.enum(GMAIL_FOLDERS).catch("inbox");
+
+/**
+ * The single folder a thread belongs to. Trash wins; then the most-specific
+ * classification across the thread's messages (contract > quote > receipt/invoice
+ * > sale); then spam; else inbox. One folder per thread so quotes, receipts and
+ * contracts are cleanly separated.
+ */
+function threadFolderFor(
+  msgs: { classification: string; isSpam: boolean; deletedAt: Date | null }[],
+): GmailFolder {
+  if (msgs.some((m) => m.deletedAt != null)) return "trash";
+  const has = (k: string) => msgs.some((m) => m.classification === k);
+  if (has("contract")) return "contracts";
+  if (has("quote")) return "quotes";
+  if (has("receipt") || has("invoice")) return "receipts";
+  if (has("sale")) return "sales";
+  if (msgs.some((m) => m.isSpam)) return "spam";
+  return "inbox";
+}
+
+function emptyFolderCounts(): Record<GmailFolder, number> {
+  return { inbox: 0, quotes: 0, receipts: 0, contracts: 0, sales: 0, spam: 0, trash: 0 };
+}
 
 // ─── Response schemas ─────────────────────────────────────────────────────────
 
@@ -777,7 +805,7 @@ gmailRouter.get("/showrooms/:storeId/threads-by-domain", async (c) => {
 
   try {
     const [store] = await db
-      .select({ id: showroomStores.id, name: showroomStores.name, email: showroomStores.emailAddress, pocEmail: showroomStores.mainPocEmailAddress })
+      .select({ id: showroomStores.id, name: showroomStores.name, email: showroomStores.emailAddress, pocEmail: showroomStores.mainPocEmailAddress, iconUrl: showroomStores.iconCfImagesUrl })
       .from(showroomStores)
       .where(eq(showroomStores.id, storeId))
       .limit(1);
@@ -858,46 +886,32 @@ gmailRouter.get("/showrooms/:storeId/threads-by-domain", async (c) => {
     // classification/isSpam/deletedAt: Trash if soft-deleted; else Spam if any
     // message is spam; else it's in Inbox — and additionally in Receipts when it
     // carries a purchase document. (Inbox excludes spam; Receipts keeps them.)
-    const RECEIPT_KINDS = new Set(["receipt", "invoice", "quote"]);
-    type Folder = "inbox" | "receipts" | "spam" | "trash";
-    const requestedFolder: Folder = gmailFolderSchema.parse(c.req.query("folder"));
+    const requestedFolder = gmailFolderSchema.parse(c.req.query("folder"));
 
     const enriched = threads.map((thread) => {
       const msgs = msgsByThread.get(thread.threadId) ?? [];
-      const deleted = msgs.some((m) => m.deletedAt != null);
-      const spam = msgs.some((m) => m.isSpam);
-      const receipt = msgs.some((m) => RECEIPT_KINDS.has(m.classification));
+      const folder = threadFolderFor(msgs);
       const unread = msgs.filter((m) => m.readAt == null && m.deletedAt == null).length;
-      // Spam + receipt co-occur (a promo carrying a real quote): it stays out of
-      // the main Inbox (spam) but still shows under Receipts so purchase docs are
-      // never lost. Non-spam receipts show in both Inbox and Receipts.
-      const folders: Folder[] = deleted
-        ? ["trash"]
-        : spam && receipt
-          ? ["spam", "receipts"]
-          : spam
-            ? ["spam"]
-            : receipt
-              ? ["inbox", "receipts"]
-              : ["inbox"];
-      return { thread, msgs, unread, folders, spam, receipt };
+      return { thread, msgs, unread, folder };
     });
 
-    // Per-folder counts (threads) + Inbox unread for the folder rail + badge.
-    const counts = { inbox: 0, receipts: 0, spam: 0, trash: 0 };
+    // Per-folder thread counts + Inbox unread for the folder rail + badge.
+    const counts = emptyFolderCounts();
     let unreadCount = 0;
     for (const e of enriched) {
-      for (const f of e.folders) counts[f] += 1;
-      if (e.folders.includes("inbox")) unreadCount += e.unread;
+      counts[e.folder] += 1;
+      if (e.folder === "inbox") unreadCount += e.unread;
     }
 
     const items = enriched
-      .filter((e) => e.folders.includes(requestedFolder))
+      .filter((e) => e.folder === requestedFolder)
       .map((e) => ({
         ...buildInboxThreadItem(e.thread, store.name, e.msgs),
         unread: e.unread,
-        isSpam: e.spam,
-        isReceipt: e.receipt,
+        isSpam: e.msgs.some((m) => m.isSpam),
+        classification: e.folder,
+        // Scoped inbox: every thread is this showroom's mail → its brand icon.
+        logoUrl: store.iconUrl ?? null,
         spamRationale: e.msgs.find((m) => m.spamRationale)?.spamRationale ?? null,
       }));
     items.sort((a, b) => {
@@ -1003,7 +1017,6 @@ gmailRouter.post("/threads/:threadId/mark-not-spam", async (c) => {
 gmailRouter.get("/inbox", async (c) => {
   const db = drizzle(c.env.DB);
   const requestedFolder = gmailFolderSchema.parse(c.req.query("folder"));
-  const RECEIPT_KINDS = new Set(["receipt", "invoice", "quote"]);
   try {
     const threads = await db
       .select()
@@ -1026,38 +1039,47 @@ gmailRouter.get("/inbox", async (c) => {
 
     const enriched = threads.map((thread) => {
       const msgs = msgsByThread.get(thread.threadId) ?? [];
-      const deleted = msgs.some((m) => m.deletedAt != null);
-      const spam = msgs.some((m) => m.isSpam);
-      const receipt = msgs.some((m) => RECEIPT_KINDS.has(m.classification));
+      const folder = threadFolderFor(msgs);
       const unread = msgs.filter((m) => m.readAt == null && m.deletedAt == null).length;
-      const folders = deleted
-        ? (["trash"] as const)
-        : spam && receipt
-          ? (["spam", "receipts"] as const)
-          : spam
-            ? (["spam"] as const)
-            : receipt
-              ? (["inbox", "receipts"] as const)
-              : (["inbox"] as const);
-      return { thread, msgs, unread, folders, spam, receipt };
+      return { thread, msgs, unread, folder };
     });
 
-    const counts = { inbox: 0, receipts: 0, spam: 0, trash: 0 };
+    const counts = emptyFolderCounts();
     let unreadCount = 0;
     for (const e of enriched) {
-      for (const f of e.folders) counts[f] += 1;
-      if ((e.folders as readonly string[]).includes("inbox")) unreadCount += e.unread;
+      counts[e.folder] += 1;
+      if (e.folder === "inbox") unreadCount += e.unread;
+    }
+
+    // Map showroom WEBSITE-domain → brand icon, so a sender whose domain matches
+    // a showroom shows that showroom's logo instead of initials.
+    const iconByDomain = new Map<string, string>();
+    const linkRows = await db
+      .select({ url: showroomStoreLinks.url, icon: showroomStores.iconCfImagesUrl })
+      .from(showroomStoreLinks)
+      .innerJoin(showroomStores, eq(showroomStoreLinks.storeId, showroomStores.id))
+      .where(and(eq(showroomStoreLinks.type, "WEBSITE"), isNotNull(showroomStores.iconCfImagesUrl)))
+      .all();
+    for (const r of linkRows) {
+      const d = normalizeDomain(r.url);
+      if (d && r.icon) iconByDomain.set(d, r.icon);
     }
 
     const items = enriched
-      .filter((e) => (e.folders as readonly string[]).includes(requestedFolder))
-      .map((e) => ({
-        ...buildInboxThreadItem(e.thread, "", e.msgs),
-        unread: e.unread,
-        isSpam: e.spam,
-        isReceipt: e.receipt,
-        spamRationale: e.msgs.find((m) => m.spamRationale)?.spamRationale ?? null,
-      }))
+      .filter((e) => e.folder === requestedFolder)
+      .map((e) => {
+        const item = buildInboxThreadItem(e.thread, "", e.msgs);
+        // The sender is "Display Name <addr@domain>"; parse the address form.
+        const dom = parseEmailAddress(item.lastMessage?.from ?? "")?.domain ?? null;
+        return {
+          ...item,
+          unread: e.unread,
+          isSpam: e.msgs.some((m) => m.isSpam),
+          classification: e.folder,
+          logoUrl: dom ? iconByDomain.get(dom) ?? null : null,
+          spamRationale: e.msgs.find((m) => m.spamRationale)?.spamRationale ?? null,
+        };
+      })
       .sort((a, b) => {
         const at = a.lastMessage?.date ? new Date(a.lastMessage.date).getTime() : -1;
         const bt = b.lastMessage?.date ? new Date(b.lastMessage.date).getTime() : -1;

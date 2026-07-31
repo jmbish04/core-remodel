@@ -17,7 +17,65 @@ import { classifyMessage, trimQuotedReply } from "./classify-message";
   });
   assert.equal(r.isSpam, true);
   assert.equal(r.spamRationale, "unsubscribe");
+  // "50% off" is a deal → Sales (not buried as generic promotional/spam).
+  assert.equal(r.classification, "sale");
+}
+
+// ── promotional (spam, no deal/purchase keyword) → promotional ──────────────
+{
+  const r = classifyMessage({
+    subject: "Our latest newsletter",
+    body: "Read our blog.\n\nUnsubscribe | Manage preferences",
+    hasAttachments: false,
+  });
+  assert.equal(r.isSpam, true);
   assert.equal(r.classification, "promotional");
+}
+
+// ── contract → Contracts folder ─────────────────────────────────────────────
+{
+  const r = classifyMessage({
+    subject: "Please sign: Master Service Agreement",
+    body: "Attached is the contract for your signature via DocuSign.",
+    hasAttachments: true,
+  });
+  assert.equal(r.classification, "contract");
+}
+
+// ── "contractor"/"terms and conditions" must NOT trip Contracts ─────────────
+{
+  const sub = classifyMessage({
+    subject: "Your subcontractor is on the way",
+    body: "The subcontractor will arrive at 9am.",
+    hasAttachments: false,
+  });
+  assert.equal(sub.classification, "normal", "'subcontractor' is not a contract");
+
+  // A receipt whose footer says "terms and conditions" stays a receipt, not contract.
+  const rc = classifyMessage({
+    subject: "Receipt",
+    body: "Paid $50. See our terms and conditions.",
+    hasAttachments: false,
+  });
+  assert.equal(rc.classification, "receipt");
+}
+
+// ── sale keyword → Sales ────────────────────────────────────────────────────
+{
+  const r = classifyMessage({
+    subject: "Clearance event this weekend",
+    body: "Final sale on all floor models.",
+    hasAttachments: false,
+  });
+  assert.equal(r.classification, "sale");
+}
+
+// ── quote separate from receipt ─────────────────────────────────────────────
+{
+  const q = classifyMessage({ subject: "Your quote", body: "Total $2,400", hasAttachments: false });
+  assert.equal(q.classification, "quote");
+  const rc = classifyMessage({ subject: "Receipt for your order", body: "Paid $2,400", hasAttachments: false });
+  assert.equal(rc.classification, "receipt");
 }
 
 // ── normal ────────────────────────────────────────────────────────────────
