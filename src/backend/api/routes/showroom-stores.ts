@@ -1590,18 +1590,57 @@ showroomStoresRouter.get("/:id", async (c) => {
  * Returns `{ allowed:false }` (403) when over cap so the client renders nothing.
  * This is a best-effort counter: it only sees renders the client announces, but
  * our client always calls it first, so under normal flow the count is complete.
+ *
+ * The route sits under `/api/showroom-stores/*`, which `requireAccessAuth` gates
+ * in api/index.ts — every response shape is `{ allowed, reason?, message? }`.
  */
+const streetviewRenderBodySchema = z.object({
+  // Bounded so a hostile client can't log-inject or bloat the usage row.
+  panoId: z.string().max(256).optional(),
+});
+
 showroomStoresRouter.post("/:id/streetview-render", async (c) => {
   const storeId = Number(c.req.param("id"));
   if (!Number.isInteger(storeId) || storeId <= 0) {
-    return c.json({ allowed: false, error: "Invalid store id" }, 400);
+    return c.json(
+      { allowed: false, reason: "INVALID_ID", message: "Invalid store id." },
+      400,
+    );
   }
 
-  // Optional pano id for log context; parsed leniently so a bodyless call works.
-  const body = (await c.req.json().catch(() => null)) as { panoId?: unknown } | null;
-  const panoId = typeof body?.panoId === "string" ? body.panoId : undefined;
+  // Validate the (optional) body through Zod rather than casting untrusted JSON.
+  const parsed = streetviewRenderBodySchema.safeParse(
+    (await c.req.json().catch(() => ({}))) ?? {},
+  );
+  if (!parsed.success) {
+    return c.json(
+      { allowed: false, reason: "BAD_BODY", message: "Invalid request body." },
+      400,
+    );
+  }
+  const { panoId } = parsed.data;
+
+  const db = drizzle(c.env.DB);
+  // Don't spend shared Street View budget on a store that doesn't exist — a bad
+  // id would otherwise write a meaningless render row against the monthly cap.
+  const [store] = await db
+    .select({ id: showroomStores.id })
+    .from(showroomStores)
+    .where(eq(showroomStores.id, storeId))
+    .limit(1);
+  if (!store) {
+    return c.json(
+      { allowed: false, reason: "NOT_FOUND", message: "Store not found." },
+      404,
+    );
+  }
 
   const maps = new GoogleMapsService(c.env);
+  // ponytail: check-then-log is not atomic and D1 has no transactions, so two
+  // concurrent renders can both pass the check. Acceptable here — the cap
+  // (4,500) sits 500 events below Google's free-tier ceiling (5,000), which
+  // absorbs any realistic race for a single-operator app. Revisit with a
+  // conditional insert only if concurrency ever gets high enough to matter.
   if (!(await maps.isUnderApiQuota("street_view"))) {
     return c.json(
       { allowed: false, reason: "QUOTA_LIMIT", message: "Street View monthly cap reached." },

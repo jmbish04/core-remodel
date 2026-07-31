@@ -45,13 +45,19 @@ export const placesRouter = new OpenAPIHono<{ Bindings: Env }>();
  * you don't want to relax the server key.
  */
 placesRouter.get("/maps-js-key", async (c) => {
+  // Never let a browser or intermediate proxy cache the credential.
+  c.header("Cache-Control", "no-store");
+  let key: string;
   try {
-    const key = await getGoogleMapsApiKey(c.env);
-    if (!key) return c.json({ error: "Maps key not configured" }, 503);
-    return c.json({ key });
-  } catch {
-    return c.json({ error: "Maps key not configured" }, 503);
+    key = await getGoogleMapsApiKey(c.env);
+  } catch (err) {
+    // A thrown error is an operational failure (binding read, etc.), not a
+    // clean "unset" — log it and surface a distinct 500 so it's debuggable.
+    console.error("maps-js-key: failed to read GOOGLE_MAPS_API:", err);
+    return c.json({ error: "Failed to read Maps key" }, 500);
   }
+  if (!key) return c.json({ error: "Maps key not configured" }, 503);
+  return c.json({ key });
 });
 
 // ─── Shared error schemas ────────────────────────────────────────────────────

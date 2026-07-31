@@ -2273,6 +2273,9 @@ function TourCard({ url }: { url: string }) {
             title="360° showroom tour"
             allow="fullscreen; xr-spatial-tracking"
             allowFullScreen
+            // Defense-in-depth: the host is already checked (isMatterport), but a
+            // sandbox blocks top-level navigation + other ambient authority.
+            sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
             className="size-full"
           />
         </div>

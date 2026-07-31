@@ -56,8 +56,13 @@ interface GMaps {
       motionTrackingControl?: boolean;
       fullscreenControl?: boolean;
     },
-  ) => unknown;
+  ) => StreetViewPanoramaInstance;
   StreetViewSource: { DEFAULT: string; OUTDOOR: string };
+}
+
+/** The bits of a live StreetViewPanorama we touch (to dispose it on unmount). */
+interface StreetViewPanoramaInstance {
+  setVisible(visible: boolean): void;
 }
 
 declare global {
@@ -89,7 +94,12 @@ function loadGoogleMaps(): Promise<GMaps> {
   loaderPromise = (async () => {
     const key = await fetchBrowserKey();
     return await new Promise<GMaps>((resolve, reject) => {
-      window.__gmapsReady = () => resolve(window.google!.maps);
+      window.__gmapsReady = () => {
+        const maps = window.google!.maps;
+        // One-shot JSONP callback — don't leave it dangling on window.
+        delete window.__gmapsReady;
+        resolve(maps);
+      };
       const s = document.createElement("script");
       s.src =
         "https://maps.googleapis.com/maps/api/js" +
@@ -125,6 +135,7 @@ export function StreetViewTour({
   const panoId = useRef<string | undefined>(undefined);
   const mapsRef = useRef<GMaps | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const panoInstance = useRef<StreetViewPanoramaInstance | null>(null);
 
   // Free detection on mount. Renders nothing unless a panorama is found.
   useEffect(() => {
@@ -164,9 +175,31 @@ export function StreetViewTour({
     };
   }, [lat, lng]);
 
-  // Gated, billable render — server checks quota + logs the event first.
+  // Instantiate the (billable) panorama only once the "open" container is
+  // actually committed to the DOM — a useEffect guarantees that, where a raw
+  // requestAnimationFrame after setState does not under React 18 concurrency.
+  // The cleanup disposes the panorama (it attaches listeners + holds memory) so
+  // repeated mount/unmount in the bento grid doesn't leak.
+  useEffect(() => {
+    if (status !== "open" || !containerRef.current || !mapsRef.current) return;
+    panoInstance.current = new mapsRef.current.StreetViewPanorama(containerRef.current, {
+      pano: panoId.current,
+      visible: true,
+      addressControl: false,
+      motionTracking: false,
+      motionTrackingControl: false,
+      fullscreenControl: true,
+    });
+    return () => {
+      panoInstance.current?.setVisible(false);
+      panoInstance.current = null;
+    };
+  }, [status]);
+
+  // Gated, billable render — server checks quota + logs the event first. The
+  // panorama itself is created by the effect above once status flips to "open".
   async function openTour() {
-    if (opening || !mapsRef.current || !containerRef.current) return;
+    if (opening || !mapsRef.current) return;
     setOpening(true);
     try {
       const res = await fetch(`/api/showroom-stores/${storeId}/streetview-render`, {
@@ -183,18 +216,6 @@ export function StreetViewTour({
         return;
       }
       setStatus("open");
-      // Mount after the container is visible in the DOM (next tick).
-      requestAnimationFrame(() => {
-        if (!containerRef.current || !mapsRef.current) return;
-        new mapsRef.current.StreetViewPanorama(containerRef.current, {
-          pano: panoId.current,
-          visible: true,
-          addressControl: false,
-          motionTracking: false,
-          motionTrackingControl: false,
-          fullscreenControl: true,
-        });
-      });
     } catch {
       toast.error("Couldn't open the 360° tour.");
     } finally {

@@ -63,20 +63,24 @@ try {
   }
 
   // ── 2. streetview-render guard ───────────────────────────────────────────
-  const storeId = d1(
-    "SELECT id FROM showroom_stores WHERE latitude IS NOT NULL LIMIT 1;",
-  )[0]?.id;
+  // D1's --json can return an id as a string; coerce before the finite check.
+  const storeId = Number(
+    d1("SELECT id FROM showroom_stores WHERE latitude IS NOT NULL LIMIT 1;")[0]?.id,
+  );
   check("found a store with coords", Number.isFinite(storeId), `storeId=${storeId}`);
 
   if (Number.isFinite(storeId)) {
-    const beforeCount = d1(
-      "SELECT COUNT(*) AS n FROM google_maps_usage_log WHERE endpoint = 'streetview:render';",
-    )[0]?.n;
+    // The render POST WRITES a usage row (and previews share prod's D1), so only
+    // exercise the mutating path under --preview; the prod regression run just
+    // confirms the non-mutating error paths. Clean the QC row up afterwards.
+    if (isPreview) {
+      const beforeCount = d1(
+        "SELECT COUNT(*) AS n FROM google_maps_usage_log WHERE endpoint = 'streetview:render';",
+      )[0]?.n;
 
-    const renderRes = await c.post(`/api/showroom-stores/${storeId}/streetview-render`, {
-      panoId: "QC_TEST_PANO",
-    });
-    if (!pending("streetview-render", renderRes)) {
+      const renderRes = await c.post(`/api/showroom-stores/${storeId}/streetview-render`, {
+        panoId: "QC_TEST_PANO",
+      });
       const allowed = renderRes.status === 200 && renderRes.json?.allowed === true;
       const blocked = renderRes.status === 403 && renderRes.json?.reason === "QUOTA_LIMIT";
       check("render guard responds allowed|QUOTA_LIMIT", allowed || blocked, `status=${renderRes.status}`);
@@ -87,9 +91,18 @@ try {
         )[0]?.n;
         check("render logged one usage row", Number(afterCount) === Number(beforeCount) + 1, `${beforeCount}→${afterCount}`);
       }
+
+      // Clean up the synthetic row so repeated runs don't pollute D1.
+      d1("DELETE FROM google_maps_usage_log WHERE endpoint = 'streetview:render' AND api_request LIKE '%QC_TEST_PANO%';");
+      const leftover = d1(
+        "SELECT COUNT(*) AS n FROM google_maps_usage_log WHERE api_request LIKE '%QC_TEST_PANO%';",
+      )[0]?.n;
+      check("QC render row cleaned up", Number(leftover) === 0, `leftover=${leftover}`);
+    } else {
+      info("streetview-render: skipped on prod (mutating endpoint — preview only)");
     }
 
-    // Invalid id → 400
+    // Invalid id → 400 (non-mutating; safe on either base).
     const badRes = await c.post(`/api/showroom-stores/0/streetview-render`, {});
     if (!pending("streetview-render bad-id", badRes)) {
       check("invalid store id → 400", badRes.status === 400, `status=${badRes.status}`);
