@@ -14,15 +14,19 @@ import type { Exclusion } from "./types";
 
 export function ExclusionsApp() {
   const [exclusions, setExclusions] = useState<Exclusion[] | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     try {
       const data = await listExclusions();
       setExclusions(data.exclusions);
+      setLoadError(null);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Could not load exclusions");
-      setExclusions([]);
+      const msg = e instanceof Error ? e.message : "Could not load exclusions";
+      toast.error(msg);
+      // Keep the list null and record the error — don't render a false "nothing excluded" empty state.
+      setLoadError(msg);
     }
   }, []);
 
@@ -44,6 +48,17 @@ export function ExclusionsApp() {
   }
 
   if (exclusions == null) {
+    if (loadError) {
+      return (
+        <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-destructive/40 py-12 text-center text-muted-foreground">
+          <p>Couldn't load your not-interested list — {loadError}</p>
+          <Button size="sm" variant="outline" onClick={() => void load()}>
+            <RotateCcw className="size-4" />
+            Retry
+          </Button>
+        </div>
+      );
+    }
     return (
       <div className="flex justify-center py-16">
         <Loader2 className="size-6 animate-spin text-muted-foreground" aria-hidden />

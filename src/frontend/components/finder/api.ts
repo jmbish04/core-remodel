@@ -14,8 +14,9 @@ async function json<T>(res: Response): Promise<T> {
 
 const opts = (init?: RequestInit): RequestInit => ({
   credentials: "include",
-  headers: { "Content-Type": "application/json" },
   ...init,
+  // Merge headers so a caller's custom headers don't clobber the JSON content type.
+  headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
 });
 
 export async function listSearches(): Promise<{ count: number; searches: SearchSummary[] }> {
@@ -45,7 +46,8 @@ export async function getRevisions(slug: string): Promise<{ count: number; revis
 }
 
 export async function finalizeSearch(slug: string): Promise<{ ok: boolean }> {
-  return json(await fetch(`/api/showroom-searches/${encodeURIComponent(slug)}/finalize`, opts({ method: "POST" })));
+  // Send an explicit empty JSON body so the application/json content type isn't a lie a strict parser rejects.
+  return json(await fetch(`/api/showroom-searches/${encodeURIComponent(slug)}/finalize`, opts({ method: "POST", body: JSON.stringify({}) })));
 }
 
 export async function importResults(slug: string, resultIds: number[]): Promise<{ ok: boolean; imported: number[]; storeIds: number[] }> {

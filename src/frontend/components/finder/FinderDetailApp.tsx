@@ -23,13 +23,20 @@ export function FinderDetailApp({ slug }: { slug: string }) {
   const [live, setLive] = useState(false);
   const [busy, setBusy] = useState<null | "finalize" | "refine">(null);
   const mounted = useRef(true);
+  const inFlight = useRef(false);
 
   const load = useCallback(async () => {
+    if (inFlight.current) return; // Don't stack overlapping loads (poll + WS burst on a slow network).
+    inFlight.current = true;
+    const forSlug = slug; // pin: a response for a previous slug must not overwrite the current one.
     try {
-      const data = await getSearch(slug);
-      if (mounted.current) setDetail(data);
+      const data = await getSearch(forSlug);
+      // Guard both unmount AND a slug change that started while this request was in flight.
+      if (mounted.current && forSlug === slug) setDetail(data);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not load the search");
+    } finally {
+      inFlight.current = false;
     }
   }, [slug]);
 

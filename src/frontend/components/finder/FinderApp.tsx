@@ -35,6 +35,7 @@ export function FinderApp() {
   }, [load]);
 
   async function onRun() {
+    if (running) return; // Enter-key bypasses the disabled button; guard duplicate submits.
     if (!near.trim() && !query.trim()) {
       toast.error("Enter a location or a query");
       return;
@@ -69,6 +70,7 @@ export function FinderApp() {
               value={near}
               onChange={(e) => setNear(e.target.value)}
               placeholder="Near… (city, area, or lat,lng)"
+              aria-label="Search location (city, area, or lat,lng)"
               className="border-0 px-1 focus-visible:ring-0"
               onKeyDown={(e) => e.key === "Enter" && onRun()}
             />
@@ -77,6 +79,7 @@ export function FinderApp() {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="What are you after? (tile, plumbing…) — optional"
+            aria-label="What are you after (e.g. tile, plumbing) — optional"
             onKeyDown={(e) => e.key === "Enter" && onRun()}
           />
           <Button onClick={onRun} disabled={running}>

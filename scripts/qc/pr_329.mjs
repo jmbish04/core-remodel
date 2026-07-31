@@ -40,7 +40,8 @@ try {
   const searches = await client.get("/api/showroom-searches");
   checks.ok(
     "GET /api/showroom-searches → responds (finder REST)",
-    searches.status === 200 || searches.status === 401 || searches.status === 404,
+    // The endpoint shipped in D2c-1 — a 404 here is a real regression, not an allowed state.
+    searches.status === 200 || searches.status === 401,
     `→ ${searches.status}`,
   );
   const wsHealth = await client.get("/api/showrooms/discovery/health?slug=qc");

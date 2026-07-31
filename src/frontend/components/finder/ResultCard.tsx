@@ -3,7 +3,7 @@
  * type/rating/distance badges + import / not-interested actions. Mirrors ParkFindCard.
  */
 import { Check, ExternalLink, Loader2, Phone, Star, X } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { DriveMapThumb } from "@/components/drives/DriveMapThumb";
@@ -23,6 +23,13 @@ export function ResultCard({
   onChanged: () => void;
 }) {
   const [busy, setBusy] = useState<null | "import" | "exclude">(null);
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
   const hasGeo = result.latitude != null && result.longitude != null;
   const imported = result.importedAt != null || result.inDirectory;
 
@@ -35,7 +42,7 @@ export function ResultCard({
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not import");
     } finally {
-      setBusy(null);
+      if (mounted.current) setBusy(null);
     }
   }
 
@@ -48,11 +55,21 @@ export function ResultCard({
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not exclude");
     } finally {
-      setBusy(null);
+      if (mounted.current) setBusy(null);
     }
   }
 
   const category = result.categoryGuess ?? result.primaryType;
+  // Only render an external link for http(s) URLs — never javascript:/data: (XSS/phishing).
+  const safeWebsite = (() => {
+    if (!result.website) return null;
+    try {
+      const u = new URL(result.website);
+      return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
+    } catch {
+      return null;
+    }
+  })();
 
   return (
     <div className="flex flex-col overflow-hidden rounded-xl border border-border/60 bg-card sm:flex-row">
@@ -96,9 +113,9 @@ export function ResultCard({
               {result.phone}
             </a>
           )}
-          {result.website && (
+          {safeWebsite && (
             <a
-              href={result.website}
+              href={safeWebsite}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1 hover:text-foreground"
