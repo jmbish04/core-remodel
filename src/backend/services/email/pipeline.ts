@@ -18,7 +18,7 @@
  */
 
 import PostalMime from "postal-mime";
-import { eq, like } from "drizzle-orm";
+import { and, eq, like } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { workerEmails } from "@backend/db/schema/emails/worker_emails";
 import { workerEmailAttachments } from "@backend/db/schema/emails/worker_email_attachments";
@@ -324,6 +324,48 @@ async function embedEmailContent(env: Env, emailId: number, text: string): Promi
     if (vectors.length > 0) await env.VECTOR_INDEX.upsert(vectors);
   } catch (err) {
     console.error(`[email-pipeline] embedding failed for email ${emailId}:`, err);
+  }
+}
+
+/**
+ * Vision OCR for image attachments the user has APPROVED for AI processing
+ * (0042 P2). Image OCR needs a vision model, so it is gated behind approval —
+ * `runNonAiExtraction` only flags images `needs_ai_ocr`. This runs
+ * `env.AI.toMarkdown` (vision) on each such image, persists the text, and flips
+ * the status so the subsequent `reprocessEmail`/`analyzeAndPersist` pass sees it.
+ */
+export async function runImageOcr(
+  db: ReturnType<typeof drizzle>,
+  env: Env,
+  emailId: number,
+): Promise<void> {
+  const images = await db
+    .select()
+    .from(workerEmailAttachments)
+    .where(and(eq(workerEmailAttachments.emailId, emailId), eq(workerEmailAttachments.ocrStatus, "needs_ai_ocr")));
+
+  for (const att of images) {
+    try {
+      const object = await env.ARTIFACTS_BUCKET.get(att.r2Key);
+      if (!object) continue;
+      const buf = await object.arrayBuffer();
+      const blob = new Blob([buf], { type: att.mimeType ?? "image/png" });
+      const result = await env.AI.toMarkdown({ name: att.filename ?? "image", blob });
+      const text = result.format !== "error" ? result.data : null;
+      await db
+        .update(workerEmailAttachments)
+        .set({ extractedText: text, ocrStatus: text ? "extracted" : "none" })
+        .where(eq(workerEmailAttachments.id, att.id));
+    } catch (err) {
+      // Mark terminal so a permanently-unprocessable image isn't re-OCR'd on
+      // every approve (the selector only picks up ocr_status='needs_ai_ocr').
+      console.error(`[email-pipeline] image OCR failed for attachment ${att.id}:`, err);
+      await db
+        .update(workerEmailAttachments)
+        .set({ ocrStatus: "failed" })
+        .where(eq(workerEmailAttachments.id, att.id))
+        .catch(() => {});
+    }
   }
 }
 

@@ -1,5 +1,6 @@
 export { CompanyGmailPanel } from "./CompanyGmailPanel";
 export { GmailInboxApp } from "./GmailInboxApp";
+export { StoreInboxApp } from "./StoreInboxApp";
 export { GmailThreadList } from "./GmailThreadList";
 export { GmailThreadView } from "./GmailThreadView";
 export { gmailApi } from "./types";
