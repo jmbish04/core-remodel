@@ -1577,6 +1577,49 @@ showroomStoresRouter.get("/:id", async (c) => {
 });
 
 /**
+ * POST /:id/streetview-render — quota gate + usage log for a billable Street
+ * View render.
+ *
+ * The browser detects a panorama for free via `StreetViewService.getPanorama()`
+ * (NOT billed), then calls this endpoint immediately BEFORE instantiating a
+ * `StreetViewPanorama` object — the one action that fires a Dynamic Street View
+ * (Pro SKU) billing event. We check the `street_view` monthly cap and, when
+ * under it, log the render into `google_maps_usage_log` so it counts against the
+ * shared free-tier budget alongside Places/Routes.
+ *
+ * Returns `{ allowed:false }` (403) when over cap so the client renders nothing.
+ * This is a best-effort counter: it only sees renders the client announces, but
+ * our client always calls it first, so under normal flow the count is complete.
+ */
+showroomStoresRouter.post("/:id/streetview-render", async (c) => {
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isInteger(storeId) || storeId <= 0) {
+    return c.json({ allowed: false, error: "Invalid store id" }, 400);
+  }
+
+  // Optional pano id for log context; parsed leniently so a bodyless call works.
+  const body = (await c.req.json().catch(() => null)) as { panoId?: unknown } | null;
+  const panoId = typeof body?.panoId === "string" ? body.panoId : undefined;
+
+  const maps = new GoogleMapsService(c.env);
+  if (!(await maps.isUnderApiQuota("street_view"))) {
+    return c.json(
+      { allowed: false, reason: "QUOTA_LIMIT", message: "Street View monthly cap reached." },
+      403,
+    );
+  }
+
+  await maps.logUsage(
+    "street_view",
+    { storeId, panoId },
+    { ok: true },
+    { endpoint: "streetview:render", statusCode: 200 },
+  );
+
+  return c.json({ allowed: true });
+});
+
+/**
  * POST / — Create a new store.
  *
  * Accepts an optional `categoryIds` array. After the store row is inserted the

@@ -42,12 +42,14 @@ import {
   Trash2,
   Upload,
   Users,
+  View,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { NavigateTeslaButton } from "@/components/tesla/NavigateTeslaButton";
 import { StoreVisitsSection } from "@/components/visits/StoreVisitsSection";
 import {
@@ -70,6 +72,7 @@ import { AssociateBrandsModal } from "./associate/AssociateBrandsModal";
 import { AssociateProductsModal } from "./associate/AssociateProductsModal";
 import { type ShowroomPhoto } from "./photos/ShowroomPhotoPolaroid";
 import { VisitPhotosManager } from "./photos/VisitPhotosManager";
+import { StreetViewTour } from "./photos/StreetViewTour";
 import { GooglePhotosButton } from "@/components/google-photos/GooglePhotosButton";
 import { ShowroomBento, type ShowroomBentoSection } from "./bento/ShowroomBento";
 import { ShowroomGmailPanel } from "@/components/gmail/ShowroomGmailPanel";
@@ -91,6 +94,8 @@ import {
   UploadPhotoModal,
   type StoreCategoryChip,
 } from "./hero";
+import { asLinkType } from "./intake/LinksField";
+import { absoluteHref } from "./hero/SocialLinks";
 import type { HoursJson } from "./intake/hours-types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -172,6 +177,8 @@ interface StoreDetail {
   locationState: string | null;
   locationZipCode: string | null;
   googleMapsLink: string | null;
+  /** Google Place id — used to log Street View render events for cost context. */
+  placeId: string | null;
   /** Places coordinates — preferred over the address text for Tesla navigation. */
   latitude: number | null;
   longitude: number | null;
@@ -971,6 +978,16 @@ export function StoreViewportApp({
 
   // ── Bento sections ──────────────────────────────────────────────────────────
 
+  // The store's 360° walkthrough (Matterport or other), if a SHOWROOM_TOUR link
+  // exists. Surfaced in the Photos section and flagged on its bento tile.
+  const tourUrl = useMemo(
+    () =>
+      absoluteHref(
+        store?.links?.find((l) => asLinkType(l.type) === "SHOWROOM_TOUR")?.url,
+      ),
+    [store?.links],
+  );
+
   const bentoSections: ShowroomBentoSection[] = useMemo(
     () => [
       {
@@ -1003,7 +1020,7 @@ export function StoreViewportApp({
         title: "Showroom photos",
         description: `${galleryPhotos.length + photos.length} photo${
           galleryPhotos.length + photos.length === 1 ? "" : "s"
-        } · Places + your visits`,
+        } · Places + your visits${tourUrl ? " · 360° tour" : ""}`,
         icon: <ImagePlus className="size-5" />,
         preview:
           galleryPhotos.length > 0 || photos.length > 0 ? (
@@ -1027,6 +1044,7 @@ export function StoreViewportApp({
       photos,
       galleryPhotos,
       brandsWithCounts,
+      tourUrl,
     ],
   );
 
@@ -1328,6 +1346,10 @@ export function StoreViewportApp({
         ) : (
           <PhotosSection
             storeId={id}
+            tourUrl={tourUrl}
+            placeId={store.placeId}
+            lat={store.latitude}
+            lng={store.longitude}
             galleryPhotos={galleryPhotos}
             photos={photos}
             uploading={uploading}
@@ -2214,6 +2236,60 @@ function GalleryThumb({
   );
 }
 
+/** Is this a Matterport URL we can embed directly in an iframe? */
+function isMatterport(url: string): boolean {
+  try {
+    return /(^|\.)matterport\.com$/i.test(new URL(url).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The store's 360° walkthrough. A Matterport link embeds inline (their /show/
+ * URLs are iframe-able); any other tour URL (Google Maps "See inside", a hosted
+ * 360, etc.) renders as a big open-in-new-tab tile.
+ */
+function TourCard({ url }: { url: string }) {
+  return (
+    <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 text-base font-semibold">
+          <View className="size-4 text-muted-foreground" /> 360° Tour
+        </h2>
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          className={cn(buttonVariants({ size: "sm", variant: "outline" }), "gap-1.5")}
+        >
+          <ExternalLink className="size-3.5" /> Open in new tab
+        </a>
+      </div>
+      {isMatterport(url) ? (
+        <div className="mt-4 aspect-video overflow-hidden rounded-lg ring-1 ring-border/40">
+          <iframe
+            src={url}
+            title="360° showroom tour"
+            allow="fullscreen; xr-spatial-tracking"
+            allowFullScreen
+            className="size-full"
+          />
+        </div>
+      ) : (
+        <a
+          href={url}
+          target="_blank"
+          rel="noreferrer"
+          className="mt-4 flex aspect-video items-center justify-center rounded-lg bg-muted/40 text-sm text-muted-foreground ring-1 ring-border/40 transition-colors hover:bg-muted/60 hover:text-foreground"
+        >
+          <View className="mr-2 size-5" /> Open the 360° walkthrough
+        </a>
+      )}
+    </div>
+  );
+}
+
 /**
  * Photos section — two collections:
  *   1. "From Google Places" — the stock photos pulled at intake/backfill time
@@ -2223,6 +2299,10 @@ function GalleryThumb({
  */
 function PhotosSection({
   storeId,
+  tourUrl,
+  placeId,
+  lat,
+  lng,
   galleryPhotos,
   photos,
   uploading,
@@ -2234,6 +2314,12 @@ function PhotosSection({
   onDeleteGalleryPhoto,
 }: {
   storeId: number;
+  /** Absolute URL of the store's 360° tour (SHOWROOM_TOUR link), if any. */
+  tourUrl?: string | null;
+  /** Google Place id + coords — power the free Street View fallback tour. */
+  placeId: string | null;
+  lat: number | null;
+  lng: number | null;
   galleryPhotos: GalleryPhoto[];
   photos: ShowroomPhoto[];
   uploading: boolean;
@@ -2246,6 +2332,13 @@ function PhotosSection({
 }) {
   return (
     <div className="space-y-6">
+      {/* ── 360° walkthrough: manual link wins; else free Street View probe ── */}
+      {tourUrl ? (
+        <TourCard url={tourUrl} />
+      ) : (
+        <StreetViewTour storeId={storeId} placeId={placeId} lat={lat} lng={lng} />
+      )}
+
       {/* ── Collection: Google Places stock photos ── */}
       <div className="rounded-xl bg-card p-5 ring-1 ring-border/40">
         <div className="flex items-center justify-between gap-2">
