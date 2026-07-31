@@ -27,21 +27,27 @@ showroomExclusionsRouter.get("/", async (c) => {
   return c.json({ count: exclusions.length, exclusions });
 });
 
-const addSchema = z.object({
-  placeId: z.string().nullable().optional(),
-  name: z.string().nullable().optional(),
-  latitude: z.number().nullable().optional(),
-  longitude: z.number().nullable().optional(),
-  locationStreetNumber: z.string().nullable().optional(),
-  locationStreetName: z.string().nullable().optional(),
-  locationCity: z.string().nullable().optional(),
-  locationState: z.string().nullable().optional(),
-  locationZipCode: z.string().nullable().optional(),
-  category: z.string().nullable().optional(),
-  reasonMarkdown: z.string().nullable().optional(),
-  reasonHtml: z.string().nullable().optional(),
-  source: z.enum(["manual", "ai"]).optional(),
-});
+const addSchema = z
+  .object({
+    placeId: z.string().nullable().optional(),
+    name: z.string().nullable().optional(),
+    latitude: z.number().nullable().optional(),
+    longitude: z.number().nullable().optional(),
+    locationStreetNumber: z.string().nullable().optional(),
+    locationStreetName: z.string().nullable().optional(),
+    locationCity: z.string().nullable().optional(),
+    locationState: z.string().nullable().optional(),
+    locationZipCode: z.string().nullable().optional(),
+    category: z.string().nullable().optional(),
+    reasonMarkdown: z.string().nullable().optional(),
+    reasonHtml: z.string().nullable().optional(),
+    source: z.enum(["manual", "ai"]).optional(),
+  })
+  // An exclusion needs a match key — place_id (the idempotency key) OR at least a name
+  // (fuzzy name+address fallback). An empty body would produce an unmatchable row.
+  .refine((v) => Boolean(v.placeId?.trim()) || Boolean(v.name?.trim()), {
+    message: "An exclusion requires a placeId or a name.",
+  });
 
 /** POST /api/showroom-exclusions — add a not-interested place (idempotent by place_id). */
 showroomExclusionsRouter.post("/", async (c) => {

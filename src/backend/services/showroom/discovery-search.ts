@@ -30,6 +30,7 @@ import {
 import { showroomStores } from "@backend/db/schema/showroom/stores";
 import { GoogleMapsService } from "@backend/services/google/maps";
 import { siteUrl } from "@backend/mcp/urls";
+import { sanitizeNoteHtml } from "@backend/services/notes/markdown";
 import { publishDiscoveryEvent } from "@backend/realtime/publish";
 import { generateStructured, type JsonSchemaNode } from "@backend/services/structured-output";
 import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
@@ -492,15 +493,19 @@ export async function findShowrooms(
       searchId,
       revisionNumber: nextRevision,
       paramsJson: JSON.stringify(params),
-      source: candidates.some((c) => c.source === "ai") && usedPlaces ? "mixed" : usedPlaces ? "places" : "ai",
+      // Classify from the DEDUPED set: if every AI candidate was a duplicate of a
+      // Places hit and got dropped, the persisted rows are Places-only — not "mixed".
+      source:
+        deduped.some((c) => c.source === "ai") && usedPlaces
+          ? "mixed"
+          : usedPlaces
+            ? "places"
+            : "ai",
       usedPlaces,
       changeNote: input.slug ? "refined" : "initial search",
     })
     .returning({ id: showroomSearchRevision.id });
   const revisionId = rev.id;
-
-  // Replace prior results for this slug (revision history lives in the revisions table).
-  await db.delete(showroomSearchResult).where(eq(showroomSearchResult.searchId, searchId)).run();
 
   const visible = built.filter((b) => !b.isExcluded);
   const rows = built.map((b, i) => ({
@@ -526,9 +531,6 @@ export async function findShowrooms(
     matchedExclusionId: b.matchedExclusionId,
     rank: i,
   }));
-  for (const part of chunk(rows, RESULT_ROWS_PER_INSERT)) {
-    if (part.length > 0) await db.insert(showroomSearchResult).values(part).run();
-  }
 
   const summary =
     `${visible.length} remodel showroom${visible.length === 1 ? "" : "s"}` +
@@ -537,17 +539,31 @@ export async function findShowrooms(
     (built.length - visible.length > 0 ? `; ${built.length - visible.length} on your not-interested list` : "") +
     ".";
 
-  await db
-    .update(showroomSearch)
-    .set({
-      status: "ready",
-      currentRevision: nextRevision,
-      resultCount: visible.length,
-      summary,
-      paramsJson: JSON.stringify(params),
-      updatedAt: new Date(),
-    })
-    .where(eq(showroomSearch.id, searchId));
+  // Atomically REPLACE the slug's result set + flip the search to ready. D1 has no
+  // transactions but a batch is all-or-nothing, so a partial-insert can't leave the
+  // revision present with half its results and the search stuck on "running": the
+  // delete, every result-insert chunk (≤3 rows/stmt for the 100-param cap), and the
+  // status update either all land or none do. (The revision row was inserted first —
+  // it needs its generated id below; a bare revision with no results is a harmless,
+  // re-runnable remnant, not corruption.)
+  const stmts = [
+    db.delete(showroomSearchResult).where(eq(showroomSearchResult.searchId, searchId)),
+    ...chunk(rows, RESULT_ROWS_PER_INSERT)
+      .filter((part) => part.length > 0)
+      .map((part) => db.insert(showroomSearchResult).values(part)),
+    db
+      .update(showroomSearch)
+      .set({
+        status: "ready",
+        currentRevision: nextRevision,
+        resultCount: visible.length,
+        summary,
+        paramsJson: JSON.stringify(params),
+        updatedAt: new Date(),
+      })
+      .where(eq(showroomSearch.id, searchId)),
+  ];
+  await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
 
   // Re-read the persisted rows so the response carries REAL result ids (the chunked
   // insert doesn't return them) — callers act on these ids via import/exclude.
@@ -722,13 +738,13 @@ export async function importSearchResults(
           latitude: r.latitude,
           longitude: r.longitude,
           placeId: r.placeId,
-          locationStreetNumber: r.locationStreetNumber,
-          locationStreetName: r.locationStreetName,
-          locationCity: r.locationCity,
-          locationState: r.locationState,
-          locationZipCode: r.locationZipCode,
           phoneNumber: r.phone,
           isIdentifiedByProximityScan: true,
+          // Normalized address is NOT set here: the Places text sweep only yields a
+          // formatted `full_address` string (kept on the result row for display), not
+          // parsed components — copying the always-null result columns would write
+          // null parts. The store's address is backfilled from `place_id` via the geo
+          // backfill, exactly as the HITL PROCESS path creates a proximity store.
         })
         .returning({ id: showroomStores.id });
       storeId = store?.id;
@@ -819,6 +835,9 @@ async function addExclusionRow(db: Db, input: AddExclusionInput): Promise<number
       .limit(1);
     if (existing) return existing.id;
   }
+  // reasonHtml is client-supplied rich text — sanitize before it reaches the DB so the
+  // stored render cache can never carry a stored-XSS payload (same guard visit-log.ts uses).
+  const reasonHtml = input.reasonHtml?.trim() ? sanitizeNoteHtml(input.reasonHtml) : null;
   const [row] = await db
     .insert(showroomExclusions)
     .values({
@@ -833,7 +852,7 @@ async function addExclusionRow(db: Db, input: AddExclusionInput): Promise<number
       locationZipCode: input.locationZipCode ?? null,
       category: input.category ?? null,
       reasonMarkdown: input.reasonMarkdown ?? null,
-      reasonHtml: input.reasonHtml ?? null,
+      reasonHtml,
       source: input.source ?? "manual",
     })
     .returning({ id: showroomExclusions.id });
