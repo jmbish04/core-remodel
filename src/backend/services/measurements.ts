@@ -3,7 +3,7 @@
  * creating, listing, and summarizing master measurements.
  *
  * Both the HTTP API (`/api/measurements`, see routes/measurements.ts) and the
- * measurement MCP bridge (routes/mcp.ts — so Claude can record dimensions during a
+ * measurement MCP bridge (routes/mcp/tools/*.ts — so Claude can record dimensions during a
  * live measuring session) go through these functions.  Centralizing them here means
  * room/floor validation and the insert shape can never DRIFT between the two surfaces
  * (a real risk once two callers write to the same table).
