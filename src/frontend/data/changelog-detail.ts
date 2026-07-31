@@ -113,6 +113,49 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "0032-discovery-mcp-tools": {
+    slug: "0032-discovery-mcp-tools",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0032 D2c-2 · discovery finder over MCP (voice/chat parity)",
+    code: [],
+    problem:
+      "D2c-1 shipped the finder engine + REST, but a Claude voice/chat session can't call REST — it needs MCP tools. 0022 §14.2 requires REST/MCP parity: the finder page and a voice session must run and manage a discovery search through the exact same logic, never a divergent second implementation.",
+    approach:
+      "10 MCP tools, each a thin `defineTool` wrapper that calls the identical `services/showroom/discovery-search.ts` function its REST twin uses — the parity seam, exactly how `list_park_finds`/`decide_park_find` wrap `hitl-queue.ts`. `find_showrooms` (WRITE) → `findShowrooms`; the reads `list_showroom_searches`/`get_showroom_search`/`get_search_revisions` (READ_ONLY) → `listSearches`/`getSearch`/`getSearchRevisions`; `finalize_showroom_search` (WRITE_IDEMPOTENT) → `finalizeSearch`; `import_search_results` (WRITE) → `importSearchResults`; `exclude_search_result` (WRITE) → `excludeSearchResult`; and exclusions CRUD `add_showroom_exclusion` (WRITE_IDEMPOTENT) / `list_showroom_exclusions` (READ_ONLY) / `remove_showroom_exclusion` (DESTRUCTIVE) → `addExclusion`/`listExclusions`/`removeExclusion`. Each has a hand-written Zod v4 input shape, ≥1 example, and the correct annotation; they register in `tools/showrooms/index.ts` and auto-render on the `/connect/tools` catalog via the registry (`/api/mcp-docs`). No D1 schema, no new REST — pure MCP surface over the D2c-1 engine, so the finder page (D2d) and the voice loop share one brain.",
+    apiChanges: [
+      "10 MCP tools (Showrooms domain): find_showrooms, list_showroom_searches, get_showroom_search, get_search_revisions, finalize_showroom_search, import_search_results, exclude_search_result, add_showroom_exclusion, list_showroom_exclusions, remove_showroom_exclusion.",
+      "No REST or D1 change — the tools call the D2c-1 discovery-search.ts service.",
+    ],
+    filesTouched: [
+      "src/backend/mcp/tools/showrooms/{find_showrooms,list_showroom_searches,get_showroom_search,get_search_revisions,finalize_showroom_search,import_search_results,exclude_search_result,add_showroom_exclusion,list_showroom_exclusions,remove_showroom_exclusion}.ts (new)",
+      "src/backend/mcp/tools/showrooms/index.ts (register all 10)",
+      "scripts/qc/pr_327.mjs",
+    ],
+    migrations: [],
+    diagrams: [
+      {
+        caption: "REST and MCP both call the one discovery-search service — never a second implementation",
+        code: `flowchart LR
+  UI["Finder UI (D2d)"] --> REST["/api/showroom-searches* (D2c-1)"]
+  VOICE["Claude voice/chat"] --> MCP["MCP find_showrooms + slug + exclusion tools (D2c-2)"]
+  REST --> SVC["discovery-search.ts"]
+  MCP --> SVC
+  SVC --> DB[(showroom_search / _revision / _result)]
+  SVC --> HUB[DiscoveryHub realtime]
+  SVC --> EXC[(showroom_exclusions)]
+  classDef new fill:#3a2a3f,stroke:#c084fc,color:#f5e8ff;
+  class MCP new;`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_327.mjs",
+      command: "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 327 -- --preview",
+      ranAt: "2026-07-31",
+      output:
+        "tsc --noEmit clean on all 10 tool files + the registry barrel. pnpm run build green (exit 0, ~116s). Registry tool count went up by 10. No D1 schema, no new REST. QC pr_327 asserts all 10 tool names appear in GET /api/mcp-docs (the registry catalog that backs /connect/tools) — invoking them needs an OAuth grant not mintable in QC, so catalog presence is the wired-in proof.",
+      migrations: [],
+    },
+  },
   "0032-discovery-search-engine": {
     slug: "0032-discovery-search-engine",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",

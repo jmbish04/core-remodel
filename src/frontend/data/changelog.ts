@@ -301,6 +301,21 @@ export const BRANCHES: ChangelogBranch[] = [
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "0032-discovery-mcp-tools",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-31",
+    tag: "0032",
+    area: "Discovery",
+    title: "Discovery finder over MCP — voice/chat parity (0032 D2c-2)",
+    summary:
+      "The voice/chat half of the finder: 10 MCP tools that let a Claude session run and manage a discovery search exactly like the finder UI — find_showrooms (run/refine a search), list_showroom_searches / get_showroom_search / get_search_revisions (read a slug + its results + revision history), finalize_showroom_search, import_search_results (promote picks into the directory), exclude_search_result, and the exclusions CRUD add_/list_/remove_showroom_exclusion. Every tool is a thin defineTool wrapper over the SAME services/showroom/discovery-search.ts functions the D2c-1 REST routes call — the AGENTS.md parity contract, so a voice session and the finder page can never drift. Hand-written Zod v4 input shapes, ≥1 example each, and correct READ_ONLY / WRITE / WRITE_IDEMPOTENT / DESTRUCTIVE annotations; they auto-render on the /connect/tools catalog via the registry. No D1 schema, no new REST — pure MCP surface over the shipped engine.",
+    changes: [
+      { kind: "added", text: "10 MCP tools in src/backend/mcp/tools/showrooms/: find_showrooms, list_showroom_searches, get_showroom_search, get_search_revisions, finalize_showroom_search, import_search_results, exclude_search_result, add_showroom_exclusion, list_showroom_exclusions, remove_showroom_exclusion — registered in tools/showrooms/index.ts." },
+      { kind: "changed", text: "Each tool calls the identical discovery-search.ts function its REST twin uses (findShowrooms/listSearches/getSearch/getSearchRevisions/finalizeSearch/importSearchResults/excludeSearchResult/addExclusion/listExclusions/removeExclusion) — one service, two callers." },
+    ],
+    status: "staged",
+  },
+  {
     id: "0032-discovery-search-engine",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-31",

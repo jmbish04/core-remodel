@@ -22,6 +22,16 @@ import { dedupShowroomStores } from "./dedup_showroom_stores";
 import { deleteShowroom } from "./delete_showroom";
 import { listParkFinds } from "./list_park_finds";
 import { decideParkFind } from "./decide_park_find";
+import { findShowroomsTool } from "./find_showrooms";
+import { listShowroomSearches } from "./list_showroom_searches";
+import { getShowroomSearch } from "./get_showroom_search";
+import { getSearchRevisions_ } from "./get_search_revisions";
+import { finalizeShowroomSearch } from "./finalize_showroom_search";
+import { importSearchResultsTool } from "./import_search_results";
+import { excludeSearchResultTool } from "./exclude_search_result";
+import { addShowroomExclusion } from "./add_showroom_exclusion";
+import { listShowroomExclusions } from "./list_showroom_exclusions";
+import { removeShowroomExclusion } from "./remove_showroom_exclusion";
 
 export const showroomTools: RemodelTool[] = [
   listShowrooms,
@@ -46,4 +56,15 @@ export const showroomTools: RemodelTool[] = [
   deleteShowroom,
   listParkFinds,
   decideParkFind,
+  // 0032 D2c-2 — discovery finder (parity with /api/showroom-searches* + /api/showroom-exclusions*)
+  findShowroomsTool,
+  listShowroomSearches,
+  getShowroomSearch,
+  getSearchRevisions_,
+  finalizeShowroomSearch,
+  importSearchResultsTool,
+  excludeSearchResultTool,
+  addShowroomExclusion,
+  listShowroomExclusions,
+  removeShowroomExclusion,
 ];
