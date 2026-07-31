@@ -301,6 +301,23 @@ export const BRANCHES: ChangelogBranch[] = [
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "0032-discovery-search-schema",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-31",
+    tag: "0032",
+    area: "Discovery",
+    title: "Discovery-finder schema foundation (0032 D2a)",
+    summary:
+      "The data spine for the on-demand 'find me showrooms near here' finder (0022 §5.7), landed first as an additive migration so every later D2 slice (the find_showrooms engine, the realtime hub, the finder pages) builds on live tables. Three new tables: showroom_search (one orchestrated search = a shareable slug, status running→ready→refining→final→error), showroom_search_revision (every change to a slug is a numbered revision, unique per search — the model can cite 'revision N'), and showroom_search_result (the result rows for a revision — Places/AI candidates with normalized address, type/rating/hours badges, ai_relevance/reasoning, distance, and in_directory / is_excluded flags + FKs to the store it already is or the exclusion that hid it). Plus showroom_exclusions gains the §5.7 columns it was missing: the 5 normalized address parts + category (so a not-interested place can be matched by name+address when it has no place_id). All additive — 3 CREATE TABLE + 6 ADD COLUMN, no rebuilds; migration 0163.",
+    migrations: ["0163_warm_ravenous"],
+    changes: [
+      { kind: "migration", text: "0163_warm_ravenous: CREATE showroom_search / showroom_search_revision / showroom_search_result (+ FKs, unique(search_id,revision_number), slug-unique, status/search/revision/place indexes); ALTER showroom_exclusions ADD location_street_number/_street_name/_city/_state/_zip_code + category + zip index. Additive only." },
+      { kind: "added", text: "src/backend/db/schema/showroom/search.ts — the three discovery tables (result rows relate to their store by existing_store_id and to their hiding exclusion by matched_exclusion_id — FK + JOIN, never a denormalized name)." },
+      { kind: "changed", text: "showroom_exclusions gains normalized address + category (§5.7). name stays nullable — the PRD's notNull can't be safely retrofitted onto the D1a-shipped populated column under the additive-migration rule; documented in the schema." },
+    ],
+    status: "staged",
+  },
+  {
     id: "0041-store-inbox",
     branch: "claude/showroom-inbox-filtering-0294ec",
     date: "2026-07-30",

@@ -113,6 +113,80 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "0032-discovery-search-schema": {
+    slug: "0032-discovery-search-schema",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0032 D2a · discovery-finder schema foundation",
+    code: [],
+    problem:
+      "0032 D2 is the on-demand 'find me showrooms near here' finder (0022 §5.7): a user or the voice assistant asks, the worker runs a Places sweep + Gemini rank, and persists the result as a shareable slug the user can open mid-conversation. That whole flow — the find_showrooms engine, the realtime hub that streams a running search, the finder pages — needs a data spine that does not exist yet: showroom_search / _revision / _result are absent, and showroom_exclusions (shipped in D1a) lacks the §5.7 normalized-address + category columns needed to match a not-interested place that arrives without a Google place_id.",
+    approach:
+      "Land the schema FIRST, as an additive migration, so every later D2 slice builds on live tables (and every other branch's preview keeps working against the shared D1). Three new tables mirror §5.7 exactly: showroom_search (one orchestrated search = a slug; status running→ready→refining→final→error, where a fresh slug is PENDING = ready-but-not-final; params_json carries near/radius/query/broad/excludes; origin mcp|ui), showroom_search_revision (every change is a 1-based numbered revision, UNIQUE(search_id, revision_number), source places|ai|mixed, used_places bool for the quota-hard-disable case — mirrors the artifact-revision pattern so the model can cite 'revision N'), and showroom_search_result (the rows a revision produced — place_id, normalized address + full_address, lat/lng, category_guess/primary_type + google_rating + opening_hours_json for the badges, source places|ai, ai_relevance/ai_reasoning, distance_m, and the two dedupe flags in_directory + is_excluded with FKs existing_store_id → showroom_stores and matched_exclusion_id → showroom_exclusions so a hidden result can name WHY it was hidden). Per the FK rule, a result relates to its store/exclusion by id and JOINs for the name — never a denormalized copy. showroom_exclusions gains location_street_number/_street_name/_city/_state/_zip_code + category + a zip index. name stays nullable: the PRD wants notNull, but retrofitting NOT NULL onto the D1a-populated column violates the additive-migration law, so it's documented and deferred. Generated via drizzle-kit (never hand-authored); the result is 3 CREATE TABLE + 6 ADD COLUMN + indexes, no table rebuilds.",
+    apiChanges: [
+      "None. Schema-only foundation; the /api/showroom-searches* endpoints + MCP find_showrooms that read these tables are D2c.",
+    ],
+    filesTouched: [
+      "src/backend/db/schema/showroom/search.ts (new — showroom_search/_revision/_result)",
+      "src/backend/db/schema/showroom/exclusions.ts (add address×5 + category + zip index)",
+      "src/backend/db/schema/showroom/index.ts (export ./search)",
+      "drizzle/0163_warm_ravenous.sql (generated)",
+      "scripts/qc/pr_321.mjs",
+    ],
+    migrations: [{ tag: "0163_warm_ravenous", sql: "CREATE TABLE showroom_search / showroom_search_revision / showroom_search_result (+FKs, unique(search_id,revision_number), slug-unique, status/search/revision/place indexes); ALTER showroom_exclusions ADD location_street_number/_street_name/_city/_state/_zip_code + category; CREATE INDEX showroom_exclusions_zip_idx. Additive only — no rebuilds." }],
+    diagrams: [
+      {
+        caption: "§5.7 discovery-search data model — a slug, its numbered revisions, and the result rows a revision produced",
+        code: `erDiagram
+  showroom_search ||--o{ showroom_search_revision : "numbered revisions"
+  showroom_search ||--o{ showroom_search_result : "current results"
+  showroom_search_revision ||--o{ showroom_search_result : "produced these"
+  showroom_exclusions |o--o{ showroom_search_result : "match hides a result"
+  showroom_stores |o--o{ showroom_search_result : "already in directory"
+  showroom_search {
+    int id PK
+    text slug UK
+    text status "running|ready|refining|final|error"
+    int current_revision
+    text params_json
+    text origin "mcp|ui"
+  }
+  showroom_search_revision {
+    int id PK
+    int search_id FK
+    int revision_number "UNIQUE per search"
+    text source "places|ai|mixed"
+    int used_places "false when quota hard-disabled"
+  }
+  showroom_search_result {
+    int id PK
+    int search_id FK
+    int revision_id FK
+    text place_id
+    real ai_relevance
+    real distance_m
+    int in_directory
+    int existing_store_id FK
+    int is_excluded
+    int matched_exclusion_id FK
+  }
+  showroom_exclusions {
+    int id PK
+    text place_id "preferred match key"
+    text location_zip_code "NEW"
+    text category "NEW"
+    text source "manual|ai"
+  }`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_321.mjs",
+      command: "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 321 -- --preview",
+      ranAt: "2026-07-31",
+      output:
+        "tsc --noEmit clean on search.ts + exclusions.ts. pnpm run build green (exit 0, ~109s server build). Migration 0163 generated via drizzle-kit — inspected: 3 CREATE TABLE + 6 additive ADD COLUMN + indexes, no drops/rebuilds. QC pr_321 is a regression guard (the new tables have no consumer endpoint until D2c): asserts /api/showroom-hitl-queue (which reads/writes the ALTERed showroom_exclusions) and /api/showrooms still respond, so the additive migration didn't break the live surface.",
+      migrations: [{ tag: "0163_warm_ravenous", appliedRemote: false, note: "Applies on the post-merge Deploy (manual) run with run_migrations:true; additive (3 CREATE TABLE + 6 ADD COLUMN)." }],
+    },
+  },
   "0041-store-inbox": {
     slug: "0041-store-inbox",
     branch: "claude/showroom-inbox-filtering-0294ec",
