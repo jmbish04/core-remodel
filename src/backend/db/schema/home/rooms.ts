@@ -102,6 +102,28 @@ export const rooms = sqliteTable("rooms", {
   /** Cloudflare Images token of the cropped per-room floorplan region (if cropped). */
   floorplanCropCfImageId: text("floorplan_crop_cf_image_id"),
 
+  /**
+   * Permanent line identity (0041 Phase 0 — the Diagram).
+   *
+   * `lineColorHex` is the room's colour for the life of the project. It is
+   * assigned once at creation and then carried EVERYWHERE the room is ever
+   * referenced — budget rows, photo groups, receipts, bids, notifications, the
+   * in-car screen. It is functional identity, not styling, and it is never
+   * re-themed per page.
+   *
+   * The set must stay mutually distinguishable at arm's length across ~20
+   * simultaneous rooms, and must survive both the dark and light ground (see
+   * DESIGN.md, "The Both Grounds Rule"). Null = not yet assigned; the UI falls
+   * back to a neutral line rather than picking a colour at render time, because
+   * a colour that changes between page loads is not identity.
+   *
+   * `lineOrder` is the room's draw order in the diagram, lowest first. Null
+   * sorts last. Kept separate from any display sort so that reordering the
+   * diagram never reorders a picker.
+   */
+  lineColorHex: text("line_color_hex"),
+  lineOrder: integer("line_order"),
+
   datetimeCreated: integer("datetime_created", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),

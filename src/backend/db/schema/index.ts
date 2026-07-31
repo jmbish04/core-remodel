@@ -21,6 +21,21 @@ export * from "./contracts/contracts";
 
 export * from "./home/floors";
 export * from "./home/rooms";
+
+// 0041 Phase 0 — homeowner experience foundation.
+export * from "./home/projects";
+export * from "./home/room_stop_state";
+export * from "./home/spec_definitions";
+export * from "./home/room_spec_fields";
+export * from "./home/decisions";
+export * from "./home/decision_reopenings";
+export * from "./impacts/impact_definitions";
+export * from "./impacts/impacts";
+export * from "./impacts/impact_targets";
+export * from "./impacts/impact_blocks";
+export * from "./impacts/impact_evidence";
+export * from "./impacts/ripple_rules";
+
 export * from "./home/measurements";
 export * from "./home/remodel_scenarios";
 export * from "./home/scenario_room_plans";
