@@ -31,7 +31,7 @@ export const sendDriveToTesla = defineTool({
   annotations: WRITE,
   outputShape: {
     ok: z.boolean(),
-    method: z.string().optional().describe("'single' or 'maps-route'."),
+    method: z.enum(["single", "maps-route"]).optional().describe("How the drive was sent."),
     count: z.number().int().optional().describe("How many waypoints were sent."),
     truncated: z.number().int().optional().describe("Stops dropped to fit the Maps URL limit."),
   },

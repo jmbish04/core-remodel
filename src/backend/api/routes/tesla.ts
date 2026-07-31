@@ -150,15 +150,18 @@ teslaRouter.post("/navigate", async (c) => {
  * for the Fleet-API follow-up).
  */
 teslaRouter.post("/navigate-drive", async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { driveListId?: number; slug?: string };
+  const body = (await c.req.json().catch(() => ({}))) as { driveListId?: unknown; slug?: unknown };
   const db = drizzle(c.env.DB);
 
+  // Validate at the boundary — only accept a numeric id / string slug (a non-string
+  // slug must never reach Drizzle).
   let driveListId = typeof body.driveListId === "number" ? body.driveListId : null;
-  if (driveListId == null && body.slug) {
+  const slug = typeof body.slug === "string" ? body.slug : undefined;
+  if (driveListId == null && slug) {
     const [dl] = await db
       .select({ id: driveLists.id })
       .from(driveLists)
-      .where(eq(driveLists.slug, body.slug))
+      .where(eq(driveLists.slug, slug))
       .limit(1);
     driveListId = dl?.id ?? null;
   }

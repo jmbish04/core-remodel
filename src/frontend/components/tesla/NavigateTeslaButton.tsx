@@ -92,12 +92,10 @@ export function NavigateTeslaButton({
       // Require an explicit ok:true — a 200 with malformed/absent JSON is NOT success.
       if (!res.ok || data?.ok !== true) throw new Error(data?.error ?? `Failed (${res.status})`);
       const dropped = data.truncated ? ` (${data.truncated} beyond the maps limit not sent)` : "";
+      const n = data.count;
       toast.success(
         isDrive
-          ? `Sent ${data.count ?? ""} stop${data.count === 1 ? "" : "s"} to the car${dropped}`.replace(
-              "  ",
-              " ",
-            )
+          ? `Sent ${n ?? "all"} stop${n === 1 ? "" : "s"} to the car${dropped}`
           : "Sent to the car",
       );
     } catch (e) {
@@ -116,6 +114,8 @@ export function NavigateTeslaButton({
       className={className}
       disabled={busy || !hasTarget}
       onClick={go}
+      aria-busy={busy}
+      aria-label={label ?? (isDrive ? "Send drive to car" : "Send to the Tesla's navigation")}
       title={hasTarget ? "Send to the Tesla's navigation" : "No destination to send"}
     >
       {busy ? (

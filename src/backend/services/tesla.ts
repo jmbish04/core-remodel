@@ -222,18 +222,26 @@ export async function sendMultiWaypointNavigation(
   waypoints: Waypoint[],
 ): Promise<SendDriveResult> {
   const all = (waypoints ?? []).filter(
-    (w) => Number.isFinite(w.latitude) && Number.isFinite(w.longitude),
+    (w) =>
+      Number.isFinite(w.latitude) &&
+      Number.isFinite(w.longitude) &&
+      w.latitude >= -90 &&
+      w.latitude <= 90 &&
+      w.longitude >= -180 &&
+      w.longitude <= 180,
   );
-  if (all.length === 0) return { ok: false, error: "No waypoints with coordinates." };
+  if (all.length === 0) return { ok: false, error: "No waypoints with valid coordinates." };
   if (all.length === 1) {
     const r = await sendNavigation(env, `${all[0].latitude},${all[0].longitude}`);
     return { ...r, method: "single", count: 1 };
   }
 
-  // Cap to what a Maps directions URL routes reliably; drop the tail (not the
-  // destination) and report how many so the caller can tell the driver.
+  // Cap to what a Maps directions URL routes reliably. Drop from the MIDDLE, always
+  // keeping the real final destination (the last stop) — report how many were
+  // dropped so the caller can tell the driver.
   const truncated = Math.max(0, all.length - MAX_MAPS_WAYPOINTS);
-  const pts = truncated > 0 ? all.slice(0, MAX_MAPS_WAYPOINTS) : all;
+  const pts =
+    truncated > 0 ? [...all.slice(0, MAX_MAPS_WAYPOINTS - 1), all[all.length - 1]] : all;
 
   const dest = pts[pts.length - 1];
   const mids = pts.slice(0, -1);
