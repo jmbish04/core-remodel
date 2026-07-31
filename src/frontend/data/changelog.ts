@@ -338,6 +338,21 @@ export const CHANGELOG: ChangelogEntry[] = [
     status: "staged",
   },
   {
+    id: "0032-voice-mcp-keepalive",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    date: "2026-07-31",
+    tag: "0032",
+    area: "MCP / Infra",
+    title: "Voice MCP keepalive — a 15s SSE heartbeat on the connector (0032 K1)",
+    summary:
+      "MCP tools intermittently report 'down' during Claude real-time VOICE sessions but work in normal text chat. The gaps between voice tool calls are long enough that a cellular NAT or iOS idle-kills the long-lived /mcp/sse (and streamable-HTTP) socket — the same failure PR #313 fixed for the a2a-v2 stream. withSseHeartbeat wraps both OAuth-gated MCP transports and, for any text/event-stream response, splices a `: ping` SSE comment frame into the stream every 15s (well under the ~30s idle window). Comment lines are ignored by every SSE client, so it's invisible to the protocol but keeps the socket warm. Only text/event-stream responses are wrapped — a normal JSON request/response tool call (the text-chat path) passes through untouched, so this can't regress normal-chat MCP. It uses a ReadableStream controller (not a second writer) so the pump and the heartbeat never race on a pending write. No schema change.",
+    changes: [
+      { kind: "added", text: "src/backend/mcp/sse-heartbeat.ts — withSseHeartbeat(inner): splices a 15s `: ping` frame into text/event-stream MCP responses via a ReadableStream controller; non-SSE responses pass through verbatim." },
+      { kind: "changed", text: "src/_worker.ts wraps both OAuthProvider apiHandlers (/mcp serve + /mcp/sse serveSSE) with withSseHeartbeat." },
+    ],
+    status: "staged",
+  },
+  {
     id: "0032-nav-multiwaypoint",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
     date: "2026-07-31",

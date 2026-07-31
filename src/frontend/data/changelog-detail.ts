@@ -181,6 +181,69 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
       ],
     },
   },
+  "0032-voice-mcp-keepalive": {
+    slug: "0032-voice-mcp-keepalive",
+    branch: "claude/tesla-telemetry-webhooks-2jnnj9",
+    subtitle: "0032 K1 · 15s SSE heartbeat on the MCP connector",
+    code: [],
+    problem:
+      "MCP tools intermittently report 'down' during Claude real-time VOICE sessions while working fine in normal text chat. A voice session holds a long-lived SSE / streamable-HTTP socket to /mcp(/sse), but tool calls in voice are sparse — there can be tens of seconds of silence between them. A cellular-carrier NAT or iOS aggressively idle-kills a TCP socket that goes quiet, so the connection is dead by the time the next tool call needs it and the connector reads as 'down'. The connector's only keepalive is the `agents` library's ~30s SSE ping, which is slow enough to lose the race — the same class of failure PR #313 fixed for the a2a-v2 stream with a 15s heartbeat.",
+    approach:
+      "withSseHeartbeat wraps an MCP api-handler: it awaits the inner response and, ONLY when the response is text/event-stream, tees the body through a ReadableStream that splices a `: ping\\n\\n` SSE comment frame in every 15s (INTERVAL_MS, matching #313 and comfortably under the ~30s idle window). Comment lines (`:`-prefixed) are ignored by every SSE client per the spec, so the frame is invisible to the MCP protocol but resets the carrier/OS idle timer and keeps the socket warm through the quiet gaps. A non-SSE response (a normal JSON request/response tool call — the text-chat path) is returned verbatim, so the wrapper cannot regress normal-chat MCP. The splice uses a single ReadableStream controller for both the upstream pump and the setInterval tick — controller.enqueue() is synchronous and just appends to the internal queue, so there is no pending-write race the way a second WritableStream writer would have; the timer is cleared in the pump's finally and in cancel(). Both OAuthProvider apiHandlers (/mcp via serve, /mcp/sse via serveSSE) are wrapped in src/_worker.ts. It rules out transport idle-kill as the cause; if voice still drops, the remaining suspects (DO hibernation between calls, OAuth token expiry) are the next documented spike — not yet needed.",
+    apiChanges: [
+      "None. Transparent transport wrapper on the existing /mcp + /mcp/sse OAuth handlers; no new route, schema, or tool.",
+    ],
+    filesTouched: [
+      "src/backend/mcp/sse-heartbeat.ts (new — withSseHeartbeat + FetchHandler)",
+      "src/_worker.ts (wrap both OAuthProvider apiHandlers)",
+      "src/frontend/data/changelog.ts + changelog-detail.ts, scripts/qc/pr_319.mjs",
+    ],
+    migrations: [],
+    diagrams: [
+      {
+        caption: "Why the socket dies in voice — and what the 15s heartbeat changes",
+        code: `sequenceDiagram
+  actor V as Claude voice session
+  participant N as Carrier NAT / iOS
+  participant W as /mcp/sse (connector)
+  Note over V,W: WITHOUT heartbeat
+  V->>W: open SSE stream
+  W-->>V: tool result
+  Note over N: 30s+ silence between calls
+  N--xW: idle-kill the quiet socket
+  V->>W: next tool call → "MCP down"
+  Note over V,W: WITH withSseHeartbeat (15s)
+  V->>W: open SSE stream
+  loop every 15s
+    W-->>V: ": ping" comment frame (ignored by client)
+    Note over N: timer reset — socket stays warm
+  end
+  V->>W: next tool call → OK`,
+      },
+      {
+        caption: "The wrapper is scoped to SSE — JSON tool calls pass through untouched",
+        code: `flowchart TD
+  R["MCP request → apiHandler"] --> I["inner.fetch()"]
+  I --> C{"content-type<br/>text/event-stream?"}
+  C -- "no (JSON tool call)" --> P["return response verbatim<br/>(text-chat path, no change)"]
+  C -- "yes (SSE stream)" --> S["ReadableStream splice"]
+  S --> T["setInterval 15s → enqueue ': ping'"]
+  S --> U["pump: read upstream → enqueue chunks"]
+  T --> O["heartbeat-spliced body"]
+  U --> O
+  classDef hb fill:#1f3a4d,stroke:#38bdf8,color:#e0f2fe;
+  class S,T,U,O hb;`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_319.mjs",
+      command: "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 319 -- --preview",
+      ranAt: "2026-07-31",
+      output:
+        "tsc --noEmit clean on sse-heartbeat.ts + _worker.ts. pnpm run build green (exit 0, ~106s server build). No schema → no migration. QC pr_319 proves the wrapper didn't regress the surface: /mcp/sse + /mcp still respond through it (401 gated, not 404/5xx), the non-SSE OAuth metadata + token endpoints pass through untouched, and the legacy /api/mcp-docs catalog is unaffected. The 15s `: ping` itself fires only on an authenticated text/event-stream session (an OAuth grant not mintable in QC) and is verified live in a Claude voice session.",
+      migrations: [],
+    },
+  },
   "0032-nav-multiwaypoint": {
     slug: "0032-nav-multiwaypoint",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",
