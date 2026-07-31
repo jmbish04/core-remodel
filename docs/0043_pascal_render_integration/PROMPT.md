@@ -17,15 +17,25 @@ Two agents, two repos. Section A = this worker (`core-remodel`). Section B = the
 >
 > **First action:** verify the branch is fresh vs `origin/main` (`pnpm run worktree:check`).
 >
+> **Contract source of truth:** editor PR `jmbish04/editor#1`, branch
+> `feat/core-remodel-pascal-integration`. Mirror `packages/mcp/src/storage/types.ts`
+> (`SceneMeta/SceneWithGraph/ProjectStatus/SceneEvent/SceneStore`), `apps/editor/lib/
+> rendering-metadata-schema.ts` (provenance Zod), `apps/editor/lib/scene-api-errors.ts` (codes)
+> byte-for-byte. Ids are **slugs ≤64** (lowercase alnum+hyphen); field is **`name`** (not title);
+> timestamps ISO-8601; `graph` is Pascal `SceneGraph` (`@pascal-app/core`).
+>
 > **Phase 1 — schema + wire.**
 > - New `src/backend/db/schema/pascal/`: `pascal_projects`, `pascal_studies`, `pascal_variants`,
->   `pascal_snapshots`, `pascal_scene_events` (see IMPLEMENTATION_PLAN §3, ERD). `db:generate` →
->   `migrate:remote` → verify columns on remote.
+>   `pascal_snapshots`, `pascal_scene_events` (see IMPLEMENTATION_PLAN §3, ERD) — slug PKs,
+>   version/saveMode/graphHash/published-draft-latest rollup, `rendering_json` = exact
+>   `SceneRenderingMetadata`. `db:generate` → `migrate:remote` → verify columns on remote.
 > - `src/backend/api/routes/pascal.ts` (`OpenAPIHono`, unique operationIds): the 9 `/api/pascal/v1/*`
->   routes (PLAN §4). Zod `SceneMeta/SceneWithGraph/ProjectStatus/SceneEvent`. Optimistic version
->   (`expectedVersion`/`If-Match` → 409/412), `413` when `scene_bytes` over cap, `422` when
->   `projectId` ≠ `rendering.coreRemodelProjectId`. Mount in `src/backend/api/index.ts` behind the
->   `WORKER_API_KEY` gate (`requireAccessAuth` / `isRequestAuthenticated`, `utils/access.ts`).
+>   routes (PLAN §4) returning `SceneMeta/SceneWithGraph/ProjectStatus/SceneEvent`. PUT accepts
+>   `graph`+`name`+`expectedVersion`+`saveMode`+`publish`+`rendering`. **Status codes match
+>   `scene-api-errors.ts`:** version_conflict → **409**, not_found → 404, too_large → **413**,
+>   invalid → **400**, typed `{ "error": "<code>" }` bodies. Mount in `src/backend/api/index.ts`
+>   behind the `WORKER_API_KEY` gate (`requireAccessAuth` / `isRequestAuthenticated`,
+>   `utils/access.ts`).
 > - QC `scripts/qc/pr_<n>.mjs` (shared helpers) — run vs `--preview` and prod.
 >
 > **Phase 2 — generator + core MCP tools.**
@@ -36,11 +46,17 @@ Two agents, two repos. Section A = this worker (`core-remodel`). Section B = the
 >   Build the provenance snapshot (measurement IDs, source, unit, value, confidence, request id).
 > - `src/backend/mcp/tools/pascal/` — one `defineTool` per file, `pascalTools[]` in `index.ts`,
 >   spread into `ALL_TOOL_GROUPS` (`tools/index.ts`): `create_render_project`, `create_study`,
->   `generate_floorplan_variant` (base mode), `get_render_context`, `list_studies`, `list_variants`,
->   `get_variant_editor_link`, `get_render_status`. Money-in-cents n/a; correct annotations; ≥1
->   example each.
+>   `generate_floorplan_variant` (base mode), `get_render_context`,
+>   **`get_scene_graph` (returns the FULL SceneGraph — every node + every property)**, `list_studies`,
+>   `list_variants`, `get_variant_editor_link`, `get_render_status`. Money-in-cents n/a; correct
+>   annotations; ≥1 example each.
 >
-> **Phase 3 — AI variants, compare, snapshots.**
+> **Phase 3 — AI variants, full-fidelity edits, compare, snapshots.**
+> - **Full-detail write surface (required):** `edit_scene_nodes` (granular add/update/delete/move of
+>   ANY node with ALL properties; `expectedVersion` guard; validate ids/refs vs live graph) and
+>   `put_scene_graph` (whole-graph replace). Graph stored/passed with structural validation; deep
+>   per-node Zod mirroring `@pascal-app/core` is a later hardening task (editor stays node-semantics
+>   authority until then).
 > - `generate_floorplan_variant` intent mode: structured-output (JSON schema) node-graph **edit**;
 >   validate node ids against the live graph and dims against measured bounds before write; new child
 >   variant + provenance. `compare_layout_variants`. `capture_scene_screenshot` via Browser Rendering

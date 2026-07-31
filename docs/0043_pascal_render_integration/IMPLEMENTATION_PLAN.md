@@ -81,9 +81,15 @@ flowchart LR
 
 ## 3. Data model (new `src/backend/db/schema/pascal/`)
 
-FK-only, no denormalized name columns. Scene stored as **one JSON blob per variant** → sidesteps
-the D1 100-bound-param cap (no multi-row node inserts). Blob capped; oversize → move to R2 (later)
-and reject at the API with `413`.
+**Contract source of truth:** editor PR `jmbish04/editor#1`, branch
+`feat/core-remodel-pascal-integration` — `packages/mcp/src/storage/types.ts` (`SceneMeta`,
+`SceneWithGraph`, `ProjectStatus`, `SceneEvent`, `SceneStore`), `apps/editor/lib/
+rendering-metadata-schema.ts` (the provenance Zod), `apps/editor/lib/scene-api-errors.ts` (codes).
+**Our columns mirror these field names/semantics exactly** — the TS interfaces are the client that
+consumes our JSON.
+
+FK-only for relations. `graph` stored as **one JSON blob per variant** (the Pascal `SceneGraph` from
+`@pascal-app/core`) → sidesteps the D1 100-param cap. Capped; oversize → `413` (R2 offload later).
 
 ```mermaid
 erDiagram
@@ -91,67 +97,90 @@ erDiagram
   rooms  ||--o{ pascal_projects : "scopes (FK, nullable)"
   pascal_projects ||--o{ pascal_studies  : has
   pascal_studies  ||--o{ pascal_variants : has
-  pascal_variants ||--o{ pascal_variants : "parent lineage"
+  pascal_variants ||--o{ pascal_variants : "parent_scene_id lineage"
   pascal_variants ||--o{ pascal_snapshots    : has
   pascal_variants ||--o{ pascal_scene_events : has
 
   pascal_projects {
-    uuid   id PK
-    text   core_remodel_project_id "stable slug; == rendering.coreRemodelProjectId"
+    text   id PK "slug ≤64 (== ProjectStatus.id / SceneId)"
+    text   core_remodel_project_id "== projectId == rendering.coreRemodelProjectId"
     text   name
     text   scope_type "floor | room | whole_home"
     int    floor_id FK "nullable"
     int    room_id  FK "nullable"
-    text   datetime_created
+    text   owner_id
+    text   created_at "ISO8601"
+    text   updated_at "ISO8601"
   }
   pascal_studies {
-    uuid   id PK
-    uuid   project_id FK
-    text   title       "required"
-    text   description
-    text   datetime_created
-    text   datetime_last_modified
+    text   id PK "slug"
+    text   project_id FK
+    text   title       "required (product grouping; not on the wire)"
+    text   description_markdown
+    text   description_html
+    text   created_at
+    text   updated_at
   }
   pascal_variants {
-    uuid   id PK "== Pascal sceneId; its own editor URL"
-    uuid   study_id FK
-    uuid   parent_variant_id FK "nullable; branch lineage"
-    text   title       "required"
-    text   description
-    text   scene_json  "Pascal flat node graph {nodes, rootNodeIds}"
-    int    scene_bytes "size guard for 413"
-    int    version     "optimistic concurrency"
-    text   status      "draft | active | archived"
-    text   provenance_json "immutable evidence snapshot (sanctioned)"
-    text   thumbnail_url   "latest snapshot delivery URL"
-    text   datetime_created
-    text   datetime_last_modified
+    text   id PK "slug ≤64 == sceneId; its own /scene/:id"
+    text   study_id  FK
+    text   project_id FK "real FK; == SceneMeta.projectId"
+    text   parent_scene_id FK "nullable; == variant.parentSceneId lineage"
+    text   name "== SceneMeta.name"
+    text   description_markdown "core-remodel-only"
+    text   description_html
+    text   graph_json "Pascal SceneGraph (full node fidelity)"
+    text   graph_hash "== SceneMeta.graphHash"
+    int    size_bytes "== sizeBytes (413 guard)"
+    int    node_count "== nodeCount"
+    int    version
+    int    published_version
+    int    draft_version
+    int    latest_version
+    int    browser_visible_version
+    text   save_mode "draft | checkpoint"
+    int    is_draft   "bool"
+    int    published  "bool"
+    text   status "product: draft | active | archived"
+    text   rendering_json "SceneRenderingMetadata (exact schema; sanctioned snapshot)"
+    text   thumbnail_url
+    text   owner_id
+    text   created_at "ISO8601"
+    text   updated_at "ISO8601"
   }
   pascal_snapshots {
-    uuid   id PK
-    uuid   variant_id FK
+    text   id PK "slug"
+    text   variant_id FK
     text   cf_image_id
     text   image_url
     text   caption
-    text   camera_json "camera/view at capture"
-    text   datetime_created
+    text   camera_json
+    text   created_at
   }
   pascal_scene_events {
-    uuid   id PK
-    uuid   variant_id FK
-    int    seq        "monotonic per variant; cursor read"
-    text   type
-    text   payload_json
-    text   actor
-    text   datetime_created
+    int    event_id PK "autoincrement == SceneEvent.eventId cursor"
+    text   scene_id FK
+    int    version
+    text   kind
+    text   graph_json "SceneEvent carries the full SceneGraph snapshot"
+    text   created_at
   }
 ```
 
-**Sanctioned denormalization:** `provenance_json` on a variant is a deliberate **immutable
-snapshot** of the evidence at generation time — authoritative Core-Remodel measurement IDs, source
-revision, unit, value, confidence, aggregate confidence, generation timestamp, request ID. Updating
-it never updates the business records. This is the one documented exception to the FK rule
-(matches the editor contract's "immutable measurement evidence snapshots").
+- **Slug ids, not UUIDs.** `SceneId` = lowercase alphanumeric + hyphen, ≤64. Variant id = sceneId =
+  the editor URL segment. Generate slugs (e.g. `upstairs-island-a`), enforce the charset/length.
+- **`name` not `title` on the wire.** Our product `title`/rich `description` are core-remodel-only;
+  `SceneMeta.name` = variant name. Study title+description are our grouping metadata (the editor's
+  flat `project→scenes` contract doesn't carry them).
+- **Version model matches the adapter:** `saveMode` (`draft` updates the browser-visible working
+  model, same version repeatedly; `checkpoint` records history), `expectedVersion` optimistic guard,
+  `graphHash`, and the published/draft/latest/browser-visible rollup surfaced in `ProjectStatus`.
+
+**Sanctioned denormalization:** `rendering_json` is the deliberate **immutable evidence snapshot**,
+serialized to the editor's exact `SceneRenderingMetadata`: `coreRemodelProjectId`, `variant{id,
+label,parentSceneId}`, `measurements[]{measurementId,kind,value,unit,confidence 0..1,sourceRevision}`
+(≤10 000), `confidence 0..1|null`, `provenance{source: core-remodel|pascal|import, generatedAt(ISO),
+sourceRevision, requestId}`. Updating it never touches the business records.
 
 **Compliance scan (mandatory):** no currency fields, no user-managed multi-select vocabularies in
 this surface. `scope_type`/`status` are fixed enums, not config vocabularies — no
@@ -177,12 +206,16 @@ browser-scoped-token idea — the editor mediates all calls server-side, which i
 | POST | `/scenes/:sceneId/events` | append scene event | `SceneEvent` |
 | GET | `/scenes/:sceneId/events?after=<seq>` | read events after cursor | `SceneEvent[]` |
 
-**Contract shapes** (Zod, authored here; editor's `SceneMeta / SceneWithGraph / ProjectStatus /
-SceneEvent`): `sceneId == pascal_variants.id`; every scene carries `projectId` **and**
-`rendering.coreRemodelProjectId` and they must match at the boundary (reject `422` otherwise).
+**Contract shapes** (Zod, authored here to satisfy the editor's `SceneMeta / SceneWithGraph /
+ProjectStatus / SceneEvent` interfaces verbatim): `sceneId == pascal_variants.id` (slug); every
+scene carries `projectId` **and** `rendering.coreRemodelProjectId` and they must match at the
+boundary. `PUT /scenes/:id` accepts `graph` (full SceneGraph), `name`, `expectedVersion`, `saveMode`
+(`draft|checkpoint`), `publish`, `rendering`; returns `SceneMeta`. `GET /scenes/:id` returns
+`SceneWithGraph` (full graph). Events carry the full graph snapshot; `GET …/events?after=<eventId>`.
 
-**Status codes:** `409`/`412` version conflict (optimistic; PUT takes `expectedVersion` /
-`If-Match`), `404` missing, `400`/`422` invalid payload or identity mismatch, `413` oversize scene.
+**Status codes (match `scene-api-errors.ts` exactly):** `version_conflict → 409`, `not_found → 404`,
+`too_large → 413`, `invalid → 400`, else `500`. (The prose doc mentions 412/422; the real adapter
+maps to **409/400** — implement those.) Emit typed error bodies `{ "error": "<code>" }`.
 
 ```mermaid
 stateDiagram-v2
@@ -251,22 +284,42 @@ flowchart TD
   intent + assumptions + confidence.
 - **AI must return node ids, validated against the live graph** before applying (no hallucinated
   ids reaching a write).
+- **Full fidelity, not bounds-only.** The rectangle seed is a *starting point*. Via `get_scene_graph`
+  + `edit_scene_nodes`/`put_scene_graph` (§7) the AI reads and sets **any** node property — real wall
+  runs/endpoints, openings, items, cameras — for highly detailed edits. Measured-bounds validation is
+  an advisory guard on dimensioned edits, not a cap on expressiveness.
 
 ---
 
 ## 7. MCP tools (new `pascal` domain, `/mcp` connector)
+
+**Full node-graph fidelity is a hard requirement.** Read tools expose **every node and property** of
+the Pascal `SceneGraph` (walls with endpoints, slabs/polygons, zones, openings, items, cameras,
+metadata) — never a summarized/rectangle view. Write tools let the AI **specify any of those
+details**: whole-graph replace *and* granular node ops. The deterministic rectangle generator is
+just one starting point; from there the AI/user does arbitrarily detailed edits.
 
 | Tool | Annotation | Purpose |
 |---|---|---|
 | `create_render_project` | WRITE_IDEMPOTENT | map a floor/room → a Pascal project |
 | `create_study` | WRITE | grouping (title+description), e.g. "island placement" |
 | `get_render_context` | READ_ONLY | measurements + constraints + existing variants for the AI |
-| `generate_floorplan_variant` | WRITE | deterministic base (no intent) or AI edit (intent + fromVariant) |
+| `get_scene_graph` | READ_ONLY | **full** SceneGraph for a variant — all nodes + all properties |
+| `generate_floorplan_variant` | WRITE | new variant: deterministic base, or from-parent + intent |
+| `edit_scene_nodes` | WRITE | granular ops on a variant's graph: add/update/delete/move any node with full properties; `expectedVersion` guard; validate ids/refs vs live graph |
+| `put_scene_graph` | WRITE | replace a variant's whole graph (AI-authored full SceneGraph), validated + versioned |
 | `list_studies` / `list_variants` | READ_ONLY | browse |
-| `compare_layout_variants` | READ_ONLY | side-by-side dims + snapshots within a study |
+| `compare_layout_variants` | READ_ONLY | side-by-side full-detail diff + snapshots within a study |
 | `get_variant_editor_link` | READ_ONLY | deep-link `PASCAL_EDITOR_URL/scene/:variantId` |
 | `capture_scene_screenshot` | WRITE | Browser Rendering → CF Images → snapshot/thumbnail |
-| `get_render_status` | READ_ONLY | variant version/status/thumbnail |
+| `get_render_status` | READ_ONLY | variant version/status/thumbnail (`ProjectStatus` rollup) |
+
+**Graph validation ceiling (ponytail):** the worker stores/passes the `SceneGraph` with structural
+validation (well-formed `nodes` record, resolvable `parentId`/refs, id charset, size cap) and mirrors
+the editor's `SceneRenderingMetadata` Zod exactly. Deep per-node-type Zod (mirroring every
+`@pascal-app/core` schema) is a **later hardening task** — until then the editor remains the
+authority on node-level semantics. Node ids the AI supplies are validated against the live graph
+before any write; hallucinated ids are rejected.
 
 ---
 
@@ -288,12 +341,14 @@ flowchart TD
 **Phase 2 — Deterministic generator + product MCP tools.**
 - `p2-generator` — rooms/bbox/measurements → Pascal node-graph JSON (rectangular seed) + provenance.
 - `p2-mcp-core` — `create_render_project`, `create_study`, `generate_floorplan_variant` (base),
-  `get_render_context`, `list_studies`, `list_variants`, `get_variant_editor_link`,
-  `get_render_status`.
+  `get_render_context`, `get_scene_graph` (full-fidelity read), `list_studies`, `list_variants`,
+  `get_variant_editor_link`, `get_render_status`.
 
-**Phase 3 — AI variants, compare, snapshots.**
+**Phase 3 — AI variants, full-fidelity edits, compare, snapshots.**
 - `p3-ai-variant` — `generate_floorplan_variant` intent mode (structured output + bounds validation
   + lineage).
+- `p3-graph-edit` — `edit_scene_nodes` (granular node ops, all properties, `expectedVersion`, id/ref
+  validation) + `put_scene_graph` (whole-graph replace). This is the full-detail write surface.
 - `p3-compare` — `compare_layout_variants`.
 - `p3-screenshot` — `capture_scene_screenshot` (worker Browser Rendering + CF Images) OR editor-capture
   fallback per p0.
