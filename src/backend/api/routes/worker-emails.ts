@@ -11,6 +11,8 @@ import { workerEmailContracts } from "@backend/db/schema/emails/worker_email_con
 import { companies } from "@backend/db/schema/directory/companies";
 import { materialScheduleItems } from "@backend/db/schema/materials/schedule_item";
 import { attachServiceNames } from "@backend/services/service-names";
+import { reprocessEmail, runImageOcr } from "@backend/services/email/pipeline";
+import { publishRealtimeEvent } from "@backend/realtime/publish";
 
 export const workerEmailsRouter = new Hono<{ Bindings: Env }>();
 
@@ -259,6 +261,61 @@ workerEmailsRouter.post("/:id/invoices/:invoiceId/reject", async (c) => {
     .returning();
 
   return c.json({ invoice: updated });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// AI trust gate — approve a pending Gmail email for AI extraction (0042 P2)
+//
+// Gmail-sourced mail lands ai_status='pending_approval' (non-AI OCR + embeddings
+// already ran). This releases it: run vision OCR on image attachments, then the
+// deferred Gemini extraction (via reprocessEmail → analyzeAndPersist), and flip
+// ai_status='approved'. Idempotent-ish: only acts on a pending_approval row.
+// ═══════════════════════════════════════════════════════════════════════════
+
+workerEmailsRouter.post("/:id/approve-ai", async (c) => {
+  const db = drizzle(c.env.DB);
+  const emailId = parseInt(c.req.param("id"), 10);
+  if (!Number.isFinite(emailId)) return c.json({ error: "Invalid email id" }, 400);
+
+  const [email] = await db.select().from(workerEmails).where(eq(workerEmails.id, emailId)).limit(1);
+  if (!email) return c.json({ error: "Email not found" }, 404);
+  if (email.aiStatus !== "pending_approval") {
+    return c.json({ error: `Email is not pending approval (ai_status=${email.aiStatus})` }, 409);
+  }
+
+  try {
+    // The AI steps the user just authorized: vision OCR on image attachments,
+    // then the deferred Gemini classification/extraction.
+    await runImageOcr(db, c.env, emailId);
+    await db
+      .update(workerEmails)
+      .set({ aiApprovedAt: new Date(), aiApprovedBy: "Admin" })
+      .where(eq(workerEmails.id, emailId));
+    const result = await reprocessEmail(db, c.env, emailId);
+    await db.update(workerEmails).set({ aiStatus: "approved" }).where(eq(workerEmails.id, emailId));
+
+    // Poke the alerts center (0042 P3) — the item moved from pending to extracted.
+    await publishRealtimeEvent(c.env, "global", {
+      type: "email_ai_approved",
+      emailId,
+      classification: result?.classification ?? null,
+    }).catch(() => {});
+
+    return c.json({
+      success: true,
+      emailId,
+      classification: result?.classification ?? null,
+      invoiceCount: result?.invoiceCount ?? 0,
+    });
+  } catch (err) {
+    console.error(`[worker-emails] approve-ai failed for ${emailId}:`, err);
+    await db
+      .update(workerEmails)
+      .set({ aiStatus: "failed" })
+      .where(eq(workerEmails.id, emailId))
+      .catch(() => {});
+    return c.json({ error: "AI processing failed" }, 500);
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
