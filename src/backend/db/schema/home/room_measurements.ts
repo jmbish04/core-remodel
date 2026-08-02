@@ -76,6 +76,22 @@ export const roomMeasurements = sqliteTable(
      */
     areaSqFtOverride: real("area_sq_ft_override"),
 
+    /**
+     * WHY this room needs an override — "L-shaped, the computed rectangle is
+     * wrong". Human-authored. Present so the override is never a bare number a
+     * reader has to take on faith; the canonical measurement view always returns
+     * it alongside the value.
+     */
+    areaSqFtOverrideNotes: text("area_sq_ft_override_notes"),
+
+    /**
+     * HOW the override was arrived at — "8'0 × 6'0 + 4'0 × 3'0 = 60 sq ft", or
+     * "Matterport scan". Present so the calculation is auditable: a reader can
+     * see the computed rectangle, the override, AND the reasoning that produced
+     * the override, without any of it being hidden behind branching logic.
+     */
+    areaSqFtOverrideCalculation: text("area_sq_ft_override_calculation"),
+
     /** Floorplan bounding box, percent 0-100, for rendering the room on the plan. */
     bboxXPct: real("bbox_x_pct"),
     bboxYPct: real("bbox_y_pct"),
