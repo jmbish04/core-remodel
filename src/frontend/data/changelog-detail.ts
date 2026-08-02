@@ -113,6 +113,81 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "store-quote-viewport": {
+    slug: "store-quote-viewport",
+    branch: "claude/0042-showroom-quote-map",
+    prNumber: 336,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/336",
+    subtitle: "0042 P4 · extracted quotes surface in the showroom viewport",
+    code: [],
+    problem:
+      "0042 P0–P3 shipped: attachments get non-AI OCR + embeddings, the trust gate defers AI on Gmail-sourced mail, and a global alerts bell aggregates everything. But the original request had one more beat — the extracted quote/invoice should appear 'within that showroom viewport as a pending item,' matched to the store it came from. Until now an extracted quote landed only in worker_email_invoices and the global receipt-review queue; nothing tied it to the Pietra Fina viewport where the user staged the slabs it prices. There was no FK from an invoice to a showroom at all.",
+    approach:
+      "Give the invoice a home. A nullable worker_email_invoices.showroom_store_id FK (migration 0166, additive) records which showroom a quote is FROM. The email pipeline already runs matchShowroomStore() to auto-populate showroom contacts from a sender's domain/name — the same resolver now stamps the invoice at extraction time, inside analyzeAndPersist so both the fresh-receipt and reprocess paths get it for free. A new GET /api/showroom-stores/:id/pending-quotes returns that store's draft quotes with their line items; StoreViewportApp loads it and renders a PendingQuotesPanel atop the brands-products section — vendor, total, confidence, line items, and Confirm/Dismiss that reuse the existing worker-emails confirm/reject endpoints, plus a Review & map link into the full HITL. The alerts aggregator's invoice_review rows now deep-link into the store viewport when the quote resolved to a showroom, else the global receipt-review queue. The FK is nullable on purpose: a quote from a public domain (a gmail.com sender) resolves to no store and shows only in the global feed — verified against the one existing prod draft (Costco / gmail.com), which correctly stays null. It's a real relation, not a denormalized name: vendorName stays the as-extracted snapshot; the store is the FK. Product match/auto-create per line is P5, which builds directly on showroom_store_id.",
+    apiChanges: [
+      "NEW GET /api/showroom-stores/:id/pending-quotes → { quotes: [{ id, kind, vendorName, invoiceNumber, invoiceDate, dueDate, subtotal, tax, total, currency, confidence, status, emailId, createdAt, lineItems[] }] } — draft quotes resolved to this store.",
+      "CHANGED GET /api/alerts: invoice_review rows deep-link to /admin/shopping/store/:id/brands-products when showroom_store_id is set, else /admin/shopping/receipt-review.",
+      "matchShowroomStore() exported from services/email/showroom-contact-autopopulate.ts; pipeline stamps showroom_store_id on the invoice at extraction (fresh + reprocess).",
+    ],
+    filesTouched: [
+      "src/backend/db/schema/emails/worker_email_invoices.ts (showroom_store_id FK + index)",
+      "drizzle/0166_many_joseph.sql (new, additive)",
+      "src/backend/services/email/showroom-contact-autopopulate.ts (export matchShowroomStore)",
+      "src/backend/services/email/pipeline.ts (resolve + stamp store at extraction)",
+      "src/backend/api/routes/showroom-stores.ts (GET /:id/pending-quotes)",
+      "src/backend/api/routes/alerts.ts (store-scoped invoice_review deep-link)",
+      "src/frontend/components/showroom/StoreViewportApp.tsx (PendingQuotesPanel)",
+      "scripts/qc/pr_336.mjs",
+    ],
+    migrations: [
+      {
+        tag: "0166",
+        sql: "ALTER TABLE `worker_email_invoices` ADD `showroom_store_id` integer REFERENCES showroom_stores(id);\nCREATE INDEX `worker_email_invoices_showroom_idx` ON `worker_email_invoices` (`showroom_store_id`);",
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Schema delta — an invoice now relates to the showroom it came from (FK, nullable)",
+        code: `erDiagram
+  showroom_stores ||--o{ worker_email_invoices : "quotes from"
+  worker_emails ||--o{ worker_email_invoices : "extracted from"
+  worker_email_invoices ||--o{ worker_email_invoice_line_items : "lines"
+  worker_email_invoices {
+    int id PK
+    int email_id FK
+    int showroom_store_id FK "NEW · nullable · SET NULL"
+    string vendor_name "as-extracted snapshot"
+    real total
+    string status "draft|confirmed|rejected"
+  }`,
+      },
+      {
+        caption: "Extraction → resolve → the quote appears in that store's viewport",
+        code: `sequenceDiagram
+  participant P as email pipeline (analyzeAndPersist)
+  participant M as matchShowroomStore(sender)
+  participant I as worker_email_invoices
+  participant V as StoreViewportApp
+  participant A as alerts bell
+  P->>M: sender domain / vendor name
+  M-->>P: storeId (or null for a public domain)
+  P->>I: insert invoice + showroom_store_id
+  V->>I: GET /:id/pending-quotes
+  I-->>V: draft quotes + line items → PendingQuotesPanel
+  A->>I: invoice_review alert
+  Note over A: deep-links to /store/:id when scoped, else receipt-review`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_336.mjs",
+      command:
+        "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run migrate:remote  &&  pnpm run test:pr 336 -- --preview  &&  pnpm run test:pr 336",
+      ranAt: "2026-08-02",
+      output:
+        "tsc --noEmit clean on all touched files. pnpm run build green (exit 0, ~130s). migrate:remote applied 0166; PRAGMA confirms worker_email_invoices.showroom_store_id exists on remote. QC pr_336 against the preview: 6/6 — GET /:id/pending-quotes 200 with { quotes: [...] } shape, invalid id → 400, alerts regression intact. QC against prod (main): 3/3 regression green, /pending-quotes correctly reports 'pending merge/deploy' (endpoint not on main yet). The one existing prod draft (Costco / gmail.com) stays showroom_store_id=null as designed.",
+      migrations: [{ tag: "0166", appliedRemote: true }],
+    },
+  },
   "0032-discovery-finder-pages": {
     slug: "0032-discovery-finder-pages",
     branch: "claude/tesla-telemetry-webhooks-2jnnj9",

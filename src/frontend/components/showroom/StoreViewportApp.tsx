@@ -23,6 +23,7 @@ import {
   CalendarPlus,
   CheckCircle2,
   ExternalLink,
+  FileText,
   Globe,
   ImagePlus,
   Loader2,
@@ -199,6 +200,35 @@ interface MappedProduct {
   mappingId: number;
   product: { id: number; itemName: string; brandId: number | null };
   brandName: string | null;
+}
+
+/** One line from a pending quote/invoice, GET /:id/pending-quotes (0042 P4). */
+interface PendingQuoteLine {
+  id: number;
+  description: string | null;
+  quantity: number | null;
+  unitPrice: number | null;
+  lineTotal: number | null;
+  matchStatus: string;
+}
+
+/** A quote/invoice/receipt extracted from email, resolved to this store. */
+interface PendingQuote {
+  id: number;
+  kind: string;
+  vendorName: string | null;
+  invoiceNumber: string | null;
+  invoiceDate: string | null;
+  dueDate: string | null;
+  subtotal: number | null;
+  tax: number | null;
+  total: number | null;
+  currency: string | null;
+  confidence: number | null;
+  status: string;
+  emailId: number;
+  createdAt: number | null;
+  lineItems: PendingQuoteLine[];
 }
 
 /** One discounted item from a clearance snapshot (see ClearanceItem in D1). */
@@ -535,6 +565,8 @@ export function StoreViewportApp({
 
   // Section data.
   const [mappedProducts, setMappedProducts] = useState<MappedProduct[]>([]);
+  const [pendingQuotes, setPendingQuotes] = useState<PendingQuote[]>([]);
+  const [resolvingQuoteId, setResolvingQuoteId] = useState<number | null>(null);
   const [notes, setNotes] = useState<NoteRow[]>([]);
   const [photos, setPhotos] = useState<ShowroomPhoto[]>([]);
   const [contacts, setContacts] = useState<ContactRow[]>([]);
@@ -607,6 +639,40 @@ export function StoreViewportApp({
       toast.error(e instanceof Error ? e.message : "Failed to load mapped products");
     }
   }, [id]);
+
+  const loadPendingQuotes = useCallback(async () => {
+    try {
+      const data = await api<{ quotes: PendingQuote[] }>(
+        `/api/showroom-stores/${id}/pending-quotes`,
+      );
+      setPendingQuotes(data.quotes ?? []);
+    } catch (e) {
+      console.error("[store/pending-quotes]", e);
+      // Non-fatal: a quotes fetch failure must not blank the whole viewport.
+    }
+  }, [id]);
+
+  const resolveQuote = useCallback(
+    async (quote: PendingQuote, action: "confirm" | "reject") => {
+      if (resolvingQuoteId != null) return;
+      setResolvingQuoteId(quote.id);
+      try {
+        const res = await fetch(
+          `/api/worker-emails/${quote.emailId}/invoices/${quote.id}/${action}`,
+          { method: "POST", credentials: "include" },
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        toast.success(action === "confirm" ? "Quote confirmed" : "Quote dismissed");
+        await loadPendingQuotes();
+      } catch (e) {
+        console.error("[store/resolve-quote]", e);
+        toast.error(e instanceof Error ? e.message : "Failed to update quote");
+      } finally {
+        setResolvingQuoteId(null);
+      }
+    },
+    [resolvingQuoteId, loadPendingQuotes],
+  );
 
   const loadNotes = useCallback(async () => {
     try {
@@ -688,6 +754,7 @@ export function StoreViewportApp({
     void loadContacts();
     void loadGalleryPhotos();
     void loadSales();
+    void loadPendingQuotes();
   }, [
     loadStore,
     loadMappedProducts,
@@ -696,6 +763,7 @@ export function StoreViewportApp({
     loadContacts,
     loadGalleryPhotos,
     loadSales,
+    loadPendingQuotes,
   ]);
 
   // ── Scrape status: mount fetch + poll while in-flight ─────────────────────
@@ -1318,16 +1386,24 @@ export function StoreViewportApp({
       {/* ── Active section content ────────────────────────────────────────────── */}
       <div className="mt-6">
         {section === "brands-products" ? (
-          <BrandsProductsSection
-            brands={brandsWithCounts}
-            products={mappedProducts}
-            removingBrandId={removingBrandId}
-            removingProductId={removingProductId}
-            onRemoveBrand={removeBrand}
-            onRemoveProduct={removeMappedProduct}
-            onAssociateBrands={() => setBrandsOpen(true)}
-            onAssociateProducts={() => setProductsOpen(true)}
-          />
+          <div className="space-y-6">
+            <PendingQuotesPanel
+              quotes={pendingQuotes}
+              resolvingQuoteId={resolvingQuoteId}
+              onConfirm={(q) => void resolveQuote(q, "confirm")}
+              onDismiss={(q) => void resolveQuote(q, "reject")}
+            />
+            <BrandsProductsSection
+              brands={brandsWithCounts}
+              products={mappedProducts}
+              removingBrandId={removingBrandId}
+              removingProductId={removingProductId}
+              onRemoveBrand={removeBrand}
+              onRemoveProduct={removeMappedProduct}
+              onAssociateBrands={() => setBrandsOpen(true)}
+              onAssociateProducts={() => setProductsOpen(true)}
+            />
+          </div>
         ) : section === "contacts" ? (
           <ContactsSection
             contacts={contacts}
@@ -1869,6 +1945,141 @@ function BrandListCard({
 }
 
 // ─── Section: Brands & Products ─────────────────────────────────────────────────
+
+/** Format a numeric amount as currency; blank when null. */
+function fmtMoney(n: number | null | undefined, currency = "USD"): string {
+  if (n == null || !Number.isFinite(n)) return "—";
+  try {
+    return new Intl.NumberFormat("en-US", { style: "currency", currency }).format(n);
+  } catch {
+    return `$${n.toFixed(2)}`;
+  }
+}
+
+/**
+ * Pending quotes/invoices/receipts extracted from email and resolved to THIS
+ * showroom (0042 P4). Shows the header + line items in-context so the user can
+ * confirm or dismiss without leaving the store. Product mapping (match/create)
+ * arrives in P5; for now "Open email" deep-links to the full HITL review.
+ */
+function PendingQuotesPanel({
+  quotes,
+  resolvingQuoteId,
+  onConfirm,
+  onDismiss,
+}: {
+  quotes: PendingQuote[];
+  resolvingQuoteId: number | null;
+  onConfirm: (quote: PendingQuote) => void;
+  onDismiss: (quote: PendingQuote) => void;
+}) {
+  if (quotes.length === 0) return null;
+
+  return (
+    <div className="rounded-xl bg-card p-5 ring-1 ring-amber-500/30">
+      <div className="flex items-center gap-2">
+        <FileText className="size-4 text-amber-500" aria-hidden />
+        <h2 className="text-base font-semibold">
+          Pending from email ({quotes.length})
+        </h2>
+      </div>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Quotes and invoices we matched to this showroom — confirm to keep, dismiss
+        if it isn’t theirs.
+      </p>
+
+      <div className="mt-4 space-y-3">
+        {quotes.map((q) => {
+          const busy = resolvingQuoteId === q.id;
+          const label = q.kind === "receipt" ? "Receipt" : "Quote/Invoice";
+          return (
+            <div
+              key={q.id}
+              className="rounded-lg border border-border/50 bg-background/40 p-4"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="text-xs">
+                      {label}
+                    </Badge>
+                    {q.invoiceNumber ? (
+                      <span className="text-xs text-muted-foreground">
+                        #{q.invoiceNumber}
+                      </span>
+                    ) : null}
+                    {q.confidence != null ? (
+                      <span className="text-xs text-muted-foreground">
+                        {Math.round(q.confidence * 100)}% confidence
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="mt-1 truncate text-sm font-medium">
+                    {q.vendorName ?? "Unknown vendor"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    {q.total != null ? `Total ${fmtMoney(q.total, q.currency ?? "USD")}` : "No total"}
+                    {q.invoiceDate ? ` · ${q.invoiceDate}` : ""}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <a
+                    href={`/admin/shopping/receipt-review`}
+                    className={buttonVariants({ size: "sm", variant: "ghost" })}
+                  >
+                    <ExternalLink className="size-3.5" /> Review &amp; map
+                  </a>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="gap-1.5"
+                    disabled={busy}
+                    onClick={() => onConfirm(q)}
+                  >
+                    {busy ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <CheckCircle2 className="size-3.5" />
+                    )}
+                    Confirm
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="gap-1.5 text-muted-foreground"
+                    disabled={busy}
+                    onClick={() => onDismiss(q)}
+                  >
+                    <X className="size-3.5" /> Dismiss
+                  </Button>
+                </div>
+              </div>
+
+              {q.lineItems.length > 0 ? (
+                <ul className="mt-3 divide-y divide-border/40 border-t border-border/40 text-sm">
+                  {q.lineItems.map((li) => (
+                    <li
+                      key={li.id}
+                      className="flex items-center justify-between gap-3 py-1.5"
+                    >
+                      <span className="min-w-0 truncate text-muted-foreground">
+                        {li.quantity != null ? `${li.quantity}× ` : ""}
+                        {li.description ?? "—"}
+                      </span>
+                      <span className="shrink-0 tabular-nums">
+                        {fmtMoney(li.lineTotal ?? li.unitPrice, q.currency ?? "USD")}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 function BrandsProductsSection({
   brands,

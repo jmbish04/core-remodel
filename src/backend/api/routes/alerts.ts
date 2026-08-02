@@ -79,6 +79,7 @@ alertsRouter.get("/", async (c) => {
         vendor: workerEmailInvoices.vendorName,
         total: workerEmailInvoices.total,
         kind: workerEmailInvoices.kind,
+        storeId: workerEmailInvoices.showroomStoreId,
         ts: workerEmailInvoices.createdAt,
       })
       .from(workerEmailInvoices)
@@ -110,7 +111,12 @@ alertsRouter.get("/", async (c) => {
       title: `${v.kind === "receipt" ? "Receipt" : "Invoice"} to review${v.vendor ? ` — ${v.vendor}` : ""}`,
       context: v.total != null ? `Total ${v.total}` : "Extracted from email",
       timestamp: toMs(v.ts),
-      route: `/admin/shopping/receipt-review`,
+      // Pin to the store viewport when the quote resolved to a showroom (0042
+      // P4) so a click lands on that store's pending-quote panel; otherwise the
+      // global receipt-review queue.
+      route: v.storeId
+        ? `/admin/shopping/store/${v.storeId}/brands-products`
+        : `/admin/shopping/receipt-review`,
     })),
     ...unreadMail.map((m) => ({
       id: `email_received:${m.id}`,

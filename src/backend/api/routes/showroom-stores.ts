@@ -44,6 +44,8 @@ import {
   productPriceObservations,
   productShowroomPhotos,
 } from "@backend/db/schema/showroom/index";
+import { workerEmailInvoices } from "@backend/db/schema/emails/worker_email_invoices";
+import { workerEmailInvoiceLineItems } from "@backend/db/schema/emails/worker_email_invoice_line_items";
 import { deviceLocation } from "@backend/db/schema/system/device-location";
 import { classifyBayAreaRegion } from "@backend/lib/bay-area-region";
 import { maybeEndActiveDriveOnHomeArrival } from "@backend/services/drive-home-arrival";
@@ -3708,6 +3710,89 @@ showroomStoresRouter.get("/:id/notes", async (c) => {
     .orderBy(desc(storeNotes.timestamp));
 
   return c.json({ notes: notes.map(serializeStoreNote) });
+});
+
+/**
+ * GET /:id/pending-quotes — Quotes/invoices/receipts extracted from email that
+ * were resolved to THIS showroom and still await review (0042 P4).
+ *
+ * The email pipeline stamps `worker_email_invoices.showroom_store_id` when the
+ * sender's domain/name matches a store, so a Pietra Fina quote surfaces right
+ * in Pietra Fina's viewport as a pending item to confirm/map. Each row carries
+ * its line items. (P5 adds `productId`/`brandId` per line once those columns
+ * exist; this P4 shape does not include them.)
+ *
+ * Response 200:
+ *   { "quotes": [ { id, kind, vendorName, invoiceNumber, invoiceDate, dueDate,
+ *                   subtotal, tax, total, currency, confidence, status, emailId,
+ *                   createdAt, lineItems: [ { id, description, quantity,
+ *                   unitPrice, lineTotal, matchStatus } ] } ] }
+ */
+showroomStoresRouter.get("/:id/pending-quotes", async (c) => {
+  const db = drizzle(c.env.DB);
+  const storeId = Number(c.req.param("id"));
+  if (!Number.isFinite(storeId)) {
+    return c.json({ success: false, error: "Invalid store id" }, 400);
+  }
+
+  // Cap at 50: a store realistically carries a handful of open drafts, and the
+  // cap bounds the line-items `inArray` below to <=50 bound params — safely
+  // under D1's 100-param limit without needing to chunk.
+  const invoices = await db
+    .select()
+    .from(workerEmailInvoices)
+    .where(
+      and(
+        eq(workerEmailInvoices.showroomStoreId, storeId),
+        eq(workerEmailInvoices.status, "draft"),
+      ),
+    )
+    .orderBy(desc(workerEmailInvoices.createdAt))
+    .limit(50);
+
+  if (invoices.length === 0) return c.json({ quotes: [] });
+
+  // One IN() over the (<=50) invoice ids — stays under D1's 100 bound-param cap.
+  const invoiceIds = invoices.map((inv) => inv.id);
+  const lines = await db
+    .select()
+    .from(workerEmailInvoiceLineItems)
+    .where(inArray(workerEmailInvoiceLineItems.invoiceId, invoiceIds))
+    .orderBy(asc(workerEmailInvoiceLineItems.id));
+
+  const linesByInvoice = new Map<number, typeof lines>();
+  for (const li of lines) {
+    const arr = linesByInvoice.get(li.invoiceId) ?? [];
+    arr.push(li);
+    linesByInvoice.set(li.invoiceId, arr);
+  }
+
+  const quotes = invoices.map((inv) => ({
+    id: inv.id,
+    kind: inv.kind,
+    vendorName: inv.vendorName,
+    invoiceNumber: inv.invoiceNumber,
+    invoiceDate: inv.invoiceDate,
+    dueDate: inv.dueDate,
+    subtotal: inv.subtotal,
+    tax: inv.tax,
+    total: inv.total,
+    currency: inv.currency,
+    confidence: inv.confidence,
+    status: inv.status,
+    emailId: inv.emailId,
+    createdAt: inv.createdAt instanceof Date ? inv.createdAt.getTime() : inv.createdAt,
+    lineItems: (linesByInvoice.get(inv.id) ?? []).map((li) => ({
+      id: li.id,
+      description: li.description,
+      quantity: li.quantity,
+      unitPrice: li.unitPrice,
+      lineTotal: li.lineTotal,
+      matchStatus: li.matchStatus,
+    })),
+  }));
+
+  return c.json({ quotes });
 });
 
 /**
