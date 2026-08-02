@@ -25,6 +25,7 @@ import {
   serializeSceneWithGraph,
   sceneWithGraphSchema,
 } from "../../services/pascal/shapes";
+import { storeSnapshotBytes } from "../../services/pascal/capture";
 import {
   appendSceneEvent,
   createProject,
@@ -35,6 +36,7 @@ import {
   listScenes,
   loadScene,
   PascalStoreError,
+  recordSnapshot,
   renameScene,
   saveScene,
 } from "../../services/pascal/store";
@@ -321,5 +323,29 @@ pascalRouter.openapi(
     return c.json(rows.map(serializeSceneEvent), 200);
   },
 );
+
+// ─── POST /scenes/:sceneId/snapshot — editor canvas-capture fallback ──────────
+// Not part of the frozen editor storage contract: the fallback for when worker-side
+// Browser Rendering can't paint a client-side WebGPU scene. The editor grabs its own
+// canvas and POSTs the raw PNG bytes here; we upload to CF Images + record a snapshot.
+pascalRouter.post("/scenes/:sceneId/snapshot", async (c) => {
+  const sceneId = c.req.param("sceneId");
+  const scene = await loadScene(c.env, sceneId);
+  if (!scene) return c.json({ error: "not_found" }, 404);
+  const bytes = await c.req.arrayBuffer();
+  try {
+    const shot = await storeSnapshotBytes(c.env, bytes);
+    await recordSnapshot(c.env, {
+      variantId: sceneId,
+      cfImageId: shot.imageId,
+      imageUrl: shot.deliveryUrl,
+      caption: c.req.query("caption") ?? null,
+      setAsThumbnail: c.req.query("thumbnail") !== "false",
+    });
+    return c.json({ sceneId, imageId: shot.imageId, deliveryUrl: shot.deliveryUrl }, 200);
+  } catch (err) {
+    return c.json({ error: "invalid", message: err instanceof Error ? err.message : "error" }, 400);
+  }
+});
 
 export default pascalRouter;
