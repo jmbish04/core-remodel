@@ -7,13 +7,19 @@
  *
  * Two moves, both idempotent (guarded by NOT EXISTS, so re-running is a no-op):
  *
- *   1. rooms.{length,width}_{feet,inches} + area_sq_ft  ->  room_measurements
- *      Converted to CANONICAL INCHES (feet*12 + inches). area_sq_ft carries over
- *      as the area override for irregular rooms. confidence = 'assumed' — these
- *      are pre-existing estimates, not freshly verified measurements, and the
- *      threshold must not treat them as `known`. perimeter is left NULL: it is
- *      measured, never derived, and 2*(L+W) would be a guess wearing the costume
- *      of a measurement for any non-rectangular room.
+ *   1. rooms.{length,width}_{feet,inches}  ->  room_measurements
+ *      Converted to CANONICAL INCHES (feet*12 + inches). confidence = 'assumed'
+ *      — these are pre-existing estimates, not freshly verified measurements, and
+ *      the threshold must not treat them as `known`. perimeter is left NULL: it
+ *      is measured, never derived, and 2*(L+W) would be a guess wearing the
+ *      costume of a measurement for any non-rectangular room.
+ *
+ *      area_sq_ft is DELIBERATELY NOT carried over. Every stored `rooms.area_sq_ft`
+ *      value equalled length × width — it was a cached rectangle, not a measured
+ *      irregular footprint. Area is computed on read by takeoff.floorAreaSqFt();
+ *      storing it would re-introduce exactly the staleness this model avoids.
+ *      area_sq_ft_override stays NULL until a human measures a genuinely
+ *      non-rectangular room.
  *
  *   2. rooms.{plumbing,electrical,structural,hvac,general}_notes + problem_areas
  *      ->  room_notes, tagged with the matching room_note_type_def where one
@@ -44,13 +50,13 @@ const q = (v) => (v === null || v === undefined ? "NULL" : `'${String(v).replace
 // already have an existing-measurement row.
 const measurementSql =
   `INSERT INTO room_measurements ` +
-  `(room_id, kind, length_inches, width_inches, area_sq_ft_override, confidence, measured_by) ` +
+  `(room_id, kind, length_inches, width_inches, confidence, measured_by) ` +
   `SELECT r.id, 'EXISTING_FLOORPLAN', ` +
   `  CASE WHEN r.length_feet IS NOT NULL OR r.length_inches IS NOT NULL ` +
   `    THEN COALESCE(r.length_feet,0)*12 + COALESCE(r.length_inches,0) END, ` +
   `  CASE WHEN r.width_feet IS NOT NULL OR r.width_inches IS NOT NULL ` +
   `    THEN COALESCE(r.width_feet,0)*12 + COALESCE(r.width_inches,0) END, ` +
-  `  r.area_sq_ft, 'assumed', 'backfill' ` +
+  `  'assumed', 'backfill' ` +
   `FROM rooms r ` +
   `WHERE r.is_active = 1 ` +
   `  AND (r.length_feet IS NOT NULL OR r.width_feet IS NOT NULL OR r.area_sq_ft IS NOT NULL) ` +

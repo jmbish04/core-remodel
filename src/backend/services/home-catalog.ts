@@ -469,7 +469,6 @@ async function _doSeedHomeCatalog(env: Env): Promise<void> {
         lengthInches: room.lengthInches,
         widthFeet: room.widthFeet,
         widthInches: room.widthInches,
-        areaSqFt: room.areaSqFt ?? null,
         isLivingSpace: room.isLivingSpace,
         floorplanFloorKey: room.floorplanFloorKey,
         floorplanXPct: room.floorplanXPct,
@@ -479,21 +478,8 @@ async function _doSeedHomeCatalog(env: Env): Promise<void> {
       .run();
   }
 
-  // ── 0006 P1: backfill explicit area overrides onto already-seeded rows ──────
-  //
-  // The insert loop above uses onConflictDoNothing, so a room that already exists
-  // (e.g. the live `lower-foyer`) never receives the seed's new `areaSqFt`.  Apply
-  // any DEFAULT_ROOMS areaSqFt to existing rows that don't have one yet.  The
-  // `IS NULL` guard keeps this idempotent and never clobbers a value the owner has
-  // since entered by hand.
-  for (const room of DEFAULT_ROOMS) {
-    if (typeof room.areaSqFt !== "number") continue;
-    await db
-      .update(rooms)
-      .set({ areaSqFt: room.areaSqFt })
-      .where(and(eq(rooms.roomCode, room.roomCode), isNull(rooms.areaSqFt)))
-      .run();
-  }
+  // (0043) The former areaSqFt-override backfill was removed with the column —
+  // area is computed on read (computeRoomSqft), never seeded onto the row.
 }
 
 // ---------------------------------------------------------------------------
@@ -535,26 +521,24 @@ function formatRoomDimensions(
 }
 
 /**
- * Resolve a room's square footage.
+ * Resolve a room's square footage — COMPUTED ON READ, never stored.
  *
- * 0006 P1: an explicit `areaSqFt` override always wins — irregular / L-shaped rooms
- * (e.g. the lower foyer = 77.28) store their true area there and it is returned
- * verbatim (not rounded), so the real value surfaces everywhere the catalog `sqft`
- * field is consumed.  When no override is set, fall back to the rectangular estimate:
- * (lengthFeet + lengthInches/12) * (widthFeet + widthInches/12), rounded.
- * Returns null when neither an override nor a full length+width pair is present.
+ * The stored `rooms.area_sq_ft` override was removed (0043): every value it held
+ * equalled length × width, i.e. it was a cached rectangle, and a stored
+ * calculation goes stale the instant a measurement changes. Area is therefore
+ * always derived here: (lengthFeet + lengthInches/12) × (widthFeet + widthInches/12).
+ *
+ * A genuinely irregular footprint (an L-shape, a bay) is a MEASUREMENT, not a
+ * calculation, and lives in `room_measurements.area_sq_ft_override` — read from
+ * there in the measurement/takeoff path, not cached back onto the room.
+ * Returns null when a full length+width pair is not present.
  */
 function computeRoomSqft(
   room: Pick<
     typeof rooms.$inferSelect,
-    "lengthFeet" | "lengthInches" | "widthFeet" | "widthInches" | "areaSqFt"
+    "lengthFeet" | "lengthInches" | "widthFeet" | "widthInches"
   >,
 ): number | null {
-  // Authoritative override (irregular footprints) takes precedence over any math.
-  if (typeof room.areaSqFt === "number") {
-    return room.areaSqFt;
-  }
-
   const lengthSet =
     typeof room.lengthFeet === "number" || typeof room.lengthInches === "number";
   const widthSet =

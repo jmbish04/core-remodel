@@ -56,12 +56,23 @@ export const roomMeasurements = sqliteTable(
     perimeterInches: integer("perimeter_inches"),
 
     /**
-     * Authoritative area, in square FEET, for rooms that length × width cannot
-     * describe — the L-shaped lower foyer at 77.28 sq ft is the reference case.
-     * When present it WINS over the length×width computation everywhere area is
-     * used (this is exactly what the takeoff layer's `areaSqFtOverride` reads).
-     * Null = the room is a rectangle and length×width is correct. Carried over
-     * from the deprecated `rooms.area_sq_ft` by the backfill.
+     * A MEASURED area, in square FEET, for a room whose real footprint length ×
+     * width cannot describe — an L-shape, a bay, a bump-out. It is NOT a cache of
+     * a calculation: for a rectangle, area is `length × width ÷ 144` and is
+     * computed ON READ by `takeoff.floorAreaSqFt()`, never stored, because a
+     * stored calculation goes stale the instant a measurement changes and turns
+     * a one-line formula fix into a find-fix-analyse-backfill saga.
+     *
+     * So this is null for every rectangular room, and non-null ONLY when a human
+     * or a scan measured the actual irregular footprint. That value is a
+     * measurement — the same kind of stored fact as `length_inches` — and it
+     * wins over the computed rectangle when present.
+     *
+     * HISTORY: the backfill first copied `rooms.area_sq_ft` here for all rooms,
+     * which was wrong — every one of those values equalled length × width, i.e.
+     * they were cached rectangles, not measured irregulars. They were nulled.
+     * Do not write a computed area into this column; if you are computing it,
+     * it belongs in the read path, not the table.
      */
     areaSqFtOverride: real("area_sq_ft_override"),
 
