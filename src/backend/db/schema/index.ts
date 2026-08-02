@@ -36,6 +36,16 @@ export * from "./impacts/impact_blocks";
 export * from "./impacts/impact_evidence";
 export * from "./impacts/ripple_rules";
 
+// 0043 Phase 0 — room-model definition tables.
+export * from "./home/room_note_type_def";
+export * from "./home/room_problem_type_def";
+export * from "./home/room_problem_fix_def";
+export * from "./home/room_problem_document_type_def";
+export * from "./home/room_use_def";
+export * from "./home/room_type_def";
+export * from "./home/room_intent_type_def";
+export * from "./materials/material_type_def";
+
 export * from "./home/measurements";
 export * from "./home/remodel_scenarios";
 export * from "./home/scenario_room_plans";
