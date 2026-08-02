@@ -3,6 +3,7 @@ import { index, integer, real, sqliteTable, text } from "drizzle-orm/sqlite-core
 
 import { workerEmails } from "./worker_emails";
 import { workerEmailAttachments } from "./worker_email_attachments";
+import { showroomStores } from "../showroom/stores";
 
 /**
  * Worker Email Invoices — structured invoice data extracted by AI from
@@ -24,6 +25,18 @@ export const workerEmailInvoices = sqliteTable(
     /** The attachment the invoice was extracted from (null if inline in body). */
     attachmentId: integer("attachment_id").references(
       () => workerEmailAttachments.id,
+      { onDelete: "set null" },
+    ),
+
+    /**
+     * The showroom this quote/invoice is FROM, resolved at extraction by
+     * matching the sender's domain/name to a store (0042 P4). Nullable: an
+     * unresolved quote still shows in the global alerts feed, it just doesn't
+     * pin to any store viewport. NOT a denormalized name — the FK; the vendor
+     * display name is `vendorName` (as-extracted, a point-in-time snapshot).
+     */
+    showroomStoreId: integer("showroom_store_id").references(
+      () => showroomStores.id,
       { onDelete: "set null" },
     ),
 
@@ -85,6 +98,7 @@ export const workerEmailInvoices = sqliteTable(
   (table) => ({
     emailIdx: index("worker_email_invoices_email_idx").on(table.emailId),
     statusIdx: index("worker_email_invoices_status_idx").on(table.status),
+    showroomIdx: index("worker_email_invoices_showroom_idx").on(table.showroomStoreId),
   }),
 );
 

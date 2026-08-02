@@ -30,7 +30,7 @@ const PUBLIC_EMAIL_DOMAINS = new Set<string>([
  * (against the store's WEBSITE link domain / email column) or a fuzzy name
  * match. Returns the store id, or null. Public providers never domain-match.
  */
-async function matchShowroomStore(
+export async function matchShowroomStore(
   senderEmail: string | null,
   senderName: string | null,
   env: Env,

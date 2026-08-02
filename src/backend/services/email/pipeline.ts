@@ -29,7 +29,10 @@ import { workerEmailStagedCompanies } from "@backend/db/schema/emails/worker_ema
 import { companies } from "@backend/db/schema/directory/companies";
 import { analyzeWithGemini, type AiAnalysis } from "./classify";
 import { isHealthcheckSubject } from "@backend/services/health/email-loopback-markers";
-import { registerShowroomContactFromEmail } from "./showroom-contact-autopopulate";
+import {
+  registerShowroomContactFromEmail,
+  matchShowroomStore,
+} from "./showroom-contact-autopopulate";
 import {
   buildMatchContext,
   CATCH_ALL_PROFILE,
@@ -714,11 +717,20 @@ export async function analyzeAndPersist(args: AnalyzeArgs): Promise<void> {
     analysis.invoiceData
   ) {
     const inv = analysis.invoiceData;
+    // Resolve which showroom this quote/invoice is FROM so it can surface as a
+    // pending item in that store's viewport (0042 P4). Best-effort: sender
+    // domain/name → store; null when unresolved (still shows in global alerts).
+    const invoiceStoreId = await matchShowroomStore(
+      realSenderEmail,
+      realSenderName ?? inv.vendorName ?? null,
+      env,
+    );
     const [insertedInvoice] = await db
       .insert(workerEmailInvoices)
       .values({
         emailId: emailId,
         attachmentId: attachments[0]?.id || null,
+        showroomStoreId: invoiceStoreId,
         kind: effectiveClassification === "receipt" ? "receipt" : "invoice",
         vendorName: inv.vendorName,
         invoiceNumber: inv.invoiceNumber,
