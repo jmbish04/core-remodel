@@ -1,0 +1,1 @@
+ALTER TABLE `room_measurements` ADD `area_sq_ft_override` real;

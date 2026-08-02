@@ -55,6 +55,16 @@ export const roomMeasurements = sqliteTable(
     /** Measured, not computed. Unlocks paint and baseboard takeoffs. */
     perimeterInches: integer("perimeter_inches"),
 
+    /**
+     * Authoritative area, in square FEET, for rooms that length × width cannot
+     * describe — the L-shaped lower foyer at 77.28 sq ft is the reference case.
+     * When present it WINS over the length×width computation everywhere area is
+     * used (this is exactly what the takeoff layer's `areaSqFtOverride` reads).
+     * Null = the room is a rectangle and length×width is correct. Carried over
+     * from the deprecated `rooms.area_sq_ft` by the backfill.
+     */
+    areaSqFtOverride: real("area_sq_ft_override"),
+
     /** Floorplan bounding box, percent 0-100, for rendering the room on the plan. */
     bboxXPct: real("bbox_x_pct"),
     bboxYPct: real("bbox_y_pct"),
