@@ -13,6 +13,7 @@ import { drizzle } from "drizzle-orm/d1";
 import {
   pascalProjects,
   pascalSceneEvents,
+  pascalSnapshots,
   pascalVariants,
 } from "@backend/db";
 
@@ -410,4 +411,61 @@ export async function listSceneEvents(
     .orderBy(pascalSceneEvents.eventId)
     .limit(Math.min(opts.limit ?? 200, 1000))
     .all();
+}
+
+// ─── Snapshots ────────────────────────────────────────────────────────────────
+
+export async function recordSnapshot(
+  env: Env,
+  input: {
+    variantId: string;
+    cfImageId: string;
+    imageUrl: string;
+    caption?: string | null;
+    cameraJson?: string | null;
+    setAsThumbnail?: boolean;
+  },
+): Promise<typeof pascalSnapshots.$inferSelect> {
+  const db = drizzle(env.DB);
+  const scene = await loadScene(env, input.variantId);
+  if (!scene) throw new PascalStoreError("not_found");
+  const id = slugify("snap", "snap");
+  const inserted = await db
+    .insert(pascalSnapshots)
+    .values({
+      id,
+      variantId: input.variantId,
+      cfImageId: input.cfImageId,
+      imageUrl: input.imageUrl,
+      caption: input.caption ?? null,
+      cameraJson: input.cameraJson ?? null,
+      datetimeCreated: new Date(),
+    })
+    .returning()
+    .get();
+  if ((input.setAsThumbnail ?? true) === true) {
+    await db
+      .update(pascalVariants)
+      .set({ thumbnailUrl: input.imageUrl })
+      .where(eq(pascalVariants.id, input.variantId))
+      .run();
+  }
+  return inserted;
+}
+
+/** The most recent snapshot for a variant (for compare/thumbnails). */
+export async function getLatestSnapshot(
+  env: Env,
+  variantId: string,
+): Promise<typeof pascalSnapshots.$inferSelect | null> {
+  const db = drizzle(env.DB);
+  return (
+    (await db
+      .select()
+      .from(pascalSnapshots)
+      .where(eq(pascalSnapshots.variantId, variantId))
+      .orderBy(desc(pascalSnapshots.datetimeCreated))
+      .limit(1)
+      .get()) ?? null
+  );
 }

@@ -1,8 +1,10 @@
 import { z } from "zod";
 
+import { applyNodeOps } from "../../../services/pascal/edit";
+import { proposeEdits } from "../../../services/pascal/ai-edit";
 import { generateSeedGraph } from "../../../services/pascal/generator";
 import { parseGraphJson } from "../../../services/pascal/shapes";
-import { getProject, loadScene } from "../../../services/pascal/store";
+import { getProject, loadScene, PascalStoreError } from "../../../services/pascal/store";
 import { createVariant, getStudy } from "../../../services/pascal/product";
 import { toolError } from "../../format";
 import { defineTool, WRITE } from "../../types";
@@ -36,53 +38,78 @@ export const generateFloorplanVariant = defineTool({
 
     const generatedAt = new Date().toISOString();
 
+    // 1) Establish the starting graph + provenance (branch from a parent, or a
+    //    deterministic measured base).
+    let graph;
+    let rendering;
+    let parentSceneId: string | null = null;
+    let extra: Record<string, unknown> = {};
+
     if (input.fromVariantId) {
       const parent = await loadScene(env, input.fromVariantId);
       if (!parent) return toolError(`Unknown fromVariantId '${input.fromVariantId}'`);
       // Prevent branching across projects — the parent must belong to this study's project.
       if (parent.projectId !== project.id) {
-        return toolError(
-          `fromVariantId '${input.fromVariantId}' belongs to a different project`,
-        );
+        return toolError(`fromVariantId '${input.fromVariantId}' belongs to a different project`);
       }
-      const graph = parseGraphJson(parent.graphJson);
-      const rendering = {
+      graph = parseGraphJson(parent.graphJson);
+      rendering = {
         coreRemodelProjectId: project.coreRemodelProjectId,
         variant: null,
         measurements: [],
         confidence: null,
         provenance: { source: "pascal" as const, generatedAt, sourceRevision: null, requestId: null },
       };
-      const row = await createVariant(env, {
-        studyId: input.studyId,
-        projectId: project.id,
-        name: input.name,
-        graph,
-        rendering,
-        parentSceneId: input.fromVariantId,
+      parentSceneId = input.fromVariantId;
+      extra = { branchedFrom: input.fromVariantId };
+    } else {
+      const seed = await generateSeedGraph(db, {
+        coreRemodelProjectId: project.coreRemodelProjectId,
+        scopeType: project.scopeType,
+        floorId: project.floorId,
+        roomId: project.roomId,
+        generatedAt,
       });
-      return { ...variantDto(row, env), branchedFrom: input.fromVariantId };
+      if (seed.roomCount === 0) {
+        return toolError(
+          `No active rooms found for project scope (${project.scopeType}). Check the floor/room mapping.`,
+        );
+      }
+      graph = seed.graph;
+      rendering = seed.rendering;
+      extra = { roomCount: seed.roomCount, note: seed.note };
     }
 
-    const seed = await generateSeedGraph(db, {
-      coreRemodelProjectId: project.coreRemodelProjectId,
-      scopeType: project.scopeType,
-      floorId: project.floorId,
-      roomId: project.roomId,
-      generatedAt,
-    });
-    if (seed.roomCount === 0) {
-      return toolError(
-        `No active rooms found for project scope (${project.scopeType}). Check the floor/room mapping.`,
-      );
+    // 2) Optionally apply the AI intent as validated node ops before saving.
+    if (input.intent) {
+      const boundsNote = rendering.measurements
+        .map((m) => `${m.kind}=${m.value}${m.unit}`)
+        .join(", ");
+      const plan = await proposeEdits(env, { graph, intent: input.intent, boundsNote });
+      let intentApplied = 0;
+      let intentNote = plan.rationale;
+      if (plan.ops.length > 0) {
+        try {
+          graph = applyNodeOps(graph, plan.ops);
+          intentApplied = plan.ops.length;
+        } catch (err) {
+          // AI proposed an op referencing a bad node — keep the base, don't fail creation.
+          intentNote =
+            (err instanceof PascalStoreError ? err.message : "invalid AI ops") +
+            " — variant created without the intent edits.";
+        }
+      }
+      extra = { ...extra, intentApplied, intentRationale: intentNote };
     }
+
     const row = await createVariant(env, {
       studyId: input.studyId,
       projectId: project.id,
       name: input.name,
-      graph: seed.graph,
-      rendering: seed.rendering,
+      graph,
+      rendering,
+      parentSceneId,
     });
-    return { ...variantDto(row, env), roomCount: seed.roomCount, note: seed.note };
+    return { ...variantDto(row, env), ...extra };
   },
 });
