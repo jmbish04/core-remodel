@@ -14,13 +14,13 @@
  * literal values rather than bindings, so the cap is not in play, but the
  * chunking stays because a single enormous statement is its own problem.
  *
+ * Also seeds one `projects` row, but only once a primary property exists —
+ * `projects.propertyId` is a NOT NULL FK. Run
+ * `scripts/backfill-primary-property.mjs --apply` first if it is missing.
+ *
  * NOT SEEDED HERE, deliberately:
- *   - the `projects` row. Its propertyId is a NOT NULL FK and `properties` is
- *     empty on remote. Inserting a bare property row would skip the geocode
- *     that every proximity consumer depends on, so the property must be created
- *     through its own admin flow first.
  *   - room line colours. Assigning 19 rooms a permanent identity colour is a
- *     design decision that deserves review, not a silent default.
+ *     design decision that gets proposed and reviewed, not silently defaulted.
  */
 
 import { execFileSync } from "node:child_process";
@@ -233,6 +233,16 @@ for (const r of RULES) {
     `INSERT OR IGNORE INTO ripple_rules (key, trigger_name, trigger_match, consequences, rationale, strength, jurisdiction, is_active) VALUES (${q(r.key)}, ${q(r.triggerName)}, ${q(JSON.stringify(r.triggerMatch))}, ${q(JSON.stringify(r.consequences))}, ${q(r.rationale)}, ${q(r.strength)}, NULL, 1);`,
   );
 }
+
+// ── The project row ─────────────────────────────────────────────────────────
+// Guarded by a SELECT so it is a no-op when no primary property exists yet, and
+// a no-op on re-run. `title` is the effort's own name; the property's label is
+// JOINED from `properties`, never copied here.
+statements.push(
+  `INSERT INTO projects (property_id, title, slug, project_type, is_active) ` +
+    `SELECT p.id, 'Whole-house remodel', 'primary', 'lifestyle_change', 1 FROM properties p ` +
+    `WHERE p.is_primary = 1 AND NOT EXISTS (SELECT 1 FROM projects WHERE slug = 'primary');`,
+);
 
 // Chunk so no single execute carries an unreasonable payload.
 const CHUNK = 20;
