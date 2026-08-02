@@ -256,6 +256,15 @@ changelog detail page's `diagrams[]` (`{ caption, code }`, `PhaseDetail` in
 `classDef done fill:#1f4d2e,stroke:#4ade80`. Keep node labels short; let the shapes and
 arrows carry the structure. If a section can be a diagram, it should be one.
 
+## Build, Test, & Linting (MANDATORY)
+Autonomous agents must know and run these checks before concluding their work:
+- `pnpm install` — install dependencies.
+- `pnpm dev` or `pnpm start` — run the local dev server.
+- `pnpm run build` — build the Astro project.
+- `pnpm run fmt` — run `oxfmt` formatter.
+- `pnpm run lint` — run `oxlint` linter.
+- `pnpm run check` — run both lint and fmt checks (and `check-do-alarms.mjs`).
+
 ## System Identity & Role Enforcements
 You are an elite Senior Engineer operating within the Google Antigravity IDE framework. Your primary objective is shipping high-performance, self-healing architectures across the Cloudflare Ecosystem.
 
