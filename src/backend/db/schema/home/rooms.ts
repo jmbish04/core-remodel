@@ -103,23 +103,33 @@ export const rooms = sqliteTable("rooms", {
   floorplanCropCfImageId: text("floorplan_crop_cf_image_id"),
 
   /**
-   * Permanent line identity (0041 Phase 0 — the Diagram).
+   * The room's tint (0041 Phase 0).
    *
-   * `lineColorHex` is the room's colour for the life of the project. It is
-   * assigned once at creation and then carried EVERYWHERE the room is ever
-   * referenced — budget rows, photo groups, receipts, bids, notifications, the
-   * in-car screen. It is functional identity, not styling, and it is never
-   * re-themed per page.
+   * WHAT IT IS FOR: cross-surface recognition. Tint a budget line, a badge, or a
+   * chip when it belongs to this room; highlight this room's region on the
+   * floorplan when it is the one being referenced. It is reinforcement on an
+   * object that already carries the room's NAME.
    *
-   * The set must stay mutually distinguishable at arm's length across ~20
-   * simultaneous rooms, and must survive both the dark and light ground (see
-   * DESIGN.md, "The Both Grounds Rule"). Null = not yet assigned; the UI falls
-   * back to a neutral line rather than picking a colour at render time, because
-   * a colour that changes between page loads is not identity.
+   * WHAT IT IS NOT: an identity key. A room is identified by its path —
+   * `${floor}/${name}` — and by its position on the floorplan. The label always
+   * carries the truth, so the tint never has to. That means the set does NOT
+   * need to be mutually distinguishable across all rooms: two rooms sharing a
+   * similar green is fine when the badge says which one it is.
    *
-   * `lineOrder` is the room's draw order in the diagram, lowest first. Null
-   * sorts last. Kept separate from any display sort so that reordering the
-   * diagram never reorders a picker.
+   * NAME IS HISTORICAL. `line_color_hex` came from an early framing of the
+   * diagram as a transit map with permanent coloured "lines". That framing was
+   * dropped — see the plan §4f. The column is not renamed because renaming a
+   * column on SQLite forces a table rebuild, and `rooms` has children; on D1
+   * that pattern is how child data gets silently dropped. Not worth it for a
+   * name.
+   *
+   * Should survive both the dark and light ground (DESIGN.md, "The Both Grounds
+   * Rule"). Null = untinted; surfaces fall back to neutral rather than picking a
+   * colour at render time, because a tint that changes between page loads reads
+   * as a bug.
+   *
+   * `lineOrder` is a stable display order for room lists and the floorplan
+   * legend, lowest first. Null sorts last.
    */
   lineColorHex: text("line_color_hex"),
   lineOrder: integer("line_order"),
