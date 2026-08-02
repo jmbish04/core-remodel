@@ -231,6 +231,94 @@ erDiagram
 
 ---
 
+## 5a · Room remodel intent — and why every room gets mapped
+
+### The argument for mapping rooms nobody is touching
+
+Onboarding asks for every room, including the ones out of scope. That friction needs a reason, and there is a good one:
+
+> *"I'm only remodeling the kitchen — why would I measure the rest of the house?"*
+>
+> Because the new hardwood has to match. The moment the homeowner decides the floor should be continuous, they need square footage for **every** room — and by then they are not in a mood to go measure the house. The system cannot ask for it retroactively at the moment it becomes useful.
+
+The same shape recurs:
+
+- **Ripple into unintended rooms.** Electrical work for the kitchen surfaces a panel or a circuit issue that lands in a room nobody planned to touch, and it needs documentation.
+- **Expansion.** A remodel that grows into part of an adjacent room needs that room's dimensions before the decision, not after.
+- **AI context.** An agent reasoning about one room with no model of the house gives worse answers than one that knows the whole floor.
+
+**A fully-mapped house is the cheap insurance.** Out-of-scope rooms are mapped for spatial continuity, whole-house material maths, and ambient context — not because anyone plans to work on them.
+
+### The shape: intent lives on the definition, and a room can hold several
+
+```mermaid
+erDiagram
+  projects ||--o{ room_intents : "scopes"
+  rooms ||--o{ room_intents : "has"
+  room_intent_type_def ||--o{ room_intents : "types"
+  impacts ||--o{ room_intents : "may have CAUSED"
+  room_intent_type_def {
+    int id PK
+    text key "OUT_OF_SCOPE|TARGETED_FIXTURE|SURFACE_REFRESH|IN_KIND|..."
+    text display_name
+    text scope_level "OUT_OF_SCOPE|CONTIGUOUS_FINISH|TARGETED_UPDATE|FULL_REMODEL"
+    text definition_markdown
+    text definition_html
+    text definition_plaintext
+    int requires_full_spec "does roomReadiness demand the full spec set"
+    int is_active
+  }
+  room_intents {
+    int id PK
+    int project_id FK
+    int room_id FK
+    int intent_type_id FK
+    int caused_by_impact_id FK "NOT a boolean - the actual ripple"
+    text status "proposed|committed|dropped"
+    text datetime_created
+  }
+```
+
+### Five corrections to the drafted schema
+
+| Drafted | Problem | Corrected |
+|---|---|---|
+| `scopeLevel` **and** `intentType` columns | The same fact twice. `OUT_OF_SCOPE`, targeted-update and contiguous-finish appear in **both** enums, so the two columns can disagree — and eventually will | `scope_level` lives on `room_intent_type_def`. Derived, cannot drift, still groups and filters |
+| `intentType` as an enum-constrained text column | Defeats the def table: adding an intent type still needs a migration | `intent_type_id` FK to the def table. A new type is a row |
+| One intent per room | The Toto case is *two or three*: `TARGETED_FIXTURE` for the toilet, `MEP_CHANGE` for the outlet it requires, and possibly `SURFACE_REFRESH` for floor continuity | Many intents per room |
+| `hasTradeRippleEffect` boolean | Says work exists because of something elsewhere but not **what**. Cannot be traced, explained, or acted on — and 0041 already models exactly this | `caused_by_impact_id` FK. A ripple is an impact with an effect targeting this room. **Do not add a boolean beside a graph that answers more** |
+| `notes` as one text column | Contradicts §4 — notes are typed, many-per-room, and three-format | Use `room_notes`; drop the column |
+
+Also: timestamps follow the repo convention — `integer({ mode: "timestamp" })` defaulting to `unixepoch()`, not TEXT `CURRENT_TIMESTAMP`. And `project_id` / `room_id` are real FKs, which the draft omitted.
+
+### The bug this exposes in shipped code
+
+**`roomReadiness()` as built would block every out-of-scope room forever.**
+
+It requires each `spec_definitions` row flagged `isRequiredForThreshold` on **every** room, globally. So a room nobody is touching would sit permanently un-ready, demanding a shower valve and a drywall finish level. The threshold would be meaningless the day a real house is loaded.
+
+**Intent has to gate the requirement set.** `spec_definitions.appliesToRoomKinds` was the wrong axis; what matters is **applies to intents**:
+
+- `OUT_OF_SCOPE` → requires nothing. Dimensions only, and even those are optional until a whole-house material makes them matter.
+- `TARGETED_FIXTURE` → requires the spec for *that fixture* and any trade it drags in, nothing else.
+- `SURFACE_REFRESH` → requires the surface finish and the measurement it is calculated from.
+- `IN_KIND` / `FULL_REMODEL` → the full set.
+
+`roomReadiness()` therefore takes the room's intents into account, and a room with no intent is not "unready" — it is **not in scope**, which is a different and honest state. This is the same distinction as `unknown` versus `missing`: absence of scope is not failure to specify.
+
+### Open: does this collide with `scenario_room_plans`?
+
+`scenario_room_plans` already holds per-room, per-scenario `proposedUse` + `stage` + `estimatedCostCents`. Intent is *also* a to-be statement about a room, which is the same "two tables, one concept" error caught twice already in this plan.
+
+Two candidate resolutions, and this needs deciding before either is built:
+
+1. **Intent is committed, scenarios propose.** `room_intents` holds the current plan; a scenario may propose a different intent set, and approving the scenario writes them. Clean separation, one more join.
+2. **Intent is an attribute of the plan row.** `scenario_room_plans` grows `intent_type_id`, and the committed plan is simply the approved scenario. Fewer tables; requires every project to have a scenario, which is friction on day one.
+
+Recommendation: **(1)**, because a homeowner states intent long before they have a scenario, and forcing a scenario to exist first inverts the real sequence.
+
+---
+
 ## 5b · Floor-wide and multi-room scope — fan out in the API, not in the data
 
 Paint, flooring, windows, a problem affecting a whole storey, a document covering a floor: plenty of things attach to more than one room. `all_levels` existed to express that, and it was the wrong instrument — a fake floor is a shortcut in the data that **every query then has to know about forever**, and the first one that forgets it produces a wrong answer silently.
