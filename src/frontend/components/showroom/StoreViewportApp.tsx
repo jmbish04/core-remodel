@@ -202,7 +202,7 @@ interface MappedProduct {
   brandName: string | null;
 }
 
-/** One line from a pending quote/invoice, GET /:id/pending-quotes (0042 P4). */
+/** One line from a pending quote/invoice, GET /:id/pending-quotes (0042 P4/P5). */
 interface PendingQuoteLine {
   id: number;
   description: string | null;
@@ -210,6 +210,10 @@ interface PendingQuoteLine {
   unitPrice: number | null;
   lineTotal: number | null;
   matchStatus: string;
+  /** Product this line was matched to / created as (P5); null if skipped. */
+  productId: number | null;
+  brandId: number | null;
+  productName: string | null;
 }
 
 /** A quote/invoice/receipt extracted from email, resolved to this store. */
@@ -2058,17 +2062,32 @@ function PendingQuotesPanel({
               {q.lineItems.length > 0 ? (
                 <ul className="mt-3 divide-y divide-border/40 border-t border-border/40 text-sm">
                   {q.lineItems.map((li) => (
-                    <li
-                      key={li.id}
-                      className="flex items-center justify-between gap-3 py-1.5"
-                    >
-                      <span className="min-w-0 truncate text-muted-foreground">
-                        {li.quantity != null ? `${li.quantity}× ` : ""}
-                        {li.description ?? "—"}
-                      </span>
-                      <span className="shrink-0 tabular-nums">
-                        {fmtMoney(li.lineTotal ?? li.unitPrice, q.currency ?? "USD")}
-                      </span>
+                    <li key={li.id} className="py-1.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="min-w-0 truncate text-muted-foreground">
+                          {li.quantity != null ? `${li.quantity}× ` : ""}
+                          {li.description ?? "—"}
+                        </span>
+                        <span className="shrink-0 tabular-nums">
+                          {fmtMoney(li.lineTotal ?? li.unitPrice, q.currency ?? "USD")}
+                        </span>
+                      </div>
+                      {li.productId && li.productName ? (
+                        <div className="mt-0.5 flex items-center gap-1.5 pl-4 text-xs text-muted-foreground">
+                          <Package className="size-3" aria-hidden />
+                          <span className="min-w-0 truncate">{li.productName}</span>
+                          <Badge
+                            variant="outline"
+                            className={
+                              li.matchStatus === "created"
+                                ? "border-emerald-500/40 text-emerald-500"
+                                : ""
+                            }
+                          >
+                            {li.matchStatus === "created" ? "new from quote" : "matched"}
+                          </Badge>
+                        </div>
+                      ) : null}
                     </li>
                   ))}
                 </ul>

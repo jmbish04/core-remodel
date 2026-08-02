@@ -33,6 +33,7 @@ import {
   registerShowroomContactFromEmail,
   matchShowroomStore,
 } from "./showroom-contact-autopopulate";
+import { mapInvoiceLinesToProducts } from "./map-invoice-products";
 import {
   buildMatchContext,
   CATCH_ALL_PROFILE,
@@ -805,6 +806,26 @@ export async function analyzeAndPersist(args: AnalyzeArgs): Promise<void> {
       } catch (err) {
         console.error(
           `[email-pipeline] material-room deduction failed for email ${emailId}:`,
+          err,
+        );
+      }
+    }
+
+    // ── Product mapping (0042 P5) ──────────────────────────────────────────
+    // Match each line to a product this showroom carries, else auto-create the
+    // brand/product, link it, and record the price. Only fires when the quote
+    // resolved to a showroom (the service no-ops otherwise). Best-effort — a
+    // mapping failure must never break email processing.
+    if (insertedInvoice) {
+      try {
+        const map = await mapInvoiceLinesToProducts(db, insertedInvoice.id);
+        console.log(
+          `[email-pipeline] product mapping for invoice ${insertedInvoice.id}: ` +
+            `matched=${map.matched}, created=${map.created}, skipped=${map.skipped}`,
+        );
+      } catch (err) {
+        console.error(
+          `[email-pipeline] product mapping failed for invoice ${insertedInvoice.id}:`,
           err,
         );
       }

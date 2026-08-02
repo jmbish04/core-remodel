@@ -3719,14 +3719,15 @@ showroomStoresRouter.get("/:id/notes", async (c) => {
  * The email pipeline stamps `worker_email_invoices.showroom_store_id` when the
  * sender's domain/name matches a store, so a Pietra Fina quote surfaces right
  * in Pietra Fina's viewport as a pending item to confirm/map. Each row carries
- * its line items. (P5 adds `productId`/`brandId` per line once those columns
- * exist; this P4 shape does not include them.)
+ * its line items; each line carries the product it was matched to or created as
+ * (0042 P5) — `productId` + `productName` (JOINed from products) + `matchStatus`.
  *
  * Response 200:
  *   { "quotes": [ { id, kind, vendorName, invoiceNumber, invoiceDate, dueDate,
  *                   subtotal, tax, total, currency, confidence, status, emailId,
  *                   createdAt, lineItems: [ { id, description, quantity,
- *                   unitPrice, lineTotal, matchStatus } ] } ] }
+ *                   unitPrice, lineTotal, matchStatus, productId, brandId,
+ *                   productName } ] } ] }
  */
 showroomStoresRouter.get("/:id/pending-quotes", async (c) => {
   const db = drizzle(c.env.DB);
@@ -3755,8 +3756,24 @@ showroomStoresRouter.get("/:id/pending-quotes", async (c) => {
   // One IN() over the (<=50) invoice ids — stays under D1's 100 bound-param cap.
   const invoiceIds = invoices.map((inv) => inv.id);
   const lines = await db
-    .select()
+    .select({
+      id: workerEmailInvoiceLineItems.id,
+      invoiceId: workerEmailInvoiceLineItems.invoiceId,
+      description: workerEmailInvoiceLineItems.description,
+      quantity: workerEmailInvoiceLineItems.quantity,
+      unitPrice: workerEmailInvoiceLineItems.unitPrice,
+      lineTotal: workerEmailInvoiceLineItems.lineTotal,
+      matchStatus: workerEmailInvoiceLineItems.matchStatus,
+      productId: workerEmailInvoiceLineItems.productId,
+      brandId: workerEmailInvoiceLineItems.brandId,
+      // Display name JOINed from products — never denormalized onto the line.
+      productName: showroomStoreProducts.itemName,
+    })
     .from(workerEmailInvoiceLineItems)
+    .leftJoin(
+      showroomStoreProducts,
+      eq(showroomStoreProducts.id, workerEmailInvoiceLineItems.productId),
+    )
     .where(inArray(workerEmailInvoiceLineItems.invoiceId, invoiceIds))
     .orderBy(asc(workerEmailInvoiceLineItems.id));
 
@@ -3789,6 +3806,9 @@ showroomStoresRouter.get("/:id/pending-quotes", async (c) => {
       unitPrice: li.unitPrice,
       lineTotal: li.lineTotal,
       matchStatus: li.matchStatus,
+      productId: li.productId,
+      brandId: li.brandId,
+      productName: li.productName,
     })),
   }));
 
