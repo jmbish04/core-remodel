@@ -141,7 +141,11 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
     migrations: [
       {
         tag: "0167",
-        sql: "ALTER TABLE `worker_email_invoice_line_items` ADD `product_id` integer REFERENCES products(id);\nALTER TABLE `worker_email_invoice_line_items` ADD `brand_id` integer REFERENCES brands(id);\nCREATE INDEX `worker_email_invoice_line_items_product_idx` ON `worker_email_invoice_line_items` (`product_id`);",
+        sql: "ALTER TABLE `worker_email_invoice_line_items` ADD `product_id` integer REFERENCES products(id);\nCREATE INDEX `worker_email_invoice_line_items_product_idx` ON `worker_email_invoice_line_items` (`product_id`);\n-- (0167 also added brand_id; dropped in 0168 per review — see below)",
+      },
+      {
+        tag: "0168",
+        sql: "-- Review: brand_id was denormalized (products.brandId owns it). Native\n-- DROP COLUMN — no table rebuild, so the material_room_proposals FK is safe.\nALTER TABLE `worker_email_invoice_line_items` DROP COLUMN `brand_id`;",
       },
     ],
     diagrams: [
@@ -156,8 +160,7 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
   worker_email_invoice_line_items {
     int id PK
     int invoice_id FK
-    int product_id FK "NEW · nullable"
-    int brand_id FK "NEW · nullable"
+    int product_id FK "NEW · nullable · brand derives via products.brandId"
     string match_status "unmatched|matched|created|skipped"
   }`,
       },
@@ -185,7 +188,10 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
       ranAt: "2026-08-02",
       output:
         "tsc --noEmit clean on all touched files. pnpm run build green (exit 0, ~67s). migrate:remote applied 0167; PRAGMA confirms product_id + brand_id on worker_email_invoice_line_items on remote. QC pr_337: the junk-line heuristic self-check passes (tax/delivery/labor/subtotal skipped; slab/faucet/pendant kept), and the pending-quotes line shape exposes productId/brandId/productName/matchStatus. Mapping on live data fires when the next real showroom quote arrives — the only existing prod draft is store-less (gmail.com sender), which the service correctly no-ops.",
-      migrations: [{ tag: "0167", appliedRemote: true }],
+      migrations: [
+        { tag: "0167", appliedRemote: true },
+        { tag: "0168", appliedRemote: true },
+      ],
     },
   },
   "store-quote-viewport": {

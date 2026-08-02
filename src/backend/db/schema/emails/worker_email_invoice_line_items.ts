@@ -5,7 +5,6 @@ import { workerEmailInvoices } from "./worker_email_invoices";
 import { materialScheduleItems } from "../materials/schedule_item";
 import { services } from "../services/services";
 import { showroomStoreProducts } from "../showroom/store_products";
-import { brands } from "../brands/brands";
 
 /**
  * Worker Email Invoice Line Items — individual line items from an extracted
@@ -53,17 +52,13 @@ export const workerEmailInvoiceLineItems = sqliteTable(
      * The product this line was matched to (existing) or created as (0042 P5).
      * The mapping service resolves vendor + description → a product via the
      * shared ensureProductFromExtraction dedup; null until mapped/if skipped.
-     * FK, not a name — the display name JOINs from products.
+     * FK, not a name — the display name JOINs from products, and the brand
+     * derives from `products.brandId` (never duplicated onto the line).
      */
     productId: integer("product_id").references(
       () => showroomStoreProducts.id,
       { onDelete: "set null" },
     ),
-
-    /** The brand of the matched/created product (derivable via product.brandId; kept for direct filtering). */
-    brandId: integer("brand_id").references(() => brands.id, {
-      onDelete: "set null",
-    }),
 
     /** HITL match status: "unmatched" | "matched" | "created" | "skipped". */
     matchStatus: text("match_status").notNull().default("unmatched"),

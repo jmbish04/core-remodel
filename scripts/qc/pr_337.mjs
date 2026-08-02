@@ -41,13 +41,15 @@ try {
   const quotes = pq.json?.quotes;
   check("response is { quotes: [...] }", Array.isArray(quotes), typeof quotes);
 
-  // Shape check: whenever any line exists, it must expose the P5 fields (even if null).
-  const line = (quotes ?? []).flatMap((q) => q.lineItems ?? [])[0];
-  if (line) {
+  // Shape check: EVERY line must expose the P5 fields (even if null).
+  const allLines = (quotes ?? []).flatMap((q) => q.lineItems ?? []);
+  if (allLines.length > 0) {
+    const REQUIRED = ["productId", "brandId", "productName", "matchStatus"];
+    const bad = allLines.find((l) => !REQUIRED.every((k) => k in l));
     check(
-      "line exposes P5 fields (productId/brandId/productName/matchStatus)",
-      "productId" in line && "brandId" in line && "productName" in line && "matchStatus" in line,
-      JSON.stringify(Object.keys(line)),
+      "every line exposes P5 fields (productId/brandId/productName/matchStatus)",
+      !bad,
+      bad ? JSON.stringify(Object.keys(bad)) : `all ${allLines.length} lines ok`,
     );
     // A mapped line (created/matched) must carry a productId + name.
     const mapped = (quotes ?? []).flatMap((q) => q.lineItems ?? []).filter((l) => l.matchStatus === "created" || l.matchStatus === "matched");

@@ -3765,9 +3765,9 @@ showroomStoresRouter.get("/:id/pending-quotes", async (c) => {
       lineTotal: workerEmailInvoiceLineItems.lineTotal,
       matchStatus: workerEmailInvoiceLineItems.matchStatus,
       productId: workerEmailInvoiceLineItems.productId,
-      brandId: workerEmailInvoiceLineItems.brandId,
-      // Display name JOINed from products — never denormalized onto the line.
+      // Product display name + brand JOINed — never denormalized onto the line.
       productName: showroomStoreProducts.itemName,
+      brandId: showroomStoreProducts.brandId,
     })
     .from(workerEmailInvoiceLineItems)
     .leftJoin(

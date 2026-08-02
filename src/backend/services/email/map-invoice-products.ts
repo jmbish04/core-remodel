@@ -39,6 +39,18 @@ export interface MapResult {
 }
 
 /**
+ * Normalize an extraction confidence to the 0–100 integer the price-observation
+ * column wants. `classificationConfidence` is a 0–1 fraction, but a value that
+ * already arrives on a 0–100 scale must NOT be multiplied again (that overflows
+ * and clamps to 100, masking the scale mismatch). null → a mid default of 60.
+ */
+export function toConfidence100(raw: number | null | undefined): number {
+  if (raw == null || !Number.isFinite(raw)) return 60;
+  const scaled = raw <= 1 ? raw * 100 : raw;
+  return Math.max(0, Math.min(100, Math.round(scaled)));
+}
+
+/**
  * Map a single invoice's unmatched line items to products. Idempotent: only
  * `matchStatus='unmatched'` lines are processed, so a re-run (or reprocess,
  * which re-inserts lines as unmatched) does the right thing. Best-effort per
@@ -116,11 +128,11 @@ export async function mapInvoiceLinesToProducts(
             showroomId: storeId,
             price: `$${line.unitPrice.toFixed(2)}`,
             priceCents: cents,
-            // Carry the AI's extraction confidence (0–1) → 0–100; default mid.
-            confidence:
-              invoice.confidence != null
-                ? Math.max(0, Math.min(100, Math.round(invoice.confidence * 100)))
-                : 60,
+            // Carry the AI's extraction confidence into the 0–100 column.
+            // classificationConfidence is a 0–1 fraction, but be defensive: a
+            // value already >1 is treated as a 0–100 score, not multiplied
+            // again (which would overflow and silently clamp to 100).
+            confidence: toConfidence100(invoice.confidence),
             reviewStatus: "pending",
             notes: `From email quote${invoice.invoiceNumber ? ` #${invoice.invoiceNumber}` : ""}`,
           });
@@ -131,7 +143,6 @@ export async function mapInvoiceLinesToProducts(
         .update(workerEmailInvoiceLineItems)
         .set({
           productId: product.id,
-          brandId: product.brandId ?? null,
           matchStatus: created ? "created" : "matched",
           updatedAt: new Date(),
         })

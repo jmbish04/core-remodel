@@ -2072,7 +2072,7 @@ function PendingQuotesPanel({
                           {fmtMoney(li.lineTotal ?? li.unitPrice, q.currency ?? "USD")}
                         </span>
                       </div>
-                      {li.productId && li.productName ? (
+                      {li.productId != null && li.productName ? (
                         <div className="mt-0.5 flex items-center gap-1.5 pl-4 text-xs text-muted-foreground">
                           <Package className="size-3" aria-hidden />
                           <span className="min-w-0 truncate">{li.productName}</span>
