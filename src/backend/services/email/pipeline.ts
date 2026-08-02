@@ -718,13 +718,23 @@ export async function analyzeAndPersist(args: AnalyzeArgs): Promise<void> {
   ) {
     const inv = analysis.invoiceData;
     // Resolve which showroom this quote/invoice is FROM so it can surface as a
-    // pending item in that store's viewport (0042 P4). Best-effort: sender
-    // domain/name → store; null when unresolved (still shows in global alerts).
-    const invoiceStoreId = await matchShowroomStore(
-      realSenderEmail,
-      realSenderName ?? inv.vendorName ?? null,
-      env,
-    );
+    // pending item in that store's viewport (0042 P4). Best-effort in the
+    // strict sense: a lookup failure must never break invoice persistence (it
+    // mirrors the showroom-contact guard below), so it's try/caught to null.
+    // The name fallback trims first — a parsed display name often arrives as ""
+    // which would otherwise mask the vendor-name fallback.
+    const invoiceStoreMatchName =
+      (realSenderName && realSenderName.trim()) || inv.vendorName || null;
+    let invoiceStoreId: number | null = null;
+    try {
+      invoiceStoreId = await matchShowroomStore(
+        realSenderEmail,
+        invoiceStoreMatchName,
+        env,
+      );
+    } catch (err) {
+      console.error("[email-pipeline] showroom store match failed:", err);
+    }
     const [insertedInvoice] = await db
       .insert(workerEmailInvoices)
       .values({

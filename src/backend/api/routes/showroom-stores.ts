@@ -3719,13 +3719,14 @@ showroomStoresRouter.get("/:id/notes", async (c) => {
  * The email pipeline stamps `worker_email_invoices.showroom_store_id` when the
  * sender's domain/name matches a store, so a Pietra Fina quote surfaces right
  * in Pietra Fina's viewport as a pending item to confirm/map. Each row carries
- * its line items; `productId`/`brandId` on a line are populated by P5 mapping.
+ * its line items. (P5 adds `productId`/`brandId` per line once those columns
+ * exist; this P4 shape does not include them.)
  *
  * Response 200:
  *   { "quotes": [ { id, kind, vendorName, invoiceNumber, invoiceDate, dueDate,
  *                   subtotal, tax, total, currency, confidence, status, emailId,
  *                   createdAt, lineItems: [ { id, description, quantity,
- *                   unitPrice, lineTotal, matchStatus, productId, brandId } ] } ] }
+ *                   unitPrice, lineTotal, matchStatus } ] } ] }
  */
 showroomStoresRouter.get("/:id/pending-quotes", async (c) => {
   const db = drizzle(c.env.DB);
@@ -3734,6 +3735,9 @@ showroomStoresRouter.get("/:id/pending-quotes", async (c) => {
     return c.json({ success: false, error: "Invalid store id" }, 400);
   }
 
+  // Cap at 50: a store realistically carries a handful of open drafts, and the
+  // cap bounds the line-items `inArray` below to <=50 bound params — safely
+  // under D1's 100-param limit without needing to chunk.
   const invoices = await db
     .select()
     .from(workerEmailInvoices)
@@ -3743,12 +3747,12 @@ showroomStoresRouter.get("/:id/pending-quotes", async (c) => {
         eq(workerEmailInvoices.status, "draft"),
       ),
     )
-    .orderBy(desc(workerEmailInvoices.createdAt));
+    .orderBy(desc(workerEmailInvoices.createdAt))
+    .limit(50);
 
   if (invoices.length === 0) return c.json({ quotes: [] });
 
-  // One IN() over the invoice ids — the set is small (drafts for one store),
-  // so a single query stays well under D1's 100 bound-param cap.
+  // One IN() over the (<=50) invoice ids — stays under D1's 100 bound-param cap.
   const invoiceIds = invoices.map((inv) => inv.id);
   const lines = await db
     .select()
