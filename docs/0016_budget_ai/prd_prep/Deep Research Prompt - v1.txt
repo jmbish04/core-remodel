@@ -1,0 +1,467 @@
+﻿Product Requirements Document: Hybrid AI Construction Budgeting & Sourcing Platform
+1. Executive Summary & Vision
+The residential construction and renovation industry operates within a paradigm historically fraught with systemic financial opacity, misaligned incentives, and severe, predictable budget overruns. Homeowners frequently enter complex, multi-million dollar capital projects armed only with rudimentary spreadsheets and static PDF bids, leaving them highly vulnerable to industry-standard estimating tactics that obscure the true final costs of a build. The core vision of this product is to engineer a hybrid deterministic and asynchronous artificial intelligence platform that serves as a fiduciary digital consultant, a rigorous bid reconciler, and an automated procurement sourcing agent for homeowners.
+By bridging robust construction finance methodologies—specifically adapting the Construction Specifications Institute (CSI) MasterFormat for residential use 1—with sophisticated Large Language Model (LLM) agentic workflows and modern, highly intuitive web interfaces, this application establishes an impenetrable defense against budget inflation. The architecture is deliberately designed around a concept of "Hybrid Intelligence." The system strictly segregates exact mathematical determinism from qualitative stochastic analysis. Deterministic algorithms enforce rigid 20 percent contingencies, track exact line-item variances, and roll up budgets utilizing fixed-precision arithmetic. Conversely, the LLM agents are deployed exclusively for qualitative tasks: detecting "bait-and-switch" allowance tactics in unstructured text, flagging missing structural scope in architectural plans, and autonomously scouring the web for superior product sourcing and installation warnings.
+To achieve enterprise-grade reliability, the backend architecture is strictly built upon the Cloudflare Developer Platform. The infrastructure leverages Cloudflare Workers for edge compute, Durable Objects for stateful chat memory and real-time collaboration, Workflows for orchestrating long-running, multi-step deep research tasks, Queues for resilient background processing of dense PDF documents, and D1 SQLite for highly distributed, edge-adjacent relational data storage. The client interface is a responsive React web application utilizing Shadcn UI components and the assistant-ui library to render seamless, persistent chat interfaces.3
+Furthermore, the platform acknowledges the behavioral reality of its user base: homeowners inherently trust and utilize external spreadsheet software for financial management. Rather than forcing users into a closed ecosystem, the application maintains a bi-directional, mathematically rigorous synchronization with Google Sheets.4 To prevent catastrophic data corruption during concurrent edits, the architecture establishes the Cloudflare D1 database as the absolute source of truth, enforcing a strict "Last-Write-Wins with Versioning" model that maintains an unalterable revision log and audit trail of all external spreadsheet states.5 The resulting platform represents a paradigm shift in residential construction management, transforming the homeowner from a passive payer into an armed, data-driven procurement manager.
+2. Industry Best Practices & Core Relational Data Model
+2.1 Foundation: Construction Budgeting Psychology & Methodology
+To architect a system capable of defending a homeowner's capital, the underlying data model must accurately reflect the psychological and financial mechanisms utilized in modern construction contracting. Traditional construction contracts heavily rely on the concept of "allowances." An allowance is fundamentally a budget placeholder for materials—the "known unknowns"—that have not yet been explicitly selected at the time the contract is executed.6 Allowances are distinctly different from "contingencies," which are reserved exclusively for "unknown unknowns," such as discovering dry rot during demolition or encountering unmarked sub-surface utilities.7
+While allowances serve a legitimate purpose in allowing construction to commence prior to final design selections, they are frequently weaponized by volume builders and unscrupulous contractors as a "bait-and-switch" mechanism to secure the initial contract. To present an artificially low top-line bid, a contractor will intentionally load the proposal with generic, builder-grade allowances for major finishes, cabinetry, and lighting.8 The psychological trap snaps shut months later when the homeowner visits the design center. A homeowner may discover that their $15,000 "appliance allowance" only covers base-model units, while the luxury suite they actually require costs $60,000.8 Because the structure is already partially built, the homeowner has no leverage and must absorb a $45,000 out-of-pocket overage, while the contractor maintains their profit margin on the base contract.8
+To counteract this, the platform brings enterprise-level organization to residential projects by adapting the Construction Specifications Institute (CSI) MasterFormat. MasterFormat is a standardized framework utilized in commercial construction to organize specifications, ensuring that all parties interpret information uniformly and minimizing costly miscommunications.2 MasterFormat currently consists of 50 divisions.1 The platform specifically adapts the Facility Construction Subgroup (Divisions 02-19) for residential application.1 By forcing unstructured contractor bids into this standardized hierarchical schema, the platform can structurally identify missing scope and isolate padded allowances.
+
+
+CSI MasterFormat Division
+	Residential Application & Scope Addressed
+	Typical Risk Factors if Omitted
+	Division 02 - Existing Conditions
+	Site assessment, demolition, hazardous material remediation (asbestos/lead).
+	Unforeseen remediation costs; catastrophic delays during early demolition phases.1
+	Division 03 - Concrete
+	Foundations, structural frames, slabs, and architectural concrete elements.10
+	Severe structural failure; inability to support planned vertical additions or heavy material loads.10
+	Division 04 - Masonry
+	Brickwork, block walls, and structural stone elements.1
+	Moisture intrusion through exterior envelopes; failure of retaining walls.1
+	Division 05 - Metals
+	Structural steel beams, ornamental metalwork, seismic retrofitting brackets.1
+	Failure to meet local seismic codes; inability to execute open-concept, load-bearing wall removals.1
+	Division 06 - Wood, Plastics, & Composites
+	Rough carpentry, framing, finish carpentry, millwork, engineered wood.10
+	Warping, framing deficiencies; excessive squeaking in subfloors; poor integration with finish cabinetry.10
+	Division 07 - Thermal & Moisture Protection
+	Roofing, insulation, waterproofing membranes, weather barriers, fireproofing.10
+	Catastrophic water damage; mold proliferation; failure of Division 09 finishes (e.g., tile popping off walls).10
+	Division 08 - Openings
+	Doors, exterior windows, storefronts, skylights, hardware.1
+	Envelope breaches; severe energy inefficiency; failure to meet egress code requirements.1
+	Division 09 - Finishes
+	Flooring, wall finishes, painting, ceilings, tile, drywall.1
+	Purely aesthetic failures; budget overruns due to high-variance luxury material selections.1
+	
+
+2.2 Relational Data Model Schema (Cloudflare D1)
+The application's data pipeline relies on a strict, cascading hierarchical structure: Room -> Budget Item -> Material Category -> Shopping Item/Actual Product -> Showroom/Brand. The Cloudflare D1 SQLite database schema must support this hierarchy while meticulously tracking the delta between the contractor's initial allowance and the actual sourced cost.
+
+
+Table Name
+	Column Name
+	Data Type & Constraints
+	Description
+	Projects
+	id
+	UUID, Primary Key
+	Unique identifier for the homeowner's renovation project.
+	Projects
+	name
+	Text, Not Null
+	Human-readable project name (e.g., "123 Main St Full Gut").
+	Projects
+	total_budget_cap
+	Real, Not Null
+	The absolute financial ceiling the homeowner can afford.
+	Projects
+	contingency_percentage
+	Real, Default 20.0
+	Enforced buffer reserved strictly for unknown unknowns.11
+	Rooms
+	id
+	UUID, Primary Key
+	Unique identifier for architectural zones.
+	Rooms
+	project_id
+	UUID, Foreign Key
+	Relational link to the parent Projects table.
+	Rooms
+	name
+	Text, Not Null
+	Functional designation (e.g., "Primary Bathroom").
+	Rooms
+	display_order
+	Integer
+	Integer for frontend UI sorting and drag-and-drop ordering.
+	Budget_Items
+	id
+	UUID, Primary Key
+	Represents a discrete line item within a room.
+	Budget_Items
+	room_id
+	UUID, Foreign Key
+	Relational link to the parent Rooms table.
+	Budget_Items
+	masterformat_division
+	Text, Not Null
+	CSI Code mapping (e.g., "09 - Finishes") for gap analysis.1
+	Budget_Items
+	allowance_amount
+	Real, Not Null
+	The contractor's initial bid placeholder value.7
+	Budget_Items
+	actual_cost
+	Real, Default 0.0
+	The final, fully burdened cost of the sourced material/labor.
+	Budget_Items
+	variance
+	Generated Column
+	Deterministic calculation: actual_cost - allowance_amount.
+	Budget_Items
+	status
+	Enum
+	State machine: 'Pending Selection', 'In Research', 'Purchased'.
+	Sourced_Products
+	id
+	UUID, Primary Key
+	The physical material selected to fulfill the budget item.
+	Sourced_Products
+	budget_item_id
+	UUID, Foreign Key
+	Relational link to the parent Budget_Items table.
+	Sourced_Products
+	product_name
+	Text, Not Null
+	Specific SKU or description (e.g., "Calacatta Gold Quartz").
+	Sourced_Products
+	unit_price
+	Real, Not Null
+	Exact cost per unit of measure.
+	Sourced_Products
+	quantity
+	Real, Not Null
+	Total units required, accounting for standard waste factors.
+	Sourced_Products
+	roi_score
+	Real, Nullable
+	AI-generated metric evaluating historical resale value.12
+	
+
+2.3 Bi-Directional Sync & Job State Schema
+To support bi-directional synchronization with Google Sheets without sacrificing data integrity, the system implements a "Last-Write-Wins with Versioning" strategy.5 One system—the D1 database—is designated as the authoritative source of truth.5 Changes flow outward to the spreadsheet, and while the spreadsheet can send updates back, the database explicitly controls the merge rules based on logical timestamps. To achieve this, the D1 schema requires a dedicated revision log to maintain an auditable trail of all mutations.
+
+
+Table Name
+	Column Name
+	Data Type & Constraints
+	Description
+	Sync_Revision_Log
+	id
+	UUID, Primary Key
+	Unique identifier for the sync event.
+	Sync_Revision_Log
+	project_id
+	UUID, Foreign Key
+	Links the audit event to the specific project.
+	Sync_Revision_Log
+	entity_type
+	Text, Not Null
+	The table name mutated (e.g., "Budget_Items").
+	Sync_Revision_Log
+	entity_id
+	UUID, Not Null
+	The primary key of the mutated row.
+	Sync_Revision_Log
+	previous_state
+	JSONB
+	A complete snapshot of the row prior to the mutation.
+	Sync_Revision_Log
+	new_state
+	JSONB
+	A complete snapshot of the row post-mutation.
+	Sync_Revision_Log
+	mutation_source
+	Enum
+	Origin: 'App_UI', 'Google_Sheets_Webhook', 'AI_Agent'.
+	Sync_Revision_Log
+	timestamp
+	Timestamp, Indexed
+	Critical field for resolving Last-Write-Wins race conditions.
+	Sync_Revision_Log
+	conflict_flag
+	Boolean, Default False
+	Flags mutations requiring manual human reconciliation.5
+	Deep_Research_Jobs
+	id
+	UUID, Primary Key
+	Maps directly to the Cloudflare Workflow instanceId.13
+	Deep_Research_Jobs
+	budget_item_id
+	UUID, Foreign Key
+	The item currently being researched by the autonomous agent.
+	Deep_Research_Jobs
+	status
+	Enum
+	State: 'Queued', 'Scraping', 'Pending_Approval', 'Completed'.
+	Deep_Research_Jobs
+	ai_summary_output
+	Text, Nullable
+	The synthesized result of the deep research operation.
+	
+
+3. Feature Specifications (The AI Agents & Deterministic Tools)
+Feature 3.1: The Gap Analyzer
+User Story: As a homeowner reviewing an initial contractor bid, I want the system to automatically analyze the structural integrity of the proposal and flag missing structural or preparatory components so that I am not ambushed by costly change orders once demolition begins.
+Research-Backed Rationale: Change orders are the primary mechanism through which contractors recoup lost margins on artificially low initial bids. These change orders frequently stem from missing preparatory work, differing interpretations of architectural drawings, or conveniently overlooked structural realities.14 A prime example is the interplay between CSI MasterFormat Division 09 (Finishes) and Division 07 (Thermal and Moisture Protection).1 If a contractor submits a bid for a luxury bathroom remodel that heavily details the Division 09 tile and fixtures but entirely omits the Division 07 waterproofing membrane, the homeowner faces an imminent risk of catastrophic water damage and subsequent total loss of the finish materials.10
+Furthermore, local ordinances often trigger cascading requirements that contractors omit from initial bids to appear competitive. For instance, in San Francisco, extensive renovations on specific properties trigger the Mandatory Soft Story Retrofit Ordinance.15 This ordinance applies to wood-frame structures built prior to 1978 containing five or more residential units and two or more stories over a weak or "soft" ground floor.15 While a standard foundation bolting retrofit may cost $3,200 to $7,500, a full soft-story retrofit costs between $14,000 and $27,000.16 If a homeowner's architectural plans trigger this ordinance, but the contractor's bid omits the seismic engineering and structural steel (Division 05) line items, the homeowner is facing a guaranteed minimum $14,000 overage before framing even begins.1
+Deterministic Rules: The application utilizes strict relational logic to enforce scope completeness. If a Room object contains a Budget_Item mapped to Division 09 (Finishes) with descriptors matching "Tile," "Shower," or "Wet Room," the database trigger must algorithmically verify the existence of a corresponding Division 07 (Waterproofing) line item within the same parent Room. Total budget calculations and variance roll-ups are executed strictly using fixed-precision SQL mathematics; no LLM floating-point calculations are permitted to ensure absolute financial accuracy.
+LLM Agent Tasks: The primary AI agent acts as a semantic interpreter. It analyzes the qualitative text of the uploaded architectural notes and the contractor's bid to determine if the scope of work reasonably triggers secondary requirements. For example, if the AI detects phrases such as "load-bearing wall removal" or "open concept transition," it cross-references the bid to ensure Division 05 (Structural Steel) and corresponding structural engineering consultation fees are present.
+UI/UX Requirements: The frontend leverages Shadcn Alert components (utilizing the Destructive/Red variant) appended dynamically to the top of the budget DataTable. When a user interacts with a flagged row, a Shadcn HoverCard surfaces, providing a plain-English explanation of the specific CSI MasterFormat gap, referencing the precise missing division and citing potential financial consequences.
+Feature 3.2: The Bid Reconciler, Risk Predictor, & Negotiation Consultant
+User Story: As a user uploading a dense, multi-page PDF contractor bid, I want the system to parse the unstructured text, extract individual line items, compare them against my predefined architectural budget, and provide tactical negotiation scripts based on identified padding or predatory allowance tactics.
+Research-Backed Rationale: The financial dynamic between contractors and homeowners is defined by severe information asymmetry. To win a contract, volume builders routinely utilize "bait-and-switch" allowance tactics.8 They present an attractive initial bid loaded with generic placeholders for major finishes. When the homeowner subsequently visits a design center, they discover that their allocated $15,000 "appliance allowance" is sufficient only for basic, builder-grade units, while the luxury suite (e.g., Sub-Zero and Wolf) they specified during initial consultations costs $60,000.8 Because the structure is already under construction, the homeowner is captured; they must absorb the $45,000 variance directly out of pocket.8 Furthermore, contractors dictate that all labor, installation costs, overhead, and profit must be included in the base Contract Sum, not within the allowance itself.6 Labor costs associated with allowances must be strictly separated to prevent contractors from artificially inflating installation fees later.18
+Deterministic Rules: The system algorithmically extracts and sums all explicit "Allowance" financial tags versus "Fixed Cost" tags. It then calculates the percentage of the total bid composed of variable allowances. If allowances constitute greater than 30 percent of the top-line bid, the system deterministic triggers a "High-Risk Contract" alert.
+LLM Agent Tasks:
+* Reconciliation: The parsing agent consumes the PDF text (ingested asynchronously via Cloudflare Workers and Queues) and maps the unstructured contractor line items to the strict internal Budget_Items table, assigning appropriate CSI MasterFormat division codes.
+* Negotiation Tactics: A secondary consultant agent generates a room-by-room negotiation script tailored to the homeowner's stated preferences. For instance: "The contractor allocated $15,000 for kitchen appliances. Based on your profile indicating a requirement for luxury brands, historical data indicates this allowance is deficient by approximately $45,000. Instruct the contractor to convert this line item from a variable allowance to a 'No Allowance' fixed-price specification referencing exact model numbers before executing the contract."
+UI/UX Requirements: The interface presents a split-pane layout. The left pane renders the original PDF document utilizing a React PDF viewer with highlighted bounding boxes over extracted text. The right pane renders a Shadcn DataTable displaying the extracted, standardized mappings. A floating assistant-ui modal acts as an always-available Negotiation Consultant, maintaining persistent conversation history via Cloudflare Durable Objects.3
+Feature 3.3: Human-in-the-Loop Bid Mapping UI
+User Story: As a user, if the AI incorrectly maps a vaguely worded contractor line item (e.g., a generic entry for "Kitchen Stuff - $5000") to the wrong MasterFormat division, I require an intuitive visual interface to manually override and correct the mapping, ensuring my budget remains accurate.
+Research-Backed Rationale: Complete autonomous parsing of highly unstructured, idiosyncratic construction data is fundamentally fragile. Contractors frequently use non-standard terminology, group unrelated trades into single line items, or provide bids lacking any clear hierarchy. Relying entirely on LLM extraction without a fallback mechanism guarantees data corruption and user frustration. Therefore, a Human-in-the-Loop (HITL) intervention interface is a mandatory architectural requirement.19
+Deterministic Rules: Updating a mapping via the manual UI instantly triggers a cascading database transaction. The system recalculates all parent room subtotals, re-evaluates the variance against the baseline allowance, and updates the global contingency state. The manual override is logged immutably in the Sync_Revision_Log with the mutation_source flagged as 'App_UI'.
+LLM Agent Tasks: None directly during the manual override. The UI strictly interacts with the Cloudflare Worker API to update the relational mapping in the D1 SQLite database, bypassing the AI parser.
+UI/UX Requirements: The frontend implements a robust drag-and-drop interface utilizing the @dnd-kit/core library. Any extracted line items that fall below a 90% AI confidence threshold are isolated into a vertical "Staging Area" column on the left side of the screen. Users can physically drag these unmapped cards into designated "Room / MasterFormat Category" drop zones located in a grid on the right, providing tactile control over the data ingestion process.
+Feature 3.4: Asynchronous Deep Research & Sourcing Agent
+User Story: As a user finalizing material selections, I want an autonomous AI agent to scour the web for specific fixtures, aggregate pricing across multiple vendors, synthesize hundreds of user reviews to highlight hidden installation "gotchas," and run these heavy tasks in the background without freezing my application.
+Research-Backed Rationale: Material sourcing is exceptionally time-consuming, requiring the aggregation of highly distributed, unstructured data across thousands of disparate e-commerce and wholesale web properties. Executing live web scraping and LLM synthesis requires long-running processes that inherently exceed the standard execution timeout limits of serverless functions. Cloudflare Workflows is explicitly engineered for this exact pattern, allowing multi-step logic to be automatically retried and memoized for durability.20 Furthermore, executing broad web searches consumes significant compute resources; therefore, a human-in-the-loop gate is required before initiating deep research. This gating is achieved utilizing the Cloudflare Workflow waitForEvent() API.13
+Deterministic Rules: The system enforces a rule that a Deep Research job cannot be initiated unless the target Budget_Item has a defined mathematical budget ceiling in the database. Workflow instances must continually log their internal state transitions ('Queued', 'Scraping', 'Pending_Approval', 'Completed') to the Deep_Research_Jobs D1 table to enable frontend polling.
+LLM Agent Tasks: The orchestration agent utilizes the Model Context Protocol (MCP) to execute external tools.21 It triggers web search algorithms to locate material pricing across diverse vendors. Subsequently, it synthesizes end-user reviews specifically hunting for installation difficulties or warranty voids. For example, the agent might report: "While this specific imported tile is under budget, sentiment analysis of 142 reviews indicates it requires a highly specialized epoxy grout that will increase your Division 09 labor costs by $4 per square foot, ultimately causing a budget overrun."
+UI/UX Requirements:
+* Research Jobs Dashboard: A dedicated routing view listing all active, pending, and completed Workflows. The interface utilizes Shadcn Progress bars to visually indicate the status of active scraping operations.
+* Persistent Notifications: A Shadcn notification badge on the global navigation bar alerts the user to unread research results.
+* Approval Gate UI: When a research step requires human intervention, a Shadcn Dialog interrupts the user, asking them to confirm the execution of the deep research task. Clicking 'Approve' fires a specialized webhook that satisfies the Cloudflare Workflow waitForEvent promise, allowing the backend agent to resume execution.13
+Feature 3.5: The Overage Mitigator & ROI Optimizer
+User Story: As a homeowner approaching my maximum financial limit, I want the system to mathematically project my final cost based on current line-item variances and autonomously suggest high-ROI material downgrades in secondary rooms to preserve my critical 20% contingency fund.
+Research-Backed Rationale: The standard 20% construction contingency must be fiercely protected against erosion.11 Any remaining contingency at project completion belongs entirely to the homeowner, not the contractor.11 When variances force the reallocation of funds, homeowners must understand the Return on Investment (ROI) of specific materials to make optimal sacrifices. Historical real estate data indicates that a midrange, cosmetic kitchen remodel—focusing heavily on painting existing cabinetry and updating hardware—yields an exceptional 70% ROI.22 When selecting countertops, Quartz provides an optimal 68% ROI due to its zero-maintenance requirements and UV resistance, outperforming Granite (64% ROI), which requires annual chemical sealing.12 If a project is tracking over budget, the system should leverage this data to suggest downgrading a secondary bathroom's custom tilework to a prefabricated acrylic surround, thereby preserving capital to fund the high-ROI Quartz countertops in the primary kitchen.
+Deterministic Rules: The system continuously runs a background calculation: Remaining_Contingency = Total_Contingency_Value - SUM(Positive_Variances_Across_All_Rooms). If the Remaining_Contingency metric drops below 5% of the total project value, the system triggers a critical, un-dismissible alert requiring homeowner acknowledgement.
+LLM Agent Tasks: The optimization agent analyzes the current Sourced_Products table, identifies items still in the 'Pending Selection' state, and queries the internal ROI knowledge base. It generates highly localized, qualitative suggestions. For example: "Swap custom cherry cabinetry in the laundry room for painted semi-custom (Essentials line 24) to immediately recover $12,000 with statistically negligible impact on final property resale value."
+UI/UX Requirements: The UI features a persistent, sticky header across all views displaying a visual budget thermometer. The thermometer transitions dynamically from Green to Yellow to Red based on the mathematical consumption of the contingency fund. When overages occur, Shadcn Cards surface presenting AI-generated "Trade-off Scenarios," complete with bold 'Accept' or 'Reject' action buttons that automatically execute the suggested budget reallocations across the database.
+Feature 3.6: The High/Low Variance Dashboard & Sync
+User Story: As a power user, I want my application data seamlessly and continuously synchronized with my personal Google Sheet, maintaining a reliable, chronological history of edits so that I never lose critical financial data due to conflicting updates.
+Research-Backed Rationale: Despite the existence of specialized software, a vast majority of homeowners and contractors ultimately revert to trusting spreadsheet software for complex financial tracking. Attempting to force users out of this paradigm causes high churn. However, real-time bi-directional synchronization between a web application and an external spreadsheet is technologically perilous without establishing a rigid single source of truth.25 The Cloudflare D1 database must act as this authoritative ledger. Furthermore, to handle strict Google Sheets API rate limits and network latency efficiently, individual cellular updates must be aggressively batched using the spreadsheets.batchUpdate method.26
+Deterministic Rules: Every successful write operation to the D1 database triggers the asynchronous dispatch of a Cloudflare Queue message containing the specific JSON Delta of the change. A consumer Worker processes this queue, batching Deltas on a predefined interval, and executes a single, massive batchUpdate payload to Google Sheets.26
+Conversely, inbound webhooks generated by Google Sheets App Scripts must submit the altered range and value alongside a timestamp. The D1 ingestion worker checks the Sync_Revision_Log timestamp. If the incoming Sheet's timestamp is older than D1's last recorded edit for that entity, the inbound edit is unequivocally rejected. D1 then forcefully dispatches an outbound update to overwrite the Sheet, maintaining absolute data integrity (Conflict Resolution: Last-Write-Wins with D1 bias).5
+UI/UX Requirements: The application includes a dedicated "Sync History & Audit" tab within the settings panel. This view utilizes a heavily paginated Shadcn DataTable, displaying the chronological Sync_Revision_Log. It highlights the mutation_source and surfaces a highly visible "Force Resync to Sheets" manual override button to allow users to manually push the D1 state outward in the event of an API failure.
+
+
+  
+
+
+
+4. Cloudflare Infrastructure & Worker Architecture
+The backend infrastructure completely eschews traditional, centralized monolithic servers in favor of the globally distributed Cloudflare Developer Platform. This architecture specifically leverages Cloudflare's purpose-built primitives to handle stateful AI orchestration, long-running processes, and edge-adjacent relational data storage.27
+4.1 Cloudflare Workflows (Long-Running Research)
+Cloudflare Workflows provide step-based, durable execution necessary for the Deep Research Agent.20 Because web scraping and LLM synthesis can take several minutes and are inherently prone to transient network failures or external API timeouts, Workflows automatically handle execution retries and state memoization without requiring complex boilerplate.20
+The architecture specifically utilizes the human-in-the-loop pattern. The Workflow script (extending WorkflowEntrypoint) initiates by receiving a specific budget_item_id. To prevent runaway compute costs, it immediately pauses execution using the step.waitForEvent() API.13 For example, the script executes: const waitForApproval = await step.waitForEvent('Wait for AI Image tagging approval', { type: 'approval-for-research', timeout: '5 minute' });.13 The Workflow remains suspended in a zero-compute state until the user approves the action via the React UI. Upon approval, the frontend dispatches a payload ({ approved: true }) to the Workflow endpoint, which resolves the promise.13 The Workflow then resumes, executing sequential step.do() blocks to call search APIs, parse the DOM of vendor sites, chunk data into Workers AI for synthesis, and finally write the resulting ai_summary_output back to the D1 database.
+4.2 Durable Objects & State (Chat Memory)
+The integration of the assistant-ui chat interface requires highly stateful, low-latency communication to maintain conversational continuity. This requirement is fulfilled utilizing Cloudflare Durable Objects coupled directly with the @cloudflare/ai-chat package.28 Durable Objects provide globally unique, addressable instances that bind compute to localized persistent storage.30
+The implementation defines a Durable Object class that extends AIChatAgent.29 A unique instance is instantiated per user session. This object maintains the entire conversational memory directly within its embedded, zero-latency SQLite database.31 This architecture ensures that if a user on a mobile device experiences a network drop, the WebSocket connection can immediately resume upon reconnection, seamlessly recovering the chat state without querying a central database.28 Furthermore, the system leverages WebSocket hibernation; when the user is idle, the Durable Object shuts down to conserve compute costs while maintaining the active connection.32 On the client side, the React application utilizes the useAgentChat hook provided by @cloudflare/ai-chat/react. This hook effortlessly wraps the WebSocket and exposes the messages array, sendMessage function, and streaming status directly to the assistant-ui runtime, completely abstracting the complex WebSocket lifecycle management.3
+4.3 Queues (PDF Ingestion & Bulk Syncing)
+Cloudflare Queues are deployed to manage unpredictable workload spikes and decouple heavy processing from user-facing API responses.
+* PDF Ingestion Pipeline: When a user uploads a dense, 50-page contractor bid PDF, the receiving Worker does not attempt to parse it inline. Instead, it immediately returns an HTTP 202 Accepted response to the client and drops the binary payload (or an R2 reference key) into an ingestion-queue. A consumer Worker pulls these messages in manageable batches, runs OCR processes, and routes the extracted text through Workers AI to map the line items before writing the results to D1.
+* Google Sheets Bulk Sync: To strictly adhere to Google Sheets API rate limits and avoid 429 Too Many Requests errors, all successful D1 mutations dispatch a lightweight message to a sheets-sync-queue. A secondary consumer worker batches these deltas every 10 to 30 seconds, constructing a single, massive spreadsheets.batchUpdate request. When retrieving document states, the API utilizes the includeTabsContent parameter set to true via the documents.get method to ensure all hierarchical sheets are analyzed.26
+4.4 D1 SQLite (Relational Logic & Auditing)
+Cloudflare D1 serves as the serverless relational database powering the core deterministic logic of the application. It handles the rigorous, standard SQL mathematics required for rolling up line items, tracking variances, and maintaining the revision audit log. The schema heavily utilizes foreign key constraints to maintain the absolute integrity of the MasterFormat mapping hierarchy. Because the bi-directional sync architecture requires frequent, high-speed read operations to compare inbound Google Sheets timestamps against the Sync_Revision_Log, the database configuration is tuned utilizing the PRAGMA cache_size directive, expanding the maximum number of database disk pages held in memory to optimize read latency.35
+5. API Endpoint Design & Meta-Prompts
+The backend exposes a secure API gateway managed by Cloudflare Workers, providing RESTful and RPC interfaces for the React frontend and external webhooks.
+5.1 API Endpoint Definitions
+
+
+Endpoint Path
+	HTTP Method
+	Payload / Request Body
+	Response & Internal Logic
+	/api/v1/projects/:id/bids/upload
+	POST
+	multipart/form-data (PDF file)
+	Logic: Saves file to R2, enqueues a message to ingestion-queue, returns HTTP 202 Accepted.
+	/api/v1/projects/:id/budget
+	GET
+	None (Relies on Path Param)
+	Logic: Executes deterministic D1 SQL query (GROUP BY room_id, masterformat_division) utilizing SUM(actual_cost - allowance_amount) to return the aggregated hierarchical budget.
+	/api/v1/sync/google-sheets/webhook
+	POST
+	{ sheetId, range, value, timestamp }
+	Logic: Validates payload timestamp against D1 Sync_Revision_Log. Resolves Last-Write-Wins conflict. Updates D1 or rejects and triggers an outbound force-sync.5
+	/api/v1/workflows/research/approve
+	POST
+	{ instanceId: string, approved: boolean }
+	Logic: Retrieves Workflow instance, dispatches an event to resolve the waitForEvent pause, allowing deep research to commence.13
+	/api/v1/chat/ws/:session_id
+	GET (Upgrade)
+	WebSocket Upgrade Headers
+	Logic: Upgrades HTTP request to a WebSocket, routing the connection to the specific Durable Object managing the AIChatAgent state.28
+	
+
+5.2 Critical Meta-Prompts for AI Agents
+The following meta-prompts are designed to be embedded directly within the Cloudflare Workers AI integration. They provide the exact orchestration logic, persona constraints, and output structures required for the AI agents to function predictably.
+Meta-Prompt 1: Bid Reconciliation & Risk Analysis Agent
+<system_directive> You are an elite, highly skeptical Construction Estimator and Fiduciary Consultant. Your sole objective is to protect the homeowner's capital by identifying hidden risks, aggressive allowances, and missing scope in unstructured contractor bids. You prioritize structural integrity and budget containment above all aesthetic concerns. </system_directive>
+<output_schema> { "mapped_items": [ { "original_text": string, "masterformat_division": string, "amount": number, "is_allowance": boolean } ], "allowance_percentage": number, "risk_flags":, "negotiation_script": string } </output_schema>
+Meta-Prompt 2: Deep Research Orchestration Agent
+<system_directive> You are an autonomous Procurement and Research Agent operating asynchronously. Your task is to utilize tool-calling to execute live web searches, aggregate quantitative pricing, and synthesize qualitative product reviews for specific construction materials. </system_directive>
+<tool_definitions>
+</tool_definitions>
+6. Open Questions & Future Iterations
+To ensure seamless engineering execution and mitigate downstream architectural refactoring, the following critical areas require clarification from the Product and Engineering leadership during the initial Sprint Planning phase:
+1. Google Sheets Rate Limit Tuning: While the implementation of the batchUpdate payload effectively mitigates absolute write limits 26, the exact interval at which the Cloudflare Queue flushes data to Google Sheets must be defined. Is a near-real-time flush (every 5 to 10 seconds) strictly necessary for user confidence, or is a 60-second debounced batch interval acceptable to further reduce API load and compute costs?
+2. Durable Object Hibernation UX: To heavily optimize serverless costs, the architecture relies on WebSocket hibernation for idle chat sessions.32 How should the React UI handle the visual state (e.g., loading spinners, disabled inputs) during the brief, predictable latency incurred when a Durable Object wakes up from hibernation upon a user sending a new message after an extended period of inactivity?
+3. Authentication & Multi-Tenant Isolation: Assuming the deployment utilizes Cloudflare Access or a standard JWT implementation for identity management, how will Row-Level Security (RLS) be strictly enforced at the D1 SQLite query level? It is imperative to ensure that users absolutely cannot access other homeowners' highly sensitive financial data or sync logs through manipulated API requests.
+4. Assistant-UI Thread Management: The assistant-ui documentation explicitly states that multi-thread support requires a custom thread list wired around the useAISDKRuntime component.3 Will the initial v1 release support multiple distinct chat threads (e.g., one isolated thread for Kitchen negotiations, another for Bathroom sourcing), or will it utilize a single, global project assistant thread to minimize initial development complexity?
+
+
+
+
+
+
+JSON
+,
+   "dependencies":
+ },
+ {
+   "taskId": "T-002",
+   "title": "Build Deterministic Budget Rollup Endpoints",
+   "description": "Create REST endpoints in the Cloudflare Worker to query D1. Implement strict mathematical logic utilizing SQL SUM and GROUP BY to calculate Room subtotals, variance, and Remaining_Contingency. Ensure no floating-point inaccuracies.",
+   "epic": "Cloudflare Infrastructure",
+   "cloudflare_services":,
+   "dependencies":
+ },
+ {
+   "taskId": "T-003",
+   "title": "Implement Chat Agent Durable Object",
+   "description": "Create a Durable Object class extending AIChatAgent from @cloudflare/ai-chat. Configure the internal SQLite storage for message persistence and expose the WebSocket upgrade endpoint to handle chat streams.",
+   "epic": "AI Agents",
+   "cloudflare_services":,
+   "dependencies":
+ },
+ {
+   "taskId": "T-004",
+   "title": "Frontend: Wire Assistant-UI to Chat Agent",
+   "description": "Integrate @assistant-ui/react with the React frontend. Utilize the useAgentChat hook from @cloudflare/ai-chat/react to connect to the Durable Object WebSocket. Render the floating assistant modal.",
+   "epic": "Frontend UI",
+   "cloudflare_services": ["None"],
+   "dependencies":
+ },
+ {
+   "taskId": "T-005",
+   "title": "PDF Bid Ingestion Queue Producer",
+   "description": "Create an API endpoint to accept multipart/form-data PDF uploads. Save the binary to R2 and enqueue a message to the ingestion-queue, returning a 202 Accepted response immediately.",
+   "epic": "Cloudflare Infrastructure",
+   "cloudflare_services":,
+   "dependencies":
+ },
+ {
+   "taskId": "T-006",
+   "title": "PDF Bid Ingestion Queue Consumer & OCR",
+   "description": "Write a consumer Worker to pull from the ingestion-queue. Execute OCR text extraction and pass the raw text to Workers AI utilizing the Bid Reconciliation Meta-Prompt. Parse the JSON output and write mapped items to D1.",
+   "epic": "AI Agents",
+   "cloudflare_services":,
+   "dependencies":
+ },
+ {
+   "taskId": "T-007",
+   "title": "Frontend: Human-in-the-Loop Drag & Drop UI",
+   "description": "Implement @dnd-kit/core. Create a split-pane view with a 'Staging Area' for unmapped PDF extractions. Allow users to drag items into Room/Category drop zones, triggering API calls to update D1 mappings.",
+   "epic": "Frontend UI",
+   "cloudflare_services": ["None"],
+   "dependencies":
+ },
+ {
+   "taskId": "T-008",
+   "title": "Deep Research Workflow Orchestration",
+   "description": "Implement a Cloudflare Workflow for the Sourcing Agent. Implement step.waitForEvent('approval-for-research') for the human approval gate. Configure MCP tool calling for web search and sequential step.do() blocks for synthesis.",
+   "epic": "AI Agents",
+   "cloudflare_services":,
+   "dependencies":
+ },
+ {
+   "taskId": "T-009",
+   "title": "Frontend: Deep Research Approval & Dashboard",
+   "description": "Build the 'Research Jobs' dashboard utilizing Shadcn Progress bars. Create Dialogs that prompt the user for approval. Fire the specific webhook payload to resolve the Workflow waitForEvent pause.",
+   "epic": "Frontend UI",
+   "cloudflare_services": ["None"],
+   "dependencies":
+ },
+ {
+   "taskId": "T-010",
+   "title": "Google Sheets Sync: Outbound Queue Producer",
+   "description": "Implement database triggers or application-level hooks so that every successful D1 mutation writes a JSON delta payload to the sheets-sync-queue.",
+   "epic": "Data Sync",
+   "cloudflare_services":,
+   "dependencies":
+ },
+ {
+   "taskId": "T-011",
+   "title": "Google Sheets Sync: Outbound Batch Updates",
+   "description": "Write a consumer Worker that debounces messages from the sheets-sync-queue and constructs a massive spreadsheets.batchUpdate request, utilizing includeTabsContent to target specific sheet ranges.",
+   "epic": "Data Sync",
+   "cloudflare_services":,
+   "dependencies":
+ },
+ {
+   "taskId": "T-012",
+   "title": "Google Sheets Sync: Inbound Webhook & Conflict Resolution",
+   "description": "Create a webhook endpoint to receive edits from Google Sheets. Implement the 'Last-Write-Wins' logic comparing incoming timestamps against the Sync_Revision_Log. Write accepted changes to D1 or trigger a force-sync.",
+   "epic": "Data Sync",
+   "cloudflare_services":,
+   "dependencies":
+ },
+ {
+   "taskId": "T-013",
+   "title": "Frontend: Sync History & Audit Dashboard",
+   "description": "Build a settings view utilizing a paginated Shadcn DataTable to display the chronological Sync_Revision_Log. Implement visual indicators for conflict_flag states and a manual 'Force Resync' button.",
+   "epic": "Frontend UI",
+   "cloudflare_services": ["None"],
+   "dependencies":
+ },
+ {
+   "taskId": "T-014",
+   "title": "Implement CSI MasterFormat Gap Analyzer Logic",
+   "description": "Write the D1 triggers and application logic to enforce scope completeness. Specifically map Division 09 (Finishes) dependencies to Division 07 (Waterproofing) and flag missing structural items.",
+   "epic": "Cloudflare Infrastructure",
+   "cloudflare_services":,
+   "dependencies":
+ },
+ {
+   "taskId": "T-015",
+   "title": "Frontend: Overage Mitigator & Budget Thermometer",
+   "description": "Implement a persistent sticky header displaying a visual budget thermometer based on the Remaining_Contingency metric. Surface AI-generated Trade-off Scenario cards when thresholds are breached.",
+   "epic": "Frontend UI",
+   "cloudflare_services": ["None"],
+   "dependencies":
+ }
+]
+
+Works cited
+1. CSI MasterFormat® Simply Explained: All 50 Divisions - Young Architect Academy, accessed July 6, 2026, https://academy2.youngarchitect.com/masterformat/
+2. What Is MasterFormat? A Complete Guide to CSI Divisions - Autodesk, accessed July 6, 2026, https://www.autodesk.com/blogs/construction/csi-divisions-masterformat/
+3. Cloudflare Agents Integration - assistant-ui, accessed July 6, 2026, https://www.assistant-ui.com/docs/integrations/frameworks/cloudflare-agents/overview
+4. Sync2Sheets: Notion to Google Sheets Real-Time 2-Way Sync, accessed July 6, 2026, https://sync2sheets.com/
+5. Database to Database Integration: Guide & Patterns - Domo, accessed July 6, 2026, https://www.domo.com/learn/article/database-to-database-integration
+6. Construction Allowances Explained: What Contractors Need To Know | AIA Contract Documents, accessed July 6, 2026, https://learn.aiacontracts.com/articles/6529593-construction-contracting-basics-allowances/
+7. THE USE AND MISUSE OF ALLOWANCES AND CONTRACTOR CONTINGENCY | Ogletree Deakins, accessed July 6, 2026, https://ogletree.com/app/uploads/practice-areas/allowances-contingencies-white-paper.pdf
+8. The Cost of Indecision: Why We Use a "No Allowance" Bidding Process - Bayless Custom Homes San Antonio, TX, accessed July 6, 2026, https://baylesscustomhomessa.com/the-cost-of-indecision-why-we-use-a-no-allowance-bidding-process/
+9. MasterFormat: The Definitive Guide to CSI Divisions in Construction | Procore, accessed July 6, 2026, https://www.procore.com/library/csi-masterformat
+10. CSI Standards for Residential Construction, accessed July 6, 2026, https://theconstructionstandard.com/csi-standards-residential-construction
+11. Managing the contingency allowance - The American Institute of Architects: AIA, accessed July 6, 2026, https://www.aia.org/resource-center/managing-the-contingency-allowance
+12. What Adds Most Value to Kitchen? Top ROI Upgrades 2026 - Pro Remodeling, accessed July 6, 2026, https://www.pro-remodeling.com/kitchen-upgrades-best-roi/
+13. Human-in-the-Loop Image Tagging with waitForEvent · Cloudflare ..., accessed July 6, 2026, https://developers.cloudflare.com/workflows/examples/wait-for-event/
+14. San Francisco Design-Build: The Fastest Way to Complete a Home Remodel, accessed July 6, 2026, https://www.podestaconstruction.com/blog/san-francisco-design-build-the-fastest-way
+15. Soft Story | SFGOV, accessed July 6, 2026, https://www.sfgov.org/sfc/esip/soft-story
+16. Seismic Retrofit Cost Bay Area 2026 | Pricing by Type - Custom Home, accessed July 6, 2026, https://www.customhome.us/blog/seismic-retrofit-cost-bay-area
+17. Seismic Retrofit Costs San Francisco 2025 | Complete Guide - Twin Home Buyer, accessed July 6, 2026, https://www.twinhomebuyer.com/seismic-retrofit-costs-in-san-francisco-a-comprehensive-guide-2025-update/
+18. Three Guidelines to Avoid Construction Allowance Pitfalls - Jordan Ramis, accessed July 6, 2026, https://jordanramis.com/article/three-guidelines-to-avoid-construction-allowance-pitfalls/
+19. Human-in-the-loop patterns · Cloudflare Agents docs, accessed July 6, 2026, https://developers.cloudflare.com/agents/concepts/agentic-patterns/human-in-the-loop/
+20. Cloudflare Workflows - Durable Execution Engine, accessed July 6, 2026, https://www.cloudflare.com/products/workflows/
+21. Agent setup - Cloudflare Docs, accessed July 6, 2026, https://developers.cloudflare.com/agent-setup/
+22. Kitchen Remodel Return on Investment for Sellers - Zillow, accessed July 6, 2026, https://www.zillow.com/learn/kitchen-remodel-roi/
+23. 7 Kitchen Improvement Projects That Offer the Best and Worst Return on Investment, accessed July 6, 2026, https://www.realtor.com/advice/home-improvement/kitchen-improvement-projects-that-offer-best-and-worst-return-on-investment/
+24. A Well-Planned Kitchen Remodel: A Wise Investment with Great ROI - Mullwoods, accessed July 6, 2026, https://mullwoods.com/a-well-planned-kitchen-remodel-a-wise-investment-with-great-roi-2/
+25. Bidirectional sync between two databases with differing schemas - Software Engineering Stack Exchange, accessed July 6, 2026, https://softwareengineering.stackexchange.com/questions/402122/bidirectional-sync-between-two-databases-with-differing-schemas
+26. Update spreadsheets | Google Sheets, accessed July 6, 2026, https://developers.google.com/workspace/sheets/api/guides/batchupdate
+27. Build Stateful AI Agents - Cloudflare, accessed July 6, 2026, https://www.cloudflare.com/products/agents/
+28. Chat agents - Cloudflare Docs, accessed July 6, 2026, https://developers.cloudflare.com/agents/communication-channels/chat/chat-agents/
+29. @cloudflare/ai-chat - npm, accessed July 6, 2026, https://npmjs.com/package/@cloudflare/ai-chat
+30. Overview · Cloudflare Durable Objects docs, accessed July 6, 2026, https://developers.cloudflare.com/durable-objects/
+31. Building an AI Agent that puts humans in the loop with Knock and Cloudflare's Agents SDK, accessed July 6, 2026, https://blog.cloudflare.com/building-agents-at-knock-agents-sdk/
+32. Cloudflare Agents, accessed July 6, 2026, https://agents.cloudflare.com/
+33. Think · Cloudflare Agents docs, accessed July 6, 2026, https://developers.cloudflare.com/agents/harnesses/think/
+34. Best practices for best results | Google Docs, accessed July 6, 2026, https://developers.google.com/workspace/docs/api/how-tos/best-practices
+35. Pragma statements supported by SQLite, accessed July 6, 2026, https://sqlite.org/pragma.html
