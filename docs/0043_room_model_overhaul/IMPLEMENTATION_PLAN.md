@@ -92,6 +92,128 @@ erDiagram
 
 ---
 
+## 3b · Walls are the graph the ledger could not hold
+
+### What the first attempt got right, and the one thing it got wrong
+
+`measurements` (0006 Phase 1, 14 rows on remote) is a better as-is ledger than it is given credit for: `element_type` polymorphism across room / closet / window / door / shower / wall, optional room and floor, an authoritative `areaSqFt` override for irregular footprints, and real provenance via `source` + `isApproximate` + `accuracyNote`. Its docstring even names the skylight case explicitly.
+
+**Its single failure: it tried to hold a graph in a JSON column.**
+
+`spanJson` was the escape hatch for "a skylight's distance from each of the four surrounding walls" — but JSON cannot hold a foreign key, so *"36 inches from **that wall**"* degrades to a string nothing can join on. And "what is on the other side of this wall" had nowhere to live at all. That is why the model stalled at Phase 1: the next step was not expressible in it.
+
+**Keep the ledger. Add the graph.** They are different things, and asking one table to be both is what stopped it.
+
+| Concern | Home |
+|---|---|
+| "This dimension is X, measured this way, to this confidence" | `measurements` — kept, migrated to canonical inches |
+| "This wall separates these two rooms, is load-bearing, and has a window 36 inches from its left end" | New relational tables below |
+
+### Walls as first-class, shared between rooms
+
+```mermaid
+erDiagram
+  walls ||--o{ wall_face_segments : "each side divides into"
+  walls ||--o{ wall_openings : "carries"
+  rooms ||--o{ wall_face_segments : "is adjacent across"
+  walls {
+    int id PK
+    int project_id FK
+    text label
+    int length_inches
+    int height_inches
+    text wall_kind "full|pony|partial_divider|column|knee"
+    text load_bearing "yes|no|unknown"
+    text load_bearing_confidence "known|assumed|range|unknown"
+    text load_bearing_source "engineer|contractor|homeowner|drawing|inferred"
+    int is_active
+  }
+  wall_face_segments {
+    int id PK
+    int wall_id FK
+    text side "a|b"
+    int from_inches "position along the wall"
+    int to_inches
+    text adjacent_kind "room|exterior|garage|crawlspace|unknown"
+    int adjacent_room_id FK
+    text exterior_compass "N|E|S|W|NE|NW|SE|SW"
+    text exterior_relation "street_facing|backyard_facing|left_side|right_side"
+    text insulation_status "present|absent|unknown|planned"
+  }
+  wall_openings {
+    int id PK
+    int wall_id FK
+    text opening_kind "window|exterior_door|interior_door|passage|niche|pass_through"
+    int offset_from_left_inches
+    int width_inches
+    int height_inches
+    int sill_height_inches "null for doors"
+    int product_id FK "when specified"
+    int is_active
+  }
+```
+
+**A wall belongs to the project, not to a room.** One wall separates two spaces, and modelling it per-room would store it twice and let the copies disagree — the same error as a denormalised name.
+
+**Segments in inches, not percentages.** The 30/30/30/10 case — part exterior, part guest bath, part living room, part laundry — is four segments with real positions. Percentages were the intuitive framing but they silently rescale the moment the wall is resized, so a 30% laundry share quietly becomes a different number of inches with no event recording it. Inches survive; the percentage is derived for display.
+
+**Openings store offset + width, never both sides.** "Wall length to the left of the window and to the right" is one measurement and one derivation: right = `length_inches − offset − width`. Storing both is the feet-and-inches mistake again — two columns holding one fact, disagreeing the first time either is edited.
+
+**Load-bearing is not a boolean.** The phrasing was *"known to be **or confirmed to be** load bearing"* — which is two different states, and the difference is whether a homeowner should be quoting it to a contractor. It carries a confidence and a source, reusing the vocabulary `roomReadiness()` already enforces. An `assumed` load-bearing wall is a question, not a fact.
+
+### Ceiling features positioned by real references
+
+```mermaid
+erDiagram
+  rooms ||--o{ ceiling_features : "has"
+  ceiling_features ||--o{ ceiling_feature_distances : "is located by"
+  walls ||--o{ ceiling_feature_distances : "references"
+  ceiling_features {
+    int id PK
+    int room_id FK
+    text feature_kind "skylight|beam|soffit|vault|coffer|fan_box|light_well"
+    int width_inches
+    int length_inches
+    int product_id FK
+  }
+  ceiling_feature_distances {
+    int id PK
+    int feature_id FK
+    text feature_edge "N|E|S|W"
+    int wall_id FK
+    int distance_inches
+  }
+```
+
+This is the `spanJson` case done relationally. A 4×4 skylight recorded as *west edge 126" to the entry wall, north edge 36" to the shower wall, east edge 23" to the back wall, south edge 36" to the vanity wall* becomes four rows with real `wall_id` FKs.
+
+**And it locates the feature without coordinates.** Given the room's own dimensions, four edge-to-wall distances place the skylight unambiguously — the agent can say "the skylight sits in the back third, centred" and be *right*, rather than guessing. That was the point of the original design and JSON could not deliver it.
+
+### The tense axis applies to walls too
+
+A wall has an as-is state and a to-be state, and the to-be belongs to a scenario — the same rule as §3 and 0041 §4e. Planned changes are **not** columns on `walls`:
+
+`wall_planned_changes(wall_id, scenario_id, change_kind, …)` where `change_kind` ∈ `keep | resize | reposition | remove | add`. A removed wall is one of the highest-ripple decisions in a remodel, and expressing it as a scenario-scoped row rather than a flag means it can be proposed, costed, and rolled back without mutating the as-is record of the house.
+
+### Existing items — the fit-check that pays for itself
+
+Measure what is already in the room even when it is being replaced. The case that justifies it is not documentation, it is **shopping**:
+
+> A homeowner sees an 8-foot interior door in a showroom and adds it to a wishlist. The ceiling in that hallway is 8'0". Nobody catches it until delivery.
+
+`room_existing_items(room_id, item_kind, width/height/depth_inches, disposition, product_id)` where `disposition` ∈ `keep | replace | remove | relocate`. Two uses:
+
+1. **Keep** items must be accounted for in the to-be plan — a piece of furniture that no longer fits is a discovery nobody wants at the end.
+2. **Replace** items give the shopping surface a baseline, so a candidate product can be fit-checked against the actual opening, ceiling, and clearance before it is bought.
+
+### Capture: this is 0041 Phase 7, pointed at the floorplan
+
+The half-built idea — a live floorplan canvas where an agent plots the wall it needs, the homeowner speaks *"forty and a half inches"*, and the measurement draws itself for confirmation — is **not new work.** It is 0041's conversational capture (`assistant-ui` thread + voice transcription + generative-UI confirmation loop) with the floorplan as the confirmation surface instead of a card.
+
+That matters for sequencing: the capture problem is already funded in 0041 Phase 7, and this model is what gives it something precise to write. The confirmation step is also what makes voice capture safe — *"is this the wall I mean"* is exactly the generative-UI restatement, and getting the wrong wall is the failure mode that would otherwise poison the whole dataset.
+
+---
+
 ## 4 · Notes
 
 ```mermaid
@@ -380,6 +502,103 @@ erDiagram
 ### `all_levels` therefore goes
 
 It has zero rooms, its purpose is served properly by the mechanism above, and leaving it invites exactly the shortcut this section rejects. Retire it, and if scope markers are ever needed in `floors` again, add an explicit `is_physical` flag so a non-floor cannot quietly become a floor.
+
+---
+
+## 5c · Material types, applicability, and takeoffs
+
+### The type carries the envelope; the application carries the fact
+
+```mermaid
+erDiagram
+  material_type_def ||--o{ material_type_room_type_mapping : "is limited to"
+  room_type_def ||--o{ material_type_room_type_mapping : "limits"
+  material_type_def ||--o{ material_schedule_items : "types"
+  material_type_def {
+    int id PK
+    text key "FLOORING|WALL_FINISH|INTERIOR_DOOR|WINDOW|LIGHTING|OUTLET|BASEBOARD|..."
+    text display_name
+    text description_markdown
+    text description_html
+    text description_plaintext
+    int is_entire_floor_applicable "CAN this type span a floor"
+    int is_entire_home_applicable "CAN this type span the house"
+    text takeoff_unit "sqft|linear_ft|each|gallons"
+    real default_waste_factor "NEW - 0.10 flooring, 0.15 tile, 0 for each-counted"
+    int is_active
+  }
+  material_type_room_type_mapping {
+    int id PK
+    int material_type_id FK
+    int room_type_id FK
+  }
+```
+
+**The flags describe what a type *can* do, not what was done.** "Flooring can span the house" is a property of flooring; a specific tile SKU inherits it. What actually happened is already recorded by `room_scope_applications` from §5b. Keeping the two separate is what stops the same fact living in two places and drifting.
+
+**`isRoomTypeUnique` + one `room_type_id` becomes a mapping.** A shower valve is unique to bathrooms *and* wet rooms; a range hood to kitchens *and* a butler's pantry. A single-value constraint on a genuinely many-valued relationship is the same shape corrected twice already in this plan, so it is corrected here up front rather than after it ships.
+
+### Applicability rules — reuse `ripple_rules`, do not build a second engine
+
+The flooring logic is a rules problem with exactly the structure 0041 already has: trigger → consequence → does a human have to confirm.
+
+```mermaid
+flowchart TD
+  A["Flooring applied<br/>whole house"] --> B{"Multiple levels?"}
+  B -->|yes| C["CONFIRM: whole house,<br/>or one level?"]
+  C -->|one level| D["REQUIRE: stair strategy —<br/>match the updated level,<br/>or leave as-is?"]
+  B -->|no| E{"Material family?"}
+  C -->|whole house| E
+  E -->|tile| F["CONFIRM: continue into<br/>bathrooms?"]
+  E -->|hardwood / carpet| G["ASSUME: bathrooms differ.<br/>Do not ask."]
+  classDef ask fill:#4d3d1f,stroke:#fbbf24,color:#fff
+  classDef auto fill:#1f4d2e,stroke:#4ade80,color:#fff
+  class C,D,F ask
+  class G auto
+```
+
+**The valuable part is not the branching — it is knowing which branches are questions.** Tile continuing into a bathroom is genuinely ambiguous, so it is a confirm. Hardwood continuing into a bathroom is almost never the intent, so it is an assumption and asking would be noise. An app that asks both is a nag; an app that asks neither is wrong. That distinction is the product.
+
+So the rule row carries an explicit resolution:
+
+| `resolution` | Behaviour |
+|---|---|
+| `auto_apply` | Extend the material without asking |
+| `auto_exclude` | Do **not** extend; state the assumption where it is visible, do not interrupt |
+| `must_confirm` | Stop and ask, with the reason shown |
+| `must_specify` | Cannot proceed until the homeowner supplies a decision — the stair case |
+
+`ripple_rules` already has `trigger_match`, `consequences`, `rationale`, `strength`, and `jurisdiction`. Adding `resolution` and reusing it beats a parallel `material_applicability_rules` table that would drift from it.
+
+**The stair case is the good one.** Choosing one level forces a stair decision — the stairs are the seam between two flooring strategies and there is no defensible default. `must_specify` is exactly right: not a nag, a genuine unknown that blocks a correct takeoff.
+
+### Takeoffs — computed, never stored
+
+Square footage of flooring, linear feet of baseboard, gallons of paint, counts of doors, outlets and lights. All **derived on read** from measurements + intent + material type, never written to D1 — the same rule as measurements themselves. A stored takeoff is wrong the first time a wall moves, and nobody notices.
+
+| Takeoff | Needs | Status |
+|---|---|---|
+| Flooring sqft | area + waste factor | Ready — area is derivable from length × width, or the explicit override |
+| Paint sqft | **perimeter** × ceiling height − openings | **Blocked — see below** |
+| Baseboard linear ft | **perimeter** − door openings | **Blocked** |
+| Interior doors | count of door openings | Needs an openings model |
+| Lighting / outlets | count | Needs an openings/fixtures model |
+
+### The gap: perimeter is not derivable
+
+`length × width` gives area for a rectangle and nothing useful for anything else. `rooms.areaSqFt` exists precisely because rooms are not rectangles — its docstring cites the L-shaped lower foyer at 77.28 sq ft.
+
+**Paint and baseboard are perimeter problems, and perimeter cannot be inferred from an area override.** Two rooms of identical area have wildly different perimeters.
+
+So `room_measurements` gains:
+
+- **`perimeter_inches`** — measured, not computed. Without it, baseboard and paint takeoffs are guesses presented as numbers, which is worse than no number at all.
+- **`ceiling_height_inches`** — already in §3, and paint depends on it.
+- **`openings`** — a small child table (`room_openings`: kind = `door | window | passage | niche`, width/height in inches, plus a `product_id` FK when it is a specified door or window). Openings are what get subtracted from paint and baseboard, and counted for the door takeoff. They are also what `FENESTRATION_CHANGE` intent operates on.
+
+**`default_waste_factor` on the type.** Every real takeoff adds waste — roughly 10% for plank flooring, 15% for tile with a diagonal lay, none for anything counted individually. A takeoff without it under-orders, and under-ordering tile means a dye-lot mismatch, which is not a rounding error but a re-do. The factor is a default on the type and overridable per material.
+
+**Every takeoff reports its inputs and its confidence.** A number computed from an `assumed` measurement is presented as an estimate with its basis shown, never as a quantity to order from. This is `PRODUCT.md` principle 7 applied to arithmetic: do not hand someone a number they will act on without showing what it rests on.
 
 ---
 
