@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/0042-showroom-quote-map",
+    title: "Showroom pending-quote panel (0042 P4)",
+    summary:
+      "Extracted quotes/invoices now resolve to the showroom they came from and surface as a pending item inside that store's viewport, not only the global alerts feed. Adds worker_email_invoices.showroom_store_id (FK, migration 0166, additive); the email pipeline stamps it at extraction via the existing matchShowroomStore() (sender domain/name → store) on both the fresh and reprocess paths. GET /api/showroom-stores/:id/pending-quotes returns a store's draft quotes + line items; a PendingQuotesPanel atop the brands-products section shows vendor/total/lines with Confirm/Dismiss (reusing the worker-emails confirm/reject endpoints) and a Review & map link. The alerts aggregator's invoice_review rows now deep-link into the store viewport when the quote resolved to a showroom, else the global receipt-review queue. Nullable by design — an unresolved quote (e.g. a gmail.com sender) stays store-less and shows only in the global feed. Product match/auto-create is P5.",
+    date: "2026-08-02",
+    status: "staged",
+    prNumber: 336,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/336",
+  },
+  {
     branch: "claude/showroom-360-tour-links-0fd2ac",
     title: "Showroom 360° tour — Photos bento + Street View auto-tour",
     summary:
@@ -310,6 +320,24 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "store-quote-viewport",
+    branch: "claude/0042-showroom-quote-map",
+    date: "2026-08-02",
+    area: "Showrooms",
+    title: "Pending quotes surface in the showroom viewport (0042 P4)",
+    summary:
+      "An extracted quote/invoice now resolves to the showroom it came FROM and shows as a pending item inside that store's viewport — closing the P4 half of the original quote-ingestion request (previously the quote only appeared in the global alerts feed). The email pipeline stamps worker_email_invoices.showroom_store_id at extraction by matching the sender's domain/name to a store via the existing matchShowroomStore(), on both the fresh and reprocess paths. A PendingQuotesPanel atop the brands-products section lists vendor / total / line items with Confirm/Dismiss (reusing the worker-emails confirm/reject endpoints) and a Review & map link; the alerts aggregator deep-links invoice_review rows into the store viewport when scoped. The FK is nullable — a quote from a public domain (gmail.com) stays store-less and shows only globally. Product match/auto-create is P5.",
+    changes: [
+      { kind: "migration", text: "0166 (additive): worker_email_invoices.showroom_store_id integer FK → showroom_stores (ON DELETE SET NULL) + index. Applied to remote + verified." },
+      { kind: "added", text: "GET /api/showroom-stores/:id/pending-quotes — draft quotes (status='draft') resolved to this store, each with its line items; { quotes: [...] }." },
+      { kind: "added", text: "PendingQuotesPanel in StoreViewportApp (brands-products section): vendor, total, confidence, line items, Confirm/Dismiss, Review & map. Renders nothing when there are no pending quotes." },
+      { kind: "changed", text: "email pipeline (analyzeAndPersist) resolves sender → store via matchShowroomStore() (now exported from showroom-contact-autopopulate.ts) and stamps showroom_store_id on the invoice — fresh + reprocess." },
+      { kind: "changed", text: "alerts aggregator: invoice_review rows deep-link to /admin/shopping/store/:id/brands-products when the quote resolved to a showroom, else /admin/shopping/receipt-review." },
+    ],
+    migrations: ["0166"],
+    status: "staged",
+  },
   {
     id: "showroom-360-tour",
     branch: "claude/showroom-360-tour-links-0fd2ac",
