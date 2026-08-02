@@ -55,6 +55,9 @@ export * from "./home/room_notes";
 export * from "./home/room_intents";
 export * from "./home/room_problems";
 
+// 0043 Phase 4 — surfaces: assemblies, fixtures, requirements.
+export * from "./home/surfaces";
+
 export * from "./home/measurements";
 export * from "./home/remodel_scenarios";
 export * from "./home/scenario_room_plans";
