@@ -70,6 +70,34 @@ export const rippleRules = sqliteTable(
      */
     jurisdiction: text("jurisdiction"),
 
+    /**
+     * What KIND of rule this is (0043 §5c). The same engine now serves three
+     * jobs, and a query needs to tell them apart:
+     *   physical_ripple   move a wall, plumbing and electrical follow
+     *   material_applicability  tile whole-house -> confirm the bathrooms
+     *   scoping_question  bathroom + FULL_REMODEL -> "wall-hung vanity?"
+     * One engine, three uses — three engines would drift. Added via ADD COLUMN
+     * with a default so existing physical-ripple rows keep working untouched.
+     */
+    ruleKind: text("rule_kind").notNull().default("physical_ripple"),
+
+    /**
+     * What the system does when the trigger matches (0043 §5c). The VALUE of this
+     * whole feature is not the branching — it is knowing WHICH branches are
+     * questions:
+     *   auto_apply     extend without asking (tile continuing across a floor)
+     *   auto_exclude   do NOT extend; state the assumption, do not interrupt
+     *                  (hardwood does not continue into a bathroom)
+     *   must_confirm   stop and ask, with the reason shown
+     *                  (tile continuing INTO a bathroom is genuinely ambiguous)
+     *   must_specify   cannot proceed until the homeowner decides — the stair
+     *                  case, where no defensible default exists
+     * An app that asks both is a nag; one that asks neither is wrong. Encoding
+     * which is which is the product. Null for physical-ripple rows, which do not
+     * resolve to a homeowner question.
+     */
+    resolution: text("resolution"),
+
     isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
 
     datetimeCreated: integer("datetime_created", { mode: "timestamp" })
