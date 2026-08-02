@@ -50,6 +50,11 @@ export * from "./materials/material_type_def";
 export * from "./home/walls";
 export * from "./home/room_measurements";
 
+// 0043 Phase 2-3 — notes, intents, problems.
+export * from "./home/room_notes";
+export * from "./home/room_intents";
+export * from "./home/room_problems";
+
 export * from "./home/measurements";
 export * from "./home/remodel_scenarios";
 export * from "./home/scenario_room_plans";

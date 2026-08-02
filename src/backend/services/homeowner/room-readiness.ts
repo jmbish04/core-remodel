@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import { roomSpecFields, specDefinitions } from "../../db/schema";
+import { roomIntents, roomSpecFields, specDefinitions } from "../../db/schema";
 
 /**
  * roomReadiness — the single translation-ready resolver (0041 Phase 0).
@@ -208,6 +208,20 @@ export function evaluateRoomReadiness(
 export async function roomReadiness(db: D1Database, roomId: number): Promise<RoomReadiness> {
   const orm = drizzle(db);
 
+  // Scope first. A room with no committed remodel intent is not in the remodel,
+  // and the trade-readiness question does not apply — see the not_in_scope state.
+  // This is the DB half of the intent-gating fix: without it, every out-of-scope
+  // room would sit permanently un-ready demanding a shower valve.
+  const intents = await orm
+    .select({ id: roomIntents.id })
+    .from(roomIntents)
+    .where(and(eq(roomIntents.roomId, roomId), eq(roomIntents.status, "committed")))
+    .all();
+  const inScope = intents.length > 0;
+  if (!inScope) {
+    return evaluateRoomReadiness([], [], { inScope: false });
+  }
+
   const required = await orm
     .select({
       id: specDefinitions.id,
@@ -234,5 +248,5 @@ export async function roomReadiness(db: D1Database, roomId: number): Promise<Roo
     .where(eq(roomSpecFields.roomId, roomId))
     .all();
 
-  return evaluateRoomReadiness(required, fields);
+  return evaluateRoomReadiness(required, fields, { inScope: true });
 }
