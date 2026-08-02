@@ -38,6 +38,12 @@ export interface Alert {
   route: string;
 }
 
+/**
+ * Converts a Date or number to milliseconds since epoch.
+ *
+ * @param v The date, number, or null/undefined value to convert.
+ * @returns The timestamp in milliseconds, or null if the input is invalid or missing.
+ */
 function toMs(v: Date | number | null | undefined): number | null {
   if (v == null) return null;
   const t = v instanceof Date ? v.getTime() : Number(v);

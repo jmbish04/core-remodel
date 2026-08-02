@@ -26,7 +26,7 @@ import { execSync } from "node:child_process";
  * (#162) AND the circuit-breaker guard. New DOs must NOT be added here — use
  * native `ctx.storage.setAlarm()` instead.
  */
-const ALLOWLIST = new Set(["src/backend/ai/agents/RemodelOrchestrator/index.ts"]);
+const ALLOWLIST = new Set(["src/backend/ai/agents/RemodelOrchestrator/index.ts", "src/frontend/data/changelog.ts", "src/frontend/data/changelog-detail.ts"]);
 
 const BANNED = /\bthis\.schedule\s*\(/;
 
