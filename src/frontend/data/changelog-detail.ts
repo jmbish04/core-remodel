@@ -113,6 +113,81 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "store-quote-product-map": {
+    slug: "store-quote-product-map",
+    branch: "claude/0042-p5-product-map",
+    prNumber: 337,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/337",
+    subtitle: "0042 P5 · quote lines → products (match or auto-create) — and 0042 complete",
+    code: [],
+    problem:
+      "P4 pinned an extracted quote to the showroom it came from, but the line items still dead-ended: they linked only to materials/services, never to the products catalog, and a quote from a showroom the user is actively tracking did nothing to that store's product list. The original ask was explicit — 'match that data up to the products the user is tracking in the showroom if any, and if none yet, create the brand/products.' That match/create step, plus recording the quoted price, is P5 and the last of 0042.",
+    approach:
+      "A small service, map-invoice-products.ts, runs after line-item insert (post-extraction = post-approval for Gmail, so a human already gated it). For each unmatched line it reuses the SHARED ensureProductFromExtraction — the same brand+item dedup the photo-intake pipeline uses, so a quote and a price-card photo converge on one product rather than forking the catalog — passing the invoice vendor as the brand and the line description as the item name. The returned product is linked to the showroom via showroom_product_mappings (idempotent on its uniq index) and the line's unit price is written as a dated product_price_observation (sourceType 'showroom', deduped on product+store+cents so a reprocess doesn't pile up dups). The line is stamped product_id / brand_id / match_status ('created' vs 'matched'), and the viewport panel renders the product under each line with a 'new from quote' or 'matched' badge. Guardrails keep the catalog clean: only quotes that resolved to a store are mapped (an unattributed quote is left for a human), a prefix heuristic skips charge lines (tax/delivery/labor/fee/total), and everything is best-effort per line so one bad row never fails the email. FK discipline throughout — the line stores product_id/brand_id, and the display name JOINs from products.",
+    apiChanges: [
+      "CHANGED GET /api/showroom-stores/:id/pending-quotes: each line now carries productId, brandId, productName (LEFT JOIN products) + matchStatus.",
+      "NEW services/email/map-invoice-products.ts: mapInvoiceLinesToProducts(db, invoiceId) → { matched, created, skipped }; fired from the email pipeline.",
+      "No new HTTP route — mapping is a pipeline side-effect; the viewport reads it through the existing pending-quotes endpoint.",
+    ],
+    filesTouched: [
+      "src/backend/db/schema/emails/worker_email_invoice_line_items.ts (product_id + brand_id FKs + index)",
+      "drizzle/0167_abandoned_bromley.sql (new, additive)",
+      "src/backend/services/email/map-invoice-products.ts (new — the mapping service)",
+      "src/backend/services/email/pipeline.ts (fire mapping post-line-insert)",
+      "src/backend/api/routes/showroom-stores.ts (pending-quotes JOINs product name)",
+      "src/frontend/components/showroom/StoreViewportApp.tsx (per-line product badge)",
+      "scripts/qc/pr_337.mjs",
+    ],
+    migrations: [
+      {
+        tag: "0167",
+        sql: "ALTER TABLE `worker_email_invoice_line_items` ADD `product_id` integer REFERENCES products(id);\nALTER TABLE `worker_email_invoice_line_items` ADD `brand_id` integer REFERENCES brands(id);\nCREATE INDEX `worker_email_invoice_line_items_product_idx` ON `worker_email_invoice_line_items` (`product_id`);",
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Schema delta — a quote line now relates to a product + brand (FKs, nullable)",
+        code: `erDiagram
+  products ||--o{ worker_email_invoice_line_items : "matched/created as"
+  brands ||--o{ worker_email_invoice_line_items : "brand of"
+  worker_email_invoices ||--o{ worker_email_invoice_line_items : "lines"
+  products ||--o{ showroom_product_mappings : "carried by showroom"
+  products ||--o{ product_price_observations : "priced at"
+  worker_email_invoice_line_items {
+    int id PK
+    int invoice_id FK
+    int product_id FK "NEW · nullable"
+    int brand_id FK "NEW · nullable"
+    string match_status "unmatched|matched|created|skipped"
+  }`,
+      },
+      {
+        caption: "Per line: skip a charge, match a product, or create one — then link + price",
+        code: `flowchart TD
+  L["unmatched line (desc + unitPrice)"] --> J{charge line?<br/>tax/delivery/labor/fee}
+  J -->|yes| SK["match_status = skipped"]
+  J -->|no| E["ensureProductFromExtraction(vendor, desc)"]
+  E --> F{existing product?}
+  F -->|yes| MT["match_status = matched"]
+  F -->|no| CR["create brand+product · match_status = created"]
+  MT --> LK["showroom_product_mappings (idempotent)"]
+  CR --> LK
+  LK --> PO["product_price_observations<br/>(dedup product+store+cents)"]
+  PO --> ST["stamp line product_id / brand_id"]
+  classDef new fill:#1f4d2e,stroke:#4ade80,color:#eaffea;
+  class CR,LK,PO,ST new;`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_337.mjs",
+      command:
+        "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run migrate:remote  &&  pnpm run test:pr 337 -- --preview  &&  pnpm run test:pr 337",
+      ranAt: "2026-08-02",
+      output:
+        "tsc --noEmit clean on all touched files. pnpm run build green (exit 0, ~67s). migrate:remote applied 0167; PRAGMA confirms product_id + brand_id on worker_email_invoice_line_items on remote. QC pr_337: the junk-line heuristic self-check passes (tax/delivery/labor/subtotal skipped; slab/faucet/pendant kept), and the pending-quotes line shape exposes productId/brandId/productName/matchStatus. Mapping on live data fires when the next real showroom quote arrives — the only existing prod draft is store-less (gmail.com sender), which the service correctly no-ops.",
+      migrations: [{ tag: "0167", appliedRemote: true }],
+    },
+  },
   "store-quote-viewport": {
     slug: "store-quote-viewport",
     branch: "claude/0042-showroom-quote-map",
