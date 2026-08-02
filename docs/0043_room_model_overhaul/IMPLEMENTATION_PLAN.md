@@ -290,20 +290,54 @@ That the same engine now answers ripples, material applicability, **and** scopin
 
 Finishes attach through the assembly layers rather than through their own mapping tables — a paint profile is the top layer of a wall assembly, a tile profile is a three-or-four-layer stack. That keeps floor and wall finishes on one mechanism instead of two.
 
-### Progressive disclosure is not optional here
+### Depth is never gated — only what is *asked* is
 
-`PRODUCT.md` names the primary user as a **first-time remodeler who needs structure handed to them.** This model can ask about RSIC-1 clips, Level 5 finish, and mineral wool R-values — which is the right depth for a sophisticated owner and completely wrong as an onboarding experience.
+**Correcting an earlier draft of this plan.** It proposed gating depth by intent, so a `TARGETED_FIXTURE` room could not record assembly or acoustic detail. That was wrong, and the reasoning behind it — "the first-time remodeler needs structure" — was being used to justify a shortcut. It would cap the product at the ceiling of its least ambitious user, which is the opposite of a system whose job is to help someone build the remodel they actually want.
 
-**Intent gates the depth**, using the mechanism from §5a:
+**Three states, and only two of them are conditional:**
 
-| Intent | What is asked |
-|---|---|
-| `OUT_OF_SCOPE` | nothing beyond dimensions |
-| `SURFACE_REFRESH` | the finish layer and its quantity |
-| `TARGETED_FIXTURE` | that fixture, its requirements, and the trade it drags in |
-| `FULL_REMODEL` | the assembly, acoustics, blocking, and sequencing questions |
+| | Gated by | Behaviour |
+|---|---|---|
+| **Required** | intent | `roomReadiness()`. An `OUT_OF_SCOPE` room requires nothing. This is about the *trade threshold*, not about permission — it stays exactly as designed |
+| **Offered** | context | What the agent or the stepper proactively raises. A bathroom is asked about wall-mounted faucets; a bedroom is not |
+| **Available** | **nothing** | Everything, always. If a homeowner wants to record acoustic decoupling on a guest closet, the system records it without comment |
 
-Depth is earned by scope, never presented by default. A homeowner replacing a toilet must never meet the acoustic decoupling questionnaire.
+The only hard requirement in the entire model is **measuring walls** — and that is not arbitrary. Walls are what make every other question *addressable*: you cannot ask "which wall" until walls exist. Establish them and everything else becomes optional, in any order, to any depth.
+
+### Simplicity comes from the capture path, not from a smaller schema
+
+Three surfaces, all writing through **the same API** — three divergent implementations is the `resolveRoomScope` lesson again:
+
+1. **Agentic chat, in-app.** `assistant-ui` with voice-to-text. The agent runs the questions conversationally, advises, and teases the detail out — which is how a first-timer reaches Level 5 drywall without ever meeting a form field labelled "finish level."
+2. **MCP tools.** The same capture from the homeowner's own chat client, so the work is not trapped inside one app.
+3. **A stepper that narrows before it asks.** Scope first, questions second.
+
+### The stepper: narrow, then ask what that scope actually implies
+
+```mermaid
+flowchart TD
+  A["What are you changing?"] --> B["Where?"]
+  B --> C1["Whole house"]
+  B --> C2["Entire floor(s)"]
+  B --> C3["Specific rooms"]
+  C1 --> D{"Change kind determines<br/>the next question"}
+  C2 --> D
+  C3 --> D
+  D -->|flooring| E["Room-scoped.<br/>Tile profile, material,<br/>transitions"]
+  D -->|ceiling| F["Room-scoped.<br/>Assembly, fixtures,<br/>height"]
+  D -->|wall| G["<b>Wall-scoped.</b><br/>Which wall_id(s)?<br/>Then assembly + fixtures"]
+  E --> H["resolveRoomScope() fans out<br/>+ records the intent"]
+  F --> H
+  G --> H
+  classDef ask fill:#4d3d1f,stroke:#fbbf24,color:#fff
+  class D,G ask
+```
+
+**The scope granularity is the change kind's own property.** Flooring and ceiling work resolve to whole rooms; wall work cannot — it must name walls, because "the bathroom's walls" is four different assemblies and the difference is the entire point.
+
+That granularity therefore belongs on `material_type_def` as `scope_granularity` ∈ `room | wall | surface | project`, so the stepper derives its next question from data rather than from a hardcoded switch. Adding a new material type then teaches the stepper how to ask about it, for free.
+
+**And the stepper is `resolveRoomScope()` with a UI on it** — whole house / floors / rooms is exactly the fan-out from §5b, which already records what the homeowner said alongside the rows it produced.
 
 ### Corrections to the drafted schema
 
