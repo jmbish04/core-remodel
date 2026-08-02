@@ -443,7 +443,7 @@ export async function recordSnapshot(
     })
     .returning()
     .get();
-  if (input.setAsThumbnail !== false) {
+  if ((input.setAsThumbnail ?? true) === true) {
     await db
       .update(pascalVariants)
       .set({ thumbnailUrl: input.imageUrl })

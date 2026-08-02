@@ -49,11 +49,16 @@ export function applyNodeOps(graph: SceneGraph, ops: NodeOp[]): SceneGraph {
       }
       case "update": {
         if (!exists) throw new PascalStoreError("invalid", `${at}: unknown node`);
-        nodes[op.nodeId] = {
-          ...(nodes[op.nodeId] as Record<string, unknown>),
-          ...((op.node as Record<string, unknown>) ?? {}),
-          id: op.nodeId,
-        };
+        const patch = (op.node as Record<string, unknown>) ?? {};
+        // A parentId embedded in the patch must resolve (or be null) — same rule as `move`.
+        if (
+          "parentId" in patch &&
+          patch.parentId != null &&
+          !Object.prototype.hasOwnProperty.call(nodes, patch.parentId as string)
+        ) {
+          throw new PascalStoreError("invalid", `${at}: unknown parentId '${String(patch.parentId)}'`);
+        }
+        nodes[op.nodeId] = { ...(nodes[op.nodeId] as Record<string, unknown>), ...patch, id: op.nodeId };
         break;
       }
       case "delete": {
@@ -75,10 +80,12 @@ export function applyNodeOps(graph: SceneGraph, ops: NodeOp[]): SceneGraph {
     }
   }
 
-  // Keep only rootNodeIds that still exist.
-  const rootNodeIds = ((graph?.rootNodeIds as string[]) ?? []).filter((id) =>
-    Object.prototype.hasOwnProperty.call(nodes, id),
-  );
+  // Recompute rootNodeIds from the graph itself: a root is any node with no parent.
+  // This keeps the invariant correct after adds (new roots), deletes, and moves —
+  // rather than only pruning the stale list.
+  const rootNodeIds = Object.entries(nodes)
+    .filter(([, n]) => (n as Record<string, unknown>)?.parentId == null)
+    .map(([id]) => id);
   return { ...graph, nodes, rootNodeIds };
 }
 

@@ -28,12 +28,26 @@ export interface CaptureResult {
   deliveryUrl: string;
 }
 
+/** PNG magic bytes — reject anything that isn't a PNG before we store it. */
+function isPng(bytes: Uint8Array): boolean {
+  const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  return bytes.length >= 8 && sig.every((b, i) => bytes[i] === b);
+}
+
 /** Capture a screenshot of `sceneUrl` via Browser Rendering → CF Images. */
 export async function captureSceneScreenshot(
   env: Env,
   sceneUrl: string,
   opts: { width?: number; height?: number; fullPage?: boolean } = {},
 ): Promise<CaptureResult> {
+  // SSRF guard: only ever render the configured Pascal editor origin — never an
+  // arbitrary caller-supplied URL through the Browser Rendering binding.
+  const editorBase = (env as { PASCAL_EDITOR_URL?: string }).PASCAL_EDITOR_URL ?? "https://3d-remodel.vercel.app";
+  const allowedOrigin = new URL(editorBase).origin;
+  if (new URL(sceneUrl).origin !== allowedOrigin) {
+    throw new Error("Refusing to capture a URL outside the Pascal editor origin");
+  }
+
   await assertCanSpend(env, "BROWSER_RENDERING");
 
   const accountId = await env.CLOUDFLARE_ACCOUNT_ID.get();
@@ -61,7 +75,8 @@ export async function captureSceneScreenshot(
       status: "error",
       errorMessage: `${res.status} ${body}`.slice(0, 500),
     });
-    throw new Error(`Browser Rendering snapshot failed: ${res.status} ${body}`);
+    // The raw provider body is logged to the ledger above but NOT surfaced to callers.
+    throw new Error(`Browser Rendering snapshot failed (${res.status})`);
   }
   await recordBrowserRun(env, { feature: "pascal_scene_screenshot", url: sceneUrl });
 
@@ -70,6 +85,7 @@ export async function captureSceneScreenshot(
   if (!b64) throw new Error("Browser Rendering returned no screenshot (blank scene?)");
   const bytes = b64ToBytes(b64);
   if (bytes.byteLength > MAX_IMAGE_BYTES) throw new Error("Screenshot exceeds 10MB");
+  if (!isPng(bytes)) throw new Error("Browser Rendering returned a non-PNG payload");
 
   return uploadBytesToCfImages(
     env,
@@ -86,5 +102,6 @@ export async function storeSnapshotBytes(
 ): Promise<CaptureResult> {
   if (bytes.byteLength === 0) throw new Error("Empty image");
   if (bytes.byteLength > MAX_IMAGE_BYTES) throw new Error("Screenshot exceeds 10MB");
+  if (!isPng(new Uint8Array(bytes))) throw new Error("Body is not a PNG image");
   return uploadBytesToCfImages(env, bytes, "image/png", "pascal-scene.png");
 }

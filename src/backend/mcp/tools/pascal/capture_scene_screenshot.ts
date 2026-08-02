@@ -17,7 +17,7 @@ export const captureSceneScreenshotTool = defineTool({
     width: z.number().int().min(320).max(3840).optional(),
     height: z.number().int().min(240).max(2160).optional(),
     fullPage: z.boolean().optional(),
-    setAsThumbnail: z.boolean().optional(),
+    setAsThumbnail: z.boolean().default(true),
     caption: z.string().max(300).optional(),
   },
   annotations: WRITE,

@@ -332,7 +332,11 @@ pascalRouter.post("/scenes/:sceneId/snapshot", async (c) => {
   const sceneId = c.req.param("sceneId");
   const scene = await loadScene(c.env, sceneId);
   if (!scene) return c.json({ error: "not_found" }, 404);
+  if (!(c.req.header("content-type") ?? "").includes("image/png")) {
+    return c.json({ error: "invalid" }, 400); // expect a raw PNG body
+  }
   const bytes = await c.req.arrayBuffer();
+  const thumb = c.req.query("thumbnail");
   try {
     const shot = await storeSnapshotBytes(c.env, bytes);
     await recordSnapshot(c.env, {
@@ -340,11 +344,16 @@ pascalRouter.post("/scenes/:sceneId/snapshot", async (c) => {
       cfImageId: shot.imageId,
       imageUrl: shot.deliveryUrl,
       caption: c.req.query("caption") ?? null,
-      setAsThumbnail: c.req.query("thumbnail") !== "false",
+      setAsThumbnail: thumb !== "false" && thumb !== "0",
     });
     return c.json({ sceneId, imageId: shot.imageId, deliveryUrl: shot.deliveryUrl }, 200);
   } catch (err) {
-    return c.json({ error: "invalid", message: err instanceof Error ? err.message : "error" }, 400);
+    // Bad payload (empty / oversize / non-PNG) is a client error; anything else is ours.
+    const msg = err instanceof Error ? err.message : "";
+    const clientError = /PNG|Empty|10MB/i.test(msg);
+    return clientError
+      ? c.json({ error: "invalid" }, 400)
+      : c.json({ error: "internal_error" }, 500);
   }
 });
 
