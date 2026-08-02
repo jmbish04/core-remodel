@@ -214,6 +214,109 @@ That matters for sequencing: the capture problem is already funded in 0041 Phase
 
 ---
 
+## 3c · The chain this all serves
+
+> **measurements → materials → quantity → budget → market research and showroom shopping → communication with the trade**
+
+Measurements are not documentation. They are the first link in the only chain that matters, and every table below earns its place by moving something along it. A wall length that never becomes a paint quantity that never becomes a budget line that never becomes a showroom question was not worth capturing.
+
+This is also the answer to "why so much detail": the detail is what lets a homeowner walk into a showroom already knowing what they need, and hand a contractor a scope that can be priced without a site visit. That is the product's stated positioning, made concrete.
+
+---
+
+## 3d · Eight subsystems that are actually three primitives
+
+Wall technical details, ceiling technical details, lighting, window coverings, finishes, blocking, in-wall utilities, and acoustics all decompose identically. Building eight bespoke schemas would produce eight things that drift; the pattern underneath is small.
+
+```mermaid
+flowchart LR
+  S["SURFACE<br/>wall face · ceiling · floor"] --> A["ASSEMBLY<br/>ordered layers"]
+  S --> F["FIXTURE<br/>attached at a position"]
+  F --> R["REQUIREMENT<br/>what the fixture demands<br/>of the assembly"]
+  R -.->|"must be satisfied before<br/>the assembly closes"| A
+  A --> T["Takeoff · budget · sourcing"]
+  F --> T
+  classDef p fill:#1f3a4d,stroke:#60a5fa,color:#fff
+  class S,A,F,R p
+```
+
+### 1 · Assemblies — an ordered stack of layers on a surface
+
+Every finish is a build-up, and they share one shape:
+
+| Surface | Assembly |
+|---|---|
+| Party wall, acoustic | studs → mineral wool → MLV → 5/8" Type X → Green Glue → 5/8" Type X → Level 5 → primer → paint |
+| Shower wall | framing → cement board → liquid waterproofing → thinset → tile → grout |
+| Floor | subfloor → uncoupling membrane → thinset → tile |
+
+So: `surface_assemblies(surface_kind, surface_id, scenario_id, …)` with `assembly_layers(assembly_id, position, layer_kind, product_id, spec_json, thickness_inches)`.
+
+**This subsumes most of the wall and ceiling technical detail as layers rather than columns.** Drywall level, thickness, and layering strategy are properties of a drywall layer. Insulation type is a layer. MLV, Green Glue, resilient channel, uncoupling membrane, waterproofing — all layers. Adding a new material technique becomes a row, not a migration, which is the same principle as `impact_definitions.riskInputs`.
+
+**And it makes the takeoff fall out.** Quantity per layer × surface area × waste factor, straight into the budget. A `finish_level` column on `walls` could never do that.
+
+### 2 · Fixtures — a thing attached to a surface at a position
+
+Sconces, TVs, medicine cabinets, rainfall heads, curtain tracks, floating vanities, recessed speakers, exhaust fans, faceplates, in-wall safes, laundry chutes. One table: `surface_fixtures(surface_kind, surface_id, fixture_type_id, offset_x_inches, offset_y_inches, product_id, scenario_id, …)`.
+
+Faceplates are fixtures, which handles the multi-switch case cleanly — two faceplates at either end of a living room, and the stair pair with a switch at the garage entrance and another upstairs, are four fixture rows on three walls with a shared circuit reference. No special model needed.
+
+### 3 · Requirements — what a fixture demands of the assembly
+
+This is the layer that makes the whole thing worth building, and it is where the questions come from.
+
+| Fixture | Requirements it imposes |
+|---|---|
+| Wall-mounted TV | solid blocking · electrical at height · cable raceway · optional recessed niche for flush mount |
+| Floating vanity | blocking rated for the loaded weight · plumbing in-wall · finish continues behind |
+| Medicine cabinet | rough opening dimensions from the spec sheet · electrical if lit |
+| Lit mirror | electrical pre-run · hue coordination with the room's lighting plan |
+| Wall-mounted faucet | in-wall valve · access · finish penetration coordination |
+| Ceiling rainfall head | ceiling blocking · plumbing drop · waterproofing above |
+| Recessed curtain track | **ceiling assembly coordination** — the pocket must exist before the ceiling closes |
+
+`fixture_requirements(fixture_type_id, requirement_kind, spec, blocks_assembly_close)` — and that last flag is the valuable one. **A requirement that must be satisfied before the wall or ceiling is closed is a hard sequencing constraint**, and missing it is the single most expensive category of remodel mistake: opening a finished wall because nobody blocked for the TV.
+
+### The prompted questions are `ripple_rules` — for the third time
+
+*"Will a TV be wall mounted in this room?"* is not a form field. It is a rule that triggers on **room type + intent** and resolves to `must_confirm`, exactly like tile-into-the-bathroom. Answering yes instantiates the fixture and its requirements, which then appear as blocking, electrical, and sequencing constraints — and as budget lines.
+
+That the same engine now answers ripples, material applicability, **and** scoping questions is a strong signal it is the right primitive. One engine, three uses; not three engines.
+
+### Finishes as definition tables
+
+`paint_sheen_def` and `tile_format_def` are correct as drafted in spirit — vocabularies with display names and plain-language descriptions, admin-manageable, seeded with sensible starters. `tile_install_profile_def` captures the substrate / waterproofing / uncoupling / thinset / grout / joint / pattern / trim combination as a reusable named profile, which is genuinely useful because those choices travel together.
+
+Finishes attach through the assembly layers rather than through their own mapping tables — a paint profile is the top layer of a wall assembly, a tile profile is a three-or-four-layer stack. That keeps floor and wall finishes on one mechanism instead of two.
+
+### Progressive disclosure is not optional here
+
+`PRODUCT.md` names the primary user as a **first-time remodeler who needs structure handed to them.** This model can ask about RSIC-1 clips, Level 5 finish, and mineral wool R-values — which is the right depth for a sophisticated owner and completely wrong as an onboarding experience.
+
+**Intent gates the depth**, using the mechanism from §5a:
+
+| Intent | What is asked |
+|---|---|
+| `OUT_OF_SCOPE` | nothing beyond dimensions |
+| `SURFACE_REFRESH` | the finish layer and its quantity |
+| `TARGETED_FIXTURE` | that fixture, its requirements, and the trade it drags in |
+| `FULL_REMODEL` | the assembly, acoustics, blocking, and sequencing questions |
+
+Depth is earned by scope, never presented by default. A homeowner replacing a toilet must never meet the acoustic decoupling questionnaire.
+
+### Corrections to the drafted schema
+
+| Drafted | Problem |
+|---|---|
+| `import { createInsertSchema } from 'drizzle-zod'` **in a schema file** | **Breaks `pnpm run build`.** On the pinned `drizzle-orm@0.33.0` this fails at build even though `tsc` passes. Zero schema files in this repo import it, and `measurements.ts` states the convention: *"validating enums at the API boundary rather than in the database."* Hand-write the route Zod schemas |
+| `text('id').primaryKey()` with hand-authored ids | Repo convention is `integer("id").primaryKey({ autoIncrement: true })`. Hand-authored string ids also make seeds fragile |
+| `.superRefine()` validation on the schema | Belongs at the API boundary, same rule as enums |
+| `uncouplingMembraneRequired` restricted to `concrete_slab` | **Domain-wrong.** Uncoupling membranes are routinely specified over plywood subfloors — that is one of their primary uses. This validation would reject correct data, which is worse than no validation |
+| `type` enum duplicated as a column *and* a def table | Same error corrected three times already: the def table is the vocabulary; the column is an FK |
+
+---
+
 ## 4 · Notes
 
 ```mermaid
