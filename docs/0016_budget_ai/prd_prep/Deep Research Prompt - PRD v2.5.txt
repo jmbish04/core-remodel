@@ -1,0 +1,267 @@
+﻿Architectural Re-Alignment and Task Matrix Refactoring: Hybrid AI Construction Budgeting Platform
+1. Executive Overview and Structural Pivot
+The evolution of enterprise-grade construction management software demands absolute precision in both its operational capabilities and its underlying codebase architecture. The deployment of the "Hybrid AI Construction Budgeting & Sourcing Platform" represents a fundamental shift away from fragmented, legacy spreadsheet environments toward a highly resilient, deterministically executed system powered by edge-native artificial intelligence.1 However, the initial architectural blueprint suffered from a critical topological hallucination: the imposition of a generic Turborepo monorepo structure utilizing arbitrary directory partitions such as apps/api, apps/web, and packages/database.
+This generic structure, while common in standard Next.js or Node-centric ecosystems, is fundamentally incompatible with the specific Cloudflare Developer Ecosystem targeted for this platform. Executing a build process against those hallucinated directories results in misaligned deployment targets, broken edge bindings, and the failure of the Astro framework to successfully locate its associated React islands.
+The primary objective of this report is to completely rectify this structural drift. By instituting a rigorous set of path mapping rules, the application architecture is realigned with its actual operational repository structure. This comprehensive document details the domain context necessitating this platform, the architectural philosophy behind the directory refactoring, and culminates in a completely rewritten, fully corrected execution task matrix required to build the system accurately.
+2. The Financial and Operational Paradigm of Core Remodeling
+To fully appreciate the necessity of an edge-deployed, agent-driven architecture, one must examine the operational complexities of large-scale construction remodeling. General contracting firms—such as Core Remodel LLC, an entity operating within the Chicago market under a Class "C" license executing projects up to $5,000,000 in construction costs—face immense data reconciliation challenges.2 As these full-service design and build firms expand their footprint, establishing physical interactive design showrooms to sample brands like Kohler, Lightology, and MSI, the volume of material specification data increases exponentially.3
+Firms managing between 50 and 75 extensive remodeling projects annually require meticulous, transparent estimating processes.3 The pandemic-driven reevaluation of residential spaces has fundamentally shifted the market, demanding greater precision in how living, working, and learning spaces are configured and budgeted.3 The foundational financial model for these projects dictates that property owners typically invest between 10% and 15% of the total home value into core renovations, such as full-scale kitchen remodels.4
+Tracking the granular expenditure within these budgets is historically fraught with vulnerabilities stemming from disconnected procurement spreadsheets. A standard core remodel budget is distributed across highly specific, cost-intensive categories.
+
+
+  
+
+
+
+Traditional manual accounting for elements like custom cabinetry and hardware (which consume roughly 30% of the budget) or labor and installation (approximately 20%) frequently results in delayed conflict resolution.4 When unforeseen issues arise behind walls or below floors—such as broken plumbing or damaged structural framing—reactive financial adjustments can rapidly catapult a client's budget into the stratosphere, jeopardizing the entire endeavor.5 The architecture proposed in this document, specifically the bidirectional D1 database synchronization and the Bid Reconciler agent, is engineered directly to mitigate these exact operational friction points.
+3. Deconstructing the Fallacy of Generic Turborepo Structures
+The initial structural hallucination relied on a standardized apps/web, apps/api, and packages/database directory tree. This layout implies an operational decoupling that relies on heavy package managers (like pnpm workspaces) to symlink dependencies across entirely separate execution environments. In a traditional Next.js/Express/PostgreSQL stack, this is highly effective.
+However, the Hybrid AI Construction Budgeting Platform operates entirely within the Cloudflare ecosystem.1 Cloudflare's deployment mechanism via Wrangler natively prefers a cohesive, deeply integrated source directory where edge bindings (like D1, AI Gateway, and Durable Objects) can be orchestrated from a singular, centralized configuration file.1
+When a project is partitioned into a generic Turborepo structure, the deployment pipeline struggles to resolve the compilation of Drizzle ORM schemas against the Hono remote procedure call (RPC) routes without complex, brittle build steps. Furthermore, the Astro frontend framework utilizes an island architecture, demanding that backend validation schemas be immediately adjacent and importable to guarantee compile-time type safety across the network boundary.1 By flattening the architecture into a bespoke src/backend and src/frontend schema, the system eliminates symbolic linking errors and ensures that modifications to the database structure immediately cascade type-checking warnings directly into the React components responsible for rendering that data.
+
+
+  
+
+
+
+4. The Path Mapping Imperatives
+To guarantee that the execution agent constructs the application correctly, eight uncompromising path mapping rules have been established. These rules govern the relocation of every file generation task away from the hallucinated Turborepo framework and into the customized, Cloudflare-optimized repository structure.
+4.1 Orchestration and Configuration Relocation
+The orchestration of a Cloudflare deployment is entirely dependent on the wrangler configuration file. In the deprecated model, this critical file was buried within the apps/api folder, effectively treating the backend as an isolated microservice rather than the core executor of the platform's edge logic.
+Mapping Rule Enforcement: The configuration must be elevated to the absolute root directory as wrangler.jsonc. Utilizing the JSONC format (JSON with comments) provides the necessary annotation capabilities required to document complex edge bindings, such as the specific IDs for the D1 database, the namespace configurations for Durable Objects, and the operational limits of Cloudflare Workflows.1 Root placement ensures that the Cloudflare Pages build environment automatically detects the deployment parameters during the CI/CD pipeline execution.
+Similarly, the drizzle.config.ts file, responsible for orchestrating database migrations and generating the SQLite schemas, was improperly sequestered inside packages/database.
+Mapping Rule Enforcement: The Drizzle configuration must also be moved to the root directory. Placing it at the root allows the Drizzle CLI to seamlessly parse the entire repository, generating migration files that Wrangler can immediately execute against the bound D1 database during deployment without requiring complicated relative path traversals.1
+4.2 Database Topography and Schema Management
+The platform utilizes Cloudflare D1, a heavily optimized SQLite database operating at the edge, as its primary relational store.1 D1 underpins all structured business logic, tracking construction projects, room divisions, and the critical financial data associated with budget items and sourced product materials.1 The deprecated architecture isolated these definitions within packages/database/schema/....
+Mapping Rule Enforcement: All Drizzle ORM schema files must be relocated to src/backend/db/schema/home/... (for example, src/backend/db/schema/home/budget_tracking.ts). This precise relocation embeds the database definitions directly adjacent to the backend logic that utilizes them.
+The schema design relies on strict referential integrity. For instance, the SQLite dialect allows for the explicit definition of ON DELETE CASCADE rules. This deterministic propagation ensures that if a parent project is purged, all nested structural definitions—rooms, material lists, and budget constraints—are automatically obliterated natively by the database engine.1 This prevents the database bloat and state fragmentation that would inevitably occur if such operations were manually handled in the application layer.1
+Furthermore, the schema files serve a dual purpose through the integration of the drizzle-zod plugin. This tool dynamically analyzes SQLite column constraints (such as enums and notNull requirements) to synthesize rigid Zod validation schemas directly from the database definitions.1 Relocating these schemas into the core backend directory ensures that the generated TypeScript interfaces (z.infer) are immediately accessible to both the API routing layer and the frontend components without cross-package boundary issues.1
+4.3 Centralizing the Backend Routing Ecosystem
+The backend HTTP and remote procedure call (RPC) interface is orchestrated via the Hono framework, recognized for its ultra-lightweight footprint and edge optimization.1 The previous blueprint placed these route definitions within apps/api/src/routes/....
+Mapping Rule Enforcement: All stateless Hono routing logic must be transferred to src/backend/api/routes/.... This consolidation unifies the API infrastructure directly beneath the backend umbrella. The Hono routers act as the gateway between the frontend React islands and the D1 database, consuming the Zod schemas generated in the step above via @hono/zod-validator.1 This guarantees that any request payload originating from the user interface is strictly verified against the unassailable single source of truth defined by the database schema before compute resources are expended on execution.1
+4.4 Stateful Artificial Intelligence and Autonomous Execution
+The sophistication of this construction platform stems from its integration of autonomous conversational agents capable of complex bid negotiation and supplier research.1 These agents do not operate as standard, stateless REST endpoints. Instead, they rely on Cloudflare Durable Objects to encapsulate highly mutable conversational memory, securely partitioned within embedded SQLite databases via the native this.sql API.1 The hallucinated structure placed these critical entities in apps/api/src/agents/....
+Mapping Rule Enforcement: Stateful AI agent classes must be relocated to src/backend/ai/agents/.... This specific pathing reflects the unique operational characteristics of agents built upon the @cloudflare/think framework. By isolating the chat state within Durable Objects, the system entirely prevents multi-turn conversational race conditions and circumvents the serialization overhead that plagues external Key-Value storage solutions.1
+For instance, the BidReconciler agent, configured with strict concurrency queues to prevent token-context overflow, must maintain immediate adjacency to the AI Gateway routing logic located within the same backend subdirectory.1 The system strictly mandates that all inference queries, such as the delegation of complex reasoning to @cf/moonshotai/kimi-k2.7 or massive context parsing to @cf/zai-org/glm-5.2, route through this centralized gateway to leverage semantic caching and token-cost tracking observability.1 If the agents were left in the deprecated apps/api folder, securing the network boundary against unauthorized direct LLM access would become significantly more complex.
+4.5 Reclassifying Long-Running Workflows
+The platform must autonomously execute operations that far exceed the execution time limits of standard edge compute functions. Tasks such as polling external architectural supplier catalogs or processing massive batches of bidirectional Google Sheets revision logs require durable execution that persists across network retries.1 These operations are handled by Cloudflare Workflows. Originally, these files were mapped to apps/api/src/workflows/....
+Mapping Rule Enforcement: All Workflow definitions must be moved to src/backend/services/... (e.g., src/backend/services/showroom-scrape-workflow.ts). This semantic and structural shift acknowledges that Workflows act as foundational, asynchronous backend services rather than simple API endpoints. By relocating them to the services directory, the architecture clearly delineates between synchronous, low-latency requests (handled by Hono in the api folder) and asynchronous, high-latency processes.
+The necessity of these services is underscored by the complexity of the sync_revision_log functionality. Bidirectional syncing requires the system to process incoming webhook payloads, calculate SHA-256 data hashes to detect true divergence from the canonical state, and negotiate conflict resolution protocols.1 Isolating this logic within a dedicated service directory ensures that heavy data transformation tasks do not impede the responsiveness of the primary conversational interfaces.
+4.6 Frontend Presentation: Islands and Routing
+The client-facing application is built on the Astro framework, chosen specifically for its island architecture that ships zero JavaScript by default.1 Complex interactivity is reserved exclusively for specific React component islands.1 The generic monorepo structure separated these elements into apps/web/components/... and apps/web/app/....
+Mapping Rule Enforcement (Components): All user interface components must be migrated to src/frontend/components/.... This includes all unstyled Shadcn UI primitives, the @assistant-ui/react elements managing the WebSocket streams for conversational chat, and the complex manual reconciliation tools built upon @dnd-kit/core.1 Placing these components within a dedicated frontend directory ensures that they are easily discoverable by the Astro compilation engine and prevents the accidental importation of node-specific backend modules into the browser environment.
+Mapping Rule Enforcement (Pages): All application routing logic and static scaffolding must be moved to src/frontend/pages/... (e.g., src/frontend/pages/admin/budget/reconciliation.astro). This strictly aligns with Astro's file-based routing paradigm while maintaining the clear architectural boundary between the edge compute logic and the client delivery payload.1
+5. Exhaustive Task Matrix Execution Payload
+The following JSON array represents the entirely rewritten, rigorously corrected task sequence. Every single targetFilePath has been meticulously audited against the eight mandatory path mapping rules defined in the preceding sections. The descriptions, dependencies, and complex operational logic remain functionally identical to the platform's requirements but are now targeted at the exact coordinates required for successful Cloudflare ecosystem deployment.
+This payload is designed to be directly ingested by the automated coding agent without truncation or syntactical errors.
+
+
+
+
+
+
+JSON
+,
+   "executionLogic": "{\n  \"name\": \"core-remodel-platform\",\n  \"main\": \"src/backend/index.ts\",\n  \"compatibility_date\": \"2026-07-07\",\n  \"d1_databases\":,\n  \"ai\": {\n    \"binding\": \"AI\"\n  },\n  \"durable_objects\": {\n    \"bindings\":\n  },\n  \"workflows\":,\n  \"migrations_dir\": \"drizzle/migrations\"\n}"
+ },
+ {
+   "taskId": "INIT-02",
+   "title": "Establish Drizzle ORM Configuration",
+   "description": "Define the global Drizzle Kit configuration to target the D1 database for schema generation and migrations, reading from the newly established schema directory.",
+   "targetFilePath": "drizzle.config.ts",
+   "type": "configuration",
+   "dependencies":,
+   "executionLogic": "import type { Config } from 'drizzle-kit';\n\nexport default {\n  schema: './src/backend/db/schema/home/*',\n  out: './drizzle/migrations',\n  dialect: 'sqlite',\n  driver: 'd1-http',\n} satisfies Config;"
+ },
+ {
+   "taskId": "DB-01",
+   "title": "Define Projects Schema",
+   "description": "Implement the core Projects table using Drizzle ORM, representing top-level construction endeavors. Generates highly rigid Zod schemas for validation.",
+   "targetFilePath": "src/backend/db/schema/home/projects.ts",
+   "type": "schema",
+   "dependencies":,
+   "executionLogic": "import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';\nimport { sql } from 'drizzle-orm';\nimport { createSelectSchema, createInsertSchema } from 'drizzle-zod';\nimport { z } from 'zod';\n\nconst timestampConfig = {\n  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),\n  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),\n};\n\nexport const projects = sqliteTable('projects', {\n  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),\n  name: text('name').notNull(),\n  clientName: text('client_name').notNull(),\n  status: text('status', { enum: ['draft', 'active', 'completed'] }).default('draft').notNull(),\n ...timestampConfig,\n});\n\nexport const insertProjectSchema = createInsertSchema(projects);\nexport const selectProjectSchema = createSelectSchema(projects);\nexport type Project = z.infer<typeof selectProjectSchema>;"
+ },
+ {
+   "taskId": "DB-02",
+   "title": "Define Rooms Schema",
+   "description": "Implement logical subdivisions of a Project, enforcing ON DELETE CASCADE.",
+   "targetFilePath": "src/backend/db/schema/home/rooms.ts",
+   "type": "schema",
+   "dependencies":,
+   "executionLogic": "import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';\nimport { sql } from 'drizzle-orm';\nimport { projects } from './projects';\n\nconst timestampConfig = {\n  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),\n  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),\n};\n\nexport const rooms = sqliteTable('rooms', {\n  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),\n  projectId: text('project_id').notNull().references(() => projects.id, { onDelete: 'cascade' }),\n  name: text('name').notNull(),\n ...timestampConfig,\n});"
+ },
+ {
+   "taskId": "DB-03",
+   "title": "Define Budget Tracking Schema",
+   "description": "Implement the BudgetItems schema mapping financial allocations to specific rooms.",
+   "targetFilePath": "src/backend/db/schema/home/budget_tracking.ts",
+   "type": "schema",
+   "dependencies":,
+   "executionLogic": "import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';\nimport { sql } from 'drizzle-orm';\nimport { rooms } from './rooms';\nimport { createSelectSchema, createInsertSchema } from 'drizzle-zod';\nimport { z } from 'zod';\n\nconst timestampConfig = {\n  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),\n  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),\n};\n\nexport const budgetItems = sqliteTable('budget_items', {\n  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),\n  roomId: text('room_id').notNull().references(() => rooms.id, { onDelete: 'cascade' }),\n  category: text('category').notNull(),\n  description: text('description').notNull(),\n  allocatedAmount: real('allocated_amount').notNull(),\n ...timestampConfig,\n});\n\nexport const insertBudgetItemSchema = createInsertSchema(budgetItems);\nexport type BudgetItem = z.infer<typeof createSelectSchema<typeof budgetItems>>;"
+ },
+ {
+   "taskId": "DB-04",
+   "title": "Define Sourced Products Schema",
+   "description": "Implement material definitions mapping to budget items with an integrated approval state machine.",
+   "targetFilePath": "src/backend/db/schema/home/sourced_products.ts",
+   "type": "schema",
+   "dependencies":,
+   "executionLogic": "import { sqliteTable, text, integer, real } from 'drizzle-orm/sqlite-core';\nimport { sql } from 'drizzle-orm';\nimport { budgetItems } from './budget_tracking';\nimport { createInsertSchema } from 'drizzle-zod';\n\nconst timestampConfig = {\n  createdAt: integer('created_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),\n  updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull().default(sql`(unixepoch())`),\n};\n\nexport const sourcedProducts = sqliteTable('sourced_products', {\n  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),\n  budgetItemId: text('budget_item_id').notNull().references(() => budgetItems.id, { onDelete: 'cascade' }),\n  supplierName: text('supplier_name').notNull(),\n  productUrl: text('product_url'),\n  unitPrice: real('unit_price').notNull(),\n  quantity: integer('quantity').notNull().default(1),\n  status: text('status', { enum: ['proposed', 'approved', 'rejected'] }).default('proposed').notNull(),\n ...timestampConfig,\n});\n\nexport const insertSourcedProductSchema = createInsertSchema(sourcedProducts);"
+ },
+ {
+   "taskId": "DB-05",
+   "title": "Define Sync Logs Schema",
+   "description": "Implement the core synchronization log for Google Sheets bidirectional sync webhook conflict resolution.",
+   "targetFilePath": "src/backend/db/schema/home/sync_logs.ts",
+   "type": "schema",
+   "dependencies":,
+   "executionLogic": "import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';\n\nexport const syncRevisionLog = sqliteTable('sync_revision_log', {\n  id: text('id').primaryKey().$defaultFn(() => crypto.randomUUID()),\n  tableName: text('table_name').notNull(),\n  recordId: text('record_id').notNull(),\n  sheetRowId: text('sheet_row_id').notNull(),\n  revisionTimestamp: integer('revision_timestamp', { mode: 'timestamp' }).notNull(),\n  dataHash: text('data_hash').notNull(),\n  resolutionStatus: text('resolution_status', { enum: ['synced', 'conflict', 'resolved'] }).notNull(),\n});"
+ },
+ {
+   "taskId": "DB-06",
+   "title": "Export Combined Schema Definition",
+   "description": "Create an index file to combine and export all schema models for the Drizzle ORM client.",
+   "targetFilePath": "src/backend/db/schema/home/index.ts",
+   "type": "schema",
+   "dependencies":,
+   "executionLogic": "export * from './projects';\nexport * from './rooms';\nexport * from './budget_tracking';\nexport * from './sourced_products';\nexport * from './sync_logs';"
+ },
+ {
+   "taskId": "API-01",
+   "title": "Hono RPC Project Routes",
+   "description": "Create stateless HTTP endpoints for interacting with project entities, utilizing zod-validator for type safety.",
+   "targetFilePath": "src/backend/api/routes/projects.ts",
+   "type": "backend",
+   "dependencies":,
+   "executionLogic": "import { Hono } from 'hono';\nimport { zValidator } from '@hono/zod-validator';\nimport { insertProjectSchema } from '../../db/schema/home/projects';\n\nexport const projectRoutes = new Hono()\n .get('/', async (c) => {\n    // DB retrieval logic utilizing Drizzle D1 client\n    return c.json({ message: 'List all active projects' });\n  })\n .post('/', zValidator('json', insertProjectSchema), async (c) => {\n    const data = c.req.valid('json');\n    // DB insertion logic\n    return c.json({ success: true, data }, 201);\n  });"
+ },
+ {
+   "taskId": "API-02",
+   "title": "Hono RPC Budget Routes",
+   "description": "Create endpoints for managing budget items and updating allocation values.",
+   "targetFilePath": "src/backend/api/routes/budgets.ts",
+   "type": "backend",
+   "dependencies":,
+   "executionLogic": "import { Hono } from 'hono';\nimport { zValidator } from '@hono/zod-validator';\nimport { insertBudgetItemSchema } from '../../db/schema/home/budget_tracking';\n\nexport const budgetRoutes = new Hono()\n .post('/', zValidator('json', insertBudgetItemSchema), async (c) => {\n    const data = c.req.valid('json');\n    // Append budget logic to specific room\n    return c.json({ success: true, data }, 201);\n  });"
+ },
+ {
+   "taskId": "API-03",
+   "title": "Hono Main Router Entry",
+   "description": "Assemble the core API routing architecture.",
+   "targetFilePath": "src/backend/api/index.ts",
+   "type": "backend",
+   "dependencies": ["API-01", "API-02"],
+   "executionLogic": "import { Hono } from 'hono';\nimport { projectRoutes } from './routes/projects';\nimport { budgetRoutes } from './routes/budgets';\n\nconst api = new Hono()\n .route('/projects', projectRoutes)\n .route('/budgets', budgetRoutes);\n\nexport type AppType = typeof api;\nexport default api;"
+ },
+ {
+   "taskId": "AGENT-01",
+   "title": "Base Agent Configuration",
+   "description": "Establish the foundational parameters for stateful agents using the Cloudflare think architecture.",
+   "targetFilePath": "src/backend/ai/agents/base.ts",
+   "type": "agent",
+   "dependencies":,
+   "executionLogic": "import { Think } from '@cloudflare/think';\n\nexport abstract class BaseAgent<T> extends Think<T> {\n  // Inject baseline utilities, logging protocols, and cross-agent communication buses\n}"
+ },
+ {
+   "taskId": "AGENT-02",
+   "title": "Bid Reconciler & Negotiation Consultant",
+   "description": "Implement the core agent responsible for reviewing sourced products. Utilizes the Kimi-k2.7 model through the AI Gateway and enforces a queue concurrency model.",
+   "targetFilePath": "src/backend/ai/agents/BidReconciler.ts",
+   "type": "agent",
+   "dependencies":,
+   "executionLogic": "import { Think } from '@cloudflare/think';\nimport { createWorkersAI } from 'workers-ai-provider';\n\nexport class BidReconciler extends Think<Env> {\n  messageConcurrency = 'queue';\n  maxPersistedMessages = 150;\n\n  getSystemPrompt() {\n    return `You are an elite architectural Bid Reconciler. Your objective is to evaluate sourced products against defined budget items, ensuring cost-efficiency without compromising design intent. You possess access to D1 SQL data and advanced MCP tools for web scraping. Critical Rule: You must always utilize a tool approval gate and seek human confirmation before finalizing high-value modifications or initiating deep web research tasks.`;\n  }\n\n  getModel() {\n    const workersai = createWorkersAI({ binding: this.env.AI });\n    return workersai('@cf/moonshotai/kimi-k2.7');\n  }\n}"
+ },
+ {
+   "taskId": "WF-01",
+   "title": "Showroom Scrape Workflow Service",
+   "description": "Implement a durable workflow for scraping external showroom inventories, preventing edge compute exhaustion.",
+   "targetFilePath": "src/backend/services/showroom-scrape-workflow.ts",
+   "type": "workflow",
+   "dependencies":,
+   "executionLogic": "import { WorkflowEntrypoint, WorkflowStep, WorkflowEvent } from 'cloudflare:workers';\n\nexport class ShowroomScrapeWorkflow extends WorkflowEntrypoint<Env, any> {\n  async run(event: WorkflowEvent<any>, step: WorkflowStep) {\n    const data = await step.do('scrape-catalog', async () => {\n      // Execute deep data extraction against external vendor APIs and product pages\n      return { status: 'success', itemsScraped: 450 };\n    });\n    return data;\n  }\n}"
+ },
+ {
+   "taskId": "WF-02",
+   "title": "Sync Resolution Workflow Service",
+   "description": "Implement a durable workflow that processes large batches of Google Sheets synchronization revisions.",
+   "targetFilePath": "src/backend/services/sync-resolution-workflow.ts",
+   "type": "workflow",
+   "dependencies":,
+   "executionLogic": "import { WorkflowEntrypoint, WorkflowStep, WorkflowEvent } from 'cloudflare:workers';\n\nexport class SyncResolutionWorkflow extends WorkflowEntrypoint<Env, any> {\n  async run(event: WorkflowEvent<any>, step: WorkflowStep) {\n    await step.do('compute-data-hash', async () => {\n      // Implement SHA-256 bidirectional hashing checks against sync_revision_log\n    });\n    // Resolve identified data conflicts between D1 and the spreadsheet\n  }\n}"
+ },
+ {
+   "taskId": "ENTRY-01",
+   "title": "Backend Edge Entry Point",
+   "description": "Create the root index file for the Cloudflare Worker, exporting the API router and Durable Object classes.",
+   "targetFilePath": "src/backend/index.ts",
+   "type": "backend",
+   "dependencies":,
+   "executionLogic": "import api from './api';\nexport { BidReconciler } from './ai/agents/BidReconciler';\nexport { ShowroomScrapeWorkflow } from './services/showroom-scrape-workflow';\nexport { SyncResolutionWorkflow } from './services/sync-resolution-workflow';\n\nexport default {\n  fetch: api.fetch\n};"
+ },
+ {
+   "taskId": "FRONT-01",
+   "title": "Budget Table React Island",
+   "description": "Develop a React component for rendering budget allocations, designed to be mounted within Astro.",
+   "targetFilePath": "src/frontend/components/room-view/budget-table.tsx",
+   "type": "frontend",
+   "dependencies":,
+   "executionLogic": "import React from 'react';\n\nexport function BudgetTable({ items }) {\n  return (\n    <div className=\"flex flex-col gap-4 p-6 bg-white rounded-lg shadow-sm\">\n      <h2 className=\"text-lg font-semibold\">Room Budget Allocations</h2>\n      {/* Map through items to render interactive data table */}\n    </div>\n  );\n}"
+ },
+ {
+   "taskId": "FRONT-02",
+   "title": "Agent Chat UI Component",
+   "description": "Integrate @assistant-ui/react with @cloudflare/ai-chat/react hook for persistent WebSocket communication.",
+   "targetFilePath": "src/frontend/components/chat/agent-ui.tsx",
+   "type": "frontend",
+   "dependencies":,
+   "executionLogic": "import React from 'react';\nimport { useAgentChat } from '@cloudflare/ai-chat/react';\n\nexport function AgentChat() {\n  const { messages, sendMessage, status } = useAgentChat({ agent: 'BID_RECONCILER_AGENT' });\n  return (\n    <div className=\"chat-container border rounded overflow-hidden\">\n      {/* Render messages stream, handle stream recovery, and display human-in-the-loop tool approvals */}\n    </div>\n  );\n}"
+ },
+ {
+   "taskId": "FRONT-03",
+   "title": "Bid Mapping Drag-and-Drop Component",
+   "description": "Develop the manual reconciliation UI using @dnd-kit/core for assigning sourced products to budget line items.",
+   "targetFilePath": "src/frontend/components/dnd/bid-mapper.tsx",
+   "type": "frontend",
+   "dependencies":,
+   "executionLogic": "import React from 'react';\nimport { DndContext, useSensor, useSensors, PointerSensor } from '@dnd-kit/core';\n\nexport function BidMapper() {\n  const sensors = useSensors(useSensor(PointerSensor));\n  return (\n    <DndContext sensors={sensors} onDragEnd={(event) => { /* reconcile mapping logic */ }}>\n      <div className=\"grid grid-cols-2 gap-4\">\n        {/* Render draggable sourced materials and droppable budget targets */}\n      </div>\n    </DndContext>\n  );\n}"
+ },
+ {
+   "taskId": "PAGE-01",
+   "title": "Astro Global Index",
+   "description": "Develop the root landing page for the application.",
+   "targetFilePath": "src/frontend/pages/index.astro",
+   "type": "frontend",
+   "dependencies":,
+   "executionLogic": "---\nimport Layout from '../layouts/Layout.astro';\n---\n<Layout title=\"Dashboard\">\n  <main class=\"container mx-auto py-8\">\n    <h1 class=\"text-2xl font-bold mb-4\">Construction Projects Overview</h1>\n    {/* High-level portfolio metrics */}\n  </main>\n</Layout>"
+ },
+ {
+   "taskId": "PAGE-02",
+   "title": "Astro Budget Reconciliation View",
+   "description": "Develop the dedicated page for the procurement managers, embedding the chat and DnD islands.",
+   "targetFilePath": "src/frontend/pages/admin/budget/reconciliation.astro",
+   "type": "frontend",
+   "dependencies":,
+   "executionLogic": "---\nimport Layout from '../../../layouts/Layout.astro';\nimport { AgentChat } from '../../../components/chat/agent-ui';\nimport { BidMapper } from '../../../components/dnd/bid-mapper';\n---\n<Layout title=\"Bid Reconciliation Workflow\">\n  <div class=\"grid grid-cols-1 lg:grid-cols-3 gap-6 p-6\">\n    <div class=\"lg:col-span-2\">\n      <BidMapper client:load />\n    </div>\n    <div class=\"h-[800px]\">\n      <AgentChat client:load />\n    </div>\n  </div>\n</Layout>"
+ },
+ {
+   "taskId": "PAGE-03",
+   "title": "Astro Dynamic Project View",
+   "description": "Develop the dynamic routing template for individual project spaces.",
+   "targetFilePath": "src/frontend/pages/projects/[id].astro",
+   "type": "frontend",
+   "dependencies":,
+   "executionLogic": "---\nimport Layout from '../../layouts/Layout.astro';\nimport { BudgetTable } from '../../components/room-view/budget-table';\nconst { id } = Astro.params;\n---\n<Layout title={`Project Management: ${id}`}>\n  <div class=\"container mx-auto py-8\">\n    <BudgetTable client:load items={} />\n  </div>\n</Layout>"
+ }
+]
+
+6. Synthesis and Operational Readiness
+The architectural realignments formalized within this report constitute a necessary maturation of the Hybrid AI Construction Budgeting Platform. By directly addressing the structural fallacy of the original generic framework, the platform is now natively attuned to the realities of Cloudflare's edge deployment methodologies.
+The strict enforcement of path mappings—such as the centralization of the wrangler.jsonc and drizzle.config.ts files at the repository root—ensures that continuous integration pipelines can orchestrate complex bindings without fragile directory traversals. The deliberate bifurcation into src/backend and src/frontend cleanly segregates the highly mutable, stateful execution of the BidReconciler agent and the durable processing of the SyncResolutionWorkflow from the static delivery of the Astro user interface.
+Ultimately, this restructured codebase provides contracting firms with the requisite deterministic foundation to process massive arrays of material sourcing data, securely mediate human-in-the-loop AI interactions, and maintain unassailable financial accuracy across the lifecycle of multi-million dollar remodeling endeavors. The task matrix provided serves as the definitive execution blueprint for realizing this complex infrastructure.
+Works cited
+1. Deep Research Prompt - core-remodel_ budgeting (v2).md
+2. CORE REMODEL LLC - Project Photos & Reviews - Chicago, IL US | Houzz, accessed July 7, 2026, https://www.houzz.com/professionals/general-contractors/core-remodel-llc-pfvwus-pf~1957881885
+3. Onward and Westward - JWC Media, accessed July 7, 2026, https://jwcmedia.com/onward-and-westward/
+4. Understanding the Kitchen Remodeling Process: What to Expect - Cabinet IQ, accessed July 7, 2026, https://cabinetiq.com/learn/understand-kitchen-remodeling-process/
+5. 'Uh-Oh' Remodeling Moments and How Pros Handled Them - Houzz, accessed July 7, 2026, https://www.houzz.com/magazine/uh-oh-remodeling-moments-and-how-pros-handled-them-stsetivw-vs~143064247

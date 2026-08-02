@@ -1,0 +1,407 @@
+[
+  {
+    "taskId": "BGT-001",
+    "title": "Audit and document existing budget-related service contracts",
+    "epic": "Foundations",
+    "type": "analysis",
+    "targetFilePath": "src/backend/services",
+    "dependencies": [],
+    "notes": "Inventory current budget, estimate, materials, showroom, room, questionnaire, and bid-portfolio contracts before editing behavior."
+  },
+  {
+    "taskId": "BGT-002",
+    "title": "Define `budget_tracker_item_links` Drizzle schema",
+    "epic": "Data Layer",
+    "type": "schema",
+    "targetFilePath": "src/backend/db/schema/home/budget_tracker_item_links.ts",
+    "dependencies": ["BGT-001"],
+    "notes": "Persist evidence links from a budget tracker item revision to room, questionnaire track, estimate revision, estimate line item, material, showroom product, or bid portfolio."
+  },
+  {
+    "taskId": "BGT-003",
+    "title": "Define `budget_alerts` Drizzle schema",
+    "epic": "Data Layer",
+    "type": "schema",
+    "targetFilePath": "src/backend/db/schema/home/budget_alerts.ts",
+    "dependencies": ["BGT-001"],
+    "notes": "Persist durable budget warnings and action prompts for the workbench inbox."
+  },
+  {
+    "taskId": "BGT-004",
+    "title": "Export new budget schemas through the home/schema index",
+    "epic": "Data Layer",
+    "type": "schema",
+    "targetFilePath": "src/backend/db/schema/index.ts",
+    "dependencies": ["BGT-002", "BGT-003"],
+    "notes": "Keep schema aggregation consistent with the current repo pattern."
+  },
+  {
+    "taskId": "BGT-005",
+    "title": "Generate Drizzle migration for budget links and alerts",
+    "epic": "Data Layer",
+    "type": "migration",
+    "targetFilePath": "drizzle",
+    "dependencies": ["BGT-004"],
+    "notes": "Create migration only after schema naming and indexes are finalized."
+  },
+  {
+    "taskId": "BGT-006",
+    "title": "Create budget workbench aggregation service",
+    "epic": "Backend Services",
+    "type": "service",
+    "targetFilePath": "src/backend/services/budget-workbench.ts",
+    "dependencies": ["BGT-001"],
+    "notes": "Unify planned, committed, selected, purchased, spent, room, estimate, and material/product state into one internal summary contract."
+  },
+  {
+    "taskId": "BGT-006A",
+    "title": "Define shared mutation service pattern for frontend and MCP parity",
+    "epic": "Backend Services",
+    "type": "service",
+    "targetFilePath": "src/backend/services",
+    "dependencies": ["BGT-001"],
+    "notes": "Document and implement the rule that frontend actions and MCP actions must call the same business-logic path so revisioning, links, alerts, and downstream triggers stay identical."
+  },
+  {
+    "taskId": "BGT-007",
+    "title": "Add rollup helpers for planned vs committed vs spent budget states",
+    "epic": "Backend Services",
+    "type": "service",
+    "targetFilePath": "src/backend/services/budget-workbench.ts",
+    "dependencies": ["BGT-006"],
+    "notes": "Treat `budget_tracker_items` as planning, `budget_expense_entries` as actuals, and estimate/material/product data as intermediate evidence."
+  },
+  {
+    "taskId": "BGT-008",
+    "title": "Add room-level budget aggregation to the workbench service",
+    "epic": "Backend Services",
+    "type": "service",
+    "targetFilePath": "src/backend/services/budget-workbench.ts",
+    "dependencies": ["BGT-006"],
+    "notes": "Return room cards with budget totals, open blockers, estimate counts, and unresolved material decisions."
+  },
+  {
+    "taskId": "BGT-009",
+    "title": "Add estimate reconciliation aggregation to the workbench service",
+    "epic": "Backend Services",
+    "type": "service",
+    "targetFilePath": "src/backend/services/budget-workbench.ts",
+    "dependencies": ["BGT-006"],
+    "notes": "Summarize estimate revisions, mapped/unmapped lines, room coverage, and top variances."
+  },
+  {
+    "taskId": "BGT-010",
+    "title": "Add materials and products aggregation to the workbench service",
+    "epic": "Backend Services",
+    "type": "service",
+    "targetFilePath": "src/backend/services/budget-workbench.ts",
+    "dependencies": ["BGT-006"],
+    "notes": "Expose unpurchased materials, linked candidate products, selected purchases, and budget-impact metadata."
+  },
+  {
+    "taskId": "BGT-010A",
+    "title": "Persist selected-product state at the material layer",
+    "epic": "Data Layer",
+    "type": "schema",
+    "targetFilePath": "src/backend/db/schema/materials/schedule_item.ts",
+    "dependencies": ["BGT-001"],
+    "notes": "Add explicit persisted selected-product state separate from purchased-product state. Purchased implies selected, but selected may later change before purchase."
+  },
+  {
+    "taskId": "BGT-011",
+    "title": "Add alert recomputation logic",
+    "epic": "Backend Services",
+    "type": "service",
+    "targetFilePath": "src/backend/services/budget-alerts.ts",
+    "dependencies": ["BGT-003", "BGT-006"],
+    "notes": "Create alerts for unmapped estimate lines, over-target product choices, over-range rooms, and unreviewed questionnaire-generated budget items."
+  },
+  {
+    "taskId": "BGT-012",
+    "title": "Create `/api/budget-workbench` router",
+    "epic": "Backend API",
+    "type": "route",
+    "targetFilePath": "src/backend/api/routes/budget-workbench.ts",
+    "dependencies": ["BGT-006", "BGT-011"],
+    "notes": "Own summary, rooms, estimates, materials, and decision inbox endpoints."
+  },
+  {
+    "taskId": "BGT-013",
+    "title": "Implement `GET /api/budget-workbench/summary`",
+    "epic": "Backend API",
+    "type": "route",
+    "targetFilePath": "src/backend/api/routes/budget-workbench.ts",
+    "dependencies": ["BGT-012"],
+    "notes": "Return executive strip rollups and top risk counts."
+  },
+  {
+    "taskId": "BGT-014",
+    "title": "Implement `GET /api/budget-workbench/rooms`",
+    "epic": "Backend API",
+    "type": "route",
+    "targetFilePath": "src/backend/api/routes/budget-workbench.ts",
+    "dependencies": ["BGT-012"],
+    "notes": "Return room cards for the workbench board."
+  },
+  {
+    "taskId": "BGT-015",
+    "title": "Implement `GET /api/budget-workbench/estimates`",
+    "epic": "Backend API",
+    "type": "route",
+    "targetFilePath": "src/backend/api/routes/budget-workbench.ts",
+    "dependencies": ["BGT-012"],
+    "notes": "Return estimate reconciliation summaries and unresolved mapping counts."
+  },
+  {
+    "taskId": "BGT-015A",
+    "title": "Persist estimate-to-budget links at both revision and line-item levels",
+    "epic": "Backend Services",
+    "type": "service",
+    "targetFilePath": "src/backend/services/budget-workbench.ts",
+    "dependencies": ["BGT-002", "BGT-009"],
+    "notes": "Support whole-estimate budget context plus exact line-item reconciliation. Do not choose only one level."
+  },
+  {
+    "taskId": "BGT-016",
+    "title": "Implement `GET /api/budget-workbench/materials`",
+    "epic": "Backend API",
+    "type": "route",
+    "targetFilePath": "src/backend/api/routes/budget-workbench.ts",
+    "dependencies": ["BGT-012"],
+    "notes": "Return material/product sourcing and purchase-decision data."
+  },
+  {
+    "taskId": "BGT-017",
+    "title": "Implement `GET /api/budget-workbench/decision-inbox`",
+    "epic": "Backend API",
+    "type": "route",
+    "targetFilePath": "src/backend/api/routes/budget-workbench.ts",
+    "dependencies": ["BGT-012"],
+    "notes": "Combine persisted alerts with unresolved operational records."
+  },
+  {
+    "taskId": "BGT-017A",
+    "title": "Implement `GET /api/budget-workbench/sync-history`",
+    "epic": "Backend API",
+    "type": "route",
+    "targetFilePath": "src/backend/api/routes/budget-workbench.ts",
+    "dependencies": ["BGT-012"],
+    "notes": "Return budget-related sync and mutation history for a dedicated first-release sync-history surface."
+  },
+  {
+    "taskId": "BGT-018",
+    "title": "Implement `POST /api/budget-workbench/links`",
+    "epic": "Backend API",
+    "type": "route",
+    "targetFilePath": "src/backend/api/routes/budget-workbench.ts",
+    "dependencies": ["BGT-002", "BGT-012"],
+    "notes": "Create or update evidence links from a budget tracker item to related artifacts."
+  },
+  {
+    "taskId": "BGT-018A",
+    "title": "Implement MCP-safe budget mutation endpoints/services with frontend-equivalent side effects",
+    "epic": "Backend API",
+    "type": "route",
+    "targetFilePath": "src/backend/api/routes/budget-workbench.ts",
+    "dependencies": ["BGT-006A", "BGT-018"],
+    "notes": "Ensure MCP-triggerable mutations hit the same underlying services as frontend actions and preserve all resulting writes, alerts, revision steps, and follow-up processes."
+  },
+  {
+    "taskId": "BGT-019",
+    "title": "Mount the budget workbench router in the API index",
+    "epic": "Backend API",
+    "type": "route",
+    "targetFilePath": "src/backend/api/index.ts",
+    "dependencies": ["BGT-012"],
+    "notes": "Ensure route ordering does not conflict with existing budget routes."
+  },
+  {
+    "taskId": "BGT-020",
+    "title": "Extend budget tracker responses with linked evidence",
+    "epic": "Backend API",
+    "type": "route",
+    "targetFilePath": "src/backend/api/routes/budget-tracker.ts",
+    "dependencies": ["BGT-002"],
+    "notes": "Expose evidence links and alert summaries for item detail views."
+  },
+  {
+    "taskId": "BGT-020A",
+    "title": "Refactor frontend write flows onto shared backend mutation services",
+    "epic": "Backend Services",
+    "type": "service",
+    "targetFilePath": "src/backend/services",
+    "dependencies": ["BGT-006A"],
+    "notes": "Where frontend mutations currently embed behavior in route handlers, move that behavior into reusable services so MCP can invoke the same logic."
+  },
+  {
+    "taskId": "BGT-021",
+    "title": "Extend estimates responses with reconciliation metadata",
+    "epic": "Backend API",
+    "type": "route",
+    "targetFilePath": "src/backend/api/routes/estimates.ts",
+    "dependencies": ["BGT-009"],
+    "notes": "Add unmapped-counts, room-coverage hints, and budget-line linkage support."
+  },
+  {
+    "taskId": "BGT-021A",
+    "title": "Add low-confidence estimate mapping classification",
+    "epic": "Backend Services",
+    "type": "service",
+    "targetFilePath": "src/backend/services/budget-workbench.ts",
+    "dependencies": ["BGT-009"],
+    "notes": "Detect vague or weakly mapped estimate lines and stage them for explicit human review instead of forcing false certainty."
+  },
+  {
+    "taskId": "BGT-022",
+    "title": "Extend materials responses with budget context",
+    "epic": "Backend API",
+    "type": "route",
+    "targetFilePath": "src/backend/api/routes/materials.ts",
+    "dependencies": ["BGT-010", "BGT-010A"],
+    "notes": "Expose selected-vs-purchased state and budget-linked comparison metadata."
+  },
+  {
+    "taskId": "BGT-023",
+    "title": "Extend room detail payload with material/product budget context",
+    "epic": "Backend API",
+    "type": "route",
+    "targetFilePath": "src/backend/api/routes/rooms.ts",
+    "dependencies": ["BGT-008", "BGT-010"],
+    "notes": "Make room pages actionable for budget decisions without forcing users back to the workbench for everything."
+  },
+  {
+    "taskId": "BGT-024",
+    "title": "Create Budget Workbench Astro page",
+    "epic": "Frontend",
+    "type": "page",
+    "targetFilePath": "src/frontend/pages/admin/budget/workbench.astro",
+    "dependencies": ["BGT-012"],
+    "notes": "Mount a new React island and use the existing layout/auth shell."
+  },
+  {
+    "taskId": "BGT-025",
+    "title": "Build `BudgetWorkbenchApp` executive strip and overview shell",
+    "epic": "Frontend",
+    "type": "component",
+    "targetFilePath": "src/frontend/components/BudgetWorkbenchApp.tsx",
+    "dependencies": ["BGT-024", "BGT-013"],
+    "notes": "Implement the top-line rollups and primary navigation state."
+  },
+  {
+    "taskId": "BGT-025A",
+    "title": "Build sync-history view inside the workbench",
+    "epic": "Frontend",
+    "type": "component",
+    "targetFilePath": "src/frontend/components/BudgetWorkbenchApp.tsx",
+    "dependencies": ["BGT-017A", "BGT-025"],
+    "notes": "Expose budget edit audit history in the first release as a dedicated workbench state."
+  },
+  {
+    "taskId": "BGT-026",
+    "title": "Build workbench decision inbox UI",
+    "epic": "Frontend",
+    "type": "component",
+    "targetFilePath": "src/frontend/components/BudgetWorkbenchApp.tsx",
+    "dependencies": ["BGT-017", "BGT-025"],
+    "notes": "Render persistent alerts and unresolved records as action-oriented cards."
+  },
+  {
+    "taskId": "BGT-027",
+    "title": "Build room budget board UI",
+    "epic": "Frontend",
+    "type": "component",
+    "targetFilePath": "src/frontend/components/BudgetWorkbenchApp.tsx",
+    "dependencies": ["BGT-014", "BGT-025"],
+    "notes": "Render room cards with direct links into room detail and room-scoped problem solving."
+  },
+  {
+    "taskId": "BGT-028",
+    "title": "Build estimate reconciliation board UI",
+    "epic": "Frontend",
+    "type": "component",
+    "targetFilePath": "src/frontend/components/BudgetWorkbenchApp.tsx",
+    "dependencies": ["BGT-015", "BGT-025"],
+    "notes": "Surface estimate revisions, variance posture, and missing mapping actions."
+  },
+  {
+    "taskId": "BGT-028A",
+    "title": "Build manual mapping staging UI for unresolved estimate lines",
+    "epic": "Frontend",
+    "type": "component",
+    "targetFilePath": "src/frontend/components/BudgetWorkbenchApp.tsx",
+    "dependencies": ["BGT-021A", "BGT-028"],
+    "notes": "Render a focused unresolved-lines area that makes human-in-the-loop budget mapping explicit."
+  },
+  {
+    "taskId": "BGT-029",
+    "title": "Build materials and product decision board UI",
+    "epic": "Frontend",
+    "type": "component",
+    "targetFilePath": "src/frontend/components/BudgetWorkbenchApp.tsx",
+    "dependencies": ["BGT-016", "BGT-025"],
+    "notes": "Make sourcing and purchase decisions visible in the same operating surface."
+  },
+  {
+    "taskId": "BGT-030",
+    "title": "Add contractor visibility preview to the workbench",
+    "epic": "Frontend",
+    "type": "component",
+    "targetFilePath": "src/frontend/components/BudgetWorkbenchApp.tsx",
+    "dependencies": ["BGT-025"],
+    "notes": "Preview the full internal contractor-shareability picture, including all budget-related context before public visibility rules are applied."
+  },
+  {
+    "taskId": "BGT-031",
+    "title": "Add workbench entry to the admin budget navigation",
+    "epic": "Frontend",
+    "type": "navigation",
+    "targetFilePath": "src/frontend/components/AppSidebar.tsx",
+    "dependencies": ["BGT-024"],
+    "notes": "Place the new surface within the existing budget group."
+  },
+  {
+    "taskId": "BGT-032",
+    "title": "Upgrade `BudgetAgent` to consume structured workbench services",
+    "epic": "AI",
+    "type": "agent",
+    "targetFilePath": "src/backend/ai/agents/BudgetAgent/index.ts",
+    "dependencies": ["BGT-006", "BGT-011"],
+    "notes": "Replace toy snapshot behavior with summarization and suggestion tools over real workbench outputs."
+  },
+  {
+    "taskId": "BGT-032A",
+    "title": "Teach `BudgetAgent` to emit `needs_human_mapping` outcomes",
+    "epic": "AI",
+    "type": "agent",
+    "targetFilePath": "src/backend/ai/agents/BudgetAgent/index.ts",
+    "dependencies": ["BGT-021A", "BGT-032"],
+    "notes": "When estimate-line confidence is weak, the agent should route to human review instead of implying false confidence."
+  },
+  {
+    "taskId": "BGT-033",
+    "title": "Add budget workbench helper methods for the agent",
+    "epic": "AI",
+    "type": "service",
+    "targetFilePath": "src/backend/services/budget-workbench.ts",
+    "dependencies": ["BGT-032"],
+    "notes": "Provide structured summaries, top drivers, unresolved items, and candidate mappings for agent consumption."
+  },
+  {
+    "taskId": "BGT-034",
+    "title": "Document internal and contractor-visible budget data rules",
+    "epic": "Docs",
+    "type": "documentation",
+    "targetFilePath": "docs",
+    "dependencies": ["BGT-030"],
+    "notes": "Clarify privacy and visibility boundaries before rollout."
+  },
+  {
+    "taskId": "BGT-035",
+    "title": "Run verification across budget, room, materials, and estimate flows",
+    "epic": "Verification",
+    "type": "verification",
+    "targetFilePath": "package.json",
+    "dependencies": ["BGT-019", "BGT-023", "BGT-030", "BGT-033", "BGT-018A", "BGT-020A"],
+    "notes": "Verify typecheck, build, and critical manual paths for workbench, room detail, estimate review, materials, and bid portfolio preview. Also verify MCP-equivalent mutations produce the same persisted fields and downstream side effects as frontend actions."
+  }
+]
