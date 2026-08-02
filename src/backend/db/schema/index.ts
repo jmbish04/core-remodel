@@ -46,6 +46,10 @@ export * from "./home/room_type_def";
 export * from "./home/room_intent_type_def";
 export * from "./materials/material_type_def";
 
+// 0043 Phase 1 — walls and measurements graph.
+export * from "./home/walls";
+export * from "./home/room_measurements";
+
 export * from "./home/measurements";
 export * from "./home/remodel_scenarios";
 export * from "./home/scenario_room_plans";
