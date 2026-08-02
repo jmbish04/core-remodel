@@ -434,6 +434,115 @@ Forecasting is where the doctrine's **emotional fidelity** criterion actually ge
 
 ---
 
+## 4e · Rooms have tense — space versus use
+
+**The kitchen does not move. The space that serves as the kitchen changes.**
+
+This is not pedantry; it is the difference between a model that can express a real remodel and one that cannot. The founder's actual case: the kitchen was going to move downstairs, and instead the upper-floor kitchen and living room are **trading places**. Nothing is relocating — two spaces are exchanging uses.
+
+The existing schema already has the right primitive, and its own docstring names this exact scenario:
+
+- **`rooms`** is the **space**. `roomCode` is its stable slug and never changes.
+- **`remodel_scenarios`** — *"Top-level redesign/relocation scenarios. Example: 'Kitchen to lower family room'."*
+- **`scenario_room_plans`** — *"Lets an as-is room be repurposed into a to-be usage."* `roomId` is the space; `proposedUse` is what it becomes.
+
+A relocation is therefore expressible without any new concept: put a plan row on the downstairs space with `proposedUse: "kitchen"`. Reuse these; do not invent a parallel model.
+
+### The path reference needs a tense
+
+`${room.floor}/${room.name}` is the right display identity — hierarchical, human-readable, unambiguous to the trade, sorts and groups for free, and it settles most of what room colour was reaching for. But it is **time-dependent**:
+
+| Tense | Before the swap | After the swap |
+|---|---|---|
+| **as-is** | `Upper Level/Kitchen` | `Upper Level/Kitchen` — the space that *is* the kitchen today |
+| **to-be** | `Upper Level/Kitchen` | `Upper Level/Living Room` — that same space, once the plan lands |
+
+After a swap, an untensed `Upper Level/Kitchen` refers to **two different physical spaces** depending on which one you meant. So:
+
+- **Every room reference resolves against a tense**, and the tense is explicit wherever both could be meant. Bare paths are as-is.
+- **The space's `roomCode` is the join key.** The path is display, never identity — the same discipline as `properties.label`: relate by id, join for the name.
+- When discussing plans, the product says `Lower Level/Kitchen` and means *"the space that will be the kitchen, which is downstairs."* That sentence is the acceptance test for whether the system understood.
+
+### Paired moves — the one real gap
+
+`scenario_room_plans` can express each half of a swap, but nothing binds them. **Two spaces trading uses is one decision, not two**, and neither half is coherent alone: approving "upper NE becomes living room" without "upper SW becomes kitchen" leaves a house with no kitchen.
+
+Model the pairing rather than trusting a human to remember it — two plan rows that must be approved, costed, and rippled together. This is the same mutual-blocking shape as `impact_blocks`, pointed at plans.
+
+### A room move is a large-ripple decision
+
+Changing what a space is used for is among the highest-ripple decisions in a remodel, and the rule library must know it: plumbing, gas, electrical load, ventilation, structural floor loading, permits, and — in a swap — the paired space, all at once. `ripple_rules` gets a `use_change` and a `use_swap` trigger.
+
+---
+
+## 4f · Home is the floorplan, not a drawing
+
+**Correction to the comps.** Home is not a diagram to be rendered — it is the **floorplan the project already has**, with clickable room dots, which exists today at `/floor-plan` and is backed by real columns on `rooms`: `floorplanFloorKey`, `floorplanXPct`, `floorplanYPct`, and the region bounding box.
+
+The homeowner sees where a room *is* while choosing it. Placement is information, and a parallel-track abstraction throws it away.
+
+That reframes the whole rendering question:
+
+| Surface | What it actually is | Built with |
+|---|---|---|
+| **Home** | The floorplan with room dots, carrying stop state, money against plan, and attention badges | The existing `/floor-plan` implementation, extended. **Layout and hairlines — no diagram engine.** |
+| **Blast radius / dependency lens** | A node-link graph where lines cross | **`mind-elixir`**, already in production here in four components |
+| **Money — committed → paid → exposed** | A flow | **`@visx/sankey`** + `d3-sankey`, already installed |
+| **Docs and plan diagrams** | Declarative diagrams | **`mermaidcn`**, already present |
+
+**Do not hand-roll SVG for any of these.** Every capability above is already installed and, in the case of `mind-elixir`, already used in production in this repo. An earlier draft of this plan was heading toward custom SVG for the Home diagram; that was the wrong instinct and it is recorded here so it is not repeated.
+
+### What room colour is actually for
+
+Narrowed, after review. Colour is **weak for identification and strong for path-tracing**:
+
+- On the floorplan and in lists, a room is identified by its **path** and its **position**. The name is always present, so colour there is decoration.
+- In the **dependency lens**, where lines cross at a shared wall or a shared panel, colour is the only thing that lets the eye follow one line through a junction — there is no room for a label at a crossing.
+
+So: **colour belongs to the dependency lens, not to room identity.** A blast-radius view shows three to six rooms, never nineteen, which makes the palette trivially discriminable and retires the whole "nineteen mutually distinguishable hues" problem. `rooms.lineColorHex` stays, scoped to that job.
+
+This also survives colour-vision deficiency and the in-car screen, which the original identity-based scheme did not.
+
+---
+
+## 4g · Permits are a jurisdiction capability, not a feature
+
+The SF DBI integration is real and stays. **It is also not generalisable**, and the plan must not assume it is.
+
+San Mateo is one county away and does not publish permits online at all. Every jurisdiction has its own schema, its own portal, or no portal. Building "permits" as though it were one integration would produce a product that works in exactly one city.
+
+### The model
+
+```mermaid
+flowchart TB
+  P["Property"] --> J["Jurisdiction"]
+  J --> C{"Capability?"}
+  C -->|"integration exists<br/>(SF DBI today)"| SYNC["Permits sync automatically<br/>provenance: integration"]
+  C -->|"no integration"| MAN["Permits are manual entry<br/>provenance: homeowner"]
+  SYNC --> REC["permits_records"]
+  MAN --> REC
+  REC --> IMP["Impacts, ripple rules,<br/>lien clocks, forecasting"]
+  classDef ok fill:#1f4d2e,stroke:#4ade80,color:#fff
+  classDef man fill:#4d3d1f,stroke:#fbbf24,color:#fff
+  class SYNC ok
+  class MAN man
+```
+
+- A property has a **jurisdiction**, and a jurisdiction has **declared capabilities** — permit search, permit detail, inspection history, assessor parcel keys, none.
+- Where a capability exists, data syncs. Where it does not, **manual entry is the normal path, not a degraded one.** For v1 that is most users.
+- **Assessor block and lot stay, and stay optional.** They are not SF trivia: block/lot is the one key that recurs across otherwise incompatible DBI schemas, which makes it the closest thing to a portable permit join key. Present where the jurisdiction uses it, null where it does not.
+
+### The consequence nobody would notice until it bit
+
+Two downstream systems assume permit data has a provenance they can trust, and they must not:
+
+1. **Ripple rules** that fire on "permit filed" have to work identically when a human typed it. A rule keyed to an integration event silently never fires for a manual-entry user — which is a rule that is broken for most of the market and looks fine in testing.
+2. **Forecasting's evidence gate** must distinguish sources. An alarm evidenced by a jurisdiction feed and one evidenced by *the homeowner asserting a date* are not the same confidence and cannot render identically. The evidence row already carries `kind` and `recordedBy`; the alarm surface must use them rather than treating all evidence as equal.
+
+Both are cheap now and expensive later.
+
+---
+
 ## 5 · Schema deltas
 
 ### Room lines and readiness

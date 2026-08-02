@@ -201,6 +201,16 @@ Two more that matter and are cheap to check:
 
 > **Running a live lien clock on a real, active dispute is operational work, not planning work.** The schema and the citations are specified here; standing up the founder's own timeline is a separate, more urgent task and should be treated as one.
 
+### Jurisdiction capability — the lien clock cannot assume synced permits
+
+See [0041 §4g](../0041_homeowner_experience/IMPLEMENTATION_PLAN.md). Permits are a **jurisdiction capability**, not a feature: SF DBI is integrated, San Mateo one county over publishes nothing online, and every jurisdiction has its own schema or no portal at all. **For most v1 users, permit records are manual entry, and that is the normal path rather than a degraded one.**
+
+Three consequences land directly on this plan:
+
+1. **Every clock input must accept a human-entered date.** A lien window computed only from a synced feed simply never runs for most of the market, and it looks correct in testing against SF.
+2. **Provenance changes what may be asserted.** A completion date from a jurisdiction feed and one the homeowner typed carry different confidence. The clock still computes — but a deadline derived from an unverified date is presented as *"based on the completion date you entered"*, never as fact. This is `PRODUCT.md` principle 7 applied to a date rather than a citation.
+3. **Statutory windows are per-jurisdiction.** `violation_definitions.jurisdiction` already exists for this; the windows table follows the same rule. **A jurisdiction with no seeded rules gets no computed clock, not a guessed one** — CA/CSLB first, and silence everywhere else until someone does the work.
+
 ### Communication guardrails when a dispute opens
 
 CSLB's "unhappy with your contractor" publication carries behavioral instructions that change what the homeowner should *do the moment a dispute starts* — surfaced at that moment, not buried:
