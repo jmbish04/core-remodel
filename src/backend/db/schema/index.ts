@@ -58,6 +58,9 @@ export * from "./home/room_problems";
 // 0043 Phase 4 — surfaces: assemblies, fixtures, requirements.
 export * from "./home/surfaces";
 
+// 0043 Phase 5 — coordination: trade assignments, permit mapping, timeline.
+export * from "./home/room_coordination";
+
 export * from "./home/measurements";
 export * from "./home/remodel_scenarios";
 export * from "./home/scenario_room_plans";
