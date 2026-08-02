@@ -43,7 +43,25 @@ export interface ReadinessGap {
   confidence: string | null;
 }
 
+/**
+ * The honest three-state answer.
+ *
+ *   not_in_scope  the room has no remodel intent. "Are you ready to talk to the
+ *                 trade about this room" is not a question that applies, and
+ *                 answering `ready: false` would be a lie that shows up as a
+ *                 permanent blocker on a room nobody is touching.
+ *   ready         every required spec is satisfied or explicitly waived
+ *   blocked       something required is missing or unverified
+ */
+export type ReadinessStatus = "not_in_scope" | "ready" | "blocked";
+
 export interface RoomReadiness {
+  status: ReadinessStatus;
+  /**
+   * True only for `status === "ready"`. Kept because callers read it, but
+   * `status` is the field that tells the truth — a not-in-scope room is neither
+   * ready nor blocked.
+   */
   ready: boolean;
   requiredCount: number;
   satisfiedCount: number;
@@ -51,6 +69,22 @@ export interface RoomReadiness {
   gaps: ReadinessGap[];
   /** Requirements satisfied by an explicit waiver rather than a known value. */
   waivedCount: number;
+}
+
+export interface ReadinessOptions {
+  /**
+   * Whether the room is in the remodel at all — i.e. whether it carries any
+   * remodel intent (0043 §5a).
+   *
+   * WHY THIS EXISTS: before it, `roomReadiness()` demanded every spec flagged
+   * `isRequiredForThreshold` on EVERY room, globally. A room nobody is touching
+   * sat permanently un-ready, asking for a shower valve. On a real 19-room
+   * house that made the threshold meaningless on day one.
+   *
+   * Defaults to `true` so existing callers keep their behaviour; the caller that
+   * knows about intents passes it explicitly.
+   */
+  inScope?: boolean;
 }
 
 export interface RequiredDefinitionRow {
@@ -87,7 +121,22 @@ function hasValue(field: SpecFieldRow): boolean {
 export function evaluateRoomReadiness(
   required: RequiredDefinitionRow[],
   fields: SpecFieldRow[],
+  options: ReadinessOptions = {},
 ): RoomReadiness {
+  // A room with no remodel intent is not in scope. That is a different answer
+  // from "ready", and a very different answer from "blocked" — it is the
+  // absence of the question, and the UI must be able to render it as such.
+  if (options.inScope === false) {
+    return {
+      status: "not_in_scope",
+      ready: false,
+      requiredCount: 0,
+      satisfiedCount: 0,
+      waivedCount: 0,
+      gaps: [],
+    };
+  }
+
   const byDefinition = new Map<number, SpecFieldRow>();
   for (const f of fields) byDefinition.set(f.specDefinitionId, f);
 
@@ -142,8 +191,10 @@ export function evaluateRoomReadiness(
     satisfied += 1;
   }
 
+  const ready = gaps.length === 0;
   return {
-    ready: gaps.length === 0,
+    status: ready ? "ready" : "blocked",
+    ready,
     requiredCount: required.length,
     satisfiedCount: satisfied,
     waivedCount: waived,

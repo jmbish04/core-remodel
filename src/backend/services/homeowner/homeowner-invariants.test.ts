@@ -125,6 +125,46 @@ assert.equal(r.ready, true, "zero cents is a real value, not an absence");
 // behaviour is a decision rather than an accident.
 assert.equal(evaluateRoomReadiness([], []).ready, true, "no required specs => ready");
 
+// ── not_in_scope is a THIRD state, not a flavour of unready ─────────────────
+// The bug this guards: roomReadiness() required every threshold spec on EVERY
+// room, so a room nobody is touching sat permanently un-ready asking for a
+// shower valve. On a real 19-room house that made the threshold meaningless.
+
+r = evaluateRoomReadiness(REQUIRED, [], { inScope: false });
+assert.equal(r.status, "not_in_scope", "a room with no intent is NOT in scope");
+assert.equal(r.ready, false, "and it is not 'ready' either — the question does not apply");
+assert.equal(r.gaps.length, 0, "an out-of-scope room reports NO gaps to chase");
+assert.equal(r.requiredCount, 0, "and requires nothing");
+
+// Out-of-scope wins even when specs would otherwise be missing.
+r = evaluateRoomReadiness(
+  REQUIRED,
+  [field({ specDefinitionId: 1, confidence: "unknown" })],
+  { inScope: false },
+);
+assert.equal(r.status, "not_in_scope", "scope is decided before requirements are counted");
+
+// In scope is the default, so existing callers are unchanged.
+assert.equal(evaluateRoomReadiness(REQUIRED, []).status, "blocked", "default is in-scope");
+assert.equal(
+  evaluateRoomReadiness(REQUIRED, [], { inScope: true }).status,
+  "blocked",
+  "explicit in-scope with gaps is blocked, not not_in_scope",
+);
+
+// status and ready never disagree.
+for (const scenario of [
+  evaluateRoomReadiness(REQUIRED, [], { inScope: false }),
+  evaluateRoomReadiness(REQUIRED, []),
+  evaluateRoomReadiness([], []),
+]) {
+  assert.equal(
+    scenario.ready,
+    scenario.status === "ready",
+    "ready must be true if and only if status is ready",
+  );
+}
+
 // ── nodeHealth: derived, and forecasts do not colour a node ─────────────────
 
 assert.equal(isOpenImpact("active"), true);
