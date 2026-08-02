@@ -231,6 +231,70 @@ erDiagram
 
 ---
 
+## 5b · Floor-wide and multi-room scope — fan out in the API, not in the data
+
+Paint, flooring, windows, a problem affecting a whole storey, a document covering a floor: plenty of things attach to more than one room. `all_levels` existed to express that, and it was the wrong instrument — a fake floor is a shortcut in the data that **every query then has to know about forever**, and the first one that forgets it produces a wrong answer silently.
+
+**The rule: the UI offers the shortcut, the API resolves it, the database stores per-room rows.**
+
+```mermaid
+sequenceDiagram
+  actor U as Homeowner
+  participant UI
+  participant API
+  participant DB
+  U->>UI: picks a material, ticks "entire Upper Level"
+  UI->>API: { materialId, scope: "floor", scopeRefId: 2 }
+  API->>DB: resolve scope -> the 23 active rooms on floor 2
+  API->>DB: upsert 23 mapping rows (chunked at 20) + one scope record
+  DB-->>API: rows created, duplicates ignored
+  API-->>UI: "applied to 23 rooms on Upper Level"
+```
+
+Every consumer keeps joining one way — `WHERE room_id = ?` — with no awareness that a floor was ever involved. That is the whole point.
+
+### But store the intent alongside the rows
+
+Fan-out on its own throws away *what the user actually said*, and three things immediately want it back:
+
+1. **A room added to that floor later** should be offered the floor-wide materials it is missing. Bare rows cannot know they were floor-wide.
+2. **Editing** should be one operation on the decision, not twenty-three edits.
+3. **The UI should show "entire Upper Level" back**, not twenty-three ticked boxes. Those are different sentences, and only one of them is what the homeowner said.
+
+So each fan-out also writes one `room_scope_applications` row:
+
+```mermaid
+erDiagram
+  room_scope_applications {
+    int id PK
+    text entity_kind "material|product|problem|document|photo|note"
+    int entity_id
+    text scope "room|rooms|floor|project"
+    int scope_ref_id "floor id when scope=floor; null otherwise"
+    text applied_room_ids "JSON snapshot of what it resolved to AT THE TIME"
+    text applied_by
+    text applied_at
+    int is_active
+  }
+```
+
+- The mapping rows remain **the truth**. This table is the **provenance of the selection** — it explains the rows, it does not replace them.
+- `applied_room_ids` is a deliberate point-in-time snapshot, named for what it is. It answers "what did this mean when it was applied," which is different from "what would it mean now" — the same distinction as `decision_reopenings.reasonAtTime`.
+
+### Implementation notes that will otherwise bite
+
+- **One shared helper, not five implementations.** Materials, products, problems, documents, photos, and notes all need identical behaviour. `resolveRoomScope({ scope, scopeRefId, roomIds })` returns the room set; each entity's mapping writer consumes it. Six bespoke versions will drift.
+- **Chunk at 20.** This is a fan-out feature *by design* — 23 rooms × several columns exceeds D1's 100-bound-parameter cap in a single statement. Chunk, then `db.batch()` each chunk.
+- **Idempotent.** Re-applying "entire floor" must not double up: every mapping table carries a UNIQUE on `(entity_id, room_id)` and the writer uses `onConflictDoNothing`.
+- **Resolve against ACTIVE rooms only.** `rooms.isActive = false` are merged or deactivated records; fanning out onto them would resurrect dead rooms into live scope.
+- **Scope is not membership.** Removing a room from the floor-wide set is a per-room delete plus a note on the scope record — it must not silently re-apply on the next fan-out.
+
+### `all_levels` therefore goes
+
+It has zero rooms, its purpose is served properly by the mechanism above, and leaving it invites exactly the shortcut this section rejects. Retire it, and if scope markers are ever needed in `floors` again, add an explicit `is_physical` flag so a non-floor cannot quietly become a floor.
+
+---
+
 ## 6 · Further schema work, as requested
 
 Ordered by how much each would hurt to retrofit.
@@ -260,7 +324,7 @@ Ordered by how much each would hurt to retrofit.
 
 | Phase | Work |
 |---|---|
-| **0** | Definition tables + their admin pages: note types, problem types, fix types, document types, room uses |
+| **0** | Definition tables + their admin pages: note types, problem types, fix types, document types, room uses. Plus `resolveRoomScope()` and `room_scope_applications` — every later phase fans out through it, so it lands first. |
 | **1** | `room_measurements` + backfill from the `rooms` dimension columns; API conversions; deprecate in place |
 | **2** | `room_notes` + mapping; backfill the six `*Notes` columns into typed notes; deprecate in place |
 | **3** | `room_problems` + types, fixes, photos, documents; link to `impacts` |
