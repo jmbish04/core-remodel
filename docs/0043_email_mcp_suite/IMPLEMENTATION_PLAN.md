@@ -104,8 +104,14 @@ flowchart TD
   end
 ```
 
-All tools: `getGmailAccessToken` once per handler; `READ_ONLY` for search/read/
-list, `WRITE`/`WRITE_IDEMPOTENT` for label/draft/send/ingest; ≥1 example each.
+All tools: a **hand-written Zod v4 `inputShape`** validated at the trust boundary
+(never drizzle-zod), `getGmailAccessToken` once per handler, ≥1 example each, and
+an annotation that matches the tool's REAL side-effect — `READ_ONLY` only for the
+pure reads (`list_showroom_emails`, `gmail_read_message`, `worker_email_search`),
+**`WRITE_IDEMPOTENT`** for anything that ingests/uploads (`search_email` with
+`live:true`, `get_email_attachments`, `gmail_ingest_message`, label ops),
+`WRITE` for `*_send`/`*_reply`/`*_create_draft`. A tool that writes during a
+"search" must NOT be labelled READ_ONLY.
 
 ---
 
@@ -120,19 +126,27 @@ erDiagram
     string category "quote_request | appointment | project_info | general"
     string subject_template
     string body_markdown "with {{placeholders}}"
-    string body_html "sanitized on write"
+    string body_html "renderNoteHtml(md) then sanitizeNoteHtml on write"
     int is_active
   }
 ```
 
+- **Rich text = markdown + html both** (the repo convention): `body_markdown` is
+  the round-trippable source of truth; `body_html` is generated from it via
+  `renderNoteHtml` and **sanitized with `sanitizeNoteHtml` on every write** (same
+  pipeline as `store_notes` / visit notes). Placeholders are interpolated into the
+  sanitized html at render time, never re-injected as raw markup.
 - Seeded with the boilerplate the user named: **cold product/pricing quote
   request**, **appointment scheduling**, **general project info**.
 - `{{placeholders}}` resolved by a render helper from `project_system_variables`
   (timeline, contractor name…), `properties` (address), `companies`/showroom
   rows (recipient), and `supporting_documents` / inspiration images (design-doc
   + photo links) — always by FK/JOIN, never denormalized.
-- Editable at `/admin/config/email-templates` (ConfigShell + PATCH), and by the
-  AI via `render_email_template` review + a template-edit tool.
+- Editable by the user at `/admin/config/email-templates` (ConfigShell + PATCH).
+  The AI edits via a **`WRITE`-annotated** `edit_email_template` MCP tool, gated
+  by the connector's `remodel` scope; edits are sanitized on write and land as a
+  reviewable change (the user sees the new body in the config UI), never a silent
+  overwrite of a template mid-send.
 
 ---
 
@@ -162,7 +176,13 @@ Each phase its own PR; QC + changelog per repo rules. Migration only in P5
   the deploy flakes, this is the first suspect.
 - **Send is a real outbound action** — `WRITE`, never `READ_ONLY`; the MCP scope
   already gates to the trusted user. Draft-then-send split lets the agent stage.
-- Per-message ingest must be idempotent (dedup on `gmail_messages.messageId`).
+- **Per-message ingest idempotency depends on a DB-level guarantee, not app
+  logic.** Dedup on `gmail_messages.messageId` only holds if that column has a
+  **unique index** — otherwise two concurrent live-backfills (P2 `search_email`)
+  can both pass the "not indexed yet" check and double-insert. P1 must **confirm
+  the unique index exists on `gmail_messages.messageId` (add it if missing)** and
+  `ingestAndBridgeMessage` must insert with `onConflictDoNothing()` so a race
+  degrades to a no-op, not a duplicate row.
 
 ## 8. Success criteria
 
