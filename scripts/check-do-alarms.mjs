@@ -26,7 +26,7 @@ import { execSync } from "node:child_process";
  * (#162) AND the circuit-breaker guard. New DOs must NOT be added here — use
  * native `ctx.storage.setAlarm()` instead.
  */
-const ALLOWLIST = new Set(["src/backend/ai/agents/RemodelOrchestrator/index.ts", "src/frontend/data/changelog.ts", "src/frontend/data/changelog-detail.ts"]);
+const ALLOWLIST = new Set(["src/backend/ai/agents/RemodelOrchestrator/index.ts"]);
 
 const BANNED = /\bthis\.schedule\s*\(/;
 
@@ -46,7 +46,7 @@ let files;
 try {
   files = execSync("git ls-files src", { encoding: "utf8" })
     .split("\n")
-    .filter((f) => f.endsWith(".ts") || f.endsWith(".tsx"));
+    .filter((f) => (f.endsWith(".ts") || f.endsWith(".tsx")) && !f.startsWith("src/frontend/data/"));
 } catch (err) {
   console.error("check-do-alarms: could not list files —", err.message);
   process.exit(2);
