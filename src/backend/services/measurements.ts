@@ -23,6 +23,7 @@ import {
   rooms,
 } from "@backend/db";
 import { and, asc, desc, eq, inArray, like, or, sql } from "drizzle-orm";
+import { computeRoomAreaSqFt } from "@backend/services/room-area";
 
 /** A Drizzle D1 handle — identical to `drizzle(env.DB)` in the routes. */
 type Db = ReturnType<typeof import("drizzle-orm/d1").drizzle>;
@@ -216,18 +217,29 @@ export interface ActiveRoom {
 
 /** List active rooms (alphabetical by display name) for `roomId` resolution. */
 export async function listActiveRooms(db: Db): Promise<ActiveRoom[]> {
-  return db
+  const rows = await db
     .select({
       id: rooms.id,
       roomCode: rooms.roomCode,
       roomName: rooms.roomName,
       floorId: rooms.floorId,
-      areaSqFt: rooms.areaSqFt,
+      lengthFeet: rooms.lengthFeet,
+      lengthInches: rooms.lengthInches,
+      widthFeet: rooms.widthFeet,
+      widthInches: rooms.widthInches,
     })
     .from(rooms)
     .where(eq(rooms.isActive, true))
     .orderBy(asc(rooms.roomName))
     .all();
+  // Area is computed on the fly (0043 dropped the stored column).
+  return rows.map((r) => ({
+    id: r.id,
+    roomCode: r.roomCode,
+    roomName: r.roomName,
+    floorId: r.floorId,
+    areaSqFt: computeRoomAreaSqFt(r),
+  }));
 }
 
 // ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 
 import { floors, measurements, rooms } from "@backend/db";
+import { computeRoomAreaSqFt } from "@backend/services/room-area";
 
 import type { SceneGraph, SceneRenderingMetadata } from "./shapes";
 import { PascalStoreError } from "./store";
@@ -31,8 +32,8 @@ const feet = (ft: number | null, inch: number | null): number =>
 
 /** Room rectangle: measured size (ft) + bbox-derived top-left origin (ft). */
 function roomRect(r: RoomRow): { x: number; y: number; w: number; h: number } {
-  const w = feet(r.widthFeet, r.widthInches) || Math.sqrt(r.areaSqFt ?? 100);
-  const h = feet(r.lengthFeet, r.lengthInches) || Math.sqrt(r.areaSqFt ?? 100);
+  const w = feet(r.widthFeet, r.widthInches) || Math.sqrt(computeRoomAreaSqFt(r) ?? 100);
+  const h = feet(r.lengthFeet, r.lengthInches) || Math.sqrt(computeRoomAreaSqFt(r) ?? 100);
   const x = ((r.floorplanBboxXPct ?? 0) / 100) * CANVAS_FT;
   const y = ((r.floorplanBboxYPct ?? 0) / 100) * CANVAS_FT;
   return { x, y, w, h };
@@ -134,7 +135,7 @@ export async function generateSeedGraph(
         roomCode: r.roomCode,
         widthFt: w,
         lengthFt: h,
-        areaSqFt: r.areaSqFt ?? w * h,
+        areaSqFt: computeRoomAreaSqFt(r) ?? w * h,
         unit: "ft",
         approximatePosition: true,
       },
@@ -145,7 +146,7 @@ export async function generateSeedGraph(
       parentId: levelId,
       name: r.roomName,
       visible: true,
-      metadata: { roomId: r.id, roomCode: r.roomCode, areaSqFt: r.areaSqFt ?? w * h, unit: "ft" },
+      metadata: { roomId: r.id, roomCode: r.roomCode, areaSqFt: computeRoomAreaSqFt(r) ?? w * h, unit: "ft" },
     };
   }
 
