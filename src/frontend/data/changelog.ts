@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/fix-rooms-area-computed-hotfix",
+    title: "Hotfix: compute room area on the fly — heal prod 500s + room-geometry package",
+    summary:
+      "Production home-catalog endpoints were 500ing: the shared prod D1 already had rooms.area_sq_ft dropped (0043, intentional — area is computed, never stored), but deployed main still declared the column in the drizzle rooms schema, so every select().from(rooms) emitted area_sq_ft and D1 rejected it (blast radius: catalog, images, listing-photos, mood-board, supporting-docs, vision-nodes, materials, pascal, measurements). Root-cause fix: remove the column from the schema (heals every star-select at once) and derive area on read. Also modularizes the calculators into services/room-geometry — one module file per calc type (dimensions primitives, area, linear-feet), so every caller shares one implementation with no per-file drift. linear-feet is available at three scopes: a single wall/segment, an entire room (rectangular perimeter), and a floor / whole-home total; mcp roomDto now surfaces linearFt beside areaSqFt. No migration (remote already matched). Shipped to prod (version c8101a8e); /api/rooms/catalog confirmed 200.",
+    date: "2026-08-03",
+    status: "shipped",
+    prNumber: 344,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/344",
+  },
+  {
     branch: "claude/homeowner-experience-plan-v2",
     title: "Homeowner experience — room model overhaul + measurement view (0041/0043)",
     summary:
@@ -340,6 +350,23 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "rooms-area-computed-hotfix",
+    branch: "claude/fix-rooms-area-computed-hotfix",
+    date: "2026-08-03",
+    area: "Home",
+    title: "Compute room area on the fly — heal prod 500s + room-geometry package",
+    summary:
+      "Production incident + fix. The shared prod D1 already had rooms.area_sq_ft dropped (0043 — intentional: area is computed, never stored), but deployed main still declared the column in the drizzle rooms schema, so every select().from(rooms) emitted area_sq_ft and D1 rejected it — 500ing every rooms read (catalog, images, listing-photos, mood-board, supporting-docs, vision-nodes, materials, pascal, measurements). Fix: remove the column from the schema (heals every star-select at once), derive area on read, and modularize the calculators into services/room-geometry — one module file per calc type sharing the dimension primitives, so no caller carries its own math (no IFTTT). linear-feet added at three scopes: a wall/segment, a room (rectangular perimeter), a floor / whole-home total. Deployed to prod (version c8101a8e); /api/rooms/catalog confirmed 200. NOTE: the earlier 500 was briefly cached at the Cloudflare edge, masking the heal until the cache refreshed — a follow-up will make 5xx non-cacheable.",
+    changes: [
+      { kind: "fixed", text: "Removed areaSqFt from the rooms drizzle schema — a star select().from(rooms) no longer emits the dropped column; heals every rooms read across the app." },
+      { kind: "added", text: "services/room-geometry/ package: dimensions.ts (toFeet/round2), area.ts (computeRoomAreaSqFt/sumRoomAreaSqFt), linear-feet.ts (segmentLinearFt/computeRoomLinearFt/sumRoomLinearFt), index.ts barrel, + assert self-check." },
+      { kind: "changed", text: "All readers route through the shared calculators: mcp rooms _shared.roomDto (now surfaces linearFt beside areaSqFt), home-catalog.computeRoomSqft (delegates), materials allocate.buildRoomContext, pascal generator, measurements.listActiveRooms." },
+      { kind: "changed", text: "update_room: areaSqFt is no longer settable (area is derived). Removed the now-dead area backfill + unused isNull import from home-catalog." },
+    ],
+    migrations: [],
+    status: "shipped",
+  },
   {
     id: "homeowner-room-model-0043",
     branch: "claude/homeowner-experience-plan-v2",

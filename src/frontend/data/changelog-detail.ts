@@ -113,6 +113,57 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "rooms-area-computed-hotfix": {
+    slug: "rooms-area-computed-hotfix",
+    branch: "claude/fix-rooms-area-computed-hotfix",
+    prNumber: 344,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/344",
+    subtitle: "Root-cause heal for a prod outage + a shared room-geometry package",
+    introduction:
+      "A production incident and its fix. Every rooms read was 500ing because the deployed schema still declared a column the database no longer had. The fix removes the column from the schema, derives area on read, and consolidates the geometry math into one shared package.",
+    problem:
+      "The shared production D1 already had `rooms.area_sq_ft` dropped (0043 — intentional; area is a stored calculation that goes stale). But deployed `main` still declared `areaSqFt` in the drizzle `rooms` schema, so drizzle listed `area_sq_ft` in the column set of every `select().from(rooms)` and D1 rejected it: `SQLITE_ERROR: table rooms has no column named area_sq_ft`. Blast radius was every rooms read — catalog, images, listing-photos, mood-board, supporting-documents, vision-nodes, materials allocation, pascal generator, measurements.",
+    approach:
+      "Remove `areaSqFt` from the `rooms` drizzle schema — that alone heals every star-`select().from(rooms)`, since drizzle then stops naming the column. Area is derived on read. To keep the derivation identical everywhere (the homeowner's rule: same shape, no per-caller logic), the calculators were modularized into `services/room-geometry` — one module per calc type over shared dimension primitives — and every reader routed through it. Linear feet is provided at three scopes (a wall/segment, a room's rectangular perimeter, a floor / whole-home total); the walls-driven perimeter for non-rectangular rooms lands with the 0043 walls table.",
+    apiChanges: [
+      "mcp `list_rooms` / `get_room`: room output now includes `linearFt` (computed rectangular perimeter) beside `areaSqFt`.",
+      "mcp `update_room`: `areaSqFt` is no longer an accepted input — area is derived, not stored.",
+    ],
+    filesTouched: [
+      "src/backend/db/schema/home/rooms.ts (areaSqFt column removed)",
+      "src/backend/services/room-geometry/{dimensions,area,linear-feet,index}.ts (new package)",
+      "src/backend/services/room-geometry/room-geometry.test.ts (assert self-check)",
+      "src/backend/mcp/tools/rooms/{_shared,list_rooms,get_room,update_room}.ts",
+      "src/backend/services/home-catalog.ts (computeRoomSqft delegates; area backfill + isNull removed)",
+      "src/backend/services/materials/allocate.ts",
+      "src/backend/services/pascal/generator.ts",
+      "src/backend/services/measurements.ts (listActiveRooms)",
+    ],
+    migrations: [],
+    code: [
+      {
+        title: "room-geometry — one module per calc type, shared primitives",
+        lang: "ts",
+        code: "// dimensions.ts — the primitive every calc agrees on\nexport function toFeet(feet: number | null, inches: number | null): number | null {\n  if (feet == null && inches == null) return null;\n  return (feet ?? 0) + (inches ?? 0) / 12;\n}\n// area.ts\nexport const computeRoomAreaSqFt = (r: Dimensions) => {\n  const l = toFeet(r.lengthFeet, r.lengthInches), w = toFeet(r.widthFeet, r.widthInches);\n  return l != null && w != null ? round2(l * w) : null;\n};\n// linear-feet.ts — three scopes: a wall run, a room perimeter, a floor/home total\nexport const computeRoomLinearFt = (r: Dimensions) => {\n  const l = toFeet(r.lengthFeet, r.lengthInches), w = toFeet(r.widthFeet, r.widthInches);\n  return l != null && w != null ? round2(2 * (l + w)) : null;\n};",
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Why every rooms read 500'd — and where the fix cuts it",
+        title: "Schema vs. database drift",
+        code: "flowchart TD\n  A[deployed main: rooms schema still declares areaSqFt] --> B[select().from(rooms) lists area_sq_ft]\n  B --> C[(prod D1: rooms has NO area_sq_ft — dropped by 0043)]\n  C --> D[SQLITE_ERROR: no such column -> 500]\n  D --> E[every rooms read fails: catalog, images, materials, pascal, measurements...]\n  F[FIX: remove areaSqFt from schema] -.heals.-> B\n  G[derive area/linear-ft on read via room-geometry] -.-> H[200, computed shape]\n  classDef fix fill:#1f4d2e,stroke:#4ade80\n  classDef bad fill:#4d1f1f,stroke:#f87171\n  class F,G,H fix\n  class D,E bad",
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_343.mjs",
+      command: "pnpm run deploy  (from main, after merge) ; curl /api/rooms/catalog",
+      source:
+        "// Also: npx tsx src/backend/services/room-geometry/room-geometry.test.ts (assert self-check).",
+      output:
+        "Deployed to prod, version c8101a8e (100%). GET /api/rooms/catalog -> 200, success:true (was 500). room-geometry.test.ts — all assertions passed. Build + tsc(touched) clean. NOTE: the pre-fix 500 was briefly served from Cloudflare's edge cache after deploy; cache-busted requests returned 200 immediately and the bare URL refreshed to 200. Follow-up filed to make 5xx non-cacheable.",
+      migrations: [],
+    },
+  },
   "homeowner-room-model-0043": {
     slug: "homeowner-room-model-0043",
     branch: "claude/homeowner-experience-plan-v2",
