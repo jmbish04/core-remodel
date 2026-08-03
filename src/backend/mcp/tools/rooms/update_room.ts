@@ -21,7 +21,7 @@ export const updateRoom = defineTool({
       lengthInches: z.number().min(0).max(11.99).optional(),
       widthFeet: z.number().int().min(0).optional(),
       widthInches: z.number().min(0).max(11.99).optional(),
-      areaSqFt: z.number().positive().optional(),
+      // areaSqFt is not settable — area is computed from the dimensions (0043).
       problemAreas: z.string().optional(),
       plumbingNotes: z.string().optional(),
       electricalNotes: z.string().optional(),

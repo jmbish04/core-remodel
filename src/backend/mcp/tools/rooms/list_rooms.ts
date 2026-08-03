@@ -30,6 +30,7 @@ export const listRooms = defineTool({
           floorName: z.string().nullable(),
           dimensions: z.string().nullable(),
           areaSqFt: z.number().nullable(),
+          linearFt: z.number().nullable(),
         }),
       ),
     },
