@@ -1,0 +1,481 @@
+[
+  {
+    "taskKey": "P0-TRIAGE-01",
+    "title": "Triage all 140 pages against the homeowner-job test",
+    "description": "Every existing page scored keep/combine/hide/remove with an owner and a reason, using the seven triage questions in the plan. Output is a committed table, not a conversation.",
+    "workstream": "product",
+    "phase": 0,
+    "sortOrder": 1,
+    "changeType": "investigate"
+  },
+  {
+    "taskKey": "P0-DB-00",
+    "title": "Project type on the project record",
+    "description": "lifestyle_change | flip | catastrophic_rebuild. Top-level attribute that governs trajectory, money semantics, actors, and what done means. In the schema from day one even though only lifestyle_change ships in v1 - retrofitting it later is expensive.",
+    "workstream": "database",
+    "phase": 0,
+    "sortOrder": 1,
+    "changeType": "new"
+  },
+  {
+    "taskKey": "P0-DB-01",
+    "title": "Add permanent line identity to rooms",
+    "description": "line_color_hex + line_order on the existing rooms table. Do NOT fork a second room table. Colors are functional identity carried everywhere the room appears.",
+    "workstream": "database",
+    "phase": 0,
+    "sortOrder": 2,
+    "changeType": "update"
+  },
+  {
+    "taskKey": "P0-DB-02",
+    "title": "Room stop state table",
+    "description": "room_stop_state with SOURCING|FIXTURES_LOCKED|ROUGH_IN|FINISH_SPEC|SIGNED_OFF, entered_at, entered_by. One current stop per room, history preserved. The stop is high-water: it never retreats.",
+    "workstream": "database",
+    "phase": 0,
+    "sortOrder": 3,
+    "changeType": "new",
+    "dependsOn": ["P0-DB-01"]
+  },
+  {
+    "taskKey": "P0-DB-03",
+    "title": "Spec definitions + room spec fields",
+    "description": "spec_definitions (definition table, is_required_for_threshold flag) and room_spec_fields with product_id/material_id FKs, value_text + value_cents for currency, confidence enum (known|assumed|range|unknown), and provenance. No JSON blobs.",
+    "workstream": "database",
+    "phase": 0,
+    "sortOrder": 4,
+    "changeType": "new",
+    "dependsOn": ["P0-DB-02"]
+  },
+  {
+    "taskKey": "P0-DB-07",
+    "title": "The decision graph",
+    "description": "Decisions with parents and dependents, plus a reopening record carrying the named cause. Enables no-unattributed-regression: a settled decision can only be reopened BY something, never by nobody.",
+    "workstream": "database",
+    "phase": 0,
+    "sortOrder": 5,
+    "changeType": "new",
+    "dependsOn": ["P0-DB-03"]
+  },
+  {
+    "taskKey": "P0-DB-08",
+    "title": "Impact model - definitions, impacts, targets, blocking, evidence",
+    "description": "Ticketing/bug-tracker semantics. impact_definitions is a definition table whose risk_inputs declares its own scoring fields so a new impact type is CONFIGURATION not a migration. impact_targets maps one impact to any number of heterogeneous targets (room|decision|budget_line|permit|delivery|contractor|project) with an effect. impact_blocks gives blocking. impact_evidence links receipts, invoices, permit records, quotes, research. Every impact carries source and provenance.",
+    "workstream": "database",
+    "phase": 0,
+    "sortOrder": 6,
+    "changeType": "new",
+    "dependsOn": ["P0-DB-07"]
+  },
+  {
+    "taskKey": "P0-DB-09",
+    "title": "Party impacts - actor FK and the people-caused definition class",
+    "description": "actor_party_kind + actor_party_id on impacts, reaching household_members / companies / vendor records by FK - never a name string. Seed the party impact definitions: homeowner_change_of_mind, contractor_terminated, contractor_abandonment, bad_faith, contract_breach, fraud, sub_loss, vendor_failure. Applies equally to GC, sub, vendor, supplier, showroom. People are a first-class impact source, not an edge case.",
+    "workstream": "database",
+    "phase": 0,
+    "sortOrder": 7,
+    "changeType": "new",
+    "dependsOn": ["P0-DB-08"]
+  },
+  {
+    "taskKey": "P0-API-01",
+    "title": "The single roomReadiness(roomId) resolver",
+    "description": "One server-side resolver. The translation-ready badge, the drawn threshold, and any future contractor gate all call it. Direct unit check: a room with a null required spec field must never report ready.",
+    "workstream": "api",
+    "phase": 0,
+    "sortOrder": 7,
+    "changeType": "new",
+    "dependsOn": ["P0-DB-03"]
+  },
+  {
+    "taskKey": "P0-API-03",
+    "title": "The single nodeHealth(kind, id) resolver",
+    "description": "Health is DERIVED from open impacts and their blocking graph, never stored. Every badge, blast-radius highlight, and forecast reads from it. Same one-implementation discipline as roomReadiness.",
+    "workstream": "api",
+    "phase": 0,
+    "sortOrder": 8,
+    "changeType": "new",
+    "dependsOn": ["P0-DB-08"]
+  },
+  {
+    "taskKey": "P0-RULES-01",
+    "title": "Known-ripple rule library",
+    "description": "Curated construction knowledge, seeded: move a wall -> plumbing, electrical, permit, flooring transition, HVAC. Deterministic, explainable, no hallucination, works on day one with zero project history. This is what keeps the dependency graph from being empty.",
+    "workstream": "product",
+    "phase": 0,
+    "sortOrder": 9,
+    "changeType": "new",
+    "dependsOn": ["P0-DB-08"]
+  },
+  {
+    "taskKey": "P1-UI-01",
+    "title": "Homeowner shell with six destinations",
+    "description": "Home, Vision, Rooms, Out There, Money, Needs You. Net-new routes alongside /admin. Shell carries the Needs You count only.",
+    "workstream": "frontend",
+    "phase": 1,
+    "sortOrder": 1,
+    "changeType": "new",
+    "targetRoute": "/home",
+    "dependsOn": ["P0-API-01"]
+  },
+  {
+    "taskKey": "P1-UI-02",
+    "title": "The Diagram component",
+    "description": "Room lines in permanent color, uniform stop dots, ringed interchanges, one threshold rule across all lines, 45/90 geometry only where it encodes a relationship. Reopened markers and impact markers render beneath a line without moving its stop. Desktop / phone-rows / in-car variants; the car sets the legibility floor.",
+    "workstream": "frontend",
+    "phase": 1,
+    "sortOrder": 2,
+    "changeType": "new",
+    "dependsOn": ["P1-UI-01", "P0-API-03"]
+  },
+  {
+    "taskKey": "P1-UI-03",
+    "title": "Home landing",
+    "description": "Full-bleed project diagram, Needs You docked at the interchange, recent movement in plain language. No KPI tiles, no progress rings, no project-wide progress bar.",
+    "workstream": "frontend",
+    "phase": 1,
+    "sortOrder": 3,
+    "changeType": "new",
+    "targetRoute": "/home",
+    "dependsOn": ["P1-UI-02"]
+  },
+  {
+    "taskKey": "P1-API-02",
+    "title": "One Needs You queue",
+    "description": "A single queue behind the landing, the shell counter, every room blocker badge, every agent proposal, and every forecast alarm. Grouped by consequence and decision type, not urgency alone.",
+    "workstream": "api",
+    "phase": 1,
+    "sortOrder": 4,
+    "changeType": "new",
+    "targetRoute": "/needs-you",
+    "dependsOn": ["P1-UI-01"]
+  },
+  {
+    "taskKey": "P2-DB-04",
+    "title": "Style profiles + axes as definition and mapping tables",
+    "description": "style_profiles and style_axes definition tables; member_axis_scores and household_axis_scores mapping tables with stated|observed source. Never a delimited string, never a preferences blob.",
+    "workstream": "database",
+    "phase": 2,
+    "sortOrder": 1,
+    "changeType": "new"
+  },
+  {
+    "taskKey": "P2-DB-05",
+    "title": "Households, members, non-negotiables, room axis exceptions",
+    "description": "Per-partner preferences preserved alongside the household synthesis. non_negotiables as explicit objects with markdown+html, optionally room-scoped. room_axis_exceptions so a tech-forward kitchen and a deliberately simple guest room can coexist.",
+    "workstream": "database",
+    "phase": 2,
+    "sortOrder": 2,
+    "changeType": "new",
+    "dependsOn": ["P2-DB-04"]
+  },
+  {
+    "taskKey": "P2-UI-04",
+    "title": "Vision Studio - the living brief",
+    "description": "Atelier-led. Desired experiences, rituals, dislikes, must-feel and must-work outcomes in the homeowner's own words. Named profile up front, axes underneath.",
+    "workstream": "frontend",
+    "phase": 2,
+    "sortOrder": 3,
+    "changeType": "new",
+    "targetRoute": "/vision",
+    "dependsOn": ["P2-DB-05"]
+  },
+  {
+    "taskKey": "P2-UI-05",
+    "title": "Partner alignment surface",
+    "description": "Both positions side by side, disagreement preserved rather than averaged, non-negotiable collisions detected, consequences shown to each partner specifically, conscious joint choice recorded with who decided and what would cause reconsideration.",
+    "workstream": "frontend",
+    "phase": 2,
+    "sortOrder": 4,
+    "changeType": "new",
+    "targetRoute": "/vision",
+    "dependsOn": ["P2-UI-04"]
+  },
+  {
+    "taskKey": "P2-AI-01",
+    "title": "Profile divergence detection",
+    "description": "Compare stated profile against observed choices; surface as an invitation to update, never a correction, never automatic. Structured output with an explicit schema; ids validated against the live axis set.",
+    "workstream": "ai",
+    "phase": 2,
+    "sortOrder": 5,
+    "changeType": "new",
+    "dependsOn": ["P2-UI-04"]
+  },
+  {
+    "taskKey": "P3-UI-06",
+    "title": "Room workspace - atelier entry",
+    "description": "What this room will feel like: references, renders, materials at real scale, selections shown as objects not rows. This screen is make-or-break; give it the most room.",
+    "workstream": "frontend",
+    "phase": 3,
+    "sortOrder": 1,
+    "changeType": "new",
+    "targetRoute": "/rooms/[id]",
+    "dependsOn": ["P1-UI-02", "P2-UI-04"]
+  },
+  {
+    "taskKey": "P3-UI-07",
+    "title": "Persistent room orientation",
+    "description": "The room's own line and stop state stay visible without competing with the atelier layer.",
+    "workstream": "frontend",
+    "phase": 3,
+    "sortOrder": 2,
+    "changeType": "new",
+    "targetRoute": "/rooms/[id]",
+    "dependsOn": ["P3-UI-06"]
+  },
+  {
+    "taskKey": "P3-UI-08",
+    "title": "In-place spec work with confidence states",
+    "description": "No modal for specification. Every value carries known|assumed|range|unknown. An honest unknown is valid and recorded; false precision is the failure mode.",
+    "workstream": "frontend",
+    "phase": 3,
+    "sortOrder": 3,
+    "changeType": "new",
+    "targetRoute": "/rooms/[id]",
+    "dependsOn": ["P3-UI-07"]
+  },
+  {
+    "taskKey": "P3-UI-09",
+    "title": "The enforced translation-ready threshold",
+    "description": "Calls roomReadiness(). A blocked room names the exact missing field and links to where to resolve it. A deliberate unknown can be waived with a recorded reason.",
+    "workstream": "frontend",
+    "phase": 3,
+    "sortOrder": 4,
+    "changeType": "new",
+    "targetRoute": "/rooms/[id]",
+    "dependsOn": ["P3-UI-08", "P0-API-01"]
+  },
+  {
+    "taskKey": "P3-UI-14",
+    "title": "The reopened-decision marker - no unattributed regression",
+    "description": "The stop HOLDS. Work reached is never erased. A reopened decision renders as a separate attributable marker naming its cause, which is always another decision or an impact and never a person. Most important behavioral rule in the plan.",
+    "workstream": "frontend",
+    "phase": 3,
+    "sortOrder": 5,
+    "changeType": "new",
+    "targetRoute": "/rooms/[id]",
+    "dependsOn": ["P0-DB-07", "P3-UI-09"]
+  },
+  {
+    "taskKey": "P4-DB-06",
+    "title": "Out There intake lifecycle",
+    "description": "Captured -> Enriched -> Proposed -> Committed | Parked | Discarded, with the reason kept on discard and why-it-mattered kept on park.",
+    "workstream": "database",
+    "phase": 4,
+    "sortOrder": 1,
+    "changeType": "new"
+  },
+  {
+    "taskKey": "P4-UI-10",
+    "title": "Out There capture and library",
+    "description": "Atelier-led. Instant forgiving capture, enrichment after. Finds shown as objects you fell for, not rows. Parking is a first-class action.",
+    "workstream": "frontend",
+    "phase": 4,
+    "sortOrder": 2,
+    "changeType": "new",
+    "targetRoute": "/out-there",
+    "dependsOn": ["P4-DB-06"]
+  },
+  {
+    "taskKey": "P4-AI-02",
+    "title": "Destination proposal with visible reasoning",
+    "description": "Agent ranks candidate rooms with the evidence that supports or eliminates each. Narrow by elimination, not vibes. Structured output; returned ids validated before insert.",
+    "workstream": "ai",
+    "phase": 4,
+    "sortOrder": 3,
+    "changeType": "new",
+    "dependsOn": ["P4-DB-06"]
+  },
+  {
+    "taskKey": "P4-UI-11",
+    "title": "The interchange - human commit",
+    "description": "Assigning a find to a room. Nothing crosses on its own; the human confirms room plus governing intent. Carries the product's one orchestrated motion.",
+    "workstream": "frontend",
+    "phase": 4,
+    "sortOrder": 4,
+    "changeType": "new",
+    "targetRoute": "/needs-you",
+    "dependsOn": ["P4-AI-02", "P1-API-02"]
+  },
+  {
+    "taskKey": "P5-UI-12",
+    "title": "Money - commitments and exposure",
+    "description": "Committed vs paid vs exposed, per room, in the room's own color. Every currency value stored and rendered as text + cents. Cost overruns land as impacts, evidenced by receipts and invoices.",
+    "workstream": "frontend",
+    "phase": 5,
+    "sortOrder": 1,
+    "changeType": "new",
+    "targetRoute": "/money",
+    "dependsOn": ["P3-UI-09"]
+  },
+  {
+    "taskKey": "P5-UI-13",
+    "title": "Soft landing controller",
+    "description": "When a constraint kills the preferred option: preserve the governing intent, generate at least one alternative that honors it differently, show consequences across budget, schedule, maintenance, aesthetics, function, and dependencies, then let the homeowner choose. Never substitute the cheap default.",
+    "workstream": "frontend",
+    "phase": 5,
+    "sortOrder": 2,
+    "changeType": "new",
+    "targetRoute": "/money",
+    "dependsOn": ["P5-UI-12"]
+  },
+  {
+    "taskKey": "P6-API-04",
+    "title": "Impact lifecycle API",
+    "description": "Create, target, block, evidence, mitigate, resolve, dismiss. Blocking semantics: an impact cannot resolve while a blocking impact is open. Every write carries source and provenance.",
+    "workstream": "api",
+    "phase": 6,
+    "sortOrder": 1,
+    "changeType": "new",
+    "dependsOn": ["P0-API-03"]
+  },
+  {
+    "taskKey": "P6-UI-15",
+    "title": "Blast radius on the diagram",
+    "description": "An unhealthy node highlights the connected nodes it threatens IN THE SAME VIEW, never in a separate report. Severity through weight and state, not alarm color alone - three yellow nodes must not read as an emergency.",
+    "workstream": "frontend",
+    "phase": 6,
+    "sortOrder": 2,
+    "changeType": "new",
+    "dependsOn": ["P6-API-04", "P1-UI-02"]
+  },
+  {
+    "taskKey": "P6-UI-16",
+    "title": "Traversable history - zoom and time",
+    "description": "Navigate the graph zoomed out (whole project, health visible, history scrubbable), zoomed in (one room's chain of causes), and back through time to before a fork. Default view is always now; history is entered deliberately.",
+    "workstream": "frontend",
+    "phase": 6,
+    "sortOrder": 3,
+    "changeType": "new",
+    "dependsOn": ["P6-UI-15"]
+  },
+  {
+    "taskKey": "P6-UI-17",
+    "title": "Project health dashboard for homeowner and contractor",
+    "description": "The living, breathing project: which nodes need attention, which connected nodes are at risk, what is blocking what. Shared surface so homeowner, partner, and contractor read the same state.",
+    "workstream": "frontend",
+    "phase": 6,
+    "sortOrder": 4,
+    "changeType": "new",
+    "dependsOn": ["P6-UI-15"]
+  },
+  {
+    "taskKey": "P6-DB-10",
+    "title": "Change assessment tables",
+    "description": "change_assessments (linked to a proposed decision revision, with status consulting|assessed|committed|abandoned and the project stage captured at assessment time), change_assessment_findings (one row per question with answer, confidence, evidence link, cost_cents and days exposure), and assessment_question_definitions as a definition table so the interview grows without a migration.",
+    "workstream": "database",
+    "phase": 6,
+    "sortOrder": 5,
+    "changeType": "new",
+    "dependsOn": ["P0-DB-09"]
+  },
+  {
+    "taskKey": "P6-UI-23",
+    "title": "Change Impact Assessment interview",
+    "description": "Four domains in order - purchases and materials (orders affected, received, returnable per T&C, window, restocking fee, does the homeowner qualify), contracts (GC/sub contract touched, change order required, what the contract says it costs), regulatory (permit, drawings, structural calculations), timeline (critical path). Two paths: consult-first, and retroactive when they already decided. Retroactive is never punished.",
+    "workstream": "frontend",
+    "phase": 6,
+    "sortOrder": 6,
+    "changeType": "new",
+    "dependsOn": ["P6-DB-10"]
+  },
+  {
+    "taskKey": "P6-UI-24",
+    "title": "Cost-of-change preview",
+    "description": "Before a change commits, show what it costs RIGHT NOW priced against the current stage: money committed, returnability of what shipped, whether a change order triggers, permit exposure, days added - and where honest, what it would have cost earlier. Not a deterrent: the difference between discovering the cost after the fact and choosing it with eyes open. This is the incentive that makes consult-first a habit.",
+    "workstream": "frontend",
+    "phase": 6,
+    "sortOrder": 7,
+    "changeType": "new",
+    "dependsOn": ["P6-UI-23"]
+  },
+  {
+    "taskKey": "P7-UI-18",
+    "title": "assistant-ui threaded capture agent",
+    "description": "Threaded conversation on the frontend. The thread is the audit trail: what was said, what the agent understood, what the human corrected, what was committed - all attached to the resulting impact.",
+    "workstream": "frontend",
+    "phase": 7,
+    "sortOrder": 1,
+    "changeType": "new",
+    "dependsOn": ["P6-API-04"]
+  },
+  {
+    "taskKey": "P7-UI-19",
+    "title": "Voice transcription",
+    "description": "First-class, not a fallback. The real capture moment is someone standing in a half-demolished room or driving away from a site.",
+    "workstream": "frontend",
+    "phase": 7,
+    "sortOrder": 2,
+    "changeType": "new",
+    "dependsOn": ["P7-UI-18"]
+  },
+  {
+    "taskKey": "P7-UI-20",
+    "title": "Generative-UI confirmation loop",
+    "description": "The agent restates its understanding as a structured proposal - impact, targets, effects, confidence - and the user corrects it visually and verbally until right. Propose anything, commit nothing without confirmation.",
+    "workstream": "frontend",
+    "phase": 7,
+    "sortOrder": 3,
+    "changeType": "new",
+    "dependsOn": ["P7-UI-19"]
+  },
+  {
+    "taskKey": "P7-MCP-01",
+    "title": "MCP parity for impact capture",
+    "description": "The same capture works from a chat session in the car, on site, or at the desk. One file per tool under src/backend/mcp/tools/, registry-driven, with examples.",
+    "workstream": "mcp",
+    "phase": 7,
+    "sortOrder": 4,
+    "changeType": "new",
+    "dependsOn": ["P6-API-04"]
+  },
+  {
+    "taskKey": "P8-API-05",
+    "title": "Evidence-gated alarm engine",
+    "description": "An alarm must name its trigger, its evidence, and a mitigation that is already started. WITHOUT EVIDENCE IT DOES NOT RENDER. Alarms land in the one Needs You queue and on the affected node.",
+    "workstream": "api",
+    "phase": 8,
+    "sortOrder": 1,
+    "changeType": "new",
+    "dependsOn": ["P6-API-04"]
+  },
+  {
+    "taskKey": "P8-UI-21",
+    "title": "The watch list tier",
+    "description": "Quieter standing panel of known category risks for this area and project type, visibly labeled as what to expect and never as a prediction about this project. Never in the queue. Hard-separated from alarms - blending the tiers is how the feature becomes noise.",
+    "workstream": "frontend",
+    "phase": 8,
+    "sortOrder": 2,
+    "changeType": "new",
+    "dependsOn": ["P8-API-05"]
+  },
+  {
+    "taskKey": "P8-INT-01",
+    "title": "Permit system integration - project watching and area trends",
+    "description": "Already live for SF in this repo. Watch the current project's permit records; gather trend data on how long this permit type actually takes in this jurisdiction and what inspection issues recur in this area.",
+    "workstream": "integration",
+    "phase": 8,
+    "sortOrder": 3,
+    "changeType": "update",
+    "dependsOn": ["P8-API-05"]
+  },
+  {
+    "taskKey": "P8-AI-03",
+    "title": "Locality intelligence research",
+    "description": "The agent researches where the project actually is - online forums, local building code, jurisdiction quirks - so it can advise and anticipate. Reuses the existing deep-research engine. Renders as a range with its source, never as a confident date.",
+    "workstream": "ai",
+    "phase": 8,
+    "sortOrder": 4,
+    "changeType": "new",
+    "dependsOn": ["P8-INT-01"]
+  },
+  {
+    "taskKey": "P8-UI-22",
+    "title": "Mitigation staging and group sharing",
+    "description": "Every alarm ships with a mitigation already started so nobody is flying blind. An alarm is a conversation point: shareable to a partner and to the contractor so the group prepares together instead of discovering separately.",
+    "workstream": "frontend",
+    "phase": 8,
+    "sortOrder": 5,
+    "changeType": "new",
+    "dependsOn": ["P8-API-05"]
+  }
+]
