@@ -10,7 +10,7 @@ export const generateFloorplanVariant = defineTool({
   category: "render",
   title: "Generate a floorplan variant",
   description:
-    "Create a new variant (scene) under a study. Two modes: (1) a deterministic BASE from Core-Remodel measurements — rooms as rectangles sized by measured feet and positioned by floorplan bbox; or (2) a BRANCH from an existing variant (`fromVariantId`) that preserves its graph and measurement evidence. An optional `intent` applies validated structured AI node edits before the child scene is saved. Every result opens at its own `/scene/:id` in the Pascal editor.",
+    "Create a new Pascal scene under a study. Use it like a quick layout sketcher: first generate a deterministic BASE from Core Remodel measurements, then create BRANCH variants from an existing scene with a natural-language `intent` such as moving a kitchen island, trying a different appliance wall, or changing seating. The intent is converted into validated scene-node edits before the child scene is saved. Every result returns its Pascal `/scene/:id` editor link for 2D/3D review.",
   inputShape: {
     studyId: z.string().min(1),
     name: z.string().min(1).describe("Variant label, e.g. 'Island centered'."),
@@ -21,14 +21,22 @@ export const generateFloorplanVariant = defineTool({
     intent: z
       .string()
       .optional()
-      .describe("Design intent applied as validated structured node edits."),
+      .describe(
+        "Natural-language layout change to apply as validated scene-node edits, e.g. 'move the kitchen island toward the windows and add seating for four'.",
+      ),
   },
   annotations: WRITE,
   examples: [
     { title: "Base from measurements", args: { studyId: "study-abc12345", name: "Measured base" } },
     {
-      title: "Branch a variant",
-      args: { studyId: "study-abc12345", name: "Island moved", fromVariantId: "scene-def67890" },
+      title: "Branch a kitchen island option",
+      args: {
+        studyId: "study-abc12345",
+        name: "Island shifted toward windows",
+        fromVariantId: "scene-def67890",
+        intent:
+          "Create a longer kitchen island with seating for four on the living-room side. Keep measured wall positions and clearances.",
+      },
     },
   ],
   handler: async ({ env }, input) => {

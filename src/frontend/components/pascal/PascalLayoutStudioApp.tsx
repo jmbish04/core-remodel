@@ -7,6 +7,7 @@
 import {
   AlertTriangle,
   ArrowLeft,
+  Bot,
   Camera,
   ChevronDown,
   ExternalLink,
@@ -14,6 +15,7 @@ import {
   ImageIcon,
   Layers3,
   Loader2,
+  MessageSquareText,
   MoreHorizontal,
   Plus,
   RefreshCw,
@@ -295,6 +297,42 @@ export function PascalLayoutStudioApp({ projectId }: { projectId?: string }) {
   return projectId ? <ProjectDetail projectId={projectId} /> : <ProjectIndex />;
 }
 
+function UsageGuide() {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <Bot className="size-4 text-muted-foreground" aria-hidden="true" />
+          Quick layout sketcher
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-4 text-sm md:grid-cols-3">
+        <div className="space-y-1">
+          <p className="font-medium">1. Pick scope</p>
+          <p className="text-muted-foreground">Select a floor, room, or whole home.</p>
+        </div>
+        <div className="space-y-1">
+          <p className="font-medium">2. Describe change</p>
+          <p className="text-muted-foreground">Generate a base, then branch it.</p>
+        </div>
+        <div className="space-y-1">
+          <p className="font-medium">3. Review the render</p>
+          <p className="text-muted-foreground">Open, capture, and compare variants.</p>
+        </div>
+      </CardContent>
+      <CardFooter className="flex flex-col items-start gap-2 border-t text-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-2 text-muted-foreground">
+          <MessageSquareText className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+          <span>Example MCP prompt: "Create an island study, then branch a longer island."</span>
+        </div>
+        <Badge variant="outline" className="shrink-0">
+          MCP tools: render domain
+        </Badge>
+      </CardFooter>
+    </Card>
+  );
+}
+
 function ProjectIndex() {
   const [data, setData] = useState<ProjectIndexPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -327,6 +365,8 @@ function ProjectIndex() {
 
   return (
     <div className="space-y-6">
+      <UsageGuide />
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
           {data.projects.length} {data.projects.length === 1 ? "project" : "projects"}
@@ -624,6 +664,8 @@ function ProjectDetail({ projectId }: { projectId: string }) {
         <ArrowLeft className="size-4" /> All layout projects
       </a>
 
+      <UsageGuide />
+
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -777,7 +819,10 @@ function CreateStudyDialog({
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>New layout study</DialogTitle>
-          <DialogDescription>Group variants that answer one layout question.</DialogDescription>
+          <DialogDescription>
+            Group variants that answer one layout question, such as island placement or appliance
+            layout.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
@@ -863,7 +908,7 @@ function CreateVariantDialog({
         <DialogHeader>
           <DialogTitle>New variant</DialogTitle>
           <DialogDescription>
-            Measured dimensions stay authoritative; the generated shape remains editable.
+            Start from measured geometry, then optionally ask AI to make a specific layout change.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
@@ -873,7 +918,7 @@ function CreateVariantDialog({
               id="pascal-variant-name"
               value={name}
               onChange={(event) => setName(event.target.value)}
-              placeholder="Island centered"
+              placeholder="Island shifted toward windows"
             />
           </div>
           <div className="space-y-2">
@@ -916,7 +961,7 @@ function CreateVariantDialog({
               id="pascal-variant-intent"
               value={intent}
               onChange={(event) => setIntent(event.target.value)}
-              placeholder="Move the island toward the windows while preserving measured clearances."
+              placeholder="Create a longer kitchen island with seating for four on the living-room side. Keep measured wall positions and clearances."
               rows={4}
             />
           </div>
@@ -924,7 +969,8 @@ function CreateVariantDialog({
             <Ruler />
             <AlertTitle>Measured starting point</AlertTitle>
             <AlertDescription>
-              Rooms are placed at measured sizes. Refine walls and openings in Pascal.
+              The AI can move or add scene nodes, but Core Remodel dimensions remain the boundary.
+              Open the result in Pascal to inspect the 2D/3D view.
             </AlertDescription>
           </Alert>
         </div>
