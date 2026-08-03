@@ -1,0 +1,25 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { PascalLayoutStudioApp } from "@/components/pascal/PascalLayoutStudioApp";
+
+const { projectId } = Astro.params;
+if (!projectId) return Astro.redirect("/admin/pascal");
+---
+
+<BaseLayout
+  title="Layout Study - 126 Colby - Remodel Mission Control"
+  description="Create, compare, capture, and open Pascal layout variants."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 flex items-center gap-2 text-3xl font-bold tracking-tight">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-6 text-muted-foreground" aria-hidden="true">
+          <path d="M3 3h18v18H3z"></path><path d="M9 3v18"></path><path d="M9 9h12"></path><path d="M3 15h6"></path>
+        </svg>
+        Layout Studio
+      </h1>
+      <p class="text-muted-foreground">Measured project facts stay in Core Remodel; Pascal handles visual editing.</p>
+    </div>
+    <PascalLayoutStudioApp projectId={projectId} client:only="react" />
+  </main>
+</BaseLayout>
