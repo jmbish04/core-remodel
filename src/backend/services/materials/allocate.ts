@@ -41,6 +41,7 @@ import {
 import { subcategories } from "@backend/db/schema/config/subcategories";
 import { rooms } from "@backend/db/schema/home/rooms";
 import { floors } from "@backend/db/schema/home/floors";
+import { computeRoomAreaSqFt } from "@backend/services/room-area";
 import { workerEmailInvoiceLineItems } from "@backend/db/schema/emails/worker_email_invoice_line_items";
 import { workerEmailInvoices } from "@backend/db/schema/emails/worker_email_invoices";
 import { createGeminiAiGatewayClient } from "@backend/services/render/providers/gemini-stage-provider";
@@ -83,9 +84,10 @@ export async function buildRoomContext(db: Db): Promise<RoomContext> {
       id: rooms.id,
       roomName: rooms.roomName,
       floorName: floors.name,
-      areaSqFt: rooms.areaSqFt,
       lengthFeet: rooms.lengthFeet,
+      lengthInches: rooms.lengthInches,
       widthFeet: rooms.widthFeet,
+      widthInches: rooms.widthInches,
     })
     .from(rooms)
     .leftJoin(floors, eq(rooms.floorId, floors.id))
@@ -98,7 +100,7 @@ export async function buildRoomContext(db: Db): Promise<RoomContext> {
       id: r.id,
       roomName: r.roomName,
       floorName: r.floorName ?? null,
-      areaSqFt: r.areaSqFt ?? null,
+      areaSqFt: computeRoomAreaSqFt(r),
       lengthFeet: r.lengthFeet ?? null,
       widthFeet: r.widthFeet ?? null,
       materializedSubcategoryIds: new Set<number>(),
