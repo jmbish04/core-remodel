@@ -8,6 +8,7 @@ import { apiReference } from "@scalar/hono-api-reference";
 import { Hono } from "hono";
 
 import pascalRouter from "./pascal";
+import { PASCAL_OPENAPI_PATH_PREFIX } from "./pascal-paths";
 
 const openapiRouter = new Hono<{ Bindings: Env }>();
 
@@ -1351,28 +1352,64 @@ const openApiSpec = {
  * Pascal's route definitions remain the source of truth; prefixing happens here
  * because that router is mounted at /api/pascal/v1 by api/index.ts.
  */
-function getOpenApiSpec() {
+type OpenApiMap = Record<string, unknown>;
+
+function mergeWithoutCollisions(label: string, left: OpenApiMap, right: OpenApiMap): OpenApiMap {
+  for (const key of Object.keys(right)) {
+    if (Object.prototype.hasOwnProperty.call(left, key)) {
+      throw new Error(`OpenAPI ${label} collision: '${key}'`);
+    }
+  }
+  return { ...left, ...right };
+}
+
+function mergeComponents(left: OpenApiMap, right: OpenApiMap): OpenApiMap {
+  const merged: OpenApiMap = { ...left };
+  for (const [section, value] of Object.entries(right)) {
+    const current = merged[section];
+    if (current && value && typeof current === "object" && typeof value === "object") {
+      merged[section] = mergeWithoutCollisions(
+        `components.${section}`,
+        current as OpenApiMap,
+        value as OpenApiMap,
+      );
+    } else if (current !== undefined) {
+      throw new Error(`OpenAPI components collision: '${section}'`);
+    } else {
+      merged[section] = value;
+    }
+  }
+  return merged;
+}
+
+function buildOpenApiSpec() {
   const pascalSpec = pascalRouter.getOpenAPI31Document({
     openapi: "3.1.0",
     info: { title: "Pascal scene API", version: "1.0.0" },
   });
   const pascalPaths = Object.fromEntries(
     Object.entries(pascalSpec.paths ?? {}).map(([path, operations]) => [
-      `/pascal/v1${path}`,
+      `${PASCAL_OPENAPI_PATH_PREFIX}${path}`,
       operations,
     ]),
   );
+  const legacyPaths = openApiSpec.paths as OpenApiMap;
+  const generatedPaths = pascalPaths as OpenApiMap;
   return {
     ...openApiSpec,
-    paths: { ...openApiSpec.paths, ...pascalPaths },
-    components: {
-      ...openApiSpec.components,
-      schemas: {
-        ...openApiSpec.components.schemas,
-        ...pascalSpec.components?.schemas,
-      },
-    },
+    paths: mergeWithoutCollisions("path", legacyPaths, generatedPaths),
+    components: mergeComponents(
+      openApiSpec.components as OpenApiMap,
+      (pascalSpec.components ?? {}) as OpenApiMap,
+    ),
   };
+}
+
+let cachedOpenApiSpec: ReturnType<typeof buildOpenApiSpec> | undefined;
+
+function getOpenApiSpec(): ReturnType<typeof buildOpenApiSpec> {
+  cachedOpenApiSpec ??= buildOpenApiSpec();
+  return cachedOpenApiSpec;
 }
 
 // GET /openapi.json

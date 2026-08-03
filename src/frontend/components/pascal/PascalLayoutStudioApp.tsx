@@ -22,7 +22,9 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { z } from "zod";
 
+import { MarkdownProse } from "@/components/research/MarkdownProse";
 import {
   OverviewNoteEditor,
   type OverviewNoteEditorValue,
@@ -147,7 +149,76 @@ interface ProjectDetailPayload {
   variants: Variant[];
 }
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
+const scopeOptionSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  floorId: z.number().optional(),
+});
+const projectSummaryPayloadSchema = z.object({
+  id: z.string(),
+  coreRemodelProjectId: z.string(),
+  name: z.string(),
+  scopeType: z.enum(["floor", "room", "whole_home"]),
+  floorId: z.number().nullable(),
+  roomId: z.number().nullable(),
+  scopeName: z.string().nullable(),
+  studyCount: z.number(),
+  variantCount: z.number(),
+  latestThumbnailUrl: z.string().nullable(),
+  updatedAt: z.string(),
+});
+const studyPayloadSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  title: z.string(),
+  descriptionMarkdown: z.string().nullable(),
+  descriptionHtml: z.string().nullable(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+const measurementPayloadSchema = z.object({
+  measurementId: z.union([z.number(), z.string()]).optional(),
+  kind: z.string().optional(),
+  value: z.number().optional(),
+  unit: z.string().optional(),
+  confidence: z.number().optional(),
+  sourceRevision: z.string().nullable().optional(),
+});
+const variantPayloadSchema = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  studyId: z.string().nullable(),
+  name: z.string(),
+  descriptionMarkdown: z.string().nullable(),
+  descriptionHtml: z.string().nullable(),
+  version: z.number(),
+  nodeCount: z.number(),
+  status: z.enum(["draft", "active", "archived"]),
+  parentSceneId: z.string().nullable(),
+  confidence: z.number().nullable(),
+  measurements: z.array(measurementPayloadSchema),
+  thumbnailUrl: z.string().nullable(),
+  editorUrl: z.string(),
+  updatedAt: z.string(),
+});
+const projectIndexPayloadSchema = z.object({
+  projects: z.array(projectSummaryPayloadSchema),
+  scopes: z.object({ floors: z.array(scopeOptionSchema), rooms: z.array(scopeOptionSchema) }),
+});
+const projectDetailPayloadSchema = z.object({
+  project: projectSummaryPayloadSchema,
+  studies: z.array(studyPayloadSchema),
+  variants: z.array(variantPayloadSchema),
+});
+const comparisonPayloadSchema = z.object({ variants: z.array(variantPayloadSchema) });
+const projectCreatedPayloadSchema = z.object({ id: z.string() }).passthrough();
+const generationPayloadSchema = z
+  .object({
+    generation: z.object({ intentApplied: z.number().optional() }).optional(),
+  })
+  .passthrough();
+
+async function requestJson(path: string, init?: RequestInit): Promise<unknown> {
   const response = await fetch(path, {
     credentials: "include",
     ...init,
@@ -156,11 +227,20 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
       ...init?.headers,
     },
   });
-  const payload = (await response.json().catch(() => ({}))) as { error?: string; message?: string };
+  const payload: unknown = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(payload.message ?? payload.error ?? `Request failed (${response.status})`);
+    const detail =
+      payload && typeof payload === "object" ? (payload as Record<string, unknown>) : {};
+    const message = typeof detail.message === "string" ? detail.message : detail.error;
+    throw new Error(typeof message === "string" ? message : `Request failed (${response.status})`);
   }
-  return payload as T;
+  return payload;
+}
+
+async function apiParsed<T>(path: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> {
+  const parsed = schema.safeParse(await requestJson(path, init));
+  if (!parsed.success) throw new Error("The server returned an invalid Layout Studio response");
+  return parsed.data;
 }
 
 function formatDate(value: string): string {
@@ -210,6 +290,7 @@ function LoadingCards() {
   );
 }
 
+/** Canonical Layout Studio island for the project index and project-detail views. */
 export function PascalLayoutStudioApp({ projectId }: { projectId?: string }) {
   return projectId ? <ProjectDetail projectId={projectId} /> : <ProjectIndex />;
 }
@@ -220,20 +301,25 @@ function ProjectIndex() {
   const [loading, setLoading] = useState(true);
   const [createOpen, setCreateOpen] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
     setLoading(true);
     setError(null);
     try {
-      setData(await api<ProjectIndexPayload>("/api/pascal/v1/projects"));
+      setData(await apiParsed("/api/pascal/v1/projects", projectIndexPayloadSchema, { signal }));
     } catch (cause) {
+      if (cause instanceof DOMException && cause.name === "AbortError") return;
       console.error("[PascalLayoutStudio] project index failed", cause);
       setError(cause instanceof Error ? cause.message : "Could not load layout projects");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted) setLoading(false);
     }
   }, []);
 
-  useEffect(() => void load(), [load]);
+  useEffect(() => {
+    const controller = new AbortController();
+    void load(controller.signal);
+    return () => controller.abort();
+  }, [load]);
 
   if (loading && !data) return <LoadingCards />;
   if (error && !data) return <ErrorState message={error} onRetry={() => void load()} />;
@@ -258,7 +344,7 @@ function ProjectIndex() {
             </EmptyMedia>
             <EmptyHeader>
               <EmptyTitle>No layout projects yet</EmptyTitle>
-              <EmptyDescription>Create one from a floor, room, or the whole home.</EmptyDescription>
+              <EmptyDescription>Choose a floor, room, or whole home.</EmptyDescription>
             </EmptyHeader>
             <EmptyContent>
               <Button onClick={() => setCreateOpen(true)}>
@@ -299,7 +385,7 @@ function ProjectIndex() {
                   className="w-full"
                   render={
                     <a
-                      href={`/admin/pascal/${encodeURIComponent(project.id)}`}
+                      href={`/admin/plan/3d?project=${encodeURIComponent(project.id)}`}
                       aria-label={`Open ${project.name}`}
                     />
                   }
@@ -327,7 +413,7 @@ function CreateProjectDialog({
   scopes: ProjectIndexPayload["scopes"];
 }) {
   const [name, setName] = useState("");
-  const [coreProjectId, setCoreProjectId] = useState("126-colby");
+  const [coreProjectId, setCoreProjectId] = useState("");
   const [scopeType, setScopeType] = useState<ScopeType>("floor");
   const [scopeId, setScopeId] = useState("");
   const [saving, setSaving] = useState(false);
@@ -337,7 +423,7 @@ function CreateProjectDialog({
     if (!name.trim() || !coreProjectId.trim() || (scopeType !== "whole_home" && !scopeId)) return;
     setSaving(true);
     try {
-      const created = await api<{ id: string }>("/api/pascal/v1/projects", {
+      const created = await apiParsed("/api/pascal/v1/projects", projectCreatedPayloadSchema, {
         method: "POST",
         body: JSON.stringify({
           name: name.trim(),
@@ -348,7 +434,7 @@ function CreateProjectDialog({
         }),
       });
       toast.success("Layout project created");
-      window.location.assign(`/admin/pascal/${encodeURIComponent(created.id)}`);
+      window.location.assign(`/admin/plan/3d?project=${encodeURIComponent(created.id)}`);
     } catch (cause) {
       console.error("[PascalLayoutStudio] create project failed", cause);
       toast.error(cause instanceof Error ? cause.message : "Could not create project");
@@ -383,12 +469,12 @@ function CreateProjectDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label>Scope</Label>
+            <Label htmlFor="pascal-project-scope">Scope</Label>
             <Select
               value={scopeType}
               onValueChange={(value) => value && (setScopeType(value as ScopeType), setScopeId(""))}
             >
-              <SelectTrigger>
+              <SelectTrigger id="pascal-project-scope">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -400,9 +486,11 @@ function CreateProjectDialog({
           </div>
           {scopeType !== "whole_home" ? (
             <div className="space-y-2">
-              <Label>{scopeType === "floor" ? "Floor" : "Room"}</Label>
+              <Label htmlFor="pascal-project-scope-id">
+                {scopeType === "floor" ? "Floor" : "Room"}
+              </Label>
               <Select value={scopeId} onValueChange={(value) => setScopeId(value ?? "")}>
-                <SelectTrigger>
+                <SelectTrigger id="pascal-project-scope-id">
                   <SelectValue placeholder={`Choose a ${scopeType}`} />
                 </SelectTrigger>
                 <SelectContent>
@@ -444,26 +532,41 @@ function ProjectDetail({ projectId }: { projectId: string }) {
   const [compare, setCompare] = useState<Variant[] | null>(null);
   const [comparing, setComparing] = useState(false);
 
-  const load = useCallback(async () => {
-    setError(null);
-    try {
-      setData(
-        await api<ProjectDetailPayload>(
+  const load = useCallback(
+    async (signal?: AbortSignal) => {
+      setError(null);
+      try {
+        const payload = await apiParsed(
           `/api/pascal/v1/projects/${encodeURIComponent(projectId)}/studies`,
-        ),
-      );
-    } catch (cause) {
-      console.error("[PascalLayoutStudio] project detail failed", cause);
-      setError(cause instanceof Error ? cause.message : "Could not load the layout project");
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId]);
+          projectDetailPayloadSchema,
+          { signal },
+        );
+        setData(payload);
+        const currentIds = new Set(payload.variants.map((variant) => variant.id));
+        setSelected((current) => new Set([...current].filter((id) => currentIds.has(id))));
+      } catch (cause) {
+        if (cause instanceof DOMException && cause.name === "AbortError") return;
+        console.error("[PascalLayoutStudio] project detail failed", cause);
+        setError(cause instanceof Error ? cause.message : "Could not load the layout project");
+      } finally {
+        if (!signal?.aborted) setLoading(false);
+      }
+    },
+    [projectId],
+  );
 
   useEffect(() => {
-    void load();
-    const interval = window.setInterval(() => void load(), 15_000);
-    return () => window.clearInterval(interval);
+    const controller = new AbortController();
+    let timeout: number | undefined;
+    const poll = async () => {
+      await load(controller.signal);
+      if (!controller.signal.aborted) timeout = window.setTimeout(() => void poll(), 15_000);
+    };
+    void poll();
+    return () => {
+      controller.abort();
+      if (timeout !== undefined) window.clearTimeout(timeout);
+    };
   }, [load]);
 
   const variantsByStudy = useMemo(() => {
@@ -479,6 +582,8 @@ function ProjectDetail({ projectId }: { projectId: string }) {
     setSelected((current) => {
       const next = new Set(current);
       if (checked) {
+        // Comparison is meaningful only within one study, so a cross-study pick
+        // intentionally starts a fresh selection instead of mixing cohorts.
         const otherStudy = data?.variants.find(
           (item) => next.has(item.id) && item.studyId !== variant.studyId,
         );
@@ -493,7 +598,7 @@ function ProjectDetail({ projectId }: { projectId: string }) {
     if (selected.size < 2) return;
     setComparing(true);
     try {
-      const result = await api<{ variants: Variant[] }>("/api/pascal/v1/variants/compare", {
+      const result = await apiParsed("/api/pascal/v1/variants/compare", comparisonPayloadSchema, {
         method: "POST",
         body: JSON.stringify({ variantIds: [...selected] }),
       });
@@ -513,7 +618,7 @@ function ProjectDetail({ projectId }: { projectId: string }) {
   return (
     <div className="space-y-6">
       <a
-        href="/admin/pascal"
+        href="/admin/plan/3d"
         className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="size-4" /> All layout projects
@@ -574,9 +679,10 @@ function ProjectDetail({ projectId }: { projectId: string }) {
                   <div>
                     <h3 className="text-lg font-semibold">{study.title}</h3>
                     {study.descriptionMarkdown ? (
-                      <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-                        {study.descriptionMarkdown}
-                      </p>
+                      <MarkdownProse
+                        markdown={study.descriptionMarkdown}
+                        className="mt-1 max-w-3xl text-sm text-muted-foreground prose-p:mb-2 prose-p:leading-6"
+                      />
                     ) : null}
                   </div>
                   <Button variant="outline" size="sm" onClick={() => setVariantStudy(study)}>
@@ -646,7 +752,7 @@ function CreateStudyDialog({
     if (!title.trim()) return;
     setSaving(true);
     try {
-      await api(`/api/pascal/v1/projects/${encodeURIComponent(projectId)}/studies`, {
+      await requestJson(`/api/pascal/v1/projects/${encodeURIComponent(projectId)}/studies`, {
         method: "POST",
         body: JSON.stringify({
           title: title.trim(),
@@ -721,8 +827,9 @@ function CreateVariantDialog({
     if (!study || !name.trim() || (mode === "branch" && !parentId)) return;
     setSaving(true);
     try {
-      const result = await api<{ generation: { intentApplied?: number } }>(
+      const result = await apiParsed(
         `/api/pascal/v1/studies/${encodeURIComponent(study.id)}/variants`,
+        generationPayloadSchema,
         {
           method: "POST",
           body: JSON.stringify({
@@ -733,7 +840,7 @@ function CreateVariantDialog({
         },
       );
       toast.success(
-        result.generation.intentApplied
+        result.generation?.intentApplied
           ? `Variant created with ${result.generation.intentApplied} AI edits`
           : "Variant created",
       );
@@ -770,12 +877,12 @@ function CreateVariantDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label>Starting point</Label>
+            <Label htmlFor="pascal-variant-mode">Starting point</Label>
             <Select
               value={mode}
               onValueChange={(value) => value && setMode(value as "base" | "branch")}
             >
-              <SelectTrigger>
+              <SelectTrigger id="pascal-variant-mode">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -786,9 +893,9 @@ function CreateVariantDialog({
           </div>
           {mode === "branch" ? (
             <div className="space-y-2">
-              <Label>Source variant</Label>
+              <Label htmlFor="pascal-variant-parent">Source variant</Label>
               <Select value={parentId} onValueChange={(value) => setParentId(value ?? "")}>
-                <SelectTrigger>
+                <SelectTrigger id="pascal-variant-parent">
                   <SelectValue placeholder="Choose a variant" />
                 </SelectTrigger>
                 <SelectContent>
@@ -853,7 +960,7 @@ function VariantCard({
   const capture = async () => {
     setCapturing(true);
     try {
-      await api(`/api/pascal/v1/scenes/${encodeURIComponent(variant.id)}/capture`, {
+      await requestJson(`/api/pascal/v1/scenes/${encodeURIComponent(variant.id)}/capture`, {
         method: "POST",
         body: JSON.stringify({ setAsThumbnail: true }),
       });
@@ -869,7 +976,7 @@ function VariantCard({
   const setStatus = async (status: VariantStatus) => {
     setStatusBusy(true);
     try {
-      await api(`/api/pascal/v1/scenes/${encodeURIComponent(variant.id)}/status`, {
+      await requestJson(`/api/pascal/v1/scenes/${encodeURIComponent(variant.id)}/status`, {
         method: "PATCH",
         body: JSON.stringify({ status }),
       });
@@ -890,7 +997,7 @@ function VariantCard({
     }
     setRenaming(true);
     try {
-      await api(`/api/pascal/v1/scenes/${encodeURIComponent(variant.id)}`, {
+      await requestJson(`/api/pascal/v1/scenes/${encodeURIComponent(variant.id)}`, {
         method: "PATCH",
         body: JSON.stringify({ name, expectedVersion: variant.version }),
       });
@@ -997,9 +1104,7 @@ function VariantCard({
             <DropdownMenuItem
               disabled={statusBusy}
               variant={variant.status === "archived" ? "default" : "destructive"}
-              onClick={() =>
-                void setStatus(variant.status === "archived" ? "active" : "archived")
-              }
+              onClick={() => void setStatus(variant.status === "archived" ? "active" : "archived")}
             >
               {statusBusy ? <Loader2 className="animate-spin" /> : null}
               {variant.status === "archived" ? "Restore" : "Archive"}

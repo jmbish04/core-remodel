@@ -33,10 +33,15 @@ export const generateFloorplanVariant = defineTool({
   ],
   handler: async ({ env }, input) => {
     try {
-      const { row, ...extra } = await generateProductVariant(env, input);
-      return { ...variantDto(row, env), ...extra };
+      const { row, roomCount, note, branchedFrom, intentApplied, intentRationale } =
+        await generateProductVariant(env, input);
+      return {
+        ...variantDto(row, env),
+        generation: { roomCount, note, branchedFrom, intentApplied, intentRationale },
+      };
     } catch (error) {
-      return toolError(error instanceof Error ? error.message : "Variant generation failed");
+      console.error("[generate_floorplan_variant] workflow failed", error);
+      return toolError("Variant generation failed");
     }
   },
 });

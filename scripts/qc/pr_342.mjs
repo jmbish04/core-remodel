@@ -9,7 +9,13 @@
  *   pnpm run test:pr 342 -- --preview
  *   pnpm run test:pr 342
  */
-import { assertReachable, createChecks, createClient, resolveBase } from "../config.mjs";
+import {
+  accessCookie,
+  assertReachable,
+  createChecks,
+  createClient,
+  resolveBase,
+} from "../config.mjs";
 
 const client = createClient();
 const checks = createChecks();
@@ -19,12 +25,21 @@ console.log(`\nQC pr_342 — Pascal Layout Studio\n  target: ${resolveBase()}\n`
 try {
   await assertReachable(client, checks);
 
-  const page = await client.get("/admin/pascal");
-  checks.ok("GET /admin/pascal → 200", page.status === 200, `→ ${page.status}`);
+  const page = await client.get("/admin/plan/3d");
+  checks.ok("GET /admin/plan/3d → 200", page.status === 200, `→ ${page.status}`);
   checks.ok(
     "Layout Studio page mounts the Pascal island",
     page.text.includes("Layout Studio") && page.text.includes("PascalLayoutStudioApp"),
     "missing page title or island bundle",
+  );
+  const legacy = await fetch(`${resolveBase()}/admin/pascal`, {
+    redirect: "manual",
+    headers: { cookie: accessCookie() },
+  });
+  checks.ok(
+    "legacy /admin/pascal permanently redirects",
+    legacy.status === 308 && legacy.headers.get("location") === "/admin/plan/3d",
+    `→ ${legacy.status} ${legacy.headers.get("location") ?? ""}`,
   );
 
   const index = await client.get("/api/pascal/v1/projects");
@@ -60,7 +75,9 @@ try {
   const openapi = await client.get("/openapi.json");
   const operationIds = new Set(
     Object.values(openapi.json?.paths ?? {}).flatMap((path) =>
-      Object.values(path ?? {}).map((operation) => operation?.operationId).filter(Boolean),
+      Object.values(path ?? {})
+        .map((operation) => operation?.operationId)
+        .filter(Boolean),
     ),
   );
   for (const operationId of [
@@ -89,7 +106,7 @@ try {
   checks.ok(
     "QC completed without an unhandled error",
     false,
-    error instanceof Error ? error.stack ?? error.message : String(error),
+    error instanceof Error ? (error.stack ?? error.message) : String(error),
   );
 }
 

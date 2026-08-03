@@ -355,7 +355,7 @@ before any write; hallucinated ids are rejected.
   fallback per p0.
 
 **Phase 4 — Admin UI + docs + ship.**
-- `p4-admin-ui` — `/admin/pascal` (projects → studies → variant cards + snapshots + deep-links +
+- `p4-admin-ui` — `/admin/plan/3d` (projects → studies → variant cards + snapshots + deep-links +
   compare); BaseLayout shell. See DESIGN_SPEC.
 - `p4-connect-docs` — verify `/connect/tools` catalog cards for the new domain.
 - `p4-changelog` — changelog branch + entries + detail page + verification block.
@@ -370,7 +370,7 @@ before any write; hallucinated ids are rejected.
 - From Claude: create a project for "upstairs", a study "island placement", generate a base variant
   + two AI variants; each opens as its own floorplan at `PASCAL_EDITOR_URL/scene/:id`.
 - Editor loads a scene from this worker, edits, saves back; version increments; stale save → 409.
-- A snapshot is captured to CF Images and shows as the variant thumbnail in `/admin/pascal`.
+- A snapshot is captured to CF Images and shows as the variant thumbnail in `/admin/plan/3d`.
 - `compare_layout_variants` returns the study's variants with dims + thumbnails.
 - Unauthorized/identity-mismatched calls fail before touching the store.
 - QC green on preview and prod; migrations applied to remote and verified.

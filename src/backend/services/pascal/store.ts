@@ -30,7 +30,9 @@ export class PascalStoreError extends Error {
 
 type VariantRow = typeof pascalVariants.$inferSelect;
 type ProjectRow = typeof pascalProjects.$inferSelect;
+/** Persisted Pascal scene row returned by store operations. */
 export type PascalVariantRow = VariantRow;
+/** Persisted Pascal project row returned by store operations. */
 export type PascalProjectRow = ProjectRow;
 
 const enc = new TextEncoder();
@@ -75,7 +77,19 @@ export async function createProject(env: Env, input: CreateProjectInput): Promis
   const db = drizzle(env.DB);
   const id = input.id ?? slugify(input.name, "proj");
   const existing = await db.select().from(pascalProjects).where(eq(pascalProjects.id, id)).get();
-  if (existing) return existing; // idempotent create
+  if (existing) {
+    const isSameProject =
+      existing.name === input.name &&
+      existing.coreRemodelProjectId === input.coreRemodelProjectId &&
+      existing.scopeType === input.scopeType &&
+      existing.floorId === (input.floorId ?? null) &&
+      existing.roomId === (input.roomId ?? null) &&
+      existing.ownerId === (input.ownerId ?? null);
+    if (!isSameProject) {
+      throw new PascalStoreError("invalid", "Project id already exists with different properties");
+    }
+    return existing;
+  }
 
   await db
     .insert(pascalProjects)
@@ -99,11 +113,24 @@ export async function getProject(env: Env, id: string): Promise<ProjectRow | nul
   return (await db.select().from(pascalProjects).where(eq(pascalProjects.id, id)).get()) ?? null;
 }
 
-export async function listProjects(env: Env): Promise<ProjectRow[]> {
+/**
+ * List projects for the admin-only Layout Studio super-query.
+ *
+ * This deliberately crosses owners because the route is protected by the admin
+ * access middleware. Callers must not expose it through tenant-scoped surfaces.
+ */
+export async function listAdminProjects(
+  env: Env,
+  options: { limit?: number; offset?: number } = {},
+): Promise<ProjectRow[]> {
+  const limit = Math.min(Math.max(options.limit ?? 50, 1), 50);
+  const offset = Math.max(options.offset ?? 0, 0);
   return drizzle(env.DB)
     .select()
     .from(pascalProjects)
     .orderBy(desc(pascalProjects.datetimeLastModified))
+    .limit(limit)
+    .offset(offset)
     .all();
 }
 
@@ -313,7 +340,7 @@ export async function renameScene(
 ): Promise<VariantRow> {
   const db = drizzle(env.DB);
   const existing = await loadScene(env, sceneId);
-  if (!existing) throw new PascalStoreError("not_found");
+  if (!existing) throw new PascalStoreError("not_found", `Unknown sceneId '${sceneId}'`);
   if (expectedVersion != null && expectedVersion !== existing.version) {
     throw new PascalStoreError("version_conflict");
   }
@@ -347,7 +374,9 @@ export async function updateSceneStatus(
     .where(eq(pascalVariants.id, sceneId))
     .run();
   const updated = await loadScene(env, sceneId);
-  if (!updated) throw new PascalStoreError("not_found");
+  if (!updated) {
+    throw new PascalStoreError("not_found", `Scene '${sceneId}' disappeared during update`);
+  }
   return updated;
 }
 

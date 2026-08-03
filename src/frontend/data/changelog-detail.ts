@@ -124,7 +124,7 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
     problem:
       "Phases 1–3 delivered the durable wire, measured generator, full-fidelity MCP editing, comparison, and screenshot paths, but those capabilities were only reachable through the editor or Claude. A homeowner/admin had no place to browse the hierarchy, understand which dimensions grounded a scene, compare alternatives, capture a thumbnail, or retire an obsolete option. The MCP generation and comparison implementations were also at risk of drifting from any new browser endpoints, and the repository's hand-maintained OpenAPI document omitted the entire Pascal router.",
     approach:
-      "A shared product workflow now owns measured-base generation, branched generation with optional structured AI edits, and enriched comparison. Both the existing MCP tools and the new product REST routes call that workflow. Two thin Astro shells mount one Shadcn React island: the index selects a canonical floor/room scope and the detail page groups rich-text studies with their variants. Cards keep evidence visible but progressive: thumbnail, state and top dimensions first; lineage/confidence inside provenance; rename/archive inside More. Pascal is always opened by deep link in a new tab—Core Remodel never renders Three.js. Finally, /openapi.json merges Pascal's OpenAPIHono document at the actual /pascal/v1 mount prefix, making route declarations the documentation source of truth.",
+      "A shared product workflow now owns measured-base generation, branched generation with optional structured AI edits, and enriched comparison. Both the existing MCP tools and the new product REST routes call that workflow. The canonical /admin/plan/3d Astro shell mounts one Shadcn React island; project detail state lives in the URL query, while legacy /admin/pascal links permanently redirect. Cards keep evidence visible but progressive: thumbnail, state and top dimensions first; lineage/confidence inside provenance; rename/archive inside More. Pascal is always opened by deep link in a new tab—Core Remodel never renders Three.js. Finally, /openapi.json merges Pascal's OpenAPIHono document at the actual /pascal/v1 mount prefix, making route declarations the documentation source of truth.",
     apiChanges: [
       "NEW GET /api/pascal/v1/projects — project summaries plus canonical floor and room scope choices.",
       "NEW GET/POST /api/pascal/v1/projects/:projectId/studies — enriched hierarchy and rich-text study creation.",
@@ -134,8 +134,9 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
       "CHANGED GET /openapi.json — merges all Pascal OpenAPIHono operations at /pascal/v1/*.",
     ],
     filesTouched: [
-      "src/frontend/pages/admin/pascal/index.astro",
-      "src/frontend/pages/admin/pascal/[projectId].astro",
+      "src/frontend/pages/admin/plan/3d.astro",
+      "src/frontend/pages/admin/pascal/index.astro (redirect)",
+      "src/frontend/pages/admin/pascal/[projectId].astro (redirect)",
       "src/frontend/components/pascal/PascalLayoutStudioApp.tsx",
       "src/frontend/components/sidebar/nav-groups.ts",
       "src/backend/api/routes/pascal.ts",
@@ -191,7 +192,7 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
         caption: "Layout Studio navigation and lifecycle",
         code: `stateDiagram-v2
   [*] --> Projects
-  Projects --> Project: Open project
+  Projects --> Project: Open project via ?project=id
   Project --> Study: Create or choose study
   Study --> Variant: Generate measured or branch
   Variant --> Compared: Select 2 or more

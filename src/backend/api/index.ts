@@ -65,6 +65,7 @@ import { roomsRouter } from "./routes/rooms";
 import { roomsExtendedRouter } from "./routes/rooms-extended";
 import { floorplanRegionsRouter } from "./routes/floorplan-regions";
 import pascalRouter from "./routes/pascal";
+import { PASCAL_API_MOUNT_PATH } from "./routes/pascal-paths";
 import { syncRouter } from "./routes/sync";
 import { threadsRouter } from "./routes/threads";
 import { supportingDocumentsRouter } from "./routes/supporting-documents";
@@ -212,8 +213,8 @@ app.use("/api/workshop/*", requireAccessAuth);
 app.use("/api/floorplan-regions", requireAccessAuth);
 app.use("/api/floorplan-regions/*", requireAccessAuth);
 // Pascal scene store (0043) — the editor's server calls these with WORKER_API_KEY.
-app.use("/api/pascal/v1", requireAccessAuth);
-app.use("/api/pascal/v1/*", requireAccessAuth);
+app.use(PASCAL_API_MOUNT_PATH, requireAccessAuth);
+app.use(`${PASCAL_API_MOUNT_PATH}/*`, requireAccessAuth);
 app.use("/api/bid-portfolios/*", async (c, next) => {
   // Public routes do not require auth
   const path = new URL(c.req.url).pathname;
@@ -276,7 +277,7 @@ app.route("/api/planning", planningExtendedRouter);
 app.route("/api/rooms", roomsExtendedRouter);
 app.route("/api/rooms", roomsRouter);
 app.route("/api/floorplan-regions", floorplanRegionsRouter);
-app.route("/api/pascal/v1", pascalRouter);
+app.route(PASCAL_API_MOUNT_PATH, pascalRouter);
 app.route("/api/measurements", measurementsRouter);
 app.route("/api/estimate-statuses", estimateStatusesRouter);
 app.route("/api/estimate-companies", estimateCompaniesRouter);

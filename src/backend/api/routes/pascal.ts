@@ -1,4 +1,4 @@
-import { floors, rooms } from "@backend/db";
+import { floors, pascalStudies, pascalVariants, rooms } from "@backend/db";
 /**
  * @fileoverview Pascal scene store API — `/api/pascal/v1/*` (0043).
  *
@@ -11,10 +11,12 @@ import { floors, rooms } from "@backend/db";
  * and scene-api-errors.ts): version_conflict→409, not_found→404, too_large→413, invalid→400.
  */
 import { createRoute, OpenAPIHono, z } from "@hono/zod-openapi";
-import { asc, eq } from "drizzle-orm";
+import { asc, desc, eq, inArray } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
+import { sanitizeNoteHtml } from "../../services/notes/markdown";
 import { captureSceneScreenshot, storeSnapshotBytes } from "../../services/pascal/capture";
+import { pascalEditorBase } from "../../services/pascal/editor-url";
 import { createStudy, listStudies, listVariants } from "../../services/pascal/product";
 import {
   appendEventBodySchema,
@@ -36,7 +38,7 @@ import {
   deleteScene,
   getProject,
   getProjectHead,
-  listProjects,
+  listAdminProjects,
   listSceneEvents,
   listScenes,
   loadScene,
@@ -49,10 +51,6 @@ import {
 import { compareProductVariants, generateProductVariant } from "../../services/pascal/workflow";
 
 export const pascalRouter = new OpenAPIHono<{ Bindings: Env }>();
-
-const DEFAULT_EDITOR_URL = "https://3d-remodel.vercel.app";
-const editorBase = (env: Env): string =>
-  (env as { PASCAL_EDITOR_URL?: string }).PASCAL_EDITOR_URL ?? DEFAULT_EDITOR_URL;
 
 const errorSchema = z.object({ error: z.string(), message: z.string().optional() });
 
@@ -132,29 +130,16 @@ function dateIso(value: Date): string {
   return value.toISOString();
 }
 
-async function projectSummary(env: Env, project: Awaited<ReturnType<typeof listProjects>>[number]) {
-  const [studies, variants] = await Promise.all([
-    listStudies(env, project.id),
-    listVariants(env, { projectId: project.id }),
-  ]);
-  const db = drizzle(env.DB);
-  const scopeName = project.roomId
-    ? ((
-        await db
-          .select({ name: rooms.roomName })
-          .from(rooms)
-          .where(eq(rooms.id, project.roomId))
-          .get()
-      )?.name ?? null)
-    : project.floorId
-      ? ((
-          await db
-            .select({ name: floors.name })
-            .from(floors)
-            .where(eq(floors.id, project.floorId))
-            .get()
-        )?.name ?? null)
-      : "Whole home";
+/** Build the transport summary from rows already loaded by the route. */
+function projectSummary(
+  project: Awaited<ReturnType<typeof listAdminProjects>>[number],
+  facts: {
+    scopeName: string | null;
+    studyCount: number;
+    variantCount: number;
+    latestThumbnailUrl: string | null;
+  },
+) {
   return {
     id: project.id,
     coreRemodelProjectId: project.coreRemodelProjectId,
@@ -162,10 +147,7 @@ async function projectSummary(env: Env, project: Awaited<ReturnType<typeof listP
     scopeType: project.scopeType,
     floorId: project.floorId,
     roomId: project.roomId,
-    scopeName,
-    studyCount: studies.length,
-    variantCount: variants.length,
-    latestThumbnailUrl: variants[0]?.thumbnailUrl ?? null,
+    ...facts,
     updatedAt: dateIso(project.datetimeLastModified),
   };
 }
@@ -175,6 +157,12 @@ pascalRouter.openapi(
   createRoute({
     method: "get",
     path: "/projects",
+    request: {
+      query: z.object({
+        limit: z.coerce.number().int().positive().max(50).default(50),
+        offset: z.coerce.number().int().nonnegative().default(0),
+      }),
+    },
     responses: {
       200: {
         description: "Pascal projects and available Core-Remodel scopes",
@@ -188,6 +176,11 @@ pascalRouter.openapi(
                   z.object({ id: z.number().int(), floorId: z.number().int(), name: z.string() }),
                 ),
               }),
+              pagination: z.object({
+                limit: z.number().int(),
+                offset: z.number().int(),
+                returned: z.number().int(),
+              }),
             }),
           },
         },
@@ -198,8 +191,9 @@ pascalRouter.openapi(
   }),
   async (c) => {
     const db = drizzle(c.env.DB);
+    const { limit, offset } = c.req.valid("query");
     const [projects, floorRows, roomRows] = await Promise.all([
-      listProjects(c.env),
+      listAdminProjects(c.env, { limit, offset }),
       db
         .select({ id: floors.id, name: floors.name })
         .from(floors)
@@ -212,10 +206,54 @@ pascalRouter.openapi(
         .orderBy(asc(rooms.roomName))
         .all(),
     ]);
+    const projectIds = projects.map((project) => project.id);
+    const [studyRows, variantRows] = projectIds.length
+      ? await Promise.all([
+          db
+            .select({ projectId: pascalStudies.projectId })
+            .from(pascalStudies)
+            .where(inArray(pascalStudies.projectId, projectIds))
+            .all(),
+          db
+            .select({
+              projectId: pascalVariants.projectId,
+              thumbnailUrl: pascalVariants.thumbnailUrl,
+            })
+            .from(pascalVariants)
+            .where(inArray(pascalVariants.projectId, projectIds))
+            .orderBy(desc(pascalVariants.datetimeLastModified))
+            .all(),
+        ])
+      : [[], []];
+    const studyCounts = new Map<string, number>();
+    const variantCounts = new Map<string, number>();
+    const latestThumbnails = new Map<string, string>();
+    for (const row of studyRows)
+      studyCounts.set(row.projectId, (studyCounts.get(row.projectId) ?? 0) + 1);
+    for (const row of variantRows) {
+      variantCounts.set(row.projectId, (variantCounts.get(row.projectId) ?? 0) + 1);
+      if (row.thumbnailUrl && !latestThumbnails.has(row.projectId)) {
+        latestThumbnails.set(row.projectId, row.thumbnailUrl);
+      }
+    }
+    const floorNames = new Map(floorRows.map((floor) => [floor.id, floor.name]));
+    const roomNames = new Map(roomRows.map((room) => [room.id, room.name]));
     return c.json(
       {
-        projects: await Promise.all(projects.map((project) => projectSummary(c.env, project))),
+        projects: projects.map((project) =>
+          projectSummary(project, {
+            scopeName: project.roomId
+              ? (roomNames.get(project.roomId) ?? null)
+              : project.floorId
+                ? (floorNames.get(project.floorId) ?? null)
+                : "Whole home",
+            studyCount: studyCounts.get(project.id) ?? 0,
+            variantCount: variantCounts.get(project.id) ?? 0,
+            latestThumbnailUrl: latestThumbnails.get(project.id) ?? null,
+          }),
+        ),
         scopes: { floors: floorRows, rooms: roomRows },
+        pagination: { limit, offset, returned: projects.length },
       },
       200,
     );
@@ -245,7 +283,7 @@ pascalRouter.openapi(
     try {
       const project = await createProject(c.env, body);
       const head = await getProjectHead(c.env, project.id);
-      return c.json(serializeProjectStatus(project, head, editorBase(c.env)), 200);
+      return c.json(serializeProjectStatus(project, head, pascalEditorBase(c.env)), 200);
     } catch (err) {
       const { status, body: b } = toHttp(err);
       return c.json(b, status);
@@ -274,7 +312,7 @@ pascalRouter.openapi(
     const project = await getProject(c.env, projectId);
     if (!project) return c.json({ error: "not_found" }, 404);
     const head = await getProjectHead(c.env, project.id);
-    return c.json(serializeProjectStatus(project, head, editorBase(c.env)), 200);
+    return c.json(serializeProjectStatus(project, head, pascalEditorBase(c.env)), 200);
   },
 );
 
@@ -310,13 +348,36 @@ pascalRouter.openapi(
       listStudies(c.env, projectId),
       listVariants(c.env, { projectId }),
     ]);
+    const db = drizzle(c.env.DB);
+    const scopeName = project.roomId
+      ? ((
+          await db
+            .select({ name: rooms.roomName })
+            .from(rooms)
+            .where(eq(rooms.id, project.roomId))
+            .get()
+        )?.name ?? null)
+      : project.floorId
+        ? ((
+            await db
+              .select({ name: floors.name })
+              .from(floors)
+              .where(eq(floors.id, project.floorId))
+              .get()
+          )?.name ?? null)
+        : "Whole home";
     const comparison = await compareProductVariants(c.env, {
       variantIds: variants.map((variant) => variant.id),
     });
     const enriched = new Map(comparison.map((variant) => [variant.id, variant]));
     return c.json(
       {
-        project: await projectSummary(c.env, project),
+        project: projectSummary(project, {
+          scopeName,
+          studyCount: studies.length,
+          variantCount: variants.length,
+          latestThumbnailUrl: variants[0]?.thumbnailUrl ?? null,
+        }),
         studies: studies.map((study) => ({
           id: study.id,
           projectId: study.projectId,
@@ -337,7 +398,7 @@ pascalRouter.openapi(
             confidence: null,
             measurements: [],
             thumbnailUrl: variant.thumbnailUrl,
-            editorUrl: `${editorBase(c.env).replace(/\/$/, "")}/scene/${encodeURIComponent(variant.id)}`,
+            editorUrl: `${pascalEditorBase(c.env)}/scene/${encodeURIComponent(variant.id)}`,
           }),
           projectId: variant.projectId,
           studyId: variant.studyId,
@@ -364,7 +425,12 @@ pascalRouter.openapi(
             schema: z.object({
               title: z.string().trim().min(1).max(160),
               descriptionMarkdown: z.string().max(20_000).nullable().optional(),
-              descriptionHtml: z.string().max(50_000).nullable().optional(),
+              descriptionHtml: z
+                .string()
+                .max(50_000)
+                .nullable()
+                .optional()
+                .openapi({ description: "Sanitized server-side before persistence." }),
             }),
           },
         },
@@ -385,7 +451,11 @@ pascalRouter.openapi(
     if (!(await getProject(c.env, projectId))) return c.json({ error: "not_found" }, 404);
     const body = c.req.valid("json");
     try {
-      const study = await createStudy(c.env, { projectId, ...body });
+      const study = await createStudy(c.env, {
+        projectId,
+        ...body,
+        descriptionHtml: body.descriptionHtml ? sanitizeNoteHtml(body.descriptionHtml) : null,
+      });
       return c.json(
         {
           id: study.id,
@@ -449,6 +519,7 @@ pascalRouter.openapi(
         ...c.req.valid("json"),
       });
       const [variant] = await compareProductVariants(c.env, { variantIds: [row.id] });
+      if (!variant) throw new PascalStoreError("not_found", "Generated variant could not be read");
       return c.json(
         {
           variant: {
@@ -533,7 +604,7 @@ pascalRouter.openapi(
     const q = c.req.valid("query");
     const rows = await listScenes(c.env, q);
     return c.json(
-      rows.map((r) => serializeSceneMeta(r, editorBase(c.env))),
+      rows.map((r) => serializeSceneMeta(r, pascalEditorBase(c.env))),
       200,
     );
   },
@@ -563,7 +634,7 @@ pascalRouter.openapi(
     const body = c.req.valid("json");
     try {
       const row = await saveScene(c.env, sceneId, body);
-      return c.json(serializeSceneMeta(row, editorBase(c.env)), 200);
+      return c.json(serializeSceneMeta(row, pascalEditorBase(c.env)), 200);
     } catch (err) {
       const { status, body: b } = toHttp(err);
       return c.json(b, status);
@@ -591,7 +662,7 @@ pascalRouter.openapi(
     const { sceneId } = c.req.valid("param");
     const row = await loadScene(c.env, sceneId);
     if (!row) return c.json({ error: "not_found" }, 404);
-    return c.json(serializeSceneWithGraph(row, editorBase(c.env)), 200);
+    return c.json(serializeSceneWithGraph(row, pascalEditorBase(c.env)), 200);
   },
 );
 
@@ -619,7 +690,7 @@ pascalRouter.openapi(
     const { name, expectedVersion } = c.req.valid("json");
     try {
       const row = await renameScene(c.env, sceneId, name, expectedVersion);
-      return c.json(serializeSceneMeta(row, editorBase(c.env)), 200);
+      return c.json(serializeSceneMeta(row, pascalEditorBase(c.env)), 200);
     } catch (err) {
       const { status, body: b } = toHttp(err);
       return c.json(b, status);
@@ -759,7 +830,7 @@ pascalRouter.openapi(
     if (!scene) return c.json({ error: "not_found" }, 404);
     const input = c.req.valid("json");
     try {
-      const url = `${editorBase(c.env).replace(/\/$/, "")}/scene/${encodeURIComponent(sceneId)}`;
+      const url = `${pascalEditorBase(c.env)}/scene/${encodeURIComponent(sceneId)}`;
       const shot = await captureSceneScreenshot(c.env, url, input);
       await recordSnapshot(c.env, {
         variantId: sceneId,
@@ -778,12 +849,12 @@ pascalRouter.openapi(
         200,
       );
     } catch (error) {
+      console.error("[Pascal capture] screenshot failed", { sceneId, error });
       return c.json(
         {
           error: "capture_failed",
           message:
-            `${error instanceof Error ? error.message : "Capture failed"}. ` +
-            "Use the editor canvas-capture fallback if headless WebGPU is blank.",
+            "Capture failed. Use the editor canvas-capture fallback if headless WebGPU is blank.",
         },
         500,
       );
@@ -824,6 +895,7 @@ pascalRouter.openapi(
         c.req.valid("json").status,
       );
       const [variant] = await compareProductVariants(c.env, { variantIds: [row.id] });
+      if (!variant) throw new PascalStoreError("not_found", "Updated variant could not be read");
       return c.json(
         {
           ...variant,

@@ -4,9 +4,11 @@
  * from growing a second implementation of generation, comparison, or capture.
  */
 import { drizzle } from "drizzle-orm/d1";
+import { z } from "zod";
 
 import { proposeEdits } from "./ai-edit";
 import { applyNodeOps } from "./edit";
+import { pascalEditorBase } from "./editor-url";
 import { generateSeedGraph } from "./generator";
 import { createVariant, getStudy, listVariants } from "./product";
 import {
@@ -23,6 +25,23 @@ import {
   type PascalVariantRow,
 } from "./store";
 
+const generateProductVariantInputSchema = z.object({
+  studyId: z.string().trim().min(1),
+  name: z.string().trim().min(1).max(160),
+  fromVariantId: z.string().trim().min(1).optional(),
+  intent: z.string().trim().max(4_000).optional(),
+});
+
+const compareProductVariantsInputSchema = z
+  .object({
+    studyId: z.string().trim().min(1).optional(),
+    variantIds: z.array(z.string().trim().min(1)).min(1).max(20).optional(),
+  })
+  .refine((input) => Boolean(input.studyId || input.variantIds?.length), {
+    message: "studyId or variantIds is required",
+  });
+
+/** Validated input shared by REST and MCP variant-generation callers. */
 export interface GenerateProductVariantInput {
   studyId: string;
   name: string;
@@ -30,6 +49,7 @@ export interface GenerateProductVariantInput {
   intent?: string;
 }
 
+/** Generated scene plus non-authoritative workflow metadata. */
 export interface GenerateProductVariantResult {
   row: PascalVariantRow;
   roomCount?: number;
@@ -49,11 +69,28 @@ function parseRenderingEvidence(raw: string | null): SceneRenderingMetadata | nu
   }
 }
 
+/** Enforce that a branch source exists and belongs to the study's project. */
+export function assertSourceVariant(
+  source: Pick<PascalVariantRow, "projectId"> | null,
+  sourceId: string,
+  projectId: string,
+): asserts source is Pick<PascalVariantRow, "projectId"> {
+  if (!source) throw new PascalStoreError("not_found", `Unknown fromVariantId '${sourceId}'`);
+  if (source.projectId !== projectId) {
+    throw new PascalStoreError("invalid", "The source variant belongs to a different project");
+  }
+}
+
 /** Generate a measured base or a child variant with validated AI node edits. */
 export async function generateProductVariant(
   env: Env,
   input: GenerateProductVariantInput,
 ): Promise<GenerateProductVariantResult> {
+  const parsedInput = generateProductVariantInputSchema.safeParse(input);
+  if (!parsedInput.success) {
+    throw new PascalStoreError("invalid", parsedInput.error.issues[0]?.message ?? "Invalid input");
+  }
+  input = parsedInput.data;
   const study = await getStudy(env, input.studyId);
   if (!study) throw new PascalStoreError("not_found", `Unknown studyId '${input.studyId}'`);
   const project = await getProject(env, study.projectId);
@@ -69,12 +106,7 @@ export async function generateProductVariant(
 
   if (input.fromVariantId) {
     const parent = await loadScene(env, input.fromVariantId);
-    if (!parent) {
-      throw new PascalStoreError("not_found", `Unknown fromVariantId '${input.fromVariantId}'`);
-    }
-    if (parent.projectId !== project.id) {
-      throw new PascalStoreError("invalid", "The source variant belongs to a different project");
-    }
+    assertSourceVariant(parent, input.fromVariantId, project.id);
     graph = parseGraphJson(parent.graphJson);
     const inheritedRendering = parseRenderingEvidence(parent.renderingJson);
     rendering = {
@@ -126,6 +158,11 @@ export async function generateProductVariant(
         graph = applyNodeOps(graph, plan.ops);
         intentApplied = plan.ops.length;
       } catch (error) {
+        console.warn("[Pascal workflow] AI edits rejected; saving unedited variant", {
+          studyId: input.studyId,
+          fromVariantId: input.fromVariantId ?? null,
+          reason: error instanceof Error ? error.message : "unknown",
+        });
         intentRationale =
           `${error instanceof PascalStoreError ? error.message : "Invalid AI edits"} — ` +
           "variant created without the intent edits.";
@@ -145,6 +182,7 @@ export async function generateProductVariant(
   return { row, ...extra };
 }
 
+/** Comparison-ready variant facts returned to REST, MCP, and the admin UI. */
 export interface PascalVariantComparison {
   id: string;
   name: string;
@@ -158,17 +196,16 @@ export interface PascalVariantComparison {
   editorUrl: string;
 }
 
-function editorBase(env: Env): string {
-  return (
-    (env as { PASCAL_EDITOR_URL?: string }).PASCAL_EDITOR_URL ?? "https://3d-remodel.vercel.app"
-  );
-}
-
 /** Return the same side-by-side evidence used by compare_layout_variants. */
 export async function compareProductVariants(
   env: Env,
   input: { studyId?: string; variantIds?: string[] },
 ): Promise<PascalVariantComparison[]> {
+  const parsedInput = compareProductVariantsInputSchema.safeParse(input);
+  if (!parsedInput.success) {
+    throw new PascalStoreError("invalid", parsedInput.error.issues[0]?.message ?? "Invalid input");
+  }
+  input = parsedInput.data;
   const rows = input.variantIds?.length
     ? (await Promise.all(input.variantIds.map((id) => loadScene(env, id)))).filter(
         (row): row is PascalVariantRow => row != null,
@@ -180,14 +217,7 @@ export async function compareProductVariants(
   return Promise.all(
     rows.map(async (row) => {
       const snapshot = await getLatestSnapshot(env, row.id);
-      let rendering: SceneRenderingMetadata | null = null;
-      try {
-        rendering = row.renderingJson
-          ? (JSON.parse(row.renderingJson) as SceneRenderingMetadata)
-          : null;
-      } catch {
-        rendering = null;
-      }
+      const rendering = parseRenderingEvidence(row.renderingJson);
       return {
         id: row.id,
         name: row.name,
@@ -198,7 +228,7 @@ export async function compareProductVariants(
         confidence: rendering?.confidence ?? null,
         measurements: rendering?.measurements ?? [],
         thumbnailUrl: snapshot?.imageUrl ?? row.thumbnailUrl ?? null,
-        editorUrl: `${editorBase(env).replace(/\/$/, "")}/scene/${encodeURIComponent(row.id)}`,
+        editorUrl: `${pascalEditorBase(env)}/scene/${encodeURIComponent(row.id)}`,
       };
     }),
   );
