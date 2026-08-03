@@ -1,0 +1,347 @@
+<meta charset="utf-8">
+<title>Core Remodel — three direction comps</title>
+<style>
+  :root{
+    --ground:#0f1113; --ground-2:#15181b; --hair:#2a2f34; --hair-2:#1e2226;
+    --ink:#e8eaec; --ink-2:#9aa2a9; --ink-3:#6b747c;
+    --kitchen:#5fa84e; --bath:#a8425a; --guest:#c98a2b; --down:#3f7fb8; --light:#7b62b8; --whole:#8a8f95;
+    --grotesk: "Helvetica Neue", Helvetica, "Segoe UI", system-ui, sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#08090a;color:var(--ink);font-family:var(--grotesk);-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1180px;margin:0 auto;padding:56px 28px 96px}
+  .page-head{border-bottom:1px solid var(--hair);padding-bottom:28px;margin-bottom:8px}
+  .kicker{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3);margin:0 0 14px}
+  h1{font-size:30px;line-height:1.15;letter-spacing:-.02em;font-weight:600;margin:0 0 12px}
+  .sub{color:var(--ink-2);font-size:15px;line-height:1.6;max-width:68ch;margin:0}
+  .note{color:var(--ink-3);font-size:12.5px;line-height:1.6;max-width:68ch;margin:14px 0 0}
+
+  .comp{margin-top:72px}
+  .comp-head{display:flex;gap:16px;align-items:baseline;border-bottom:1px solid var(--hair-2);padding-bottom:12px;margin-bottom:0}
+  .comp-id{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-3);white-space:nowrap}
+  .comp-name{font-size:19px;font-weight:600;letter-spacing:-.01em;margin:0}
+  .comp-tests{color:var(--ink-2);font-size:13.5px;line-height:1.6;margin:16px 0 22px;max-width:76ch}
+  .comp-tests b{color:var(--ink);font-weight:600}
+
+  .screen{background:var(--ground);border:1px solid var(--hair);padding:30px 32px 34px}
+  .screen-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:30px}
+  .brandmark{font-size:12px;letter-spacing:.2em;text-transform:uppercase;color:var(--ink-2)}
+  .counter{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-2)}
+  .counter b{color:var(--ink);font-weight:600}
+
+  .lbl{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;fill:var(--ink-3);font-family:var(--grotesk)}
+  .lbl-room{font-size:11.5px;letter-spacing:.14em;text-transform:uppercase;fill:var(--ink);font-weight:600;font-family:var(--grotesk)}
+  .lbl-thresh{font-size:9.5px;letter-spacing:.2em;text-transform:uppercase;fill:var(--ink-3);font-family:var(--grotesk)}
+  .money{font-size:12.5px;fill:var(--ink-2);font-family:var(--grotesk);font-variant-numeric:tabular-nums}
+  .money b{fill:var(--ink)}
+  .flag{font-size:11px;fill:var(--ink-2);font-family:var(--grotesk)}
+
+  .needs{margin-top:26px;border-top:1px solid var(--hair);padding-top:22px}
+  .needs-h{display:flex;align-items:baseline;gap:12px;margin-bottom:16px}
+  .needs-h .t{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-2)}
+  .needs-h .n{font-size:11px;letter-spacing:.14em;color:var(--ink-3)}
+  .item{display:grid;grid-template-columns:3px 1fr auto;gap:14px;align-items:baseline;padding:10px 0;border-bottom:1px solid var(--hair-2)}
+  .item:last-child{border-bottom:0}
+  .item .bar{align-self:stretch}
+  .item .txt{font-size:13.5px;line-height:1.5;color:var(--ink)}
+  .item .txt em{font-style:normal;color:var(--ink-3)}
+  .item .meta{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);white-space:nowrap}
+
+  .caption{display:grid;grid-template-columns:1fr 1fr;gap:26px;margin-top:20px}
+  .caption h4{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);margin:0 0 8px;font-weight:600}
+  .caption p{margin:0;font-size:13px;line-height:1.65;color:var(--ink-2)}
+
+  .swatches{display:flex;gap:0;margin-top:14px;border:1px solid var(--hair)}
+  .sw{flex:1;padding:12px 10px;font-size:10px;letter-spacing:.12em;text-transform:uppercase}
+  .sw.on-light{color:#15181b}
+  .grounds{display:grid;grid-template-columns:1fr 1fr;gap:0;margin-top:26px;border:1px solid var(--hair)}
+  .g{padding:16px}
+  .g.dark{background:var(--ground)} .g.lite{background:#f4f2ef}
+  .g .gl{font-size:10px;letter-spacing:.16em;text-transform:uppercase;margin-bottom:12px}
+  .g.dark .gl{color:var(--ink-3)} .g.lite .gl{color:#6b747c}
+
+  .imgslot{background:
+      repeating-linear-gradient(115deg,#1b1f22 0 12px,#191d20 12px 24px);
+    border:1px solid var(--hair);display:flex;align-items:flex-end;padding:12px}
+  .imgslot span{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+  .atelier{display:grid;grid-template-columns:1.55fr 1fr;gap:2px}
+  .atelier .imgslot:first-child{aspect-ratio:16/10}
+  .atelier .stack{display:grid;grid-template-rows:1fr 1fr;gap:2px}
+  .room-title{display:flex;align-items:baseline;gap:14px;margin:22px 0 6px}
+  .room-title .nm{font-size:26px;font-weight:600;letter-spacing:-.02em}
+  .room-title .st{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3)}
+  .room-money{font-size:13px;color:var(--ink-2);font-variant-numeric:tabular-nums;margin-bottom:18px}
+  .strip{border-top:1px solid var(--hair);padding-top:16px;margin-top:22px}
+</style>
+
+<div class="wrap">
+
+  <div class="page-head">
+    <p class="kicker">Core Remodel · direction comps · seed 70a4d826</p>
+    <h1>Diagram outside, Atelier inside — three compositions</h1>
+    <p class="sub">All three share one committed world: room lines in permanent functional color, uniform stops, ringed interchanges, flat ground, no cards. What varies is the structure the world is asked to carry on the Home screen — the one thing a still image can actually settle.</p>
+    <p class="note">Rooms are 126 Colby's real rooms. <b>All figures, counts and dates are synthetic placeholders.</b> Rendered on the dark ground; light is co-primary and authored equally — the room-line set is checked against both at the bottom.</p>
+  </div>
+
+  <!-- ══════════════ COMP A ══════════════ -->
+  <section class="comp">
+    <div class="comp-head">
+      <span class="comp-id">Comp A</span>
+      <h3 class="comp-name">Parallel Tracks</h3>
+    </div>
+    <p class="comp-tests"><b>Tests:</b> the schedule reading. Every room is a horizontal track; the translation-ready threshold is a single vertical rule crossing all of them at once, so "who is ready" is one horizontal glance. Needs You docks below at a single interchange.</p>
+
+    <div class="screen">
+      <div class="screen-top"><span class="brandmark">126 Colby</span><span class="counter">Needs you <b>7</b></span></div>
+
+      <svg viewBox="0 0 1060 330" width="100%" role="img" aria-label="Six room tracks crossed by a translation-ready threshold">
+        <!-- threshold -->
+        <line x1="640" y1="14" x2="640" y2="300" stroke="#3a4148" stroke-width="1" stroke-dasharray="2 4"/>
+        <text class="lbl-thresh" x="640" y="322" text-anchor="middle">Translation-ready</text>
+
+        <g font-family="var(--grotesk)">
+          <!-- KITCHEN -->
+          <text class="lbl-room" x="0" y="36">Kitchen</text>
+          <line x1="176" y1="31" x2="712" y2="31" stroke="#22272b" stroke-width="6" stroke-linecap="round"/>
+          <line x1="176" y1="31" x2="712" y2="31" stroke="var(--kitchen)" stroke-width="6" stroke-linecap="round" stroke-dasharray="536" stroke-dashoffset="180"/>
+          <circle cx="176" cy="31" r="5" fill="var(--kitchen)"/><circle cx="310" cy="31" r="5" fill="var(--kitchen)"/><circle cx="444" cy="31" r="5" fill="var(--kitchen)"/>
+          <circle cx="578" cy="31" r="7.5" fill="var(--ground)" stroke="var(--kitchen)" stroke-width="3"/>
+          <circle cx="712" cy="31" r="4" fill="#2a2f34"/>
+          <text class="money" x="760" y="35"><tspan font-weight="600" fill="#e8eaec">$48,200</tspan> / 52,000</text>
+          <text class="flag" x="940" y="35">▲ 2 need you</text>
+
+          <!-- PRIMARY BATH -->
+          <text class="lbl-room" x="0" y="94">Primary Bath</text>
+          <line x1="176" y1="89" x2="712" y2="89" stroke="#22272b" stroke-width="6" stroke-linecap="round"/>
+          <line x1="176" y1="89" x2="578" y2="89" stroke="var(--bath)" stroke-width="6" stroke-linecap="round"/>
+          <circle cx="176" cy="89" r="5" fill="var(--bath)"/><circle cx="310" cy="89" r="5" fill="var(--bath)"/><circle cx="444" cy="89" r="5" fill="var(--bath)"/>
+          <circle cx="578" cy="89" r="7.5" fill="var(--ground)" stroke="var(--bath)" stroke-width="3"/>
+          <circle cx="712" cy="89" r="4" fill="#2a2f34"/>
+          <text class="money" x="760" y="93"><tspan font-weight="600" fill="#e8eaec">$19,400</tspan> / 18,000</text>
+          <text class="flag" x="940" y="93" fill="#c98a2b">over plan</text>
+          <text class="lbl" x="176" y="108">↺ 3 reopened · kitchen wall relocation</text>
+
+          <!-- GUEST BATH -->
+          <text class="lbl-room" x="0" y="160">Guest Bath</text>
+          <line x1="176" y1="155" x2="712" y2="155" stroke="#22272b" stroke-width="6" stroke-linecap="round"/>
+          <line x1="176" y1="155" x2="310" y2="155" stroke="var(--guest)" stroke-width="6" stroke-linecap="round"/>
+          <circle cx="176" cy="155" r="5" fill="var(--guest)"/>
+          <circle cx="310" cy="155" r="7.5" fill="var(--ground)" stroke="var(--guest)" stroke-width="3"/>
+          <circle cx="444" cy="155" r="4" fill="#2a2f34"/><circle cx="578" cy="155" r="4" fill="#2a2f34"/><circle cx="712" cy="155" r="4" fill="#2a2f34"/>
+          <text class="money" x="760" y="159">$0 / 11,500</text>
+
+          <!-- DOWNSTAIRS -->
+          <text class="lbl-room" x="0" y="212">Downstairs</text>
+          <line x1="176" y1="207" x2="712" y2="207" stroke="#22272b" stroke-width="6" stroke-linecap="round"/>
+          <circle cx="176" cy="207" r="7.5" fill="var(--ground)" stroke="var(--down)" stroke-width="3"/>
+          <circle cx="310" cy="207" r="4" fill="#2a2f34"/><circle cx="444" cy="207" r="4" fill="#2a2f34"/><circle cx="578" cy="207" r="4" fill="#2a2f34"/><circle cx="712" cy="207" r="4" fill="#2a2f34"/>
+          <text class="money" x="760" y="211">not started</text>
+
+          <!-- LIGHTWELL -->
+          <text class="lbl-room" x="0" y="252">Lightwell</text>
+          <line x1="176" y1="247" x2="712" y2="247" stroke="#22272b" stroke-width="6" stroke-linecap="round"/>
+          <line x1="176" y1="247" x2="444" y2="247" stroke="var(--light)" stroke-width="6" stroke-linecap="round"/>
+          <circle cx="176" cy="247" r="5" fill="var(--light)"/><circle cx="310" cy="247" r="5" fill="var(--light)"/>
+          <circle cx="444" cy="247" r="7.5" fill="var(--ground)" stroke="var(--light)" stroke-width="3"/>
+          <circle cx="578" cy="247" r="4" fill="#2a2f34"/><circle cx="712" cy="247" r="4" fill="#2a2f34"/>
+          <text class="money" x="760" y="251">$6,100 / 9,000</text>
+
+          <!-- WHOLE HOUSE -->
+          <text class="lbl-room" x="0" y="292">Whole House</text>
+          <line x1="176" y1="287" x2="712" y2="287" stroke="#22272b" stroke-width="6" stroke-linecap="round"/>
+          <line x1="176" y1="287" x2="444" y2="287" stroke="var(--whole)" stroke-width="6" stroke-linecap="round"/>
+          <circle cx="176" cy="287" r="5" fill="var(--whole)"/><circle cx="310" cy="287" r="5" fill="var(--whole)"/>
+          <circle cx="444" cy="287" r="7.5" fill="var(--ground)" stroke="var(--whole)" stroke-width="3"/>
+          <circle cx="578" cy="287" r="4" fill="#2a2f34"/><circle cx="712" cy="287" r="4" fill="#2a2f34"/>
+          <text class="lbl" x="760" y="291">permits · electrical · structural</text>
+
+          <!-- stop legend -->
+          <text class="lbl" x="176" y="14" text-anchor="middle">Sourcing</text>
+          <text class="lbl" x="310" y="14" text-anchor="middle">Fixtures</text>
+          <text class="lbl" x="444" y="14" text-anchor="middle">Rough-in</text>
+          <text class="lbl" x="578" y="14" text-anchor="middle">Finish spec</text>
+          <text class="lbl" x="712" y="14" text-anchor="middle">Sign-off</text>
+        </g>
+      </svg>
+
+      <div class="needs">
+        <div class="needs-h"><span class="t">◎ Needs you</span><span class="n">7 · grouped by consequence</span></div>
+        <div class="item"><div class="bar" style="background:var(--bath)"></div><div class="txt">Primary bath tile — two options parked <em>11 days</em></div><div class="meta">decision</div></div>
+        <div class="item"><div class="bar" style="background:var(--kitchen)"></div><div class="txt">Range change reopens 3 settled decisions <em>— confirm the ripple</em></div><div class="meta">decision</div></div>
+        <div class="item"><div class="bar" style="background:#2a2f34"></div><div class="txt">12 finds from Saturday's drive need a room</div><div class="meta">interchange</div></div>
+        <div class="item"><div class="bar" style="background:var(--whole)"></div><div class="txt">Roofing payment request — <em>2 of 4 phase conditions unmet</em></div><div class="meta">approval</div></div>
+      </div>
+    </div>
+
+    <div class="caption">
+      <div><h4>What it gets right</h4><p>One glance answers "which rooms can I talk to a contractor about." The threshold is doing real work as a shared vertical, and the reopened marker sits under Primary Bath without moving its stop. Scales to twenty rooms as a list.</p></div>
+      <div><h4>What it costs</h4><p>The network is implied, not shown. Nothing on this screen says the kitchen wall move is what reopened the bath — you have to read the annotation. Dependency is text, not geometry.</p></div>
+    </div>
+  </section>
+
+  <!-- ══════════════ COMP B ══════════════ -->
+  <section class="comp">
+    <div class="comp-head">
+      <span class="comp-id">Comp B</span>
+      <h3 class="comp-name">The Network</h3>
+    </div>
+    <p class="comp-tests"><b>Tests:</b> literal dependency. Room lines actually meet at interchanges where they share something real — a wall, a trade, a permit, a panel. The blast radius of the kitchen wall move is visible as geometry rather than described in a footnote.</p>
+
+    <div class="screen">
+      <div class="screen-top"><span class="brandmark">126 Colby</span><span class="counter">Needs you <b>7</b></span></div>
+
+      <svg viewBox="0 0 1060 400" width="100%" role="img" aria-label="Room lines meeting at shared-dependency interchanges">
+        <g stroke-linecap="round" stroke-linejoin="round" fill="none">
+          <!-- WHOLE HOUSE trunk -->
+          <path d="M70 350 H300 L360 290 H620 L680 230 H980" stroke="var(--whole)" stroke-width="7"/>
+          <!-- KITCHEN -->
+          <path d="M70 90 H300 L360 150 H560" stroke="var(--kitchen)" stroke-width="7"/>
+          <path d="M560 150 L620 210 H700" stroke="var(--kitchen)" stroke-width="7" stroke-dasharray="7 9" opacity=".55"/>
+          <!-- PRIMARY BATH -->
+          <path d="M70 170 H240 L300 230 H560" stroke="var(--bath)" stroke-width="7"/>
+          <path d="M560 230 H760" stroke="var(--bath)" stroke-width="7" stroke-dasharray="7 9" opacity=".55"/>
+          <!-- GUEST BATH -->
+          <path d="M70 250 H240" stroke="var(--guest)" stroke-width="7"/>
+          <path d="M240 250 L300 290" stroke="var(--guest)" stroke-width="7" stroke-dasharray="7 9" opacity=".55"/>
+          <!-- LIGHTWELL -->
+          <path d="M70 300 H240 L300 290" stroke="var(--light)" stroke-width="7"/>
+          <!-- DOWNSTAIRS -->
+          <path d="M70 380 H360 L420 350" stroke="var(--down)" stroke-width="7" stroke-dasharray="7 9" opacity=".55"/>
+        </g>
+
+        <!-- interchanges -->
+        <g>
+          <circle cx="300" cy="230" r="12" fill="var(--ground)" stroke="#e8eaec" stroke-width="3"/>
+          <circle cx="300" cy="230" r="4.5" fill="#e8eaec"/>
+          <text class="lbl" x="300" y="205" text-anchor="middle" fill="#e8eaec">Shared wall</text>
+
+          <circle cx="620" cy="210" r="12" fill="var(--ground)" stroke="#c98a2b" stroke-width="3"/>
+          <circle cx="620" cy="210" r="4.5" fill="#c98a2b"/>
+          <text class="lbl" x="620" y="186" text-anchor="middle" fill="#c98a2b">Panel capacity</text>
+
+          <circle cx="360" cy="290" r="12" fill="var(--ground)" stroke="var(--whole)" stroke-width="3"/>
+          <circle cx="360" cy="290" r="4.5" fill="var(--whole)"/>
+          <text class="lbl" x="360" y="318" text-anchor="middle">Permit</text>
+
+          <circle cx="560" cy="150" r="12" fill="var(--ground)" stroke="var(--kitchen)" stroke-width="3"/>
+          <circle cx="560" cy="150" r="4.5" fill="var(--kitchen)"/>
+          <text class="lbl" x="560" y="128" text-anchor="middle">Wall relocation</text>
+        </g>
+
+        <!-- plain stops -->
+        <g fill="var(--ground)">
+          <circle cx="180" cy="90" r="5.5" fill="var(--kitchen)"/><circle cx="180" cy="170" r="5.5" fill="var(--bath)"/>
+          <circle cx="180" cy="250" r="5.5" fill="var(--guest)"/><circle cx="180" cy="300" r="5.5" fill="var(--light)"/>
+          <circle cx="180" cy="350" r="5.5" fill="var(--whole)"/>
+        </g>
+
+        <g>
+          <text class="lbl-room" x="0" y="94">Kitchen</text>
+          <text class="lbl-room" x="0" y="174">Primary</text>
+          <text class="lbl-room" x="0" y="254">Guest</text>
+          <text class="lbl-room" x="0" y="304">Lightwell</text>
+          <text class="lbl-room" x="0" y="354">Whole hse</text>
+          <text class="lbl-room" x="0" y="384">Downstairs</text>
+          <text class="lbl" x="700" y="215">at risk</text>
+          <text class="lbl" x="768" y="235">at risk</text>
+        </g>
+      </svg>
+
+      <div class="needs">
+        <div class="needs-h"><span class="t">◎ Blast radius</span><span class="n">kitchen wall relocation · 14 aug</span></div>
+        <div class="item"><div class="bar" style="background:var(--kitchen)"></div><div class="txt">Reopens <em>3 decisions</em> in Kitchen — slab, range placement, fabrication note</div><div class="meta">source</div></div>
+        <div class="item"><div class="bar" style="background:var(--bath)"></div><div class="txt">Reaches Primary Bath through the shared wall — <em>vanity no longer fits</em></div><div class="meta">reopened</div></div>
+        <div class="item"><div class="bar" style="background:var(--whole)"></div><div class="txt">Panel capacity question opens if the range goes induction</div><div class="meta">unknown</div></div>
+      </div>
+    </div>
+
+    <div class="caption">
+      <div><h4>What it gets right</h4><p>Dependency is the picture, not a footnote. You can see that the bath was reopened <i>through a shared wall</i>, and that the panel is the next thing at risk. Dashed segments read as "not yet real" without a legend.</p></div>
+      <div><h4>What it costs</h4><p>Readiness is gone — there is no single glance that answers "who can I talk to the trade about." Hand-placed geometry does not auto-layout to twenty rooms, and this is the composition most likely to become decorative.</p></div>
+    </div>
+  </section>
+
+  <!-- ══════════════ COMP C ══════════════ -->
+  <section class="comp">
+    <div class="comp-head">
+      <span class="comp-id">Comp C</span>
+      <h3 class="comp-name">Atelier-Led Home</h3>
+    </div>
+    <p class="comp-tests"><b>Tests:</b> whether Home should feel like a house rather than a control surface. The diagram is demoted to a persistent strip; the room you are actually in the middle of leads at full scale.</p>
+
+    <div class="screen">
+      <div class="screen-top"><span class="brandmark">126 Colby</span><span class="counter">Needs you <b>7</b></span></div>
+
+      <div class="atelier">
+        <div class="imgslot"><span>Image slot — primary bath, current direction</span></div>
+        <div class="stack">
+          <div class="imgslot"><span>Material — Calacatta Viola</span></div>
+          <div class="imgslot"><span>Reference — niche detail</span></div>
+        </div>
+      </div>
+
+      <div class="room-title"><span class="nm">Primary Bath</span><span class="st">Finish spec · ↺ 3 reopened</span></div>
+      <div class="room-money">$19,400 committed of $18,000 planned &nbsp;·&nbsp; 5 ideas parked &nbsp;·&nbsp; tile decision open 11 days</div>
+
+      <div class="strip">
+        <svg viewBox="0 0 1060 96" width="100%" role="img" aria-label="Persistent room-line strip">
+          <g>
+            <text class="lbl" x="0" y="12">The house</text>
+            <line x1="0" y1="34" x2="150" y2="34" stroke="var(--kitchen)" stroke-width="5" stroke-linecap="round"/>
+            <text class="lbl" x="0" y="54">Kitchen</text>
+            <line x1="176" y1="34" x2="326" y2="34" stroke="var(--bath)" stroke-width="5" stroke-linecap="round"/>
+            <circle cx="326" cy="34" r="7" fill="var(--ground)" stroke="var(--bath)" stroke-width="3"/>
+            <text class="lbl" x="176" y="54" fill="#e8eaec">Primary bath — here</text>
+            <line x1="352" y1="34" x2="428" y2="34" stroke="var(--guest)" stroke-width="5" stroke-linecap="round"/>
+            <text class="lbl" x="352" y="54">Guest</text>
+            <line x1="454" y1="34" x2="530" y2="34" stroke="#22272b" stroke-width="5" stroke-linecap="round"/>
+            <text class="lbl" x="454" y="54">Downstairs</text>
+            <line x1="556" y1="34" x2="700" y2="34" stroke="var(--light)" stroke-width="5" stroke-linecap="round"/>
+            <text class="lbl" x="556" y="54">Lightwell</text>
+            <line x1="726" y1="34" x2="870" y2="34" stroke="var(--whole)" stroke-width="5" stroke-linecap="round"/>
+            <text class="lbl" x="726" y="54">Whole house</text>
+            <circle cx="960" cy="34" r="11" fill="var(--ground)" stroke="#e8eaec" stroke-width="2.5"/>
+            <circle cx="960" cy="34" r="4" fill="#e8eaec"/>
+            <text class="lbl" x="960" y="60" text-anchor="middle" fill="#e8eaec">12 waiting</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+
+    <div class="caption">
+      <div><h4>What it gets right</h4><p>It feels like your house, not a dashboard — which is the doctrine's emotional-fidelity criterion taken seriously on the first screen. Resuming where you left off is the most common real session.</p></div>
+      <div><h4>What it costs</h4><p>You lose the whole-project read on entry. A flipper with six properties, and anyone who opened the app to ask "where does everything stand," has to travel to find out. The strip is orientation but it is not an answer.</p></div>
+    </div>
+  </section>
+
+  <!-- grounds check -->
+  <section class="comp">
+    <div class="comp-head"><span class="comp-id">Both grounds</span><h3 class="comp-name">The room-line set, checked against dark and light</h3></div>
+    <p class="comp-tests">Line colors must stay mutually distinguishable at arm's length on either ground — the car at night and the showroom in daylight are both primary scenes. Provisional values; the real set gets tuned during implementation.</p>
+    <div class="grounds">
+      <div class="g dark">
+        <div class="gl">Night · in-car · kitchen table</div>
+        <svg viewBox="0 0 500 88" width="100%">
+          <line x1="8" y1="14" x2="240" y2="14" stroke="var(--kitchen)" stroke-width="6" stroke-linecap="round"/>
+          <line x1="8" y1="32" x2="240" y2="32" stroke="var(--bath)" stroke-width="6" stroke-linecap="round"/>
+          <line x1="8" y1="50" x2="240" y2="50" stroke="var(--guest)" stroke-width="6" stroke-linecap="round"/>
+          <line x1="264" y1="14" x2="492" y2="14" stroke="var(--down)" stroke-width="6" stroke-linecap="round"/>
+          <line x1="264" y1="32" x2="492" y2="32" stroke="var(--light)" stroke-width="6" stroke-linecap="round"/>
+          <line x1="264" y1="50" x2="492" y2="50" stroke="var(--whole)" stroke-width="6" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <div class="g lite">
+        <div class="gl">Daylight · showroom aisle · job site</div>
+        <svg viewBox="0 0 500 88" width="100%">
+          <line x1="8" y1="14" x2="240" y2="14" stroke="var(--kitchen)" stroke-width="6" stroke-linecap="round"/>
+          <line x1="8" y1="32" x2="240" y2="32" stroke="var(--bath)" stroke-width="6" stroke-linecap="round"/>
+          <line x1="8" y1="50" x2="240" y2="50" stroke="var(--guest)" stroke-width="6" stroke-linecap="round"/>
+          <line x1="264" y1="14" x2="492" y2="14" stroke="var(--down)" stroke-width="6" stroke-linecap="round"/>
+          <line x1="264" y1="32" x2="492" y2="32" stroke="var(--light)" stroke-width="6" stroke-linecap="round"/>
+          <line x1="264" y1="50" x2="492" y2="50" stroke="var(--whole)" stroke-width="6" stroke-linecap="round"/>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+</div>

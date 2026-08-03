@@ -53,6 +53,26 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/fix-rooms-area-computed-hotfix",
+    title: "Hotfix: compute room area on the fly — heal prod 500s + room-geometry package",
+    summary:
+      "Production home-catalog endpoints were 500ing: the shared prod D1 already had rooms.area_sq_ft dropped (0043, intentional — area is computed, never stored), but deployed main still declared the column in the drizzle rooms schema, so every select().from(rooms) emitted area_sq_ft and D1 rejected it (blast radius: catalog, images, listing-photos, mood-board, supporting-docs, vision-nodes, materials, pascal, measurements). Root-cause fix: remove the column from the schema (heals every star-select at once) and derive area on read. Also modularizes the calculators into services/room-geometry — one module file per calc type (dimensions primitives, area, linear-feet), so every caller shares one implementation with no per-file drift. linear-feet is available at three scopes: a single wall/segment, an entire room (rectangular perimeter), and a floor / whole-home total; mcp roomDto now surfaces linearFt beside areaSqFt. No migration (remote already matched). Shipped to prod (version c8101a8e); /api/rooms/catalog confirmed 200.",
+    date: "2026-08-03",
+    status: "shipped",
+    prNumber: 344,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/344",
+  },
+  {
+    branch: "claude/homeowner-experience-plan-v2",
+    title: "Homeowner experience — room model overhaul + measurement view (0041/0043)",
+    summary:
+      "Recovery + rebase of docs/homeowner-experience-plan, which had fallen 40 commits behind main with migrations 0162–0171 colliding by NUMBER against main's parallel 0162–0168. Rather than a 28-commit rebase conflicting on drizzle meta at every step, the schema/service/docs work was ported onto current main and the 10 divergent migrations consolidated into ONE fresh catch-up migration (0169_organic_dragon_lord) generated against main's snapshot — verified to contain only this branch's delta (47 new tables + rooms columns + the rooms.area_sq_ft drop), no re-creation of main's tables. Lands the 0041/0043 room model (projects, walls + openings + face segments, room_measurements, room_notes, decisions/impacts ripple graph, surface assemblies, spec definitions, trade assignments, permit mapping, room timeline) and the measurement-view.ts canonical resolver: one transparent shape per room (computed area + override + provenance, walls-win perimeter precedence), mutation-checked. rooms.area_sq_ft is dropped — area is computed, never stored, with any override living in room_measurements.area_sq_ft_override. DEPLOY NOTE: the additive DDL is idempotent-safe under scripts/d1-migrate.mjs, but the rooms.area_sq_ft DROP must ride the merge deploy (code that stops using the column ships together) — never migrate:remote from the unmerged branch, since the D1 is shared with live prod that still writes that column.",
+    date: "2026-08-02",
+    status: "open",
+    prNumber: 343,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/343",
+  },
+  {
     branch: "claude/0042-p5-product-map",
     title: "Quote line items → products (0042 P5)",
     summary:
@@ -330,6 +350,40 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "rooms-area-computed-hotfix",
+    branch: "claude/fix-rooms-area-computed-hotfix",
+    date: "2026-08-03",
+    area: "Home",
+    title: "Compute room area on the fly — heal prod 500s + room-geometry package",
+    summary:
+      "Production incident + fix. The shared prod D1 already had rooms.area_sq_ft dropped (0043 — intentional: area is computed, never stored), but deployed main still declared the column in the drizzle rooms schema, so every select().from(rooms) emitted area_sq_ft and D1 rejected it — 500ing every rooms read (catalog, images, listing-photos, mood-board, supporting-docs, vision-nodes, materials, pascal, measurements). Fix: remove the column from the schema (heals every star-select at once), derive area on read, and modularize the calculators into services/room-geometry — one module file per calc type sharing the dimension primitives, so no caller carries its own math (no IFTTT). linear-feet added at three scopes: a wall/segment, a room (rectangular perimeter), a floor / whole-home total. Deployed to prod (version c8101a8e); /api/rooms/catalog confirmed 200. NOTE: the earlier 500 was briefly cached at the Cloudflare edge, masking the heal until the cache refreshed — a follow-up will make 5xx non-cacheable.",
+    changes: [
+      { kind: "fixed", text: "Removed areaSqFt from the rooms drizzle schema — a star select().from(rooms) no longer emits the dropped column; heals every rooms read across the app." },
+      { kind: "added", text: "services/room-geometry/ package: dimensions.ts (toFeet/round2), area.ts (computeRoomAreaSqFt/sumRoomAreaSqFt), linear-feet.ts (segmentLinearFt/computeRoomLinearFt/sumRoomLinearFt), index.ts barrel, + assert self-check." },
+      { kind: "changed", text: "All readers route through the shared calculators: mcp rooms _shared.roomDto (now surfaces linearFt beside areaSqFt), home-catalog.computeRoomSqft (delegates), materials allocate.buildRoomContext, pascal generator, measurements.listActiveRooms." },
+      { kind: "changed", text: "update_room: areaSqFt is no longer settable (area is derived). Removed the now-dead area backfill + unused isNull import from home-catalog." },
+    ],
+    migrations: [],
+    status: "shipped",
+  },
+  {
+    id: "homeowner-room-model-0043",
+    branch: "claude/homeowner-experience-plan-v2",
+    date: "2026-08-02",
+    area: "Home",
+    title: "Room model overhaul + canonical measurement view (0041/0043)",
+    summary:
+      "Lands the 0041/0043 room data model and recovers the branch after a power-loss + 40-commits-behind divergence whose migrations collided by number with main's. The schema/service/docs were ported onto current main and the 10 divergent migrations consolidated into ONE fresh catch-up migration (0169) generated against main's snapshot — verified to hold only this branch's delta, no re-creation of main's tables. Core substance: measurement-view.ts, a pure resolver that returns the SAME transparent shape for every room — walls[], computed area AND override AND the override's provenance (notes + calculation), perimeter with a named source (walls > measured > rectangular_estimate > unavailable), effective area + its source, confidence — absent data is null, never a missing key, and nothing is hidden behind an if/else. Inches are canonical; feet/sqft/linear are computed on read; real walls win the perimeter for any non-rectangular room. rooms.area_sq_ft (a stored calculation that goes stale) is dropped — area is computed, any authoritative override lives in room_measurements.area_sq_ft_override (+ _notes / _calculation).",
+    changes: [
+      { kind: "migration", text: "0169_organic_dragon_lord (consolidated catch-up): 47 CREATE TABLE (projects, walls + wall_openings + wall_face_segments + wall_planned_changes, room_measurements, room_notes + type defs/mappings, decisions/decision_reopenings, impacts + impact_targets/blocks/evidence/definitions, ripple_rules, surface_assemblies + assembly_layers, spec_definitions + room_spec_fields, room_trade_assignments, room_permit_mapping, room_events, room_intents, room_problems + docs/photos, fixture_requirements, and the *_def vocab tables) + 4 rooms columns (line_color_hex, line_order, +2) + DROP rooms.area_sq_ft. NOT applied to remote (see deploy note)." },
+      { kind: "added", text: "services/homeowner/measurement-view.ts — measurementView(): one canonical shape per room (computed + override + provenance, walls-win perimeter precedence), plus a mutation-checked test (measurement-view.test.ts)." },
+      { kind: "removed", text: "rooms.area_sq_ft column — area is computed from dimensions/walls, never stored; override moves to room_measurements.area_sq_ft_override. home-catalog.ts stops writing it; list_rooms/get_room/update_room now expose a computed areaSqFt (non-settable)." },
+      { kind: "added", text: "0041/0043/0044 planning doc bundles (docs/) — IMPLEMENTATION_PLAN, PROMPT, DESIGN_SPEC." },
+    ],
+    migrations: ["0169"],
+    status: "staged",
+  },
   {
     id: "store-quote-product-map",
     branch: "claude/0042-p5-product-map",

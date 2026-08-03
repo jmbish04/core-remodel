@@ -113,6 +113,125 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "rooms-area-computed-hotfix": {
+    slug: "rooms-area-computed-hotfix",
+    branch: "claude/fix-rooms-area-computed-hotfix",
+    prNumber: 344,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/344",
+    subtitle: "Root-cause heal for a prod outage + a shared room-geometry package",
+    introduction:
+      "A production incident and its fix. Every rooms read was 500ing because the deployed schema still declared a column the database no longer had. The fix removes the column from the schema, derives area on read, and consolidates the geometry math into one shared package.",
+    problem:
+      "The shared production D1 already had `rooms.area_sq_ft` dropped (0043 — intentional; area is a stored calculation that goes stale). But deployed `main` still declared `areaSqFt` in the drizzle `rooms` schema, so drizzle listed `area_sq_ft` in the column set of every `select().from(rooms)` and D1 rejected it: `SQLITE_ERROR: table rooms has no column named area_sq_ft`. Blast radius was every rooms read — catalog, images, listing-photos, mood-board, supporting-documents, vision-nodes, materials allocation, pascal generator, measurements.",
+    approach:
+      "Remove `areaSqFt` from the `rooms` drizzle schema — that alone heals every star-`select().from(rooms)`, since drizzle then stops naming the column. Area is derived on read. To keep the derivation identical everywhere (the homeowner's rule: same shape, no per-caller logic), the calculators were modularized into `services/room-geometry` — one module per calc type over shared dimension primitives — and every reader routed through it. Linear feet is provided at three scopes (a wall/segment, a room's rectangular perimeter, a floor / whole-home total); the walls-driven perimeter for non-rectangular rooms lands with the 0043 walls table.",
+    apiChanges: [
+      "mcp `list_rooms` / `get_room`: room output now includes `linearFt` (computed rectangular perimeter) beside `areaSqFt`.",
+      "mcp `update_room`: `areaSqFt` is no longer an accepted input — area is derived, not stored.",
+    ],
+    filesTouched: [
+      "src/backend/db/schema/home/rooms.ts (areaSqFt column removed)",
+      "src/backend/services/room-geometry/{dimensions,area,linear-feet,index}.ts (new package)",
+      "src/backend/services/room-geometry/room-geometry.test.ts (assert self-check)",
+      "src/backend/mcp/tools/rooms/{_shared,list_rooms,get_room,update_room}.ts",
+      "src/backend/services/home-catalog.ts (computeRoomSqft delegates; area backfill + isNull removed)",
+      "src/backend/services/materials/allocate.ts",
+      "src/backend/services/pascal/generator.ts",
+      "src/backend/services/measurements.ts (listActiveRooms)",
+    ],
+    migrations: [],
+    code: [
+      {
+        title: "room-geometry — one module per calc type, shared primitives",
+        lang: "ts",
+        code: "// dimensions.ts — the primitive every calc agrees on\nexport function toFeet(feet: number | null, inches: number | null): number | null {\n  if (feet == null && inches == null) return null;\n  return (feet ?? 0) + (inches ?? 0) / 12;\n}\n// area.ts\nexport const computeRoomAreaSqFt = (r: Dimensions) => {\n  const l = toFeet(r.lengthFeet, r.lengthInches), w = toFeet(r.widthFeet, r.widthInches);\n  return l != null && w != null ? round2(l * w) : null;\n};\n// linear-feet.ts — three scopes: a wall run, a room perimeter, a floor/home total\nexport const computeRoomLinearFt = (r: Dimensions) => {\n  const l = toFeet(r.lengthFeet, r.lengthInches), w = toFeet(r.widthFeet, r.widthInches);\n  return l != null && w != null ? round2(2 * (l + w)) : null;\n};",
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Why every rooms read 500'd — and where the fix cuts it",
+        title: "Schema vs. database drift",
+        code: "flowchart TD\n  A[deployed main: rooms schema still declares areaSqFt] --> B[select().from(rooms) lists area_sq_ft]\n  B --> C[(prod D1: rooms has NO area_sq_ft — dropped by 0043)]\n  C --> D[SQLITE_ERROR: no such column -> 500]\n  D --> E[every rooms read fails: catalog, images, materials, pascal, measurements...]\n  F[FIX: remove areaSqFt from schema] -.heals.-> B\n  G[derive area/linear-ft on read via room-geometry] -.-> H[200, computed shape]\n  classDef fix fill:#1f4d2e,stroke:#4ade80\n  classDef bad fill:#4d1f1f,stroke:#f87171\n  class F,G,H fix\n  class D,E bad",
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_343.mjs",
+      command: "pnpm run deploy  (from main, after merge) ; curl /api/rooms/catalog",
+      source:
+        "// Also: npx tsx src/backend/services/room-geometry/room-geometry.test.ts (assert self-check).",
+      output:
+        "Deployed to prod, version c8101a8e (100%). GET /api/rooms/catalog -> 200, success:true (was 500). room-geometry.test.ts — all assertions passed. Build + tsc(touched) clean. NOTE: the pre-fix 500 was briefly served from Cloudflare's edge cache after deploy; cache-busted requests returned 200 immediately and the bare URL refreshed to 200. Follow-up filed to make 5xx non-cacheable.",
+      migrations: [],
+    },
+  },
+  "homeowner-room-model-0043": {
+    slug: "homeowner-room-model-0043",
+    branch: "claude/homeowner-experience-plan-v2",
+    prNumber: 343,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/343",
+    subtitle: "0041/0043 room model + one transparent measurement shape per room",
+    introduction:
+      "The homeowner-experience schema foundation (0041/0043): a real room model — walls with openings, per-room measurements and notes, a decisions/impacts ripple graph, surface assemblies, spec definitions, trades and permits — plus a single resolver that hands every consumer the same, fully transparent measurement shape. Recovered and rebased after a power-loss interrupted the branch and it drifted 40 commits behind main.",
+    problem:
+      "Two problems. (1) Area was a STORED column on rooms (rooms.area_sq_ft) — a cached calculation that silently goes stale the moment a dimension changes, and a magnet for denormalized drift. (2) The original branch fell 40 commits behind main, and its migrations 0162–0171 collided BY NUMBER with the 0162–0168 main had added in parallel (different migrations, same numbers), so a normal rebase conflicted on drizzle meta at nearly every one of 28 commits.",
+    approach:
+      "Area becomes computed, never stored: rooms.area_sq_ft is dropped and measurement-view.ts resolves each room to ONE shape that is total and transparent — it returns the computed rectangle AND any override AND the override's provenance (notes + how it was calculated), the perimeter with a NAMED source (real walls win for any shape > measured perimeter > labelled rectangular estimate > unavailable), the effective area with its source, and a confidence — with absent data as null, never a missing key, and nothing hidden behind an if/else. For the divergence, rather than fight the rebase, the schema/service/docs were ported onto current main and the 10 colliding migrations were consolidated into ONE fresh catch-up migration (0169) generated against main's own snapshot, then reviewed to confirm it contains only this branch's delta.",
+    apiChanges: [
+      "measurementView(room, walls, measurements) — pure resolver, no endpoint of its own yet (the 0043 HTTP/MCP read layer is deferred); it is the canonical assembler those routes will call.",
+      "list_rooms / get_room / update_room (MCP) — areaSqFt is now a COMPUTED output field; update_room rejects it as an input (area is not settable).",
+    ],
+    filesTouched: [
+      "src/backend/services/homeowner/measurement-view.ts (new)",
+      "src/backend/services/homeowner/measurement-view.test.ts (new, mutation-checked)",
+      "src/backend/db/schema/home/room_measurements.ts (area_sq_ft_override_notes + _calculation)",
+      "src/backend/db/schema/home/rooms.ts (area_sq_ft removed)",
+      "src/backend/db/schema/index.ts (barrel — 3-way merged with main)",
+      "src/backend/services/home-catalog.ts (stops writing rooms.area_sq_ft)",
+      "src/backend/mcp/tools/rooms/* (computed areaSqFt)",
+      "drizzle/0169_organic_dragon_lord.sql (consolidated catch-up)",
+      "docs/0041_*, docs/0043_*, docs/0044_* (planning bundles)",
+    ],
+    migrations: [
+      {
+        tag: "0169_organic_dragon_lord",
+        sql: "-- consolidated catch-up (47 CREATE TABLE + 4 ADD COLUMN + 1 DROP), excerpt:\nALTER TABLE `rooms` ADD `line_color_hex` text;\nALTER TABLE `rooms` ADD `line_order` integer;\nALTER TABLE `rooms` DROP COLUMN `area_sq_ft`;\n-- room_measurements override provenance:\nALTER TABLE `room_measurements` ADD `area_sq_ft_override_notes` text;\nALTER TABLE `room_measurements` ADD `area_sq_ft_override_calculation` text;",
+      },
+    ],
+    code: [
+      {
+        title: "measurement-view.ts — one shape, no IFTTT: computed + override + provenance always present",
+        lang: "ts",
+        code: "// Perimeter precedence is NAMED, never anonymous: real walls win (correct for\n// any shape) > measured perimeter > labelled rectangular estimate > unavailable.\nexport type PerimeterSource =\n  | \"walls\" | \"measured\" | \"rectangular_estimate\" | \"unavailable\";\n\nexport interface MeasurementView {\n  walls: WallView[];\n  computeAreaSqFt: number | null;      // the rectangle we can always derive\n  areaSqFtOverride: number | null;     // human-authoritative, when present\n  areaSqFtOverrideNotes: string | null;\n  areaSqFtOverrideCalculation: string | null;\n  computeLinearFt: number | null;\n  perimeterSource: PerimeterSource;    // always set — no anonymous number\n  effectiveAreaSqFt: number | null;    // override ?? computed\n  effectiveAreaSource: \"override\" | \"computed\" | \"unavailable\";\n  confidence: \"high\" | \"medium\" | \"low\";\n}\n// Consumer sees the computed value AND the override AND why they differ, and\n// decides. Absent data is null, never a missing key.",
+      },
+    ],
+    diagrams: [
+      {
+        caption: "0169 schema delta — the room model (ERD, abridged)",
+        title: "What the catch-up migration adds",
+        code: "erDiagram\n  rooms ||--o{ walls : has\n  rooms ||--o{ room_measurements : has\n  rooms ||--o{ room_notes : has\n  walls ||--o{ wall_openings : has\n  walls ||--o{ wall_face_segments : has\n  rooms }o--|| projects : belongs_to\n  rooms ||--o{ room_trade_assignments : has\n  rooms ||--o{ room_permit_mapping : has\n  rooms ||--o{ decisions : has\n  decisions ||--o{ impacts : triggers\n  rooms {\n    int id PK\n    text line_color_hex \"new\"\n    int line_order \"new\"\n    real area_sq_ft \"DROPPED — computed, not stored\"\n  }\n  room_measurements {\n    int id PK\n    int room_id FK\n    real area_sq_ft_override\n    text area_sq_ft_override_notes \"new\"\n    text area_sq_ft_override_calculation \"new\"\n  }",
+      },
+      {
+        caption: "measurementView() resolution — total shape, precedence is named",
+        title: "How one room resolves",
+        code: "flowchart TD\n  A[room + walls + measurements] --> B[measurementView]\n  B --> C{real walls?}\n  C -->|yes| D[perimeter = walls]\n  C -->|no, measured| E[perimeter = measured]\n  C -->|no| F[perimeter = rectangular_estimate]\n  D --> G[effectiveArea = override ?? computed]\n  E --> G\n  F --> G\n  G --> H[return: computed + override + provenance + named source + confidence]\n  classDef drop fill:#4d1f1f,stroke:#f87171\n  classDef new fill:#1f4d2e,stroke:#4ade80",
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_343.mjs",
+      command: "npx tsx src/backend/services/homeowner/measurement-view.test.ts",
+      source:
+        "// Mutation-checked: broke the walls-win perimeter precedence, confirmed the\n// test failed, then restored — so the test actually bites.",
+      output:
+        "measurement-view.test.ts — PASS (resolver returns identical shape for every room; override-wins and walls-win precedence asserted). QC pr_343.mjs regression run against prod: pending (no wrangler auth this session).",
+      migrations: [
+        {
+          tag: "0169_organic_dragon_lord",
+          appliedRemote: false,
+          note: "NOT applied to remote. Additive DDL is idempotent-safe under scripts/d1-migrate.mjs, but the rooms.area_sq_ft DROP must ride the MERGE deploy — prod code still writes that column, and the D1 is shared with live prod. Applying from the unmerged branch would break production.",
+        },
+      ],
+    },
+  },
   "store-quote-product-map": {
     slug: "store-quote-product-map",
     branch: "claude/0042-p5-product-map",
