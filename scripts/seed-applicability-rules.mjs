@@ -85,7 +85,14 @@ if (!APPLY) {
 }
 
 const target = LOCAL ? "--local" : "--remote";
-execFileSync("npx", ["wrangler", "d1", "execute", DB, target, "--command", statements.join(" ")], {
-  stdio: ["ignore", "ignore", "inherit"],
-});
+try {
+  execFileSync("npx", ["wrangler", "d1", "execute", DB, target, "--command", statements.join(" ")], {
+    stdio: ["ignore", "ignore", "inherit"],
+  });
+} catch (err) {
+  console.error(
+    `seed-applicability-rules: wrangler d1 execute failed — ${err instanceof Error ? err.message : String(err)}`,
+  );
+  process.exit(1);
+}
 console.log("seed-applicability-rules: done");

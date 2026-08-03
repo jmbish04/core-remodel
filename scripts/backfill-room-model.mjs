@@ -81,7 +81,12 @@ function noteInsertsFor(col) {
   // (room_id, author, and the plaintext), which is stable for a given source.
   return (
     `INSERT INTO room_notes (room_id, note_markdown, note_html, note_plaintext, author) ` +
-    `SELECT r.id, r.${col}, '<p>' || replace(r.${col}, char(10), '</p><p>') || '</p>', r.${col}, 'backfill:${col}' ` +
+    // note_html: HTML-escape the source (&, <, >) BEFORE wrapping, so a note
+    // containing markup is stored as text, not live HTML (stored-XSS guard).
+    // Escape & first to avoid double-encoding the entities we just inserted.
+    `SELECT r.id, r.${col}, ` +
+    `'<p>' || replace(replace(replace(replace(r.${col}, '&', '&amp;'), '<', '&lt;'), '>', '&gt;'), char(10), '</p><p>') || '</p>', ` +
+    `r.${col}, 'backfill:${col}' ` +
     `FROM rooms r ` +
     `WHERE r.is_active = 1 AND r.${col} IS NOT NULL AND trim(r.${col}) <> '' ` +
     `  AND NOT EXISTS (` +

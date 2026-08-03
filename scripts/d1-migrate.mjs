@@ -136,9 +136,16 @@ for (const name of files) {
         execSql(statement);
       } catch (err) {
         const text = errorText(err);
-        if (IDEMPOTENT_ERROR.test(text)) {
+        // Re-running a DROP COLUMN whose column is already gone is idempotent —
+        // "already done", same class as the CREATE/ADD cases above. Scoped to
+        // DROP COLUMN so a "no such column" from any OTHER statement (a real
+        // dependency bug) still fails loudly.
+        const idempotentDrop =
+          /drop\s+column/i.test(statement) && /no such column/i.test(text);
+        if (IDEMPOTENT_ERROR.test(text) || idempotentDrop) {
           toleratedCount += 1;
-          console.warn(`  ⚠ ${name}: tolerated — ${text.match(IDEMPOTENT_ERROR)?.[0]}`);
+          const reason = idempotentDrop ? "no such column (drop)" : text.match(IDEMPOTENT_ERROR)?.[0];
+          console.warn(`  ⚠ ${name}: tolerated — ${reason}`);
           continue;
         }
         console.error(`d1-migrate: ✗ ${name} failed on a non-idempotent error:\n${text}`);

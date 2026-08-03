@@ -95,7 +95,12 @@ export function resolveScope(request: ScopeRequest, allRooms: RoomRow[]): ScopeR
 
   switch (request.scope) {
     case "project": {
-      // Every active room. scopeRefId and roomIds are meaningless here.
+      // Every active room = the whole house. This is a SINGLE-HOME app: rooms
+      // belong to floors, floors to the one house — there is no rooms.project_id
+      // and no cross-tenant partition, so "project" scope is deliberately "all
+      // rooms", not a per-project filter. If the model ever becomes multi-project,
+      // add rooms.project_id and filter both here and in resolveRoomScope's query.
+      // scopeRefId and roomIds are meaningless here.
       return {
         ...base,
         roomIds: normalise([...active.keys()]),
