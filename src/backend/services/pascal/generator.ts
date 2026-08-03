@@ -16,7 +16,7 @@
 import { and, eq, inArray } from "drizzle-orm";
 
 import { floors, measurements, rooms } from "@backend/db";
-import { computeRoomAreaSqFt } from "@backend/services/room-area";
+import { computeRoomAreaSqFt } from "@backend/services/room-geometry";
 
 import type { SceneGraph, SceneRenderingMetadata } from "./shapes";
 import { PascalStoreError } from "./store";

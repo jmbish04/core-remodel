@@ -48,7 +48,8 @@
  */
 
 import { floors, images, inspirationalImageRooms, roomAiSummaries, rooms } from "@backend/db";
-import { and, asc, count, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, count, eq, inArray } from "drizzle-orm";
+import { computeRoomAreaSqFt } from "@backend/services/room-geometry";
 import { drizzle } from "drizzle-orm/d1";
 
 interface SeedFloor {
@@ -539,20 +540,9 @@ function computeRoomSqft(
     "lengthFeet" | "lengthInches" | "widthFeet" | "widthInches"
   >,
 ): number | null {
-  const lengthSet =
-    typeof room.lengthFeet === "number" || typeof room.lengthInches === "number";
-  const widthSet =
-    typeof room.widthFeet === "number" || typeof room.widthInches === "number";
-  // Both dimensions must be present to compute a meaningful area.
-  if (!lengthSet || !widthSet) return null;
-
-  const lengthFt = (typeof room.lengthFeet === "number" ? room.lengthFeet : 0) +
-    (typeof room.lengthInches === "number" ? room.lengthInches / 12 : 0);
-  const widthFt = (typeof room.widthFeet === "number" ? room.widthFeet : 0) +
-    (typeof room.widthInches === "number" ? room.widthInches / 12 : 0);
-
-  if (lengthFt <= 0 || widthFt <= 0) return null;
-  return Math.round(lengthFt * widthFt);
+  // One shared calculator for the whole app (services/room-geometry) — no
+  // per-caller area math to drift out of sync.
+  return computeRoomAreaSqFt(room);
 }
 
 /**

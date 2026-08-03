@@ -23,7 +23,7 @@ import {
   rooms,
 } from "@backend/db";
 import { and, asc, desc, eq, inArray, like, or, sql } from "drizzle-orm";
-import { computeRoomAreaSqFt } from "@backend/services/room-area";
+import { computeRoomAreaSqFt } from "@backend/services/room-geometry";
 
 /** A Drizzle D1 handle — identical to `drizzle(env.DB)` in the routes. */
 type Db = ReturnType<typeof import("drizzle-orm/d1").drizzle>;
