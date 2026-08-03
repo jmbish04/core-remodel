@@ -366,9 +366,11 @@ pascalRouter.openapi(
               .get()
           )?.name ?? null)
         : "Whole home";
-    const comparison = await compareProductVariants(c.env, {
-      variantIds: variants.map((variant) => variant.id),
-    });
+    const comparison = variants.length
+      ? await compareProductVariants(c.env, {
+          variantIds: variants.map((variant) => variant.id),
+        })
+      : [];
     const enriched = new Map(comparison.map((variant) => [variant.id, variant]));
     return c.json(
       {
