@@ -1,6 +1,6 @@
 # 0043 — Pascal ⇄ Core-Remodel Rendering Integration
 
-**Status:** Phase 4 in progress · **Slug:** `pascal-core-remodel-integration` · **Owner branch:** `codex/pascal-core-remodel-continuation`
+**Status:** Phase 4 in review (PR #342) · **Slug:** `pascal-core-remodel-integration` · **Owner branch:** `codex/pascal-core-remodel-continuation`
 **Companion repo:** `jmbish04/editor` (Pascal, deployed `https://3d-remodel.vercel.app`)
 
 ---

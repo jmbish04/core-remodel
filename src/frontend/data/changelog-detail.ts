@@ -113,6 +113,105 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "pascal-layout-studio": {
+    slug: "pascal-layout-studio",
+    branch: "codex/pascal-core-remodel-continuation",
+    prNumber: 342,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/342",
+    subtitle: "0043 Phase 4 · Core Remodel manages evidence; Pascal edits the scene",
+    introduction:
+      "This closes the last planned Core Remodel phase of the Pascal integration. The editor remains the authority for visual node editing, while Core Remodel owns the durable projects, studies, variants, measurement evidence, snapshots, and lifecycle around those scenes.",
+    problem:
+      "Phases 1–3 delivered the durable wire, measured generator, full-fidelity MCP editing, comparison, and screenshot paths, but those capabilities were only reachable through the editor or Claude. A homeowner/admin had no place to browse the hierarchy, understand which dimensions grounded a scene, compare alternatives, capture a thumbnail, or retire an obsolete option. The MCP generation and comparison implementations were also at risk of drifting from any new browser endpoints, and the repository's hand-maintained OpenAPI document omitted the entire Pascal router.",
+    approach:
+      "A shared product workflow now owns measured-base generation, branched generation with optional structured AI edits, and enriched comparison. Both the existing MCP tools and the new product REST routes call that workflow. Two thin Astro shells mount one Shadcn React island: the index selects a canonical floor/room scope and the detail page groups rich-text studies with their variants. Cards keep evidence visible but progressive: thumbnail, state and top dimensions first; lineage/confidence inside provenance; rename/archive inside More. Pascal is always opened by deep link in a new tab—Core Remodel never renders Three.js. Finally, /openapi.json merges Pascal's OpenAPIHono document at the actual /pascal/v1 mount prefix, making route declarations the documentation source of truth.",
+    apiChanges: [
+      "NEW GET /api/pascal/v1/projects — project summaries plus canonical floor and room scope choices.",
+      "NEW GET/POST /api/pascal/v1/projects/:projectId/studies — enriched hierarchy and rich-text study creation.",
+      "NEW POST /api/pascal/v1/studies/:studyId/variants — measured base or branched/intent variant via the shared workflow.",
+      "NEW POST /api/pascal/v1/variants/compare — enriched comparison used by the browser UI.",
+      "NEW POST /api/pascal/v1/scenes/:sceneId/capture and PATCH /status — snapshot and lifecycle actions.",
+      "CHANGED GET /openapi.json — merges all Pascal OpenAPIHono operations at /pascal/v1/*.",
+    ],
+    filesTouched: [
+      "src/frontend/pages/admin/pascal/index.astro",
+      "src/frontend/pages/admin/pascal/[projectId].astro",
+      "src/frontend/components/pascal/PascalLayoutStudioApp.tsx",
+      "src/frontend/components/sidebar/nav-groups.ts",
+      "src/backend/api/routes/pascal.ts",
+      "src/backend/api/routes/openapi.ts",
+      "src/backend/services/pascal/workflow.ts",
+      "src/backend/services/pascal/store.ts",
+      "src/backend/mcp/tools/pascal/generate_floorplan_variant.ts",
+      "src/backend/mcp/tools/pascal/compare_layout_variants.ts",
+      "docs/0043_pascal_render_integration/TASKS.json",
+      "scripts/qc/pr_342.mjs",
+      "worker-configuration.d.ts",
+    ],
+    migrations: [],
+    code: [],
+    diagrams: [
+      {
+        caption: "Ownership boundary and the shared workflow",
+        code: `flowchart LR
+  UI["Core Remodel Layout Studio"] --> REST["Pascal product REST"]
+  MCP["Claude via Pascal MCP tools"] --> WF["Shared product workflow"]
+  REST --> WF
+  WF --> D1["D1 projects, studies, scenes, evidence"]
+  UI --> LINK["Open editor deep-link"]
+  LINK --> EDITOR["Pascal editor: node semantics + 2D/3D"]
+  EDITOR --> WIRE["Frozen scene wire"]
+  WIRE --> D1`,
+      },
+      {
+        caption: "Measured or branched variant creation",
+        code: `sequenceDiagram
+  actor U as User
+  participant UI as Layout Studio
+  participant WF as Shared workflow
+  participant AI as Structured AI edit
+  participant DB as D1 scene store
+  U->>UI: Generate variant
+  alt Measured base
+    UI->>WF: studyId + name
+    WF->>DB: Read floor, rooms, measurements
+    WF->>WF: Deterministic rectangular seed
+  else Branch
+    UI->>WF: parent scene + optional intent
+    WF->>DB: Load graph + measurement evidence
+    opt Intent supplied
+      WF->>AI: Propose validated node operations
+      AI-->>WF: Structured operations
+    end
+  end
+  WF->>DB: Save child graph + lineage + provenance
+  DB-->>UI: Variant + editor URL`,
+      },
+      {
+        caption: "Layout Studio navigation and lifecycle",
+        code: `stateDiagram-v2
+  [*] --> Projects
+  Projects --> Project: Open project
+  Project --> Study: Create or choose study
+  Study --> Variant: Generate measured or branch
+  Variant --> Compared: Select 2 or more
+  Variant --> Captured: Capture snapshot
+  Variant --> Editing: Open Pascal editor
+  Variant --> Archived: Archive
+  Archived --> Variant: Restore
+  Editing --> Variant: Save through frozen wire`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_342.mjs",
+      command: "pnpm run test:pr 342 -- --preview",
+      output: `QC pr_342 — Pascal Layout Studio
+target: https://wcrp-codex-pascal-core-remodel-continuation.hacolby.workers.dev
+18 passed, 0 failed`,
+      ranAt: "2026-08-02",
+      migrations: [],
+    },
+  },
   "store-quote-product-map": {
     slug: "store-quote-product-map",
     branch: "claude/0042-p5-product-map",

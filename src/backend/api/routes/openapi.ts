@@ -7,6 +7,8 @@ import { swaggerUI } from "@hono/swagger-ui";
 import { apiReference } from "@scalar/hono-api-reference";
 import { Hono } from "hono";
 
+import pascalRouter from "./pascal";
+
 const openapiRouter = new Hono<{ Bindings: Env }>();
 
 // OpenAPI specification
@@ -1344,9 +1346,38 @@ const openApiSpec = {
   },
 };
 
+/**
+ * Merge OpenAPIHono-owned domains into the legacy hand-maintained document.
+ * Pascal's route definitions remain the source of truth; prefixing happens here
+ * because that router is mounted at /api/pascal/v1 by api/index.ts.
+ */
+function getOpenApiSpec() {
+  const pascalSpec = pascalRouter.getOpenAPI31Document({
+    openapi: "3.1.0",
+    info: { title: "Pascal scene API", version: "1.0.0" },
+  });
+  const pascalPaths = Object.fromEntries(
+    Object.entries(pascalSpec.paths ?? {}).map(([path, operations]) => [
+      `/pascal/v1${path}`,
+      operations,
+    ]),
+  );
+  return {
+    ...openApiSpec,
+    paths: { ...openApiSpec.paths, ...pascalPaths },
+    components: {
+      ...openApiSpec.components,
+      schemas: {
+        ...openApiSpec.components.schemas,
+        ...pascalSpec.components?.schemas,
+      },
+    },
+  };
+}
+
 // GET /openapi.json
 openapiRouter.get("/openapi.json", (c) => {
-  return c.json(openApiSpec);
+  return c.json(getOpenApiSpec());
 });
 
 // GET /swagger

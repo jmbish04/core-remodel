@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "codex/pascal-core-remodel-continuation",
+    title: "Pascal Layout Studio (0043 Phase 4)",
+    summary:
+      "Completes the Core Remodel-owned management surface for Pascal projects, studies, measured and branched variants, comparison evidence, snapshots, rename/archive lifecycle, and editor deep links. REST and MCP now share generation and comparison workflows, and the Pascal OpenAPIHono registry is merged into the served OpenAPI document.",
+    date: "2026-08-02",
+    status: "staged",
+    prNumber: 342,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/342",
+  },
+  {
     branch: "claude/0042-p5-product-map",
     title: "Quote line items → products (0042 P5)",
     summary:
@@ -330,6 +340,24 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "pascal-layout-studio",
+    branch: "codex/pascal-core-remodel-continuation",
+    date: "2026-08-02",
+    tag: "0043 P4",
+    area: "Design",
+    title: "Pascal Layout Studio — projects, studies, variants, and evidence",
+    summary:
+      "Core Remodel now has a complete management surface for the Pascal editor at /admin/pascal. Project cards bind to canonical floor/room scopes; study sections hold rich-text briefs; variants start from measured room data or branch from an existing scene with optional structured AI edits. Every variant exposes measurement evidence, lineage, confidence, snapshots, comparison, rename/archive lifecycle, and a deep link into Pascal. The browser and MCP tools call shared generation/comparison workflows, so there is one behavior path. This phase also restores discoverability in the Plan sidebar and merges Pascal's generated OpenAPI routes into /openapi.json.",
+    changes: [
+      { kind: "added", text: "/admin/pascal and /admin/pascal/:projectId Layout Studio pages with loading, empty, error, and populated states." },
+      { kind: "added", text: "Product REST surface for project summaries, studies, variant generation/comparison, snapshots, and scene lifecycle." },
+      { kind: "changed", text: "generate_floorplan_variant and compare_layout_variants now share the same workflow used by the browser UI; branched variants retain measurement evidence." },
+      { kind: "changed", text: "/openapi.json dynamically merges the Pascal OpenAPIHono registry, documenting the frozen editor wire and product routes from their source definitions." },
+      { kind: "added", text: "Plan sidebar entry, refreshed Worker bindings, TASKS.json plan mirror, and PR #342 preview QC (18 assertions)." },
+    ],
+    status: "staged",
+  },
   {
     id: "store-quote-product-map",
     branch: "claude/0042-p5-product-map",
