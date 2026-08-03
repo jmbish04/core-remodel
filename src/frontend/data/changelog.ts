@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/homeowner-experience-plan-v2",
+    title: "Homeowner experience — room model overhaul + measurement view (0041/0043)",
+    summary:
+      "Recovery + rebase of docs/homeowner-experience-plan, which had fallen 40 commits behind main with migrations 0162–0171 colliding by NUMBER against main's parallel 0162–0168. Rather than a 28-commit rebase conflicting on drizzle meta at every step, the schema/service/docs work was ported onto current main and the 10 divergent migrations consolidated into ONE fresh catch-up migration (0169_organic_dragon_lord) generated against main's snapshot — verified to contain only this branch's delta (47 new tables + rooms columns + the rooms.area_sq_ft drop), no re-creation of main's tables. Lands the 0041/0043 room model (projects, walls + openings + face segments, room_measurements, room_notes, decisions/impacts ripple graph, surface assemblies, spec definitions, trade assignments, permit mapping, room timeline) and the measurement-view.ts canonical resolver: one transparent shape per room (computed area + override + provenance, walls-win perimeter precedence), mutation-checked. rooms.area_sq_ft is dropped — area is computed, never stored, with any override living in room_measurements.area_sq_ft_override. DEPLOY NOTE: the additive DDL is idempotent-safe under scripts/d1-migrate.mjs, but the rooms.area_sq_ft DROP must ride the merge deploy (code that stops using the column ships together) — never migrate:remote from the unmerged branch, since the D1 is shared with live prod that still writes that column.",
+    date: "2026-08-02",
+    status: "open",
+    prNumber: 343,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/343",
+  },
+  {
     branch: "claude/0042-p5-product-map",
     title: "Quote line items → products (0042 P5)",
     summary:
@@ -330,6 +340,23 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "homeowner-room-model-0043",
+    branch: "claude/homeowner-experience-plan-v2",
+    date: "2026-08-02",
+    area: "Home",
+    title: "Room model overhaul + canonical measurement view (0041/0043)",
+    summary:
+      "Lands the 0041/0043 room data model and recovers the branch after a power-loss + 40-commits-behind divergence whose migrations collided by number with main's. The schema/service/docs were ported onto current main and the 10 divergent migrations consolidated into ONE fresh catch-up migration (0169) generated against main's snapshot — verified to hold only this branch's delta, no re-creation of main's tables. Core substance: measurement-view.ts, a pure resolver that returns the SAME transparent shape for every room — walls[], computed area AND override AND the override's provenance (notes + calculation), perimeter with a named source (walls > measured > rectangular_estimate > unavailable), effective area + its source, confidence — absent data is null, never a missing key, and nothing is hidden behind an if/else. Inches are canonical; feet/sqft/linear are computed on read; real walls win the perimeter for any non-rectangular room. rooms.area_sq_ft (a stored calculation that goes stale) is dropped — area is computed, any authoritative override lives in room_measurements.area_sq_ft_override (+ _notes / _calculation).",
+    changes: [
+      { kind: "migration", text: "0169_organic_dragon_lord (consolidated catch-up): 47 CREATE TABLE (projects, walls + wall_openings + wall_face_segments + wall_planned_changes, room_measurements, room_notes + type defs/mappings, decisions/decision_reopenings, impacts + impact_targets/blocks/evidence/definitions, ripple_rules, surface_assemblies + assembly_layers, spec_definitions + room_spec_fields, room_trade_assignments, room_permit_mapping, room_events, room_intents, room_problems + docs/photos, fixture_requirements, and the *_def vocab tables) + 4 rooms columns (line_color_hex, line_order, +2) + DROP rooms.area_sq_ft. NOT applied to remote (see deploy note)." },
+      { kind: "added", text: "services/homeowner/measurement-view.ts — measurementView(): one canonical shape per room (computed + override + provenance, walls-win perimeter precedence), plus a mutation-checked test (measurement-view.test.ts)." },
+      { kind: "removed", text: "rooms.area_sq_ft column — area is computed from dimensions/walls, never stored; override moves to room_measurements.area_sq_ft_override. home-catalog.ts stops writing it; list_rooms/get_room/update_room now expose a computed areaSqFt (non-settable)." },
+      { kind: "added", text: "0041/0043/0044 planning doc bundles (docs/) — IMPLEMENTATION_PLAN, PROMPT, DESIGN_SPEC." },
+    ],
+    migrations: ["0169"],
+    status: "staged",
+  },
   {
     id: "store-quote-product-map",
     branch: "claude/0042-p5-product-map",
