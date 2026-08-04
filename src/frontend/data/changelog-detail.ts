@@ -113,6 +113,98 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "showroom-multi-location-mcp": {
+    slug: "showroom-multi-location-mcp",
+    branch: "claude/showroom-multi-location-mcp",
+    prNumber: 347,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/347",
+    subtitle: "The table shipped empty a week ago. This wires it — data, reads, writes, dedupe.",
+    introduction:
+      "One showroom store row is a BUSINESS, not an address. Bay Area chains run several sites under a single row, and the table that models that shipped in July — completely empty and completely unreferenced. This fills it and teaches the MCP surface to read, write and search it.",
+    problem:
+      "PR #278 (\"0031 Phase A\") merged FIVE files: the drizzle schema for `showroom_store_locations`, its migration, the snapshot, and two barrel lines. No service, no route, no MCP tool, no backfill. Verified on 2026-08-04: `select count(*) from showroom_store_locations` returned **0** against **244** stores, and `grep -rn showroomStoreLocations src/` returned exactly two hits — `store_location.ts` and `hours.ts`, both schema files. So every read and write still used the flat `location_*` / `place_id` / `latitude` columns on `showroom_stores`: one store, one address.\n\nThe user hit the consequence in the field. He stopped at the San Carlos branch of a plumbing showroom already registered at Emeryville, photographed the business card, and asked a chat agent to add it. The agent could only see one address, so it offered to overwrite Emeryville. Asked to add a location instead, it correctly answered that no such tool exists. Asked to list the stores with more than one location, it had nothing to query. None of that was the agent's fault — the tools genuinely did not exist.",
+    approach:
+      "Finish 0031 **Phase A** (backfill + dual-write) and layer the MCP surface on top; deliberately do NOT attempt Phase B/C. Phase B repoints every API reader, every service writer and the frontend; Phase C drops twenty columns. That is a far larger blast radius and it gets nobody the missing tools any sooner. So the legacy `showroom_stores` address columns stay authoritative for un-migrated readers and are **dual-written from the primary site** on every location mutation.\n\nTwo things are derived rather than stored, on purpose. **`address`** is assembled from the structured parts at read time — the locations table has no `location_address` column because a free-text formatted address gets abused by AI enrichment (\"SF Bay area\"), so it is a parse SOURCE only. **`isPrimary`** is the location whose `place_id` matches the parent store's (else the lowest id); a stored `is_primary` flag would drift the first time a branch closed.\n\nThe dedupe fix is the root-cause half. `find_known_showrooms` and `search_showrooms` matched an inbound Google place id against `showroom_stores.place_id` alone. A chain's second site only ever carries its place id on the LOCATION row, so those tools would report a genuinely registered branch as unknown — and the caller would create a second store for a business the directory already had. Both now resolve through a shared `loadPlaceIdOwners` that reads locations as well as stores.",
+    apiChanges: [
+      "mcp `get_showroom`: returns `locations[]` (id, derived `address`, structured parts, coords, placeId, googleMapsLink, bayAreaCityName/hubRoute/hubName from the FK join, `isPrimary`, notes triple) and `locationCount`.",
+      "mcp `list_showrooms`: every row carries `locationCount`; new `multiLocationOnly?: boolean` input returns only businesses with more than one site.",
+      "mcp `add_showroom_location` (WRITE): register an additional site on an existing store. Structured address parts only — no free-text address field.",
+      "mcp `update_showroom_location` (WRITE): patch one site by `locationId`; only passed fields change.",
+      "mcp `delete_showroom_location` (DESTRUCTIVE): remove one site; refuses the store's last remaining location.",
+      "mcp `find_known_showrooms` / `search_showrooms`: place-id matching now resolves through locations, and reports the OWNING store id.",
+    ],
+    filesTouched: [
+      "scripts/sql/backfill_showroom_store_locations.sql (new — idempotent seed)",
+      "src/backend/services/showroom/locations.ts (new — the shared read/derive/dual-write helper)",
+      "src/backend/mcp/tools/showrooms/add_showroom_location.ts (new)",
+      "src/backend/mcp/tools/showrooms/update_showroom_location.ts (new)",
+      "src/backend/mcp/tools/showrooms/delete_showroom_location.ts (new)",
+      "src/backend/mcp/tools/showrooms/get_showroom.ts",
+      "src/backend/mcp/tools/showrooms/list_showrooms.ts",
+      "src/backend/mcp/tools/showrooms/find_known_showrooms.ts",
+      "src/backend/mcp/tools/showrooms/search_showrooms.ts",
+      "src/backend/mcp/tools/showrooms/index.ts (registry barrel — 3 new tools)",
+      "scripts/qc/pr_347.mjs (new)",
+      "docs/0045_showroom_multi_location_mcp/{IMPLEMENTATION_PLAN,PROMPT,TASKS.json}",
+    ],
+    migrations: [],
+    code: [
+      {
+        title: "The backfill — idempotent, one location per store",
+        lang: "sql",
+        code: "INSERT INTO showroom_store_locations (\n  store_id, place_id, google_maps_link, bay_area_city_id, latitude, longitude,\n  street_number, street_name, city, state, zip_code, notes\n)\nSELECT s.id, s.place_id, s.google_maps_link, s.bay_area_city_id, s.latitude, s.longitude,\n       s.location_street_number, s.location_street_name, s.location_city, s.location_state,\n       -- location_zip_code is canonical; zip_code is the legacy twin kept in sync.\n       COALESCE(s.location_zip_code, s.zip_code), s.location_notes\nFROM showroom_stores s\nWHERE NOT EXISTS (\n  SELECT 1 FROM showroom_store_locations l WHERE l.store_id = s.id\n);",
+      },
+      {
+        title: "Primary is derived, never a stored flag",
+        lang: "ts",
+        code: "/** Mark exactly one location primary: the place_id match, else the lowest id. */\nfunction markPrimary(rows, storePlaceId) {\n  const sorted = [...rows].sort((a, b) => a.location.id - b.location.id);\n  const primaryId =\n    (storePlaceId ? sorted.find((r) => r.location.placeId === storePlaceId)?.location.id : null) ??\n    sorted[0]?.location.id ??\n    null;\n  return sorted.map((r) => toDto(r.location, r.city, r.location.id === primaryId));\n}",
+      },
+      {
+        title: "The dedupe root cause — locations win over the store row",
+        lang: "ts",
+        code: "// Stores first, locations second — so a location's owner wins on any disagreement,\n// since the location row is the authoritative home of a site's place id.\nfor (const r of storeRows) if (r.placeId) owners.set(r.placeId, r.id);\nfor (const r of locationRows) if (r.placeId) owners.set(r.placeId, r.storeId);\nreturn owners;",
+      },
+      {
+        title: "add_showroom_location names the owner instead of throwing a constraint error",
+        lang: "ts",
+        code: "if (clash) {\n  const [owner] = await db.select({ name: showroomStores.name })\n    .from(showroomStores).where(eq(showroomStores.id, clash.storeId)).limit(1);\n  toolError(\n    `placeId ${parts.placeId} is already location ${clash.id} of showroom ` +\n    `${clash.storeId} (${owner?.name ?? \"unknown\"}). That site is already registered — ` +\n    `use update_showroom_location to correct it instead of adding a duplicate.`,\n  );\n}",
+      },
+    ],
+    diagrams: [
+      {
+        caption:
+          "What shipped in July vs. what this lands. The table existed; nothing on either side of it did.",
+        title: "Before / after",
+        code: "flowchart LR\n  subgraph before[\"BEFORE — PR #278 shipped the table only\"]\n    S1[(showroom_stores<br/>244 rows, flat address cols)]\n    L1[(showroom_store_locations<br/>0 rows, 0 code refs)]\n    S1 --> R1[MCP + API + frontend]\n    L1 -.nothing reads or writes it.-> X(( ))\n  end\n  subgraph after[\"AFTER — 0045\"]\n    S2[(showroom_stores<br/>legacy cols, dual-written from primary)]\n    L2[(showroom_store_locations<br/>244 rows, 1:N)]\n    L2 --> H[services/showroom/locations.ts]\n    H --> M[get_showroom.locations&#91;&#93;<br/>list_showrooms.locationCount<br/>add/update/delete_showroom_location<br/>find_known + search dedupe]\n    H -. primary only .-> S2\n    S2 --> R2[un-migrated API + frontend readers]\n  end\n  classDef dead fill:#4d1f1f,stroke:#f87171\n  classDef live fill:#1f4d2e,stroke:#4ade80\n  class L1,X dead\n  class L2,H,M live",
+      },
+      {
+        caption: "The 1:many model. Locations own the address; the store owns the identity.",
+        title: "Data model",
+        code: "erDiagram\n    showroom_stores ||--o{ showroom_store_locations : \"store_id (1:N, cascade)\"\n    showroom_store_locations }o--o| store_bayarea_cities : \"bay_area_city_id\"\n    showroom_store_locations ||--o{ showroom_store_hours : \"location_id (nullable)\"\n\n    showroom_stores {\n        int id PK\n        text name \"the BUSINESS\"\n        text location_address \"LEGACY - primary site, dual-written\"\n        text place_id \"LEGACY - primary site's place\"\n    }\n    showroom_store_locations {\n        int id PK\n        int store_id FK\n        text place_id UK \"nulls distinct\"\n        int bay_area_city_id FK\n        real latitude\n        real longitude\n        text street_number\n        text street_name\n        text city\n        text state\n        text zip_code\n        text notes \"PlateJS triple\"\n    }",
+      },
+      {
+        caption:
+          "The field failure this fixes: a known store, an unknown branch, and no tool to say so.",
+        title: "Business card → new site",
+        code: "sequenceDiagram\n    actor U as Justin (San Carlos)\n    participant A as Chat agent\n    participant M as MCP\n    participant D as D1\n    Note over U,D: BEFORE\n    U->>A: photo of a business card — add this\n    A->>M: get_showroom(42)\n    M-->>A: one address — Emeryville\n    A->>U: overwrite Emeryville?\n    U->>A: no, it's a different branch\n    A->>U: I have no tool to add a location\n    Note over U,D: AFTER\n    U->>A: photo of a business card — add this\n    A->>M: get_showroom(42)\n    M-->>A: locations[] = [Emeryville (primary)], locationCount 1\n    A->>M: add_showroom_location(42, San Carlos parts)\n    M->>D: INSERT location; primary unchanged\n    M-->>A: locationCount 2\n    A->>U: added — Emeryville untouched",
+      },
+      {
+        caption: "Every location write decides one thing: does the legacy store row follow?",
+        title: "Dual-write decision (0031 Phase A contract)",
+        code: "flowchart TD\n  W[add / update / delete a location] --> P{is it the PRIMARY site?}\n  P -->|no| N[write the location row only<br/>store row untouched]\n  P -->|yes| Y[write the location row<br/>+ mirror address/coords/place_id<br/>onto showroom_stores]\n  Y --> R[un-migrated readers stay correct:<br/>API, frontend, drive routing, Tesla nav]\n  D[delete the primary] --> PR[promote the next location<br/>then mirror it]\n  PR --> R\n  classDef ok fill:#1f4d2e,stroke:#4ade80\n  class N,Y,R,PR ok",
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_347.mjs",
+      command:
+        "node scripts/qc/pr_347.mjs --base https://wcrp-claude-showroom-multi-location-mcp.hacolby.workers.dev --preview\nnode scripts/qc/pr_347.mjs   # production",
+      source:
+        "// Asserts (1) the registry catalog at /api/mcp-docs lists the three new tools with the right\n// destructiveHint + an example each, and that the two changed reads advertise the model; and\n// (2) the backfill's real state in remote D1 — one location per store, no duplicate store_ids,\n// no orphan stores, no place_id shared by two locations, and the primary location's city equal\n// to the legacy showroom_stores.location_city (the dual-write parity contract).",
+      output:
+        "PREVIEW (wcrp-claude-showroom-multi-location-mcp) — 22 passed, 0 failed:\n  ✓ /api/mcp-docs 200\n  ✓ catalog returned tools\n  ✓ add_showroom_location registered / has a description / has >=1 example / destructiveHint=false\n  ✓ update_showroom_location registered / has a description / has >=1 example / destructiveHint=false\n  ✓ delete_showroom_location registered / has a description / has >=1 example / destructiveHint=true\n  ✓ get_showroom points agents at add_showroom_location\n  ✓ list_showrooms advertises locationCount / multiLocationOnly\n  ✓ every store has at least one location\n  ✓ no store has duplicate backfill rows\n  ✓ no store without a location\n  ✓ no place_id shared by two locations\n  ✓ primary location city matches legacy store city\n  ✓ /api/showroom-stores still 200\n\nPRODUCTION (pre-merge) — 8 passed, 0 failed:\n  ✓ /api/mcp-docs 200\n  ✓ catalog returned tools\n    add_showroom_location: pending merge/deploy (absent from prod catalog)\n    update_showroom_location: pending merge/deploy (absent from prod catalog)\n    delete_showroom_location: pending merge/deploy (absent from prod catalog)\n    get_showroom description: pending merge/deploy (still the single-address copy)\n  ✓ every store has at least one location\n  ✓ no store has duplicate backfill rows\n  ✓ no store without a location\n  ✓ no place_id shared by two locations\n  ✓ primary location city matches legacy store city\n  ✓ /api/showroom-stores still 200\n\nBACKFILL (applied to remote D1 before the code shipped, since the table was unused):\n  npx wrangler d1 execute core-remodel --remote --file scripts/sql/backfill_showroom_store_locations.sql\n  -> { locs: 244, stores: 244, distinct_stores: 244, with_place: 186 }\n\nBUILD / TYPES:\n  pnpm run build -> Complete (server built in 73.41s)\n  npx tsc --noEmit -> 178 errors, IDENTICAL to the stashed baseline of 178. Diffed by stashing the\n  branch, capturing the error list, restoring, and capturing again (line numbers stripped so a\n  pure line-shift from an added import does not read as a new error). ZERO net-new.\n  formatShowroomAddress self-check (npx tsx): '1234 Industrial Rd, San Carlos, CA 94070' /\n  'Emeryville, CA' / null — all assertions passed.\n\nNO MIGRATIONS in this PR — the table already existed on remote (0145, PR #278). The backfill is\nDATA and was applied separately via the SQL file above.",
+      migrations: [],
+    },
+  },
   "rooms-area-computed-hotfix": {
     slug: "rooms-area-computed-hotfix",
     branch: "claude/fix-rooms-area-computed-hotfix",
