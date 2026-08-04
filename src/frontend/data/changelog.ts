@@ -53,6 +53,14 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/showroom-multi-location-mcp",
+    title: "Showroom multi-location, wired end to end (0045)",
+    summary:
+      "showroom_store_locations shipped as an EMPTY table in PR #278 ('0031 Phase A') and nothing was ever wired to it: 0 rows against 244 stores, and the only two references in the whole repo were the schema files themselves. Every read and write still used the flat address columns on showroom_stores, so MCP saw exactly one address per business and had no tool to add a second site — which is how a business card from a chain's San Carlos branch turned into an offer to overwrite that store's Emeryville address, and why 'which showrooms have more than one location' had no answer. This finishes 0031 Phase A (backfill + dual-write) and puts the MCP surface on top: 244 locations backfilled one-per-store, get_showroom returns locations[], list_showrooms returns locationCount and gains multiLocationOnly, and add/update/delete_showroom_location are new tools. Also fixes the dedupe path that would otherwise mint duplicate stores — find_known_showrooms and search_showrooms matched place ids against showroom_stores only, but a chain's second site carries its place id on the LOCATION row, so known branches read as 'new'. Deliberately NOT the 0031 Phase B/C cutover: every legacy column stays dual-written from the primary site.",
+    date: "2026-08-04",
+    status: "staged",
+  },
+  {
     branch: "claude/fix-rooms-area-computed-hotfix",
     title: "Hotfix: compute room area on the fly — heal prod 500s + room-geometry package",
     summary:
@@ -350,6 +358,25 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "showroom-multi-location-mcp",
+    branch: "claude/showroom-multi-location-mcp",
+    date: "2026-08-04",
+    area: "Showrooms",
+    title: "Showroom multi-location — MCP reads, writes, and dedupe (0045)",
+    summary:
+      "A showroom store row is a BUSINESS, not an address — Bay Area chains run several sites under one row. The table for that (showroom_store_locations) shipped empty in PR #278 and was never wired to anything: 0 rows, 244 stores, and grep found exactly two references in the repo, both schema files. So MCP still read one flat address per store, had no tool to add a site, and could not answer 'which of these are chains'. Backfills 244 locations one-per-store, teaches get_showroom and list_showrooms the array, adds add/update/delete_showroom_location, and resolves place-id dedupe through locations so a chain's second branch stops reading as an unregistered business. isPrimary and the display address are both DERIVED (place-id match, else lowest id; address assembled from the structured parts) — no stored flag, no stored formatted address, because both drift. Scope stops short of the 0031 Phase B/C cutover: the legacy showroom_stores columns stay dual-written from the primary site so every un-migrated reader keeps working.",
+    changes: [
+      { kind: "added", text: "add_showroom_location, update_showroom_location, delete_showroom_location MCP tools. add pre-checks the place_id unique index and names the store that already owns a site; delete refuses to remove a store's LAST location (a business with no address is not representable — delete_showroom retires the store instead)." },
+      { kind: "changed", text: "get_showroom returns locations[] (each with a derived address, coords, placeId, hub and isPrimary) + locationCount, and its description now tells an agent to reach for add_showroom_location instead of overwriting the store address with update_showroom." },
+      { kind: "changed", text: "list_showrooms returns locationCount per row and accepts multiLocationOnly: true — the 'show me the chains' query that previously had no answer." },
+      { kind: "fixed", text: "find_known_showrooms + search_showrooms resolve Google place ids through LOCATIONS as well as the store row. A chain's second site only ever carries its place id on the location, so the store-only lookup reported already-registered branches as new and invited duplicate stores." },
+      { kind: "added", text: "services/showroom/locations.ts — formatShowroomAddress (derived, with an assert self-check), loadStoreLocations / loadStoreLocationCounts (chunked at 20 ids for the D1 100-bound-param cap), resolveBayAreaCityId (matches an existing definition row, never mints one from an unvalidated string), loadPlaceIdOwners, primaryLocationStorePatch." },
+      { kind: "added", text: "scripts/sql/backfill_showroom_store_locations.sql — idempotent (NOT EXISTS guard) one-location-per-store seed. Applied to remote: 244 locations / 244 stores, 0 orphans, 0 shared place ids." },
+    ],
+    migrations: [],
+    status: "staged",
+  },
   {
     id: "rooms-area-computed-hotfix",
     branch: "claude/fix-rooms-area-computed-hotfix",

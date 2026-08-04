@@ -1,6 +1,5 @@
-import { showroomStores } from "@backend/db";
 import { GoogleMapsService } from "@backend/services/google/maps";
-import { inArray } from "drizzle-orm";
+import { loadPlaceIdOwners } from "@backend/services/showroom/locations";
 import { z } from "zod";
 
 import { toolError } from "../../format";
@@ -75,17 +74,10 @@ export const searchShowrooms = defineTool({
       rethrowMapsError(err);
     }
 
-    // Cross-reference existing stores by placeId so the agent can skip dupes.
-    const placeIds = candidates.map((c) => c.placeId);
-    const existing =
-      placeIds.length > 0
-        ? await db
-            .select({ id: showroomStores.id, placeId: showroomStores.placeId })
-            .from(showroomStores)
-            .where(inArray(showroomStores.placeId, placeIds))
-            .all()
-        : [];
-    const byPlaceId = new Map(existing.map((s) => [s.placeId, s.id]));
+    // Cross-reference existing stores by placeId so the agent can skip dupes. Resolves
+    // through LOCATIONS too — a chain's second site carries its place id only on the
+    // location row, so a store-only lookup marks a known branch "new" and mints a duplicate.
+    const byPlaceId = await loadPlaceIdOwners(db, candidates.map((c) => c.placeId));
 
     return {
       query,

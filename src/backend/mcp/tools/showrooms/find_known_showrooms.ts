@@ -9,6 +9,7 @@
  * that as one call per name burns agent turns and latency.
  */
 import { showroomStores } from "@backend/db";
+import { loadPlaceIdOwners } from "@backend/services/showroom/locations";
 import { z } from "zod";
 
 import { looseObject } from "../../schemas";
@@ -119,8 +120,16 @@ export const findKnownShowrooms = defineTool({
       })
       .from(showroomStores);
 
+    // Place ids resolve through LOCATIONS as well as the store row: a chain's second site
+    // only ever carries its place id on the location, so a store-only lookup would report
+    // an already-registered branch as unknown and invite a duplicate store.
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const placeIdOwners = await loadPlaceIdOwners(ctx.db);
     const byPlaceId = new Map<string, (typeof rows)[number]>();
-    for (const r of rows) if (r.placeId) byPlaceId.set(r.placeId, r);
+    for (const [placeId, storeId] of Array.from(placeIdOwners.entries())) {
+      const row = byId.get(storeId);
+      if (row) byPlaceId.set(placeId, row);
+    }
 
     const indexed = rows.map((r) => ({ row: r, norm: normalizeName(r.name ?? "") }));
 
