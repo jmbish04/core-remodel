@@ -98,9 +98,14 @@ export const updateShowroomLocation = defineTool({
       }
     }
 
-    // Keep the region cluster consistent when the city moves.
+    // Keep the region cluster consistent when the city moves — but only when the new city
+    // actually matches a definition row. resolveBayAreaCityId returns null for anything it
+    // does not recognise, and writing that null would silently drop a valid FK just because
+    // someone corrected a typo or moved a site outside the seeded vocabulary. Leave the
+    // existing value alone instead; a stale cluster is recoverable, a cleared FK is not.
     if (typeof patch.city === "string") {
-      patch.bayAreaCityId = await resolveBayAreaCityId(db, patch.city);
+      const cityId = await resolveBayAreaCityId(db, patch.city);
+      if (cityId != null) patch.bayAreaCityId = cityId;
     }
 
     // Cast per the repo's house pattern: drizzle-orm@0.33's update inference collapses to

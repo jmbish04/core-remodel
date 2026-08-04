@@ -215,6 +215,13 @@ export async function loadStoreLocationCounts(
   return counts;
 }
 
+/** The PlateJS notes triple as it arrives from a write tool — every key optional. */
+export interface ShowroomNotesTriple {
+  notes?: string | null;
+  notesMarkdown?: string | null;
+  notesHtml?: string | null;
+}
+
 /**
  * Normalize the PlateJS notes triple at the trust boundary.
  *
@@ -225,22 +232,22 @@ export async function loadStoreLocationCounts(
  *
  * Mutates nothing — returns only the keys that should actually be written.
  */
-export function normalizeLocationNotes<
-  T extends { notes?: string | null; notesMarkdown?: string | null; notesHtml?: string | null },
->(input: T): T {
-  const out = { ...input };
+export function normalizeLocationNotes<T extends ShowroomNotesTriple>(
+  input: T,
+): T & ShowroomNotesTriple {
+  const { notes, notesMarkdown, notesHtml } = input;
 
-  if (out.notesHtml != null) {
-    out.notesHtml = sanitizeNoteHtml(out.notesHtml) as T["notesHtml"];
-  } else if (out.notesMarkdown != null) {
-    out.notesHtml = renderNoteHtml(out.notesMarkdown) as T["notesHtml"];
-  }
+  const html =
+    notesHtml != null
+      ? sanitizeNoteHtml(notesHtml)
+      : notesMarkdown != null
+        ? renderNoteHtml(notesMarkdown)
+        : notesHtml;
 
-  if (out.notes == null && out.notesMarkdown != null) {
-    out.notes = out.notesMarkdown as T["notes"];
-  }
-
-  return out;
+  // Spread-then-override rather than casting onto T's own key types: both helpers return
+  // `string`, which is not assignable to a `string | null | undefined` slot without an
+  // unsound assertion. Widening the return instead keeps every write site honest.
+  return { ...input, notesHtml: html, notes: notes ?? notesMarkdown ?? notes };
 }
 
 /**
@@ -263,49 +270,46 @@ export async function loadPlaceIdOwners(
   const wanted = placeIds ? Array.from(new Set(placeIds.filter(Boolean))) : null;
   if (wanted && wanted.length === 0) return owners;
 
-  // Stores first, locations second — so a location's owner wins on any disagreement,
-  // since the location row is the authoritative home of a site's place id.
-  const storeRows = wanted
-    ? (
-        await Promise.all(
-          chunk(wanted).map((part) =>
-            db
-              .select({ id: showroomStores.id, placeId: showroomStores.placeId })
-              .from(showroomStores)
-              .where(inArray(showroomStores.placeId, part))
-              .all(),
-          ),
-        )
-      ).flat()
-    : await db
+  // Sequential, not Promise.all: a big placeIds list would otherwise fan out to one D1
+  // subrequest per chunk on BOTH tables at once, and Workers cap subrequests per request.
+  // These tables are small enough that the serial round-trips are not worth that risk.
+  //
+  // Stores FIRST, locations SECOND — so a location's owner wins on any disagreement, since
+  // the location row is the authoritative home of a site's place id. Both sources are
+  // indexed; a store's own place_id is never dropped.
+  const storeSelect = db
+    .select({ id: showroomStores.id, placeId: showroomStores.placeId })
+    .from(showroomStores);
+  if (wanted) {
+    for (const part of chunk(wanted)) {
+      const rows = await db
         .select({ id: showroomStores.id, placeId: showroomStores.placeId })
         .from(showroomStores)
+        .where(inArray(showroomStores.placeId, part))
         .all();
-  for (const r of storeRows) if (r.placeId) owners.set(r.placeId, r.id);
+      for (const r of rows) if (r.placeId) owners.set(r.placeId, r.id);
+    }
+  } else {
+    for (const r of await storeSelect.all()) if (r.placeId) owners.set(r.placeId, r.id);
+  }
 
-  const locationRows = wanted
-    ? (
-        await Promise.all(
-          chunk(wanted).map((part) =>
-            db
-              .select({
-                storeId: showroomStoreLocations.storeId,
-                placeId: showroomStoreLocations.placeId,
-              })
-              .from(showroomStoreLocations)
-              .where(inArray(showroomStoreLocations.placeId, part))
-              .all(),
-          ),
-        )
-      ).flat()
-    : await db
-        .select({
-          storeId: showroomStoreLocations.storeId,
-          placeId: showroomStoreLocations.placeId,
-        })
+  const locationCols = {
+    storeId: showroomStoreLocations.storeId,
+    placeId: showroomStoreLocations.placeId,
+  };
+  if (wanted) {
+    for (const part of chunk(wanted)) {
+      const rows = await db
+        .select(locationCols)
         .from(showroomStoreLocations)
+        .where(inArray(showroomStoreLocations.placeId, part))
         .all();
-  for (const r of locationRows) if (r.placeId) owners.set(r.placeId, r.storeId);
+      for (const r of rows) if (r.placeId) owners.set(r.placeId, r.storeId);
+    }
+  } else {
+    const rows = await db.select(locationCols).from(showroomStoreLocations).all();
+    for (const r of rows) if (r.placeId) owners.set(r.placeId, r.storeId);
+  }
 
   return owners;
 }
