@@ -167,7 +167,7 @@ export const roomProblemPhotos = sqliteTable(
     photoType: text("photo_type").notNull().default("PROBLEM"),
 
     /** images.id — a UUID text FK, not a URL. */
-    imageId: text("image_id").references(() => images.id, { onDelete: "set null" }),
+    imageId: integer("image_id").references(() => images.id, { onDelete: "set null" }),
 
     name: text("name"),
     descriptionMarkdown: text("description_markdown"),
