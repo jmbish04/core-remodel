@@ -64,6 +64,15 @@ migration, and do not hand-edit `drizzle/`.
 - **Dual-write:** when the mutated location is primary, mirror the address/coords/place_id
   back onto `showroom_stores` so every un-migrated reader stays correct. Non-primary rows
   must not touch the store row.
+- **Deleting a primary that is NOT the last site must promote and re-mirror.** After the
+  delete, re-derive the primary from the remaining rows and dual-write *that* location to
+  `showroom_stores` before returning — otherwise the store row keeps pointing at a deleted
+  branch and every un-migrated reader serves a closed address. Because `isPrimary` is
+  derived (place_id match, else lowest id), the re-derivation happens automatically on the
+  next read; what does NOT happen automatically is the mirror, so write it explicitly.
+- **Never mirror a null over a populated legacy value.** `primaryLocationStorePatch` builds
+  the mirror from the location row, so a sparse new primary would blank good store data.
+  Drop null/undefined keys from the patch before applying it.
 - **No `db.transaction()`** — dead on D1. Use `db.batch([...])`.
 
 ### P5 — the sibling-caller fix (do not skip)

@@ -1,6 +1,7 @@
 import { showroomStores, showroomStoreLocations } from "@backend/db";
 import {
   loadOneStoreLocations,
+  normalizeLocationNotes,
   primaryLocationStorePatch,
   resolveBayAreaCityId,
 } from "@backend/services/showroom/locations";
@@ -38,7 +39,12 @@ export const updateShowroomLocation = defineTool({
     googleMapsLink: z.string().optional(),
     notes: z.string().optional().describe("Site-specific plaintext notes"),
     notesMarkdown: z.string().optional(),
-    notesHtml: z.string().optional(),
+    notesHtml: z
+      .string()
+      .optional()
+      .describe(
+        "Render-ready HTML cache. Sanitized on write; rendered from notesMarkdown when omitted.",
+      ),
   },
   annotations: WRITE,
   examples: [
@@ -55,7 +61,9 @@ export const updateShowroomLocation = defineTool({
   },
   handler: async ({ env, db }, input) => {
     const { locationId, ...rest } = input;
-    const patch = Object.fromEntries(Object.entries(rest).filter(([, v]) => v !== undefined));
+    // notesHtml comes from an LLM — sanitize before it is ever persisted as a render cache.
+    const safeRest = normalizeLocationNotes(rest);
+    const patch = Object.fromEntries(Object.entries(safeRest).filter(([, v]) => v !== undefined));
     if (Object.keys(patch).length === 0) {
       toolError("No fields to update — pass at least one field besides `locationId`.");
     }

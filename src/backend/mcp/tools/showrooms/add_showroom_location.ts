@@ -1,6 +1,7 @@
 import { showroomStores, showroomStoreLocations } from "@backend/db";
 import {
   loadOneStoreLocations,
+  normalizeLocationNotes,
   primaryLocationStorePatch,
   resolveBayAreaCityId,
 } from "@backend/services/showroom/locations";
@@ -45,7 +46,12 @@ export const addShowroomLocation = defineTool({
       .optional()
       .describe('Site-specific plaintext notes, e.g. "the SF site is designer-only"'),
     notesMarkdown: z.string().optional().describe("Markdown source of truth for the notes"),
-    notesHtml: z.string().optional().describe("Render-ready HTML cache for the notes"),
+    notesHtml: z
+      .string()
+      .optional()
+      .describe(
+        "Render-ready HTML cache. Sanitized on write — script/style/iframe/object/embed tags and inline event handlers are stripped. Omit it and it is rendered from notesMarkdown server-side.",
+      ),
   },
   annotations: WRITE,
   examples: [
@@ -117,12 +123,14 @@ export const addShowroomLocation = defineTool({
     }
 
     const bayAreaCityId = await resolveBayAreaCityId(db, parts.city);
+    // notesHtml comes from an LLM — sanitize before it is ever persisted as a render cache.
+    const safeParts = normalizeLocationNotes(parts);
 
     // Cast per the repo's house pattern (see brands/create_brand.ts): drizzle-orm@0.33's
     // insert inference collapses to just the notNull column and rejects the rest.
     const [inserted] = await db
       .insert(showroomStoreLocations)
-      .values({ storeId, bayAreaCityId, ...parts } as unknown as typeof showroomStoreLocations.$inferInsert)
+      .values({ storeId, bayAreaCityId, ...safeParts } as unknown as typeof showroomStoreLocations.$inferInsert)
       .returning();
 
     // Dual-write (0031 Phase A): every un-migrated reader still uses the store's flat

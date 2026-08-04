@@ -61,16 +61,25 @@ export const deleteShowroomLocation = defineTool({
       .where(eq(showroomStoreLocations.id, input.locationId))
       .run();
 
-    // Dual-write (0031 Phase A): dropping the primary promotes the next site, and the
-    // legacy store columns must follow it or every un-migrated reader points at a closed
-    // branch. Read-then-write, so this is deliberately NOT inside the delete's atomic unit.
+    // Dual-write (0031 Phase A): dropping the primary must promote a survivor AND mirror it,
+    // or the store row keeps pointing at a branch that no longer exists and every
+    // un-migrated reader (API, frontend, drive routing, Tesla nav) serves a closed address.
+    //
+    // Promotion itself is automatic because isPrimary is DERIVED, not stored: with the old
+    // primary gone, markPrimary re-derives from the remaining rows (place_id match, else
+    // lowest id), so `after` always names a new primary when any location survives — and
+    // the guard above guarantees at least one does. The mirror is what must be written.
+    // Read-then-write, so this is deliberately NOT inside the delete's atomic unit.
     const after = await loadOneStoreLocations(db, existing.storeId);
     if (wasPrimary) {
-      const [promoted] = await db
-        .select()
-        .from(showroomStoreLocations)
-        .where(eq(showroomStoreLocations.id, after.find((l) => l.isPrimary)?.id ?? 0))
-        .limit(1);
+      const promotedId = after.find((l) => l.isPrimary)?.id;
+      const [promoted] = promotedId
+        ? await db
+            .select()
+            .from(showroomStoreLocations)
+            .where(eq(showroomStoreLocations.id, promotedId))
+            .limit(1)
+        : [];
       if (promoted) {
         await db
           .update(showroomStores)

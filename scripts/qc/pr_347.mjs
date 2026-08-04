@@ -26,6 +26,19 @@ const c = createClient({ base: BASE });
 const { ok: check, info, summary } = createChecks();
 console.log(`QC 0045 multi-location against ${BASE}${isPreview ? " (preview)" : ""}\n`);
 
+/**
+ * Run one statement against remote D1 and return its `results` rows.
+ *
+ * wrangler prints a banner and warnings before the `--json` payload, so the JSON is sliced
+ * out rather than parsed whole. The slice runs from the FIRST `[` to the LAST `]` on
+ * purpose: the payload is one top-level array and the preamble contains no brackets, so a
+ * non-greedy match would stop at the first nested `]` and truncate. A parse failure throws
+ * instead of degrading to `[]` — a silent empty result would turn every assertion below
+ * into a misleading `NaN` comparison rather than an obvious failure.
+ *
+ * @param {string} sql  A single SQL statement.
+ * @returns {Array<Record<string, unknown>>} The statement's result rows.
+ */
 function d1(sql) {
   const out = execFileSync(
     "npx",
@@ -33,7 +46,18 @@ function d1(sql) {
     { encoding: "utf8", maxBuffer: 32 * 1024 * 1024 },
   );
   const m = out.match(/\[\s*{[\s\S]*}\s*\]/);
-  return m ? JSON.parse(m[0])[0].results : [];
+  if (!m) throw new Error(`d1: no JSON payload in wrangler output for: ${sql}`);
+  const parsed = JSON.parse(m[0]);
+  const results = parsed?.[0]?.results;
+  if (!Array.isArray(results)) throw new Error(`d1: no results array for: ${sql}`);
+  return results;
+}
+
+/** Assert a single-row aggregate actually came back, so a miss fails loudly, not as NaN. */
+function d1Row(sql) {
+  const [row] = d1(sql);
+  if (!row) throw new Error(`d1: expected one row, got none for: ${sql}`);
+  return row;
 }
 
 const NEW_TOOLS = {
@@ -90,7 +114,7 @@ try {
   }
 
   // ── 2. backfill + dual-write parity in D1 ────────────────────────────────
-  const [counts] = d1(
+  const counts = d1Row(
     "SELECT (SELECT count(*) FROM showroom_store_locations) locs," +
       " (SELECT count(DISTINCT store_id) FROM showroom_store_locations) distinct_stores," +
       " (SELECT count(*) FROM showroom_stores) stores;",
@@ -101,13 +125,13 @@ try {
   check("every store has at least one location", locs >= stores, `locs=${locs} stores=${stores}`);
   check("no store has duplicate backfill rows", distinct === stores, `distinct=${distinct}`);
 
-  const [orphans] = d1(
+  const orphans = d1Row(
     "SELECT count(*) n FROM showroom_stores s" +
       " WHERE NOT EXISTS (SELECT 1 FROM showroom_store_locations l WHERE l.store_id = s.id);",
   );
   check("no store without a location", Number(orphans?.n) === 0, `orphans=${orphans?.n}`);
 
-  const [dupPlaces] = d1(
+  const dupPlaces = d1Row(
     "SELECT count(*) n FROM (SELECT place_id FROM showroom_store_locations" +
       " WHERE place_id IS NOT NULL GROUP BY place_id HAVING count(*) > 1);",
   );
@@ -116,7 +140,7 @@ try {
   // Dual-write contract: the primary site's city must equal the store's legacy city, or
   // every un-migrated reader (API, frontend, drive routing, Tesla nav) is pointing at the
   // wrong branch. Compared on the place_id-matched primary only.
-  const [drift] = d1(
+  const drift = d1Row(
     "SELECT count(*) n FROM showroom_stores s" +
       " JOIN showroom_store_locations l ON l.store_id = s.id AND l.place_id = s.place_id" +
       " WHERE s.place_id IS NOT NULL" +

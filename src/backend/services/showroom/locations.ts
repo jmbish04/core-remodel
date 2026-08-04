@@ -19,6 +19,7 @@
  * a denormalized copy.
  */
 import { showroomStores, showroomStoreLocations, storeBayareaCities } from "@backend/db";
+import { renderNoteHtml, sanitizeNoteHtml } from "@backend/services/notes/markdown";
 import { eq, inArray } from "drizzle-orm";
 
 import type { RemodelDb } from "../../mcp/types";
@@ -215,6 +216,34 @@ export async function loadStoreLocationCounts(
 }
 
 /**
+ * Normalize the PlateJS notes triple at the trust boundary.
+ *
+ * `notesHtml` arrives from an MCP client — i.e. from an LLM — and is stored as a
+ * render-ready cache, so it is NEVER persisted verbatim: supplied HTML is run through
+ * `sanitizeNoteHtml`, and when only markdown is given the HTML is rendered server-side.
+ * Markdown stays the source of truth; plaintext `notes` backfills from it when absent.
+ *
+ * Mutates nothing — returns only the keys that should actually be written.
+ */
+export function normalizeLocationNotes<
+  T extends { notes?: string | null; notesMarkdown?: string | null; notesHtml?: string | null },
+>(input: T): T {
+  const out = { ...input };
+
+  if (out.notesHtml != null) {
+    out.notesHtml = sanitizeNoteHtml(out.notesHtml) as T["notesHtml"];
+  } else if (out.notesMarkdown != null) {
+    out.notesHtml = renderNoteHtml(out.notesMarkdown) as T["notesHtml"];
+  }
+
+  if (out.notes == null && out.notesMarkdown != null) {
+    out.notes = out.notesMarkdown as T["notes"];
+  }
+
+  return out;
+}
+
+/**
  * Map every known Google `place_id` to the store that owns it — LOCATIONS FIRST.
  *
  * This is the fix for the duplicate-store failure mode. A chain's second site only ever
@@ -315,7 +344,7 @@ export async function resolveBayAreaCityId(
 export function primaryLocationStorePatch(
   location: typeof showroomStoreLocations.$inferSelect,
 ): Record<string, unknown> {
-  return {
+  const patch: Record<string, unknown> = {
     locationAddress: formatShowroomAddress(location),
     locationStreetNumber: location.streetNumber,
     locationStreetName: location.streetName,
@@ -329,6 +358,18 @@ export function primaryLocationStorePatch(
     googleMapsLink: location.googleMapsLink,
     bayAreaCityId: location.bayAreaCityId,
   };
+
+  // ponytail: fill-only mirror — null/undefined keys are dropped so a sparse location can
+  // never blank a populated legacy column. A store whose first location is added with just
+  // a city would otherwise wipe its address, coords and place_id on the way through.
+  //
+  // The ceiling: clearing a field on the primary location does NOT clear its legacy twin.
+  // That is the correct trade for a temporary mirror — a stale value beats a destroyed one,
+  // and 0031 Phase B deletes these columns outright. Revisit only if Phase B slips.
+  for (const key of Object.keys(patch)) {
+    if (patch[key] === null || patch[key] === undefined) delete patch[key];
+  }
+  return patch;
 }
 
 /** ponytail: self-check for the one bit of real logic here — the address assembler. */
