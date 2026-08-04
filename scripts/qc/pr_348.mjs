@@ -21,6 +21,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+
 import { accessCookie, createClient, createChecks, resolveBase } from "../config.mjs";
 
 const BASE = resolveBase();
@@ -71,16 +72,29 @@ async function mcpToken() {
   return tok.access_token;
 }
 
+/**
+ * Calls an MCP tool with the given token, tool name, and arguments.
+ * It manages the MCP session ID across RPC requests.
+ */
 async function callTool(token, name, args) {
   const url = `${BASE}/mcp`;
   let sid = null;
   let id = 0;
+
+  /**
+   * Constructs the headers for the RPC request, including the session ID if available.
+   */
   const headers = () => ({
     "content-type": "application/json",
     accept: "application/json, text/event-stream",
     authorization: `Bearer ${token}`,
     ...(sid ? { "mcp-session-id": sid } : {}),
   });
+
+  /**
+   * Executes a JSON-RPC method over HTTP, parsing the event-stream response and
+   * extracting the mcp-session-id for subsequent requests.
+   */
   const rpc = async (method, params) => {
     const r = await fetch(url, {
       method: "POST",
@@ -173,7 +187,9 @@ try {
     // Every tier-1 group must explain itself.
     const unexplained = (r.plan ?? []).filter((p) => !(p.linkedBy ?? []).length);
     check("every tier-1 group reports linkedBy", unexplained.length === 0);
-    info(`tier-1 groups: ${r.plan?.length ?? 0} · branchCandidates: ${r.branchCandidates?.length ?? 0}`);
+    info(
+      `tier-1 groups: ${r.plan?.length ?? 0} · branchCandidates: ${r.branchCandidates?.length ?? 0}`,
+    );
   }
 
   // ── 3. pure self-check ────────────────────────────────────────────────────
@@ -197,7 +213,11 @@ try {
 
   // ── 4. source hygiene ─────────────────────────────────────────────────────
   const src = readFileSync("src/backend/mcp/tools/showrooms/dedup_showroom_stores.ts");
-  check("dedup tool source has no NUL bytes", !src.includes(0), "a NUL makes git treat it as binary");
+  check(
+    "dedup tool source has no NUL bytes",
+    !src.includes(0),
+    "a NUL makes git treat it as binary",
+  );
 
   // ── regression guard ──────────────────────────────────────────────────────
   const stores = await c.get("/api/showroom-stores");
