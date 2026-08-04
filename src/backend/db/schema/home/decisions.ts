@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { type AnySQLiteColumn, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 import { projects } from "./projects";
 import { rooms } from "./rooms";
@@ -56,8 +56,13 @@ export const decisions = sqliteTable(
      */
     governingIntent: text("governing_intent"),
 
-    /** What this was decided under. Null = a root decision. */
-    parentDecisionId: integer("parent_decision_id"),
+    /** What this was decided under. Null = a root decision. Self-FK → decisions.id
+     * (a decision chains under its parent); ON DELETE SET NULL so removing a parent
+     * re-roots its children rather than cascading them away. */
+    parentDecisionId: integer("parent_decision_id").references(
+      (): AnySQLiteColumn => decisions.id,
+      { onDelete: "set null" },
+    ),
 
     /**
      * proposed  an agent or a person suggested it; not project truth yet
