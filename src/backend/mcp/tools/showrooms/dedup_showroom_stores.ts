@@ -299,21 +299,30 @@ export const dedupShowroomStores = defineTool({
       if (addr) i.addresses.add(addr);
     }
 
+    // place_id ONLY — deliberately NOT the street parts.
+    //
+    // showroom_store_locations has no suite/unit column, so its street data is
+    // BUILDING-level: every tenant of one address normalizes identically. On live
+    // data that pulled "Leandro Quintal" (1775 Monterey Rd #64A) into the Marblus
+    // Granite group (#40C) — a different company in the same industrial park —
+    // because both location rows read plainly "1775 Monterey Rd". The MAX_WEAK_FANOUT
+    // cap did not catch it: only two rows shared the value, and the group already
+    // carried a strong `name` link between the two genuine Marblus rows, so the
+    // weak-only guard never fired either. The bad edge simply rode in on transitivity.
+    //
+    // The store's own `location_address` DOES carry the suite (Places formats it in),
+    // so unit-level address matching is preserved above; a location's place_id is the
+    // reliable per-site identity. Its suite-less street adds only false positives.
     const locRows = await db
       .select({
         storeId: showroomStoreLocations.storeId,
         placeId: showroomStoreLocations.placeId,
-        streetNumber: showroomStoreLocations.streetNumber,
-        streetName: showroomStoreLocations.streetName,
       })
       .from(showroomStoreLocations)
       .all();
     for (const l of locRows) {
       if (!byId.has(l.storeId)) continue;
-      const i = identityFor(l.storeId);
-      if (l.placeId) i.placeIds.add(l.placeId);
-      const addr = normAddress(`${l.streetNumber ?? ""} ${l.streetName ?? ""}`);
-      if (addr) i.addresses.add(addr);
+      if (l.placeId) identityFor(l.storeId).placeIds.add(l.placeId);
     }
 
     const pocRows = await db
