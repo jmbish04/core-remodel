@@ -1,3 +1,5 @@
+import type { BatchItem } from "drizzle-orm/batch";
+
 import {
   budgetExpenseEntries,
   budgetFundingAccounts,
@@ -8,7 +10,6 @@ import {
   rooms,
 } from "@backend/db";
 import { publishRealtimeEvent } from "@backend/realtime/publish";
-import type { BatchItem } from "drizzle-orm/batch";
 import { desc, eq, inArray, max, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
@@ -84,7 +85,11 @@ function parseTimestamp(input: unknown): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-async function emitBudgetRealtime(env: Env, payload: Record<string, unknown>): Promise<void> {
+// Exported so sibling budget routers (e.g. budget-grid.ts) don't retype this.
+export async function emitBudgetRealtime(
+  env: Env,
+  payload: Record<string, unknown>,
+): Promise<void> {
   try {
     await publishRealtimeEvent(env, "home", {
       ...payload,

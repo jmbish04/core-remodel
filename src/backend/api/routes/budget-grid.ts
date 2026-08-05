@@ -14,6 +14,8 @@
  * `requireAccessAuth` gate as `/api/budget-tracker`.
  */
 
+import type { BatchItem } from "drizzle-orm/batch";
+
 import {
   budgetExpenseEntries,
   budgetFundingAccounts,
@@ -21,13 +23,13 @@ import {
   budgetPlanSchedule,
   budgetTrackerItems,
 } from "@backend/db";
-import { publishRealtimeEvent } from "@backend/realtime/publish";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
 
 import { computeGridMath, deriveMonthWindow, secondsToMonth } from "./budget-grid-math";
+import { emitBudgetRealtime } from "./budget-tracker";
 
 const budgetGridRouter = new Hono<{ Bindings: Env }>();
 
@@ -37,14 +39,6 @@ function normalizeString(input: unknown): string | null {
   if (typeof input !== "string") return null;
   const value = input.trim();
   return value.length > 0 ? value : null;
-}
-
-async function emitBudgetRealtime(env: Env, payload: Record<string, unknown>): Promise<void> {
-  try {
-    await publishRealtimeEvent(env, "home", { ...payload, at: new Date().toISOString() });
-  } catch {
-    // best-effort — a dropped realtime ping never blocks the write
-  }
 }
 
 // --- Deliverable A: GET /api/budget/grid --------------------------------
@@ -78,21 +72,35 @@ budgetGridRouter.get("/grid", async (c) => {
     ]);
 
     // --- Month window ---
+    // Collected once, up front: every period present in the plan schedule
+    // plus every expense's dateIncurred month, across the WHOLE dataset (not
+    // phase/q-filtered — the window brief describes is data-wide).
+    const periodsPresent: string[] = planRows.map((row) => row.period);
+    for (const expense of expenseRows) {
+      if (expense.dateIncurred) {
+        periodsPresent.push(secondsToMonth(Math.floor(expense.dateIncurred.getTime() / 1000)));
+      }
+    }
+
     let months: string[];
     if (fromParam && toParam) {
       // Explicit bounds are never truncated to the 12-month cap — that cap
-      // only applies to the derived-from-data window below.
+      // only applies to the derived-from-data windows below.
       months = fillMonthRange(fromParam, toParam);
-    } else if (fromParam || toParam) {
-      const anchor = fromParam || toParam!;
-      months = deriveMonthWindow([anchor]);
+    } else if (fromParam) {
+      // Only a lower bound given: extend the upper bound OUT to the data's
+      // latest period (never just a single degenerate month), capped to 12.
+      const forward = periodsPresent.filter((p) => p >= fromParam).sort();
+      const to = forward.length > 0 ? forward[forward.length - 1] : fromParam;
+      months = fillMonthRange(fromParam, to).slice(0, 12);
+    } else if (toParam) {
+      // Only an upper bound given: extend the lower bound BACK to the data's
+      // earliest period, capped to the most recent 12 months ending at `to`.
+      const backward = periodsPresent.filter((p) => p <= toParam).sort();
+      const from = backward.length > 0 ? backward[0] : toParam;
+      const filled = fillMonthRange(from, toParam);
+      months = filled.length > 12 ? filled.slice(filled.length - 12) : filled;
     } else {
-      const periodsPresent: string[] = planRows.map((row) => row.period);
-      for (const expense of expenseRows) {
-        if (expense.dateIncurred) {
-          periodsPresent.push(secondsToMonth(Math.floor(expense.dateIncurred.getTime() / 1000)));
-        }
-      }
       months = deriveMonthWindow(periodsPresent, 12);
       // ponytail: brief allows an empty `months` array as the "no data at all"
       // fallback instead of a Date.now()-derived 5-month default, to keep this
@@ -345,12 +353,22 @@ budgetGridRouter.post("/grid/seed", async (c) => {
     );
     const plansSkipped = planCandidates.length - toInsert.length;
 
-    for (const batch of chunk(toInsert, 20)) {
-      if (batch.length === 0) continue;
-      // onConflictDoNothing is still the safety net against a race with
-      // another writer between the existence check above and this insert
-      // (D1 has no transactions to close that window) — never overwrite.
-      await db.insert(budgetPlanSchedule).values(batch).onConflictDoNothing().run();
+    // D1 caps a single statement at 100 bound params. A multi-row
+    // `.values(batch)` insert binds rows*columns in ONE statement — 7
+    // columns here, so a 20-row chunk would bind 140 and D1 would reject it
+    // with "too many SQL variables" the moment there are >~14 active
+    // estimated items. Fix: one INSERT statement per row (7 params each,
+    // nowhere near the cap), grouped into `db.batch()` calls of up to 20
+    // statements so nothing runs unbatched. onConflictDoNothing is still the
+    // safety net against a race with another writer between the existence
+    // check above and this insert (D1 has no transactions to close that
+    // window) — never overwrite.
+    for (const rowsChunk of chunk(toInsert, 20)) {
+      if (rowsChunk.length === 0) continue;
+      const stmts: BatchItem<"sqlite">[] = rowsChunk.map((row) =>
+        db.insert(budgetPlanSchedule).values(row).onConflictDoNothing(),
+      );
+      await db.batch(stmts as [BatchItem<"sqlite">, ...BatchItem<"sqlite">[]]);
     }
     const plansSeeded = toInsert.length;
 
@@ -379,6 +397,9 @@ budgetGridRouter.post("/grid/seed", async (c) => {
 
     let expensesAttributed = 0;
     let expensesSkipped = 0;
+    // Sequential single-row UPDATEs, not a batched multi-value statement, so
+    // there's no D1 100-bound-param exposure here (each statement binds
+    // budgetItemTrackId + datetimeUpdated + the id in WHERE — 3 params).
     // Read-then-write, not atomic (D1 has no transactions): between the read
     // above and each update below another writer could change the picture.
     // Acceptable here — this is an idempotent, re-runnable best-effort seed,
