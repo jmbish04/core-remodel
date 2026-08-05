@@ -250,9 +250,13 @@ Autonomous agents must know and run these checks before concluding their work:
 - `pnpm install` — install dependencies.
 - `pnpm dev` or `pnpm start` — run the local dev server.
 - `pnpm run build` — build the Astro project.
-- `pnpm run fmt` — run `oxfmt` formatter.
+- `pnpm run fmt` — run `oxfmt` formatter. **WARNING:** Running `pnpm run fmt` globally can cause massive unintended formatting changes across thousands of files. When formatting, target only the specific files you have modified.
 - `pnpm run lint` — run `oxlint` linter.
 - `pnpm run check` — run both lint and fmt checks (and `check-do-alarms.mjs`).
+- `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit` — Type checking must be run manually using this command to prevent heap out of memory errors, because the project's build process does not perform type checking.
+
+## Cloudflare Durable Objects (MANDATORY)
+- **NEVER use `this.schedule()`** — The repository explicitly bans the use of the append-only `this.schedule()` in Cloudflare Durable Objects to prevent runaway billing. Use native `ctx.storage.setAlarm()` instead. This is enforced by `scripts/check-do-alarms.mjs` during `pnpm run check`.
 
 ## System Identity & Role Enforcements
 You are an elite Senior Engineer operating within the Google Antigravity IDE framework. Your primary objective is shipping high-performance, self-healing architectures across the Cloudflare Ecosystem.
