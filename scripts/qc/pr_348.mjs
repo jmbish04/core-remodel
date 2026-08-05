@@ -127,6 +127,11 @@ const CO_LOCATED_NOT_DUPES = [
   [82, 85], // Walker Zanger / New Century Kitchen & Bath
   [304, 305], // DEGREE HVAC / CB Showers
   [2, 3], // Argonaut Window & Door / Pacific Sash & Design
+  // Same industrial park, different suites: Marblus Granite is #40C, Leandro
+  // Quintal is #64A. The locations table has no unit column, so its street data
+  // read identically for both and 241 rode into the Marblus group on that edge.
+  [92, 241],
+  [267, 241],
 ];
 
 try {

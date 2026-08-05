@@ -1,6 +1,12 @@
-# Astro shadcn/ui template
+# core-remodel
 
-A modern starter template using [Astro](https://astro.build/), [Tailwind CSS](https://tailwindcss.com/), and [shadcn/ui](https://ui.shadcn.com/) - perfect for building fast, accessible, and themeable web apps.
+A complex monorepo running on Cloudflare Workers featuring Astro, Tailwind CSS, shadcn/ui, D1 databases, MCP tools, and AI governance. It acts as the mission control and shared source of truth for contractors, designers, and homeowners to review existing conditions, inspiration, and in-progress remodel decisions.
+
+---
+
+## Documentation
+
+Comprehensive documentation for this project is available in the [`docs/`](docs/) directory. Start at the [Docs Index](docs/README.md) to navigate through the architecture, setup, deployment, routing, and API details.
 
 ---
 
@@ -8,28 +14,61 @@ A modern starter template using [Astro](https://astro.build/), [Tailwind CSS](ht
 
 Before you begin, ensure that you have **Node.js** and **pnpm** installed.
 
-### Setup
+### Installation
+
+Clone the repository and install the dependencies using `pnpm`. Do not use `npm` or `yarn`.
 
 ```bash
-git clone https://github.com/area44/astro-shadcn-ui-template
-cd astro-shadcn-ui-template
+git clone https://github.com/jmbish04/core-remodel
+cd core-remodel
 pnpm install
+```
+
+### Development
+
+To start the local development server:
+
+```bash
 pnpm dev
 ```
 
 Open your browser and go to [http://localhost:4321](http://localhost:4321) to see the app running.
 
-## Adding Components
+### Testing and Linting
 
-`shadcn/ui` provides pre-built, accessible UI components. To add one:
+The project uses `oxlint` for linting and `oxfmt` for formatting.
 
-1. Follow the official [Astro installation guide](https://ui.shadcn.com/docs/installation/astro).
-2. Pick a component (e.g., [Accordion](https://ui.shadcn.com/docs/components/accordion), [Dialog](https://ui.shadcn.com/docs/components/dialog)) and follow the usage instructions.
+To check code quality and formatting:
 
-> [!NOTE]
-> In Astro, an [island](https://docs.astro.build/en/concepts/islands/) is an interactive component rendered on the client. For complex or dynamic components, check [Add a Shadcn UI Component | Space Madness Stack](https://spacemadness.dev/docs/add-a-shadcn-ui-component)
+```bash
+pnpm run check
+```
 
-If you're new to using React (or other frameworks) inside Astro, start with the [Framework Components guide](https://docs.astro.build/en/guides/framework-components/).
+Type checking must be run manually using:
+
+```bash
+NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit
+```
+
+To run PR tests locally before pushing:
+
+```bash
+pnpm run test:pr <n>
+```
+
+### Build
+
+To build the project for production:
+
+```bash
+pnpm run build
+```
+
+---
+
+## Agent Guidelines
+
+Autonomous agents working on this repository must consult [`AGENTS.md`](AGENTS.md) for mandatory workflows, branch management, CI/CD previews, and changelog discipline.
 
 ## License
 
