@@ -42,6 +42,8 @@ type BudgetExpensePatch = {
   item?: string | null;
   category?: string | null;
   amountCents?: number | string | null;
+  /** Links this expense to a budget line (budget_tracker_items.trackId) so it rolls into that line's Actuals. */
+  budgetItemTrackId?: string | null;
   vendorName?: string | null;
   scenarioId?: string | null;
   optionGroup?: string | null;
@@ -842,6 +844,9 @@ budgetTrackerRouter.post("/expenses", async (c) => {
         item,
         category,
         amountCents,
+        // Optional link to a budget line so the amount rolls into that line's
+        // Actuals in the time-phased grid (0035). Null = unattributed expense.
+        budgetItemTrackId: normalizeString(body.budgetItemTrackId),
         vendorName: normalizeString(body.vendorName),
         scenarioId: normalizeString(body.scenarioId),
         optionGroup: normalizeString(body.optionGroup),
