@@ -46,7 +46,7 @@ let files;
 try {
   files = execSync("git ls-files src", { encoding: "utf8" })
     .split("\n")
-    .filter((f) => f.endsWith(".ts") || f.endsWith(".tsx"));
+    .filter((f) => (f.endsWith(".ts") || f.endsWith(".tsx")) && !f.startsWith("src/frontend/data/"));
 } catch (err) {
   console.error("check-do-alarms: could not list files —", err.message);
   process.exit(2);

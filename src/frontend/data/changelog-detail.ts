@@ -113,291 +113,104 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
-  "showroom-dedup-signals": {
-    slug: "showroom-dedup-signals",
-    branch: "claude/showroom-dedup-signals",
-    prNumber: 348,
-    prUrl: "https://github.com/jmbish04/core-remodel/pull/348",
-    subtitle: "Adding the obvious signals made it worse before it made it better",
+  "pascal-layout-studio": {
+    slug: "pascal-layout-studio",
+    branch: "codex/pascal-core-remodel-continuation",
+    prNumber: 342,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/342",
+    subtitle: "0043 Phase 4 · Core Remodel manages evidence; Pascal edits the scene",
     introduction:
-      "The merge tool compared store names and nothing else. Fixing that meant adding place_id, phone, address and website — and then spending most of the work stopping those same signals from fusing unrelated businesses together.",
+      "This closes the last planned Core Remodel phase of the Pascal integration. The editor remains the authority for visual node editing, while Core Remodel owns the durable projects, studies, variants, measurement evidence, snapshots, and lifecycle around those scenes.",
     problem:
-      "`dedup_showroom_stores` grouped on normalized NAME alone — `const key = norm(r.name)` — so any duplicate whose two rows were named even slightly differently was invisible to it. The live proof: two real `Jack London Kitchen & Bath` rows, one written with `&` and one with `and` plus a `-Walnut Creek` branch suffix, never landed in the same group and had to be merged by hand in #347.\n\nThe signals that would have caught it already existed in `services/showroom/duplicate-check.ts` — place_id → phone → street address → website host. But that module answers \"does this INCOMING store already exist?\" at CREATE time. It stops you adding a duplicate; nothing brought those signals to the MERGE path that finds the ones already in the table.",
+      "Phases 1–3 delivered the durable wire, measured generator, full-fidelity MCP editing, comparison, and screenshot paths, but those capabilities were only reachable through the editor or Claude. A homeowner/admin had no place to browse the hierarchy, understand which dimensions grounded a scene, compare alternatives, capture a thumbnail, or retire an obsolete option. The MCP generation and comparison implementations were also at risk of drifting from any new browser endpoints, and the repository's hand-maintained OpenAPI document omitted the entire Pascal router.",
     approach:
-      "A shared `services/showroom/duplicate-signals.ts` with the normalizers plus transitive union-find grouping, so `A~B` by phone and `B~C` by place_id resolve to a single store. Signals are gathered from **three** tables — `showroom_stores`, `showroom_store_locations` and `showroom_pocs` — because the parent row alone is not enough: the Jack London pair sat on different domains (`jacklondonkitchenandbath.com` vs `jlkbg.com`) and were only linkable because a POC on one carried the phone and street address of a location on the other.\n\n**The real work was false positives, and both were found only by running it against production data.** Grouping on street address fused every tenant of 2 Henry Adams St — the San Francisco Design Center — into one component that then chained outward to 37 stores including Cole Hardware and Cushman & Wakefield. Separately, reading every `showroom_store_links` row as a website meant `linkedin.com`, `youtube.com`, `houzz.com` and `x.com` fused 36 stores on their own. An `apply:true` on either would have soft-deleted real businesses.\n\nSo signals are split by what a match actually proves. **STRONG** (`place_id`, `website`, `name`) identify a business or an exact site and may merge. **WEAK** (`phone`, `address`) identify a *place* that businesses share: they may surface a group for review, a weak value held by more than two stores is discarded as a building rather than a business, and a group linked only by weak signals is never auto-merged however small it is. `duplicate-check.ts` had already warned about exactly this — \"legitimate distinct suites at one address / shared call-center numbers\" — this encodes the warning instead of restating it.\n\nFinally, `ambiguousGroupsSkipped` became `branchCandidates`. Skipping multi-site groups was correct under one-row-per-site and is backwards under 0045's multi-location model: those are chains that should collapse into ONE store with many location rows. They are now reported with their matching evidence and still never auto-merged, because that is a human-confirmed operation.",
+      "A shared product workflow now owns measured-base generation, branched generation with optional structured AI edits, and enriched comparison. Both the existing MCP tools and the new product REST routes call that workflow. The canonical /admin/plan/3d Astro shell mounts one Shadcn React island; project detail state lives in the URL query, while legacy /admin/pascal links permanently redirect. Cards keep evidence visible but progressive: thumbnail, state and top dimensions first; lineage/confidence inside provenance; rename/archive inside More. Pascal is always opened by deep link in a new tab—Core Remodel never renders Three.js. Finally, /openapi.json merges Pascal's OpenAPIHono document at the actual /pascal/v1 mount prefix, making route declarations the documentation source of truth.",
     apiChanges: [
-      "mcp `dedup_showroom_stores`: groups by ANY shared identity signal (place_id / phone / address / website host / normalized name) instead of name alone.",
-      "mcp `dedup_showroom_stores`: each plan entry gains `linkedBy` — the signals that grouped it — so a reviewer sees WHY rows matched.",
-      "mcp `dedup_showroom_stores`: `ambiguousGroupsSkipped` → `branchCandidates`, now carrying `names`, `linkedBy`, `evidence` and a reason. Never touched by `apply:true`.",
+      "NEW GET /api/pascal/v1/projects — project summaries plus canonical floor and room scope choices.",
+      "NEW GET/POST /api/pascal/v1/projects/:projectId/studies — enriched hierarchy and rich-text study creation.",
+      "NEW POST /api/pascal/v1/studies/:studyId/variants — measured base or branched/intent variant via the shared workflow.",
+      "NEW POST /api/pascal/v1/variants/compare — enriched comparison used by the browser UI.",
+      "NEW POST /api/pascal/v1/scenes/:sceneId/capture and PATCH /status — snapshot and lifecycle actions.",
+      "CHANGED GET /openapi.json — merges all Pascal OpenAPIHono operations at /pascal/v1/*.",
     ],
     filesTouched: [
-      "src/backend/services/showroom/duplicate-signals.ts (new — normalizers + union-find + self-check)",
-      "src/backend/mcp/tools/showrooms/dedup_showroom_stores.ts (grouping, guards, branchCandidates, NUL byte removed)",
-      "scripts/fix-nul.mjs (new)",
-      "scripts/qc/pr_348.mjs (new)",
+      "src/frontend/pages/admin/plan/3d.astro",
+      "src/frontend/pages/admin/pascal/index.astro (redirect)",
+      "src/frontend/pages/admin/pascal/[projectId].astro (redirect)",
+      "src/frontend/components/pascal/PascalLayoutStudioApp.tsx",
+      "src/frontend/components/sidebar/nav-groups.ts",
+      "src/backend/api/routes/pascal.ts",
+      "src/backend/api/routes/openapi.ts",
+      "src/backend/services/pascal/workflow.ts",
+      "src/backend/services/pascal/store.ts",
+      "src/backend/mcp/tools/pascal/generate_floorplan_variant.ts",
+      "src/backend/mcp/tools/pascal/compare_layout_variants.ts",
+      "docs/0043_pascal_render_integration/TASKS.json",
+      "scripts/qc/pr_342.mjs",
+      "worker-configuration.d.ts",
     ],
     migrations: [],
-    code: [
-      {
-        title: "Name normalization — why the two Jack London rows never grouped",
-        lang: "ts",
-        code: "export function normName(value: string | null | undefined): string {\n  let s = (value ?? \"\").toLowerCase();\n  s = s.replace(/&/g, \" and \");\n  // Strip a trailing \"- City\" / \"– City\" / \", City\" branch suffix (one level).\n  s = s.replace(/\\s*[-–—,]\\s*[a-z][a-z .']{2,24}$/, \"\");\n  s = s.replace(/\\b(inc|llc|l\\.l\\.c|corp|corporation|co|ltd|company)\\b\\.?/g, \" \");\n  s = s.replace(/[^a-z0-9]+/g, \" \");\n  return s.replace(/\\s+/g, \" \").trim();\n}\n\n// \"Jack London Kitchen and Bath -Walnut Creek\" -> \"jack london kitchen and bath\"\n// \"Jack London Kitchen & Bath\"                -> \"jack london kitchen and bath\"",
-      },
-      {
-        title: "The guard that stops a building becoming a business",
-        lang: "ts",
-        code: "/**\n * A phone or street address carried by more than this many stores is a shared\n * facility — a design centre, a business park, a parent company's switchboard —\n * not an identity. Two is the largest count that can still mean \"one business\n * filed twice\"; beyond that it is a building.\n */\nexport const MAX_WEAK_FANOUT = 2;\n\n// …in groupBySignals:\nif (ids.length < 2) continue;\n// A weak value shared by a crowd is a building, not a business. Skip it\n// entirely — including as evidence — so it cannot chain a component open.\nif (!isStrongSignal(kind) && ids.length > MAX_WEAK_FANOUT) continue;",
-      },
-      {
-        title: "Only the WEBSITE link type — social profiles are shared by definition",
-        lang: "ts",
-        code: "// ONLY type = WEBSITE. showroom_store_links also holds social/profile links,\n// and those are shared by definition — linkedin.com, youtube.com, houzz.com\n// and x.com alone fused 36 unrelated stores into a single component on the\n// live directory. A store's own domain identifies the business; its Houzz\n// profile identifies Houzz.\nconst linkRows = await db\n  .select({ storeId: showroomStoreLinks.storeId, url: showroomStoreLinks.url })\n  .from(showroomStoreLinks)\n  .where(eq(showroomStoreLinks.type, \"WEBSITE\"))\n  .all();",
-      },
-      {
-        title: "Two guards, both routing to human review rather than auto-merge",
-        lang: "ts",
-        code: "const weakOnly = !g.hasStrongSignal;\nif (reals.length >= 2 || weakOnly) {\n  branchCandidates.push({\n    ids: rows.map((r) => r.id).sort((a, b) => a - b),\n    names: rows.map((r) => r.name),\n    linkedBy: g.signals,\n    evidence: g.evidence.slice(0, 8),\n    reason: weakOnly\n      ? `Linked only by ${g.signals.join(\", \")} — a shared address or phone means a shared BUILDING or switchboard, not one business.`\n      : `${reals.length} rows have their own zip/placeId — distinct SITES of what looks like one business. Should become ONE store with ${reals.length} location rows.`,\n  });\n  continue;\n}",
-      },
-    ],
+    code: [],
     diagrams: [
       {
-        caption:
-          "What a match proves depends on the signal — and that distinction is the whole design.",
-        title: "Signal taxonomy",
-        code: "flowchart TD\n  C[candidate pair] --> S{place_id, phone,<br/>or street address match?}\n  S -->|yes| W{is it place_id?}\n  W -->|yes| T1[STRONG — same exact SITE<br/>safe to merge]\n  W -->|no| WK[WEAK — phone/address<br/>a shared building or switchboard]\n  S -->|no| B{same website host,<br/>or same normalized name?}\n  B -->|yes| T1b[STRONG — same BUSINESS]\n  B -->|no| N[not a duplicate]\n  WK --> R[surface for review only<br/>NEVER auto-merged]\n  T1 --> M{2+ rows with their own zip/placeId?}\n  T1b --> M\n  M -->|no| MERGE[tier 1 — auto-merge on apply:true]\n  M -->|yes| BR[branchCandidates — chain branches<br/>should become ONE store + N locations]\n  classDef ok fill:#1f4d2e,stroke:#4ade80\n  classDef bad fill:#4d1f1f,stroke:#f87171\n  class MERGE ok\n  class WK,R bad",
+        caption: "Ownership boundary and the shared workflow",
+        code: `flowchart LR
+  UI["Core Remodel Layout Studio"] --> REST["Pascal product REST"]
+  MCP["Claude via Pascal MCP tools"] --> WF["Shared product workflow"]
+  REST --> WF
+  WF --> D1["D1 projects, studies, scenes, evidence"]
+  UI --> LINK["Open editor deep-link"]
+  LINK --> EDITOR["Pascal editor: node semantics + 2D/3D"]
+  EDITOR --> WIRE["Frozen scene wire"]
+  WIRE --> D1`,
       },
       {
-        caption:
-          "The 37-store blob. One shared street address chained the whole SF Design Center together.",
-        title: "How address-only grouping blew up",
-        code: "flowchart LR\n  A[(2 Henry Adams St<br/>SF Design Center)] --> T1[de Gournay]\n  A --> T2[Kravet / Lee Jofa]\n  A --> T3[F. Schumacher]\n  A --> T4[Phillip Jeffries]\n  A --> T5[Ann Sacks]\n  T1 --> U{union-find<br/>one component}\n  T2 --> U\n  T3 --> U\n  T4 --> U\n  T5 --> U\n  U --> X[chained outward:<br/>Cole Hardware, Cushman &amp; Wakefield,<br/>SiteOne, Jack London…<br/><b>37 stores</b>]\n  X --> D[apply:true would<br/>SOFT-DELETE real businesses]\n  F[FIX: weak value on &gt;2 stores<br/>is a building, discard it] -.blocks.-> U\n  classDef bad fill:#4d1f1f,stroke:#f87171\n  classDef ok fill:#1f4d2e,stroke:#4ade80\n  class X,D bad\n  class F ok",
+        caption: "Measured or branched variant creation",
+        code: `sequenceDiagram
+  actor U as User
+  participant UI as Layout Studio
+  participant WF as Shared workflow
+  participant AI as Structured AI edit
+  participant DB as D1 scene store
+  U->>UI: Generate variant
+  alt Measured base
+    UI->>WF: studyId + name
+    WF->>DB: Read floor, rooms, measurements
+    WF->>WF: Deterministic rectangular seed
+  else Branch
+    UI->>WF: parent scene + optional intent
+    WF->>DB: Load graph + measurement evidence
+    opt Intent supplied
+      WF->>AI: Propose validated node operations
+      AI-->>WF: Structured operations
+    end
+  end
+  WF->>DB: Save child graph + lineage + provenance
+  DB-->>UI: Variant + editor URL`,
       },
       {
-        caption: "Signals are read from three tables, because the store row alone missed the case.",
-        title: "Where identity comes from",
-        code: "erDiagram\n    showroom_stores ||--o{ showroom_store_locations : \"store_id\"\n    showroom_stores ||--o{ showroom_pocs : \"showroom_id\"\n    showroom_stores ||--o{ showroom_store_links : \"store_id (type=WEBSITE only)\"\n\n    showroom_stores {\n        text name \"normName\"\n        text place_id \"STRONG\"\n        text phone_number \"WEAK\"\n        text location_address \"WEAK\"\n    }\n    showroom_store_locations {\n        text place_id \"STRONG — a branch's own site\"\n        text street_number \"WEAK\"\n        text street_name \"WEAK\"\n    }\n    showroom_pocs {\n        text phone \"WEAK — but it cracked the Jack London case\"\n        text address \"WEAK\"\n    }\n    showroom_store_links {\n        text url \"STRONG via host, WEBSITE rows only\"\n    }",
+        caption: "Layout Studio navigation and lifecycle",
+        code: `stateDiagram-v2
+  [*] --> Projects
+  Projects --> Project: Open project via ?project=id
+  Project --> Study: Create or choose study
+  Study --> Variant: Generate measured or branch
+  Variant --> Compared: Select 2 or more
+  Variant --> Captured: Capture snapshot
+  Variant --> Editing: Open Pascal editor
+  Variant --> Archived: Archive
+  Archived --> Variant: Restore
+  Editing --> Variant: Save through frozen wire`,
       },
     ],
     verification: {
-      qcScript: "scripts/qc/pr_348.mjs",
-      command:
-        "node scripts/qc/pr_348.mjs --base https://wcrp-claude-showroom-dedup-signals.hacolby.workers.dev --preview\nnode scripts/qc/pr_348.mjs   # production, after merge + deploy",
-      source:
-        "// The interesting failure mode is a FALSE POSITIVE, not a miss, so the assertions are\n// mostly upper bounds. The QC drives the OAuth flow with WORKER_API_KEY and runs a real\n// dedup_showroom_stores DRY RUN against the live directory (writes nothing), asserting:\n// no runaway component (<=8 stores), no tier-1 group linked only by address/phone, and\n// that known co-located-but-unrelated pairs (Walker Zanger/New Century, DEGREE HVAC/CB\n// Showers, Argonaut/Pacific Sash) never appear together in the auto-merge plan. It also\n// runs the pure __selfCheck and scans the tool source for NUL bytes.",
-      output:
-        "PRODUCTION (after merge of #348 + `pnpm run deploy`, version 3c28ea57) — 16 passed, 0 failed:\n  ✓ /api/mcp-docs 200\n  ✓ dedup_showroom_stores registered\n  ✓ advertises multi-signal grouping\n  ✓ advertises the generic-host guard\n  ✓ obtained an MCP token\n  ✓ dry run wrote nothing\n  ✓ returns branchCandidates\n  ✓ no runaway component (<=8 stores)\n  ✓ no tier-1 group linked only by address/phone\n  ✓ co-located 82/85 not auto-merged\n  ✓ co-located 304/305 not auto-merged\n  ✓ co-located 2/3 not auto-merged\n  ✓ every tier-1 group reports linkedBy\n    tier-1 groups: 8 · branchCandidates: 17\n  ✓ duplicate-signals __selfCheck passes\n  ✓ dedup tool source has no NUL bytes\n  ✓ /api/showroom-stores still 200\n\nPREVIEW (wcrp-claude-showroom-dedup-signals, pre-merge) — 16 passed, 0 failed (identical).\nPRE-MERGE PRODUCTION run — 5 passed, 0 failed, with the new behaviour correctly reported\n\"pending merge/deploy\".\n\nREGRESSION: scripts/qc/pr_347.mjs re-run against production after this deploy — 22 passed,\n0 failed. The 0045 multi-location surface is unaffected.\n\nBEHAVIOUR ON THE LIVE DIRECTORY (dry run, nothing written):\n  tier-1 groups     6  ->  8   (now includes 116 <- 261 Jack London — the merge that\n                                previously required a human)\n  largest component 37 ->  5   (Studio Belmont, Homewise — real chains)\n  branchCandidates   5 -> 17   (with evidence + linkedBy)\n\nTYPES: 177 on the branch vs 185 on origin/main — ZERO net-new. Baseline taken from a\nthrowaway `git worktree add --detach origin/main`, since `git stash -u` does not remove\ncommitted files and silently compares a branch against itself.\n\nMIGRATIONS: none.\n\nNOTE ON THIS ENTRY: it was written AFTER #348 merged, not with it — the PR body shipped\nwith a link to a changelog entry that did not yet exist. Recorded here rather than quietly\nbackdated.",
+      qcScript: "scripts/qc/pr_342.mjs",
+      command: "pnpm run test:pr 342 -- --preview",
+      output: `QC pr_342 — Pascal Layout Studio
+target: https://wcrp-codex-pascal-core-remodel-continuation.hacolby.workers.dev
+18 passed, 0 failed`,
+      ranAt: "2026-08-02",
       migrations: [],
-    },
-  },
-  "showroom-multi-location-mcp": {
-    slug: "showroom-multi-location-mcp",
-    branch: "claude/showroom-multi-location-mcp",
-    prNumber: 347,
-    prUrl: "https://github.com/jmbish04/core-remodel/pull/347",
-    subtitle: "The table shipped empty a week ago. This wires it — data, reads, writes, dedupe.",
-    introduction:
-      "One showroom store row is a BUSINESS, not an address. Bay Area chains run several sites under a single row, and the table that models that shipped in July — completely empty and completely unreferenced. This fills it and teaches the MCP surface to read, write and search it.",
-    problem:
-      "PR #278 (\"0031 Phase A\") merged FIVE files: the drizzle schema for `showroom_store_locations`, its migration, the snapshot, and two barrel lines. No service, no route, no MCP tool, no backfill. Verified on 2026-08-04: `select count(*) from showroom_store_locations` returned **0** against **244** stores, and `grep -rn showroomStoreLocations src/` returned exactly two hits — `store_location.ts` and `hours.ts`, both schema files. So every read and write still used the flat `location_*` / `place_id` / `latitude` columns on `showroom_stores`: one store, one address.\n\nThe user hit the consequence in the field. He stopped at the San Carlos branch of a plumbing showroom already registered at Emeryville, photographed the business card, and asked a chat agent to add it. The agent could only see one address, so it offered to overwrite Emeryville. Asked to add a location instead, it correctly answered that no such tool exists. Asked to list the stores with more than one location, it had nothing to query. None of that was the agent's fault — the tools genuinely did not exist.",
-    approach:
-      "Finish 0031 **Phase A** (backfill + dual-write) and layer the MCP surface on top; deliberately do NOT attempt Phase B/C. Phase B repoints every API reader, every service writer and the frontend; Phase C drops twenty columns. That is a far larger blast radius and it gets nobody the missing tools any sooner. So the legacy `showroom_stores` address columns stay authoritative for un-migrated readers and are **dual-written from the primary site** on every location mutation.\n\nTwo things are derived rather than stored, on purpose. **`address`** is assembled from the structured parts at read time — the locations table has no `location_address` column because a free-text formatted address gets abused by AI enrichment (\"SF Bay area\"), so it is a parse SOURCE only. **`isPrimary`** is the location whose `place_id` matches the parent store's (else the lowest id); a stored `is_primary` flag would drift the first time a branch closed.\n\nThe dedupe fix is the root-cause half. `find_known_showrooms` and `search_showrooms` matched an inbound Google place id against `showroom_stores.place_id` alone. A chain's second site only ever carries its place id on the LOCATION row, so those tools would report a genuinely registered branch as unknown — and the caller would create a second store for a business the directory already had. Both now resolve through a shared `loadPlaceIdOwners` that reads locations as well as stores.",
-    apiChanges: [
-      "mcp `get_showroom`: returns `locations[]` (id, derived `address`, structured parts, coords, placeId, googleMapsLink, bayAreaCityName/hubRoute/hubName from the FK join, `isPrimary`, notes triple) and `locationCount`.",
-      "mcp `list_showrooms`: every row carries `locationCount`; new `multiLocationOnly?: boolean` input returns only businesses with more than one site.",
-      "mcp `add_showroom_location` (WRITE): register an additional site on an existing store. Structured address parts only — no free-text address field.",
-      "mcp `update_showroom_location` (WRITE): patch one site by `locationId`; only passed fields change.",
-      "mcp `delete_showroom_location` (DESTRUCTIVE): remove one site; refuses the store's last remaining location.",
-      "mcp `find_known_showrooms` / `search_showrooms`: place-id matching now resolves through locations, and reports the OWNING store id.",
-    ],
-    filesTouched: [
-      "scripts/sql/backfill_showroom_store_locations.sql (new — idempotent seed)",
-      "src/backend/services/showroom/locations.ts (new — the shared read/derive/dual-write helper)",
-      "src/backend/mcp/tools/showrooms/add_showroom_location.ts (new)",
-      "src/backend/mcp/tools/showrooms/update_showroom_location.ts (new)",
-      "src/backend/mcp/tools/showrooms/delete_showroom_location.ts (new)",
-      "src/backend/mcp/tools/showrooms/get_showroom.ts",
-      "src/backend/mcp/tools/showrooms/list_showrooms.ts",
-      "src/backend/mcp/tools/showrooms/find_known_showrooms.ts",
-      "src/backend/mcp/tools/showrooms/search_showrooms.ts",
-      "src/backend/mcp/tools/showrooms/index.ts (registry barrel — 3 new tools)",
-      "scripts/qc/pr_347.mjs (new)",
-      "docs/0045_showroom_multi_location_mcp/{IMPLEMENTATION_PLAN,PROMPT,TASKS.json}",
-    ],
-    migrations: [],
-    code: [
-      {
-        title: "The backfill — idempotent, one location per store",
-        lang: "sql",
-        code: "INSERT INTO showroom_store_locations (\n  store_id, place_id, google_maps_link, bay_area_city_id, latitude, longitude,\n  street_number, street_name, city, state, zip_code, notes\n)\nSELECT s.id, s.place_id, s.google_maps_link, s.bay_area_city_id, s.latitude, s.longitude,\n       s.location_street_number, s.location_street_name, s.location_city, s.location_state,\n       -- location_zip_code is canonical; zip_code is the legacy twin kept in sync.\n       COALESCE(s.location_zip_code, s.zip_code), s.location_notes\nFROM showroom_stores s\nWHERE NOT EXISTS (\n  SELECT 1 FROM showroom_store_locations l WHERE l.store_id = s.id\n);",
-      },
-      {
-        title: "Primary is derived, never a stored flag",
-        lang: "ts",
-        code: "/** Mark exactly one location primary: the place_id match, else the lowest id. */\nfunction markPrimary(rows, storePlaceId) {\n  const sorted = [...rows].sort((a, b) => a.location.id - b.location.id);\n  const primaryId =\n    (storePlaceId ? sorted.find((r) => r.location.placeId === storePlaceId)?.location.id : null) ??\n    sorted[0]?.location.id ??\n    null;\n  return sorted.map((r) => toDto(r.location, r.city, r.location.id === primaryId));\n}",
-      },
-      {
-        title: "The dedupe root cause — locations win over the store row",
-        lang: "ts",
-        code: "// Stores first, locations second — so a location's owner wins on any disagreement,\n// since the location row is the authoritative home of a site's place id.\nfor (const r of storeRows) if (r.placeId) owners.set(r.placeId, r.id);\nfor (const r of locationRows) if (r.placeId) owners.set(r.placeId, r.storeId);\nreturn owners;",
-      },
-      {
-        title: "add_showroom_location names the owner instead of throwing a constraint error",
-        lang: "ts",
-        code: "if (clash) {\n  const [owner] = await db.select({ name: showroomStores.name })\n    .from(showroomStores).where(eq(showroomStores.id, clash.storeId)).limit(1);\n  toolError(\n    `placeId ${parts.placeId} is already location ${clash.id} of showroom ` +\n    `${clash.storeId} (${owner?.name ?? \"unknown\"}). That site is already registered — ` +\n    `use update_showroom_location to correct it instead of adding a duplicate.`,\n  );\n}",
-      },
-    ],
-    diagrams: [
-      {
-        caption:
-          "What shipped in July vs. what this lands. The table existed; nothing on either side of it did.",
-        title: "Before / after",
-        code: "flowchart LR\n  subgraph before[\"BEFORE — PR #278 shipped the table only\"]\n    S1[(showroom_stores<br/>244 rows, flat address cols)]\n    L1[(showroom_store_locations<br/>0 rows, 0 code refs)]\n    S1 --> R1[MCP + API + frontend]\n    L1 -.nothing reads or writes it.-> X(( ))\n  end\n  subgraph after[\"AFTER — 0045\"]\n    S2[(showroom_stores<br/>legacy cols, dual-written from primary)]\n    L2[(showroom_store_locations<br/>244 rows, 1:N)]\n    L2 --> H[services/showroom/locations.ts]\n    H --> M[get_showroom.locations&#91;&#93;<br/>list_showrooms.locationCount<br/>add/update/delete_showroom_location<br/>find_known + search dedupe]\n    H -. primary only .-> S2\n    S2 --> R2[un-migrated API + frontend readers]\n  end\n  classDef dead fill:#4d1f1f,stroke:#f87171\n  classDef live fill:#1f4d2e,stroke:#4ade80\n  class L1,X dead\n  class L2,H,M live",
-      },
-      {
-        caption: "The 1:many model. Locations own the address; the store owns the identity.",
-        title: "Data model",
-        code: "erDiagram\n    showroom_stores ||--o{ showroom_store_locations : \"store_id (1:N, cascade)\"\n    showroom_store_locations }o--o| store_bayarea_cities : \"bay_area_city_id\"\n    showroom_store_locations ||--o{ showroom_store_hours : \"location_id (nullable)\"\n\n    showroom_stores {\n        int id PK\n        text name \"the BUSINESS\"\n        text location_address \"LEGACY - primary site, dual-written\"\n        text place_id \"LEGACY - primary site's place\"\n    }\n    showroom_store_locations {\n        int id PK\n        int store_id FK\n        text place_id UK \"nulls distinct\"\n        int bay_area_city_id FK\n        real latitude\n        real longitude\n        text street_number\n        text street_name\n        text city\n        text state\n        text zip_code\n        text notes \"PlateJS triple\"\n    }",
-      },
-      {
-        caption:
-          "The field failure this fixes: a known store, an unknown branch, and no tool to say so.",
-        title: "Business card → new site",
-        code: "sequenceDiagram\n    actor U as Justin (San Carlos)\n    participant A as Chat agent\n    participant M as MCP\n    participant D as D1\n    Note over U,D: BEFORE\n    U->>A: photo of a business card — add this\n    A->>M: get_showroom(42)\n    M-->>A: one address — Emeryville\n    A->>U: overwrite Emeryville?\n    U->>A: no, it's a different branch\n    A->>U: I have no tool to add a location\n    Note over U,D: AFTER\n    U->>A: photo of a business card — add this\n    A->>M: get_showroom(42)\n    M-->>A: locations[] = [Emeryville (primary)], locationCount 1\n    A->>M: add_showroom_location(42, San Carlos parts)\n    M->>D: INSERT location; primary unchanged\n    M-->>A: locationCount 2\n    A->>U: added — Emeryville untouched",
-      },
-      {
-        caption: "Every location write decides one thing: does the legacy store row follow?",
-        title: "Dual-write decision (0031 Phase A contract)",
-        code: "flowchart TD\n  W[add / update / delete a location] --> P{is it the PRIMARY site?}\n  P -->|no| N[write the location row only<br/>store row untouched]\n  P -->|yes| Y[write the location row<br/>+ mirror address/coords/place_id<br/>onto showroom_stores]\n  Y --> R[un-migrated readers stay correct:<br/>API, frontend, drive routing, Tesla nav]\n  D[delete the primary] --> PR[promote the next location<br/>then mirror it]\n  PR --> R\n  classDef ok fill:#1f4d2e,stroke:#4ade80\n  class N,Y,R,PR ok",
-      },
-    ],
-    verification: {
-      qcScript: "scripts/qc/pr_347.mjs",
-      command:
-        "node scripts/qc/pr_347.mjs --base https://wcrp-claude-showroom-multi-location-mcp.hacolby.workers.dev --preview\nnode scripts/qc/pr_347.mjs   # production\n# plus a live OAuth-authenticated tools/call run against the preview's /mcp endpoint (see output)",
-      source:
-        "// Asserts (1) the registry catalog at /api/mcp-docs lists the three new tools with the right\n// destructiveHint + an example each, and that the two changed reads advertise the model; and\n// (2) the backfill's real state in remote D1 — one location per store, no duplicate store_ids,\n// no orphan stores, no place_id shared by two locations, and the primary location's city equal\n// to the legacy showroom_stores.location_city (the dual-write parity contract).",
-      output:
-        "LIVE END-TO-END against the preview worker's OAuth MCP endpoint (/mcp). The registry tools\ncannot be bearer-authed, so the OAuth flow was driven with the WORKER_API_KEY (dynamic client\nregistration -> consent with the access cookie -> authorization_code -> token), then every tool\ncalled for real. Store 64 = General Plumbing Supply, an actual multi-branch chain. Writes hit the\nSHARED prod D1, so the probe row was deleted at the end and the counts re-verified.\n\n  1. BEFORE — locationCount: 1, locations: [54 '1530 San Luis Road, Walnut Creek, CA 94597' isPrimary=true]\n     legacy store address: '1530 San Luis Rd, Walnut Creek, CA 94597, USA'\n  2. add_showroom_location(storeId 64, San Carlos parts) -> { added: true, locationCount: 2,\n     location: { id: 245, address: '1234 Industrial Rd, San Carlos, CA 94070', isPrimary: false } }\n     XSS probe: notesMarkdown contained a literal <script>alert(1)</script>; stored notesHtml came\n     back '<p>QC probe — <strong>temporary</strong>. &lt;script&gt;alert(1)&lt;/script&gt;</p>' — neutralized.\n  3. AFTER — locationCount: 2, BOTH sites present, legacy store address UNCHANGED (Walnut Creek).\n     This is exactly the field scenario: a second branch added without touching the first.\n  4. Duplicate-placeId guard -> 'placeId ChIJKYfR4p1hhYARQJL7Hb1gg10 is already location 54 of\n     showroom 64 (General Plumbing Supply). That site is already registered — use\n     update_showroom_location to correct it instead of adding a duplicate.'\n  5. list_showrooms({ multiLocationOnly: true }) -> [{ id: 64, name: 'General Plumbing Supply',\n     locationCount: 2 }] — the chain query that previously had no answer.\n  6. update_showroom_location(245, zipCode '94071') -> address re-derived to '…, CA 94071'.\n  7. Last-location guard on a single-site store -> 'Location 37 is the only site on showroom 47.\n     Removing it would leave the business with no address — use delete_showroom to retire the\n     whole store instead.'\n  8. delete_showroom_location(245) -> { deleted: true, remainingLocations: 1 }\n  9. FINAL — locationCount: 1, legacy store address unchanged. State identical to step 1.\n  D1 residue check -> { locs: 244, stores: 244, residue: 0 }\n\nPREVIEW QC SCRIPT (wcrp-claude-showroom-multi-location-mcp) — 22 passed, 0 failed:\n  ✓ /api/mcp-docs 200\n  ✓ catalog returned tools\n  ✓ add_showroom_location registered / has a description / has >=1 example / destructiveHint=false\n  ✓ update_showroom_location registered / has a description / has >=1 example / destructiveHint=false\n  ✓ delete_showroom_location registered / has a description / has >=1 example / destructiveHint=true\n  ✓ get_showroom points agents at add_showroom_location\n  ✓ list_showrooms advertises locationCount / multiLocationOnly\n  ✓ every store has at least one location\n  ✓ no store has duplicate backfill rows\n  ✓ no store without a location\n  ✓ no place_id shared by two locations\n  ✓ primary location city matches legacy store city\n  ✓ /api/showroom-stores still 200\n\nPRODUCTION (pre-merge) — 8 passed, 0 failed:\n  ✓ /api/mcp-docs 200\n  ✓ catalog returned tools\n    add_showroom_location: pending merge/deploy (absent from prod catalog)\n    update_showroom_location: pending merge/deploy (absent from prod catalog)\n    delete_showroom_location: pending merge/deploy (absent from prod catalog)\n    get_showroom description: pending merge/deploy (still the single-address copy)\n  ✓ every store has at least one location\n  ✓ no store has duplicate backfill rows\n  ✓ no store without a location\n  ✓ no place_id shared by two locations\n  ✓ primary location city matches legacy store city\n  ✓ /api/showroom-stores still 200\n\nBACKFILL (applied to remote D1 before the code shipped, since the table was unused):\n  npx wrangler d1 execute core-remodel --remote --file scripts/sql/backfill_showroom_store_locations.sql\n  -> { locs: 244, stores: 244, distinct_stores: 244, with_place: 186 }\n\nBUILD / TYPES:\n  pnpm run build -> Complete (server built in 73.41s)\n  npx tsc --noEmit -> 177 on the branch vs 185 on origin/main. ZERO net-new errors.\n  METHOD NOTE: the first baseline attempt used `git stash -u`, which does NOT remove already-\n  COMMITTED files — so it silently compared the branch against itself and the resulting\n  '178 = 178' was meaningless. The real baseline came from a throwaway `git worktree add\n  --detach origin/main` with node_modules symlinked in, typechecked there, line numbers\n  stripped so an added import does not read as a new error. The 8 errors present on main but\n  not on the branch are .astro/types.d.ts artifacts (d3/three/import.meta.glob) from the\n  baseline tree never having run `astro sync`, not fixes from this PR.\n  formatShowroomAddress self-check (npx tsx): '1234 Industrial Rd, San Carlos, CA 94070' /\n  'Emeryville, CA' / null — all assertions passed.\n\nNO MIGRATIONS in this PR — the table already existed on remote (0145, PR #278). The backfill is\nDATA and was applied separately via the SQL file above.",
-      migrations: [],
-    },
-  },
-  "rooms-area-computed-hotfix": {
-    slug: "rooms-area-computed-hotfix",
-    branch: "claude/fix-rooms-area-computed-hotfix",
-    prNumber: 344,
-    prUrl: "https://github.com/jmbish04/core-remodel/pull/344",
-    subtitle: "Root-cause heal for a prod outage + a shared room-geometry package",
-    introduction:
-      "A production incident and its fix. Every rooms read was 500ing because the deployed schema still declared a column the database no longer had. The fix removes the column from the schema, derives area on read, and consolidates the geometry math into one shared package.",
-    problem:
-      "The shared production D1 already had `rooms.area_sq_ft` dropped (0043 — intentional; area is a stored calculation that goes stale). But deployed `main` still declared `areaSqFt` in the drizzle `rooms` schema, so drizzle listed `area_sq_ft` in the column set of every `select().from(rooms)` and D1 rejected it: `SQLITE_ERROR: table rooms has no column named area_sq_ft`. Blast radius was every rooms read — catalog, images, listing-photos, mood-board, supporting-documents, vision-nodes, materials allocation, pascal generator, measurements.",
-    approach:
-      "Remove `areaSqFt` from the `rooms` drizzle schema — that alone heals every star-`select().from(rooms)`, since drizzle then stops naming the column. Area is derived on read. To keep the derivation identical everywhere (the homeowner's rule: same shape, no per-caller logic), the calculators were modularized into `services/room-geometry` — one module per calc type over shared dimension primitives — and every reader routed through it. Linear feet is provided at three scopes (a wall/segment, a room's rectangular perimeter, a floor / whole-home total); the walls-driven perimeter for non-rectangular rooms lands with the 0043 walls table.",
-    apiChanges: [
-      "mcp `list_rooms` / `get_room`: room output now includes `linearFt` (computed rectangular perimeter) beside `areaSqFt`.",
-      "mcp `update_room`: `areaSqFt` is no longer an accepted input — area is derived, not stored.",
-    ],
-    filesTouched: [
-      "src/backend/db/schema/home/rooms.ts (areaSqFt column removed)",
-      "src/backend/services/room-geometry/{dimensions,area,linear-feet,index}.ts (new package)",
-      "src/backend/services/room-geometry/room-geometry.test.ts (assert self-check)",
-      "src/backend/mcp/tools/rooms/{_shared,list_rooms,get_room,update_room}.ts",
-      "src/backend/services/home-catalog.ts (computeRoomSqft delegates; area backfill + isNull removed)",
-      "src/backend/services/materials/allocate.ts",
-      "src/backend/services/pascal/generator.ts",
-      "src/backend/services/measurements.ts (listActiveRooms)",
-    ],
-    migrations: [],
-    code: [
-      {
-        title: "room-geometry — one module per calc type, shared primitives",
-        lang: "ts",
-        code: "// dimensions.ts — the primitive every calc agrees on\nexport function toFeet(feet: number | null, inches: number | null): number | null {\n  if (feet == null && inches == null) return null;\n  return (feet ?? 0) + (inches ?? 0) / 12;\n}\n// area.ts\nexport const computeRoomAreaSqFt = (r: Dimensions) => {\n  const l = toFeet(r.lengthFeet, r.lengthInches), w = toFeet(r.widthFeet, r.widthInches);\n  return l != null && w != null ? round2(l * w) : null;\n};\n// linear-feet.ts — three scopes: a wall run, a room perimeter, a floor/home total\nexport const computeRoomLinearFt = (r: Dimensions) => {\n  const l = toFeet(r.lengthFeet, r.lengthInches), w = toFeet(r.widthFeet, r.widthInches);\n  return l != null && w != null ? round2(2 * (l + w)) : null;\n};",
-      },
-    ],
-    diagrams: [
-      {
-        caption: "Why every rooms read 500'd — and where the fix cuts it",
-        title: "Schema vs. database drift",
-        code: "flowchart TD\n  A[deployed main: rooms schema still declares areaSqFt] --> B[select().from(rooms) lists area_sq_ft]\n  B --> C[(prod D1: rooms has NO area_sq_ft — dropped by 0043)]\n  C --> D[SQLITE_ERROR: no such column -> 500]\n  D --> E[every rooms read fails: catalog, images, materials, pascal, measurements...]\n  F[FIX: remove areaSqFt from schema] -.heals.-> B\n  G[derive area/linear-ft on read via room-geometry] -.-> H[200, computed shape]\n  classDef fix fill:#1f4d2e,stroke:#4ade80\n  classDef bad fill:#4d1f1f,stroke:#f87171\n  class F,G,H fix\n  class D,E bad",
-      },
-    ],
-    verification: {
-      qcScript: "scripts/qc/pr_343.mjs",
-      command: "pnpm run deploy  (from main, after merge) ; curl /api/rooms/catalog",
-      source:
-        "// Also: npx tsx src/backend/services/room-geometry/room-geometry.test.ts (assert self-check).",
-      output:
-        "Deployed to prod, version c8101a8e (100%). GET /api/rooms/catalog -> 200, success:true (was 500). room-geometry.test.ts — all assertions passed. Build + tsc(touched) clean. NOTE: the pre-fix 500 was briefly served from Cloudflare's edge cache after deploy; cache-busted requests returned 200 immediately and the bare URL refreshed to 200. Follow-up filed to make 5xx non-cacheable.",
-      migrations: [],
-    },
-  },
-  "homeowner-room-model-0043": {
-    slug: "homeowner-room-model-0043",
-    branch: "claude/homeowner-experience-plan-v2",
-    prNumber: 343,
-    prUrl: "https://github.com/jmbish04/core-remodel/pull/343",
-    subtitle: "0041/0043 room model + one transparent measurement shape per room",
-    introduction:
-      "The homeowner-experience schema foundation (0041/0043): a real room model — walls with openings, per-room measurements and notes, a decisions/impacts ripple graph, surface assemblies, spec definitions, trades and permits — plus a single resolver that hands every consumer the same, fully transparent measurement shape. Recovered and rebased after a power-loss interrupted the branch and it drifted 40 commits behind main.",
-    problem:
-      "Two problems. (1) Area was a STORED column on rooms (rooms.area_sq_ft) — a cached calculation that silently goes stale the moment a dimension changes, and a magnet for denormalized drift. (2) The original branch fell 40 commits behind main, and its migrations 0162–0171 collided BY NUMBER with the 0162–0168 main had added in parallel (different migrations, same numbers), so a normal rebase conflicted on drizzle meta at nearly every one of 28 commits.",
-    approach:
-      "Area becomes computed, never stored: rooms.area_sq_ft is dropped and measurement-view.ts resolves each room to ONE shape that is total and transparent — it returns the computed rectangle AND any override AND the override's provenance (notes + how it was calculated), the perimeter with a NAMED source (real walls win for any shape > measured perimeter > labelled rectangular estimate > unavailable), the effective area with its source, and a confidence — with absent data as null, never a missing key, and nothing hidden behind an if/else. For the divergence, rather than fight the rebase, the schema/service/docs were ported onto current main and the 10 colliding migrations were consolidated into ONE fresh catch-up migration (0169) generated against main's own snapshot, then reviewed to confirm it contains only this branch's delta.",
-    apiChanges: [
-      "measurementView(room, walls, measurements) — pure resolver, no endpoint of its own yet (the 0043 HTTP/MCP read layer is deferred); it is the canonical assembler those routes will call.",
-      "list_rooms / get_room / update_room (MCP) — areaSqFt is now a COMPUTED output field; update_room rejects it as an input (area is not settable).",
-    ],
-    filesTouched: [
-      "src/backend/services/homeowner/measurement-view.ts (new)",
-      "src/backend/services/homeowner/measurement-view.test.ts (new, mutation-checked)",
-      "src/backend/db/schema/home/room_measurements.ts (area_sq_ft_override_notes + _calculation)",
-      "src/backend/db/schema/home/rooms.ts (area_sq_ft removed)",
-      "src/backend/db/schema/index.ts (barrel — 3-way merged with main)",
-      "src/backend/services/home-catalog.ts (stops writing rooms.area_sq_ft)",
-      "src/backend/mcp/tools/rooms/* (computed areaSqFt)",
-      "drizzle/0169_organic_dragon_lord.sql (consolidated catch-up)",
-      "docs/0041_*, docs/0043_*, docs/0044_* (planning bundles)",
-    ],
-    migrations: [
-      {
-        tag: "0169_organic_dragon_lord",
-        sql: "-- consolidated catch-up (47 CREATE TABLE + 4 ADD COLUMN + 1 DROP), excerpt:\nALTER TABLE `rooms` ADD `line_color_hex` text;\nALTER TABLE `rooms` ADD `line_order` integer;\nALTER TABLE `rooms` DROP COLUMN `area_sq_ft`;\n-- room_measurements override provenance:\nALTER TABLE `room_measurements` ADD `area_sq_ft_override_notes` text;\nALTER TABLE `room_measurements` ADD `area_sq_ft_override_calculation` text;",
-      },
-    ],
-    code: [
-      {
-        title: "measurement-view.ts — one shape, no IFTTT: computed + override + provenance always present",
-        lang: "ts",
-        code: "// Perimeter precedence is NAMED, never anonymous: real walls win (correct for\n// any shape) > measured perimeter > labelled rectangular estimate > unavailable.\nexport type PerimeterSource =\n  | \"walls\" | \"measured\" | \"rectangular_estimate\" | \"unavailable\";\n\nexport interface MeasurementView {\n  walls: WallView[];\n  computeAreaSqFt: number | null;      // the rectangle we can always derive\n  areaSqFtOverride: number | null;     // human-authoritative, when present\n  areaSqFtOverrideNotes: string | null;\n  areaSqFtOverrideCalculation: string | null;\n  computeLinearFt: number | null;\n  perimeterSource: PerimeterSource;    // always set — no anonymous number\n  effectiveAreaSqFt: number | null;    // override ?? computed\n  effectiveAreaSource: \"override\" | \"computed\" | \"unavailable\";\n  confidence: \"high\" | \"medium\" | \"low\";\n}\n// Consumer sees the computed value AND the override AND why they differ, and\n// decides. Absent data is null, never a missing key.",
-      },
-    ],
-    diagrams: [
-      {
-        caption: "0169 schema delta — the room model (ERD, abridged)",
-        title: "What the catch-up migration adds",
-        code: "erDiagram\n  rooms ||--o{ walls : has\n  rooms ||--o{ room_measurements : has\n  rooms ||--o{ room_notes : has\n  walls ||--o{ wall_openings : has\n  walls ||--o{ wall_face_segments : has\n  rooms }o--|| projects : belongs_to\n  rooms ||--o{ room_trade_assignments : has\n  rooms ||--o{ room_permit_mapping : has\n  rooms ||--o{ decisions : has\n  decisions ||--o{ impacts : triggers\n  rooms {\n    int id PK\n    text line_color_hex \"new\"\n    int line_order \"new\"\n    real area_sq_ft \"DROPPED — computed, not stored\"\n  }\n  room_measurements {\n    int id PK\n    int room_id FK\n    real area_sq_ft_override\n    text area_sq_ft_override_notes \"new\"\n    text area_sq_ft_override_calculation \"new\"\n  }",
-      },
-      {
-        caption: "measurementView() resolution — total shape, precedence is named",
-        title: "How one room resolves",
-        code: "flowchart TD\n  A[room + walls + measurements] --> B[measurementView]\n  B --> C{real walls?}\n  C -->|yes| D[perimeter = walls]\n  C -->|no, measured| E[perimeter = measured]\n  C -->|no| F[perimeter = rectangular_estimate]\n  D --> G[effectiveArea = override ?? computed]\n  E --> G\n  F --> G\n  G --> H[return: computed + override + provenance + named source + confidence]\n  classDef drop fill:#4d1f1f,stroke:#f87171\n  classDef new fill:#1f4d2e,stroke:#4ade80",
-      },
-    ],
-    verification: {
-      qcScript: "scripts/qc/pr_343.mjs",
-      command: "npx tsx src/backend/services/homeowner/measurement-view.test.ts",
-      source:
-        "// Mutation-checked: broke the walls-win perimeter precedence, confirmed the\n// test failed, then restored — so the test actually bites.",
-      output:
-        "measurement-view.test.ts — PASS (resolver returns identical shape for every room; override-wins and walls-win precedence asserted). QC pr_343.mjs regression run against prod: pending (no wrangler auth this session).",
-      migrations: [
-        {
-          tag: "0169_organic_dragon_lord",
-          appliedRemote: false,
-          note: "NOT applied to remote. Additive DDL is idempotent-safe under scripts/d1-migrate.mjs, but the rooms.area_sq_ft DROP must ride the MERGE deploy — prod code still writes that column, and the D1 is shared with live prod. Applying from the unmerged branch would break production.",
-        },
-      ],
     },
   },
   "store-quote-product-map": {
@@ -1733,7 +1546,14 @@ tsc --noEmit clean (176 = baseline, 0 new in the touched files). No schema chang
       {
         title: "The widened gate (access.ts)",
         lang: "ts",
-        code: `export async function isRequestAuthenticated(request: Request, env: Env): Promise<boolean> {
+        code: `/**
+ * Determines if a request is authenticated by checking for a valid cookie or API key header.
+ *
+ * @param request The incoming HTTP request.
+ * @param env The environment bindings.
+ * @returns True if the request is authenticated, false otherwise.
+ */
+export async function isRequestAuthenticated(request: Request, env: Env): Promise<boolean> {
   const apiKey = (await env.WORKER_API_KEY.get())?.trim() || "";
   if (!apiKey) return false;
   // 1) raw key via header (codra / QC)
@@ -1897,6 +1717,13 @@ tsc --noEmit clean (176 = baseline, 0 new in the touched files). No schema chang
   navigateOnExpand?: boolean; // parent link that navigates AND expands
 };
 
+/**
+ * Checks if a sidebar item or any of its children are currently active based on the path.
+ *
+ * @param currentPath The current application path.
+ * @param item The sidebar item to check.
+ * @returns True if the item or a child is active, false otherwise.
+ */
 export function isItemActive(currentPath: string, item: SidebarItem): boolean {
   if (item.href && isPathActive(currentPath, item.href)) return true;
   return (item.children ?? []).some((c) => isItemActive(currentPath, c));
@@ -2821,7 +2648,12 @@ const deleteIds = sorted.slice(1).map(r => r.id);`,
       {
         title: "Bootstrap-only guard — seed-showroom-stores.ts",
         lang: "ts",
-        code: `export async function seedShowroomStores(db: DrizzleD1Database) {
+        code: `/**
+ * Seeds the showroom stores table with initial data if it is empty.
+ *
+ * @param db The Drizzle database instance.
+ */
+export async function seedShowroomStores(db: DrizzleD1Database) {
   const stores = getStoreData();
 
   // Bootstrap-only + idempotent. This seed inserts a FIXED list with no natural
@@ -2911,6 +2743,12 @@ const deleteIds = sorted.slice(1).map(r => r.id);`,
         code: `// _shared.ts — THE only place showroom coordinates are read for proximity.
 // When location data moves off showroom_stores, change this query and every
 // proximity caller (whats_near_me, the P4 park-scan) follows automatically.
+/**
+ * Loads the coordinates for all active showrooms for proximity calculations.
+ *
+ * @param db The database instance.
+ * @returns A promise that resolves to an array of showroom coordinates.
+ */
 export async function loadShowroomCoords(db: RemodelDb): Promise<ShowroomCoord[]> {
   const rows = await db
     .select({
@@ -3437,6 +3275,11 @@ const step = ledgerSteps(rawStep, run);
 //
 // A wrong number on a cost page is worse than no number, because nobody
 // double-checks a number that looks plausible.
+/**
+ * Retrieves the current agent run ID from async local storage.
+ *
+ * @returns The current agent run ID, or null if not in an agent run context.
+ */
 export function currentAgentRunId(): number | null {
   return storage.getStore()?.runId ?? null;
 }`,
@@ -3697,7 +3540,13 @@ CREATE UNIQUE INDEX \`drive_lists_single_active_uniq\` ON \`drive_lists\` (\`is_
       {
         title: "One write path — clear + set in a single D1 batch",
         lang: "ts",
-        code: `export async function setActiveDrive(db: RemodelDb, id: number | null): Promise<void> {
+        code: `/**
+ * Sets the active drive by clearing the current active drive and setting the new one.
+ *
+ * @param db The database instance.
+ * @param id The ID of the drive to set as active, or null to clear the active drive.
+ */
+export async function setActiveDrive(db: RemodelDb, id: number | null): Promise<void> {
   const clear = db
     .update(driveLists)
     .set({ isActive: false, updatedAt: new Date() })
@@ -3731,7 +3580,13 @@ const state = await getVehicleState(env);   // GET /{vin}/state?use_cache=true`,
       {
         title: "Getting home ends the drive — every gate, cheapest first",
         lang: "ts",
-        code: `export function homeArrivalReason(facts: {
+        code: `/**
+ * Determines the reason for home arrival based on current facts.
+ *
+ * @param facts The facts about the current state.
+ * @returns The reason for home arrival, or null if not arrived.
+ */
+export function homeArrivalReason(facts: {
   hasActiveDrive: boolean;
   stopped: boolean;
   at: Date;
@@ -3747,7 +3602,13 @@ const state = await getVehicleState(env);   // GET /{vin}/state?use_cache=true`,
       {
         title: "Tabs bucket on progress, never on status",
         lang: "tsx",
-        code: `function bucketOf(d: DriveListSummary): Bucket {
+        code: `/**
+ * Determines the progress bucket for a drive list.
+ *
+ * @param d The drive list summary.
+ * @returns The progress bucket (pending, partial, or finished).
+ */
+function bucketOf(d: DriveListSummary): Bucket {
   if (d.stopCount > 0 && d.visitedCount >= d.stopCount) return "finished";
   return d.visitedCount > 0 ? "partial" : "pending";
 }`,
@@ -4114,7 +3975,14 @@ homeArrivalReason
       {
         title: "The fourth state — closed now, but open again later today",
         lang: "ts",
-        code: `export function computeOpenBadge(hours: HourRow[], now: PstNow): OpenBadge | null {
+        code: `/**
+ * Computes the open badge state based on store hours and the current time.
+ *
+ * @param hours The store's operating hours.
+ * @param now The current time in PST.
+ * @returns The open badge state, or null if hours are unavailable.
+ */
+export function computeOpenBadge(hours: HourRow[], now: PstNow): OpenBadge | null {
   if (!hours || hours.length === 0) return null;
   const row = rowForDay(hours, now.day);
   if (row) {
@@ -4569,7 +4437,13 @@ if (href === "/admin/changelog") {
       {
         title: "Derive hoursJson from the rows (response back-compat)",
         lang: "ts",
-        code: `export function rowsToHoursJson(rows): HoursJsonColumn {
+        code: `/**
+ * Rebuilds the legacy hours JSON structure from normalized hour rows.
+ *
+ * @param rows The normalized hour rows.
+ * @returns The legacy hours JSON object.
+ */
+export function rowsToHoursJson(rows): HoursJsonColumn {
   const out = { mon: null, tue: null, wed: null, thu: null, fri: null, sat: null, sun: null };
   for (const r of rows) {
     const key = ENUM_TO_DAY_KEY[r.day];
@@ -4641,8 +4515,21 @@ if (href === "/admin/changelog") {
       {
         title: "Parse Google addressComponents → granular parts",
         lang: "ts",
-        code: `export function parseGoogleAddressComponents(data): ParsedAddress {
+        code: `/**
+ * Parses Google Maps address components into a granular address structure.
+ *
+ * @param data The Google Maps place data containing address components.
+ * @returns The parsed granular address.
+ */
+export function parseGoogleAddressComponents(data): ParsedAddress {
   const comps = data.addressComponents ?? [];
+  /**
+   * Helper to pick a specific address component type.
+   *
+   * @param type The component type to find.
+   * @param short Whether to return the short text instead of long text.
+   * @returns The component text, or null if not found.
+   */
   const pick = (type, short = false) => {
     const c = comps.find((x) => x.types?.includes(type));
     return c ? (short ? c.shortText : c.longText) : null;
@@ -4705,7 +4592,13 @@ if (href === "/admin/changelog") {
       {
         title: "Responses derive the legacy flat fields from links",
         lang: "ts",
-        code: `export function linksToLegacyUrls(links: StoreLinkRow[]): LegacyStoreUrls {
+        code: `/**
+ * Derives legacy flat URL fields from the new normalized links table.
+ *
+ * @param links The store's normalized links.
+ * @returns An object containing the legacy flat URL fields.
+ */
+export function linksToLegacyUrls(links: StoreLinkRow[]): LegacyStoreUrls {
   return {
     websiteUrl: firstOfType(links, "WEBSITE"),
     instagramUrl: firstOfType(links, "INSTAGRAM"),
@@ -4769,6 +4662,12 @@ if (href === "/admin/changelog") {
         title: "Split a mixed phone string into labeled numbers",
         lang: "ts",
         code: `// "(510) 809-5741 cell · (510) 447-5016 direct · (510) 236-7960 office"
+/**
+ * Parses a raw phone string into labeled phone numbers.
+ *
+ * @param raw The raw phone string to parse.
+ * @returns An object containing the parsed labeled phone numbers.
+ */
 export function parsePhoneField(raw): LabeledPhones {
   // → mobile: cell/mobile, office: direct/desk, general: office/main (store line), fax
   //   The general number is routed to the store's GENERAL_CONTACT, not the person.
@@ -4845,7 +4744,15 @@ export function parsePhoneField(raw): LabeledPhones {
       {
         title: "Match a sender to a showroom by domain / name",
         lang: "ts",
-        code: `async function matchShowroomStore(senderEmail, senderName, env) {
+        code: `/**
+ * Matches an email sender to a showroom store by domain or name.
+ *
+ * @param senderEmail The email address of the sender.
+ * @param senderName The name of the sender.
+ * @param env The environment bindings.
+ * @returns The matched showroom store ID, or undefined if no match is found.
+ */
+async function matchShowroomStore(senderEmail, senderName, env) {
   const domain = senderEmail.split("@")[1]?.toLowerCase();
   if (domain && !PUBLIC_EMAIL_DOMAINS.has(domain)) {
     const [link] = await db.select({ storeId: showroomStoreLinks.storeId })

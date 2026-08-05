@@ -1,0 +1,31 @@
+{
+  "slug": "pascal-core-remodel-integration",
+  "title": "Pascal Core-Remodel Rendering Integration",
+  "hasDesignSpec": true,
+  "phases": [
+    { "key": "P0", "title": "Contract and screenshot spike" },
+    { "key": "P1", "title": "Durable scene wire" },
+    { "key": "P2", "title": "Measured generator and MCP" },
+    { "key": "P3", "title": "AI edits, comparison, and capture" },
+    { "key": "P4", "title": "Layout Studio and documentation" }
+  ],
+  "tasks": [
+    { "taskKey": "P0-HANDOFF-02", "phase": "P0", "workstream": "contract", "changeType": "investigate", "dependsOn": [], "status": "done", "title": "Align to editor PR #1 contract and confirm deep-link environment", "successCriteria": "Worker shapes mirror the editor contract and the server-only API URL and token flow are documented." },
+    { "taskKey": "P0-SPIKE-01", "phase": "P0", "workstream": "rendering", "changeType": "investigate", "dependsOn": ["P0-HANDOFF-02"], "status": "done", "title": "Spike Browser Rendering screenshot of a live WebGPU scene", "successCriteria": "Browser capture is attempted and an editor canvas fallback exists for blank or unsupported WebGPU output." },
+    { "taskKey": "P1-SCHEMA-01", "phase": "P1", "workstream": "database", "changeType": "new", "dependsOn": ["P0-HANDOFF-02"], "status": "done", "title": "Add the Pascal Drizzle schema and remote migration", "successCriteria": "Slug identifiers, version rollups, provenance, snapshots, and scene events are durable and verified remotely." },
+    { "taskKey": "P1-SHAPES-02", "phase": "P1", "workstream": "api", "changeType": "new", "dependsOn": ["P0-HANDOFF-02"], "status": "done", "title": "Mirror the editor wire shapes with Zod", "successCriteria": "SceneMeta, SceneWithGraph, ProjectStatus, and SceneEvent match editor PR #1." },
+    { "taskKey": "P1-REST-03", "phase": "P1", "workstream": "api", "changeType": "new", "dependsOn": ["P1-SCHEMA-01", "P1-SHAPES-02"], "status": "done", "title": "Implement the Pascal v1 scene router", "successCriteria": "The frozen nine-route wire supports optimistic versions and typed 409, 404, 413, and 400 errors." },
+    { "taskKey": "P1-QC-04", "phase": "P1", "workstream": "qc", "changeType": "new", "dependsOn": ["P1-REST-03"], "status": "done", "title": "Verify the editor wire on preview and production", "successCriteria": "The route contract and version-conflict behavior pass the dedicated QC harness." },
+    { "taskKey": "P2-GEN-01", "phase": "P2", "workstream": "services", "changeType": "new", "dependsOn": ["P1-REST-03"], "status": "done", "title": "Generate a measured rectangular Pascal base graph", "successCriteria": "Room dimensions are exact, bbox placement is deterministic, and approximation provenance is explicit." },
+    { "taskKey": "P2-MCP-02", "phase": "P2", "workstream": "mcp", "changeType": "new", "dependsOn": ["P2-GEN-01"], "status": "done", "title": "Add the core Pascal MCP tool domain", "successCriteria": "Claude can create projects and studies, generate and fully read variants, list state, and obtain editor links." },
+    { "taskKey": "P3-EDIT-01", "phase": "P3", "workstream": "mcp", "changeType": "new", "dependsOn": ["P2-MCP-02"], "status": "done", "title": "Support granular and whole-graph writes", "successCriteria": "AI can update any Pascal node or replace a graph with version and reference validation." },
+    { "taskKey": "P3-AI-01", "phase": "P3", "workstream": "ai", "changeType": "new", "dependsOn": ["P3-EDIT-01"], "status": "done", "title": "Generate intent-driven variants", "successCriteria": "Structured edits branch from a chosen scene and preserve lineage, bounds, and provenance." },
+    { "taskKey": "P3-AI-02", "phase": "P3", "workstream": "ai", "changeType": "new", "dependsOn": ["P3-EDIT-01"], "status": "done", "title": "Verify intent-driven variant generation", "successCriteria": "The intent path returns a valid graph and a durable child scene." },
+    { "taskKey": "P3-CMP-02", "phase": "P3", "workstream": "services", "changeType": "new", "dependsOn": ["P3-AI-01"], "status": "done", "title": "Compare layout variants", "successCriteria": "Comparison returns graph, rendering, measurement, lineage, and snapshot evidence." },
+    { "taskKey": "P3-CMP-03", "phase": "P3", "workstream": "mcp", "changeType": "new", "dependsOn": ["P3-CMP-02"], "status": "done", "title": "Expose comparison through MCP", "successCriteria": "Claude can request the same comparison contract used by the admin UI." },
+    { "taskKey": "P3-SHOT-03", "phase": "P3", "workstream": "rendering", "changeType": "new", "dependsOn": ["P0-SPIKE-01", "P3-EDIT-01"], "status": "done", "title": "Capture Pascal scene screenshots", "successCriteria": "Browser Rendering uploads a thumbnail to Cloudflare Images or returns the supported fallback path." },
+    { "taskKey": "P3-SHOT-04", "phase": "P3", "workstream": "api", "changeType": "new", "dependsOn": ["P3-SHOT-03"], "status": "done", "title": "Expose screenshot capture and editor fallback", "successCriteria": "Worker capture and editor canvas uploads both create durable snapshot evidence." },
+    { "taskKey": "P4-UI-01", "phase": "P4", "workstream": "frontend", "changeType": "new", "dependsOn": ["P3-CMP-02", "P3-SHOT-04"], "status": "in_review", "prNumber": 342, "title": "Build the Pascal Layout Studio", "successCriteria": "Projects, studies, measured and branched variants, comparison, snapshot, rename, archive, provenance, deep links, and all four UI states work through the shared product workflow." },
+    { "taskKey": "P4-DOCS-02", "phase": "P4", "workstream": "docs", "changeType": "update", "dependsOn": ["P4-UI-01"], "status": "in_review", "prNumber": 342, "title": "Verify tool cards and publish changelog evidence", "successCriteria": "Pascal tool cards are present on /connect/tools, the PR QC script passes on preview, and the changelog includes architecture and workflow diagrams." }
+  ]
+}
