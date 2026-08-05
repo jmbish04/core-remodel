@@ -42,7 +42,7 @@ export async function captureSceneScreenshot(
 ): Promise<CaptureResult> {
   // SSRF guard: only ever render the configured Pascal editor origin — never an
   // arbitrary caller-supplied URL through the Browser Rendering binding.
-  const editorBase = (env as { PASCAL_EDITOR_URL?: string }).PASCAL_EDITOR_URL ?? "https://3d-remodel.vercel.app";
+  const editorBase = env.PASCAL_EDITOR_URL;
   const allowedOrigin = new URL(editorBase).origin;
   if (new URL(sceneUrl).origin !== allowedOrigin) {
     throw new Error("Refusing to capture a URL outside the Pascal editor origin");

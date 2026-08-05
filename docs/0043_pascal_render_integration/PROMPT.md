@@ -65,7 +65,7 @@ Two agents, two repos. Section A = this worker (`core-remodel`). Section B = the
 >   **Run the Phase-0 spike first** — if headless WebGPU capture is blank, implement the editor-capture
 >   fallback endpoint instead (`POST /api/pascal/v1/scenes/:id/snapshot`, editor posts PNG bytes).
 >
-> **Phase 4 — admin UI + docs.** `/admin/pascal` per DESIGN_SPEC (page shell, PlateJS descriptions,
+> **Phase 4 — admin UI + docs.** `/admin/plan/3d` per DESIGN_SPEC (page shell, PlateJS descriptions,
 > reused primitives). Verify `/connect/tools` cards. Changelog branch + entries + detail page +
 > `verification` block with real QC output. New secret: `PASCAL_SCENE_SIGNING_KEY` is **not** needed
 > (server-to-server WORKER_API_KEY); add `PASCAL_EDITOR_URL` var.

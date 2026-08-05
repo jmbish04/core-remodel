@@ -1,4 +1,4 @@
-# 0043 — DESIGN_SPEC: `/admin/pascal`
+# 0043 — DESIGN_SPEC: `/admin/plan/3d`
 
 Frontend brief for the Core-Remodel admin surface. Built by Claude Code + Claude AI Design against
 this hand-off. Dark Monolith theme, shadcn (Base UI primitives — `render={<a/>}`, not `asChild`;
@@ -14,7 +14,7 @@ the Pascal editor, see snapshot thumbnails, and compare variants in a study side
 
 ```mermaid
 flowchart TD
-  P["/admin/pascal — projects list"] --> PD["/admin/pascal/:projectId — studies"]
+  P["/admin/plan/3d — projects list"] --> PD["?project=:projectId — studies"]
   PD --> SD["study panel — variant grid"]
   SD --> VC[variant card: thumbnail, dims, status]
   VC --> OPEN[Open in editor ↗ deep-link]
@@ -23,14 +23,14 @@ flowchart TD
 
 ## Screens & states
 
-### 1. Projects index — `/admin/pascal`
+### 1. Projects index — `/admin/plan/3d`
 - Header: floorplan/layout lucide icon + "Layout Studio" + one-line description.
 - Grid of **project cards**: name, scope chip (`floor`/`room`/`whole home`), study count, variant
   count, last-modified, latest thumbnail.
 - Empty state: "No layout projects yet — create one from a floor or room." + primary action.
 - Loading: skeleton cards. Error: inline alert + retry.
 
-### 2. Project detail — `/admin/pascal/:projectId`
+### 2. Project detail — `/admin/plan/3d?project=:projectId`
 - Breadcrumb + project header (scope, linked floor/room name via join — never a stored name).
 - **Study accordion / sections**, each: title + description, "Compare" button, variant grid.
 - "New study" (title + description form — `title` required).
