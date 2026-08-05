@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## Repository Overview
-This repository (`jmbish04/core-remodel`) is an Astro shadcn/ui template. It uses Astro for the web framework, Tailwind CSS for styling, and shadcn/ui for frontend components.
+This repository (`area44/astro-shadcn-ui-template`) is an Astro shadcn/ui template. It uses Astro for the web framework, Tailwind CSS for styling, and shadcn/ui for frontend components.
 The default branch is `main`.
 
 ## Build, Test, and Lint Commands
