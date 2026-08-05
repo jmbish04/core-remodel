@@ -1,6 +1,6 @@
 # API Endpoints
 
-[Return to API Index](../api.md)
+[Return to Index](../README.md) | [Return to Parent](../api.md)
 
 This section documents the backend API endpoints provided by the Cloudflare Worker.
 

@@ -1,7 +1,7 @@
 # AGENTS.md
 
 ## Repository Overview
-This repository (`jmbish04/core-remodel`) is an Astro shadcn/ui template. It uses Astro for the web framework, Tailwind CSS for styling, and shadcn/ui for frontend components.
+This repository (`jmbish04/core-remodel`) is a complex monorepo running on Cloudflare Workers featuring Astro, Tailwind CSS, shadcn/ui, D1 databases, MCP tools, and AI governance. It acts as the mission control and shared source of truth for contractors, designers, and homeowners to review existing conditions, inspiration, and in-progress remodel decisions.
 The default branch is `main`.
 
 ## Build, Test, and Lint Commands
