@@ -576,9 +576,11 @@ export function BudgetGridApp() {
     }
     return [
       {
+        // Signed: a negative available balance (burn past funding) must read
+        // as negative, and turn red via the signed footer styling.
         label: "Available budget",
         values: availableBudget(fundingCents, monthActualTotals),
-        signed: false,
+        signed: true,
       },
       { label: "Net burn", values: netBurn(monthActualTotals), signed: true },
     ];
@@ -645,11 +647,16 @@ export function BudgetGridApp() {
             </Scorecard>
             <Scorecard
               label="Remaining"
-              value={formatUsd(sc.remainingCents)}
+              value={formatSignedUsd(sc.remainingCents)}
               sub={
-                <span className={sc.remainingCents < 0 ? "text-destructive" : "text-emerald-500"}>
-                  {sc.remainingCents < 0 ? "Over budget" : "On track"}
-                </span>
+                sc.totalBudgetCents === 0 ? (
+                  // No funding configured — there's no budget to be "over".
+                  <span className="text-muted-foreground">No funding set</span>
+                ) : (
+                  <span className={sc.remainingCents < 0 ? "text-destructive" : "text-emerald-500"}>
+                    {sc.remainingCents < 0 ? "Over budget" : "On track"}
+                  </span>
+                )
               }
             />
             <Scorecard
