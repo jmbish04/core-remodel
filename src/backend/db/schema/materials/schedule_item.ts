@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
+import { materialTypeDef } from "./material_type_def";
 import { rooms } from "../home/rooms";
 
 /**
@@ -30,6 +31,17 @@ export const materialScheduleItems = sqliteTable("material_schedule_items", {
   // derive from the linked product via `productId` → products → brands. Never
   // store denormalized brand/model on the material.
   notes: text("notes"),
+
+  /**
+   * The material's KIND (0043 §5c). Carries scope granularity, takeoff unit and
+   * default waste factor via `material_type_def`, so a scheduled material knows
+   * how it is counted and quoted. Nullable and added via ADD COLUMN — a nullable
+   * column add does NOT rebuild the table, so existing rows and their children
+   * are untouched. Backfilled by the service layer as materials are typed.
+   */
+  materialTypeId: integer("material_type_id").references(() => materialTypeDef.id, {
+    onDelete: "set null",
+  }),
 
   /**
    * How many identical units this material represents in its one room. Null = 1.

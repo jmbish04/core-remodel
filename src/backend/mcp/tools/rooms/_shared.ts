@@ -1,4 +1,5 @@
 import { rooms } from "@backend/db";
+import { computeRoomAreaSqFt, computeRoomLinearFt } from "@backend/services/room-geometry";
 
 /**
  * Shape a room row for tool output (dimensions folded into a readable string).
@@ -8,6 +9,10 @@ import { rooms } from "@backend/db";
  * denormalized name columns"). It matters for deduction: "Upper Level" vs
  * "Lower Level" is what separates the upstairs hall bath from the downstairs
  * guest bath.
+ *
+ * `areaSqFt` / `linearFt` are DERIVED from the dimensions on the fly by the
+ * room-geometry calculators — 0043 removed the stored `rooms.area_sq_ft` column
+ * because a cached calculation goes stale the moment a dimension changes.
  */
 export function roomDto(r: typeof rooms.$inferSelect, floorName: string | null) {
   const dim =
@@ -22,7 +27,8 @@ export function roomDto(r: typeof rooms.$inferSelect, floorName: string | null) 
     floorName,
     asIsUse: r.asIsUse,
     dimensions: dim,
-    areaSqFt: r.areaSqFt,
+    areaSqFt: computeRoomAreaSqFt(r),
+    linearFt: computeRoomLinearFt(r),
     isLivingSpace: r.isLivingSpace,
   };
 }

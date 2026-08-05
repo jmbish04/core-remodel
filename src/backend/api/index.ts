@@ -128,6 +128,27 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 // Middleware
 app.use("*", cors());
 app.use("*", logger());
+
+// Error responses must never be cached at the edge. A cached 5xx masks an
+// incident and keeps serving the failure after a fix deploys — observed on
+// GET /api/rooms/catalog, where a 500 stayed cached until its key expired while
+// the fix was already live. Stamp `no-store` on every 4xx/5xx that a route
+// RETURNS; thrown errors are handled by app.onError below.
+app.use("*", async (c, next) => {
+  await next();
+  if (c.res.status >= 400) {
+    c.res.headers.set("Cache-Control", "no-store");
+  }
+});
+
+// A thrown/unhandled error bypasses the middleware above, so guarantee the same
+// no-store on the 500 it produces (and give a JSON body instead of Hono's plain
+// text default).
+app.onError((err, c) => {
+  console.error("Unhandled API error:", err);
+  c.header("Cache-Control", "no-store");
+  return c.json({ error: "Internal server error" }, 500);
+});
 app.use("/api/admin/*", requireAccessAuth);
 // ClickUp task mirror (0009): admin-only — API token + task mutations behind auth.
 app.use("/api/clickup", requireAccessAuth);

@@ -58,37 +58,6 @@ its claims against `origin/main` before acting — those notes reflect the tree 
 it was, and the named files, routes, and components may have moved or been
 replaced.
 
-## Task hygiene — keep the D1 board current (MANDATORY)
-
-**The plan tables are only worth anything if they reflect reality, and they only
-reflect reality if every session updates them.** They have been seeded and then
-left to rot before; that is the exact failure this rule exists to stop.
-
-- **Before starting plan work,** read your phase's open tasks — `get_feature_proposal`
-  (MCP, returns the live tasks), or `GET /api/admin/plans/<slug>`. Mark what you
-  begin `in_progress`.
-- **Tick every task as you work it, with `update_plan_task` (MCP).** This is the
-  one that keeps the user in the loop: the preview changelog at
-  `/admin/changelog/preview/<slug>` holds a websocket to the plan's room AND polls,
-  so the moment you call `update_plan_task` the phase-grouped board there updates
-  **live for the user — no refresh needed.** The cadence:
-  - pick it up → `status: "in_progress"`
-  - open the PR → `status: "in_review"`, `prNumber: <n>`  (the board shows the phase
-    as "complete pending PR" and stamps a PR chip on the task)
-  - it merges → `status: "done"`, `prNumber: <n>`
-  Update tasks one PR/phase at a time as you go; don't batch it to the end. A
-  `plan_tasks` row left at `pending` after its work merged is a lie the next
-  session will trust, and it leaves the user staring at a stale board.
-- **Discover new work → file it** by re-filing the proposal with the extra rows
-  (`submit_feature_proposal` upserts tasks by `taskKey`; it will NOT reset a status
-  you already advanced). Prose is not a backlog.
-- **"Done" is not a status.** A phase is complete when its task rows say so —
-  each `done` and PR-linked, or explicitly `blocked`/`deferred` with a reason.
-
-This is not bookkeeping for its own sake: the preview changelog viewer, `/admin/plans`,
-the velocity dashboard, and the AI program-manager (0028) all read these rows as
-ground truth. `update_plan_task` and `PATCH /api/admin/plans/tasks/:id` both fan out a
-realtime poke, so either write path keeps an open viewer live.
 
 ## LAST ACTION OF EVERY TURN — you own the deploy (MANDATORY)
 
@@ -255,6 +224,15 @@ changelog detail page's `diagrams[]` (`{ caption, code }`, `PhaseDetail` in
 **Colour-code state** where it aids the read (done vs pending vs risk), e.g.
 `classDef done fill:#1f4d2e,stroke:#4ade80`. Keep node labels short; let the shapes and
 arrows carry the structure. If a section can be a diagram, it should be one.
+
+## Build, Test, & Linting (MANDATORY)
+Autonomous agents must know and run these checks before concluding their work:
+- `pnpm install` — install dependencies.
+- `pnpm dev` or `pnpm start` — run the local dev server.
+- `pnpm run build` — build the Astro project.
+- `pnpm run fmt` — run `oxfmt` formatter.
+- `pnpm run lint` — run `oxlint` linter.
+- `pnpm run check` — run both lint and fmt checks (and `check-do-alarms.mjs`).
 
 ## System Identity & Role Enforcements
 You are an elite Senior Engineer operating within the Google Antigravity IDE framework. Your primary objective is shipping high-performance, self-healing architectures across the Cloudflare Ecosystem.
@@ -1064,3 +1042,12 @@ This bundled data is the seed + SSR fallback. The source of truth is D1: after d
 `POST /api/changelog/entries` (upsert by slug — never overwrites another branch's rows). Because
 D1 accumulates across branches, the static file's only job is to carry *your* branch's additions;
 do not delete another branch's entries to resolve a merge conflict — append yours.
+
+## Commands
+
+Before submitting code, ensure everything is working by running the following commands:
+- \`pnpm install\` - Install dependencies
+- \`pnpm run build\` - Build the Astro project
+- \`pnpm run lint\` - Lint the code
+- \`pnpm run fmt\` - Format the code
+- \`pnpm run check\` - Run lint, format, and alarm checks

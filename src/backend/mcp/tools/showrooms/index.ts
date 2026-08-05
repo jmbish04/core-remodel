@@ -5,6 +5,9 @@ import { listStoreTypes } from "./list_store_types";
 import { getShowroom } from "./get_showroom";
 import { createShowroom } from "./create_showroom";
 import { updateShowroom } from "./update_showroom";
+import { addShowroomLocation } from "./add_showroom_location";
+import { updateShowroomLocation } from "./update_showroom_location";
+import { deleteShowroomLocation } from "./delete_showroom_location";
 import { addShowroomNote } from "./add_showroom_note";
 import { addShowroomPoc } from "./add_showroom_poc";
 import { setShowroomHours } from "./set_showroom_hours";
@@ -41,6 +44,9 @@ export const showroomTools: RemodelTool[] = [
   getShowroom,
   createShowroom,
   updateShowroom,
+  addShowroomLocation,
+  updateShowroomLocation,
+  deleteShowroomLocation,
   addShowroomNote,
   addShowroomPoc,
   setShowroomHours,
