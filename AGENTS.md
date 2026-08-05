@@ -10,21 +10,28 @@ The project uses `pnpm` as the package manager. Use the following exact scripts 
 * **Development Server:** `pnpm dev` (or `pnpm start`)
 * **Build:** `pnpm run build`
 * **Linting:** `pnpm run lint`
-* **Formatting:** `pnpm run fmt`
+* **Formatting:** `pnpm run fmt` - **WARNING:** Running `pnpm run fmt` globally can cause massive unintended formatting changes across thousands of files. Target only specific modified files!
 * **Checks:** `pnpm run check` (runs `oxlint`, `oxfmt` and `check-do-alarms.mjs`)
 * **Database generation:** `pnpm run db:generate`
 * **Type Checking:** Type checking must be run manually using `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit` to prevent heap out of memory errors, because the project's build process does not perform type checking.
+* **Type Checking:** Type checking must be run manually using `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit` because the project's build process does not perform type checking.
 
 ## Guidelines for Autonomous Agents
 * **Verify Branch:** As the first action of every session, verify the branch is fresh by running `pnpm run worktree:check` before reading source files, dispatching explore agents, or answering analytical questions.
 * **Formatting Restrictions:** Running `pnpm run fmt` (oxfmt) globally can cause massive unintended formatting changes across thousands of files. When formatting, target only the specific files you have modified.
 * **Do not assume conventions:** Do not assume or invent repository conventions or testing scripts. Explicitly verify and use the exact scripts defined in `package.json`.
+* **Formatting rules:** Running `pnpm run fmt` globally can cause massive unintended formatting changes across thousands of files. When formatting, target only the specific files you have modified.
 * **Documentation:** Never overwrite or delete any existing docstrings in the codebase; only add missing ones.
 
 ## Changelog
 * Always update the changelog before opening a PR. The changelog is driven by D1 data, not a static file. Add entries via D1 upsert scripts as described below.
 
+* **Branch check:** As the first action of every session, verify the branch is fresh by running `pnpm run worktree:check` (or `node scripts/worktree-check.mjs`) before reading any source files, dispatching explore agents, or answering analytical questions.
+* **Changelog:** Always update the changelog before opening a PR. The changelog is driven by D1 data, not a static file, and entries must be added via D1 upsert scripts.
+* **Durable Objects alarms:** The repository explicitly bans the use of the append-only `this.schedule()` in Cloudflare Durable Objects to prevent runaway billing. Use native `ctx.storage.setAlarm()` instead. This is enforced by `scripts/check-do-alarms.mjs` during `pnpm run check`.
+* **Durable Objects:** Never use `this.schedule()` in Cloudflare Durable Objects to prevent runaway billing. Use native `ctx.storage.setAlarm()` instead. This is enforced by `scripts/check-do-alarms.mjs` during `pnpm run check`.
 # AGENTS.md — Grounding Profile & Architectural Alignment Map
+
 # Verified on: 2026-05-20
 
 ## FIRST ACTION OF EVERY SESSION — verify the branch is fresh
@@ -68,8 +75,7 @@ Why this is a hard rule and not a suggestion:
 - Long-lived worktrees rot fast. This repo merges to `main` frequently, so **the
   code you should be reasoning about is `origin/main`** — never the branch you
   happen to be sitting in. Any bug reported from a production URL must be
-  reproduced against `origin/main`. (Production may lag even `origin/main`,
-  because deploys are manual now — see "LAST ACTION OF EVERY TURN" below.)
+  reproduced against `origin/main`.
 - The failure is silent and expensive. It manufactures false conclusions about
   features being "missing" or "broken" when they were built, renamed, or
   replaced upstream, and any code written against the stale tree conflicts hard
@@ -84,181 +90,26 @@ its claims against `origin/main` before acting — those notes reflect the tree 
 it was, and the named files, routes, and components may have moved or been
 replaced.
 
-
-## LAST ACTION OF EVERY TURN — you own the deploy (MANDATORY)
-
-**Nothing deploys itself.** Workers Builds auto-deploy is off, so merging to
-`main` does NOT ship. If you finish a turn without running the commands below,
-your work exists only in git and **production is still running the old code** —
-including any schema migration you generated.
-
-`pnpm run deploy` is the whole pipeline, in the only safe order:
-
-```
-build → migrate:remote → migrate:tesla:remote → wrangler deploy
-```
-
-Migrations run BEFORE the upload on purpose. New code reaching production before
-its column exists makes every endpoint that reads it return **500**; that is the
-first thing to suspect whenever a route 500s right after a schema change.
-
-### The contract, by what you did
-
-| You did | Run before ending the turn |
-|---|---|
-| Changed a drizzle schema | `pnpm run migrate:remote`, then **verify** the column/table exists on remote |
-| Opened or updated a PR | `pnpm run deploy:preview` — then QC with `pnpm run test:pr <n> -- --preview` |
-| **Merged to `main`** | **`pnpm run deploy`** from `main`, **or** run the **Deploy (manual)** GitHub Action (see below) — one of these is the only thing that updates production |
-| Merged the PR | `pnpm run preview:delete` from the branch's worktree |
-
-**Say what you did.** End the turn by stating explicitly whether you deployed,
-whether migrations were applied to remote, and what the QC result was. "Done" is
-not a status. If you deliberately did not deploy — because the work is unfinished
-or you want review first — say that too, so the next session knows production
-does not match `main`.
-
-### Never deploy production from an unmerged branch
-
-`pnpm run deploy` deploys whatever is in your working tree to the LIVE worker.
-Run it only from `main`, after your PR merged and you pulled. From a feature
-branch use `pnpm run deploy:preview`, which targets your own worker. The two
-commands are one word apart and the failure is not recoverable by rerunning.
-
-### Verify the deploy landed
-
-```bash
-npx wrangler deployments list | tail -20   # newest entry should be yours
-pnpm run test:pr <n>                       # QC against production, after merge
-```
-
-### Two ways to run the deploy — CLI, or the manual GitHub Action
-
-There is now a **`Deploy (manual)` GitHub Action** (`.github/workflows/deploy.yml`),
-added because the Cloudflare↔GitHub CI/CD integration was **disconnected on purpose**
-(see "Deploy topology & previews"). Pick whichever fits your session:
-
-- **`pnpm run deploy`** — from a session that HAS local Cloudflare auth (a
-  `CLOUDFLARE_API_TOKEN` in the env, or `wrangler login` done). Runs from your
-  working tree, so only from `main` after your PR merged and you pulled.
-- **`Deploy (manual)` Action** — when you do NOT have local wrangler auth (the
-  common case for a remote Claude Code session — `wrangler whoami` says "not
-  authenticated" and there's no token). It runs the **same pipeline**
-  (`build → migrate:remote → migrate:tesla:remote → wrangler deploy`) on GitHub's
-  runners using the repo's `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`
-  Actions secrets (already configured).
-
-  It is **`workflow_dispatch` only** — it NEVER runs on push or PR (that is the
-  whole point; a push must never deploy again). Trigger it either from the repo's
-  **Actions tab → "Deploy (manual)" → Run workflow** (branch `main`, type `deploy`
-  to confirm), or from a session with the GitHub MCP:
-
-  ```text
-  actions_run_trigger(workflow: "deploy.yml", ref: "main",
-    inputs: { confirm: "deploy", run_migrations: true })
-  ```
-
-  Guards baked in: typed `deploy` confirmation, **main-only** (unless
-  `allow_non_main: true`), a secrets preflight, a `run_migrations` toggle
-  (turn off for a code-only redeploy), and a concurrency group so two deploys
-  can't race onto prod. After it runs, verify as above (`wrangler deployments
-  list`, `pnpm run test:pr <n>`). This is the sanctioned way to ship from `main`
-  without a local token — use it instead of reporting "I can't deploy."
-
-## MANDATORY planning artifacts — every feature, BEFORE any code (do ALL THREE)
-
-Planning is not "write a summary and start coding." For **every** feature or
-non-trivial change, planning produces three durable, reviewable artifacts, and it
-is not complete until all three exist. **The preview changelog and the D1 planning
-tables are planning artifacts, not post-hoc documentation** — they are how the user
-reviews and approves the shape of the work *before* a line of feature code is
-written. Do not skip them, and do not treat them as something that happens "later."
-
-1. **`docs/####_<feature_name>/` doc bundle** — a new numbered folder (next free
-   ordinal; e.g. after `0022_gps_showroom_drives` the next is `0023_…`) containing:
-   - **`IMPLEMENTATION_PLAN.md`** — the plan: context/problem, phases, tasks,
-     success criteria, schema/API/MCP deltas, risks, verification. (ALWAYS)
-   - **`DESIGN_SPEC.md`** — ONLY when the feature has significant frontend work.
-     This is the brief **Claude AI Design** builds the frontend from, in
-     collaboration with the Claude Code agent — write it as a hand-off both can
-     work against (pages, components, states, tokens, interaction parity). (WHEN
-     FRONTEND IS SIGNIFICANT)
-   - **`PROMPT.md`** — the copy-paste prompt handed to the coding agent that will
-     build it. (ALWAYS)
-   - `PRD.md` / `UX.md` / `TASKS.json` are welcome additions, but the three above
-     are the floor.
-
-2. **D1 planning + task tables** — seed `plans` + `plan_tasks` (surfaced at
-   `/admin/plans/<slug>`) with the phases, tasks (`taskKey`, `workstream`, `phase`,
-   `changeType`, `dependsOn`, `status`), and success criteria. The `TASKS.json`
-   under `docs/####_*/` mirrors these rows 1:1 — keep them in sync. Do NOT invent a
-   second task table; `plan_tasks` is the source of truth (see the feature-proposal
-   flow below, which seeds it for you).
-
-3. **PreviewChangelog** (a **proposal of the changes**, matching the `docs/` bundle
-   from #1) — file it via the `submit_feature_proposal` MCP tool (or
-   `scripts/changelog/submit-proposal.mjs` → `POST /api/changelog/proposals`),
-   passing `prdMarkdown` (= IMPLEMENTATION_PLAN), `promptMarkdown` (= PROMPT),
-   `designBriefMarkdown` (= DESIGN_SPEC when present), `tasks[]` (= TASKS.json, which
-   also seeds #2), and — this is the point — the **raw, unsummarized conversation
-   transcript** as `context` (stored in R2; add a `contextCoverageNote` when it's
-   partial). It upserts by `slug` and renders at
-   **`https://core-remodel.hacolby.workers.dev/admin/changelog/preview/<slug>`**
-   — the link the user reviews. Re-file (same slug) as the plan evolves.
-   The proposal's PRD/PROMPT/tasks MUST match the `docs/####_*` artifacts; they are
-   the same plan in two homes (a file bundle and a reviewable D1/R2 record).
-
-   **ALWAYS give the user the FULL, clickable URL — never a relative path.** The base
-   is **`https://core-remodel.hacolby.workers.dev`** (pattern:
-   `https://${worker-name}.hacolby.workers.dev`, worker = `core-remodel`). Every admin
-   link surfaced to the user — the preview changelog above, `/admin/plans/<slug>`,
-   `/admin/changelog/<slug>`, any `/admin/*` page — MUST be written as the absolute
-   `https://core-remodel.hacolby.workers.dev/…` URL so it is one-click from chat. A bare
-   `/admin/changelog/preview/<slug>` in a reply is a defect; prepend the base every time.
-
-Only after these three exist — and the user has reviewed the preview changelog — does
-implementation (feature code, migrations, PRs) begin. The changelog *entries* written
-during/after the build (see "Changelog discipline") are a separate, later obligation;
-they do not replace the preview-changelog **proposal** produced here in planning.
-
-### Diagram everything with Mermaid — prose alone is a FAILED plan (MANDATORY)
-
-**Every planning artifact must be dense with Mermaid diagrams, not just prose.** A plan,
-a preview-changelog PRD, a `DESIGN_SPEC`, or a changelog detail page that explains an
-architecture, a flow, a state machine, a data model, or a decision in words alone is
-**incomplete** — send it back and diagram it. The user reviews these visually; a wall of
-text is not reviewable and hides exactly the structure a reviewer needs to catch problems.
-
-**Use the right diagram for the thing — and use MANY of them (aim for one per section that
-describes structure or behavior):**
-
-- **`flowchart`** — component/architecture maps, request pipelines, "what exists vs what's
-  missing", decision trees (park→home/stop/showroom/scan), build-order + dependency graphs.
-- **`sequenceDiagram`** — anything with actors over time: a webhook/poll round-trip, a
-  real-time WebSocket fix flowing to the UI + AI, a multi-service call chain.
-- **`stateDiagram-v2`** — lifecycles and state machines: a drive's status, a visit/park
-  session (driving → parked/soft-arrival → settled/finalized), a discovery slug.
-- **`erDiagram`** — EVERY schema change or new table. Show the FKs, the new/changed columns,
-  and the cardinality. Never describe a data model in a bullet list when an ERD will do.
-- **`journey`** — the user's day-in-the-life when UX is in scope.
-
-**Where they render:** ```mermaid fenced blocks in the preview-changelog `prdMarkdown` /
-`promptMarkdown` / `designBriefMarkdown`, in the `docs/####_*` markdown bundle, and in the
-changelog detail page's `diagrams[]` (`{ caption, code }`, `PhaseDetail` in
-`src/frontend/data/changelog-detail.ts`) — which renders via the shadcn-registry mermaid
-(zoom/pan). A schema-changing changelog entry with an empty `diagrams[]` is a defect.
-
-**Colour-code state** where it aids the read (done vs pending vs risk), e.g.
-`classDef done fill:#1f4d2e,stroke:#4ade80`. Keep node labels short; let the shapes and
-arrows carry the structure. If a section can be a diagram, it should be one.
-
 ## Build, Test, & Linting (MANDATORY)
-Autonomous agents must know and run these checks before concluding their work:
+
+Autonomous agents must know and run these checks before concluding their work.
+Do not assume or invent repository conventions or testing scripts. Explicitly
+verify and use the exact scripts defined in `package.json`:
+
 - `pnpm install` — install dependencies.
-- `pnpm dev` or `pnpm start` — run the local dev server.
+- `pnpm dev` or `pnpm start` — run the local Astro dev server.
 - `pnpm run build` — build the Astro project.
-- `pnpm run fmt` — run `oxfmt` formatter.
+- `pnpm run fmt` — run `oxfmt` formatter. When formatting, target only the specific files you have modified to avoid massive unintended formatting changes across thousands of files.
+- `pnpm run lint` — run `oxlint` linter.
+- `pnpm run check` — run both lint and fmt checks (and any custom checks).
+- `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit` — Type checking must be run manually to prevent heap out of memory errors, because the project's build process does not perform type checking.
+- `pnpm run fmt` — run `oxfmt` formatter. **WARNING:** Running `pnpm run fmt` globally can cause massive unintended formatting changes across thousands of files. When formatting, target only the specific files you have modified.
 - `pnpm run lint` — run `oxlint` linter.
 - `pnpm run check` — run both lint and fmt checks (and `check-do-alarms.mjs`).
+- `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit` — Type checking must be run manually using this command to prevent heap out of memory errors, because the project's build process does not perform type checking.
+
+## Cloudflare Durable Objects (MANDATORY)
+- **NEVER use `this.schedule()`** — The repository explicitly bans the use of the append-only `this.schedule()` in Cloudflare Durable Objects to prevent runaway billing. Use native `ctx.storage.setAlarm()` instead. This is enforced by `scripts/check-do-alarms.mjs` during `pnpm run check`.
 
 ## System Identity & Role Enforcements
 You are an elite Senior Engineer operating within the Google Antigravity IDE framework. Your primary objective is shipping high-performance, self-healing architectures across the Cloudflare Ecosystem.
@@ -301,8 +152,7 @@ There are **two** MCP servers in this repo; do not conflate them:
 
 ## Third-party CLIs — read `--help` BEFORE you run it (MANDATORY)
 
-Applies to `shadcn`, `wrangler`, `drizzle-kit`, `npx <anything>` — any CLI that
-writes files or touches infrastructure.
+Applies to `shadcn`, `npx <anything>` — any CLI that writes files or touches infrastructure.
 
 **Every time, in this order:**
 
@@ -353,7 +203,7 @@ git stash pop && diff /tmp/before.txt /tmp/after.txt | grep "^>"   # must be emp
 
 ## Page styling — consistent shell for EVERY page (MANDATORY)
 
-Every admin/app page is a **thin Astro shell** mounting one React island, wrapped
+Every page is a **thin Astro shell** mounting one React island, wrapped
 in `<BaseLayout>`, and MUST follow this exact structure. The canonical example is
 `src/frontend/pages/admin/studio.astro`. A page that jams content into the top-left
 with an unstyled header is almost always breaking rule (1) below.
@@ -1069,11 +919,33 @@ This bundled data is the seed + SSR fallback. The source of truth is D1: after d
 D1 accumulates across branches, the static file's only job is to carry *your* branch's additions;
 do not delete another branch's entries to resolve a merge conflict — append yours.
 
+## Project Commands & Conventions
+
+This repository is a **complex monorepo running on Cloudflare Workers featuring Astro, Tailwind CSS, shadcn/ui, D1 databases, MCP tools, and AI governance**. It uses `pnpm` as the package manager. Here are the core commands you will use:
+
+- **Install Dependencies:** `pnpm install`
+- **Development Server (Test/Dev):** `pnpm dev`
+- **Build Production Site:** `pnpm run build`
+- **Type Checking (Manual):** `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit`
+- **Lint:** `pnpm run lint` (runs `oxlint`)
+- **Format:** `pnpm run fmt` (runs `oxfmt`)
+- **Check All (Lint, Format, and DO Alarms):** `pnpm run check`
+- **Test PR:** `pnpm run test:pr <n>` (where `<n>` is the PR number)
+
+### Code Conventions and Rules for Autonomous Agents
+
+- **Worktree Check:** As the first action of every session, verify the branch is fresh by running `pnpm run worktree:check` (or `node scripts/worktree-check.mjs`) before reading any source files, dispatching explore agents, or answering analytical questions.
+- **Package Manager:** Always use `pnpm`. Do not use `npm` or `yarn`. Do not assume or invent repository conventions or testing scripts. Explicitly verify and use the exact scripts defined in `package.json`.
+- **Memory Errors:** Type checking must be run manually using `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit` to prevent heap out of memory errors, because the project's build process does not perform type checking.
+- **Durable Objects:** The repository explicitly bans the use of the append-only `this.schedule()` in Cloudflare Durable Objects to prevent runaway billing. Use native `ctx.storage.setAlarm()` instead. This is enforced by `scripts/check-do-alarms.mjs` during `pnpm run check`.
+- **Linting and Formatting:** The project uses `oxlint` and `oxfmt`. Run `pnpm run check` to ensure your code complies. **Warning**: Running `pnpm run fmt` globally can cause massive unintended formatting changes across thousands of files. When formatting, target only the specific files you have modified.
+- **Docstrings:** Never overwrite or delete any existing docstrings in the codebase; only add missing ones.
 ## Commands
 
 Before submitting code, ensure everything is working by running the following commands:
-- \`pnpm install\` - Install dependencies
-- \`pnpm run build\` - Build the Astro project
-- \`pnpm run lint\` - Lint the code
-- \`pnpm run fmt\` - Format the code
-- \`pnpm run check\` - Run lint, format, and alarm checks
+
+- `pnpm install` - Install dependencies
+- `pnpm run build` - Build the Astro project
+- `pnpm run lint` - Lint the code
+- `pnpm run fmt` - Format the code
+- `pnpm run check` - Run lint, format, and alarm checks

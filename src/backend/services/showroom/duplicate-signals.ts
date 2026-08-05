@@ -77,7 +77,15 @@ export function normPhone(value: string | null | undefined): string {
   return local.length === 10 ? local : "";
 }
 
-/** Lowercased alphanumerics. Short values are rejected as non-identifying. */
+/**
+ * Lowercased alphanumerics. Short values are rejected as non-identifying.
+ *
+ * CALLER CONTRACT: pass the FULL address including any suite/unit. A street
+ * without one identifies a BUILDING, and every tenant of it will compare equal —
+ * which is how "Leandro Quintal" (1775 Monterey Rd #64A) was nearly merged into
+ * Marblus Granite (#40C). Never feed this a street reassembled from columns that
+ * have nowhere to put the unit.
+ */
 export function normAddress(value: string | null | undefined): string {
   const a = (value ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
   // Must carry a street number, or "Suite F" style fragments collide wildly.
@@ -311,6 +319,12 @@ export function __selfCheck(): void {
   console.assert(normPhone("363-7333") === "", "short phone rejected");
   console.assert(normAddress("1620 Industrial Way") === "1620industrialway", "address");
   console.assert(normAddress("Suite F") === "", "fragment rejected");
+  // Suites must keep tenants of one building apart — the Marblus / Leandro Quintal case.
+  console.assert(
+    normAddress("1775 Monterey Rd #40 C San Jose, CA 95112") !==
+      normAddress("1775 Monterey Rd #64 A San Jose, CA 95112"),
+    "suite must distinguish tenants at one address",
+  );
   console.assert(normHost("https://www.JLKBG.com/x") === "jlkbg.com", "host");
   console.assert(isGenericHost("squarespace.com"), "generic host rejected");
 

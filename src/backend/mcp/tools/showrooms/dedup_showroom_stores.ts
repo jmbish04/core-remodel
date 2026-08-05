@@ -168,6 +168,9 @@ type StoreRow = {
 };
 
 
+/**
+ * Calculates a completeness score for a store row based on its enriched fields.
+ */
 function score(r: StoreRow): number {
   let s = 0;
   if (r.zipCode) s += 100;
@@ -180,15 +183,30 @@ function score(r: StoreRow): number {
   return s;
 }
 
+/**
+ * Determines if a store is considered a distinct physical site (requires zip or placeId).
+ */
 const isReal = (r: StoreRow) => Boolean(r.zipCode) || Boolean(r.placeId);
 
 const D1_IN_CHUNK = 90;
+
+/**
+ * Splits an array into smaller arrays of a specified size (defaults to D1_IN_CHUNK) to stay under D1's parameter limit.
+ */
 function chunk<T>(xs: T[], size = D1_IN_CHUNK): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < xs.length; i += size) out.push(xs.slice(i, i + size));
   return out;
 }
+
+/**
+ * Extracts the number of changed rows from a D1 result meta object.
+ */
 const changesOf = (r: unknown) => Number((r as { meta?: { changes?: number } })?.meta?.changes ?? 0);
+
+/**
+ * Generates a unique string key for a row based on the values of the specified columns.
+ */
 const keyOf = (row: Record<string, unknown>, cols: SQLiteColumn[]) =>
   cols.map((c) => String(row[c.name] ?? "∅")).join("\0");
 
@@ -283,6 +301,10 @@ export const dedupShowroomStores = defineTool({
     // phone + street address of a location on the other.
     const byId = new Map<number, StoreRow>(all.map((r) => [r.id, r]));
     const identities = new Map<number, StoreIdentity>();
+
+    /**
+     * Retrieves or initializes the identity tracker for a given store ID.
+     */
     const identityFor = (storeId: number) => {
       let i = identities.get(storeId);
       if (!i) identities.set(storeId, (i = emptyIdentity(storeId)));
@@ -299,21 +321,30 @@ export const dedupShowroomStores = defineTool({
       if (addr) i.addresses.add(addr);
     }
 
+    // place_id ONLY — deliberately NOT the street parts.
+    //
+    // showroom_store_locations has no suite/unit column, so its street data is
+    // BUILDING-level: every tenant of one address normalizes identically. On live
+    // data that pulled "Leandro Quintal" (1775 Monterey Rd #64A) into the Marblus
+    // Granite group (#40C) — a different company in the same industrial park —
+    // because both location rows read plainly "1775 Monterey Rd". The MAX_WEAK_FANOUT
+    // cap did not catch it: only two rows shared the value, and the group already
+    // carried a strong `name` link between the two genuine Marblus rows, so the
+    // weak-only guard never fired either. The bad edge simply rode in on transitivity.
+    //
+    // The store's own `location_address` DOES carry the suite (Places formats it in),
+    // so unit-level address matching is preserved above; a location's place_id is the
+    // reliable per-site identity. Its suite-less street adds only false positives.
     const locRows = await db
       .select({
         storeId: showroomStoreLocations.storeId,
         placeId: showroomStoreLocations.placeId,
-        streetNumber: showroomStoreLocations.streetNumber,
-        streetName: showroomStoreLocations.streetName,
       })
       .from(showroomStoreLocations)
       .all();
     for (const l of locRows) {
       if (!byId.has(l.storeId)) continue;
-      const i = identityFor(l.storeId);
-      if (l.placeId) i.placeIds.add(l.placeId);
-      const addr = normAddress(`${l.streetNumber ?? ""} ${l.streetName ?? ""}`);
-      if (addr) i.addresses.add(addr);
+      if (l.placeId) identityFor(l.storeId).placeIds.add(l.placeId);
     }
 
     const pocRows = await db
