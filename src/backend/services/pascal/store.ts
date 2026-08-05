@@ -1,3 +1,4 @@
+import { pascalProjects, pascalSceneEvents, pascalSnapshots, pascalVariants } from "@backend/db";
 /**
  * @fileoverview Pascal scene store (0043) — the durable backing for the Vercel editor.
  *
@@ -10,26 +11,12 @@
 import { and, desc, eq, gt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 
-import {
-  pascalProjects,
-  pascalSceneEvents,
-  pascalSnapshots,
-  pascalVariants,
-} from "@backend/db";
-
-import type {
-  SceneGraph,
-  SceneRenderingMetadata,
-} from "./shapes";
+import type { SceneGraph, SceneRenderingMetadata } from "./shapes";
 
 /** Max serialized graph size before we reject with `too_large` (413). */
 const MAX_SCENE_BYTES = 512 * 1024;
 
-export type PascalErrorCode =
-  | "not_found"
-  | "version_conflict"
-  | "too_large"
-  | "invalid";
+export type PascalErrorCode = "not_found" | "version_conflict" | "too_large" | "invalid";
 
 export class PascalStoreError extends Error {
   constructor(
@@ -41,36 +28,36 @@ export class PascalStoreError extends Error {
   }
 }
 
-type Db = ReturnType<typeof drizzle>;
 type VariantRow = typeof pascalVariants.$inferSelect;
 type ProjectRow = typeof pascalProjects.$inferSelect;
+/** Persisted Pascal scene row returned by store operations. */
+export type PascalVariantRow = VariantRow;
+/** Persisted Pascal project row returned by store operations. */
+export type PascalProjectRow = ProjectRow;
 
 const enc = new TextEncoder();
 
 /** Slug: lowercase alphanumeric + hyphen, <= 64, with a short uniqueness suffix. */
 export function slugify(name: string, prefix?: string): string {
-  const base = (prefix ? `${prefix}-${name}` : name)
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 52) || "scene";
+  const base =
+    (prefix ? `${prefix}-${name}` : name)
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 52) || "scene";
   return `${base}-${crypto.randomUUID().slice(0, 8)}`.slice(0, 64);
 }
 
 async function hashGraph(json: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", enc.encode(json));
-  return [...new Uint8Array(digest)]
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 function graphStats(graph: SceneGraph): { json: string; bytes: number; nodes: number } {
   const json = JSON.stringify(graph ?? {});
   const bytes = enc.encode(json).length;
   const nodes =
-    graph && typeof graph === "object" && graph.nodes
-      ? Object.keys(graph.nodes).length
-      : 0;
+    graph && typeof graph === "object" && graph.nodes ? Object.keys(graph.nodes).length : 0;
   return { json, bytes, nodes };
 }
 
@@ -86,18 +73,23 @@ export interface CreateProjectInput {
   roomId?: number | null;
 }
 
-export async function createProject(
-  env: Env,
-  input: CreateProjectInput,
-): Promise<ProjectRow> {
+export async function createProject(env: Env, input: CreateProjectInput): Promise<ProjectRow> {
   const db = drizzle(env.DB);
   const id = input.id ?? slugify(input.name, "proj");
-  const existing = await db
-    .select()
-    .from(pascalProjects)
-    .where(eq(pascalProjects.id, id))
-    .get();
-  if (existing) return existing; // idempotent create
+  const existing = await db.select().from(pascalProjects).where(eq(pascalProjects.id, id)).get();
+  if (existing) {
+    const isSameProject =
+      existing.name === input.name &&
+      existing.coreRemodelProjectId === input.coreRemodelProjectId &&
+      existing.scopeType === input.scopeType &&
+      existing.floorId === (input.floorId ?? null) &&
+      existing.roomId === (input.roomId ?? null) &&
+      existing.ownerId === (input.ownerId ?? null);
+    if (!isSameProject) {
+      throw new PascalStoreError("invalid", "Project id already exists with different properties");
+    }
+    return existing;
+  }
 
   await db
     .insert(pascalProjects)
@@ -111,28 +103,39 @@ export async function createProject(
       ownerId: input.ownerId ?? null,
     })
     .run();
-  const row = await db
-    .select()
-    .from(pascalProjects)
-    .where(eq(pascalProjects.id, id))
-    .get();
+  const row = await db.select().from(pascalProjects).where(eq(pascalProjects.id, id)).get();
   if (!row) throw new PascalStoreError("invalid", "Project insert failed");
   return row;
 }
 
 export async function getProject(env: Env, id: string): Promise<ProjectRow | null> {
   const db = drizzle(env.DB);
-  return (
-    (await db.select().from(pascalProjects).where(eq(pascalProjects.id, id)).get()) ??
-    null
-  );
+  return (await db.select().from(pascalProjects).where(eq(pascalProjects.id, id)).get()) ?? null;
+}
+
+/**
+ * List projects for the admin-only Layout Studio super-query.
+ *
+ * This deliberately crosses owners because the route is protected by the admin
+ * access middleware. Callers must not expose it through tenant-scoped surfaces.
+ */
+export async function listAdminProjects(
+  env: Env,
+  options: { limit?: number; offset?: number } = {},
+): Promise<ProjectRow[]> {
+  const limit = Math.min(Math.max(options.limit ?? 50, 1), 50);
+  const offset = Math.max(options.offset ?? 0, 0);
+  return drizzle(env.DB)
+    .select()
+    .from(pascalProjects)
+    .orderBy(desc(pascalProjects.datetimeLastModified))
+    .limit(limit)
+    .offset(offset)
+    .all();
 }
 
 /** The project's browser-visible head scene (most-recently-updated variant). */
-export async function getProjectHead(
-  env: Env,
-  projectId: string,
-): Promise<VariantRow | null> {
+export async function getProjectHead(env: Env, projectId: string): Promise<VariantRow | null> {
   const db = drizzle(env.DB);
   return (
     (await db
@@ -167,10 +170,7 @@ export async function listScenes(
 
 export async function loadScene(env: Env, id: string): Promise<VariantRow | null> {
   const db = drizzle(env.DB);
-  return (
-    (await db.select().from(pascalVariants).where(eq(pascalVariants.id, id)).get()) ??
-    null
-  );
+  return (await db.select().from(pascalVariants).where(eq(pascalVariants.id, id)).get()) ?? null;
 }
 
 export interface SaveSceneInput {
@@ -201,8 +201,7 @@ export async function saveScene(
   const graphHash = await hashGraph(json);
   const now = new Date();
   const saveMode = input.saveMode ?? "draft";
-  const renderingJson =
-    input.rendering !== undefined ? JSON.stringify(input.rendering) : undefined;
+  const renderingJson = input.rendering !== undefined ? JSON.stringify(input.rendering) : undefined;
 
   const existing = await loadScene(env, sceneId);
 
@@ -341,7 +340,7 @@ export async function renameScene(
 ): Promise<VariantRow> {
   const db = drizzle(env.DB);
   const existing = await loadScene(env, sceneId);
-  if (!existing) throw new PascalStoreError("not_found");
+  if (!existing) throw new PascalStoreError("not_found", `Unknown sceneId '${sceneId}'`);
   if (expectedVersion != null && expectedVersion !== existing.version) {
     throw new PascalStoreError("version_conflict");
   }
@@ -358,6 +357,27 @@ export async function renameScene(
   const row = await loadScene(env, sceneId);
   if (!row) throw new PascalStoreError("not_found");
   return row;
+}
+
+/** Update the Core-Remodel product lifecycle without changing the scene graph. */
+export async function updateSceneStatus(
+  env: Env,
+  sceneId: string,
+  status: "draft" | "active" | "archived",
+): Promise<VariantRow> {
+  const db = drizzle(env.DB);
+  const existing = await loadScene(env, sceneId);
+  if (!existing) throw new PascalStoreError("not_found");
+  await db
+    .update(pascalVariants)
+    .set({ status, datetimeLastModified: new Date() })
+    .where(eq(pascalVariants.id, sceneId))
+    .run();
+  const updated = await loadScene(env, sceneId);
+  if (!updated) {
+    throw new PascalStoreError("not_found", `Scene '${sceneId}' disappeared during update`);
+  }
+  return updated;
 }
 
 export async function deleteScene(env: Env, sceneId: string): Promise<boolean> {

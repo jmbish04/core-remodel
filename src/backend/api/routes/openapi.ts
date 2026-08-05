@@ -7,6 +7,9 @@ import { swaggerUI } from "@hono/swagger-ui";
 import { apiReference } from "@scalar/hono-api-reference";
 import { Hono } from "hono";
 
+import pascalRouter from "./pascal";
+import { PASCAL_OPENAPI_PATH_PREFIX } from "./pascal-paths";
+
 const openapiRouter = new Hono<{ Bindings: Env }>();
 
 // OpenAPI specification
@@ -1344,9 +1347,74 @@ const openApiSpec = {
   },
 };
 
+/**
+ * Merge OpenAPIHono-owned domains into the legacy hand-maintained document.
+ * Pascal's route definitions remain the source of truth; prefixing happens here
+ * because that router is mounted at /api/pascal/v1 by api/index.ts.
+ */
+type OpenApiMap = Record<string, unknown>;
+
+function mergeWithoutCollisions(label: string, left: OpenApiMap, right: OpenApiMap): OpenApiMap {
+  for (const key of Object.keys(right)) {
+    if (Object.prototype.hasOwnProperty.call(left, key)) {
+      throw new Error(`OpenAPI ${label} collision: '${key}'`);
+    }
+  }
+  return { ...left, ...right };
+}
+
+function mergeComponents(left: OpenApiMap, right: OpenApiMap): OpenApiMap {
+  const merged: OpenApiMap = { ...left };
+  for (const [section, value] of Object.entries(right)) {
+    const current = merged[section];
+    if (current && value && typeof current === "object" && typeof value === "object") {
+      merged[section] = mergeWithoutCollisions(
+        `components.${section}`,
+        current as OpenApiMap,
+        value as OpenApiMap,
+      );
+    } else if (current !== undefined) {
+      throw new Error(`OpenAPI components collision: '${section}'`);
+    } else {
+      merged[section] = value;
+    }
+  }
+  return merged;
+}
+
+function buildOpenApiSpec() {
+  const pascalSpec = pascalRouter.getOpenAPI31Document({
+    openapi: "3.1.0",
+    info: { title: "Pascal scene API", version: "1.0.0" },
+  });
+  const pascalPaths = Object.fromEntries(
+    Object.entries(pascalSpec.paths ?? {}).map(([path, operations]) => [
+      `${PASCAL_OPENAPI_PATH_PREFIX}${path}`,
+      operations,
+    ]),
+  );
+  const legacyPaths = openApiSpec.paths as OpenApiMap;
+  const generatedPaths = pascalPaths as OpenApiMap;
+  return {
+    ...openApiSpec,
+    paths: mergeWithoutCollisions("path", legacyPaths, generatedPaths),
+    components: mergeComponents(
+      openApiSpec.components as OpenApiMap,
+      (pascalSpec.components ?? {}) as OpenApiMap,
+    ),
+  };
+}
+
+let cachedOpenApiSpec: ReturnType<typeof buildOpenApiSpec> | undefined;
+
+function getOpenApiSpec(): ReturnType<typeof buildOpenApiSpec> {
+  cachedOpenApiSpec ??= buildOpenApiSpec();
+  return cachedOpenApiSpec;
+}
+
 // GET /openapi.json
 openapiRouter.get("/openapi.json", (c) => {
-  return c.json(openApiSpec);
+  return c.json(getOpenApiSpec());
 });
 
 // GET /swagger

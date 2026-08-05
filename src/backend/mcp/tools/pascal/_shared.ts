@@ -3,10 +3,8 @@
  */
 import type { pascalProjects, pascalStudies, pascalVariants } from "@backend/db";
 
-const DEFAULT_EDITOR_URL = "https://3d-remodel.vercel.app";
-
 export function editorBase(env: Env): string {
-  return (env as { PASCAL_EDITOR_URL?: string }).PASCAL_EDITOR_URL ?? DEFAULT_EDITOR_URL;
+  return env.PASCAL_EDITOR_URL.replace(/\/$/, "");
 }
 
 export function sceneLink(env: Env, sceneId: string): string {

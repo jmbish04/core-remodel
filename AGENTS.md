@@ -1,3 +1,23 @@
+# AGENTS.md
+
+## Repository Overview
+This repository (`jmbish04/core-remodel`) is an Astro shadcn/ui template. It uses Astro for the web framework, Tailwind CSS for styling, and shadcn/ui for frontend components.
+The default branch is `main`.
+
+## Build, Test, and Lint Commands
+The project uses `pnpm` as the package manager. Use the following exact scripts defined in `package.json`:
+
+* **Development Server:** `pnpm dev` (or `pnpm start`)
+* **Build:** `pnpm run build`
+* **Linting:** `pnpm run lint`
+* **Formatting:** `pnpm run fmt`
+* **Checks:** `pnpm run check` (runs `oxlint`, `oxfmt` and `check-do-alarms.mjs`)
+* **Database generation:** `pnpm run db:generate`
+* **Type Checking:** Type checking must be run manually using `npx tsc --noEmit` because the project's build process does not perform type checking.
+
+## Guidelines for Autonomous Agents
+* **Do not assume conventions:** Do not assume or invent repository conventions or testing scripts. Explicitly verify and use the exact scripts defined in `package.json`.
+* **Documentation:** Never overwrite or delete any existing docstrings in the codebase; only add missing ones.
 # AGENTS.md — Grounding Profile & Architectural Alignment Map
 
 # Verified on: 2026-05-20
@@ -71,6 +91,52 @@ verify and use the exact scripts defined in `package.json`:
 - `pnpm run lint` — run `oxlint` linter.
 - `pnpm run check` — run both lint and fmt checks (and any custom checks).
 - `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit` — Type checking must be run manually to prevent heap out of memory errors, because the project's build process does not perform type checking.
+- `pnpm run fmt` — run `oxfmt` formatter. **WARNING:** Running `pnpm run fmt` globally can cause massive unintended formatting changes across thousands of files. When formatting, target only the specific files you have modified.
+- `pnpm run lint` — run `oxlint` linter.
+- `pnpm run check` — run both lint and fmt checks (and `check-do-alarms.mjs`).
+- `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit` — Type checking must be run manually using this command to prevent heap out of memory errors, because the project's build process does not perform type checking.
+
+## Cloudflare Durable Objects (MANDATORY)
+- **NEVER use `this.schedule()`** — The repository explicitly bans the use of the append-only `this.schedule()` in Cloudflare Durable Objects to prevent runaway billing. Use native `ctx.storage.setAlarm()` instead. This is enforced by `scripts/check-do-alarms.mjs` during `pnpm run check`.
+
+## System Identity & Role Enforcements
+You are an elite Senior Engineer operating within the Google Antigravity IDE framework. Your primary objective is shipping high-performance, self-healing architectures across the Cloudflare Ecosystem.
+
+## Detected Structural Components
+- **Routing Tier:** Hono API Framework (Serving OpenAPI v3.1.0)
+- **Frontend Layer:** Astro Web Engine + Shadcn (Default Dark Theme Architecture)
+- **Data Persistence:** Drizzle ORM + D1 Serverless SQL Storage Core
+- **Cognitive Orchestration:** @cloudflare/agents SDK Layer
+
+## The renovation-studio MCP server — one file per tool
+
+There are **two** MCP servers in this repo; do not conflate them:
+1. The OAuth connector at `src/backend/mcp/` (0015 — see the "MCP Server" section
+   below). Claude.ai custom connector.
+2. **The bearer-auth "renovation-studio" server at `src/backend/api/routes/mcp/`**
+   (mounted `/api/mcp`) — render, mood-board, measurement, deep-research, and
+   showroom/changelog/business-card tools. This section is about (2).
+
+- **Tool count is whatever lives in `mcp/tools/` on the branch you are on — nothing
+  else.** `mcp/tools/index.ts` (the `TOOLS` array) is the single source of truth.
+  Count with `ls src/backend/api/routes/mcp/tools/*.ts` or read that barrel — never
+  trust memory or another branch.
+- **Layout:**
+  - `index.ts` — transport only (JSON-RPC over streamable HTTP): auth, dispatch,
+    invocation logging, `structuredContent`. No tool logic. Default-exports the router.
+  - `tools/<tool_name>.ts` — **one file per tool.** Filename == MCP tool name. Each
+    exports a `ToolDef` (`types.ts`): `{ name, description, inputSchema, research?, handler }`.
+  - `auth.ts` — worker bearer (`Authorization: Bearer <WORKER_API_KEY>`) OR a scoped
+    Deep Research token (limited to tools flagged `research: true`).
+  - `lib/` — shared render + research helpers. `types.ts` — `ToolDef`/`ToolCtx`.
+- **On `main`: 21 tools.** create_render_session, list_room_angles, run_render_stage,
+  generate_mood_board, list_mood_boards, list_rooms, highlight_wall, add_measurement,
+  list_measurements, get_measurement_coverage, get_deep_research_context,
+  record_deep_research_progress, record_deep_research_source, create_showroom_contact,
+  create_changelog_entry, set_showroom_address, set_showroom_links, set_showroom_hours,
+  list_showroom_contacts, list_failed_business_cards, resolve_business_card.
+- **Add a tool:** drop `tools/<name>.ts` exporting a `ToolDef`, add one line to
+  `tools/index.ts`. That's it — the transport picks it up.
 
 ## Third-party CLIs — read `--help` BEFORE you run it (MANDATORY)
 
