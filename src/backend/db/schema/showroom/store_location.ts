@@ -55,6 +55,16 @@ export const showroomStoreLocations = sqliteTable(
     // ── Structured address parts (no stored formatted string) ───────────────
     streetNumber: text("street_number"),
     streetName: text("street_name"),
+    /**
+     * Suite / unit / building letter (e.g. "40C", "Ste F", "#210"). Nullable.
+     *
+     * Kept as its own part BECAUSE a street without it is BUILDING-level: three
+     * tenants of one San Jose industrial park all read "1775 Monterey Rd", and
+     * omitting the suite nearly merged Leandro Quintal (#64A) into Marblus Granite
+     * (#40C) — see 0046 / PR #356. Address-based dedup that reads a location's
+     * street MUST include this, or co-located businesses collide (0047).
+     */
+    unit: text("unit"),
     city: text("city"),
     state: text("state"),
     zipCode: text("zip_code"),
