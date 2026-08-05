@@ -1,0 +1,114 @@
+{
+  "slug": "showroom-multi-location-mcp",
+  "title": "Showroom multi-location, wired end to end (MCP first)",
+  "tasks": [
+    {
+      "taskKey": "P1-backfill-sql",
+      "phase": "P1 — Backfill",
+      "workstream": "data",
+      "changeType": "migration",
+      "title": "Idempotent backfill: one location row per existing store",
+      "detail": "scripts/sql/backfill_showroom_store_locations.sql — INSERT…SELECT…WHERE NOT EXISTS, COALESCE(location_zip_code, zip_code). Applied with wrangler d1 execute --remote --file. Data, not schema, so deliberately not a drizzle migration.",
+      "dependsOn": [],
+      "status": "pending"
+    },
+    {
+      "taskKey": "P1-backfill-verify",
+      "phase": "P1 — Backfill",
+      "workstream": "data",
+      "changeType": "changed",
+      "title": "Assert count(locations) == count(stores) on remote",
+      "detail": "221/221 expected. Also assert every store_id appears exactly once.",
+      "dependsOn": ["P1-backfill-sql"],
+      "status": "pending"
+    },
+    {
+      "taskKey": "P2-locations-service",
+      "phase": "P2 — Read helper",
+      "workstream": "backend",
+      "changeType": "added",
+      "title": "services/showroom/locations.ts — formatShowroomAddress + loadStoreLocations",
+      "detail": "Derived display address from structured parts (with assert self-check); batched location loader chunked at 20 ids for the D1 100-bound-param cap; derived cityName/hubRoute/hubName via classifyBayAreaRegion; isPrimary derived from place_id match, never stored.",
+      "dependsOn": [],
+      "status": "pending"
+    },
+    {
+      "taskKey": "P3-get-showroom",
+      "phase": "P3 — MCP reads",
+      "workstream": "mcp",
+      "changeType": "changed",
+      "title": "get_showroom returns locations[] + locationCount",
+      "detail": "Description rewritten so an agent knows a store has MANY sites before it proposes overwriting one.",
+      "dependsOn": ["P2-locations-service"],
+      "status": "pending"
+    },
+    {
+      "taskKey": "P3-list-showrooms",
+      "phase": "P3 — MCP reads",
+      "workstream": "mcp",
+      "changeType": "changed",
+      "title": "list_showrooms: locationCount per row + multiLocationOnly filter",
+      "detail": "Answers 'which showrooms are chains with more than one Bay Area site' — a question that had no query before.",
+      "dependsOn": ["P2-locations-service"],
+      "status": "pending"
+    },
+    {
+      "taskKey": "P4-add-location",
+      "phase": "P4 — MCP writes",
+      "workstream": "mcp",
+      "changeType": "added",
+      "title": "add_showroom_location tool",
+      "detail": "Adds a site to an existing store. Pre-checks the place_id unique index and names the owning store on collision. Dual-writes the legacy showroom_stores columns only when the new row is the primary.",
+      "dependsOn": ["P2-locations-service"],
+      "status": "pending"
+    },
+    {
+      "taskKey": "P4-update-location",
+      "phase": "P4 — MCP writes",
+      "workstream": "mcp",
+      "changeType": "added",
+      "title": "update_showroom_location tool",
+      "detail": "Patch one location by locationId; only passed fields change; dual-writes when primary.",
+      "dependsOn": ["P2-locations-service"],
+      "status": "pending"
+    },
+    {
+      "taskKey": "P4-delete-location",
+      "phase": "P4 — MCP writes",
+      "workstream": "mcp",
+      "changeType": "added",
+      "title": "delete_showroom_location tool (DESTRUCTIVE)",
+      "detail": "Refuses to delete a store's last remaining location.",
+      "dependsOn": ["P2-locations-service"],
+      "status": "pending"
+    },
+    {
+      "taskKey": "P5-dedupe-locations",
+      "phase": "P5 — Dedupe correctness",
+      "workstream": "mcp",
+      "changeType": "fixed",
+      "title": "find_known_showrooms + search_showrooms match location place_ids",
+      "detail": "Root-cause fix: new sites only ever carry a place_id on the LOCATION row. Matching only showroom_stores.place_id makes a chain's second site read as 'not registered', which is how duplicate stores get created.",
+      "dependsOn": ["P1-backfill-verify"],
+      "status": "pending"
+    },
+    {
+      "taskKey": "P6-qc",
+      "phase": "P6 — QC + deploy",
+      "workstream": "qc",
+      "changeType": "added",
+      "title": "scripts/qc/pr_<n>.mjs — preview + prod",
+      "detail": "Exercises the three new tools, the two changed reads, the dedupe fix, and asserts legacy/primary address parity.",
+      "dependsOn": ["P3-get-showroom", "P3-list-showrooms", "P4-add-location", "P4-update-location", "P4-delete-location", "P5-dedupe-locations"],
+      "status": "pending"
+    }
+  ],
+  "successCriteria": [
+    "count(showroom_store_locations) == count(showroom_stores) on prod",
+    "get_showroom returns a locations[] array for every store",
+    "list_showrooms({ multiLocationOnly: true }) returns only chains",
+    "add_showroom_location adds a San Carlos site to an Emeryville-registered store without touching the Emeryville row",
+    "find_known_showrooms matching a chain's second site reports the OWNING store, not 'none'",
+    "QC green on preview and prod"
+  ]
+}

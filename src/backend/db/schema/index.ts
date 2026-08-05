@@ -21,6 +21,46 @@ export * from "./contracts/contracts";
 
 export * from "./home/floors";
 export * from "./home/rooms";
+
+// 0041 Phase 0 — homeowner experience foundation.
+export * from "./home/projects";
+export * from "./home/room_stop_state";
+export * from "./home/spec_definitions";
+export * from "./home/room_spec_fields";
+export * from "./home/decisions";
+export * from "./home/decision_reopenings";
+export * from "./impacts/impact_definitions";
+export * from "./impacts/impacts";
+export * from "./impacts/impact_targets";
+export * from "./impacts/impact_blocks";
+export * from "./impacts/impact_evidence";
+export * from "./impacts/ripple_rules";
+
+// 0043 Phase 0 — room-model definition tables.
+export * from "./home/room_note_type_def";
+export * from "./home/room_problem_type_def";
+export * from "./home/room_problem_fix_def";
+export * from "./home/room_problem_document_type_def";
+export * from "./home/room_use_def";
+export * from "./home/room_type_def";
+export * from "./home/room_intent_type_def";
+export * from "./materials/material_type_def";
+
+// 0043 Phase 1 — walls and measurements graph.
+export * from "./home/walls";
+export * from "./home/room_measurements";
+
+// 0043 Phase 2-3 — notes, intents, problems.
+export * from "./home/room_notes";
+export * from "./home/room_intents";
+export * from "./home/room_problems";
+
+// 0043 Phase 4 — surfaces: assemblies, fixtures, requirements.
+export * from "./home/surfaces";
+
+// 0043 Phase 5 — coordination: trade assignments, permit mapping, timeline.
+export * from "./home/room_coordination";
+
 export * from "./home/measurements";
 export * from "./home/remodel_scenarios";
 export * from "./home/scenario_room_plans";

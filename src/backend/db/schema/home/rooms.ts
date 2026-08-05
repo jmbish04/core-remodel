@@ -29,17 +29,11 @@ export const rooms = sqliteTable("rooms", {
   widthFeet: integer("width_feet"),
   widthInches: integer("width_inches"),
 
-  /**
-   * Explicit square-footage override (0006 PHASE 1).
-   *
-   * When set (non-null), this authoritative area is PREFERRED over the
-   * length × width computation in home-catalog.ts `computeRoomSqft`, so irregular
-   * / non-rectangular rooms (e.g. the L-shaped lower foyer = 77.28 sq ft) report
-   * their true area everywhere the catalog `sqft` field is surfaced (floor-plan
-   * hover card, room detail, bid portfolios).  null = fall back to the computed
-   * rectangular estimate.
-   */
-  areaSqFt: real("area_sq_ft"),
+  // area_sq_ft was removed (0043). It was a stored calculation — every value
+  // equalled length × width — and a stored calculation goes stale the instant a
+  // dimension changes. Area is computed on read (home-catalog `computeRoomSqft`,
+  // takeoff `floorAreaSqFt`). A genuine irregular footprint is a MEASUREMENT and
+  // lives in `room_measurements.area_sq_ft_override`, not here.
 
   isLivingSpace: integer("is_living_space", { mode: "boolean" }).notNull().default(true),
 
@@ -101,6 +95,38 @@ export const rooms = sqliteTable("rooms", {
   floorplanBboxHPct: real("floorplan_bbox_h_pct"),
   /** Cloudflare Images token of the cropped per-room floorplan region (if cropped). */
   floorplanCropCfImageId: text("floorplan_crop_cf_image_id"),
+
+  /**
+   * The room's tint (0041 Phase 0).
+   *
+   * WHAT IT IS FOR: cross-surface recognition. Tint a budget line, a badge, or a
+   * chip when it belongs to this room; highlight this room's region on the
+   * floorplan when it is the one being referenced. It is reinforcement on an
+   * object that already carries the room's NAME.
+   *
+   * WHAT IT IS NOT: an identity key. A room is identified by its path —
+   * `${floor}/${name}` — and by its position on the floorplan. The label always
+   * carries the truth, so the tint never has to. That means the set does NOT
+   * need to be mutually distinguishable across all rooms: two rooms sharing a
+   * similar green is fine when the badge says which one it is.
+   *
+   * NAME IS HISTORICAL. `line_color_hex` came from an early framing of the
+   * diagram as a transit map with permanent coloured "lines". That framing was
+   * dropped — see the plan §4f. The column is not renamed because renaming a
+   * column on SQLite forces a table rebuild, and `rooms` has children; on D1
+   * that pattern is how child data gets silently dropped. Not worth it for a
+   * name.
+   *
+   * Should survive both the dark and light ground (DESIGN.md, "The Both Grounds
+   * Rule"). Null = untinted; surfaces fall back to neutral rather than picking a
+   * colour at render time, because a tint that changes between page loads reads
+   * as a bug.
+   *
+   * `lineOrder` is a stable display order for room lists and the floorplan
+   * legend, lowest first. Null sorts last.
+   */
+  lineColorHex: text("line_color_hex"),
+  lineOrder: integer("line_order"),
 
   datetimeCreated: integer("datetime_created", { mode: "timestamp" })
     .notNull()

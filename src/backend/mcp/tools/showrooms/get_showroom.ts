@@ -5,6 +5,7 @@ import {
   showroomStoreType,
   storeNotes,
 } from "@backend/db";
+import { loadOneStoreLocations } from "@backend/services/showroom/locations";
 import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -17,13 +18,24 @@ export const getShowroom = defineTool({
   category: "showrooms",
   title: "Get showroom detail",
   description:
-    "Full detail for one showroom by `id`: the complete store row, its ACTIVE points of contact, ALL per-day opening hours, and its ACTIVE notes (newest first). Call list_showrooms first to find the id.",
+    "Full detail for one showroom by `id`: the complete store row, ALL of its physical LOCATIONS, its ACTIVE points of contact, ALL per-day opening hours, and its ACTIVE notes (newest first). " +
+    "IMPORTANT — a showroom store row is a BUSINESS, not an address. Bay Area chains have several sites under one store row, so read `locations[]` (each with its own derived `address`, coords, placeId and hub) rather than the store's legacy flat address fields, which only describe the PRIMARY site. " +
+    "To register a site you found that is not in `locations[]`, call add_showroom_location — do NOT use update_showroom to overwrite the store's address, that replaces the primary site instead of adding a new one. " +
+    "Call list_showrooms first to find the id.",
   inputShape: {
     id: z.number().int().positive().describe("Showroom store id (from list_showrooms)"),
   },
   annotations: READ_ONLY,
   outputShape: {
     store: looseObject({ id: z.number().int(), name: z.string().nullable() }),
+    locations: z.array(
+      looseObject({
+        id: z.number().int(),
+        address: z.string().nullable(),
+        isPrimary: z.boolean(),
+      }),
+    ),
+    locationCount: z.number().int(),
     pocs: z.array(looseObject({ id: z.number().int(), fullName: z.string().nullable() })),
     hours: z.array(looseObject({ id: z.number().int(), day: z.string() })),
     notes: z.array(looseObject({ id: z.number().int(), title: z.string().nullable() })),
@@ -67,6 +79,9 @@ export const getShowroom = defineTool({
       .orderBy(desc(storeNotes.timestamp))
       .all();
 
+    // Every physical site for this business. One store row can own many.
+    const locations = await loadOneStoreLocations(db, input.id);
+
     return {
       store: {
         ...store,
@@ -74,6 +89,8 @@ export const getShowroom = defineTool({
         typeName: type?.displayName ?? null,
         typeColor: type?.htmlColor ?? null,
       },
+      locations,
+      locationCount: locations.length,
       pocs: pocs.map((p) => ({
         id: p.id,
         fullName: p.fullName,

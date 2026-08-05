@@ -59,6 +59,7 @@ export const getRoom = defineTool({
       floorName: z.string().nullable(),
       dimensions: z.string().nullable(),
       areaSqFt: z.number().nullable(),
+      linearFt: z.number().nullable(),
       isLivingSpace: z.boolean().nullable(),
       floor: looseObject({ id: z.number().int(), key: z.string(), name: z.string() }).nullable(),
       notes: z.object({

@@ -53,6 +53,54 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/showroom-dedup-signals",
+    title: "Dedupe showroom stores on real identity signals (0046)",
+    summary:
+      "dedup_showroom_stores grouped on normalized NAME alone, so it missed every duplicate whose two rows were named even slightly differently — the two real Jack London Kitchen & Bath rows ('&' vs 'and', plus a '-Walnut Creek' branch suffix) never grouped at all and had to be merged by hand. The signals to fix it already existed in duplicate-check.ts (place_id / phone / address / website) but were wired only to the CREATE path. This brings them to the MERGE path, gathered across showroom_stores + showroom_store_locations + showroom_pocs, with transitive union-find grouping. The hard part was false positives, both found by running it against live data: grouping on street address fused every tenant of 2 Henry Adams St (the SF Design Center) into one 37-store component, and treating social links as websites (linkedin/youtube/houzz/x) fused 36 stores. So signals are now split STRONG (place_id/website/name — may merge) vs WEAK (phone/address — may only surface a group), a weak value held by >2 stores is discarded as a building rather than a business, and only type=WEBSITE links are read. ambiguousGroupsSkipped becomes branchCandidates: multi-site chains that should collapse into one store with many location rows under 0045, reported with evidence and never auto-merged. Also removed a NUL byte committed inside join('…') that made git and every review tool treat the file as binary.",
+    date: "2026-08-04",
+    status: "shipped",
+    prNumber: 348,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/348",
+  },
+  {
+    branch: "claude/showroom-multi-location-mcp",
+    title: "Showroom multi-location, wired end to end (0045)",
+    summary:
+      "showroom_store_locations shipped as an EMPTY table in PR #278 ('0031 Phase A') and nothing was ever wired to it: 0 rows against 244 stores, and the only two references in the whole repo were the schema files themselves. Every read and write still used the flat address columns on showroom_stores, so MCP saw exactly one address per business and had no tool to add a second site — which is how a business card from a chain's San Carlos branch turned into an offer to overwrite that store's Emeryville address, and why 'which showrooms have more than one location' had no answer. This finishes 0031 Phase A (backfill + dual-write) and puts the MCP surface on top: 244 locations backfilled one-per-store, get_showroom returns locations[], list_showrooms returns locationCount and gains multiLocationOnly, and add/update/delete_showroom_location are new tools. Also fixes the dedupe path that would otherwise mint duplicate stores — find_known_showrooms and search_showrooms matched place ids against showroom_stores only, but a chain's second site carries its place id on the LOCATION row, so known branches read as 'new'. Deliberately NOT the 0031 Phase B/C cutover: every legacy column stays dual-written from the primary site.",
+    date: "2026-08-04",
+    status: "staged",
+  },
+  {
+    branch: "claude/fix-rooms-area-computed-hotfix",
+    title: "Hotfix: compute room area on the fly — heal prod 500s + room-geometry package",
+    summary:
+      "Production home-catalog endpoints were 500ing: the shared prod D1 already had rooms.area_sq_ft dropped (0043, intentional — area is computed, never stored), but deployed main still declared the column in the drizzle rooms schema, so every select().from(rooms) emitted area_sq_ft and D1 rejected it (blast radius: catalog, images, listing-photos, mood-board, supporting-docs, vision-nodes, materials, pascal, measurements). Root-cause fix: remove the column from the schema (heals every star-select at once) and derive area on read. Also modularizes the calculators into services/room-geometry — one module file per calc type (dimensions primitives, area, linear-feet), so every caller shares one implementation with no per-file drift. linear-feet is available at three scopes: a single wall/segment, an entire room (rectangular perimeter), and a floor / whole-home total; mcp roomDto now surfaces linearFt beside areaSqFt. No migration (remote already matched). Shipped to prod (version c8101a8e); /api/rooms/catalog confirmed 200.",
+    date: "2026-08-03",
+    status: "shipped",
+    prNumber: 344,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/344",
+  },
+  {
+    branch: "claude/homeowner-experience-plan-v2",
+    title: "Homeowner experience — room model overhaul + measurement view (0041/0043)",
+    summary:
+      "Recovery + rebase of docs/homeowner-experience-plan, which had fallen 40 commits behind main with migrations 0162–0171 colliding by NUMBER against main's parallel 0162–0168. Rather than a 28-commit rebase conflicting on drizzle meta at every step, the schema/service/docs work was ported onto current main and the 10 divergent migrations consolidated into ONE fresh catch-up migration (0169_organic_dragon_lord) generated against main's snapshot — verified to contain only this branch's delta (47 new tables + rooms columns + the rooms.area_sq_ft drop), no re-creation of main's tables. Lands the 0041/0043 room model (projects, walls + openings + face segments, room_measurements, room_notes, decisions/impacts ripple graph, surface assemblies, spec definitions, trade assignments, permit mapping, room timeline) and the measurement-view.ts canonical resolver: one transparent shape per room (computed area + override + provenance, walls-win perimeter precedence), mutation-checked. rooms.area_sq_ft is dropped — area is computed, never stored, with any override living in room_measurements.area_sq_ft_override. DEPLOY NOTE: the additive DDL is idempotent-safe under scripts/d1-migrate.mjs, but the rooms.area_sq_ft DROP must ride the merge deploy (code that stops using the column ships together) — never migrate:remote from the unmerged branch, since the D1 is shared with live prod that still writes that column.",
+    date: "2026-08-02",
+    status: "open",
+    prNumber: 343,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/343",
+  },
+  {
+    branch: "claude/0042-p5-product-map",
+    title: "Quote line items → products (0042 P5)",
+    summary:
+      "Completes 0042. Each extracted quote/invoice line is now matched to a product the showroom already carries, or a brand+product are auto-created from the vendor+description, linked to the showroom, and the line price recorded as a dated observation — surfaced in the viewport panel with a 'new from quote' / 'matched' badge. worker_email_invoice_line_items gains product_id (FK→products) (migration 0167; a brand_id column was dropped in 0168 on review — brand derives from products.brandId). The mapping service (map-invoice-products.ts) reuses the shared ensureProductFromExtraction (brand+item dedup) — no reimplementation — links via showroom_product_mappings (idempotent uniq), and records product_price_observations deduped on product+store+cents. It fires in the pipeline after line-item insert, which for Gmail-sourced mail is post-approval (0042 trust gate), so auto-creating catalog rows is human-gated. Guardrails: only quotes attributed to a store are mapped (no catalog fork from unattributed quotes); a prefix heuristic skips tax/delivery/labor/fee/total lines; best-effort per line; product display name JOINs from products (never denormalized).",
+    date: "2026-08-02",
+    status: "staged",
+    prNumber: 337,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/337",
+  },
+  {
     branch: "claude/0042-showroom-quote-map",
     title: "Showroom pending-quote panel (0042 P4)",
     summary:
@@ -320,6 +368,96 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "showroom-dedup-signals",
+    branch: "claude/showroom-dedup-signals",
+    date: "2026-08-04",
+    area: "Showrooms",
+    title: "Dedupe on real identity signals, not name alone (0046)",
+    summary:
+      "The merge tool only ever compared normalized names, so two rows for one business were invisible to it the moment the names differed at all — which is exactly how a second Jack London Kitchen & Bath row survived. place_id, phone, street address and website host already existed as duplicate signals in duplicate-check.ts, but only on the create path; this brings them to the merge path and collects them across the store row, its LOCATIONS and its POCs (the Jack London pair sat on different domains and were only linkable because a POC on one carried the phone and street address of a location on the other). The real work was suppressing false positives, both discovered by running it on production data: a shared street address fused every tenant of the SF Design Center into a 37-store blob, and reading social links as websites fused 36 more. Signals are now STRONG (place_id/website/name — may merge) vs WEAK (phone/address — may only surface a group for review); a weak value on more than two stores is a building, not a business, and is discarded. Result on the live directory: 8 auto-mergeable groups (now including Jack London 116←261, the merge that previously required a human), largest component down from 37 to 5, and 17 evidence-carrying branchCandidates.",
+    changes: [
+      { kind: "added", text: "services/showroom/duplicate-signals.ts — normName (folds &/and, strips '- City' branch suffixes and legal suffixes), normPhone (digits-only, US country prefix dropped), normAddress (requires a street number), normHost (ignores site builders and social profiles), plus transitive union-find grouping so A~B by phone and B~C by place_id resolve to one store." },
+      { kind: "changed", text: "dedup_showroom_stores groups on ANY shared identity signal instead of name alone, gathered from showroom_stores + showroom_store_locations + showroom_pocs. Every plan entry reports linkedBy, so a reviewer sees WHY rows matched." },
+      { kind: "fixed", text: "STRONG vs WEAK signals: a group linked only by a shared address or phone is never auto-merged, and a weak value held by more than 2 stores is dropped outright. Without this, grouping on address fused all 37 tenants of 2 Henry Adams St and an apply:true would have soft-deleted real stores." },
+      { kind: "fixed", text: "Only type=WEBSITE links feed the website signal. showroom_store_links also holds social profiles, and linkedin.com/youtube.com/houzz.com/x.com alone fused 36 unrelated stores." },
+      { kind: "changed", text: "ambiguousGroupsSkipped renamed to branchCandidates and re-framed: under 0045's multi-location model these are chains that should become ONE store with many location rows. Reported with matching evidence, never auto-merged — a human-confirmed operation by design." },
+      { kind: "fixed", text: "Removed a NUL byte committed inside join('…') in the tool source. Same runtime value as \\0, but the raw byte made git, grep and every code-review tool classify the file as binary, so its contents never appeared in a diff. Added scripts/fix-nul.mjs." },
+    ],
+    migrations: [],
+    status: "shipped",
+  },
+  {
+    id: "showroom-multi-location-mcp",
+    branch: "claude/showroom-multi-location-mcp",
+    date: "2026-08-04",
+    area: "Showrooms",
+    title: "Showroom multi-location — MCP reads, writes, and dedupe (0045)",
+    summary:
+      "A showroom store row is a BUSINESS, not an address — Bay Area chains run several sites under one row. The table for that (showroom_store_locations) shipped empty in PR #278 and was never wired to anything: 0 rows, 244 stores, and grep found exactly two references in the repo, both schema files. So MCP still read one flat address per store, had no tool to add a site, and could not answer 'which of these are chains'. Backfills 244 locations one-per-store, teaches get_showroom and list_showrooms the array, adds add/update/delete_showroom_location, and resolves place-id dedupe through locations so a chain's second branch stops reading as an unregistered business. isPrimary and the display address are both DERIVED (place-id match, else lowest id; address assembled from the structured parts) — no stored flag, no stored formatted address, because both drift. Scope stops short of the 0031 Phase B/C cutover: the legacy showroom_stores columns stay dual-written from the primary site so every un-migrated reader keeps working.",
+    changes: [
+      { kind: "added", text: "add_showroom_location, update_showroom_location, delete_showroom_location MCP tools. add pre-checks the place_id unique index and names the store that already owns a site; delete refuses to remove a store's LAST location (a business with no address is not representable — delete_showroom retires the store instead)." },
+      { kind: "changed", text: "get_showroom returns locations[] (each with a derived address, coords, placeId, hub and isPrimary) + locationCount, and its description now tells an agent to reach for add_showroom_location instead of overwriting the store address with update_showroom." },
+      { kind: "changed", text: "list_showrooms returns locationCount per row and accepts multiLocationOnly: true — the 'show me the chains' query that previously had no answer." },
+      { kind: "fixed", text: "find_known_showrooms + search_showrooms resolve Google place ids through LOCATIONS as well as the store row. A chain's second site only ever carries its place id on the location, so the store-only lookup reported already-registered branches as new and invited duplicate stores." },
+      { kind: "added", text: "services/showroom/locations.ts — formatShowroomAddress (derived, with an assert self-check), loadStoreLocations / loadStoreLocationCounts (chunked at 20 ids for the D1 100-bound-param cap), resolveBayAreaCityId (matches an existing definition row, never mints one from an unvalidated string), loadPlaceIdOwners, primaryLocationStorePatch." },
+      { kind: "added", text: "scripts/sql/backfill_showroom_store_locations.sql — idempotent (NOT EXISTS guard) one-location-per-store seed. Applied to remote: 244 locations / 244 stores, 0 orphans, 0 shared place ids." },
+    ],
+    migrations: [],
+    status: "staged",
+  },
+  {
+    id: "rooms-area-computed-hotfix",
+    branch: "claude/fix-rooms-area-computed-hotfix",
+    date: "2026-08-03",
+    area: "Home",
+    title: "Compute room area on the fly — heal prod 500s + room-geometry package",
+    summary:
+      "Production incident + fix. The shared prod D1 already had rooms.area_sq_ft dropped (0043 — intentional: area is computed, never stored), but deployed main still declared the column in the drizzle rooms schema, so every select().from(rooms) emitted area_sq_ft and D1 rejected it — 500ing every rooms read (catalog, images, listing-photos, mood-board, supporting-docs, vision-nodes, materials, pascal, measurements). Fix: remove the column from the schema (heals every star-select at once), derive area on read, and modularize the calculators into services/room-geometry — one module file per calc type sharing the dimension primitives, so no caller carries its own math (no IFTTT). linear-feet added at three scopes: a wall/segment, a room (rectangular perimeter), a floor / whole-home total. Deployed to prod (version c8101a8e); /api/rooms/catalog confirmed 200. NOTE: the earlier 500 was briefly cached at the Cloudflare edge, masking the heal until the cache refreshed — a follow-up will make 5xx non-cacheable.",
+    changes: [
+      { kind: "fixed", text: "Removed areaSqFt from the rooms drizzle schema — a star select().from(rooms) no longer emits the dropped column; heals every rooms read across the app." },
+      { kind: "added", text: "services/room-geometry/ package: dimensions.ts (toFeet/round2), area.ts (computeRoomAreaSqFt/sumRoomAreaSqFt), linear-feet.ts (segmentLinearFt/computeRoomLinearFt/sumRoomLinearFt), index.ts barrel, + assert self-check." },
+      { kind: "changed", text: "All readers route through the shared calculators: mcp rooms _shared.roomDto (now surfaces linearFt beside areaSqFt), home-catalog.computeRoomSqft (delegates), materials allocate.buildRoomContext, pascal generator, measurements.listActiveRooms." },
+      { kind: "changed", text: "update_room: areaSqFt is no longer settable (area is derived). Removed the now-dead area backfill + unused isNull import from home-catalog." },
+    ],
+    migrations: [],
+    status: "shipped",
+  },
+  {
+    id: "homeowner-room-model-0043",
+    branch: "claude/homeowner-experience-plan-v2",
+    date: "2026-08-02",
+    area: "Home",
+    title: "Room model overhaul + canonical measurement view (0041/0043)",
+    summary:
+      "Lands the 0041/0043 room data model and recovers the branch after a power-loss + 40-commits-behind divergence whose migrations collided by number with main's. The schema/service/docs were ported onto current main and the 10 divergent migrations consolidated into ONE fresh catch-up migration (0169) generated against main's snapshot — verified to hold only this branch's delta, no re-creation of main's tables. Core substance: measurement-view.ts, a pure resolver that returns the SAME transparent shape for every room — walls[], computed area AND override AND the override's provenance (notes + calculation), perimeter with a named source (walls > measured > rectangular_estimate > unavailable), effective area + its source, confidence — absent data is null, never a missing key, and nothing is hidden behind an if/else. Inches are canonical; feet/sqft/linear are computed on read; real walls win the perimeter for any non-rectangular room. rooms.area_sq_ft (a stored calculation that goes stale) is dropped — area is computed, any authoritative override lives in room_measurements.area_sq_ft_override (+ _notes / _calculation).",
+    changes: [
+      { kind: "migration", text: "0169_organic_dragon_lord (consolidated catch-up): 47 CREATE TABLE (projects, walls + wall_openings + wall_face_segments + wall_planned_changes, room_measurements, room_notes + type defs/mappings, decisions/decision_reopenings, impacts + impact_targets/blocks/evidence/definitions, ripple_rules, surface_assemblies + assembly_layers, spec_definitions + room_spec_fields, room_trade_assignments, room_permit_mapping, room_events, room_intents, room_problems + docs/photos, fixture_requirements, and the *_def vocab tables) + 4 rooms columns (line_color_hex, line_order, +2) + DROP rooms.area_sq_ft. NOT applied to remote (see deploy note)." },
+      { kind: "added", text: "services/homeowner/measurement-view.ts — measurementView(): one canonical shape per room (computed + override + provenance, walls-win perimeter precedence), plus a mutation-checked test (measurement-view.test.ts)." },
+      { kind: "removed", text: "rooms.area_sq_ft column — area is computed from dimensions/walls, never stored; override moves to room_measurements.area_sq_ft_override. home-catalog.ts stops writing it; list_rooms/get_room/update_room now expose a computed areaSqFt (non-settable)." },
+      { kind: "added", text: "0041/0043/0044 planning doc bundles (docs/) — IMPLEMENTATION_PLAN, PROMPT, DESIGN_SPEC." },
+    ],
+    migrations: ["0169"],
+    status: "staged",
+  },
+  {
+    id: "store-quote-product-map",
+    branch: "claude/0042-p5-product-map",
+    date: "2026-08-02",
+    area: "Showrooms",
+    title: "Quote line items map to products — match or auto-create (0042 P5)",
+    summary:
+      "The second half of the quote-ingestion loop, and the last of 0042. Building on P4's showroom_store_id, each extracted quote line is matched to a product the showroom already carries, or a brand+product are auto-created from the vendor+description (deduped via the shared ensureProductFromExtraction), linked to the showroom, and the line's unit price recorded as a dated product_price_observation. The PendingQuotesPanel now shows each mapped line's product under it with a 'new from quote' (created) or 'matched' badge. Mapping fires in the email pipeline after line-item insert — post-extraction, which for Gmail-sourced mail is post-approval per the 0042 trust gate, so auto-creating catalog rows is human-gated. Guardrails: only quotes attributed to a store are mapped (an unattributed quote never forks the catalog); a prefix heuristic skips tax/delivery/labor/fee/total lines; the mapping is idempotent (only unmatched lines processed, price-obs deduped on product+store+cents) and best-effort per line.",
+    changes: [
+      { kind: "migration", text: "0167 (additive): worker_email_invoice_line_items.product_id (FK→products) + index. Applied to remote + verified. (0168 drops the brand_id column that 0167 also added — review: brand derives from products.brandId, never denormalized; native DROP COLUMN, no rebuild.)" },
+      { kind: "added", text: "services/email/map-invoice-products.ts — mapInvoiceLinesToProducts(): reuses ensureProductFromExtraction (brand+item dedup), links via showroom_product_mappings (idempotent uniq), records product_price_observations (deduped on product+store+cents), stamps line product_id/brand_id/match_status." },
+      { kind: "changed", text: "email pipeline fires product mapping after line-item insert + material deduction; best-effort (a failure never breaks email processing)." },
+      { kind: "changed", text: "GET /:id/pending-quotes lines now carry productId/brandId/productName (JOINed from products, never denormalized)." },
+      { kind: "added", text: "PendingQuotesPanel: each mapped line shows the product + a 'new from quote' / 'matched' badge." },
+    ],
+    migrations: ["0167", "0168"],
+    status: "staged",
+  },
   {
     id: "store-quote-viewport",
     branch: "claude/0042-showroom-quote-map",
