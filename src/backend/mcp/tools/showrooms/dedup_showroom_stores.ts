@@ -168,6 +168,9 @@ type StoreRow = {
 };
 
 
+/**
+ * Calculates a completeness score for a store row based on its enriched fields.
+ */
 function score(r: StoreRow): number {
   let s = 0;
   if (r.zipCode) s += 100;
@@ -180,15 +183,30 @@ function score(r: StoreRow): number {
   return s;
 }
 
+/**
+ * Determines if a store is considered a distinct physical site (requires zip or placeId).
+ */
 const isReal = (r: StoreRow) => Boolean(r.zipCode) || Boolean(r.placeId);
 
 const D1_IN_CHUNK = 90;
+
+/**
+ * Splits an array into smaller arrays of a specified size (defaults to D1_IN_CHUNK) to stay under D1's parameter limit.
+ */
 function chunk<T>(xs: T[], size = D1_IN_CHUNK): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < xs.length; i += size) out.push(xs.slice(i, i + size));
   return out;
 }
+
+/**
+ * Extracts the number of changed rows from a D1 result meta object.
+ */
 const changesOf = (r: unknown) => Number((r as { meta?: { changes?: number } })?.meta?.changes ?? 0);
+
+/**
+ * Generates a unique string key for a row based on the values of the specified columns.
+ */
 const keyOf = (row: Record<string, unknown>, cols: SQLiteColumn[]) =>
   cols.map((c) => String(row[c.name] ?? "∅")).join("\0");
 
@@ -283,6 +301,10 @@ export const dedupShowroomStores = defineTool({
     // phone + street address of a location on the other.
     const byId = new Map<number, StoreRow>(all.map((r) => [r.id, r]));
     const identities = new Map<number, StoreIdentity>();
+
+    /**
+     * Retrieves or initializes the identity tracker for a given store ID.
+     */
     const identityFor = (storeId: number) => {
       let i = identities.get(storeId);
       if (!i) identities.set(storeId, (i = emptyIdentity(storeId)));
