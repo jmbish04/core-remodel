@@ -92,7 +92,8 @@ erDiagram
         int candidate_id FK "cascade"
         int store_id FK
         text role "KEEPER|BRANCH|EXCLUDED"
-        int resulting_location_id FK "set on apply"
+        text collapse_state "PENDING|LOCATION_CREATED|CHILDREN_REMAPPED|RETIRED|SKIPPED_NO_ADDRESS"
+        int resulting_location_id FK "set at LOCATION_CREATED"
     }
     showroom_merge_exclusions {
         int id PK
@@ -111,12 +112,19 @@ erDiagram
 - **No denormalized names anywhere.** Members relate by `store_id`; display names JOIN.
 - **`role = EXCLUDED`** is how a human says "these four are one business, but that fifth row
   is a different company" — the Leandro Quintal case, resolved per-member instead of
-  rejecting the whole group. An exclude decision is **persisted** as an ordered pair
-  `(store_id_lo, store_id_hi)` in `showroom_merge_exclusions`, and P2's scan **skips any edge
-  whose two endpoints are an excluded pair**. Without this the detector would re-propose the
-  same keeper+excluded pairing on the very next run and the "no new candidate after apply"
-  success criterion would be unmet (codra). Rejecting a whole candidate records the exclusion
-  for every pair in it.
+  rejecting the whole group. An exclude decision is **persisted** in `showroom_merge_exclusions`,
+  and P2's scan **skips any edge whose two endpoints are an excluded pair**. Without this the
+  detector would re-propose the same pairing on the very next run and the "no new candidate
+  after apply" criterion would be unmet (codra).
+
+  **Exactly which pairs are written (codra — no ambiguity):**
+  - **Exclude one member** `X` from an otherwise-approved group: write `(X, keeper)` only. Every
+    non-excluded branch collapses INTO the keeper, so after apply the keeper is the sole
+    surviving identity `X` could re-link to — `(X, keeper)` is necessary and sufficient. Each
+    pair is stored ordered as `(min, max)` so the lookup is direction-free and the
+    `(store_id_lo, store_id_hi)` unique index dedupes.
+  - **Reject the whole candidate:** write **every pairwise combination** of its members, since
+    none of them merge and any sub-pair could otherwise regroup next scan.
 
 ---
 
@@ -163,24 +171,42 @@ sequenceDiagram
     H->>S: approve candidate 7, keeper = store 6, exclude store 31
     S->>D: re-verify membership still matches group_key
     Note over S,D: STALE if the group changed since detection — abort, re-scan
-    loop each BRANCH member
-        S->>D: INSERT showroom_store_locations from the branch's<br/>address parts + coords + place_id
-        S->>D: remap child rows onto the keeper (0046's SIMPLE_MOVE / DEDUP_MOVE)
-        S->>D: UPDATE showroom_stores SET is_active = 0
-        S->>D: record resulting_location_id on the member row
+    loop each BRANCH member (resume from its collapse_state)
+        alt state = PENDING
+            S->>D: INSERT showroom_store_locations (address + coords + place_id + unit)
+            S->>D: SET resulting_location_id, collapse_state = LOCATION_CREATED
+        end
+        alt state <= LOCATION_CREATED
+            S->>D: remap child rows onto the keeper (0046 SIMPLE_MOVE / DEDUP_MOVE)
+            S->>D: collapse_state = CHILDREN_REMAPPED
+        end
+        alt state <= CHILDREN_REMAPPED
+            S->>D: UPDATE showroom_stores SET is_active = 0
+            S->>D: collapse_state = RETIRED
+        end
+        Note over S,D: the location is NEVER deleted on failure — it holds the address
     end
-    S->>D: candidate status = APPLIED, applied_at set
-    S-->>H: per-member receipt — location created, rows moved
+    opt every BRANCH member RETIRED or SKIPPED_NO_ADDRESS
+        S->>D: candidate status = APPLIED, applied_at set
+    end
+    S-->>H: per-member receipt — each member's collapse_state
 ```
-- **Order matters:** create the location BEFORE soft-deleting, so a failure never loses the
-  address. Sequential + compensating delete (D1 has no transactions; `db.batch()` cannot feed
-  a generated id into the next statement).
-- **Idempotent / resumable (codra).** The service keys each branch on its member row's
-  `resulting_location_id`: a member that already has one is **skipped** on a retry, so a
-  mid-collapse failure (branch 2 of 5 threw) resumes cleanly rather than double-inserting a
-  location or erroring on an already-deleted store. The candidate is only marked `APPLIED`
-  once **every** BRANCH member has a `resulting_location_id` (or was skipped for no address);
-  a partial run stays `TBD` and the receipt lists which members completed.
+- **Per-member state machine, not a single flag (codra).** Each BRANCH member advances through
+  `PENDING → LOCATION_CREATED → CHILDREN_REMAPPED → RETIRED` (or terminal `SKIPPED_NO_ADDRESS`),
+  and every transition is committed as its own D1 write. A retry **resumes from the recorded
+  state** — not from "has a `resulting_location_id`", which was the flaw: a crash after the
+  location insert but before the children moved would have marked the branch done, orphaning
+  child rows and leaving the store active. The candidate reaches `APPLIED` only when every
+  BRANCH member is `RETIRED` or `SKIPPED_NO_ADDRESS`; otherwise it stays `TBD` with a receipt
+  of each member's state.
+- **The location row is the durable checkpoint — never compensating-deleted (codra).** The
+  earlier "create-then-compensating-delete" was self-contradictory: deleting the location on
+  failure would destroy the very address it was meant to preserve. Instead the location INSERT
+  is the FIRST and idempotent step (guarded by `collapse_state` + a `place_id`/unit uniqueness
+  check so a retry does not double-insert), and once written it is kept no matter what fails
+  downstream. The store is soft-deleted only at the final `RETIRED` transition, so a partial
+  failure leaves a live store plus a saved location — recoverable, never lost. `db.batch()`
+  cannot feed a generated id into the next statement, so the steps are sequential by necessity.
 - **Re-verify at apply, not just at detect.** Before touching anything, re-confirm every member
   still exists and is `is_active = 1` and the active membership still matches `group_key`; abort
   `STALE` and re-scan if it moved.
@@ -218,12 +244,13 @@ pair created by the test and removed after**, never on live rows.
 ```mermaid
 flowchart LR
   R1[Wrong group collapses a real business] -->|human confirm + per-member EXCLUDE| M1[no auto-apply, ever]
-  R2[Address lost between insert and delete] -->|create location FIRST, compensating delete| M2[address never orphaned]
+  R2[Address lost on mid-collapse failure] -->|location is the durable checkpoint, NEVER deleted;<br/>store retired only at the end| M2[address never lost]
+  R6[Retry skips unremapped children] -->|per-member collapse_state machine,<br/>resume from recorded stage| M6[no orphans]
   R3[Group changed since detection] -->|re-verify group_key on apply| M3[STALE, abort + re-scan]
   R4[Branch has no address] -->|report + skip that member| M4[never collapsed to nothing]
   R5[D1 100-param cap on child remaps] -->|chunk by floor 100 / cols-per-row| M5[bounded]
   classDef done fill:#1f4d2e,stroke:#4ade80
-  class M1,M2,M3,M4,M5 done
+  class M1,M2,M3,M4,M5,M6 done
 ```
 
 **D1 chunking is column-aware, not a fixed 20 (codra).** The cap is 100 *bound parameters* per

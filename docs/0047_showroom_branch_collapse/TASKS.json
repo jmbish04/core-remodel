@@ -8,7 +8,7 @@
       "workstream": "database",
       "changeType": "migration",
       "title": "showroom_merge_candidates + showroom_merge_candidate_members",
-      "detail": "showroom_merge_candidates + showroom_merge_candidate_members + showroom_merge_exclusions. group_key UNIQUE (sorted ACTIVE member store ids). Members relate by store_id FK — no denormalized names. role = KEEPER|BRANCH|EXCLUDED; resulting_location_id set on apply. Exclusions persist an ordered (store_id_lo, store_id_hi) pair so a human exclude decision survives across scans. db:generate then migrate:remote, then verify on remote.",
+      "detail": "showroom_merge_candidates + showroom_merge_candidate_members + showroom_merge_exclusions. group_key UNIQUE (sorted ACTIVE member store ids). Members relate by store_id FK — no denormalized names. role = KEEPER|BRANCH|EXCLUDED; members carry a collapse_state (PENDING|LOCATION_CREATED|CHILDREN_REMAPPED|RETIRED|SKIPPED_NO_ADDRESS) + resulting_location_id for resumable collapse. Exclusions persist an ordered (store_id_lo, store_id_hi) pair so a human exclude decision survives across scans. db:generate then migrate:remote, then verify on remote.",
       "dependsOn": [],
       "status": "pending"
     },
@@ -42,7 +42,7 @@
       "workstream": "backend",
       "changeType": "added",
       "title": "services/showroom/collapse-branches.ts",
-      "detail": "Per branch: create the location row FIRST, then remap children (reusing 0046 SIMPLE_MOVE/DEDUP_MOVE), then soft-delete the store. Sequential + compensating delete (D1 has no transactions). IDEMPOTENT/RESUMABLE: key each branch on its member resulting_location_id — skip a member that already has one on retry; mark the candidate APPLIED only when every branch completed, else it stays TBD. Re-verify at APPLY that every member is still active and matches group_key; abort STALE if it moved. Skip and report a branch with no usable address. Chunk COLUMN-AWARE at floor(100/columns-per-row), not a fixed 20 — ~90 ids for a single-col FK remap, ~8 rows for a ~12-col location INSERT. EXCLUDED members untouched, their pair written to showroom_merge_exclusions.",
+      "detail": "Per branch, a state machine on collapse_state, each transition its own committed write: PENDING -> LOCATION_CREATED (insert location, set resulting_location_id) -> CHILDREN_REMAPPED (reuse 0046 SIMPLE_MOVE/DEDUP_MOVE) -> RETIRED (soft-delete store), or terminal SKIPPED_NO_ADDRESS. RESUME FROM collapse_state, not from resulting_location_id — a crash after the location insert but before children moved must not skip the branch (would orphan children). The location INSERT is idempotent (guard on collapse_state + place_id/unit check) and is NEVER compensating-deleted: it holds the address, so a partial failure leaves a live store + saved location, recoverable. Re-verify at APPLY that every member is active and matches group_key; abort STALE. Candidate reaches APPLIED only when every branch is RETIRED or SKIPPED_NO_ADDRESS. Chunk column-aware at floor(100/cols-per-row). Exclusions persisted precisely: exclude X -> write (X,keeper) as (min,max); reject-whole -> every pairwise (min,max).",
       "dependsOn": [
         "P1-schema"
       ],
@@ -79,7 +79,7 @@
       "workstream": "qc",
       "changeType": "added",
       "title": "scripts/qc/pr_<n>.mjs — preview + prod",
-      "detail": "Collapse exercised on a throwaway store pair the test creates and removes — never live rows. Asserts: address carried across, children remapped, EXCLUDED member untouched + its pair persisted + not re-proposed, a partial collapse resumes cleanly, apply refuses a non-APPROVED candidate, re-scan yields no new candidate, and 0046 no-runaway-component still passes.",
+      "detail": "Collapse exercised on a throwaway store pair the test creates and removes — never live rows. Asserts: address carried across, children remapped, a SIMULATED mid-collapse crash (state left at LOCATION_CREATED) RESUMES without duplicating the location or orphaning children, EXCLUDED member untouched + only (X,keeper) persisted + not re-proposed, apply refuses a non-APPROVED candidate, re-scan yields no new candidate, and 0046 no-runaway-component still passes.",
       "dependsOn": [
         "P4-mcp-tools",
         "P5-review-ui"

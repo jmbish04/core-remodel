@@ -45,21 +45,32 @@ classification already in `dedup_showroom_stores.ts` — do NOT reimplement dete
 
 - Re-verify at APPLY, not just at detect: every member still exists, is `is_active = 1`, and the
   active membership still matches `group_key`; abort `STALE` if it moved.
-- Per BRANCH member, in this order: **create the location row, then remap children, then
-  soft-delete the store**. A failure must never leave an address destroyed — D1 has no
-  transactions, so write sequentially with a compensating delete, and say so in a comment.
-- **Idempotent / resumable:** key each branch on its member row's `resulting_location_id`. A
-  member that already has one is SKIPPED on retry, so a mid-collapse failure resumes without
-  double-inserting a location or erroring on an already-deleted store. Mark the candidate
-  `APPLIED` only when every BRANCH member has a `resulting_location_id` (or was skipped for no
-  address); a partial run stays `TBD` with a receipt of what completed.
+- Per BRANCH member, a **state machine** on `collapse_state`, each transition its own committed
+  write: `PENDING → LOCATION_CREATED → CHILDREN_REMAPPED → RETIRED` (or terminal
+  `SKIPPED_NO_ADDRESS`). Do the location INSERT first (set `resulting_location_id` +
+  `LOCATION_CREATED`), then the child remap (`CHILDREN_REMAPPED`), then `is_active = 0`
+  (`RETIRED`).
+- **Resume from `collapse_state`, NOT from "has a `resulting_location_id`."** Keying on the
+  location id alone is wrong: a crash after the location insert but before the children moved
+  would skip the branch as done and orphan its children (codra). The location INSERT must be
+  idempotent (guard on `collapse_state` + a `place_id`/unit existence check) so a resume does
+  not double-insert.
+- **Never compensating-delete the location.** It holds the copied address — deleting it on
+  failure destroys the very thing the ordering exists to protect (codra). The store is
+  soft-deleted only at the final `RETIRED` step, so a partial failure leaves a live store plus a
+  saved location: recoverable, never lost. (D1 has no transactions; steps are sequential.)
+- Mark the candidate `APPLIED` only when every BRANCH member is `RETIRED` or
+  `SKIPPED_NO_ADDRESS`; a partial run stays `TBD` with a per-member receipt.
 - Reuse 0046's `SIMPLE_MOVE` / `DEDUP_MOVE` child-table maps; do not re-list 25 FK tables.
 - **Chunk column-aware**, not a fixed 20: the D1 cap is 100 bound *parameters* per statement, so
   the safe row count is `floor(100 / columns_written_per_row)`. A single-column FK remap → ~90
   ids; a ~12-column location INSERT → ~8 rows. Use a parameter-budget helper.
 - A branch with no usable address is REPORTED and SKIPPED, never collapsed to nothing.
-- `role = EXCLUDED` members are left completely untouched, and their pair is written to
-  `showroom_merge_exclusions` so the scan never re-proposes it.
+- `role = EXCLUDED` members are left completely untouched. Persist exclusions precisely: on
+  **exclude member X**, write only `(X, keeper)` ordered as `(min, max)` — every other branch
+  merges into the keeper, so that is the sole identity X could re-link to. On **reject the whole
+  candidate**, write every pairwise `(min, max)` combination of its members. The
+  `(store_id_lo, store_id_hi)` unique index dedupes.
 
 ### P4 — MCP, one file per tool
 `list_merge_candidates` (READ_ONLY), `get_merge_candidate` (READ_ONLY, full evidence),
