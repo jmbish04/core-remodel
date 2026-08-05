@@ -1,10 +1,8 @@
 import { z } from "zod";
 
-import { getLatestSnapshot, loadScene } from "../../../services/pascal/store";
-import { listVariants } from "../../../services/pascal/product";
+import { compareProductVariants } from "../../../services/pascal/workflow";
 import { toolError } from "../../format";
 import { defineTool, READ_ONLY } from "../../types";
-import { sceneLink } from "./_shared";
 
 export const compareLayoutVariants = defineTool({
   name: "compare_layout_variants",
@@ -19,40 +17,10 @@ export const compareLayoutVariants = defineTool({
   annotations: READ_ONLY,
   examples: [{ title: "Compare a study's variants", args: { studyId: "study-abc12345" } }],
   handler: async ({ env }, input) => {
-    let rows;
-    if (input.variantIds?.length) {
-      rows = (await Promise.all(input.variantIds.map((id) => loadScene(env, id)))).filter(
-        (r): r is NonNullable<typeof r> => r != null,
-      );
-    } else if (input.studyId) {
-      rows = await listVariants(env, { studyId: input.studyId });
-    } else {
+    if (!input.variantIds?.length && !input.studyId)
       return toolError("Pass a studyId or variantIds.");
-    }
-    if (rows.length === 0) return { variants: [], note: "No variants to compare." };
-
-    const variants = await Promise.all(
-      rows.map(async (r) => {
-        const snap = await getLatestSnapshot(env, r.id);
-        let confidence: number | null = null;
-        try {
-          confidence = r.renderingJson ? JSON.parse(r.renderingJson).confidence ?? null : null;
-        } catch {
-          confidence = null;
-        }
-        return {
-          id: r.id,
-          name: r.name,
-          version: r.version,
-          nodeCount: r.nodeCount,
-          status: r.status,
-          parentSceneId: r.parentSceneId,
-          confidence,
-          thumbnailUrl: snap?.imageUrl ?? r.thumbnailUrl ?? null,
-          editorUrl: sceneLink(env, r.id),
-        };
-      }),
-    );
+    const variants = await compareProductVariants(env, input);
+    if (variants.length === 0) return { variants: [], note: "No variants to compare." };
     return { count: variants.length, variants };
   },
 });

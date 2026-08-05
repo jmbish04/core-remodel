@@ -1,0 +1,7 @@
+---
+const { projectId } = Astro.params;
+return Astro.redirect(
+  projectId ? `/admin/plan/3d?project=${encodeURIComponent(projectId)}` : "/admin/plan/3d",
+  308,
+);
+---
