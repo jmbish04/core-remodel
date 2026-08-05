@@ -27,7 +27,7 @@ import { toast } from "sonner";
 import { api } from "@/components/products";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CurrencyInput } from "@/components/ui/currency-input";
+import { CurrencyInput, parsePriceCents } from "@/components/ui/currency-input";
 import {
   Dialog,
   DialogContent,
@@ -268,13 +268,16 @@ function LogExpenseDialog({
   const [amountCents, setAmountCents] = React.useState<number | null>(null);
   const [saving, setSaving] = React.useState(false);
 
-  // Reset the form whenever the dialog opens fresh.
+  // Reset the form whenever the dialog opens fresh. Date defaults to today —
+  // it's REQUIRED because computeGridMath skips any expense with a null
+  // dateIncurred from Actuals bucketing (while it still counts in "Spent to
+  // date"), so a dateless expense would vanish from the line it's meant to hit.
   React.useEffect(() => {
     if (open) {
       setTrackId("");
       setCategory("");
       setVendor("");
-      setDate("");
+      setDate(new Date().toISOString().slice(0, 10));
       setAmountText("");
       setAmountCents(null);
     }
@@ -282,7 +285,11 @@ function LogExpenseDialog({
 
   const selectedLine = lines.find((l) => l.trackId === trackId) ?? null;
   const canSubmit =
-    Boolean(trackId) && amountCents !== null && amountCents > 0 && category.trim().length > 0;
+    Boolean(trackId) &&
+    amountCents !== null &&
+    amountCents > 0 &&
+    category.trim().length > 0 &&
+    date.length > 0;
 
   async function submit() {
     if (!selectedLine || amountCents === null || saving) return;
@@ -296,7 +303,7 @@ function LogExpenseDialog({
           amountCents,
           budgetItemTrackId: trackId, // links the expense into the line's Actuals
           vendorName: vendor.trim() || null,
-          dateIncurred: date || null,
+          dateIncurred: date, // required + defaulted to today, so it always buckets
         }),
       });
       toast.success(`Logged ${formatUsd(amountCents)} to ${selectedLine.label}`);
@@ -356,6 +363,7 @@ function LogExpenseDialog({
               <Input
                 id="expense-date"
                 type="date"
+                required
                 value={date}
                 onChange={(e) => setDate(e.target.value)}
               />
@@ -415,6 +423,25 @@ export function BudgetGridApp() {
   // Inline plan edit (Estimate view only): which cell is open + its draft text.
   const [editing, setEditing] = React.useState<{ trackId: string; monthIdx: number } | null>(null);
   const [editText, setEditText] = React.useState("");
+
+  // Roving-tabindex refs for the view tablist (arrow-key navigation).
+  const tabRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
+  function onTabKeyDown(e: React.KeyboardEvent, index: number) {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight" && e.key !== "Home" && e.key !== "End")
+      return;
+    e.preventDefault();
+    const last = VIEWS.length - 1;
+    const next =
+      e.key === "Home"
+        ? 0
+        : e.key === "End"
+          ? last
+          : e.key === "ArrowRight"
+            ? (index + 1) % VIEWS.length
+            : (index - 1 + VIEWS.length) % VIEWS.length;
+    setView(VIEWS[next].id);
+    tabRefs.current[next]?.focus();
+  }
 
   // Debounce the search box into the query that drives the fetch.
   React.useEffect(() => {
@@ -646,12 +673,17 @@ export function BudgetGridApp() {
             aria-label="Budget view"
             className="inline-flex rounded-lg border bg-card/40 p-0.5"
           >
-            {VIEWS.map((v) => (
+            {VIEWS.map((v, idx) => (
               <button
                 key={v.id}
+                ref={(el) => {
+                  tabRefs.current[idx] = el;
+                }}
                 role="tab"
                 aria-selected={view === v.id}
+                tabIndex={view === v.id ? 0 : -1}
                 onClick={() => setView(v.id)}
+                onKeyDown={(e) => onTabKeyDown(e, idx)}
                 className={cn(
                   "rounded-md px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   view === v.id
@@ -855,13 +887,7 @@ export function BudgetGridApp() {
                                         void commitEdit(
                                           line,
                                           i,
-                                          (function () {
-                                            const cleaned = e.target.value.replace(/[^0-9.]/g, "");
-                                            const dollars = Number.parseFloat(cleaned);
-                                            return Number.isFinite(dollars)
-                                              ? Math.round(dollars * 100)
-                                              : line.plan[i];
-                                          })(),
+                                          parsePriceCents(e.target.value) ?? line.plan[i],
                                           editText,
                                         )
                                       }
