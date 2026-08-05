@@ -136,17 +136,22 @@ try {
       plannedCents: 1234,
     });
     check("PATCH plan-schedule unknown trackId → 404", bad.status === 404, `status=${bad.status}`);
-    const firstLine = (g?.phases ?? []).flatMap((p) => p.lines ?? [])[0];
-    if (firstLine?.trackId) {
+    // Non-polluting round-trip: write an EXISTING in-window cell back to its own
+    // current value. Never write a far-future period — the window derivation
+    // anchors to max(period), so a stray future row would distort the default grid.
+    const firstPhase = (g?.phases ?? []).find((p) => (p.lines ?? []).length > 0);
+    const firstLine = firstPhase?.lines?.[0];
+    const firstPeriod = g?.months?.[0]?.period;
+    if (firstLine?.trackId && firstPeriod) {
+      const idx = 0;
       const patched = await c.patch("/api/budget/plan-schedule", {
         trackId: firstLine.trackId,
-        period: "2099-01",
-        plannedCents: 4200,
-        plannedText: "$42.00",
+        period: firstPeriod,
+        plannedCents: firstLine.plan?.[idx] ?? 0, // write the same value back — no data drift
       });
       check("PATCH plan-schedule valid trackId 200", patched.status === 200, `status=${patched.status}`);
     } else {
-      info("PATCH plan-schedule round-trip skipped — no line items in the grid to target");
+      info("PATCH plan-schedule round-trip skipped — no in-window line items to target");
     }
   }
 
