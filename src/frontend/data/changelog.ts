@@ -351,6 +351,24 @@ export const BRANCHES: ChangelogBranch[] = [
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: "budget-grid",
+    branch: "claude/budget-backend-frontend-09f91d",
+    date: "2026-08-05",
+    tag: "0035 P1–P2",
+    area: "Budget",
+    title: "Time-phased budget grid — /admin/budget/grid (API + MCP + UI)",
+    summary:
+      "The RemodelBudgetGrid ships end to end, on top of the Phase-0 schema. A shared loadBudgetGrid() service aggregates active budget lines into a phase → line-item, month-bucketed grid: plan[] from budget_plan_schedule, actual[] from expenses linked by the stable trackId and bucketed by dateIncurred, variance = plan − actual, per-phase progress + tone, per-line variance flags, whole-project scorecards, and footer rollups. It is exposed three ways off one code path: GET /api/budget/grid, a get_budget_grid MCP tool (same service — no divergence), and the /admin/budget/grid React island rebuilt from the design comp (Estimate/Actuals/Variance tabs computed client-side, inline plan edit via CurrencyInput → PATCH /api/budget/plan-schedule, and a Log-expense dialog that writes a line-linked expense). POST /api/budget/grid/seed spreads real estimate midpoints into the plan schedule and conservatively attributes existing expenses to lines (confident single-match only, never fabricated). Also fixes a latent bug: the expenses POST silently dropped budget_item_track_id, so logged spend never rolled into a line's Actuals. Browser-verified on preview; QC 28/28.",
+    changes: [
+      { kind: "added", text: "GET /api/budget/grid — phase→line, month-bucketed plan/actual/variance + scorecards + footer rollups (shared loadBudgetGrid service in services/budget/grid.ts)." },
+      { kind: "added", text: "PATCH /api/budget/plan-schedule (upsert on trackId+period) + POST /api/budget/grid/seed (estimate→plan spread, conservative expense attribution, idempotent)." },
+      { kind: "added", text: "MCP get_budget_grid (READ_ONLY) — same aggregation service as the route, no logic divergence." },
+      { kind: "added", text: "/admin/budget/grid page + BudgetGridApp island: Estimate/Actuals/Variance (client-side), scorecards, phase rows + progress rings, variance badges, month stepper, filters, expand/collapse, inline plan edit (CurrencyInput), Log-expense dialog." },
+      { kind: "fixed", text: "POST /api/budget-tracker/expenses now persists budget_item_track_id (was silently dropped) — logged expenses roll into the target line's Actuals." },
+    ],
+    status: "staged",
+  },
+  {
     id: "budget-grid-foundations",
     branch: "claude/budget-backend-frontend-09f91d",
     date: "2026-08-05",

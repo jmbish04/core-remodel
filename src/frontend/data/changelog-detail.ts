@@ -113,6 +113,59 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "budget-grid": {
+    slug: "budget-grid",
+    branch: "claude/budget-backend-frontend-09f91d",
+    prNumber: 360,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/360",
+    subtitle: "0035 P1–P2 · the time-phased budget grid, end to end",
+    code: [],
+    problem:
+      "Phase 0 gave the schema (phases, monthly plan schedule, the actuals→line link). The grid itself — the phase→line-item, month-bucketed view with Estimate/Actuals/Variance — still had to be built, exposed to both HTTP and MCP without the two drifting, and rendered as a real island matching the design comp.",
+    approach:
+      "One shared aggregation: services/budget/grid.ts loadBudgetGrid() reads active budget lines, buckets plan[] from budget_plan_schedule and actual[] from expenses (linked by stable trackId, bucketed by dateIncurred month), computes variance/tone/flags/progress/scorecards, and derives the month window from the data (one-sided bounds extend to the data extreme, capped 12mo). GET /api/budget/grid and the get_budget_grid MCP tool BOTH call it — verified single-source in review. PATCH /api/budget/plan-schedule upserts a cell (trackId+period); POST /api/budget/grid/seed spreads real estimate midpoints and attributes expenses only on a confident single title match. The BudgetGridApp island computes the three views client-side from raw plan[]/actual[], edits plan inline via CurrencyInput, and logs line-linked expenses. A latent bug surfaced and was root-caused: the expenses POST dropped budget_item_track_id, so actuals never reached a line — fixed additively.",
+    apiChanges: [
+      "NEW GET /api/budget/grid?from=&to=&phase=&q= → { grid: { months, phases[{plan[],actual[],progressPct,tone,lines[{plan[],actual[],flag}]}], footer, scorecards } }.",
+      "NEW PATCH /api/budget/plan-schedule {trackId,period,plannedCents,plannedText}; NEW POST /api/budget/grid/seed.",
+      "NEW MCP tool get_budget_grid (READ_ONLY, shared service).",
+      "FIXED POST /api/budget-tracker/expenses persists budgetItemTrackId.",
+    ],
+    filesTouched: [
+      "src/backend/services/budget/grid.ts (new — shared aggregation)",
+      "src/backend/api/routes/budget-grid.ts, budget-grid-math.ts (new)",
+      "src/backend/api/routes/budget-tracker.ts (expenses POST: persist budgetItemTrackId)",
+      "src/backend/api/index.ts (mount /api/budget)",
+      "src/backend/mcp/tools/budget/get_budget_grid.ts (new) + index.ts",
+      "src/frontend/components/BudgetGridApp.tsx, budget-grid-view.ts (new)",
+      "src/frontend/pages/admin/budget/grid.astro (new)",
+      "scripts/qc/pr_360.mjs, scripts/tests/test_budget_grid_{math,service,view}.mjs",
+    ],
+    migrations: [],
+    diagrams: [
+      {
+        caption: "One aggregation, three surfaces — route and MCP never diverge",
+        code: `flowchart TD
+  SVC["services/budget/grid.ts · loadBudgetGrid()"]
+  R["GET /api/budget/grid"] --> SVC
+  M["MCP get_budget_grid"] --> SVC
+  SVC --> DATA["plan from budget_plan_schedule[month]\\nactual from expenses WHERE budget_item_track_id\\nbucketed by dateIncurred[month]"]
+  UI["/admin/budget/grid · BudgetGridApp"] --> R
+  UI --> EDIT["PATCH /api/budget/plan-schedule (inline)"]
+  UI --> LOG["POST /api/budget-tracker/expenses (line-linked)"]
+  classDef n fill:#1f4d2e,stroke:#4ade80,color:#eaffea;
+  class SVC,DATA n;`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_360.mjs",
+      command:
+        "node scripts/qc/pr_360.mjs --base <preview> --preview  (28/28)  &&  node scripts/qc/pr_360.mjs  (prod regression)",
+      ranAt: "2026-08-05",
+      output:
+        "QC 28/28 on preview: grid shape (months/phases/footer/scorecards), scorecard identity remaining=totalBudget-spent, per-phase plan[]/actual[] length == months, seed idempotent (2nd run 0 new), plan-schedule PATCH 404 on unknown + 200 non-polluting round-trip, MCP get_budget_grid registered, config regression. Prod: regression green, new endpoints correctly pending merge/deploy. Browser-verified on preview: grid renders 32 real line items, Estimate↔Variance client recompute, Remaining shows signed −$5,105 with 'No funding set' when no funding accounts exist, window May–Jul 2026. Three self-checks (math/service/view) pass; build green; tsc no new errors in touched files.",
+      migrations: [],
+    },
+  },
   "budget-grid-foundations": {
     slug: "budget-grid-foundations",
     branch: "claude/budget-backend-frontend-09f91d",
