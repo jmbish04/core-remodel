@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/showroom-dedup-signals",
+    title: "Dedupe showroom stores on real identity signals (0046)",
+    summary:
+      "dedup_showroom_stores grouped on normalized NAME alone, so it missed every duplicate whose two rows were named even slightly differently — the two real Jack London Kitchen & Bath rows ('&' vs 'and', plus a '-Walnut Creek' branch suffix) never grouped at all and had to be merged by hand. The signals to fix it already existed in duplicate-check.ts (place_id / phone / address / website) but were wired only to the CREATE path. This brings them to the MERGE path, gathered across showroom_stores + showroom_store_locations + showroom_pocs, with transitive union-find grouping. The hard part was false positives, both found by running it against live data: grouping on street address fused every tenant of 2 Henry Adams St (the SF Design Center) into one 37-store component, and treating social links as websites (linkedin/youtube/houzz/x) fused 36 stores. So signals are now split STRONG (place_id/website/name — may merge) vs WEAK (phone/address — may only surface a group), a weak value held by >2 stores is discarded as a building rather than a business, and only type=WEBSITE links are read. ambiguousGroupsSkipped becomes branchCandidates: multi-site chains that should collapse into one store with many location rows under 0045, reported with evidence and never auto-merged. Also removed a NUL byte committed inside join('…') that made git and every review tool treat the file as binary.",
+    date: "2026-08-04",
+    status: "shipped",
+    prNumber: 348,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/348",
+  },
+  {
     branch: "claude/showroom-multi-location-mcp",
     title: "Showroom multi-location, wired end to end (0045)",
     summary:
@@ -358,6 +368,25 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "showroom-dedup-signals",
+    branch: "claude/showroom-dedup-signals",
+    date: "2026-08-04",
+    area: "Showrooms",
+    title: "Dedupe on real identity signals, not name alone (0046)",
+    summary:
+      "The merge tool only ever compared normalized names, so two rows for one business were invisible to it the moment the names differed at all — which is exactly how a second Jack London Kitchen & Bath row survived. place_id, phone, street address and website host already existed as duplicate signals in duplicate-check.ts, but only on the create path; this brings them to the merge path and collects them across the store row, its LOCATIONS and its POCs (the Jack London pair sat on different domains and were only linkable because a POC on one carried the phone and street address of a location on the other). The real work was suppressing false positives, both discovered by running it on production data: a shared street address fused every tenant of the SF Design Center into a 37-store blob, and reading social links as websites fused 36 more. Signals are now STRONG (place_id/website/name — may merge) vs WEAK (phone/address — may only surface a group for review); a weak value on more than two stores is a building, not a business, and is discarded. Result on the live directory: 8 auto-mergeable groups (now including Jack London 116←261, the merge that previously required a human), largest component down from 37 to 5, and 17 evidence-carrying branchCandidates.",
+    changes: [
+      { kind: "added", text: "services/showroom/duplicate-signals.ts — normName (folds &/and, strips '- City' branch suffixes and legal suffixes), normPhone (digits-only, US country prefix dropped), normAddress (requires a street number), normHost (ignores site builders and social profiles), plus transitive union-find grouping so A~B by phone and B~C by place_id resolve to one store." },
+      { kind: "changed", text: "dedup_showroom_stores groups on ANY shared identity signal instead of name alone, gathered from showroom_stores + showroom_store_locations + showroom_pocs. Every plan entry reports linkedBy, so a reviewer sees WHY rows matched." },
+      { kind: "fixed", text: "STRONG vs WEAK signals: a group linked only by a shared address or phone is never auto-merged, and a weak value held by more than 2 stores is dropped outright. Without this, grouping on address fused all 37 tenants of 2 Henry Adams St and an apply:true would have soft-deleted real stores." },
+      { kind: "fixed", text: "Only type=WEBSITE links feed the website signal. showroom_store_links also holds social profiles, and linkedin.com/youtube.com/houzz.com/x.com alone fused 36 unrelated stores." },
+      { kind: "changed", text: "ambiguousGroupsSkipped renamed to branchCandidates and re-framed: under 0045's multi-location model these are chains that should become ONE store with many location rows. Reported with matching evidence, never auto-merged — a human-confirmed operation by design." },
+      { kind: "fixed", text: "Removed a NUL byte committed inside join('…') in the tool source. Same runtime value as \\0, but the raw byte made git, grep and every code-review tool classify the file as binary, so its contents never appeared in a diff. Added scripts/fix-nul.mjs." },
+    ],
+    migrations: [],
+    status: "shipped",
+  },
   {
     id: "showroom-multi-location-mcp",
     branch: "claude/showroom-multi-location-mcp",

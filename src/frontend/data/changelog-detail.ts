@@ -113,6 +113,82 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "showroom-dedup-signals": {
+    slug: "showroom-dedup-signals",
+    branch: "claude/showroom-dedup-signals",
+    prNumber: 348,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/348",
+    subtitle: "Adding the obvious signals made it worse before it made it better",
+    introduction:
+      "The merge tool compared store names and nothing else. Fixing that meant adding place_id, phone, address and website — and then spending most of the work stopping those same signals from fusing unrelated businesses together.",
+    problem:
+      "`dedup_showroom_stores` grouped on normalized NAME alone — `const key = norm(r.name)` — so any duplicate whose two rows were named even slightly differently was invisible to it. The live proof: two real `Jack London Kitchen & Bath` rows, one written with `&` and one with `and` plus a `-Walnut Creek` branch suffix, never landed in the same group and had to be merged by hand in #347.\n\nThe signals that would have caught it already existed in `services/showroom/duplicate-check.ts` — place_id → phone → street address → website host. But that module answers \"does this INCOMING store already exist?\" at CREATE time. It stops you adding a duplicate; nothing brought those signals to the MERGE path that finds the ones already in the table.",
+    approach:
+      "A shared `services/showroom/duplicate-signals.ts` with the normalizers plus transitive union-find grouping, so `A~B` by phone and `B~C` by place_id resolve to a single store. Signals are gathered from **three** tables — `showroom_stores`, `showroom_store_locations` and `showroom_pocs` — because the parent row alone is not enough: the Jack London pair sat on different domains (`jacklondonkitchenandbath.com` vs `jlkbg.com`) and were only linkable because a POC on one carried the phone and street address of a location on the other.\n\n**The real work was false positives, and both were found only by running it against production data.** Grouping on street address fused every tenant of 2 Henry Adams St — the San Francisco Design Center — into one component that then chained outward to 37 stores including Cole Hardware and Cushman & Wakefield. Separately, reading every `showroom_store_links` row as a website meant `linkedin.com`, `youtube.com`, `houzz.com` and `x.com` fused 36 stores on their own. An `apply:true` on either would have soft-deleted real businesses.\n\nSo signals are split by what a match actually proves. **STRONG** (`place_id`, `website`, `name`) identify a business or an exact site and may merge. **WEAK** (`phone`, `address`) identify a *place* that businesses share: they may surface a group for review, a weak value held by more than two stores is discarded as a building rather than a business, and a group linked only by weak signals is never auto-merged however small it is. `duplicate-check.ts` had already warned about exactly this — \"legitimate distinct suites at one address / shared call-center numbers\" — this encodes the warning instead of restating it.\n\nFinally, `ambiguousGroupsSkipped` became `branchCandidates`. Skipping multi-site groups was correct under one-row-per-site and is backwards under 0045's multi-location model: those are chains that should collapse into ONE store with many location rows. They are now reported with their matching evidence and still never auto-merged, because that is a human-confirmed operation.",
+    apiChanges: [
+      "mcp `dedup_showroom_stores`: groups by ANY shared identity signal (place_id / phone / address / website host / normalized name) instead of name alone.",
+      "mcp `dedup_showroom_stores`: each plan entry gains `linkedBy` — the signals that grouped it — so a reviewer sees WHY rows matched.",
+      "mcp `dedup_showroom_stores`: `ambiguousGroupsSkipped` → `branchCandidates`, now carrying `names`, `linkedBy`, `evidence` and a reason. Never touched by `apply:true`.",
+    ],
+    filesTouched: [
+      "src/backend/services/showroom/duplicate-signals.ts (new — normalizers + union-find + self-check)",
+      "src/backend/mcp/tools/showrooms/dedup_showroom_stores.ts (grouping, guards, branchCandidates, NUL byte removed)",
+      "scripts/fix-nul.mjs (new)",
+      "scripts/qc/pr_348.mjs (new)",
+    ],
+    migrations: [],
+    code: [
+      {
+        title: "Name normalization — why the two Jack London rows never grouped",
+        lang: "ts",
+        code: "export function normName(value: string | null | undefined): string {\n  let s = (value ?? \"\").toLowerCase();\n  s = s.replace(/&/g, \" and \");\n  // Strip a trailing \"- City\" / \"– City\" / \", City\" branch suffix (one level).\n  s = s.replace(/\\s*[-–—,]\\s*[a-z][a-z .']{2,24}$/, \"\");\n  s = s.replace(/\\b(inc|llc|l\\.l\\.c|corp|corporation|co|ltd|company)\\b\\.?/g, \" \");\n  s = s.replace(/[^a-z0-9]+/g, \" \");\n  return s.replace(/\\s+/g, \" \").trim();\n}\n\n// \"Jack London Kitchen and Bath -Walnut Creek\" -> \"jack london kitchen and bath\"\n// \"Jack London Kitchen & Bath\"                -> \"jack london kitchen and bath\"",
+      },
+      {
+        title: "The guard that stops a building becoming a business",
+        lang: "ts",
+        code: "/**\n * A phone or street address carried by more than this many stores is a shared\n * facility — a design centre, a business park, a parent company's switchboard —\n * not an identity. Two is the largest count that can still mean \"one business\n * filed twice\"; beyond that it is a building.\n */\nexport const MAX_WEAK_FANOUT = 2;\n\n// …in groupBySignals:\nif (ids.length < 2) continue;\n// A weak value shared by a crowd is a building, not a business. Skip it\n// entirely — including as evidence — so it cannot chain a component open.\nif (!isStrongSignal(kind) && ids.length > MAX_WEAK_FANOUT) continue;",
+      },
+      {
+        title: "Only the WEBSITE link type — social profiles are shared by definition",
+        lang: "ts",
+        code: "// ONLY type = WEBSITE. showroom_store_links also holds social/profile links,\n// and those are shared by definition — linkedin.com, youtube.com, houzz.com\n// and x.com alone fused 36 unrelated stores into a single component on the\n// live directory. A store's own domain identifies the business; its Houzz\n// profile identifies Houzz.\nconst linkRows = await db\n  .select({ storeId: showroomStoreLinks.storeId, url: showroomStoreLinks.url })\n  .from(showroomStoreLinks)\n  .where(eq(showroomStoreLinks.type, \"WEBSITE\"))\n  .all();",
+      },
+      {
+        title: "Two guards, both routing to human review rather than auto-merge",
+        lang: "ts",
+        code: "const weakOnly = !g.hasStrongSignal;\nif (reals.length >= 2 || weakOnly) {\n  branchCandidates.push({\n    ids: rows.map((r) => r.id).sort((a, b) => a - b),\n    names: rows.map((r) => r.name),\n    linkedBy: g.signals,\n    evidence: g.evidence.slice(0, 8),\n    reason: weakOnly\n      ? `Linked only by ${g.signals.join(\", \")} — a shared address or phone means a shared BUILDING or switchboard, not one business.`\n      : `${reals.length} rows have their own zip/placeId — distinct SITES of what looks like one business. Should become ONE store with ${reals.length} location rows.`,\n  });\n  continue;\n}",
+      },
+    ],
+    diagrams: [
+      {
+        caption:
+          "What a match proves depends on the signal — and that distinction is the whole design.",
+        title: "Signal taxonomy",
+        code: "flowchart TD\n  C[candidate pair] --> S{place_id, phone,<br/>or street address match?}\n  S -->|yes| W{is it place_id?}\n  W -->|yes| T1[STRONG — same exact SITE<br/>safe to merge]\n  W -->|no| WK[WEAK — phone/address<br/>a shared building or switchboard]\n  S -->|no| B{same website host,<br/>or same normalized name?}\n  B -->|yes| T1b[STRONG — same BUSINESS]\n  B -->|no| N[not a duplicate]\n  WK --> R[surface for review only<br/>NEVER auto-merged]\n  T1 --> M{2+ rows with their own zip/placeId?}\n  T1b --> M\n  M -->|no| MERGE[tier 1 — auto-merge on apply:true]\n  M -->|yes| BR[branchCandidates — chain branches<br/>should become ONE store + N locations]\n  classDef ok fill:#1f4d2e,stroke:#4ade80\n  classDef bad fill:#4d1f1f,stroke:#f87171\n  class MERGE ok\n  class WK,R bad",
+      },
+      {
+        caption:
+          "The 37-store blob. One shared street address chained the whole SF Design Center together.",
+        title: "How address-only grouping blew up",
+        code: "flowchart LR\n  A[(2 Henry Adams St<br/>SF Design Center)] --> T1[de Gournay]\n  A --> T2[Kravet / Lee Jofa]\n  A --> T3[F. Schumacher]\n  A --> T4[Phillip Jeffries]\n  A --> T5[Ann Sacks]\n  T1 --> U{union-find<br/>one component}\n  T2 --> U\n  T3 --> U\n  T4 --> U\n  T5 --> U\n  U --> X[chained outward:<br/>Cole Hardware, Cushman &amp; Wakefield,<br/>SiteOne, Jack London…<br/><b>37 stores</b>]\n  X --> D[apply:true would<br/>SOFT-DELETE real businesses]\n  F[FIX: weak value on &gt;2 stores<br/>is a building, discard it] -.blocks.-> U\n  classDef bad fill:#4d1f1f,stroke:#f87171\n  classDef ok fill:#1f4d2e,stroke:#4ade80\n  class X,D bad\n  class F ok",
+      },
+      {
+        caption: "Signals are read from three tables, because the store row alone missed the case.",
+        title: "Where identity comes from",
+        code: "erDiagram\n    showroom_stores ||--o{ showroom_store_locations : \"store_id\"\n    showroom_stores ||--o{ showroom_pocs : \"showroom_id\"\n    showroom_stores ||--o{ showroom_store_links : \"store_id (type=WEBSITE only)\"\n\n    showroom_stores {\n        text name \"normName\"\n        text place_id \"STRONG\"\n        text phone_number \"WEAK\"\n        text location_address \"WEAK\"\n    }\n    showroom_store_locations {\n        text place_id \"STRONG — a branch's own site\"\n        text street_number \"WEAK\"\n        text street_name \"WEAK\"\n    }\n    showroom_pocs {\n        text phone \"WEAK — but it cracked the Jack London case\"\n        text address \"WEAK\"\n    }\n    showroom_store_links {\n        text url \"STRONG via host, WEBSITE rows only\"\n    }",
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_348.mjs",
+      command:
+        "node scripts/qc/pr_348.mjs --base https://wcrp-claude-showroom-dedup-signals.hacolby.workers.dev --preview\nnode scripts/qc/pr_348.mjs   # production, after merge + deploy",
+      source:
+        "// The interesting failure mode is a FALSE POSITIVE, not a miss, so the assertions are\n// mostly upper bounds. The QC drives the OAuth flow with WORKER_API_KEY and runs a real\n// dedup_showroom_stores DRY RUN against the live directory (writes nothing), asserting:\n// no runaway component (<=8 stores), no tier-1 group linked only by address/phone, and\n// that known co-located-but-unrelated pairs (Walker Zanger/New Century, DEGREE HVAC/CB\n// Showers, Argonaut/Pacific Sash) never appear together in the auto-merge plan. It also\n// runs the pure __selfCheck and scans the tool source for NUL bytes.",
+      output:
+        "PRODUCTION (after merge of #348 + `pnpm run deploy`, version 3c28ea57) — 16 passed, 0 failed:\n  ✓ /api/mcp-docs 200\n  ✓ dedup_showroom_stores registered\n  ✓ advertises multi-signal grouping\n  ✓ advertises the generic-host guard\n  ✓ obtained an MCP token\n  ✓ dry run wrote nothing\n  ✓ returns branchCandidates\n  ✓ no runaway component (<=8 stores)\n  ✓ no tier-1 group linked only by address/phone\n  ✓ co-located 82/85 not auto-merged\n  ✓ co-located 304/305 not auto-merged\n  ✓ co-located 2/3 not auto-merged\n  ✓ every tier-1 group reports linkedBy\n    tier-1 groups: 8 · branchCandidates: 17\n  ✓ duplicate-signals __selfCheck passes\n  ✓ dedup tool source has no NUL bytes\n  ✓ /api/showroom-stores still 200\n\nPREVIEW (wcrp-claude-showroom-dedup-signals, pre-merge) — 16 passed, 0 failed (identical).\nPRE-MERGE PRODUCTION run — 5 passed, 0 failed, with the new behaviour correctly reported\n\"pending merge/deploy\".\n\nREGRESSION: scripts/qc/pr_347.mjs re-run against production after this deploy — 22 passed,\n0 failed. The 0045 multi-location surface is unaffected.\n\nBEHAVIOUR ON THE LIVE DIRECTORY (dry run, nothing written):\n  tier-1 groups     6  ->  8   (now includes 116 <- 261 Jack London — the merge that\n                                previously required a human)\n  largest component 37 ->  5   (Studio Belmont, Homewise — real chains)\n  branchCandidates   5 -> 17   (with evidence + linkedBy)\n\nTYPES: 177 on the branch vs 185 on origin/main — ZERO net-new. Baseline taken from a\nthrowaway `git worktree add --detach origin/main`, since `git stash -u` does not remove\ncommitted files and silently compares a branch against itself.\n\nMIGRATIONS: none.\n\nNOTE ON THIS ENTRY: it was written AFTER #348 merged, not with it — the PR body shipped\nwith a link to a changelog entry that did not yet exist. Recorded here rather than quietly\nbackdated.",
+      migrations: [],
+    },
+  },
   "showroom-multi-location-mcp": {
     slug: "showroom-multi-location-mcp",
     branch: "claude/showroom-multi-location-mcp",
