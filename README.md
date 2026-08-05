@@ -1,8 +1,14 @@
-# Astro shadcn/ui template
+# core-remodel
 
-A modern starter template using [Astro](https://astro.build/), [Tailwind CSS](https://tailwindcss.com/), and [shadcn/ui](https://ui.shadcn.com/) - perfect for building fast, accessible, and themeable web apps.
+A moodboard and project management application built with [Astro](https://astro.build/), [Tailwind CSS](https://tailwindcss.com/), and [shadcn/ui](https://ui.shadcn.com/). It is structured as a monorepo that runs on Cloudflare Workers featuring D1 databases, Durable Objects, MCP tools, and AI governance.
 
 ---
+
+## Documentation
+
+Full project documentation is available in the [`docs/`](./docs/README.md) directory. Start with the [Index (`docs/README.md`)](./docs/README.md) to explore architecture, routing, setup, and more.
+
+For agentic interactions and autonomous conventions, please refer to [`AGENTS.md`](./AGENTS.md).
 
 ## Getting Started
 
@@ -11,25 +17,24 @@ Before you begin, ensure that you have **Node.js** and **pnpm** installed.
 ### Setup
 
 ```bash
-git clone https://github.com/area44/astro-shadcn-ui-template
-cd astro-shadcn-ui-template
+git clone https://github.com/jmbish04/core-remodel
+cd core-remodel
 pnpm install
-pnpm dev
 ```
 
+### Running Locally
+
+```bash
+pnpm dev
+```
 Open your browser and go to [http://localhost:4321](http://localhost:4321) to see the app running.
 
-## Adding Components
+### Testing and Linting
 
-`shadcn/ui` provides pre-built, accessible UI components. To add one:
-
-1. Follow the official [Astro installation guide](https://ui.shadcn.com/docs/installation/astro).
-2. Pick a component (e.g., [Accordion](https://ui.shadcn.com/docs/components/accordion), [Dialog](https://ui.shadcn.com/docs/components/dialog)) and follow the usage instructions.
-
-> [!NOTE]
-> In Astro, an [island](https://docs.astro.build/en/concepts/islands/) is an interactive component rendered on the client. For complex or dynamic components, check [Add a Shadcn UI Component | Space Madness Stack](https://spacemadness.dev/docs/add-a-shadcn-ui-component)
-
-If you're new to using React (or other frameworks) inside Astro, start with the [Framework Components guide](https://docs.astro.build/en/guides/framework-components/).
+- `pnpm run build` - Build the project (Cloudflare Workers output).
+- `pnpm run lint` - Run `oxlint`.
+- `pnpm run fmt` - Run code formatting via `oxfmt` (be cautious using globally).
+- `pnpm run check` - Run `oxlint`, `oxfmt`, and check for DO alarms.
 
 ## License
 
