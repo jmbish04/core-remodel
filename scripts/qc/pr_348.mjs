@@ -75,6 +75,9 @@ async function mcpToken() {
 /**
  * Calls an MCP tool with the given token, tool name, and arguments.
  * It manages the MCP session ID across RPC requests.
+ * @param {string} token
+ * @param {string} name
+ * @param {object} args
  */
 async function callTool(token, name, args) {
   const url = `${BASE}/mcp`;
@@ -83,6 +86,7 @@ async function callTool(token, name, args) {
 
   /**
    * Constructs the headers for the RPC request, including the session ID if available.
+   * @returns {object}
    */
   const headers = () => ({
     "content-type": "application/json",
@@ -94,6 +98,8 @@ async function callTool(token, name, args) {
   /**
    * Executes a JSON-RPC method over HTTP, parsing the event-stream response and
    * extracting the mcp-session-id for subsequent requests.
+   * @param {string} method
+   * @param {object} params
    */
   const rpc = async (method, params) => {
     const r = await fetch(url, {
