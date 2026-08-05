@@ -1,6 +1,7 @@
 # AGENTS.md
 
 ## Repository Overview
+This repository (`jmbish04/core-remodel`) is a complex monorepo running on Cloudflare Workers featuring Astro, Tailwind CSS, shadcn/ui, D1 databases, MCP tools, and AI governance. It acts as the mission control and shared source of truth for contractors, designers, and homeowners to review existing conditions, inspiration, and in-progress remodel decisions.
 This repository (`jmbish04/core-remodel`) is a moodboard and project management app running on Cloudflare Workers featuring D1 databases, Durable Objects, MCP tools, and AI governance. It uses Astro for the frontend framework, Tailwind CSS for styling, and shadcn/ui for frontend components.
 The default branch is `main`.
 
