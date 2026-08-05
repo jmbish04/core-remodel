@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import { integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
+import { workerEmailInvoices } from "../emails/worker_email_invoices";
+import { budgetPhases } from "./budget_phases";
 import { remodelScenarios } from "./remodel_scenarios";
 import { rooms } from "./rooms";
 
@@ -38,6 +40,17 @@ export const budgetTrackerItems = sqliteTable("budget_tracker_items", {
   scenarioId: text("scenario_id").references(() => remodelScenarios.id, {
     onDelete: "set null",
   }),
+
+  // 0035 grid: which build phase this line rolls up under (grid grouping).
+  // Nullable — unphased items land in an "Unphased" group in the grid.
+  phaseId: integer("phase_id").references(() => budgetPhases.id, {
+    onDelete: "set null",
+  }),
+
+  // 0035 grid: optional authored note explaining a line's variance flag.
+  // PlateJS markdown + sanitized html cache (rich-text rule).
+  varianceNoteMarkdown: text("variance_note_markdown"),
+  varianceNoteHtml: text("variance_note_html"),
 
   owner: text("owner"),
   aiRationale: text("ai_rationale"),
@@ -139,6 +152,21 @@ export const budgetExpenseEntries = sqliteTable("budget_expense_entries", {
   amountCents: integer("amount_cents").notNull().default(0),
   vendorName: text("vendor_name"),
   scenarioId: text("scenario_id").references(() => remodelScenarios.id, {
+    onDelete: "set null",
+  }),
+
+  // 0035: attach an actual to the budget line it belongs to. TEXT + NO FK —
+  // budget items revision in place, so we key on the stable trackId (same
+  // pattern as budget_item_material_mappings), NOT the dangling row id. This is
+  // what lets the grid roll actuals up per line and bucket them by month.
+  budgetItemTrackId: text("budget_item_track_id"),
+
+  // 0035: room + source-invoice attribution for the workbench room rollups.
+  // Nullable FKs; floor is derived by JOIN rooms.floor_id (no denormalized copy).
+  roomId: integer("room_id").references(() => rooms.id, {
+    onDelete: "set null",
+  }),
+  invoiceId: integer("invoice_id").references(() => workerEmailInvoices.id, {
     onDelete: "set null",
   }),
   optionGroup: text("option_group"),
