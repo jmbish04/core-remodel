@@ -73,10 +73,11 @@ erDiagram
     showroom_merge_candidates ||--o{ showroom_merge_candidate_members : "candidate_id"
     showroom_merge_candidate_members }o--|| showroom_stores : "store_id"
     showroom_merge_candidates }o--o| showroom_stores : "proposed_keeper_store_id"
+    showroom_merge_exclusions }o--|| showroom_stores : "store_id_lo / store_id_hi"
 
     showroom_merge_candidates {
         int id PK
-        text group_key UK "stable — sorted member store ids"
+        text group_key UK "stable — sorted ACTIVE member store ids"
         int proposed_keeper_store_id FK
         text status "TBD|APPROVED|REJECTED|APPLIED|STALE"
         text signals_json "which signals linked it"
@@ -93,15 +94,29 @@ erDiagram
         text role "KEEPER|BRANCH|EXCLUDED"
         int resulting_location_id FK "set on apply"
     }
+    showroom_merge_exclusions {
+        int id PK
+        int store_id_lo FK "the smaller store id"
+        int store_id_hi FK "the larger store id"
+        text reason
+        int created_at
+    }
 ```
 
-- **`group_key` is derived, stable and unique**: the sorted member store ids joined. Re-running
-  the scan upserts rather than duplicating, and a group whose membership changes becomes a
-  NEW candidate while the old one goes `STALE` — never silently mutated under a pending decision.
+- **`group_key` is derived, stable and unique**: the sorted **active** member store ids joined.
+  Re-running the scan upserts rather than duplicating, and a group whose membership changes
+  becomes a NEW candidate while the old one goes `STALE` — never silently mutated under a
+  pending decision. Because a collapsed branch is soft-deleted, it drops out of the next
+  scan's input (see P2), so the same group is not re-proposed after an apply.
 - **No denormalized names anywhere.** Members relate by `store_id`; display names JOIN.
 - **`role = EXCLUDED`** is how a human says "these four are one business, but that fifth row
   is a different company" — the Leandro Quintal case, resolved per-member instead of
-  rejecting the whole group.
+  rejecting the whole group. An exclude decision is **persisted** as an ordered pair
+  `(store_id_lo, store_id_hi)` in `showroom_merge_exclusions`, and P2's scan **skips any edge
+  whose two endpoints are an excluded pair**. Without this the detector would re-propose the
+  same keeper+excluded pairing on the very next run and the "no new candidate after apply"
+  success criterion would be unmet (codra). Rejecting a whole candidate records the exclusion
+  for every pair in it.
 
 ---
 
@@ -120,11 +135,24 @@ flowchart TD
 ```
 
 ### P1 — schema
-Two tables above. `pnpm run db:generate`, apply with `migrate:remote`, verify.
+Three tables above (candidates, members, exclusions) plus a **`unit` column on
+`showroom_store_locations`** — the locations table cannot express a suite today, which is
+exactly what let a suite-less street nearly merge Leandro Quintal (#64A) into Marblus (#40C)
+in #356. After 0047 most branch addresses live only on location rows, so they must be
+unit-qualifiable before address matching can safely use them again. `pnpm run db:generate`,
+apply with `pnpm run migrate:remote` (a defined package script → `node scripts/d1-migrate.mjs
+--remote`), then **verify each table/column exists on remote**.
 
 ### P2 — scan (`scan_showroom_merge_candidates`)
 Runs 0046's `groupBySignals` + the `isReal >= 2` classification and upserts a candidate per
-branch group. Idempotent by `group_key`. Never writes to `showroom_stores`.
+branch group. Never writes to `showroom_stores`.
+- **Filters `showroom_stores` to `is_active = 1` before grouping.** A soft-deleted branch must
+  never re-enter detection, or an applied group would be re-proposed from its retired members
+  (codra).
+- **Skips any edge whose endpoints are a persisted excluded pair** (`showroom_merge_exclusions`),
+  so a human's exclude decision survives across scans.
+- Idempotent by `group_key`. A group whose active membership changed becomes a NEW candidate;
+  the stale one is marked `STALE`, never mutated under a pending decision.
 
 ### P3 — the collapse service (the dangerous part)
 ```mermaid
@@ -147,13 +175,32 @@ sequenceDiagram
 - **Order matters:** create the location BEFORE soft-deleting, so a failure never loses the
   address. Sequential + compensating delete (D1 has no transactions; `db.batch()` cannot feed
   a generated id into the next statement).
+- **Idempotent / resumable (codra).** The service keys each branch on its member row's
+  `resulting_location_id`: a member that already has one is **skipped** on a retry, so a
+  mid-collapse failure (branch 2 of 5 threw) resumes cleanly rather than double-inserting a
+  location or erroring on an already-deleted store. The candidate is only marked `APPLIED`
+  once **every** BRANCH member has a `resulting_location_id` (or was skipped for no address);
+  a partial run stays `TBD` and the receipt lists which members completed.
+- **Re-verify at apply, not just at detect.** Before touching anything, re-confirm every member
+  still exists and is `is_active = 1` and the active membership still matches `group_key`; abort
+  `STALE` and re-scan if it moved.
 - Reuse 0046's child-table move maps rather than re-listing 25 FK tables.
 - A branch with no usable address is reported and skipped, never collapsed to nothing.
+- `role = EXCLUDED` members are left completely untouched, and their pair is written to
+  `showroom_merge_exclusions`.
 
 ### P4 — MCP (chat parity, per the ambiguous-parent doctrine)
 `list_merge_candidates` (READ_ONLY), `get_merge_candidate` (READ_ONLY, full evidence),
-`resolve_merge_candidate` (WRITE — approve/reject/exclude a member), `apply_merge_candidate`
-(DESTRUCTIVE — only on an APPROVED candidate).
+`resolve_merge_candidate` (WRITE — approve/reject/set keeper/exclude a member),
+`apply_merge_candidate` (DESTRUCTIVE).
+- **Every tool validates its input with hand-written Zod v4** (`inputShape`); never
+  drizzle-zod. Ids are `z.number().int().positive()`; a keeper/exclude must be a member of the
+  named candidate or the call `toolError`s.
+- **`apply_merge_candidate` refuses unless the candidate is `APPROVED`** — you cannot apply a
+  `TBD`/`REJECTED`/`APPLIED`/`STALE` row — and it re-runs the P3 active/`group_key` re-verify
+  before writing. It carries the `DESTRUCTIVE` annotation, and (like every registry write) is
+  reachable only through the OAuth-gated connector or the `WORKER_API_KEY` bearer — there is no
+  unauthenticated path (codra).
 
 ### P5 — review UI
 `/admin/shopping/showrooms/merge-review`, thin Astro shell + one React island, per the page
@@ -174,10 +221,17 @@ flowchart LR
   R2[Address lost between insert and delete] -->|create location FIRST, compensating delete| M2[address never orphaned]
   R3[Group changed since detection] -->|re-verify group_key on apply| M3[STALE, abort + re-scan]
   R4[Branch has no address] -->|report + skip that member| M4[never collapsed to nothing]
-  R5[D1 100-param cap on child remaps] -->|chunk at 20, reuse 0046 helpers| M5[bounded]
+  R5[D1 100-param cap on child remaps] -->|chunk by floor 100 / cols-per-row| M5[bounded]
   classDef done fill:#1f4d2e,stroke:#4ade80
   class M1,M2,M3,M4,M5 done
 ```
+
+**D1 chunking is column-aware, not a fixed 20 (codra).** The cap is 100 *bound parameters* per
+statement, so the safe row count is `floor(100 / columns_written_per_row)`, not a constant. A
+child remap is a single-column FK update (`SET storeId = ?` … `WHERE storeId IN (?, …)`) — a
+handful of columns, so ~90 ids is safe. A location INSERT writes ~12 columns per row, so its
+chunk is `floor(100/12) ≈ 8`. Use the parameter-budget helper, not `20`, and reuse 0046's
+existing `chunk()` sizing where the shape matches.
 
 ## 6. Compliance scan
 
@@ -193,7 +247,12 @@ No currency fields. No comma-separated multi-values.
 - Every `branchCandidate` from 0046 appears as a reviewable candidate row.
 - Approving one collapses N stores into 1 business + N locations, with **no address lost**
   and every child row remapped.
-- A member marked `EXCLUDED` is left completely untouched.
-- Re-running the scan after an apply produces no new candidate for that group.
+- A member marked `EXCLUDED` is left completely untouched, its pair persisted, and it is
+  **not re-proposed** with the same keeper on the next scan.
+- Re-running the scan after an apply produces no new candidate for that group (the retired
+  branches are filtered out as `is_active = 0`).
+- A collapse interrupted partway resumes on retry with no duplicated locations and no error on
+  an already-retired store; the candidate reaches `APPLIED` only when every branch completed.
+- `apply_merge_candidate` refuses a candidate that is not `APPROVED`.
 - `dedup_showroom_stores` still reports 0 runaway components (0046 regression).
 - QC green on preview and prod.

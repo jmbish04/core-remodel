@@ -8,7 +8,7 @@
       "workstream": "database",
       "changeType": "migration",
       "title": "showroom_merge_candidates + showroom_merge_candidate_members",
-      "detail": "group_key UNIQUE (sorted member store ids). Members relate by store_id FK — no denormalized names. role = KEEPER|BRANCH|EXCLUDED; resulting_location_id set on apply. db:generate then migrate:remote, then verify on remote.",
+      "detail": "showroom_merge_candidates + showroom_merge_candidate_members + showroom_merge_exclusions. group_key UNIQUE (sorted ACTIVE member store ids). Members relate by store_id FK — no denormalized names. role = KEEPER|BRANCH|EXCLUDED; resulting_location_id set on apply. Exclusions persist an ordered (store_id_lo, store_id_hi) pair so a human exclude decision survives across scans. db:generate then migrate:remote, then verify on remote.",
       "dependsOn": [],
       "status": "pending"
     },
@@ -30,7 +30,7 @@
       "workstream": "backend",
       "changeType": "added",
       "title": "scan_showroom_merge_candidates — upsert candidates from 0046 detection",
-      "detail": "Reuses groupBySignals + the isReal>=2 classification; does NOT reimplement detection. Idempotent by group_key. A group whose membership changed becomes a NEW candidate and the old goes STALE, so a pending decision is never mutated underneath.",
+      "detail": "Reuses groupBySignals + the isReal>=2 classification; does NOT reimplement detection. FILTERS showroom_stores to is_active=1 before grouping (a retired branch must never re-enter detection). SKIPS any edge whose endpoints are a persisted excluded pair. Idempotent by group_key; a changed active membership becomes a NEW candidate and the old goes STALE.",
       "dependsOn": [
         "P1-schema"
       ],
@@ -42,7 +42,7 @@
       "workstream": "backend",
       "changeType": "added",
       "title": "services/showroom/collapse-branches.ts",
-      "detail": "Per branch: create the location row FIRST, then remap children (reusing 0046's SIMPLE_MOVE/DEDUP_MOVE), then soft-delete the store. Sequential + compensating delete (D1 has no transactions). Re-verify group_key before starting; abort STALE if membership moved. Skip and report a branch with no usable address. Chunk every multi-id write at 20.",
+      "detail": "Per branch: create the location row FIRST, then remap children (reusing 0046 SIMPLE_MOVE/DEDUP_MOVE), then soft-delete the store. Sequential + compensating delete (D1 has no transactions). IDEMPOTENT/RESUMABLE: key each branch on its member resulting_location_id — skip a member that already has one on retry; mark the candidate APPLIED only when every branch completed, else it stays TBD. Re-verify at APPLY that every member is still active and matches group_key; abort STALE if it moved. Skip and report a branch with no usable address. Chunk COLUMN-AWARE at floor(100/columns-per-row), not a fixed 20 — ~90 ids for a single-col FK remap, ~8 rows for a ~12-col location INSERT. EXCLUDED members untouched, their pair written to showroom_merge_exclusions.",
       "dependsOn": [
         "P1-schema"
       ],
@@ -54,7 +54,7 @@
       "workstream": "mcp",
       "changeType": "added",
       "title": "list / get / resolve / apply_merge_candidate",
-      "detail": "One file per tool. READ_ONLY, READ_ONLY, WRITE, DESTRUCTIVE. apply only on an APPROVED candidate. Gives chat parity with the UI, per the ambiguous-parent doctrine (confirm in either surface, both through the same confirm step).",
+      "detail": "One file per tool. READ_ONLY, READ_ONLY, WRITE, DESTRUCTIVE. Hand-written Zod v4 inputShape validates every id; a keeper/exclude must belong to the named candidate. apply_merge_candidate REFUSES a candidate that is not APPROVED and re-runs the active/group_key re-verify before writing. Registry writes are OAuth/bearer-gated — no unauthenticated path. Gives chat parity with the UI per the ambiguous-parent doctrine.",
       "dependsOn": [
         "P2-scan",
         "P3-collapse-service"
@@ -79,7 +79,7 @@
       "workstream": "qc",
       "changeType": "added",
       "title": "scripts/qc/pr_<n>.mjs — preview + prod",
-      "detail": "Collapse exercised on a throwaway store pair the test creates and removes — never live rows. Asserts address carried across, children remapped, EXCLUDED member untouched, re-scan yields no new candidate, and 0046's no-runaway-component guard still passes.",
+      "detail": "Collapse exercised on a throwaway store pair the test creates and removes — never live rows. Asserts: address carried across, children remapped, EXCLUDED member untouched + its pair persisted + not re-proposed, a partial collapse resumes cleanly, apply refuses a non-APPROVED candidate, re-scan yields no new candidate, and 0046 no-runaway-component still passes.",
       "dependsOn": [
         "P4-mcp-tools",
         "P5-review-ui"

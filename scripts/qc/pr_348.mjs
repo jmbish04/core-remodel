@@ -195,6 +195,22 @@ try {
       check(`co-located ${a}/${b} not auto-merged`, !fused);
     }
 
+    // The keeper of every group must itself be ACTIVE — scoring alone could put a
+    // soft-deleted row first, and keeping a dead row while retiring live duplicates
+    // behind it hides real data (codra, #358).
+    const keeperIds = (r.plan ?? []).map((p) => p.keepId);
+    if (keeperIds.length) {
+      const rows = d1(
+        `SELECT id, is_active FROM showroom_stores WHERE id IN (${keeperIds.join(",")})`,
+      );
+      const inactiveKeeper = rows.filter((row) => Number(row.is_active) !== 1);
+      check(
+        "every tier-1 keeper is active",
+        inactiveKeeper.length === 0,
+        `inactive keepers: ${inactiveKeeper.map((row) => row.id).join(",") || "none"}`,
+      );
+    }
+
     // Every tier-1 group must explain itself.
     const unexplained = (r.plan ?? []).filter((p) => !(p.linkedBy ?? []).length);
     check("every tier-1 group reports linkedBy", unexplained.length === 0);

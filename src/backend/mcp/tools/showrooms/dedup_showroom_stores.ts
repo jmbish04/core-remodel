@@ -433,19 +433,25 @@ export const dedupShowroomStores = defineTool({
         continue;
       }
 
-      const sorted = [...rows].sort((a, b) => score(b) - score(a) || a.id - b.id);
+      // Merge ONLY among the active rows. Two rules ride on this:
+      //   - The keeper is the highest-scoring ACTIVE row, never an inactive one.
+      //     Scoring alone could put a soft-deleted row first, and keeping a dead
+      //     row while retiring live duplicates behind it hides real data.
+      //   - Already-soft-deleted losers are done — their children were remapped by
+      //     the run that retired them. Excluding them lets the dry run report
+      //     "clean" after an apply instead of re-listing every retired group.
+      // With fewer than two active rows there is nothing to merge. (`is_active` is
+      // NOT NULL in the schema; the explicit `=== true` states the intent anyway.)
+      const active = [...rows]
+        .filter((r) => r.isActive === true)
+        .sort((a, b) => score(b) - score(a) || a.id - b.id);
+      if (active.length < 2) continue;
 
-      // Losers that are ALREADY soft-deleted are done — their children were remapped
-      // by the run that retired them. Re-proposing them means the dry run can never
-      // report "clean": it kept listing all 8 groups immediately after a successful
-      // apply, which reads as work outstanding and invites a pointless second apply.
-      const deleteIds = sorted.slice(1).filter((r) => r.isActive).map((r) => r.id);
-      if (deleteIds.length === 0) continue;
-
+      const [keeper, ...losers] = active;
       plans.push({
-        keepId: sorted[0].id,
-        keepName: sorted[0].name,
-        deleteIds,
+        keepId: keeper.id,
+        keepName: keeper.name,
+        deleteIds: losers.map((r) => r.id),
         linkedBy: g.signals,
       });
     }
