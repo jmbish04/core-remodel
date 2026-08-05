@@ -1073,3 +1073,20 @@ This bundled data is the seed + SSR fallback. The source of truth is D1: after d
 `POST /api/changelog/entries` (upsert by slug — never overwrites another branch's rows). Because
 D1 accumulates across branches, the static file's only job is to carry *your* branch's additions;
 do not delete another branch's entries to resolve a merge conflict — append yours.
+
+## Project Commands & Conventions
+
+This repository is an **Astro shadcn/ui template** running on Cloudflare Workers. It uses `pnpm` as the package manager. Here are the core commands you will use:
+
+- **Install Dependencies:** `pnpm install`
+- **Development Server (Test/Dev):** `pnpm dev`
+- **Build Production Site:** `pnpm run build`
+- **Lint:** `pnpm run lint` (runs `oxlint`)
+- **Format:** `pnpm run fmt` (runs `oxfmt`)
+- **Check All (Lint & Format):** `pnpm run check`
+
+### Code Conventions and Rules
+
+- **Package Manager:** Always use `pnpm`. Do not use `npm` or `yarn`.
+- **Linting and Formatting:** The project uses `oxlint` and `oxfmt`. Run `pnpm run check` to ensure your code complies.
+- **Docstrings:** Never overwrite or delete any existing docstrings in the codebase; only add missing ones.
