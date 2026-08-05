@@ -1,0 +1,26 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { BlankCanvasAdminApp } from "@/components/BlankCanvasAdminApp";
+
+const { tab } = Astro.params;
+
+// Convert dash URL param to database underscores (e.g. lower-level -> lower_level)
+const initialTab = tab ? tab.replace(/-/g, "_") : undefined;
+---
+
+<BaseLayout
+  title="Blank Canvas Manager - 126 Colby - Remodel Mission Control"
+  description="Upload furniture-removed blank canvas images for listing photos."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <div class="mb-8">
+      <h1 class="mb-2 text-3xl font-bold">Blank Canvas Manager</h1>
+      <p class="text-muted-foreground">
+        Upload blank canvas (furniture-removed) versions of listing photos for
+        before/after comparison and AI photo editing.
+      </p>
+    </div>
+
+    <BlankCanvasAdminApp client:only="react" initialTab={initialTab} />
+  </main>
+</BaseLayout>

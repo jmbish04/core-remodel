@@ -1,10 +1,12 @@
 import {
   showroomMergeCandidateMembers,
   showroomMergeCandidates,
-  showroomStoreLocations,
   showroomStores,
 } from "@backend/db";
-import { formatShowroomAddress } from "@backend/services/showroom/locations";
+import {
+  formatShowroomAddress,
+  loadStoreLocationCounts,
+} from "@backend/services/showroom/locations";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
@@ -62,20 +64,9 @@ export const getMergeCandidate = defineTool({
       .where(eq(showroomMergeCandidateMembers.candidateId, input.id))
       .all();
 
-    // A member's primary-site count, so the reviewer sees which stores carry extra locations.
-    const storeIds = members.map((m) => m.storeId);
-    const locCounts = new Map<number, number>();
-    if (storeIds.length > 0) {
-      const locs = await db
-        .select({ storeId: showroomStoreLocations.storeId })
-        .from(showroomStoreLocations)
-        .all();
-      for (const l of locs) {
-        if (storeIds.includes(l.storeId)) {
-          locCounts.set(l.storeId, (locCounts.get(l.storeId) ?? 0) + 1);
-        }
-      }
-    }
+    // A member's location count, so the reviewer sees which stores carry extra sites.
+    // Reuses the chunked 0045 helper — never a full-table scan.
+    const locCounts = await loadStoreLocationCounts(db, members.map((m) => m.storeId));
 
     return {
       candidate: {

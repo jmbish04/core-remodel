@@ -48,7 +48,11 @@ async function mcpToken() {
     body: "decision=approve",
     redirect: "manual",
   });
-  const code = new URL(authed.headers.get("location")).searchParams.get("code");
+  const location = authed.headers.get("location");
+  if (!location) {
+    throw new Error(`oauth/authorize did not redirect (status ${authed.status}) — bad access cookie?`);
+  }
+  const code = new URL(location).searchParams.get("code");
   const tok = await fetch(`${BASE}/oauth/token`, {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
@@ -150,8 +154,9 @@ try {
       `offenders: ${weakOnly.map((x) => x.id).join(",") || "none"}`,
     );
 
-    // Known co-located-different pairs must not share a candidate.
-    const memberSets = cands.map((x) => new Set((x.members ?? []).map((m) => m.storeId)));
+    // Known co-located-different pairs must not share a candidate. Coerce ids to Number —
+    // D1's --json can hand back a numeric id as a string, which would make s.has(82) miss.
+    const memberSets = cands.map((x) => new Set((x.members ?? []).map((m) => Number(m.storeId))));
     for (const [a, b] of CO_LOCATED_NOT_ONE_BUSINESS) {
       const staged = memberSets.some((s) => s.has(a) && s.has(b));
       check(`co-located ${a}/${b} not staged as one business`, !staged);

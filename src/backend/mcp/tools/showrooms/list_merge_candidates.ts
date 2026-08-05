@@ -54,24 +54,32 @@ export const listMergeCandidates = defineTool({
 
     if (rows.length === 0) return { candidates: [] };
 
-    const members = await db
-      .select({
-        candidateId: showroomMergeCandidateMembers.candidateId,
-        storeId: showroomMergeCandidateMembers.storeId,
-        role: showroomMergeCandidateMembers.role,
-        name: showroomStores.name,
-      })
-      .from(showroomMergeCandidateMembers)
-      .leftJoin(showroomStores, eq(showroomMergeCandidateMembers.storeId, showroomStores.id))
-      .where(
-        inArray(
-          showroomMergeCandidateMembers.candidateId,
-          rows.map((r) => r.id),
-        ),
-      )
-      .all();
+    // Chunk the candidate-id IN list — limit allows up to 200, and D1 caps a statement at
+    // 100 bound parameters, so a single inArray would throw "too many SQL variables".
+    const candidateIds = rows.map((r) => r.id);
+    const members: {
+      candidateId: number;
+      storeId: number;
+      role: string;
+      name: string | null;
+    }[] = [];
+    for (let i = 0; i < candidateIds.length; i += 90) {
+      const part = candidateIds.slice(i, i + 90);
+      const chunkRows = await db
+        .select({
+          candidateId: showroomMergeCandidateMembers.candidateId,
+          storeId: showroomMergeCandidateMembers.storeId,
+          role: showroomMergeCandidateMembers.role,
+          name: showroomStores.name,
+        })
+        .from(showroomMergeCandidateMembers)
+        .leftJoin(showroomStores, eq(showroomMergeCandidateMembers.storeId, showroomStores.id))
+        .where(inArray(showroomMergeCandidateMembers.candidateId, part))
+        .all();
+      members.push(...chunkRows);
+    }
 
-    const byCandidate = new Map<number, typeof members>();
+    const byCandidate = new Map<number, typeof members>([]);
     for (const m of members) {
       const list = byCandidate.get(m.candidateId) ?? [];
       list.push(m);
