@@ -1,34 +1,15 @@
+// Only the tables this tool reads directly for identity signals remain here — the ~25 FK
+// child tables moved with the remap logic into services/showroom/store-child-remap.ts.
 import {
-  browserRunPages,
-  driveListStops,
-  productPhotoBuckets,
-  productPriceObservations,
-  productShowroomPhotos,
-  scrapingSitemap,
-  shoppingJournalEntries,
-  showroomBrandMappings,
-  showroomImages,
-  showroomPhotosMapping,
   showroomPocs,
-  showroomProductMappings,
-  showroomScanLog,
-  showroomStoreCategoryMapping,
-  showroomStoreContactBusinessCards,
-  showroomStoreContactLog,
-  showroomStoreContacts,
-  showroomStoreHours,
   showroomStoreLinks,
   showroomStoreLocations,
-  showroomStoreRatings,
-  showroomStoreSales,
   showroomStores,
-  storeNotes,
-  storePaMapping,
-  storeRating,
-  storeResearch,
-  storeSimilarMap,
-  storeTagMapping,
 } from "@backend/db";
+import {
+  countStoreChildren,
+  remapStoreChildren,
+} from "@backend/services/showroom/store-child-remap";
 import {
   emptyIdentity,
   groupBySignals,
@@ -40,118 +21,9 @@ import {
   type StoreIdentity,
 } from "@backend/services/showroom/duplicate-signals";
 import { count, eq, inArray } from "drizzle-orm";
-import type { SQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
 import { z } from "zod";
 
 import { defineTool, DESTRUCTIVE } from "../../types";
-
-/**
- * SIMPLE MOVE — child tables whose rows are per-event/per-item and carry no
- * (store, x) uniqueness, so every loser row is simply repointed to the keeper.
- * `{table, col, key}`: `col` is the FK column object (typed queries), `key` is
- * its property name (for the typed .set()).
- */
-const SIMPLE_MOVE: Array<{ label: string; table: SQLiteTable; col: SQLiteColumn; key: string }> = [
-  { label: "store_notes", table: storeNotes, col: storeNotes.storeId, key: "storeId" },
-  { label: "store_rating", table: storeRating, col: storeRating.storeId, key: "storeId" },
-  { label: "showroom_store_ratings", table: showroomStoreRatings, col: showroomStoreRatings.storeId, key: "storeId" },
-  { label: "showroom_pocs", table: showroomPocs, col: showroomPocs.showroomId, key: "showroomId" },
-  { label: "showroom_store_contacts", table: showroomStoreContacts, col: showroomStoreContacts.storeId, key: "storeId" },
-  { label: "showroom_store_contact_log", table: showroomStoreContactLog, col: showroomStoreContactLog.storeId, key: "storeId" },
-  {
-    label: "showroom_store_contact_business_cards",
-    table: showroomStoreContactBusinessCards,
-    col: showroomStoreContactBusinessCards.storeId,
-    key: "storeId",
-  },
-  { label: "showroom_store_sales", table: showroomStoreSales, col: showroomStoreSales.storeId, key: "storeId" },
-  { label: "showroom_images", table: showroomImages, col: showroomImages.storeId, key: "storeId" },
-  { label: "product_price_observations", table: productPriceObservations, col: productPriceObservations.showroomId, key: "showroomId" },
-  { label: "drive_list_stops", table: driveListStops, col: driveListStops.showroomStoreId, key: "showroomStoreId" },
-  { label: "shopping_journal_entries", table: shoppingJournalEntries, col: shoppingJournalEntries.storeId, key: "storeId" },
-  { label: "store_research", table: storeResearch, col: storeResearch.storeId, key: "storeId" },
-  { label: "showroom_scan_log", table: showroomScanLog, col: showroomScanLog.storeId, key: "storeId" },
-  { label: "browser_run_pages", table: browserRunPages, col: browserRunPages.showroomId, key: "showroomId" },
-  { label: "scraping_sitemap", table: scrapingSitemap, col: scrapingSitemap.showroomId, key: "showroomId" },
-  { label: "product_photo_buckets", table: productPhotoBuckets, col: productPhotoBuckets.showroomId, key: "showroomId" },
-  { label: "product_showroom_photos", table: productShowroomPhotos, col: productShowroomPhotos.showroomId, key: "showroomId" },
-  { label: "showroom_photos_mapping", table: showroomPhotosMapping, col: showroomPhotosMapping.showroomId, key: "showroomId" },
-  { label: "store_similar_map(parent)", table: storeSimilarMap, col: storeSimilarMap.parentStoreId, key: "parentStoreId" },
-  { label: "store_similar_map(similar)", table: storeSimilarMap, col: storeSimilarMap.similarStoreId, key: "similarStoreId" },
-];
-
-/**
- * DEDUP MOVE — child tables with a UNIQUE or logical (store, key…) identity.
- * Moving a loser row that the keeper already has would create a duplicate (or
- * trip the unique index), so a loser row is MOVED only if the keeper lacks that
- * key; otherwise it is dropped as redundant. `pk` is the row id column; `keyCols`
- * are the identity columns compared against the keeper's rows.
- */
-const DEDUP_MOVE: Array<{
-  label: string;
-  table: SQLiteTable;
-  col: SQLiteColumn;
-  key: string;
-  pk: SQLiteColumn;
-  keyCols: SQLiteColumn[];
-}> = [
-  {
-    label: "showroom_store_links",
-    table: showroomStoreLinks,
-    col: showroomStoreLinks.storeId,
-    key: "storeId",
-    pk: showroomStoreLinks.id,
-    keyCols: [showroomStoreLinks.url, showroomStoreLinks.type],
-  },
-  {
-    label: "showroom_store_hours",
-    table: showroomStoreHours,
-    col: showroomStoreHours.showroomId,
-    key: "showroomId",
-    pk: showroomStoreHours.id,
-    keyCols: [showroomStoreHours.day],
-  },
-  {
-    label: "store_tag_mapping",
-    table: storeTagMapping,
-    col: storeTagMapping.storeId,
-    key: "storeId",
-    pk: storeTagMapping.id,
-    keyCols: [storeTagMapping.showroomTagId],
-  },
-  {
-    label: "showroom_store_category_mapping",
-    table: showroomStoreCategoryMapping,
-    col: showroomStoreCategoryMapping.storeId,
-    key: "storeId",
-    pk: showroomStoreCategoryMapping.id,
-    keyCols: [showroomStoreCategoryMapping.categoryId],
-  },
-  {
-    label: "store_pa_mapping",
-    table: storePaMapping,
-    col: storePaMapping.storeId,
-    key: "storeId",
-    pk: storePaMapping.id,
-    keyCols: [storePaMapping.productAreaId],
-  },
-  {
-    label: "showroom_product_mappings",
-    table: showroomProductMappings,
-    col: showroomProductMappings.showroomId,
-    key: "showroomId",
-    pk: showroomProductMappings.id,
-    keyCols: [showroomProductMappings.productId],
-  },
-  {
-    label: "showroom_brand_mappings",
-    table: showroomBrandMappings,
-    col: showroomBrandMappings.showroomId,
-    key: "showroomId",
-    pk: showroomBrandMappings.id,
-    keyCols: [showroomBrandMappings.brandId],
-  },
-];
 
 type StoreRow = {
   id: number;
@@ -204,12 +76,6 @@ function chunk<T>(xs: T[], size = D1_IN_CHUNK): T[][] {
  * Extracts the number of changed rows from a D1 result meta object.
  */
 const changesOf = (r: unknown) => Number((r as { meta?: { changes?: number } })?.meta?.changes ?? 0);
-
-/**
- * Generates a unique string key for a row based on the values of the specified columns.
- */
-const keyOf = (row: Record<string, unknown>, cols: SQLiteColumn[]) =>
-  cols.map((c) => String(row[c.name] ?? "∅")).join("\0");
 
 /**
  * dedup_showroom_stores — MERGE duplicate showroom_stores rows into one canonical
@@ -461,16 +327,7 @@ export const dedupShowroomStores = defineTool({
     const allDeleteIds = scoped.flatMap((p) => p.deleteIds);
 
     // Per-table child-row counts on the delete set (the review signal).
-    const childCounts: Record<string, number> = {};
-    for (const fk of [...SIMPLE_MOVE, ...DEDUP_MOVE]) {
-      let total = 0;
-      for (const ids of chunk(allDeleteIds)) {
-        if (ids.length === 0) continue;
-        const [row] = await db.select({ n: count() }).from(fk.table).where(inArray(fk.col, ids));
-        total += row?.n ?? 0;
-      }
-      if (total > 0) childCounts[fk.label] = (childCounts[fk.label] ?? 0) + total;
-    }
+    const childCounts = await countStoreChildren(db, allDeleteIds);
 
     if (!apply) {
       return {
@@ -499,54 +356,8 @@ export const dedupShowroomStores = defineTool({
     for (const p of scoped) {
       if (p.deleteIds.length === 0) continue;
 
-      // DEDUP MOVE — move only rows the keeper doesn't already have; drop the rest.
-      for (const t of DEDUP_MOVE) {
-        const keeperRows = await db
-          .select()
-          .from(t.table)
-          .where(eq(t.col, p.keepId))
-          .all();
-        const keeperKeys = new Set(
-          keeperRows.map((r) => keyOf(r as Record<string, unknown>, t.keyCols)),
-        );
-        for (const ids of chunk(p.deleteIds)) {
-          const dupeRows = await db.select().from(t.table).where(inArray(t.col, ids)).all();
-          const toMove: number[] = [];
-          const toDrop: number[] = [];
-          for (const r of dupeRows) {
-            const row = r as Record<string, unknown>;
-            const id = Number(row[t.pk.name]);
-            if (keeperKeys.has(keyOf(row, t.keyCols))) toDrop.push(id);
-            else {
-              toMove.push(id);
-              keeperKeys.add(keyOf(row, t.keyCols)); // avoid moving two identical dupe rows
-            }
-          }
-          for (const part of chunk(toDrop))
-            if (part.length) await db.delete(t.table).where(inArray(t.pk, part)).run();
-          for (const part of chunk(toMove))
-            if (part.length) {
-              const res = await db
-                .update(t.table)
-                .set({ [t.key]: p.keepId } as Record<string, number>)
-                .where(inArray(t.pk, part))
-                .run();
-              childRowsMoved += changesOf(res);
-            }
-        }
-      }
-
-      // SIMPLE MOVE — repoint every remaining child row to the keeper.
-      for (const t of SIMPLE_MOVE) {
-        for (const ids of chunk(p.deleteIds)) {
-          const res = await db
-            .update(t.table)
-            .set({ [t.key]: p.keepId } as Record<string, number>)
-            .where(inArray(t.col, ids))
-            .run();
-          childRowsMoved += changesOf(res);
-        }
-      }
+      // Move every child/support row onto the keeper (shared with the 0047 collapse path).
+      childRowsMoved += await remapStoreChildren(db, p.keepId, p.deleteIds);
 
       // SOFT-DELETE the now-emptied duplicate store rows.
       for (const ids of chunk(p.deleteIds)) {

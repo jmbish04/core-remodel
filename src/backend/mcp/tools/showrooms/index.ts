@@ -8,6 +8,11 @@ import { updateShowroom } from "./update_showroom";
 import { addShowroomLocation } from "./add_showroom_location";
 import { updateShowroomLocation } from "./update_showroom_location";
 import { deleteShowroomLocation } from "./delete_showroom_location";
+import { scanMergeCandidatesTool } from "./scan_merge_candidates";
+import { listMergeCandidates } from "./list_merge_candidates";
+import { getMergeCandidate } from "./get_merge_candidate";
+import { resolveMergeCandidate } from "./resolve_merge_candidate";
+import { applyMergeCandidate } from "./apply_merge_candidate";
 import { addShowroomNote } from "./add_showroom_note";
 import { addShowroomPoc } from "./add_showroom_poc";
 import { setShowroomHours } from "./set_showroom_hours";
@@ -47,6 +52,11 @@ export const showroomTools: RemodelTool[] = [
   addShowroomLocation,
   updateShowroomLocation,
   deleteShowroomLocation,
+  scanMergeCandidatesTool,
+  listMergeCandidates,
+  getMergeCandidate,
+  resolveMergeCandidate,
+  applyMergeCandidate,
   addShowroomNote,
   addShowroomPoc,
   setShowroomHours,

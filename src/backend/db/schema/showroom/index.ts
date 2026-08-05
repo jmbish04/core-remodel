@@ -48,3 +48,5 @@ export * from "./scraping_sitemap";
 export * from "./price_observations";
 
 export * from "./store_location";
+export * from "./merge_candidates";
+export * from "./merge_exclusions";
