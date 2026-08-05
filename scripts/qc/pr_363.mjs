@@ -23,6 +23,10 @@ const c = createClient({ base: BASE });
 const { ok: check, info, summary } = createChecks();
 console.log(`QC 0047 branch-detection against ${BASE}${isPreview ? " (preview)" : ""}\n`);
 
+/**
+ * Obtains an access token from the oauth endpoint.
+ * @returns {Promise<string>} The access token.
+ */
 async function mcpToken() {
   const reg = await fetch(`${BASE}/oauth/register`, {
     method: "POST",
@@ -66,16 +70,32 @@ async function mcpToken() {
   return tok.access_token;
 }
 
+/**
+ * Creates an RPC caller function for the MCP endpoint.
+ * @param {string} token - The access token.
+ * @returns {function(string, any): Promise<any>} The caller function.
+ */
 function makeCaller(token) {
   const url = `${BASE}/mcp`;
   let sid = null;
   let id = 0;
+
+  /**
+   * Generates headers for the MCP RPC request.
+   * @returns {Object} The headers object.
+   */
   const headers = () => ({
     "content-type": "application/json",
     accept: "application/json, text/event-stream",
     authorization: `Bearer ${token}`,
     ...(sid ? { "mcp-session-id": sid } : {}),
   });
+  /**
+   * Sends an RPC request to the MCP endpoint.
+   * @param {string} method - The RPC method to call.
+   * @param {Object} params - The parameters for the RPC call.
+   * @returns {Promise<any>} The JSON-RPC response result.
+   */
   const rpc = async (method, params) => {
     const r = await fetch(url, {
       method: "POST",
@@ -89,6 +109,11 @@ function makeCaller(token) {
     return JSON.parse(line.replace(/^data: /, ""));
   };
   let ready = null;
+
+  /**
+   * Initializes the MCP connection if not already initialized.
+   * @returns {Promise<void>} A promise that resolves when initialization is complete.
+   */
   const init = async () => {
     if (ready) return ready;
     ready = (async () => {

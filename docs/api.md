@@ -1,6 +1,6 @@
 # API Documentation
 
-[Return to Index](README.md)
+[← Back to Index](README.md)
 
 This section contains documentation for the backend API endpoints.
 

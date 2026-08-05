@@ -3,6 +3,13 @@ import { Accordion as AccordionPrimitive } from "@base-ui/react/accordion"
 import { cn } from "src/frontend/lib/utils"
 import { ChevronDownIcon, ChevronUpIcon } from "lucide-react"
 
+/**
+ * A styled wrapper around AccordionPrimitive.Root.
+ *
+ * @param {AccordionPrimitive.Root.Props} props - The component props.
+ * @param {string} [props.className] - Optional CSS class for the root element.
+ * @returns {JSX.Element} The rendered Accordion root.
+ */
 function Accordion({ className, ...props }: AccordionPrimitive.Root.Props) {
   return (
     <AccordionPrimitive.Root
@@ -13,6 +20,13 @@ function Accordion({ className, ...props }: AccordionPrimitive.Root.Props) {
   )
 }
 
+/**
+ * A styled wrapper around AccordionPrimitive.Item.
+ *
+ * @param {AccordionPrimitive.Item.Props} props - The component props.
+ * @param {string} [props.className] - Optional CSS class for the item element.
+ * @returns {JSX.Element} The rendered Accordion item.
+ */
 function AccordionItem({ className, ...props }: AccordionPrimitive.Item.Props) {
   return (
     <AccordionPrimitive.Item
@@ -23,6 +37,15 @@ function AccordionItem({ className, ...props }: AccordionPrimitive.Item.Props) {
   )
 }
 
+/**
+ * A styled wrapper around AccordionPrimitive.Trigger.
+ * Includes an expand/collapse icon.
+ *
+ * @param {AccordionPrimitive.Trigger.Props} props - The component props.
+ * @param {string} [props.className] - Optional CSS class for the trigger element.
+ * @param {React.ReactNode} props.children - The content of the trigger.
+ * @returns {JSX.Element} The rendered Accordion trigger wrapped in a header.
+ */
 function AccordionTrigger({
   className,
   children,
@@ -46,6 +69,15 @@ function AccordionTrigger({
   )
 }
 
+/**
+ * A styled wrapper around AccordionPrimitive.Panel.
+ * Provides animated expand/collapse behavior.
+ *
+ * @param {AccordionPrimitive.Panel.Props} props - The component props.
+ * @param {string} [props.className] - Optional CSS class for the content container.
+ * @param {React.ReactNode} props.children - The content of the panel.
+ * @returns {JSX.Element} The rendered Accordion content.
+ */
 function AccordionContent({
   className,
   children,
