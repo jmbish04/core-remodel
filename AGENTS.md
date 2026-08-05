@@ -937,10 +937,15 @@ This repository is a **complex monorepo running on Cloudflare Workers featuring 
 
 - **Worktree Check:** As the first action of every session, verify the branch is fresh by running `pnpm run worktree:check` (or `node scripts/worktree-check.mjs`) before reading any source files, dispatching explore agents, or answering analytical questions.
 - **Package Manager:** Always use `pnpm`. Do not use `npm` or `yarn`. Do not assume or invent repository conventions or testing scripts. Explicitly verify and use the exact scripts defined in `package.json`.
-- **Memory Errors:** Type checking must be run manually using `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit` to prevent heap out of memory errors, because the project's build process does not perform type checking.
+- **Memory Errors:** Type checking must be run manually using `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit` to prevent heap out of memory errors, because the project's build process does not perform type checking. Verify success by diffing the error output before and after changes.
 - **Durable Objects:** The repository explicitly bans the use of the append-only `this.schedule()` in Cloudflare Durable Objects to prevent runaway billing. Use native `ctx.storage.setAlarm()` instead. This is enforced by `scripts/check-do-alarms.mjs` during `pnpm run check`.
 - **Linting and Formatting:** The project uses `oxlint` and `oxfmt`. Run `pnpm run check` to ensure your code complies. **Warning**: Running `pnpm run fmt` globally can cause massive unintended formatting changes across thousands of files. When formatting, target only the specific files you have modified.
 - **Docstrings:** Never overwrite or delete any existing docstrings in the codebase; only add missing ones.
+- **Frontend Architecture:** Every Astro page must be a thin shell mounting one React island, wrapped in `<BaseLayout>`, and must include an icon (following `src/frontend/pages/admin/studio.astro`).
+- **MCP Tools Architecture:** The transport/router is `mcp/tools/index.ts` (with no tool logic). Each tool must be defined in its own file (`tools/<tool_name>.ts`) and export a `ToolDef`.
+- **Google Apps Script:** Components are integrated into the monorepo under 'src/appscript/', managed via 'clasp', and deployed automatically via GitHub Actions.
+- **Default Branch:** The default branch for the `jmbish04/core-remodel` repository is 'main'.
+
 ## Commands
 
 Before submitting code, ensure everything is working by running the following commands:
@@ -948,5 +953,6 @@ Before submitting code, ensure everything is working by running the following co
 - `pnpm install` - Install dependencies
 - `pnpm run build` - Build the Astro project
 - `pnpm run lint` - Lint the code
-- `pnpm run fmt` - Format the code
+- `pnpm run fmt` - Format the code (carefully per files modified)
 - `pnpm run check` - Run lint, format, and alarm checks
+- `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit` - Type Check
