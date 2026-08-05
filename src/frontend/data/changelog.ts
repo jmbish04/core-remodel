@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/budget-backend-frontend-09f91d",
+    title: "Budget grid schema foundations (0035)",
+    summary:
+      "First slice of the 0035 budget grid + workbench umbrella: the time-phasing schema. Adds budget_phases (def table + config page), budget_plan_schedule (the monthly Estimate axis), and the budget_expense_entries → budget line link (stable trackId, no FK) that lets the grid roll actuals up per line and bucket them by month. Migration 0171 is additive-only and applied to remote.",
+    date: "2026-08-05",
+    status: "staged",
+    prNumber: 360,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/360",
+  },
+  {
     branch: "codex/pascal-core-remodel-continuation",
     title: "Pascal Layout Studio (0043 Phase 4)",
     summary:
@@ -340,6 +350,25 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "budget-grid-foundations",
+    branch: "claude/budget-backend-frontend-09f91d",
+    date: "2026-08-05",
+    tag: "0035 P0",
+    area: "Budget",
+    title: "Budget grid schema foundations — phases, plan schedule, expense→line link",
+    summary:
+      "The backend groundwork for the time-phased budget grid (RemodelBudgetGrid), and the first PR of the 0035 grid + workbench umbrella. Three additive pieces: budget_phases — a definition vocabulary the grid groups line items under, with a /admin/config/budget/phases config page and 4 seeded defaults; budget_plan_schedule — the monthly Estimate axis, one planned figure per (budget line, month), keyed on the stable trackId so it survives budget-item revisions; and a budget_item_track_id column on budget_expense_entries (TEXT, no FK) so actual spend attaches to the budget line it belongs to and buckets by month — the join the grid needs but the schema lacked (actuals were attributed by category text only). budget_tracker_items also gains phase_id + a variance note (markdown/html). Migration 0171 is all additive ADD COLUMN + two new tables (no table rebuild), applied and verified on remote. No grid UI yet — that is phases 1–2.",
+    changes: [
+      { kind: "migration", text: "0171 (additive): CREATE budget_phases, budget_plan_schedule; ADD budget_expense_entries.{budget_item_track_id, room_id, invoice_id}; ADD budget_tracker_items.{phase_id, variance_note_markdown, variance_note_html}. No rebuild. Applied to remote + verified." },
+      { kind: "added", text: "budget_phases definition table + /api/config/budget-phases CRUD (bare-array panel dialect, key derived from name) + /admin/config/budget/phases config page (new Budget nav group). 4 default phases seeded." },
+      { kind: "added", text: "budget_plan_schedule — monthly planned spend per line (budget_item_track_id, period 'YYYY-MM', planned_cents + planned_text); UNIQUE(track_id, period); no FK (keyed on the revision-independent trackId)." },
+      { kind: "added", text: "budget_expense_entries.budget_item_track_id (TEXT, no FK) — attaches an actual to its budget line so the grid rolls actuals per line + by month; + nullable room_id/invoice_id FKs for workbench room rollups." },
+      { kind: "changed", text: "budget_tracker_items: phase_id (FK budget_phases, set null) for grid grouping + variance_note_markdown/html." },
+    ],
+    migrations: ["0171"],
+    status: "staged",
+  },
   {
     id: "pascal-layout-studio",
     branch: "codex/pascal-core-remodel-continuation",
