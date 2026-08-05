@@ -1733,7 +1733,14 @@ tsc --noEmit clean (176 = baseline, 0 new in the touched files). No schema chang
       {
         title: "The widened gate (access.ts)",
         lang: "ts",
-        code: `export async function isRequestAuthenticated(request: Request, env: Env): Promise<boolean> {
+        code: `/**
+ * Determines if a request is authenticated by checking for a valid cookie or API key header.
+ *
+ * @param request The incoming HTTP request.
+ * @param env The environment bindings.
+ * @returns True if the request is authenticated, false otherwise.
+ */
+export async function isRequestAuthenticated(request: Request, env: Env): Promise<boolean> {
   const apiKey = (await env.WORKER_API_KEY.get())?.trim() || "";
   if (!apiKey) return false;
   // 1) raw key via header (codra / QC)
@@ -1897,6 +1904,13 @@ tsc --noEmit clean (176 = baseline, 0 new in the touched files). No schema chang
   navigateOnExpand?: boolean; // parent link that navigates AND expands
 };
 
+/**
+ * Checks if a sidebar item or any of its children are currently active based on the path.
+ *
+ * @param currentPath The current application path.
+ * @param item The sidebar item to check.
+ * @returns True if the item or a child is active, false otherwise.
+ */
 export function isItemActive(currentPath: string, item: SidebarItem): boolean {
   if (item.href && isPathActive(currentPath, item.href)) return true;
   return (item.children ?? []).some((c) => isItemActive(currentPath, c));
@@ -2821,7 +2835,12 @@ const deleteIds = sorted.slice(1).map(r => r.id);`,
       {
         title: "Bootstrap-only guard — seed-showroom-stores.ts",
         lang: "ts",
-        code: `export async function seedShowroomStores(db: DrizzleD1Database) {
+        code: `/**
+ * Seeds the showroom stores table with initial data if it is empty.
+ *
+ * @param db The Drizzle database instance.
+ */
+export async function seedShowroomStores(db: DrizzleD1Database) {
   const stores = getStoreData();
 
   // Bootstrap-only + idempotent. This seed inserts a FIXED list with no natural
@@ -2911,6 +2930,12 @@ const deleteIds = sorted.slice(1).map(r => r.id);`,
         code: `// _shared.ts — THE only place showroom coordinates are read for proximity.
 // When location data moves off showroom_stores, change this query and every
 // proximity caller (whats_near_me, the P4 park-scan) follows automatically.
+/**
+ * Loads the coordinates for all active showrooms for proximity calculations.
+ *
+ * @param db The database instance.
+ * @returns A promise that resolves to an array of showroom coordinates.
+ */
 export async function loadShowroomCoords(db: RemodelDb): Promise<ShowroomCoord[]> {
   const rows = await db
     .select({
@@ -3437,6 +3462,11 @@ const step = ledgerSteps(rawStep, run);
 //
 // A wrong number on a cost page is worse than no number, because nobody
 // double-checks a number that looks plausible.
+/**
+ * Retrieves the current agent run ID from async local storage.
+ *
+ * @returns The current agent run ID, or null if not in an agent run context.
+ */
 export function currentAgentRunId(): number | null {
   return storage.getStore()?.runId ?? null;
 }`,
@@ -3697,7 +3727,13 @@ CREATE UNIQUE INDEX \`drive_lists_single_active_uniq\` ON \`drive_lists\` (\`is_
       {
         title: "One write path — clear + set in a single D1 batch",
         lang: "ts",
-        code: `export async function setActiveDrive(db: RemodelDb, id: number | null): Promise<void> {
+        code: `/**
+ * Sets the active drive by clearing the current active drive and setting the new one.
+ *
+ * @param db The database instance.
+ * @param id The ID of the drive to set as active, or null to clear the active drive.
+ */
+export async function setActiveDrive(db: RemodelDb, id: number | null): Promise<void> {
   const clear = db
     .update(driveLists)
     .set({ isActive: false, updatedAt: new Date() })
@@ -3731,7 +3767,13 @@ const state = await getVehicleState(env);   // GET /{vin}/state?use_cache=true`,
       {
         title: "Getting home ends the drive — every gate, cheapest first",
         lang: "ts",
-        code: `export function homeArrivalReason(facts: {
+        code: `/**
+ * Determines the reason for home arrival based on current facts.
+ *
+ * @param facts The facts about the current state.
+ * @returns The reason for home arrival, or null if not arrived.
+ */
+export function homeArrivalReason(facts: {
   hasActiveDrive: boolean;
   stopped: boolean;
   at: Date;
@@ -3747,7 +3789,13 @@ const state = await getVehicleState(env);   // GET /{vin}/state?use_cache=true`,
       {
         title: "Tabs bucket on progress, never on status",
         lang: "tsx",
-        code: `function bucketOf(d: DriveListSummary): Bucket {
+        code: `/**
+ * Determines the progress bucket for a drive list.
+ *
+ * @param d The drive list summary.
+ * @returns The progress bucket (pending, partial, or finished).
+ */
+function bucketOf(d: DriveListSummary): Bucket {
   if (d.stopCount > 0 && d.visitedCount >= d.stopCount) return "finished";
   return d.visitedCount > 0 ? "partial" : "pending";
 }`,
@@ -4114,7 +4162,14 @@ homeArrivalReason
       {
         title: "The fourth state — closed now, but open again later today",
         lang: "ts",
-        code: `export function computeOpenBadge(hours: HourRow[], now: PstNow): OpenBadge | null {
+        code: `/**
+ * Computes the open badge state based on store hours and the current time.
+ *
+ * @param hours The store's operating hours.
+ * @param now The current time in PST.
+ * @returns The open badge state, or null if hours are unavailable.
+ */
+export function computeOpenBadge(hours: HourRow[], now: PstNow): OpenBadge | null {
   if (!hours || hours.length === 0) return null;
   const row = rowForDay(hours, now.day);
   if (row) {
@@ -4569,7 +4624,13 @@ if (href === "/admin/changelog") {
       {
         title: "Derive hoursJson from the rows (response back-compat)",
         lang: "ts",
-        code: `export function rowsToHoursJson(rows): HoursJsonColumn {
+        code: `/**
+ * Rebuilds the legacy hours JSON structure from normalized hour rows.
+ *
+ * @param rows The normalized hour rows.
+ * @returns The legacy hours JSON object.
+ */
+export function rowsToHoursJson(rows): HoursJsonColumn {
   const out = { mon: null, tue: null, wed: null, thu: null, fri: null, sat: null, sun: null };
   for (const r of rows) {
     const key = ENUM_TO_DAY_KEY[r.day];
@@ -4641,8 +4702,21 @@ if (href === "/admin/changelog") {
       {
         title: "Parse Google addressComponents → granular parts",
         lang: "ts",
-        code: `export function parseGoogleAddressComponents(data): ParsedAddress {
+        code: `/**
+ * Parses Google Maps address components into a granular address structure.
+ *
+ * @param data The Google Maps place data containing address components.
+ * @returns The parsed granular address.
+ */
+export function parseGoogleAddressComponents(data): ParsedAddress {
   const comps = data.addressComponents ?? [];
+  /**
+   * Helper to pick a specific address component type.
+   *
+   * @param type The component type to find.
+   * @param short Whether to return the short text instead of long text.
+   * @returns The component text, or null if not found.
+   */
   const pick = (type, short = false) => {
     const c = comps.find((x) => x.types?.includes(type));
     return c ? (short ? c.shortText : c.longText) : null;
@@ -4705,7 +4779,13 @@ if (href === "/admin/changelog") {
       {
         title: "Responses derive the legacy flat fields from links",
         lang: "ts",
-        code: `export function linksToLegacyUrls(links: StoreLinkRow[]): LegacyStoreUrls {
+        code: `/**
+ * Derives legacy flat URL fields from the new normalized links table.
+ *
+ * @param links The store's normalized links.
+ * @returns An object containing the legacy flat URL fields.
+ */
+export function linksToLegacyUrls(links: StoreLinkRow[]): LegacyStoreUrls {
   return {
     websiteUrl: firstOfType(links, "WEBSITE"),
     instagramUrl: firstOfType(links, "INSTAGRAM"),
@@ -4769,6 +4849,12 @@ if (href === "/admin/changelog") {
         title: "Split a mixed phone string into labeled numbers",
         lang: "ts",
         code: `// "(510) 809-5741 cell · (510) 447-5016 direct · (510) 236-7960 office"
+/**
+ * Parses a raw phone string into labeled phone numbers.
+ *
+ * @param raw The raw phone string to parse.
+ * @returns An object containing the parsed labeled phone numbers.
+ */
 export function parsePhoneField(raw): LabeledPhones {
   // → mobile: cell/mobile, office: direct/desk, general: office/main (store line), fax
   //   The general number is routed to the store's GENERAL_CONTACT, not the person.
@@ -4845,7 +4931,15 @@ export function parsePhoneField(raw): LabeledPhones {
       {
         title: "Match a sender to a showroom by domain / name",
         lang: "ts",
-        code: `async function matchShowroomStore(senderEmail, senderName, env) {
+        code: `/**
+ * Matches an email sender to a showroom store by domain or name.
+ *
+ * @param senderEmail The email address of the sender.
+ * @param senderName The name of the sender.
+ * @param env The environment bindings.
+ * @returns The matched showroom store ID, or undefined if no match is found.
+ */
+async function matchShowroomStore(senderEmail, senderName, env) {
   const domain = senderEmail.split("@")[1]?.toLowerCase();
   if (domain && !PUBLIC_EMAIL_DOMAINS.has(domain)) {
     const [link] = await db.select({ storeId: showroomStoreLinks.storeId })
