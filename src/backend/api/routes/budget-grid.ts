@@ -6,9 +6,10 @@
  * `RemodelBudgetGrid.dc.html` (monthly columns, Estimate/Actuals/Variance
  * views, scorecards, per-phase progress rings, per-line variance flags,
  * footer rollups). The heavy month-bucketing/variance math lives in the pure,
- * unit-tested `budget-grid-math.ts` sibling — this file is I/O only: read
- * D1, shape the query into that helper's input, shape its output into the
- * response envelope.
+ * unit-tested `budget-grid-math.ts` sibling. `GET /grid` itself is a thin
+ * wrapper over `loadBudgetGrid()` (`@backend/services/budget/grid`), which
+ * does the D1 reads + shaping — extracted so the `get_budget_grid` MCP tool
+ * can call the identical aggregation instead of duplicating it.
  *
  * Mounted at `/api/budget` in `src/backend/api/index.ts`, behind the same
  * `requireAccessAuth` gate as `/api/budget-tracker`.
@@ -16,24 +17,17 @@
 
 import type { BatchItem } from "drizzle-orm/batch";
 
-import {
-  budgetExpenseEntries,
-  budgetFundingAccounts,
-  budgetPhases,
-  budgetPlanSchedule,
-  budgetTrackerItems,
-} from "@backend/db";
+import { budgetExpenseEntries, budgetPlanSchedule, budgetTrackerItems } from "@backend/db";
+import { loadBudgetGrid, PERIOD_RE } from "@backend/services/budget/grid";
 import { and, eq, isNull } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
 import { z } from "zod";
 
-import { computeGridMath, deriveMonthWindow, secondsToMonth } from "./budget-grid-math";
+import { secondsToMonth } from "./budget-grid-math";
 import { emitBudgetRealtime } from "./budget-tracker";
 
 const budgetGridRouter = new Hono<{ Bindings: Env }>();
-
-const PERIOD_RE = /^\d{4}-\d{2}$/;
 
 function normalizeString(input: unknown): string | null {
   if (typeof input !== "string") return null;
@@ -45,7 +39,6 @@ function normalizeString(input: unknown): string | null {
 
 budgetGridRouter.get("/grid", async (c) => {
   try {
-    const db = drizzle(c.env.DB);
     const fromParam = normalizeString(c.req.query("from"));
     const toParam = normalizeString(c.req.query("to"));
     const phaseParam = normalizeString(c.req.query("phase"));
@@ -58,124 +51,15 @@ budgetGridRouter.get("/grid", async (c) => {
       return c.json({ error: "Invalid 'to' — expected YYYY-MM" }, 400);
     }
 
-    const [items, phaseDefs, planRows, expenseRows, fundingAccounts] = await Promise.all([
-      db.select().from(budgetTrackerItems).where(eq(budgetTrackerItems.isActive, true)).all(),
-      db
-        .select()
-        .from(budgetPhases)
-        .where(eq(budgetPhases.isActive, true))
-        .orderBy(budgetPhases.sortOrder)
-        .all(),
-      db.select().from(budgetPlanSchedule).all(),
-      db.select().from(budgetExpenseEntries).where(eq(budgetExpenseEntries.isActive, true)).all(),
-      db.select().from(budgetFundingAccounts).all(),
-    ]);
-
-    // --- Month window ---
-    // Collected once, up front: every period present in the plan schedule
-    // plus every expense's dateIncurred month, across the WHOLE dataset (not
-    // phase/q-filtered — the window brief describes is data-wide).
-    const periodsPresent: string[] = planRows.map((row) => row.period);
-    for (const expense of expenseRows) {
-      if (expense.dateIncurred) {
-        periodsPresent.push(secondsToMonth(Math.floor(expense.dateIncurred.getTime() / 1000)));
-      }
-    }
-
-    let months: string[];
-    if (fromParam && toParam) {
-      // Explicit bounds are never truncated to the 12-month cap — that cap
-      // only applies to the derived-from-data windows below.
-      months = fillMonthRange(fromParam, toParam);
-    } else if (fromParam) {
-      // Only a lower bound given: extend the upper bound OUT to the data's
-      // latest period (never just a single degenerate month), capped to 12.
-      const forward = periodsPresent.filter((p) => p >= fromParam).sort();
-      const to = forward.length > 0 ? forward[forward.length - 1] : fromParam;
-      months = fillMonthRange(fromParam, to).slice(0, 12);
-    } else if (toParam) {
-      // Only an upper bound given: extend the lower bound BACK to the data's
-      // earliest period, capped to the most recent 12 months ending at `to`.
-      const backward = periodsPresent.filter((p) => p <= toParam).sort();
-      const from = backward.length > 0 ? backward[0] : toParam;
-      const filled = fillMonthRange(from, toParam);
-      months = filled.length > 12 ? filled.slice(filled.length - 12) : filled;
-    } else {
-      months = deriveMonthWindow(periodsPresent, 12);
-      // ponytail: brief allows an empty `months` array as the "no data at all"
-      // fallback instead of a Date.now()-derived 5-month default, to keep this
-      // handler deterministic. See task-1-brief.md "Month window".
-    }
-
-    const gridInput = {
-      months,
-      items: items.map((row) => ({
-        id: row.id,
-        trackId: row.trackId,
-        label: row.title,
-        phaseId: row.phaseId,
-        varianceNoteMarkdown: row.varianceNoteMarkdown,
-      })),
-      phaseDefs: phaseDefs.map((row) => ({
-        id: row.id,
-        name: row.name,
-        tone: row.tone,
-        sortOrder: row.sortOrder,
-      })),
-      planRows: planRows.map((row) => ({
-        budgetItemTrackId: row.budgetItemTrackId,
-        period: row.period,
-        plannedCents: row.plannedCents,
-      })),
-      expenseRows: expenseRows.map((row) => ({
-        budgetItemTrackId: row.budgetItemTrackId,
-        amountCents: row.amountCents,
-        dateIncurred: row.dateIncurred ? Math.floor(row.dateIncurred.getTime() / 1000) : null,
-      })),
-      phaseFilter: phaseParam,
+    const db = drizzle(c.env.DB);
+    const grid = await loadBudgetGrid(db, {
+      from: fromParam,
+      to: toParam,
+      phase: phaseParam,
       q: qParam,
-    };
-
-    const { months: monthOut, phases } = computeGridMath(gridInput);
-
-    const monthPlanTotals = Array.from({ length: monthOut.length }, () => 0);
-    const monthActualTotals = Array.from({ length: monthOut.length }, () => 0);
-    for (const phase of phases) {
-      for (let i = 0; i < monthOut.length; i += 1) {
-        monthPlanTotals[i] += phase.plan[i];
-        monthActualTotals[i] += phase.actual[i];
-      }
-    }
-
-    // --- Scorecards: whole project, independent of from/to/phase/q ---
-    const totalBudgetCents = fundingAccounts.reduce((sum, row) => sum + row.amountCents, 0);
-    const spentCents = expenseRows.reduce((sum, row) => sum + row.amountCents, 0);
-    const remainingCents = totalBudgetCents - spentCents;
-    const estimateCents = planRows.reduce((sum, row) => sum + row.plannedCents, 0);
-    const varianceCents = estimateCents - spentCents;
-    const pctUsed = totalBudgetCents > 0 ? Math.round((100 * spentCents) / totalBudgetCents) : 0;
-
-    return c.json({
-      grid: {
-        months: monthOut,
-        phases,
-        footer: {
-          fundingCents: totalBudgetCents,
-          monthPlanTotals,
-          monthActualTotals,
-        },
-        scorecards: {
-          totalBudgetCents,
-          spentCents,
-          remainingCents,
-          estimateCents,
-          varianceCents,
-          pctUsed,
-          lineItemCount: items.length,
-          phaseCount: phaseDefs.length,
-        },
-      },
     });
+
+    return c.json({ grid });
   } catch (error) {
     return c.json(
       {
@@ -186,24 +70,6 @@ budgetGridRouter.get("/grid", async (c) => {
     );
   }
 });
-
-/** Fill every 'YYYY-MM' between from and to inclusive (from <= to), no cap. */
-function fillMonthRange(from: string, to: string): string[] {
-  if (!PERIOD_RE.test(from) || !PERIOD_RE.test(to)) return [];
-  const [lo, hi] = from <= to ? [from, to] : [to, from];
-  const months: string[] = [];
-  let cursor = lo;
-  // Bail out past a sane ceiling so a malformed pair can't loop forever.
-  let guard = 0;
-  while (cursor <= hi && guard < 1000) {
-    months.push(cursor);
-    const [y, m] = cursor.split("-").map(Number);
-    const next = m === 12 ? `${y + 1}-01` : `${y}-${String(m + 1).padStart(2, "0")}`;
-    cursor = next;
-    guard += 1;
-  }
-  return months;
-}
 
 // --- Deliverable B: PATCH /api/budget/plan-schedule ----------------------
 
