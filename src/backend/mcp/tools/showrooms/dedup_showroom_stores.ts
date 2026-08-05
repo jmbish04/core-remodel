@@ -165,6 +165,7 @@ type StoreRow = {
   iconCfImagesUrl: string | null;
   heroImageCfImagesUrl: string | null;
   phoneNumber: string | null;
+  isActive: boolean;
 };
 
 
@@ -291,6 +292,7 @@ export const dedupShowroomStores = defineTool({
         iconCfImagesUrl: showroomStores.iconCfImagesUrl,
         heroImageCfImagesUrl: showroomStores.heroImageCfImagesUrl,
         phoneNumber: showroomStores.phoneNumber,
+        isActive: showroomStores.isActive,
       })
       .from(showroomStores)
       .all();
@@ -432,10 +434,18 @@ export const dedupShowroomStores = defineTool({
       }
 
       const sorted = [...rows].sort((a, b) => score(b) - score(a) || a.id - b.id);
+
+      // Losers that are ALREADY soft-deleted are done — their children were remapped
+      // by the run that retired them. Re-proposing them means the dry run can never
+      // report "clean": it kept listing all 8 groups immediately after a successful
+      // apply, which reads as work outstanding and invites a pointless second apply.
+      const deleteIds = sorted.slice(1).filter((r) => r.isActive).map((r) => r.id);
+      if (deleteIds.length === 0) continue;
+
       plans.push({
         keepId: sorted[0].id,
         keepName: sorted[0].name,
-        deleteIds: sorted.slice(1).map((r) => r.id),
+        deleteIds,
         linkedBy: g.signals,
       });
     }
