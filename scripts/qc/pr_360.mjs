@@ -95,6 +95,69 @@ try {
     check("config page /admin/config/budget/phases 200", false, `status=${page.status}`);
   }
 
+  // ── grid API + seed + plan-schedule (Phase 1/2 surface) ──────────────────────
+  const grid = await c.get("/api/budget/grid");
+  if (grid.status !== 200 && !isPreview) {
+    info("grid API: pending merge/deploy (404 on prod until shipped)");
+  } else {
+    check("GET /api/budget/grid 200", grid.status === 200, `status=${grid.status}`);
+    const g = grid.json?.grid;
+    check("grid has months[] + phases[]", Array.isArray(g?.months) && Array.isArray(g?.phases));
+    check("grid has footer + scorecards", Boolean(g?.footer) && Boolean(g?.scorecards));
+    // Scorecard identity: remaining = totalBudget - spent (signed).
+    const sc = g?.scorecards ?? {};
+    check(
+      "scorecard remaining = totalBudget - spent",
+      sc.remainingCents === (sc.totalBudgetCents ?? 0) - (sc.spentCents ?? 0),
+      `rem=${sc.remainingCents} tb=${sc.totalBudgetCents} spent=${sc.spentCents}`,
+    );
+    // Per phase, plan[]/actual[] length == months length.
+    const monthN = g?.months?.length ?? 0;
+    const lenOk = (g?.phases ?? []).every(
+      (p) => p.plan?.length === monthN && p.actual?.length === monthN,
+    );
+    check("every phase plan[]/actual[] matches month count", lenOk);
+
+    // Seed is idempotent: two runs, the second seeds no NEW plan rows for the same items.
+    const seed1 = await c.post("/api/budget/grid/seed", {});
+    check("POST /api/budget/grid/seed 200", seed1.status === 200, `status=${seed1.status}`);
+    check("seed reports counts", typeof seed1.json?.plansSeeded === "number");
+    const seed2 = await c.post("/api/budget/grid/seed", {});
+    check(
+      "seed is idempotent (2nd run seeds 0 new plans)",
+      seed2.json?.plansSeeded === 0,
+      `2nd run plansSeeded=${seed2.json?.plansSeeded}`,
+    );
+
+    // plan-schedule PATCH: reject an unknown trackId (404), accept a real one round-trip.
+    const bad = await c.patch("/api/budget/plan-schedule", {
+      trackId: "qc-nonexistent-track",
+      period: "2026-05",
+      plannedCents: 1234,
+    });
+    check("PATCH plan-schedule unknown trackId → 404", bad.status === 404, `status=${bad.status}`);
+    const firstLine = (g?.phases ?? []).flatMap((p) => p.lines ?? [])[0];
+    if (firstLine?.trackId) {
+      const patched = await c.patch("/api/budget/plan-schedule", {
+        trackId: firstLine.trackId,
+        period: "2099-01",
+        plannedCents: 4200,
+        plannedText: "$42.00",
+      });
+      check("PATCH plan-schedule valid trackId 200", patched.status === 200, `status=${patched.status}`);
+    } else {
+      info("PATCH plan-schedule round-trip skipped — no line items in the grid to target");
+    }
+  }
+
+  // ── MCP get_budget_grid registered ───────────────────────────────────────────
+  const mcpDocs = await c.get("/api/mcp-docs");
+  if (mcpDocs.status === 200) {
+    const hasTool = (mcpDocs.json?.tools ?? []).some((t) => t.name === "get_budget_grid");
+    if (hasTool || isPreview) check("MCP get_budget_grid registered", hasTool);
+    else info("MCP get_budget_grid: pending merge/deploy");
+  }
+
   // ── regression guard ─────────────────────────────────────────────────────────
   const storeTypes = await c.get("/api/config/store-types");
   check("regression: /api/config/store-types still 200", storeTypes.status === 200, `status=${storeTypes.status}`);
