@@ -59,6 +59,8 @@ export const BRANCHES: ChangelogBranch[] = [
       "Adds render campaigns that apply one design brief across every angle of multiple rooms, tracks progress durably via a Cloudflare Workflow, exposes the tools in the canonical OAuth MCP registry, and surfaces an admin campaign UI.",
     date: "2026-08-07",
     status: "staged",
+    prNumber: 370,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/370",
   },
   {
     branch: "claude/0047-p1-schema",
