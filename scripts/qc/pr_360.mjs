@@ -44,15 +44,15 @@ try {
     info("budget-phases endpoint: pending merge/deploy (404 on prod until shipped)");
   } else {
     check("GET /api/config/budget-phases 200", deployed, `status=${list.status}`);
+    // Coerce to an array — a non-array body (e.g. an error object) must not crash .map/.every.
+    const rows = Array.isArray(list.json) ? list.json : [];
     check("returns a BARE array (panel dialect)", Array.isArray(list.json), `got ${typeof list.json}`);
 
-    const names = new Set((list.json ?? []).map((p) => p.name));
+    const names = new Set(rows.map((p) => p.name));
     for (const n of SEEDED) check(`seeded phase present: ${n}`, names.has(n));
 
     // Every row carries the panel-required shape.
-    const shapeOk = (list.json ?? []).every(
-      (p) => typeof p.id === "number" && typeof p.name === "string",
-    );
+    const shapeOk = rows.every((p) => typeof p.id === "number" && typeof p.name === "string");
     check("rows expose id + name", shapeOk);
 
     // ── CRUD round-trip ──────────────────────────────────────────────────────
@@ -61,23 +61,27 @@ try {
     const newId = created.json?.id;
     check("created row returns an id + name", typeof newId === "number" && created.json?.name === "QC temp phase");
 
-    const afterCreate = await c.get("/api/config/budget-phases");
-    check(
-      "created phase appears in the active list",
-      (afterCreate.json ?? []).some((p) => p.id === newId),
-    );
+    // Guard every downstream CRUD step on a real id — a failed POST must not send
+    // PATCH /budget-phases/undefined and produce misleading failures.
+    if (typeof newId === "number") {
+      const afterCreate = await c.get("/api/config/budget-phases");
+      check(
+        "created phase appears in the active list",
+        (Array.isArray(afterCreate.json) ? afterCreate.json : []).some((p) => p.id === newId),
+      );
 
-    const edited = await c.patch(`/api/config/budget-phases/${newId}`, { description: "qc edited" });
-    check("PATCH edits (200)", edited.status === 200 && edited.json?.description === "qc edited", `status=${edited.status}`);
+      const edited = await c.patch(`/api/config/budget-phases/${newId}`, { description: "qc edited" });
+      check("PATCH edits (200)", edited.status === 200 && edited.json?.description === "qc edited", `status=${edited.status}`);
 
-    const deactivated = await c.patch(`/api/config/budget-phases/${newId}`, { isActive: false });
-    check("PATCH isActive:false (200)", deactivated.status === 200, `status=${deactivated.status}`);
+      const deactivated = await c.patch(`/api/config/budget-phases/${newId}`, { isActive: false });
+      check("PATCH isActive:false (200)", deactivated.status === 200, `status=${deactivated.status}`);
 
-    const afterDeactivate = await c.get("/api/config/budget-phases");
-    check(
-      "soft-deactivated phase drops from the active list",
-      !(afterDeactivate.json ?? []).some((p) => p.id === newId),
-    );
+      const afterDeactivate = await c.get("/api/config/budget-phases");
+      check(
+        "soft-deactivated phase drops from the active list",
+        !(Array.isArray(afterDeactivate.json) ? afterDeactivate.json : []).some((p) => p.id === newId),
+      );
+    }
 
     // Bad id → 404, empty body → 400 (contract guards).
     const notFound = await c.patch("/api/config/budget-phases/99999999", { name: "x" });

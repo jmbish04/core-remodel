@@ -541,6 +541,10 @@ export function BudgetGridApp() {
           plannedText: text || undefined,
         }),
       });
+      // The optimistic setGrid above only moved the edited cell — the parent
+      // phase totals, footer rollups, and scorecards are still stale. Refetch the
+      // authoritative grid so every derived figure reconciles.
+      void load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save plan — reverting");
       void load(); // reload authoritative values

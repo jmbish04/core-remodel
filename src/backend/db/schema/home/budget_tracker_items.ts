@@ -48,7 +48,12 @@ export const budgetTrackerItems = sqliteTable("budget_tracker_items", {
   }),
 
   // 0035 grid: optional authored note explaining a line's variance flag.
-  // PlateJS markdown + sanitized html cache (rich-text rule).
+  // PlateJS markdown (source of truth) + sanitized html cache (rich-text rule).
+  // WRITE CONTRACT (no writer exists yet — this binds the one that adds it): the
+  // two columns must be updated together through a single helper that sanitizes
+  // the html on write; never persist one without the other, and never store
+  // unsanitized html (stored-XSS). The markdown is authoritative — a reader that
+  // distrusts the cache should re-render from markdown rather than trust html.
   varianceNoteMarkdown: text("variance_note_markdown"),
   varianceNoteHtml: text("variance_note_html"),
 

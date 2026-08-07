@@ -120,7 +120,7 @@ erDiagram
 - **Never FK `budget_tracker_items.id`.** `budget_plan_schedule` and the expense link both key on the stable
   **`track_id` TEXT** — same pattern as `budget_item_material_mappings`.
 - **Currency rule.** Inline-editable planned cells store **both** `planned_cents` and `planned_text`.
-- **UNIQUE**(`budget_item_track_id`, `period`) on the schedule; chunk seed inserts at 20 rows (D1 100-param cap).
+- **UNIQUE**(`budget_item_track_id`, `period`) on the schedule; chunk seed inserts so (rows × bound-columns) ≤ 100 (D1 param cap) — for the 7-column plan-schedule that is ≤14 rows per statement, or emit one single-row INSERT per row via db.batch (the pattern Phase 1 actually ships).
 
 ### Grid math (mirrors `support.js` exactly)
 - `estimate[i]` = `planned_cents` for month i · `actual[i]` = Σ linked expenses in month i · `variance[i] =
@@ -196,7 +196,7 @@ per the ambiguous-parent doctrine). Mount the currently-unwired `csv-ingestion.t
 shareability_risk) with `{severity, entity, action, mutation, target}`. Room finance rollup
 (committed/spent/risk/blocker per room) now that actuals link to items.
 
-**Phase 5 — Savings & reallocation.** `budget_savings_entries` (item, room_id FK, budgeted_cents, paid_cents,
+**Phase 5 — Savings & reallocation.** `budget_savings_entries` (budget_item_track_id TEXT no-FK — never the revisioned id; room_id FK, budgeted_cents, paid_cents,
 saved_cents, note md+html). Reallocation: reuse `get_reallocation_options`; persist an applied decision as a
 funding movement (contingency top-up / room offset). UI panel.
 
@@ -226,7 +226,7 @@ Estimates, Rooms, Materials, Savings, Visibility, Sync) into one page, matching 
 ## 6. Guardrails (repo law)
 - Never FK `budget_tracker_items.id` (revision-chained) — attach on stable `track_id` TEXT.
 - Finding B gates all contractor FKs — resolve `companies` vs `estimate_companies` first.
-- D1: `db.batch` not `db.transaction`; chunk unbounded inserts at 20 rows; FK rebuild = backup → validate
+- D1: `db.batch` not `db.transaction`; chunk unbounded inserts by (rows × columns) ≤ 100, NOT a fixed 20 (20×7-cols = 140 params, over the cap) — chunkSize = floor(100 / columnCount), or one single-row INSERT per row in db.batch; FK rebuild = backup → validate
   orphans → read generated SQL before `migrate:remote`.
 - No denormalized `*_name`/`floor_id` — JOIN via FK.
 - AI calls: structured output + JSON schema; never degrade a failed parse to `{}`; return ids not names.

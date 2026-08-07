@@ -191,8 +191,10 @@ export async function loadBudgetGrid<
   const monthActualTotals = Array.from({ length: monthOut.length }, () => 0);
   for (const phase of phases) {
     for (let i = 0; i < monthOut.length; i += 1) {
-      monthPlanTotals[i] += phase.plan[i];
-      monthActualTotals[i] += phase.actual[i];
+      // Guard against a phase array shorter than the month window — a missing
+      // cell must read as 0, never turn the whole footer total into NaN.
+      monthPlanTotals[i] += phase.plan[i] ?? 0;
+      monthActualTotals[i] += phase.actual[i] ?? 0;
     }
   }
 

@@ -404,24 +404,48 @@ configRouter.post("/budget-phases", async (c) => {
   const existing = new Set(
     (await db.select({ key: budgetPhases.key }).from(budgetPhases)).map((r) => r.key),
   );
+  let suffix = 2;
   let key = base;
-  for (let i = 2; existing.has(key); i++) key = `${base}_${i}`;
+  while (existing.has(key)) key = `${base}_${suffix++}`;
 
   // Next sort_order = current max + 1, so new phases append to the grid.
   const [{ maxSort }] = await db
     .select({ maxSort: sql<number>`coalesce(max(${budgetPhases.sortOrder}), -1)` })
     .from(budgetPhases);
+  const sortOrder = (maxSort ?? -1) + 1;
 
-  const [created] = await db
-    .insert(budgetPhases)
-    .values({
-      key,
-      name: parsed.data.name,
-      descriptionMarkdown: parsed.data.description ?? null,
-      descriptionPlaintext: parsed.data.description ?? null,
-      sortOrder: (maxSort ?? -1) + 1,
-    })
-    .returning();
+  // The in-memory key check races: two concurrent creates with the same name can
+  // both derive the same key past the SELECT, and the second INSERT hits the
+  // UNIQUE(key) constraint. Retry with a bumped suffix on that failure; surface a
+  // 409 only if we somehow can't allocate a free key after several tries.
+  let created: typeof budgetPhases.$inferSelect | undefined;
+  for (let attempt = 0; attempt < 6 && !created; attempt++) {
+    try {
+      [created] = await db
+        .insert(budgetPhases)
+        .values({
+          key,
+          name: parsed.data.name,
+          descriptionMarkdown: parsed.data.description ?? null,
+          descriptionPlaintext: parsed.data.description ?? null,
+          sortOrder,
+        })
+        .returning();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (/unique|constraint/i.test(msg)) {
+        key = `${base}_${suffix++}`;
+        continue;
+      }
+      throw err;
+    }
+  }
+  if (!created) {
+    return c.json(
+      { error: { code: "conflict", message: "Could not allocate a unique phase key" } },
+      409,
+    );
+  }
   return c.json(budgetPhaseRow(created), 201);
 });
 

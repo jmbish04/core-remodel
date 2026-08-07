@@ -15,7 +15,7 @@ for the actual code.
   `budget_expense_entries.budget_item_track_id` both key on `track_id`, no FK.
 - **Finding B gates contractor FKs** — resolve `companies` vs `estimate_companies` before adding any. No
   denormalized `floor_id` on invoices (add `room_id`, JOIN `rooms.floor_id`).
-- **D1**: `db.batch` (never `db.transaction`); chunk unbounded inserts/`inArray` at 20 rows; FK-adding
+- **D1**: `db.batch` (never `db.transaction`); chunk unbounded inserts/`inArray` by (rows × columns) ≤ 100 params, NOT a fixed 20 rows (floor(100/columnCount); a 7-col row caps at ≤14) — or emit single-row INSERTs via db.batch; FK-adding
   migrations rebuild the table → back up remote, validate orphans, READ the generated SQL before
   `pnpm run migrate:remote`. `db:generate` diffs snapshots — strip re-emitted already-applied tables.
 - **Currency** = `*_cents` INT **and** `*_text` verbatim, entered via `CurrencyInput`. **Rich text** =
