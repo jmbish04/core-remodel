@@ -1,6 +1,6 @@
 # Deployment
 
-[Return to Index](README.md)
+[← Back to Index](README.md)
 
 This project is deployed to Cloudflare Workers.
 
