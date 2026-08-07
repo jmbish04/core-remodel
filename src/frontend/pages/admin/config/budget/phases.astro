@@ -1,0 +1,15 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { ConfigDefinitionPage } from "@/components/config";
+---
+
+<BaseLayout title="Budget Phases — Configuration" description="Manage the build phases the budget grid groups line items under.">
+  <ConfigDefinitionPage
+    client:only="react"
+    activeHref="/admin/config/budget/phases"
+    title="Budget Phases"
+    description="Build phases the time-phased budget grid groups line items under (e.g. Pre-construction, Structural & rough-in, Interior finishes, Exterior)."
+    endpoint="/api/config/budget-phases"
+    columns={["name", "description"]}
+  />
+</BaseLayout>
