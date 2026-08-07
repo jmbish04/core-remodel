@@ -384,7 +384,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       { kind: "added", text: "budget_expense_entries.budget_item_track_id (TEXT, no FK) — attaches an actual to its budget line so the grid rolls actuals per line + by month; + nullable room_id/invoice_id FKs for workbench room rollups." },
       { kind: "changed", text: "budget_tracker_items: phase_id (FK budget_phases, set null) for grid grouping + variance_note_markdown/html." },
     ],
-    migrations: ["0171"],
+    migrations: ["0172"],
     status: "staged",
   },
   {

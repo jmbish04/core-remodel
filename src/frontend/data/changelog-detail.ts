@@ -195,7 +195,7 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
     ],
     migrations: [
       {
-        tag: "0171",
+        tag: "0172_famous_the_santerians",
         sql: "CREATE TABLE `budget_phases` (`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL, `key` text NOT NULL, `name` text NOT NULL, `description_markdown` text, `description_html` text, `description_plaintext` text, `tone` text, `sort_order` integer DEFAULT 0 NOT NULL, `is_active` integer DEFAULT true NOT NULL, `datetime_created` integer DEFAULT (unixepoch()) NOT NULL, `datetime_updated` integer DEFAULT (unixepoch()) NOT NULL);\nCREATE TABLE `budget_plan_schedule` (`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL, `budget_item_track_id` text NOT NULL, `period` text NOT NULL, `planned_cents` integer DEFAULT 0 NOT NULL, `planned_text` text, `source` text DEFAULT 'manual' NOT NULL, `datetime_created` integer DEFAULT (unixepoch()) NOT NULL, `datetime_updated` integer DEFAULT (unixepoch()) NOT NULL);\nALTER TABLE `budget_expense_entries` ADD `budget_item_track_id` text;\nALTER TABLE `budget_expense_entries` ADD `room_id` integer REFERENCES rooms(id);\nALTER TABLE `budget_expense_entries` ADD `invoice_id` integer REFERENCES worker_email_invoices(id);\nALTER TABLE `budget_tracker_items` ADD `phase_id` integer REFERENCES budget_phases(id);\nALTER TABLE `budget_tracker_items` ADD `variance_note_markdown` text;\nALTER TABLE `budget_tracker_items` ADD `variance_note_html` text;\nCREATE UNIQUE INDEX `budget_phases_key_unique` ON `budget_phases` (`key`);\nCREATE UNIQUE INDEX `ux_budget_plan_line_period` ON `budget_plan_schedule` (`budget_item_track_id`,`period`);",
       },
     ],
@@ -248,7 +248,7 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
         "build: green (vite ✓ ~71s, server built). tsc --noEmit: NO ERRORS in touched files (budget_phases, budget_plan_schedule, budget_tracker_items, routes/config.ts, config-nav, budget/phases.astro). migrate:remote: applied 0171; verified on remote — budget_phases + budget_plan_schedule tables exist, budget_expense_entries has all 3 new columns, budget_tracker_items has all 3, 4 default phases seeded.\n\nQC preview (17/17): GET /api/config/budget-phases 200 + BARE array; all 4 seeded phases present; CRUD round-trip (POST 201 → appears → PATCH edit → PATCH isActive:false → drops from list); PATCH unknown id → 404; config page /admin/config/budget/phases 200 + island present; regression /api/config/store-types 200.\nQC prod (1/1): store-types regression 200; new endpoint correctly reports 'pending merge/deploy' (404 until shipped).",
       migrations: [
         {
-          tag: "0171",
+          tag: "0172_famous_the_santerians",
           appliedRemote: true,
           note: "Additive only (2 CREATE TABLE + 6 ADD COLUMN + 2 unique indexes, no rebuild). PRAGMA-verified on remote; 4 default phases seeded via INSERT OR IGNORE.",
         },
