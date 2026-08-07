@@ -22,6 +22,12 @@ interface CampaignRow {
   datetimeCreated: number | null;
 }
 
+/**
+ * Maps a campaign row status to the appropriate badge variant color.
+ *
+ * @param status - The current status of the campaign row.
+ * @returns The variant string for the Badge component.
+ */
 function statusBadgeVariant(
   status: CampaignRow["status"],
 ): "default" | "secondary" | "destructive" | "outline" {
@@ -39,11 +45,18 @@ function statusBadgeVariant(
   }
 }
 
+/**
+ * React application component that renders a list of all render campaigns.
+ * It provides a table view showing progress, status, and creation details.
+ */
 export function CampaignListApp() {
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  /**
+   * Fetches the latest list of campaigns from the API.
+   */
   const fetchCampaigns = async () => {
     try {
       const res = await fetch("/api/render/campaigns?limit=100");

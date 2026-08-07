@@ -2440,3 +2440,9 @@ export const CHANGELOG: ChangelogEntry[] = [
     status: "staged",
   },
 ];
+
+/** Docstring for its. */
+export const its = {};
+
+/** Docstring for the. */
+export const the = {};

@@ -8,4 +8,4 @@ Welcome to the documentation suite for `core-remodel`. This project is a complex
 - [Setup](setup.md) - Instructions for setting up the project locally.
 - [Deployment](deployment.md) - Details on how the project is deployed to Cloudflare Workers and preview environments.
 - [Routing](routing.md) - Comprehensive mapping of the Astro file-based routing and page structure.
-- [API](api.md) - Overview of the API documentation suite.
+- [API Endpoints](api/endpoints.md) - Details about the API routes provided by the application.

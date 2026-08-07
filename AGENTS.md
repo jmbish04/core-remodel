@@ -70,15 +70,11 @@ verify and use the exact scripts defined in `package.json`:
 
 - `pnpm install` — install dependencies.
 - `pnpm dev` or `pnpm start` — run the local Astro dev server.
-- `pnpm run build` — build the Astro project.
-- `pnpm run fmt` — run `oxfmt` formatter. When formatting, target only the specific files you have modified to avoid massive unintended formatting changes across thousands of files.
-- `pnpm run lint` — run `oxlint` linter.
-- `pnpm run check` — run both lint and fmt checks (and any custom checks).
-- `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit` — Type checking must be run manually to prevent heap out of memory errors, because the project's build process does not perform type checking.
+- `pnpm run build` — build the Astro project (Cloudflare Workers output).
 - `pnpm run fmt` — run `oxfmt` formatter. **WARNING:** Running `pnpm run fmt` globally can cause massive unintended formatting changes across thousands of files. When formatting, target only the specific files you have modified.
 - `pnpm run lint` — run `oxlint` linter.
 - `pnpm run check` — run both lint and fmt checks (and `check-do-alarms.mjs`).
-- `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit` — Type checking must be run manually using this command to prevent heap out of memory errors, because the project's build process does not perform type checking.
+- `NODE_OPTIONS=--max-old-space-size=8192 npx tsc --noEmit` — Type checking must be run manually to prevent heap out of memory errors, because the project's build process does not perform type checking.
 
 ## Cloudflare Durable Objects (MANDATORY)
 - **NEVER use `this.schedule()`** — The repository explicitly bans the use of the append-only `this.schedule()` in Cloudflare Durable Objects to prevent runaway billing. Use native `ctx.storage.setAlarm()` instead. This is enforced by `scripts/check-do-alarms.mjs` during `pnpm run check`.

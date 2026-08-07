@@ -44,6 +44,12 @@ interface CampaignDetail {
   sessions: CampaignSession[];
 }
 
+/**
+ * Maps a campaign or angle status to the appropriate badge variant color.
+ *
+ * @param status - The current status of the campaign or angle.
+ * @returns The variant string for the Badge component.
+ */
 function statusBadgeVariant(
   status: Campaign["status"] | CampaignAngle["status"],
 ): "default" | "secondary" | "destructive" | "outline" {
@@ -62,6 +68,13 @@ function statusBadgeVariant(
   }
 }
 
+/**
+ * React application component for viewing the details of a render campaign.
+ * Displays progress, status, and rendered angles.
+ *
+ * @param props - Component properties.
+ * @param props.campaignId - The ID of the campaign to display.
+ */
 export function CampaignDetailApp({ campaignId }: { campaignId?: string }) {
   const [detail, setDetail] = useState<CampaignDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -88,6 +101,10 @@ export function CampaignDetailApp({ campaignId }: { campaignId?: string }) {
     return () => clearInterval(interval);
   }, [fetchDetail]);
 
+  /**
+   * Cancels the active campaign by making a POST request to the API.
+   * Reloads the campaign details upon successful cancellation.
+   */
   const handleCancel = async () => {
     if (!campaignId) return;
     setCancelling(true);

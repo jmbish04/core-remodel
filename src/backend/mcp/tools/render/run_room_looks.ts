@@ -6,6 +6,13 @@ import { runStage } from "../../../services/render/stage-runner";
 import { looseObject } from "../../schemas";
 import { defineTool, WRITE } from "../../types";
 
+/**
+ * Resolves a Cloudflare Images token to its public delivery URL.
+ * If the token is already a full URL, it is returned verbatim.
+ *
+ * @param token - The Cloudflare Images token or full URL.
+ * @returns The resolved public delivery URL.
+ */
 function deliveryUrlFromToken(token: string): string {
   return token.startsWith("http") ? token : `https://imagedelivery.net/${token}/public`;
 }
