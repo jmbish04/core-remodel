@@ -113,6 +113,74 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "showroom-branch-collapse": {
+    slug: "showroom-branch-collapse",
+    branch: "claude/0047-p1-schema",
+    prNumber: 363,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/363",
+    subtitle: "Detect real chain branches, then let a human fold them into one business with many locations",
+    introduction:
+      "The Tier-2 counterpart to the 0046 dedup: where dedup MERGES same-site duplicate stubs, this COLLAPSES real branches of one business into a single store with many locations — proposing every collapse for human confirmation, never auto-merging.",
+    problem:
+      "After 0045 gave a business many locations and 0046 learned to tell a duplicate STUB from a real BRANCH, 12 branch groups (~30 store rows) sat re-detected every scan with no way to act on one. `dedup_showroom_stores` deliberately refuses to touch them because it DISCARDS the loser's address — right for a stub, catastrophic for a real branch whose address must be carried across.",
+    approach:
+      "A staging + confirm + collapse path. `scan_showroom_merge_candidates` stages each branch group as a reviewable row (STRONG-signal-gated — website/name/place_id — so co-located different businesses like Walker Zanger / New Century are NOT staged). `resolve_merge_candidate` records the human decision (approve / reject / set_keeper / exclude_member), persisting exclusion pairs so the scan never re-proposes them. `apply_merge_candidate` collapses an APPROVED candidate. Collapse is idempotent and resumable via a per-member `collapse_state` machine, and each branch's location row is REPOINTED to the keeper (it already holds the address) rather than recreated — so a mid-collapse crash never loses an address; the branch store is soft-deleted only at the final step. The child-remap that both dedup and collapse need was extracted into one shared module, so neither re-lists the ~25 FK tables.",
+    apiChanges: [
+      "mcp scan_showroom_merge_candidates (WRITE_IDEMPOTENT) — stage / refresh / STALE branch candidates",
+      "mcp list_merge_candidates / get_merge_candidate (READ_ONLY) — the review queue + full evidence",
+      "mcp resolve_merge_candidate (WRITE) — approve / reject / set_keeper / exclude_member",
+      "mcp apply_merge_candidate (DESTRUCTIVE) — collapse an APPROVED candidate; refuses otherwise; STALEs on drift",
+    ],
+    filesTouched: [
+      "src/backend/db/schema/showroom/merge_candidates.ts, merge_exclusions.ts, store_location.ts (unit column)",
+      "src/backend/services/showroom/branch-detection.ts, branch-collapse.ts, store-child-remap.ts (new)",
+      "src/backend/mcp/tools/showrooms/{scan,list,get,resolve,apply}_merge_candidate(s).ts (new)",
+      "src/backend/mcp/tools/showrooms/dedup_showroom_stores.ts (refactored to share the remap)",
+      "scripts/qc/pr_363.mjs, scripts/qc/pr_364.mjs (new)",
+    ],
+    migrations: [
+      {
+        tag: "0171_tense_mac_gargan",
+        sql: "CREATE showroom_merge_candidates + _members + _exclusions; ALTER showroom_store_locations ADD unit",
+      },
+    ],
+    code: [
+      {
+        title: "The location is repointed, not recreated — so a crash never loses the address",
+        lang: "ts",
+        code: "// PENDING → repoint the branch's location rows onto the keeper (they hold the address).\nfor (const loc of branchLocs) {\n  // Skip a site the keeper already has (same place_id) — avoid the unique-index trip.\n  if (loc.placeId && keeperPlaceIds.has(loc.placeId)) continue;\n  await db.update(showroomStoreLocations)\n    .set({ storeId: keeper.storeId, updatedAt: new Date() })\n    .where(eq(showroomStoreLocations.id, loc.id)).run();\n  if (loc.placeId) keeperPlaceIds.add(loc.placeId);\n  movedLocationId ??= loc.id;\n}\nawait setMemberState(b.id, \"LOCATION_CREATED\", movedLocationId);",
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Two tiers: dedup merges stubs, collapse folds branches — sharing one child-remap.",
+        title: "Tier 1 vs Tier 2",
+        code: "flowchart TD\n  G[groupBySignals over active stores] --> S{2+ real sites?}\n  S -->|no| T1[TIER 1 dedup_showroom_stores<br/>merge stub, DISCARD address]\n  S -->|yes, STRONG signal| T2[TIER 2 scan_merge_candidates<br/>stage for human review]\n  T2 --> R[resolve: approve / exclude / reject]\n  R --> A[apply_merge_candidate]\n  A --> C[carry each branch site across as a LOCATION<br/>then soft-delete the branch store]\n  T1 -.shared.-> RM[remapStoreChildren]\n  C -.shared.-> RM\n  classDef ok fill:#1f4d2e,stroke:#4ade80\n  class T2,R,A,C ok",
+      },
+      {
+        caption: "Per-member state machine — a crash resumes from the last committed state.",
+        title: "Collapse state machine",
+        code: "stateDiagram-v2\n  [*] --> PENDING\n  PENDING --> LOCATION_CREATED: repoint branch location to keeper\n  PENDING --> SKIPPED_NO_ADDRESS: no location\n  LOCATION_CREATED --> CHILDREN_REMAPPED: remapStoreChildren\n  CHILDREN_REMAPPED --> RETIRED: soft-delete branch store\n  RETIRED --> [*]\n  SKIPPED_NO_ADDRESS --> [*]",
+      },
+      {
+        caption: "One store row is the business; each branch becomes a location on it.",
+        title: "Data model",
+        code: "erDiagram\n    showroom_merge_candidates ||--o{ showroom_merge_candidate_members : candidate_id\n    showroom_merge_candidate_members }o--|| showroom_stores : store_id\n    showroom_merge_exclusions }o--|| showroom_stores : store_id_lo_hi\n    showroom_merge_candidate_members {\n        text role \"KEEPER|BRANCH|EXCLUDED\"\n        text collapse_state \"PENDING..RETIRED\"\n        int resulting_location_id\n    }\n    showroom_merge_exclusions {\n        int store_id_lo\n        int store_id_hi\n    }",
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_364.mjs",
+      command:
+        "node scripts/qc/pr_364.mjs --base https://core-remodel.hacolby.workers.dev --preview   # a real collapse on the LIVE prod worker",
+      source:
+        "// Creates two sentinel stores (ZZ_QC_COLLAPSE_*) sharing a website, stages the candidate,\n// approves, applies, then asserts the keeper gained the branch's location, the branch is\n// soft-deleted, there are no orphans, a second apply is a no-op, and a re-scan is clean.\n// A finally-block hard-deletes every sentinel row regardless of outcome.",
+      output:
+        "PRODUCTION (version 30655efa):\n  pr_364 collapse — a real collapse on the LIVE worker — 12 passed, 0 failed\n  pr_363 detection — 15 passed, 0 failed\n  pr_348 dedup regression (shared-remap refactor) — 18 passed, 0 failed\n  D1 residue: 0 ZZ_QC rows.\n\nHONEST NOTE: #365 (the destructive P3/P4 PR) was absorbed into the #363 squash by a\nstacked-branch mixup, and codra cancelled its in-flight review of #365 as a result — so the\ndestructive half shipped under #363's review rather than its own. The production pr_364 run\n(a real collapse against the live worker, with cleanup) is the definitive verification in its\nplace. Migration 0171 applied to remote and verified; #360's budget schema renumbered to 0172\nafter mine, no collision — its tables confirmed present on prod.",
+      migrations: [
+        { tag: "0171_tense_mac_gargan", appliedRemote: true, note: "3 tables + unit column verified on remote" },
+      ],
+    },
+  },
   "budget-grid": {
     slug: "budget-grid",
     branch: "claude/budget-backend-frontend-09f91d",

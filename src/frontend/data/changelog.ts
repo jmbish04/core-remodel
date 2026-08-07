@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/0047-p1-schema",
+    title: "Collapse chain branches into one business — Tier 2 (0047)",
+    summary:
+      "0046 detects that some store rows are branches of one business and refuses to merge them (returns branchCandidates); 0047 makes those actionable. A scan stages each branch group as a reviewable candidate; a human approves; apply carries every branch's site across as a location on the keeper and soft-deletes the branch store. Backend shipped + verified on prod: migration 0171 (3 tables + a collapse_state machine + a unit column on locations), branch-detection + branch-collapse services, an extracted shared child-remap (dedup and collapse now share one implementation), and five MCP tools (scan/list/get/resolve/apply_merge_candidate). Proposes and never auto-merges, per the standing decision. The web review UI (P5) remains.",
+    date: "2026-08-05",
+    status: "shipped",
+    prNumber: 363,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/363",
+  },
+  {
     branch: "claude/budget-backend-frontend-09f91d",
     title: "Budget grid schema foundations (0035)",
     summary:
@@ -350,6 +360,24 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "showroom-branch-collapse",
+    branch: "claude/0047-p1-schema",
+    date: "2026-08-05",
+    area: "Showrooms",
+    title: "Collapse chain branches into one business — Tier 2 (0047)",
+    summary:
+      "After 0045 gave a business many locations and 0046 learned to tell a duplicate STUB from a real BRANCH, 12 branch groups (~30 store rows) sat re-detected every scan with no way to act on one. 0047 makes them actionable, proposing and never auto-merging. A scan stages each branch group (STRONG-signal-gated so co-located different businesses are not staged); a human approves; apply carries every branch's site across as a location on the keeper and soft-deletes the branch store. Collapse is idempotent/resumable via a per-member collapse_state machine, and a branch's location row is REPOINTED to the keeper (it already holds the address) rather than recreated — so a mid-collapse crash never loses an address. The child-remap that both dedup and collapse need was extracted into one shared module. Backend live on prod; the web review UI (P5) remains.",
+    changes: [
+      { kind: "migration", text: "0171: showroom_merge_candidates + showroom_merge_candidate_members (per-member collapse_state machine + resulting_location_id) + showroom_merge_exclusions, plus a unit column on showroom_store_locations that closes the #356 suite-collision hole." },
+      { kind: "added", text: "services/showroom/branch-detection.ts — reuses 0046 groupBySignals; a branch group requires a STRONG signal (website/name/place_id) AND 2+ real distinct sites, minus excluded pairs, with unit-qualified location signals. Staged 11 real chains live; the 5 address-only co-located different businesses correctly excluded." },
+      { kind: "added", text: "services/showroom/branch-collapse.ts — collapseCandidate: APPROVED-only, live re-verify, per-member state machine (PENDING→LOCATION_CREATED→CHILDREN_REMAPPED→RETIRED, or SKIPPED_NO_ADDRESS). Branch location repointed to the keeper, never recreated/deleted; branch store soft-deleted only at the end, so a partial failure resumes cleanly." },
+      { kind: "added", text: "services/showroom/store-child-remap.ts — the ~25 FK child-table move maps + remapStoreChildren, extracted from dedup_showroom_stores so tier-1 dedup and tier-2 collapse share ONE implementation. dedup refactored to import it (pr_348 stays 18/18)." },
+      { kind: "added", text: "MCP: scan_showroom_merge_candidates (WRITE_IDEMPOTENT), list_merge_candidates + get_merge_candidate (READ_ONLY), resolve_merge_candidate (WRITE — approve/reject/set_keeper/exclude_member), apply_merge_candidate (DESTRUCTIVE, refuses non-APPROVED)." },
+    ],
+    migrations: ["0171_tense_mac_gargan"],
+    status: "shipped",
+  },
   {
     id: "budget-grid",
     branch: "claude/budget-backend-frontend-09f91d",
