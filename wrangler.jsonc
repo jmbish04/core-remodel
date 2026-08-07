@@ -153,6 +153,11 @@
       "binding": "BLANK_CANVAS_WORKFLOW",
       "class_name": "BlankCanvasBatchWorkflow",
     },
+    {
+      "name": "render-campaign-workflow",
+      "binding": "RENDER_CAMPAIGN_WORKFLOW",
+      "class_name": "RenderCampaignWorkflow",
+    },
   ],
   "triggers": {
     // "15 */4 * * *": Gmail comms hub ingestion (0013 P3-07) — every 4 hours.

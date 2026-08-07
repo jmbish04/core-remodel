@@ -12,6 +12,7 @@ import { changelogTools } from "./changelog";
 import { driveTools } from "./drives";
 import { legacyTools } from "./legacy";
 import { materialTools } from "./materials";
+import { renderTools } from "./render";
 import { memoryTools } from "./memory";
 import { opsTools } from "./ops";
 import { pascalTools } from "./pascal";
@@ -30,6 +31,7 @@ export const ALL_TOOL_GROUPS: RemodelTool[] = [
   ...budgetTools,
   ...analyticsTools,
   ...materialTools,
+  ...renderTools,
   ...showroomTools,
   ...driveTools,
   ...teslaTools,
