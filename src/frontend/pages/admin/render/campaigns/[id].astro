@@ -1,0 +1,15 @@
+---
+import BaseLayout from "@/layouts/BaseLayout.astro";
+import { CampaignDetailApp } from "@/components/render/CampaignDetailApp";
+
+const { id } = Astro.params;
+---
+
+<BaseLayout
+  title={`Render Campaign ${id} - 126 Colby - Remodel Mission Control`}
+  description="Campaign detail and per-angle progress."
+>
+  <main class="container mx-auto px-4 py-8 pb-12">
+    <CampaignDetailApp client:only="react" campaignId={id} />
+  </main>
+</BaseLayout>

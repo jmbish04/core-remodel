@@ -113,12 +113,101 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "multi-room-render": {
+    slug: "multi-room-render",
+    branch: "claude/multi-room-render",
+    subtitle:
+      "Render one design brief across every angle of every room, durably, with MCP code-mode tools",
+    introduction:
+      "For remodelers, a design is not one room — it is a whole floor. This change lets an agent or user create a render campaign that applies one brief across multiple rooms and angles, tracks progress, and exposes the operation through the canonical OAuth MCP registry so it is callable from Code Mode.",
+    problem:
+      "The render pipeline was room-scoped. `/api/render/looks` could only render the angles of a single room in one request, and there was no durable, trackable way to render a whole-house design consistently. The local kitchen proofs showed the desired behavior but were not wired into the deployed Worker, and the new OAuth MCP server had no render tools at all.",
+    approach:
+      "Add a `render_campaigns` abstraction. A campaign enrolls (room, listing-photo) angles, creates one render session per room, and triggers a Cloudflare Workflow. The Workflow renders the hero angle first, then passes the hero canvas as a ReferenceImage to every remaining angle so the model keeps materials and layout consistent across rooms. Each angle is its own Workflow step, so the campaign survives isolate churn and redeploys. The canonical MCP registry gains create/list/get/cancel/run_room_looks tools, and an admin UI lists campaigns with realtime per-angle progress.",
+    apiChanges: [
+      "POST /api/render/campaigns — create a campaign and start the Workflow",
+      "GET /api/render/campaigns — list campaigns",
+      "GET /api/render/campaigns/:id — full detail with enriched canvas delivery URLs",
+      "POST /api/render/campaigns/:id/cancel — skip pending angles and pause",
+      "MCP create_render_campaign, list_render_campaigns, get_render_campaign, cancel_render_campaign, run_room_looks (canonical OAuth registry)",
+    ],
+    filesTouched: [
+      "src/backend/db/schema/images/render_campaigns.ts, render_campaign_angles.ts, render_campaign_sessions.ts",
+      "src/backend/services/render/campaign.ts, render-campaign-workflow.ts",
+      "src/backend/api/routes/render.ts",
+      "src/backend/mcp/tools/render/*.ts",
+      "src/backend/mcp/tools/index.ts",
+      "src/frontend/pages/admin/render/campaigns.astro, campaigns/[id].astro",
+      "src/frontend/components/render/CampaignListApp.tsx, CampaignDetailApp.tsx",
+      "scripts/qc/pr_0048.mjs",
+      "wrangler.jsonc, src/_worker.ts, worker-configuration.d.ts",
+    ],
+    migrations: [
+      {
+        tag: "0173_wet_nicolaos",
+        sql: "CREATE render_campaigns, render_campaign_angles, render_campaign_sessions",
+      },
+    ],
+    code: [
+      {
+        title: "Hero-first sequential rendering with reference propagation",
+        lang: "ts",
+        code: `const hero = angles[0];
+const heroResult = await step.do(\`render-hero:\${hero.listingPhotoId}\`, async () => {
+  return runStage({ env: this.env, sessionId: hero.sessionId, type: "stage_3_LP_finish", inputImageUrl: hero.url, prompt: campaign.prompt });
+});
+
+for (const angle of angles.slice(1)) {
+  await step.do(\`render-angle:\${angle.listingPhotoId}\`, async () => {
+    return runStage({
+      env: this.env, sessionId: angle.sessionId, type: "stage_3_LP_finish",
+      inputImageUrl: angle.url,
+      prompt: campaign.prompt,
+      references: heroDeliveryUrl ? [{ url: heroDeliveryUrl, label: "match the hero design exactly" }] : undefined,
+    });
+  });
+}`,
+      },
+    ],
+    diagrams: [
+      {
+        caption:
+          "Campaign orchestration: hero first, then every other angle with the hero as reference.",
+        title: "Render campaign flow",
+        code: `sequenceDiagram
+    participant API as POST /api/render/campaigns
+    participant DB as D1
+    participant WF as RenderCampaignWorkflow
+    participant RS as runStage
+
+    API->>DB: insert campaign + angles + sessions
+    API->>WF: create({ campaignId })
+    WF->>DB: load angles
+    WF->>RS: render hero angle
+    RS-->>WF: hero canvas + deliveryUrl
+    loop each remaining angle
+        WF->>RS: render angle with hero reference
+        RS-->>WF: canvas
+    end
+    WF->>DB: finalize campaign status`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_0048.mjs",
+      command: "node scripts/qc/pr_0048.mjs --preview",
+      source:
+        "// Verifies /api/mcp-docs lists the five new render tools, GET /api/render/campaigns returns 200, unknown campaign returns 404, and invalid angles return 400.",
+      output:
+        "Preview (wcrp-claude-multi-room-render): 11 passed, 0 failed — mcp-docs 200; all 5 render tools registered; GET /api/render/campaigns 200; unknown campaign 404; invalid angles 400 with error. Production regression: 1 passed, 0 failed — mcp-docs 200; new tools + routes reported pending (not on prod pre-merge). Migration 0173 applied + verified on remote D1 (render_campaigns, render_campaign_angles, render_campaign_sessions present).",
+    },
+  },
   "showroom-branch-collapse": {
     slug: "showroom-branch-collapse",
     branch: "claude/0047-p1-schema",
     prNumber: 363,
     prUrl: "https://github.com/jmbish04/core-remodel/pull/363",
-    subtitle: "Detect real chain branches, then let a human fold them into one business with many locations",
+    subtitle:
+      "Detect real chain branches, then let a human fold them into one business with many locations",
     introduction:
       "The Tier-2 counterpart to the 0046 dedup: where dedup MERGES same-site duplicate stubs, this COLLAPSES real branches of one business into a single store with many locations — proposing every collapse for human confirmation, never auto-merging.",
     problem:
@@ -148,12 +237,13 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
       {
         title: "The location is repointed, not recreated — so a crash never loses the address",
         lang: "ts",
-        code: "// PENDING → repoint the branch's location rows onto the keeper (they hold the address).\nfor (const loc of branchLocs) {\n  // Skip a site the keeper already has (same place_id) — avoid the unique-index trip.\n  if (loc.placeId && keeperPlaceIds.has(loc.placeId)) continue;\n  await db.update(showroomStoreLocations)\n    .set({ storeId: keeper.storeId, updatedAt: new Date() })\n    .where(eq(showroomStoreLocations.id, loc.id)).run();\n  if (loc.placeId) keeperPlaceIds.add(loc.placeId);\n  movedLocationId ??= loc.id;\n}\nawait setMemberState(b.id, \"LOCATION_CREATED\", movedLocationId);",
+        code: '// PENDING → repoint the branch\'s location rows onto the keeper (they hold the address).\nfor (const loc of branchLocs) {\n  // Skip a site the keeper already has (same place_id) — avoid the unique-index trip.\n  if (loc.placeId && keeperPlaceIds.has(loc.placeId)) continue;\n  await db.update(showroomStoreLocations)\n    .set({ storeId: keeper.storeId, updatedAt: new Date() })\n    .where(eq(showroomStoreLocations.id, loc.id)).run();\n  if (loc.placeId) keeperPlaceIds.add(loc.placeId);\n  movedLocationId ??= loc.id;\n}\nawait setMemberState(b.id, "LOCATION_CREATED", movedLocationId);',
       },
     ],
     diagrams: [
       {
-        caption: "Two tiers: dedup merges stubs, collapse folds branches — sharing one child-remap.",
+        caption:
+          "Two tiers: dedup merges stubs, collapse folds branches — sharing one child-remap.",
         title: "Tier 1 vs Tier 2",
         code: "flowchart TD\n  G[groupBySignals over active stores] --> S{2+ real sites?}\n  S -->|no| T1[TIER 1 dedup_showroom_stores<br/>merge stub, DISCARD address]\n  S -->|yes, STRONG signal| T2[TIER 2 scan_merge_candidates<br/>stage for human review]\n  T2 --> R[resolve: approve / exclude / reject]\n  R --> A[apply_merge_candidate]\n  A --> C[carry each branch site across as a LOCATION<br/>then soft-delete the branch store]\n  T1 -.shared.-> RM[remapStoreChildren]\n  C -.shared.-> RM\n  classDef ok fill:#1f4d2e,stroke:#4ade80\n  class T2,R,A,C ok",
       },
@@ -165,7 +255,7 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
       {
         caption: "One store row is the business; each branch becomes a location on it.",
         title: "Data model",
-        code: "erDiagram\n    showroom_merge_candidates ||--o{ showroom_merge_candidate_members : candidate_id\n    showroom_merge_candidate_members }o--|| showroom_stores : store_id\n    showroom_merge_exclusions }o--|| showroom_stores : store_id_lo_hi\n    showroom_merge_candidate_members {\n        text role \"KEEPER|BRANCH|EXCLUDED\"\n        text collapse_state \"PENDING..RETIRED\"\n        int resulting_location_id\n    }\n    showroom_merge_exclusions {\n        int store_id_lo\n        int store_id_hi\n    }",
+        code: 'erDiagram\n    showroom_merge_candidates ||--o{ showroom_merge_candidate_members : candidate_id\n    showroom_merge_candidate_members }o--|| showroom_stores : store_id\n    showroom_merge_exclusions }o--|| showroom_stores : store_id_lo_hi\n    showroom_merge_candidate_members {\n        text role "KEEPER|BRANCH|EXCLUDED"\n        text collapse_state "PENDING..RETIRED"\n        int resulting_location_id\n    }\n    showroom_merge_exclusions {\n        int store_id_lo\n        int store_id_hi\n    }',
       },
     ],
     verification: {
@@ -177,7 +267,11 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
       output:
         "PRODUCTION (version 30655efa):\n  pr_364 collapse — a real collapse on the LIVE worker — 12 passed, 0 failed\n  pr_363 detection — 15 passed, 0 failed\n  pr_348 dedup regression (shared-remap refactor) — 18 passed, 0 failed\n  D1 residue: 0 ZZ_QC rows.\n\nHONEST NOTE: #365 (the destructive P3/P4 PR) was absorbed into the #363 squash by a\nstacked-branch mixup, and codra cancelled its in-flight review of #365 as a result — so the\ndestructive half shipped under #363's review rather than its own. The production pr_364 run\n(a real collapse against the live worker, with cleanup) is the definitive verification in its\nplace. Migration 0171 applied to remote and verified; #360's budget schema renumbered to 0172\nafter mine, no collision — its tables confirmed present on prod.",
       migrations: [
-        { tag: "0171_tense_mac_gargan", appliedRemote: true, note: "3 tables + unit column verified on remote" },
+        {
+          tag: "0171_tense_mac_gargan",
+          appliedRemote: true,
+          note: "3 tables + unit column verified on remote",
+        },
       ],
     },
   },
@@ -269,7 +363,8 @@ export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
     ],
     diagrams: [
       {
-        caption: "Schema delta — phase grouping, a monthly plan axis, and the actuals→line link (all on the stable trackId, never the revisioned id)",
+        caption:
+          "Schema delta — phase grouping, a monthly plan axis, and the actuals→line link (all on the stable trackId, never the revisioned id)",
         code: `erDiagram
   budget_phases ||--o{ budget_tracker_items : "phase_id (FK, set null)"
   budget_tracker_items ||..o{ budget_plan_schedule : "track_id (TEXT, no FK)"
@@ -538,7 +633,8 @@ target: https://wcrp-codex-pascal-core-remodel-continuation.hacolby.workers.dev
     ],
     diagrams: [
       {
-        caption: "Schema delta — an invoice now relates to the showroom it came from (FK, nullable)",
+        caption:
+          "Schema delta — an invoice now relates to the showroom it came from (FK, nullable)",
         code: `erDiagram
   showroom_stores ||--o{ worker_email_invoices : "quotes from"
   worker_emails ||--o{ worker_email_invoices : "extracted from"
@@ -588,7 +684,9 @@ target: https://wcrp-codex-pascal-core-remodel-continuation.hacolby.workers.dev
       "The discovery finder had a full backend — tables (D2a), a realtime hub (D2b), the find_showrooms engine + REST (D2c-1), and MCP tools (D2c-2) — but no UI. A voice session could run a search, but a human had no page to see it, watch results land live, or import/exclude them. This is the finder UI, and the last slice of 0032.",
     approach:
       "Three thin Astro shells (per studio.astro — `class` not `className`, 24px header icon) mounting client:only React islands over the D2c-1 REST + D2b DiscoveryHub, modelled on the D1b Park-Finds page. (1) /admin/shopping/showrooms/finder — FinderApp: a one-box 'search near… for…' form that POSTs /api/showroom-searches and redirects to the new slug, plus a list of recent searches with status + result-count chips. (2) /finder/[slug] — FinderDetailApp: reads GET /api/showroom-searches/:slug, renders each result via ResultCard (a DriveMapThumb mini-map + type/rating/distance/relevance badges + tel:/website links + 'Add to directory'/'Not interested' actions that call the import/exclude REST and refetch), and STREAMS live updates from the DiscoveryHub WS — it derives the wss:// URL from window.location, sends a 15s `ping` keepalive, refetches on any realtime_event frame, reconnects on close, and runs a 20s poll as a fallback if the socket drops. Refine adds a revision in place; Finalize marks the slug final. (3) /exclusions — ExclusionsApp: the not-interested list with un-exclude. A Finder + Not-interested nav entry lands under Showrooms. Frontend only — no API/D1 change; every action goes through the D2c-1 REST that the MCP tools also call, so the page and a voice session stay in lockstep.",
-    apiChanges: ["None — frontend only. Consumes the D2c-1 REST (/api/showroom-searches*, /api/showroom-exclusions*) + the D2b WS (/api/showrooms/discovery/ws)."],
+    apiChanges: [
+      "None — frontend only. Consumes the D2c-1 REST (/api/showroom-searches*, /api/showroom-exclusions*) + the D2b WS (/api/showrooms/discovery/ws).",
+    ],
     filesTouched: [
       "src/frontend/pages/admin/shopping/showrooms/finder.astro (new)",
       "src/frontend/pages/admin/shopping/showrooms/finder/[slug].astro (new)",
@@ -600,7 +698,8 @@ target: https://wcrp-codex-pascal-core-remodel-continuation.hacolby.workers.dev
     migrations: [],
     diagrams: [
       {
-        caption: "The finder viewport streams the DiscoveryHub — a voice search lands live in the browser",
+        caption:
+          "The finder viewport streams the DiscoveryHub — a voice search lands live in the browser",
         code: `sequenceDiagram
   actor U as Finder viewport /finder/&lt;slug&gt;
   participant W as Worker
@@ -657,7 +756,8 @@ target: https://wcrp-codex-pascal-core-remodel-continuation.hacolby.workers.dev
     migrations: [],
     diagrams: [
       {
-        caption: "REST and MCP both call the one discovery-search service — never a second implementation",
+        caption:
+          "REST and MCP both call the one discovery-search service — never a second implementation",
         code: `flowchart LR
   UI["Finder UI (D2d)"] --> REST["/api/showroom-searches* (D2c-1)"]
   VOICE["Claude voice/chat"] --> MCP["MCP find_showrooms + slug + exclusion tools (D2c-2)"]
@@ -741,7 +841,8 @@ target: https://wcrp-codex-pascal-core-remodel-continuation.hacolby.workers.dev
     ],
     verification: {
       qcScript: "scripts/qc/pr_326.mjs",
-      command: "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 326 -- --preview --sweep",
+      command:
+        "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 326 -- --preview --sweep",
       ranAt: "2026-07-31",
       output:
         "tsc --noEmit clean on discovery-search.ts + both route files + api/index.ts. pnpm run build green (exit 0, ~120s). No D1 schema (tables shipped in D2a/0163). QC pr_326 proves the two new endpoints are wired + a regression on the shared park-find sink; the full write path (create→get→revisions) runs with --sweep AI-only (usePlaces:false + a synthetic aiResult) to avoid live Places billing + prod row-pollution. The live Places+Gemini path is exercised on a real finder search.",
@@ -770,10 +871,13 @@ target: https://wcrp-codex-pascal-core-remodel-continuation.hacolby.workers.dev
       "worker-configuration.d.ts (regenerated)",
       "scripts/qc/pr_323.mjs",
     ],
-    migrations: [{ tag: "v17", sql: "-- DO migration only: new_sqlite_classes [\"DiscoveryHub\"] (no D1 DDL)" }],
+    migrations: [
+      { tag: "v17", sql: '-- DO migration only: new_sqlite_classes ["DiscoveryHub"] (no D1 DDL)' },
+    ],
     diagrams: [
       {
-        caption: "One DiscoveryHub per search slug — the engine publishes, open finder pages stream",
+        caption:
+          "One DiscoveryHub per search slug — the engine publishes, open finder pages stream",
         code: `sequenceDiagram
   actor U as Finder page /finder/&lt;slug&gt;
   participant W as Worker (_worker.ts gateway)
@@ -810,7 +914,13 @@ target: https://wcrp-codex-pascal-core-remodel-continuation.hacolby.workers.dev
       ranAt: "2026-07-31",
       output:
         "tsc --noEmit clean on DiscoveryHub.ts + publish.ts + _worker.ts. worker-configuration.d.ts regenerated via wrangler types (DISCOVERY_HUB added to Env). pnpm run build green (exit 0). No D1 schema — DO migration tag v17 only. QC pr_323 proves the DO is wired + reachable (GET /api/showrooms/discovery/health → 200) and regresses the sibling FloorplanSessionDO gateway; the live broadcast needs an open socket + the D2c engine publishing.",
-      migrations: [{ tag: "v17", appliedRemote: false, note: "DO migration applies on the next Deploy (manual) run; no D1 DDL to verify." }],
+      migrations: [
+        {
+          tag: "v17",
+          appliedRemote: false,
+          note: "DO migration applies on the next Deploy (manual) run; no D1 DDL to verify.",
+        },
+      ],
     },
   },
   "showroom-360-tour": {
@@ -840,7 +950,8 @@ target: https://wcrp-codex-pascal-core-remodel-continuation.hacolby.workers.dev
     code: [],
     diagrams: [
       {
-        caption: "Free detection on mount, billed render deferred behind a click + server quota gate",
+        caption:
+          "Free detection on mount, billed render deferred behind a click + server quota gate",
         code: `sequenceDiagram
   participant U as User
   participant C as StreetViewTour (browser)
@@ -860,7 +971,8 @@ target: https://wcrp-codex-pascal-core-remodel-continuation.hacolby.workers.dev
   C->>G: new StreetViewPanorama(...)  [BILLED once]`,
       },
       {
-        caption: "Where the 360° tour resolves from — manual link wins, Street View is the fallback",
+        caption:
+          "Where the 360° tour resolves from — manual link wins, Street View is the fallback",
         code: `flowchart TD
   A[Photos bento] --> B{SHOWROOM_TOUR link?}
   B -- yes --> C[TourCard]
@@ -917,10 +1029,16 @@ tsc --noEmit clean (176 = baseline, 0 new in the touched files). No schema chang
       "drizzle/0163_warm_ravenous.sql (generated)",
       "scripts/qc/pr_321.mjs",
     ],
-    migrations: [{ tag: "0163_warm_ravenous", sql: "CREATE TABLE showroom_search / showroom_search_revision / showroom_search_result (+FKs, unique(search_id,revision_number), slug-unique, status/search/revision/place indexes); ALTER showroom_exclusions ADD location_street_number/_street_name/_city/_state/_zip_code + category; CREATE INDEX showroom_exclusions_zip_idx. Additive only — no rebuilds." }],
+    migrations: [
+      {
+        tag: "0163_warm_ravenous",
+        sql: "CREATE TABLE showroom_search / showroom_search_revision / showroom_search_result (+FKs, unique(search_id,revision_number), slug-unique, status/search/revision/place indexes); ALTER showroom_exclusions ADD location_street_number/_street_name/_city/_state/_zip_code + category; CREATE INDEX showroom_exclusions_zip_idx. Additive only — no rebuilds.",
+      },
+    ],
     diagrams: [
       {
-        caption: "§5.7 discovery-search data model — a slug, its numbered revisions, and the result rows a revision produced",
+        caption:
+          "§5.7 discovery-search data model — a slug, its numbered revisions, and the result rows a revision produced",
         code: `erDiagram
   showroom_search ||--o{ showroom_search_revision : "numbered revisions"
   showroom_search ||--o{ showroom_search_result : "current results"
@@ -969,7 +1087,13 @@ tsc --noEmit clean (176 = baseline, 0 new in the touched files). No schema chang
       ranAt: "2026-07-31",
       output:
         "tsc --noEmit clean on search.ts + exclusions.ts. pnpm run build green (exit 0, ~109s server build). Migration 0163 generated via drizzle-kit — inspected: 3 CREATE TABLE + 6 additive ADD COLUMN + indexes, no drops/rebuilds. QC pr_321 is a regression guard (the new tables have no consumer endpoint until D2c): asserts /api/showroom-hitl-queue (which reads/writes the ALTERed showroom_exclusions) and /api/showrooms still respond, so the additive migration didn't break the live surface.",
-      migrations: [{ tag: "0163_warm_ravenous", appliedRemote: false, note: "Applies on the post-merge Deploy (manual) run with run_migrations:true; additive (3 CREATE TABLE + 6 ADD COLUMN)." }],
+      migrations: [
+        {
+          tag: "0163_warm_ravenous",
+          appliedRemote: false,
+          note: "Applies on the post-merge Deploy (manual) run with run_migrations:true; additive (3 CREATE TABLE + 6 ADD COLUMN).",
+        },
+      ],
     },
   },
   "0041-store-inbox": {
@@ -1007,19 +1131,21 @@ tsc --noEmit clean (176 = baseline, 0 new in the touched files). No schema chang
     ],
     code: [
       {
-        title: "Deterministic spam gating — sender rules win the rationale, phrases fall back (classify-message.ts)",
+        title:
+          "Deterministic spam gating — sender rules win the rationale, phrases fall back (classify-message.ts)",
         lang: "ts",
-        code: "const sender = parseEmailAddress(input.from ?? \"\");\nif (sender) {\n  if (SPAM_SENDER_ADDRESSES.has(sender.email)) {\n    isSpam = true; spamRationale = `sender: ${sender.email}`;\n  } else if (BULK_SENDER_SUBDOMAINS.some((p) => sender.domain.startsWith(p))) {\n    isSpam = true; spamRationale = `bulk sender: ${sender.domain}`;\n  }\n}\nif (!isSpam) {\n  for (const phrase of SPAM_PHRASES) {\n    if (body.includes(phrase)) { isSpam = true; spamRationale = phrase; break; }\n  }\n}",
+        code: 'const sender = parseEmailAddress(input.from ?? "");\nif (sender) {\n  if (SPAM_SENDER_ADDRESSES.has(sender.email)) {\n    isSpam = true; spamRationale = `sender: ${sender.email}`;\n  } else if (BULK_SENDER_SUBDOMAINS.some((p) => sender.domain.startsWith(p))) {\n    isSpam = true; spamRationale = `bulk sender: ${sender.domain}`;\n  }\n}\nif (!isSpam) {\n  for (const phrase of SPAM_PHRASES) {\n    if (body.includes(phrase)) { isSpam = true; spamRationale = phrase; break; }\n  }\n}',
       },
     ],
     diagrams: [
       {
-        caption: "Ingestion gating — deterministic, no AI. Spam foldered, receipts routed to the existing parser.",
-        code: "flowchart TD\n  msg[\"raw Gmail message\"] --> ext[\"extractMessage (+html, +trimQuotedReply)\"]\n  ext --> gate[\"classifyMessage — pure text match\"]\n  gate -->|\"sender/phrase spam\"| spam[\"is_spam=1<br/>spam_rationale\"]\n  gate -->|\"receipt|invoice|quote + ($|attachment)\"| rc[\"classification=receipt<br/>→ Path-B processEmail parser\"]\n  gate -->|\"else\"| norm[\"normal\"]\n  spam --> GM[(gmail_messages)]\n  rc --> GM\n  norm --> GM\n  GM --> folder[\"?folder= inbox|receipts|spam|trash\"]\n  folder --> page[\"/admin/shopping/store/:id/inbox\"]\n  classDef new fill:#1f4d2e,stroke:#4ade80\n  class spam,rc,folder,page new",
+        caption:
+          "Ingestion gating — deterministic, no AI. Spam foldered, receipts routed to the existing parser.",
+        code: 'flowchart TD\n  msg["raw Gmail message"] --> ext["extractMessage (+html, +trimQuotedReply)"]\n  ext --> gate["classifyMessage — pure text match"]\n  gate -->|"sender/phrase spam"| spam["is_spam=1<br/>spam_rationale"]\n  gate -->|"receipt|invoice|quote + ($|attachment)"| rc["classification=receipt<br/>→ Path-B processEmail parser"]\n  gate -->|"else"| norm["normal"]\n  spam --> GM[(gmail_messages)]\n  rc --> GM\n  norm --> GM\n  GM --> folder["?folder= inbox|receipts|spam|trash"]\n  folder --> page["/admin/shopping/store/:id/inbox"]\n  classDef new fill:#1f4d2e,stroke:#4ade80\n  class spam,rc,folder,page new',
       },
       {
         caption: "Schema delta — 0158 (additive).",
-        code: "erDiagram\n  gmail_messages ||--o{ gmail_message_images : has\n  gmail_messages {\n    string classification \"NEW: normal|promotional|receipt|invoice|quote\"\n    int is_spam \"NEW\"\n    string spam_rationale \"NEW — matched phrase, no AI\"\n    datetime deleted_at \"NEW — soft delete (Trash)\"\n    string body_html \"now populated\"\n  }\n  gmail_message_images {\n    string content_id \"cid ref\"\n    string cf_image_id\n    string delivery_url\n  }",
+        code: 'erDiagram\n  gmail_messages ||--o{ gmail_message_images : has\n  gmail_messages {\n    string classification "NEW: normal|promotional|receipt|invoice|quote"\n    int is_spam "NEW"\n    string spam_rationale "NEW — matched phrase, no AI"\n    datetime deleted_at "NEW — soft delete (Trash)"\n    string body_html "now populated"\n  }\n  gmail_message_images {\n    string content_id "cid ref"\n    string cf_image_id\n    string delivery_url\n  }',
       },
     ],
     verification: {
@@ -1318,7 +1444,8 @@ tsc --noEmit clean (176 = baseline, 0 new in the touched files). No schema chang
   showroom_store_hitl_queue |o--o| park_sessions : "park resolved to find"`,
       },
       {
-        caption: "Scan → stage → decide (one Places call per park; the decision promotes or excludes)",
+        caption:
+          "Scan → stage → decide (one Places call per park; the decision promotes or excludes)",
         code: `sequenceDiagram
   participant DET as park-detector
   participant ING as ingestViaDetector
@@ -1339,7 +1466,8 @@ tsc --noEmit clean (176 = baseline, 0 new in the touched files). No schema chang
     ],
     verification: {
       qcScript: "scripts/qc/pr_301.mjs",
-      command: "npx tsc --noEmit  &&  pnpm run build  &&  node <scratch>/d1test  &&  pnpm run test:pr 301 -- --preview",
+      command:
+        "npx tsc --noEmit  &&  pnpm run build  &&  node <scratch>/d1test  &&  pnpm run test:pr 301 -- --preview",
       ranAt: "2026-07-29",
       output:
         "tsc --noEmit clean on all touched D1a files (the only tsc errors are the pre-existing 'visits' ToolCategory baseline from #290, untouched here). pnpm run build green (exit 0, Server built in ~94s). " +
@@ -1490,7 +1618,8 @@ tsc --noEmit clean (176 = baseline, 0 new in the touched files). No schema chang
   class ST,PO dim`,
       },
       {
-        caption: "L0 lands the ingress + discrete sources; L1 adds the detector then rewires the live paths",
+        caption:
+          "L0 lands the ingress + discrete sources; L1 adds the detector then rewires the live paths",
         code: `flowchart TD
   L0["L0 · ingress + phone/ai/manual<br/>(this PR — no migration)"] --> L1["L1 · park/dwell detector<br/>+ park_sessions (migration)<br/>+ rewire DO & poller"]
   L1 --> DONE["all sources unified<br/>+ automatic drive-away from any source"]
@@ -1533,7 +1662,8 @@ tsc --noEmit clean (176 = baseline, 0 new in the touched files). No schema chang
     migrations: [],
     diagrams: [
       {
-        caption: "Two config stores, one page — recording reuses the existing flag; location is new KV",
+        caption:
+          "Two config stores, one page — recording reuses the existing flag; location is new KV",
         code: `flowchart TD
   PAGE["/admin/config/tesla (3 cards)"] --> REC[Recording card]
   PAGE --> HW[Home & Work card]
@@ -1602,7 +1732,8 @@ tsc --noEmit clean (176 = baseline, 0 new in the touched files). No schema chang
     migrations: [],
     diagrams: [
       {
-        caption: "Workspace IA — one service, three pages + the store section, all reading the V2a/V2b surface",
+        caption:
+          "Workspace IA — one service, three pages + the store section, all reading the V2a/V2b surface",
         code: `flowchart TD
   NAV[Sidebar · Visit Logs] --> LIST["/visitlogs (list)<br/>Pending | Completed"]
   LIST --> DET["/visitlogs/:id<br/>evidence + finalize"]
@@ -1707,7 +1838,8 @@ tsc --noEmit clean (176 = baseline, 0 new in the touched files). No schema chang
     ],
     code: [
       {
-        title: "Wide-table backfill: single-row inserts batched under D1's 100-param cap (sales-backfill.ts)",
+        title:
+          "Wide-table backfill: single-row inserts batched under D1's 100-param cap (sales-backfill.ts)",
         lang: "ts",
         code: "// sale_items is ~40 cols, so a multi-row insert would exceed D1's 100\n// bound-param cap. One row per statement stays well under it, and db.batch\n// runs each chunk atomically.\nfor (let i = 0; i < pending.length; i += BATCH_STATEMENTS) {\n  const chunk = pending.slice(i, i + BATCH_STATEMENTS);\n  const stmts = chunk.map((row) => db.insert(saleItems).values(row));\n  if (stmts.length === 0) continue;\n  await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);\n  result.itemsInserted += stmts.length;\n}",
       },
@@ -1716,7 +1848,7 @@ tsc --noEmit clean (176 = baseline, 0 new in the touched files). No schema chang
       {
         caption:
           "Phase A data spine — the JSON blob becomes real rows, with FK-not-name into the shared config vocabularies.",
-        code: "erDiagram\n    showroom_store_sales ||--o{ sale_items : \"exploded into\"\n    showroom_stores ||--o{ sale_items : \"sells\"\n    sale_cycles ||--o{ sale_items : \"observed in\"\n    sale_items ||--o{ sale_item_images : \"raw src urls\"\n    sale_items ||--o{ sale_item_colors : \"colors mapping\"\n    colors ||--o{ sale_item_colors : \"definition\"\n    brands ||--o{ sale_items : \"brand_id\"\n    categories ||--o{ sale_items : \"category_id\"\n    subcategories ||--o{ sale_items : \"subcategory_id\"\n    sale_items ||--o| sale_watch : \"watched\"\n    sale_research_clusters ||--o{ sale_items : \"scored together\"\n    sale_cycles ||--o{ sale_scrape_runs : \"per-source health\"\n    sale_cycles ||--o| weekly_sale_ad : \"produces\"",
+        code: 'erDiagram\n    showroom_store_sales ||--o{ sale_items : "exploded into"\n    showroom_stores ||--o{ sale_items : "sells"\n    sale_cycles ||--o{ sale_items : "observed in"\n    sale_items ||--o{ sale_item_images : "raw src urls"\n    sale_items ||--o{ sale_item_colors : "colors mapping"\n    colors ||--o{ sale_item_colors : "definition"\n    brands ||--o{ sale_items : "brand_id"\n    categories ||--o{ sale_items : "category_id"\n    subcategories ||--o{ sale_items : "subcategory_id"\n    sale_items ||--o| sale_watch : "watched"\n    sale_research_clusters ||--o{ sale_items : "scored together"\n    sale_cycles ||--o{ sale_scrape_runs : "per-source health"\n    sale_cycles ||--o| weekly_sale_ad : "produces"',
       },
     ],
     verification: {
@@ -1727,7 +1859,7 @@ tsc --noEmit clean (176 = baseline, 0 new in the touched files). No schema chang
       source:
         "// preview: POST /backfill, assert ok + count parity (itemsInserted === itemsExpected),\n// then a second run must insert 0 (idempotent). prod: existing sales endpoints still 200;\n// /backfill 404 is 'pending merge/deploy'. Preview shares prod D1, so the backfill writes real rows.",
       output:
-        "PREVIEW (wcrp-claude-sales-clearance-page-b0c752):\n  ✓ GET /api/showroom-sales → 200 (regression)\n  ✓ GET /api/showroom-sales/facets → 200 (regression)\n  ✓ POST /backfill → 200\n  backfill: {\"snapshotsSeen\":14,\"snapshotsBackfilled\":3,\"snapshotsSkipped\":0,\"itemsInserted\":29,\"itemsExpected\":29}\n  ✓ count parity: itemsInserted === itemsExpected on first run\n  re-run: {\"itemsInserted\":0,\"snapshotsBackfilled\":0,\"snapshotsSkipped\":3}\n  ✓ idempotent: second run inserts 0 items\n  8 passed, 0 failed\n\nPRODUCTION (regression guard, pre-merge):\n  ✓ GET /api/showroom-sales → 200 (regression)\n  ✓ GET /api/showroom-sales/facets → 200 (regression)\n    POST /backfill → 404 on prod (pending merge/deploy) — expected\n  3 passed, 0 failed\n\nAlso: tsc --noEmit clean on all new/edited files; pnpm run build ✓; migration applied via pnpm run migrate:remote and all 8 tables + is_online_only + page_markdown confirmed present on remote D1 via wrangler d1 execute.",
+        'PREVIEW (wcrp-claude-sales-clearance-page-b0c752):\n  ✓ GET /api/showroom-sales → 200 (regression)\n  ✓ GET /api/showroom-sales/facets → 200 (regression)\n  ✓ POST /backfill → 200\n  backfill: {"snapshotsSeen":14,"snapshotsBackfilled":3,"snapshotsSkipped":0,"itemsInserted":29,"itemsExpected":29}\n  ✓ count parity: itemsInserted === itemsExpected on first run\n  re-run: {"itemsInserted":0,"snapshotsBackfilled":0,"snapshotsSkipped":3}\n  ✓ idempotent: second run inserts 0 items\n  8 passed, 0 failed\n\nPRODUCTION (regression guard, pre-merge):\n  ✓ GET /api/showroom-sales → 200 (regression)\n  ✓ GET /api/showroom-sales/facets → 200 (regression)\n    POST /backfill → 404 on prod (pending merge/deploy) — expected\n  3 passed, 0 failed\n\nAlso: tsc --noEmit clean on all new/edited files; pnpm run build ✓; migration applied via pnpm run migrate:remote and all 8 tables + is_online_only + page_markdown confirmed present on remote D1 via wrangler d1 execute.',
       migrations: [
         {
           tag: "0148_keen_vance_astro",
@@ -1750,7 +1882,9 @@ tsc --noEmit clean (176 = baseline, 0 new in the touched files). No schema chang
     apiChanges: [
       "isRequestAuthenticated (shared gate) — now also accepts Authorization: Bearer <WORKER_API_KEY> and x-worker-api-key: <WORKER_API_KEY>. No new routes; every admin-gated endpoint gains the header auth path.",
     ],
-    filesTouched: ["src/backend/utils/access.ts (getBearerKeyFromRequest + timingSafeEqual; isRequestAuthenticated rewritten)"],
+    filesTouched: [
+      "src/backend/utils/access.ts (getBearerKeyFromRequest + timingSafeEqual; isRequestAuthenticated rewritten)",
+    ],
     migrations: [],
     code: [
       {
@@ -1793,7 +1927,8 @@ export async function isRequestAuthenticated(request: Request, env: Env): Promis
     ],
     verification: {
       qcScript: "scripts/qc/pr_285.mjs",
-      command: "pnpm run test:pr 285 -- --preview   # branch preview (fix present)\npnpm run test:pr 285                # production (regression guard)",
+      command:
+        "pnpm run test:pr 285 -- --preview   # branch preview (fix present)\npnpm run test:pr 285                # production (regression guard)",
       ranAt: "2026-07-27",
       output:
         "PREVIEW (wcrp-claude-api-auth-bearer):\n  ✓ target reachable\n  ✓ WORKER_API_KEY resolved locally\n  ✓ no-credential request is rejected (401)\n  ✓ cookie (hash) path still authenticates (200)\n  ✓ Authorization: Bearer <key> authenticates (200)\n  ✓ x-worker-api-key header authenticates (200)\n  6 passed, 0 failed\n\nPRODUCTION (regression guard, pre-merge):\n  ✓ target reachable\n  ✓ WORKER_API_KEY resolved locally\n  ✓ no-credential request is rejected (401)\n  ✓ cookie (hash) path still authenticates (200)\n    raw-key header auth not on prod yet — Bearer=401, header=401 (expected 401 pre-merge)\n  4 passed, 0 failed\n\nThe prod Bearer=401/header=401 confirms the bug this PR fixes (prod rejects the raw key today); the preview 200s confirm the fix. tsc --noEmit clean on access.ts.",
@@ -1994,7 +2129,8 @@ export function isItemActive(currentPath: string, item: SidebarItem): boolean {
     prUrl: "https://github.com/jmbish04/core-remodel/pull/277",
     verification: {
       qcScript: "scripts/qc/pr_277.mjs",
-      command: "pnpm run test:pr 277 -- --preview   # branch preview\npnpm run test:pr 277                # production (regression guard)",
+      command:
+        "pnpm run test:pr 277 -- --preview   # branch preview\npnpm run test:pr 277                # production (regression guard)",
       ranAt: "2026-07-26",
       source:
         "// SSR smoke: every shopping page still 200s with the sidebar in the HTML;\n// on --preview the new-IA markers (Purchase Ops, Sourcing Tools, data-sidebar-collapsed)\n// must be present; on prod (pre-merge) they're reported 'pending merge/deploy', not failed.",
@@ -2013,7 +2149,9 @@ export function isItemActive(currentPath: string, item: SidebarItem): boolean {
       "The Showrooms directory was a dense card UI with three overlapping views (map / list-by-category / directory-by-city) grouped behind an accordion. It wasted vertical space, buried the region picker in a chip row, and had no way to regroup or scan stores as a table. The homeowner wanted a single grouped experience: pick a region (tabbed, with counts), group how they like, see what's open right now, and one-tap navigate the car to a store.",
     approach:
       "Reworked `ShowroomsDirectoryApp` in place, wired to the SAME live fetch (`/api/showroom-stores?include=categories,ratings` + the three `meta/*` endpoints) — no mock data, no new endpoints. Region tabs come from the existing `HUB_LABEL` map; a `useDeviceLocation` hook reuses the existing device-location report to auto-select the nearest region (SF fallback). A group-by switcher buckets the active region's stores (Sales Category default / Rating / Flagship / Closing Time), open stores sorted by earliest close via the existing `hours-status` helpers, closed stores folded into one expandable banner. Cards reuse `ShowroomMergedCard`; rows are a new compact accessible table. The detail modal reads `hoursJson` for a full weekly schedule and posts to the real `POST /api/tesla/navigate` for Tesla nav (Google Maps uses the standard dir URL). The map view is preserved behind a Grouped/Map toggle; the retired list/directory tabs redirect to grouped.",
-    apiChanges: ["None — pure frontend. Reuses existing /api/showroom-stores + meta/* and POST /api/tesla/navigate. No schema, no migration."],
+    apiChanges: [
+      "None — pure frontend. Reuses existing /api/showroom-stores + meta/* and POST /api/tesla/navigate. No schema, no migration.",
+    ],
     filesTouched: [
       "src/frontend/components/showroom/ShowroomsDirectoryApp.tsx (region tabs, group-by switcher, closed-collapse, cards/rows, detail modal + Tesla nav; downlevel-iteration spreads → Array.from)",
       "src/frontend/pages/admin/shopping/showrooms.astro (default tab map → grouped)",
@@ -2042,7 +2180,8 @@ export function isItemActive(currentPath: string, item: SidebarItem): boolean {
     ],
     verification: {
       qcScript: "scripts/qc/pr_282.mjs",
-      command: "pnpm run test:pr 282 -- --preview   # branch preview\npnpm run test:pr 282                # production (regression guard)",
+      command:
+        "pnpm run test:pr 282 -- --preview   # branch preview\npnpm run test:pr 282                # production (regression guard)",
       ranAt: "2026-07-26",
       output:
         "tsc --noEmit: 0 errors in ShowroomsDirectoryApp.tsx. pnpm run build: ✓ Complete. Preview deploy verified against production D1 (wcrp-claude-showrooms-grouped-table): region tabs with live counts (All 158 / SF 30 / South Bay 24 / Peninsula 19 / East Bay 75 / North Bay 8 / Central Valley 1), Sales-Category grouping with per-group avg rating + open-now, and closed-collapse banners ('12 closed now — SCIC SAN FRANCISCO, …') all render; no console errors on mount. QC harness pr_282 runs preview + prod (see PR).",
@@ -2107,7 +2246,8 @@ export function isItemActive(currentPath: string, item: SidebarItem): boolean {
     ],
     verification: {
       qcScript: "scripts/qc/pr_269.mjs",
-      command: "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 269 -- --preview   # and prod (regression)",
+      command:
+        "npx tsc --noEmit  &&  pnpm run build  &&  pnpm run test:pr 269 -- --preview   # and prod (regression)",
       ranAt: "2026-07-26",
       output:
         "`npx tsc --noEmit` — zero new errors vs the parent commit (baseline diff clean).\n" +
@@ -2479,7 +2619,9 @@ for (const s of stops) {
       "src/backend/api/routes/drive-lists.ts (activation → DO signal)",
       "src/backend/services/tesla/gating.ts + tesla-poller.ts (KV floor + heartbeat)",
     ],
-    migrations: [{ tag: "v16", sql: "-- DO migration: new_sqlite_classes [\"TeslaStreamDO\"] (no D1 DDL)" }],
+    migrations: [
+      { tag: "v16", sql: '-- DO migration: new_sqlite_classes ["TeslaStreamDO"] (no D1 DDL)' },
+    ],
     diagrams: [
       {
         caption: "Every alarm: circuit breaker → lifecycle → connect/heartbeat/dormant",
@@ -2512,7 +2654,7 @@ for (const s of stops) {
     problem:
       "The 0030 engine (shipped #229/#236) reads an emailed receipt, and for each line item deduces which room the material belongs to — a receipt of three toilets is split across three bathrooms by homogeneity, product-nature, and open-slot signals. But a deduction is an educated guess, and nothing should enter the materials schedule on a guess. Until this PR the proposals sat staged in D1 with no way for the owner to review them: the MCP tools could resolve one conversationally, but there was no visual queue to see a whole receipt at once, read the reasoning, and correct the rooms the engine placed wrong.",
     approach:
-      "A receipt-grouped HITL queue at /admin/shopping/receipt-review. Staged room_proposals are fetched and grouped by invoiceId — one card per receipt — and each line item shows the proposed room, the confidence, and the engine's reasoning. The room is editable from a dropdown of the ELIGIBLE candidate rooms the engine considered; for the cases it gets way wrong, the dropdown also carries an \"Other room…\" entry that opens a modal with RoomSelect over ALL rooms (floor-grouped, searchable). \"Confirm all\" walks the receipt's proposals and resolves each via the #236 endpoint, which mints the material against the chosen roomId FK. Frontend-only — no schema change, no new endpoint. The page is the standard thin Astro shell (BaseLayout, icon header, `class` not `className`) mounting one React island.",
+      'A receipt-grouped HITL queue at /admin/shopping/receipt-review. Staged room_proposals are fetched and grouped by invoiceId — one card per receipt — and each line item shows the proposed room, the confidence, and the engine\'s reasoning. The room is editable from a dropdown of the ELIGIBLE candidate rooms the engine considered; for the cases it gets way wrong, the dropdown also carries an "Other room…" entry that opens a modal with RoomSelect over ALL rooms (floor-grouped, searchable). "Confirm all" walks the receipt\'s proposals and resolves each via the #236 endpoint, which mints the material against the chosen roomId FK. Frontend-only — no schema change, no new endpoint. The page is the standard thin Astro shell (BaseLayout, icon header, `class` not `className`) mounting one React island.',
     apiChanges: [
       "No new endpoints. Reuses GET /api/materials/room-proposals?status=staged and POST /api/materials/room-proposals/:id/resolve from #236, and GET /api/rooms/catalog for the Other-room modal.",
     ],
@@ -2574,7 +2716,7 @@ await api.post(\`/api/materials/room-proposals/\${p.id}/resolve\`, { roomId });`
         "  GET /api/materials/room-proposals?status=staged → 3 Toilet proposals under invoiceId 28\n" +
         "    (TOTO→Primary, 2 Kohler→Guest/Hall), each with candidates[] + a numeric proposedRoomId.\n" +
         "  POST /room-proposals/46/resolve {roomId:3284744} → 200, minted material #10\n" +
-        "    \"TOTO Washlet G5A\" room=Primary Bathroom; reprocess email 3 re-stages clean.\n" +
+        '    "TOTO Washlet G5A" room=Primary Bathroom; reprocess email 3 re-stages clean.\n' +
         "  pnpm run build green; tsc --noEmit no net-new errors.",
     },
   },
@@ -2586,7 +2728,9 @@ await api.post(\`/api/materials/room-proposals/\${p.id}/resolve\`, { roomId });`
       "The dedup tool (PR #227) reparented EVERY child FK from a duplicate to the keeper. That is wrong for showroom_store_links: the seed inserts a WEBSITE link per store, and showroom_store_links has NO unique index — so reparenting a shell's seeded link would leave the kept store with two website links. The v1 leaned on `UPDATE OR IGNORE` to skip collisions, but with no unique index there is no collision to skip, so the duplicate link would simply be created. Codra's review also flagged raw sql.raw usage, sequential (non-batched) writes, loading the whole table into memory, brittle result casts, and a missing docstring.",
     approach:
       "A per-table policy replaces the blanket reparent. REPARENT (move loser→keeper) only user data worth keeping — notes, ratings, pocs, contacts, sales, images, price observations, drive stops, journal. DROP everything else — the seeded WEBSITE link, hours, scrape logs, and unique-index join mappings — by leaving it for the loser's ON DELETE CASCADE; four non-cascade artifact tables (photo buckets, product photos, scan log, sitemap) are explicitly deleted first so the store delete isn't blocked by a NO-ACTION FK. The rewrite is fully-typed Drizzle builders (no raw SQL), writes go through db.batch() (D1 has no transactions) in ≤90-param chunks, the store load selects only the 11 columns needed, a single changesOf() helper replaces the ad-hoc casts, and the export carries a JSDoc. The dry-run still prints per-table child counts, so any unexpected data on a shell (e.g. a mapping) is visible before apply.",
-    apiChanges: ["MCP dedup_showroom_stores — same contract; corrected apply semantics + typed/batched internals."],
+    apiChanges: [
+      "MCP dedup_showroom_stores — same contract; corrected apply semantics + typed/batched internals.",
+    ],
     filesTouched: ["src/backend/mcp/tools/showrooms/dedup_showroom_stores.ts"],
     migrations: [],
     code: [
@@ -2794,7 +2938,8 @@ const deleteIds = sorted.slice(1).map(r => r.id);`,
     ],
     diagrams: [
       {
-        caption: "The merge — loser's rows repoint to the survivor, then the loser is retired (never deleted)",
+        caption:
+          "The merge — loser's rows repoint to the survivor, then the loser is retired (never deleted)",
         code: `flowchart TD
   L["#221 Visual Comfort & Co.<br/>(loser)"] -->|"drop colliding<br/>type_id=21 row"| T[brand_type_mappings]
   L -->|"repoint showroom 136"| S[showroom_brand_mappings]
@@ -2807,7 +2952,8 @@ const deleteIds = sorted.slice(1).map(r => r.id);`,
   class R stop`,
       },
       {
-        caption: "The guard — a partial unique index over the normalized name key of ACTIVE brands only",
+        caption:
+          "The guard — a partial unique index over the normalized name key of ACTIVE brands only",
         code: `erDiagram
   brands {
     int id PK
@@ -3222,7 +3368,8 @@ if (stmts.length > 0) {
     ],
     diagrams: [
       {
-        caption: "Ownership: each module declares its own probes; one registry, one runner, one ledger.",
+        caption:
+          "Ownership: each module declares its own probes; one registry, one runner, one ledger.",
         code: `flowchart LR
   subgraph modules["17 backend modules — each owns a health.ts"]
     db["db"]
@@ -3248,7 +3395,8 @@ if (stmts.length > 0) {
   class reg,run done`,
       },
       {
-        caption: "The catalogue: definitions, a binding-type vocabulary, and one result row per probe per session.",
+        caption:
+          "The catalogue: definitions, a binding-type vocabulary, and one result row per probe per session.",
         code: `erDiagram
   health_test_def ||--o{ health_results : "records"
   health_test_def ||--o{ health_test_binding_types : "touches"
@@ -3582,7 +3730,7 @@ export function currentAgentRunId(): number | null {
     diagrams: [
       {
         caption: "Where a fenced mermaid block gets turned into a diagram",
-        code: "flowchart LR\n    MD[\"prdMarkdown / any markdown\"] --> RM[\"ReactMarkdown\"]\n    RM --> PRE{\"pre block:\\nlanguage-mermaid?\"}\n    PRE -->|no| CODE[\"styled pre/code block\"]\n    PRE -->|yes| MC[\"MermaidCn -> import('mermaid') -> SVG\"]",
+        code: 'flowchart LR\n    MD["prdMarkdown / any markdown"] --> RM["ReactMarkdown"]\n    RM --> PRE{"pre block:\\nlanguage-mermaid?"}\n    PRE -->|no| CODE["styled pre/code block"]\n    PRE -->|yes| MC["MermaidCn -> import(\'mermaid\') -> SVG"]',
       },
     ],
     verification: {
@@ -4758,7 +4906,8 @@ export function parseGoogleAddressComponents(data): ParsedAddress {
     ],
     diagrams: [
       {
-        caption: "Granular address columns on showroom_stores (blob address kept as the formatted display value).",
+        caption:
+          "Granular address columns on showroom_stores (blob address kept as the formatted display value).",
         code: `erDiagram
   showroom_stores {
     integer id PK
@@ -4820,7 +4969,8 @@ export function linksToLegacyUrls(links: StoreLinkRow[]): LegacyStoreUrls {
     ],
     diagrams: [
       {
-        caption: "showroom_store_links — the URL source of truth (WEBSITE / INSTAGRAM / PINTEREST / FACEBOOK / OTHER).",
+        caption:
+          "showroom_store_links — the URL source of truth (WEBSITE / INSTAGRAM / PINTEREST / FACEBOOK / OTHER).",
         code: `erDiagram
   showroom_stores ||--o{ showroom_store_links : "has (store_id->id)"
   showroom_stores {
@@ -4977,7 +5127,8 @@ async function matchShowroomStore(senderEmail, senderName, env) {
     ],
     diagrams: [
       {
-        caption: "Inbound email → signature extraction → fielded showroom contact (mapped or draft).",
+        caption:
+          "Inbound email → signature extraction → fielded showroom contact (mapped or draft).",
         code: `flowchart TD
   A["Inbound email (worker email)"] --> B{"Matches a directory company?"}
   B -- yes --> C["Company CRM"]

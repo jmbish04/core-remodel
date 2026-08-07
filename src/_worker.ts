@@ -53,6 +53,7 @@ export { ProductResearchWorkflow } from "./backend/services/product-research-wor
 export { BucketIntakeWorkflow } from "./backend/services/bucket-intake-workflow";
 export { DeepResearchJobWorkflow } from "./backend/services/deep-research-job-workflow";
 export { BlankCanvasBatchWorkflow } from "./backend/services/render/blank-canvas-batch-workflow";
+export { RenderCampaignWorkflow } from "./backend/services/render/render-campaign-workflow";
 export { ResearchAgent } from "./backend/ai/agents/ResearchAgent";
 export { PermitIntelligenceAgent } from "./backend/ai/agents/PermitIntelligenceAgent/index";
 export { ShowroomResearchAgent } from "./backend/ai/agents/ShowroomResearchAgent/index";
