@@ -21,7 +21,15 @@ pnpm install
 
 ## Running Locally
 
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+Start the development server:
+=======
 To start the local development server:
+>>>>>>> Stashed changes
+=======
+To start the local development server:
+>>>>>>> Stashed changes
 
 ```bash
 pnpm dev

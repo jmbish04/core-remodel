@@ -21,5 +21,11 @@ The application is deployed on **Cloudflare Workers**.
 Deployments are handled via GitHub Actions. Branch deploys use per-branch preview workers (`wcrp-<branch-slug>`) to prevent collisions and unintended production deployments.
 
 See the `AGENTS.md` file for full deployment, isolation, and configuration constraints.
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+=======
+=======
+>>>>>>> Stashed changes
 
 *(This page is a placeholder and should be expanded with detailed diagrams and deeper architectural explanations.)*
+>>>>>>> Stashed changes

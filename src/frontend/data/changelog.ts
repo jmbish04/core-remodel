@@ -53,6 +53,26 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "claude/0047-p1-schema",
+    title: "Collapse chain branches into one business — Tier 2 (0047)",
+    summary:
+      "0046 detects that some store rows are branches of one business and refuses to merge them (returns branchCandidates); 0047 makes those actionable. A scan stages each branch group as a reviewable candidate; a human approves; apply carries every branch's site across as a location on the keeper and soft-deletes the branch store. Backend shipped + verified on prod: migration 0171 (3 tables + a collapse_state machine + a unit column on locations), branch-detection + branch-collapse services, an extracted shared child-remap (dedup and collapse now share one implementation), and five MCP tools (scan/list/get/resolve/apply_merge_candidate). Proposes and never auto-merges, per the standing decision. The web review UI (P5) remains.",
+    date: "2026-08-05",
+    status: "shipped",
+    prNumber: 363,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/363",
+  },
+  {
+    branch: "claude/budget-backend-frontend-09f91d",
+    title: "Budget grid schema foundations (0035)",
+    summary:
+      "First slice of the 0035 budget grid + workbench umbrella: the time-phasing schema. Adds budget_phases (def table + config page), budget_plan_schedule (the monthly Estimate axis), and the budget_expense_entries → budget line link (stable trackId, no FK) that lets the grid roll actuals up per line and bucket them by month. Migration 0171 is additive-only and applied to remote.",
+    date: "2026-08-05",
+    status: "staged",
+    prNumber: 360,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/360",
+  },
+  {
     branch: "codex/pascal-core-remodel-continuation",
     title: "Pascal Layout Studio (0043 Phase 4)",
     summary:
@@ -340,6 +360,61 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "showroom-branch-collapse",
+    branch: "claude/0047-p1-schema",
+    date: "2026-08-05",
+    area: "Showrooms",
+    title: "Collapse chain branches into one business — Tier 2 (0047)",
+    summary:
+      "After 0045 gave a business many locations and 0046 learned to tell a duplicate STUB from a real BRANCH, 12 branch groups (~30 store rows) sat re-detected every scan with no way to act on one. 0047 makes them actionable, proposing and never auto-merging. A scan stages each branch group (STRONG-signal-gated so co-located different businesses are not staged); a human approves; apply carries every branch's site across as a location on the keeper and soft-deletes the branch store. Collapse is idempotent/resumable via a per-member collapse_state machine, and a branch's location row is REPOINTED to the keeper (it already holds the address) rather than recreated — so a mid-collapse crash never loses an address. The child-remap that both dedup and collapse need was extracted into one shared module. Backend live on prod; the web review UI (P5) remains.",
+    changes: [
+      { kind: "migration", text: "0171: showroom_merge_candidates + showroom_merge_candidate_members (per-member collapse_state machine + resulting_location_id) + showroom_merge_exclusions, plus a unit column on showroom_store_locations that closes the #356 suite-collision hole." },
+      { kind: "added", text: "services/showroom/branch-detection.ts — reuses 0046 groupBySignals; a branch group requires a STRONG signal (website/name/place_id) AND 2+ real distinct sites, minus excluded pairs, with unit-qualified location signals. Staged 11 real chains live; the 5 address-only co-located different businesses correctly excluded." },
+      { kind: "added", text: "services/showroom/branch-collapse.ts — collapseCandidate: APPROVED-only, live re-verify, per-member state machine (PENDING→LOCATION_CREATED→CHILDREN_REMAPPED→RETIRED, or SKIPPED_NO_ADDRESS). Branch location repointed to the keeper, never recreated/deleted; branch store soft-deleted only at the end, so a partial failure resumes cleanly." },
+      { kind: "added", text: "services/showroom/store-child-remap.ts — the ~25 FK child-table move maps + remapStoreChildren, extracted from dedup_showroom_stores so tier-1 dedup and tier-2 collapse share ONE implementation. dedup refactored to import it (pr_348 stays 18/18)." },
+      { kind: "added", text: "MCP: scan_showroom_merge_candidates (WRITE_IDEMPOTENT), list_merge_candidates + get_merge_candidate (READ_ONLY), resolve_merge_candidate (WRITE — approve/reject/set_keeper/exclude_member), apply_merge_candidate (DESTRUCTIVE, refuses non-APPROVED)." },
+    ],
+    migrations: ["0171_tense_mac_gargan"],
+    status: "shipped",
+  },
+  {
+    id: "budget-grid",
+    branch: "claude/budget-backend-frontend-09f91d",
+    date: "2026-08-05",
+    tag: "0035 P1–P2",
+    area: "Budget",
+    title: "Time-phased budget grid — /admin/budget/grid (API + MCP + UI)",
+    summary:
+      "The RemodelBudgetGrid ships end to end, on top of the Phase-0 schema. A shared loadBudgetGrid() service aggregates active budget lines into a phase → line-item, month-bucketed grid: plan[] from budget_plan_schedule, actual[] from expenses linked by the stable trackId and bucketed by dateIncurred, variance = plan − actual, per-phase progress + tone, per-line variance flags, whole-project scorecards, and footer rollups. It is exposed three ways off one code path: GET /api/budget/grid, a get_budget_grid MCP tool (same service — no divergence), and the /admin/budget/grid React island rebuilt from the design comp (Estimate/Actuals/Variance tabs computed client-side, inline plan edit via CurrencyInput → PATCH /api/budget/plan-schedule, and a Log-expense dialog that writes a line-linked expense). POST /api/budget/grid/seed spreads real estimate midpoints into the plan schedule and conservatively attributes existing expenses to lines (confident single-match only, never fabricated). Also fixes a latent bug: the expenses POST silently dropped budget_item_track_id, so logged spend never rolled into a line's Actuals. Browser-verified on preview; QC 28/28.",
+    changes: [
+      { kind: "added", text: "GET /api/budget/grid — phase→line, month-bucketed plan/actual/variance + scorecards + footer rollups (shared loadBudgetGrid service in services/budget/grid.ts)." },
+      { kind: "added", text: "PATCH /api/budget/plan-schedule (upsert on trackId+period) + POST /api/budget/grid/seed (estimate→plan spread, conservative expense attribution, idempotent)." },
+      { kind: "added", text: "MCP get_budget_grid (READ_ONLY) — same aggregation service as the route, no logic divergence." },
+      { kind: "added", text: "/admin/budget/grid page + BudgetGridApp island: Estimate/Actuals/Variance (client-side), scorecards, phase rows + progress rings, variance badges, month stepper, filters, expand/collapse, inline plan edit (CurrencyInput), Log-expense dialog." },
+      { kind: "fixed", text: "POST /api/budget-tracker/expenses now persists budget_item_track_id (was silently dropped) — logged expenses roll into the target line's Actuals." },
+    ],
+    status: "staged",
+  },
+  {
+    id: "budget-grid-foundations",
+    branch: "claude/budget-backend-frontend-09f91d",
+    date: "2026-08-05",
+    tag: "0035 P0",
+    area: "Budget",
+    title: "Budget grid schema foundations — phases, plan schedule, expense→line link",
+    summary:
+      "The backend groundwork for the time-phased budget grid (RemodelBudgetGrid), and the first PR of the 0035 grid + workbench umbrella. Three additive pieces: budget_phases — a definition vocabulary the grid groups line items under, with a /admin/config/budget/phases config page and 4 seeded defaults; budget_plan_schedule — the monthly Estimate axis, one planned figure per (budget line, month), keyed on the stable trackId so it survives budget-item revisions; and a budget_item_track_id column on budget_expense_entries (TEXT, no FK) so actual spend attaches to the budget line it belongs to and buckets by month — the join the grid needs but the schema lacked (actuals were attributed by category text only). budget_tracker_items also gains phase_id + a variance note (markdown/html). Migration 0171 is all additive ADD COLUMN + two new tables (no table rebuild), applied and verified on remote. No grid UI yet — that is phases 1–2.",
+    changes: [
+      { kind: "migration", text: "0171 (additive): CREATE budget_phases, budget_plan_schedule; ADD budget_expense_entries.{budget_item_track_id, room_id, invoice_id}; ADD budget_tracker_items.{phase_id, variance_note_markdown, variance_note_html}. No rebuild. Applied to remote + verified." },
+      { kind: "added", text: "budget_phases definition table + /api/config/budget-phases CRUD (bare-array panel dialect, key derived from name) + /admin/config/budget/phases config page (new Budget nav group). 4 default phases seeded." },
+      { kind: "added", text: "budget_plan_schedule — monthly planned spend per line (budget_item_track_id, period 'YYYY-MM', planned_cents + planned_text); UNIQUE(track_id, period); no FK (keyed on the revision-independent trackId)." },
+      { kind: "added", text: "budget_expense_entries.budget_item_track_id (TEXT, no FK) — attaches an actual to its budget line so the grid rolls actuals per line + by month; + nullable room_id/invoice_id FKs for workbench room rollups." },
+      { kind: "changed", text: "budget_tracker_items: phase_id (FK budget_phases, set null) for grid grouping + variance_note_markdown/html." },
+    ],
+    migrations: ["0172"],
+    status: "staged",
+  },
   {
     id: "pascal-layout-studio",
     branch: "codex/pascal-core-remodel-continuation",

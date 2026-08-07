@@ -55,4 +55,9 @@ export const CONFIG_NAV: ConfigNavGroup[] = [
     label: "Showroom",
     items: [{ href: "/admin/config/showroom/store-types", label: "Store Types" }],
   },
+  {
+    id: "budget",
+    label: "Budget",
+    items: [{ href: "/admin/config/budget/phases", label: "Phases" }],
+  },
 ];

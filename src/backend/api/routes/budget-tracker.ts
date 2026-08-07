@@ -1,3 +1,5 @@
+import type { BatchItem } from "drizzle-orm/batch";
+
 import {
   budgetExpenseEntries,
   budgetFundingAccounts,
@@ -8,7 +10,6 @@ import {
   rooms,
 } from "@backend/db";
 import { publishRealtimeEvent } from "@backend/realtime/publish";
-import type { BatchItem } from "drizzle-orm/batch";
 import { desc, eq, inArray, max, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/d1";
 import { Hono } from "hono";
@@ -41,6 +42,8 @@ type BudgetExpensePatch = {
   item?: string | null;
   category?: string | null;
   amountCents?: number | string | null;
+  /** Links this expense to a budget line (budget_tracker_items.trackId) so it rolls into that line's Actuals. */
+  budgetItemTrackId?: string | null;
   vendorName?: string | null;
   scenarioId?: string | null;
   optionGroup?: string | null;
@@ -84,7 +87,11 @@ function parseTimestamp(input: unknown): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-async function emitBudgetRealtime(env: Env, payload: Record<string, unknown>): Promise<void> {
+// Exported so sibling budget routers (e.g. budget-grid.ts) don't retype this.
+export async function emitBudgetRealtime(
+  env: Env,
+  payload: Record<string, unknown>,
+): Promise<void> {
   try {
     await publishRealtimeEvent(env, "home", {
       ...payload,
@@ -837,6 +844,9 @@ budgetTrackerRouter.post("/expenses", async (c) => {
         item,
         category,
         amountCents,
+        // Optional link to a budget line so the amount rolls into that line's
+        // Actuals in the time-phased grid (0035). Null = unattributed expense.
+        budgetItemTrackId: normalizeString(body.budgetItemTrackId),
         vendorName: normalizeString(body.vendorName),
         scenarioId: normalizeString(body.scenarioId),
         optionGroup: normalizeString(body.optionGroup),

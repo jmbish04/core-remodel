@@ -113,6 +113,216 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "showroom-branch-collapse": {
+    slug: "showroom-branch-collapse",
+    branch: "claude/0047-p1-schema",
+    prNumber: 363,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/363",
+    subtitle: "Detect real chain branches, then let a human fold them into one business with many locations",
+    introduction:
+      "The Tier-2 counterpart to the 0046 dedup: where dedup MERGES same-site duplicate stubs, this COLLAPSES real branches of one business into a single store with many locations — proposing every collapse for human confirmation, never auto-merging.",
+    problem:
+      "After 0045 gave a business many locations and 0046 learned to tell a duplicate STUB from a real BRANCH, 12 branch groups (~30 store rows) sat re-detected every scan with no way to act on one. `dedup_showroom_stores` deliberately refuses to touch them because it DISCARDS the loser's address — right for a stub, catastrophic for a real branch whose address must be carried across.",
+    approach:
+      "A staging + confirm + collapse path. `scan_showroom_merge_candidates` stages each branch group as a reviewable row (STRONG-signal-gated — website/name/place_id — so co-located different businesses like Walker Zanger / New Century are NOT staged). `resolve_merge_candidate` records the human decision (approve / reject / set_keeper / exclude_member), persisting exclusion pairs so the scan never re-proposes them. `apply_merge_candidate` collapses an APPROVED candidate. Collapse is idempotent and resumable via a per-member `collapse_state` machine, and each branch's location row is REPOINTED to the keeper (it already holds the address) rather than recreated — so a mid-collapse crash never loses an address; the branch store is soft-deleted only at the final step. The child-remap that both dedup and collapse need was extracted into one shared module, so neither re-lists the ~25 FK tables.",
+    apiChanges: [
+      "mcp scan_showroom_merge_candidates (WRITE_IDEMPOTENT) — stage / refresh / STALE branch candidates",
+      "mcp list_merge_candidates / get_merge_candidate (READ_ONLY) — the review queue + full evidence",
+      "mcp resolve_merge_candidate (WRITE) — approve / reject / set_keeper / exclude_member",
+      "mcp apply_merge_candidate (DESTRUCTIVE) — collapse an APPROVED candidate; refuses otherwise; STALEs on drift",
+    ],
+    filesTouched: [
+      "src/backend/db/schema/showroom/merge_candidates.ts, merge_exclusions.ts, store_location.ts (unit column)",
+      "src/backend/services/showroom/branch-detection.ts, branch-collapse.ts, store-child-remap.ts (new)",
+      "src/backend/mcp/tools/showrooms/{scan,list,get,resolve,apply}_merge_candidate(s).ts (new)",
+      "src/backend/mcp/tools/showrooms/dedup_showroom_stores.ts (refactored to share the remap)",
+      "scripts/qc/pr_363.mjs, scripts/qc/pr_364.mjs (new)",
+    ],
+    migrations: [
+      {
+        tag: "0171_tense_mac_gargan",
+        sql: "CREATE showroom_merge_candidates + _members + _exclusions; ALTER showroom_store_locations ADD unit",
+      },
+    ],
+    code: [
+      {
+        title: "The location is repointed, not recreated — so a crash never loses the address",
+        lang: "ts",
+        code: "// PENDING → repoint the branch's location rows onto the keeper (they hold the address).\nfor (const loc of branchLocs) {\n  // Skip a site the keeper already has (same place_id) — avoid the unique-index trip.\n  if (loc.placeId && keeperPlaceIds.has(loc.placeId)) continue;\n  await db.update(showroomStoreLocations)\n    .set({ storeId: keeper.storeId, updatedAt: new Date() })\n    .where(eq(showroomStoreLocations.id, loc.id)).run();\n  if (loc.placeId) keeperPlaceIds.add(loc.placeId);\n  movedLocationId ??= loc.id;\n}\nawait setMemberState(b.id, \"LOCATION_CREATED\", movedLocationId);",
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Two tiers: dedup merges stubs, collapse folds branches — sharing one child-remap.",
+        title: "Tier 1 vs Tier 2",
+        code: "flowchart TD\n  G[groupBySignals over active stores] --> S{2+ real sites?}\n  S -->|no| T1[TIER 1 dedup_showroom_stores<br/>merge stub, DISCARD address]\n  S -->|yes, STRONG signal| T2[TIER 2 scan_merge_candidates<br/>stage for human review]\n  T2 --> R[resolve: approve / exclude / reject]\n  R --> A[apply_merge_candidate]\n  A --> C[carry each branch site across as a LOCATION<br/>then soft-delete the branch store]\n  T1 -.shared.-> RM[remapStoreChildren]\n  C -.shared.-> RM\n  classDef ok fill:#1f4d2e,stroke:#4ade80\n  class T2,R,A,C ok",
+      },
+      {
+        caption: "Per-member state machine — a crash resumes from the last committed state.",
+        title: "Collapse state machine",
+        code: "stateDiagram-v2\n  [*] --> PENDING\n  PENDING --> LOCATION_CREATED: repoint branch location to keeper\n  PENDING --> SKIPPED_NO_ADDRESS: no location\n  LOCATION_CREATED --> CHILDREN_REMAPPED: remapStoreChildren\n  CHILDREN_REMAPPED --> RETIRED: soft-delete branch store\n  RETIRED --> [*]\n  SKIPPED_NO_ADDRESS --> [*]",
+      },
+      {
+        caption: "One store row is the business; each branch becomes a location on it.",
+        title: "Data model",
+        code: "erDiagram\n    showroom_merge_candidates ||--o{ showroom_merge_candidate_members : candidate_id\n    showroom_merge_candidate_members }o--|| showroom_stores : store_id\n    showroom_merge_exclusions }o--|| showroom_stores : store_id_lo_hi\n    showroom_merge_candidate_members {\n        text role \"KEEPER|BRANCH|EXCLUDED\"\n        text collapse_state \"PENDING..RETIRED\"\n        int resulting_location_id\n    }\n    showroom_merge_exclusions {\n        int store_id_lo\n        int store_id_hi\n    }",
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_364.mjs",
+      command:
+        "node scripts/qc/pr_364.mjs --base https://core-remodel.hacolby.workers.dev --preview   # a real collapse on the LIVE prod worker",
+      source:
+        "// Creates two sentinel stores (ZZ_QC_COLLAPSE_*) sharing a website, stages the candidate,\n// approves, applies, then asserts the keeper gained the branch's location, the branch is\n// soft-deleted, there are no orphans, a second apply is a no-op, and a re-scan is clean.\n// A finally-block hard-deletes every sentinel row regardless of outcome.",
+      output:
+        "PRODUCTION (version 30655efa):\n  pr_364 collapse — a real collapse on the LIVE worker — 12 passed, 0 failed\n  pr_363 detection — 15 passed, 0 failed\n  pr_348 dedup regression (shared-remap refactor) — 18 passed, 0 failed\n  D1 residue: 0 ZZ_QC rows.\n\nHONEST NOTE: #365 (the destructive P3/P4 PR) was absorbed into the #363 squash by a\nstacked-branch mixup, and codra cancelled its in-flight review of #365 as a result — so the\ndestructive half shipped under #363's review rather than its own. The production pr_364 run\n(a real collapse against the live worker, with cleanup) is the definitive verification in its\nplace. Migration 0171 applied to remote and verified; #360's budget schema renumbered to 0172\nafter mine, no collision — its tables confirmed present on prod.",
+      migrations: [
+        { tag: "0171_tense_mac_gargan", appliedRemote: true, note: "3 tables + unit column verified on remote" },
+      ],
+    },
+  },
+  "budget-grid": {
+    slug: "budget-grid",
+    branch: "claude/budget-backend-frontend-09f91d",
+    prNumber: 360,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/360",
+    subtitle: "0035 P1–P2 · the time-phased budget grid, end to end",
+    code: [],
+    problem:
+      "Phase 0 gave the schema (phases, monthly plan schedule, the actuals→line link). The grid itself — the phase→line-item, month-bucketed view with Estimate/Actuals/Variance — still had to be built, exposed to both HTTP and MCP without the two drifting, and rendered as a real island matching the design comp.",
+    approach:
+      "One shared aggregation: services/budget/grid.ts loadBudgetGrid() reads active budget lines, buckets plan[] from budget_plan_schedule and actual[] from expenses (linked by stable trackId, bucketed by dateIncurred month), computes variance/tone/flags/progress/scorecards, and derives the month window from the data (one-sided bounds extend to the data extreme, capped 12mo). GET /api/budget/grid and the get_budget_grid MCP tool BOTH call it — verified single-source in review. PATCH /api/budget/plan-schedule upserts a cell (trackId+period); POST /api/budget/grid/seed spreads real estimate midpoints and attributes expenses only on a confident single title match. The BudgetGridApp island computes the three views client-side from raw plan[]/actual[], edits plan inline via CurrencyInput, and logs line-linked expenses. A latent bug surfaced and was root-caused: the expenses POST dropped budget_item_track_id, so actuals never reached a line — fixed additively.",
+    apiChanges: [
+      "NEW GET /api/budget/grid?from=&to=&phase=&q= → { grid: { months, phases[{plan[],actual[],progressPct,tone,lines[{plan[],actual[],flag}]}], footer, scorecards } }.",
+      "NEW PATCH /api/budget/plan-schedule {trackId,period,plannedCents,plannedText}; NEW POST /api/budget/grid/seed.",
+      "NEW MCP tool get_budget_grid (READ_ONLY, shared service).",
+      "FIXED POST /api/budget-tracker/expenses persists budgetItemTrackId.",
+    ],
+    filesTouched: [
+      "src/backend/services/budget/grid.ts (new — shared aggregation)",
+      "src/backend/api/routes/budget-grid.ts, budget-grid-math.ts (new)",
+      "src/backend/api/routes/budget-tracker.ts (expenses POST: persist budgetItemTrackId)",
+      "src/backend/api/index.ts (mount /api/budget)",
+      "src/backend/mcp/tools/budget/get_budget_grid.ts (new) + index.ts",
+      "src/frontend/components/BudgetGridApp.tsx, budget-grid-view.ts (new)",
+      "src/frontend/pages/admin/budget/grid.astro (new)",
+      "scripts/qc/pr_360.mjs, scripts/tests/test_budget_grid_{math,service,view}.mjs",
+    ],
+    migrations: [],
+    diagrams: [
+      {
+        caption: "One aggregation, three surfaces — route and MCP never diverge",
+        code: `flowchart TD
+  SVC["services/budget/grid.ts · loadBudgetGrid()"]
+  R["GET /api/budget/grid"] --> SVC
+  M["MCP get_budget_grid"] --> SVC
+  SVC --> DATA["plan from budget_plan_schedule[month]\\nactual from expenses WHERE budget_item_track_id\\nbucketed by dateIncurred[month]"]
+  UI["/admin/budget/grid · BudgetGridApp"] --> R
+  UI --> EDIT["PATCH /api/budget/plan-schedule (inline)"]
+  UI --> LOG["POST /api/budget-tracker/expenses (line-linked)"]
+  classDef n fill:#1f4d2e,stroke:#4ade80,color:#eaffea;
+  class SVC,DATA n;`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_360.mjs",
+      command:
+        "node scripts/qc/pr_360.mjs --base <preview> --preview  (28/28)  &&  node scripts/qc/pr_360.mjs  (prod regression)",
+      ranAt: "2026-08-05",
+      output:
+        "QC 28/28 on preview: grid shape (months/phases/footer/scorecards), scorecard identity remaining=totalBudget-spent, per-phase plan[]/actual[] length == months, seed idempotent (2nd run 0 new), plan-schedule PATCH 404 on unknown + 200 non-polluting round-trip, MCP get_budget_grid registered, config regression. Prod: regression green, new endpoints correctly pending merge/deploy. Browser-verified on preview: grid renders 32 real line items, Estimate↔Variance client recompute, Remaining shows signed −$5,105 with 'No funding set' when no funding accounts exist, window May–Jul 2026. Three self-checks (math/service/view) pass; build green; tsc no new errors in touched files.",
+      migrations: [],
+    },
+  },
+  "budget-grid-foundations": {
+    slug: "budget-grid-foundations",
+    branch: "claude/budget-backend-frontend-09f91d",
+    prNumber: 360,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/360",
+    subtitle: "0035 P0 · time-phasing schema for the budget grid",
+    code: [],
+    problem:
+      "The RemodelBudgetGrid design is a phase → line-item grid with monthly columns and three views — Estimate, Actuals, Variance. The live budget model could back none of it. There was no phase concept on a budget line, so nothing to group rows under. There was no monthly plan anywhere, so the Estimate axis had no source. And critically, actual expenses attached to a budget line only by a free-text `category` — never to the line itself — so 'what did we actually spend on THIS item, in THIS month' was unanswerable, which is the whole Actuals column. The revision-chaining of budget_tracker_items made the obvious fix (an FK to the item) a trap: every edit inserts a new row/id, so an FK to the id dangles on the next edit.",
+    approach:
+      "Three additive pieces, each keyed correctly for the revision model. (1) budget_phases — a definition vocabulary in the established `*_def` style (stable `key`, soft-delete, config page), exposed through the generic ConfigDefinitionPage at /admin/config/budget/phases in the bare-array panel dialect store-types already uses; budget_tracker_items gains a nullable phase_id FK (set null). (2) budget_plan_schedule — one planned figure per (line, month): budget_item_track_id + period 'YYYY-MM' + planned_cents/planned_text, UNIQUE on (track_id, period) so inline edits upsert. (3) budget_expense_entries.budget_item_track_id — the actuals→line link, TEXT with NO FK, keyed on the stable trackId exactly like budget_item_material_mappings, so an actual survives its item's revisions and the grid can bucket it by dateIncurred. Everything is nullable/additive: migration 0171 is 2 CREATE TABLE + 6 ADD COLUMN + 2 unique indexes, no table rebuild, so there is zero data-loss surface on the revision-chained expense table. No grid UI in this PR — this is the substrate phases 1–2 build on.",
+    apiChanges: [
+      "NEW GET /api/config/budget-phases → bare array of {id,name,description,isActive}; POST creates (derives a unique `key` from name); PATCH /:id edits or soft-deactivates (isActive:false). Behind requireAccessAuth, on the shared config router.",
+      "NEW page /admin/config/budget/phases (ConfigDefinitionPage island, new Budget config-nav group).",
+      "No budget-item/expense HTTP surface changed yet — the new columns are written by phases 1+ (grid API, seed job).",
+    ],
+    filesTouched: [
+      "src/backend/db/schema/home/budget_phases.ts (new — def table)",
+      "src/backend/db/schema/home/budget_plan_schedule.ts (new — monthly plan)",
+      "src/backend/db/schema/home/budget_tracker_items.ts (phase_id + variance note on items; track-id/room/invoice links on expenses)",
+      "src/backend/db/schema/index.ts (barrel exports)",
+      "src/backend/api/routes/config.ts (budget-phases CRUD block)",
+      "src/frontend/pages/admin/config/budget/phases.astro (new config page)",
+      "src/frontend/components/config/config-nav.ts (Budget nav group)",
+      "drizzle/0171_whole_anthem.sql (new, additive)",
+      "scripts/qc/pr_360.mjs (new)",
+    ],
+    migrations: [
+      {
+        tag: "0172_famous_the_santerians",
+        sql: "CREATE TABLE `budget_phases` (`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL, `key` text NOT NULL, `name` text NOT NULL, `description_markdown` text, `description_html` text, `description_plaintext` text, `tone` text, `sort_order` integer DEFAULT 0 NOT NULL, `is_active` integer DEFAULT true NOT NULL, `datetime_created` integer DEFAULT (unixepoch()) NOT NULL, `datetime_updated` integer DEFAULT (unixepoch()) NOT NULL);\nCREATE TABLE `budget_plan_schedule` (`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL, `budget_item_track_id` text NOT NULL, `period` text NOT NULL, `planned_cents` integer DEFAULT 0 NOT NULL, `planned_text` text, `source` text DEFAULT 'manual' NOT NULL, `datetime_created` integer DEFAULT (unixepoch()) NOT NULL, `datetime_updated` integer DEFAULT (unixepoch()) NOT NULL);\nALTER TABLE `budget_expense_entries` ADD `budget_item_track_id` text;\nALTER TABLE `budget_expense_entries` ADD `room_id` integer REFERENCES rooms(id);\nALTER TABLE `budget_expense_entries` ADD `invoice_id` integer REFERENCES worker_email_invoices(id);\nALTER TABLE `budget_tracker_items` ADD `phase_id` integer REFERENCES budget_phases(id);\nALTER TABLE `budget_tracker_items` ADD `variance_note_markdown` text;\nALTER TABLE `budget_tracker_items` ADD `variance_note_html` text;\nCREATE UNIQUE INDEX `budget_phases_key_unique` ON `budget_phases` (`key`);\nCREATE UNIQUE INDEX `ux_budget_plan_line_period` ON `budget_plan_schedule` (`budget_item_track_id`,`period`);",
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Schema delta — phase grouping, a monthly plan axis, and the actuals→line link (all on the stable trackId, never the revisioned id)",
+        code: `erDiagram
+  budget_phases ||--o{ budget_tracker_items : "phase_id (FK, set null)"
+  budget_tracker_items ||..o{ budget_plan_schedule : "track_id (TEXT, no FK)"
+  budget_tracker_items ||..o{ budget_expense_entries : "budget_item_track_id (TEXT, no FK)"
+  budget_phases {
+    int id PK
+    text key UK "NEW"
+    text name "NEW"
+    int sort_order "NEW"
+  }
+  budget_plan_schedule {
+    int id PK
+    text budget_item_track_id "NEW · stable, no FK"
+    text period "NEW · YYYY-MM"
+    int planned_cents "NEW"
+    text planned_text "NEW · currency rule"
+  }
+  budget_expense_entries {
+    int id PK
+    text track_id
+    text budget_item_track_id "NEW · actuals→line, no FK"
+    int room_id "NEW · nullable FK"
+    int invoice_id "NEW · nullable FK"
+  }`,
+      },
+      {
+        caption: "How the three views resolve at grid read-time (phases 1–2 consume this schema)",
+        code: `flowchart LR
+  PH["budget_phases"] --> G["grid grouping"]
+  SCH["budget_plan_schedule[month]"] --> EST["Estimate view"]
+  EXP["expenses WHERE budget_item_track_id\\nbucketed by dateIncurred[month]"] --> ACT["Actuals view"]
+  EST --> VAR["Variance = plan − actual"]
+  ACT --> VAR
+  classDef new fill:#1f4d2e,stroke:#4ade80,color:#eaffea;
+  class PH,SCH,EXP new;`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_360.mjs",
+      command:
+        "pnpm run build  &&  npx tsc --noEmit (touched files)  &&  pnpm run migrate:remote  &&  node scripts/qc/pr_360.mjs --base <preview> --preview  &&  node scripts/qc/pr_360.mjs",
+      ranAt: "2026-08-05",
+      output:
+        "build: green (vite ✓ ~71s, server built). tsc --noEmit: NO ERRORS in touched files (budget_phases, budget_plan_schedule, budget_tracker_items, routes/config.ts, config-nav, budget/phases.astro). migrate:remote: applied 0171; verified on remote — budget_phases + budget_plan_schedule tables exist, budget_expense_entries has all 3 new columns, budget_tracker_items has all 3, 4 default phases seeded.\n\nQC preview (17/17): GET /api/config/budget-phases 200 + BARE array; all 4 seeded phases present; CRUD round-trip (POST 201 → appears → PATCH edit → PATCH isActive:false → drops from list); PATCH unknown id → 404; config page /admin/config/budget/phases 200 + island present; regression /api/config/store-types 200.\nQC prod (1/1): store-types regression 200; new endpoint correctly reports 'pending merge/deploy' (404 until shipped).",
+      migrations: [
+        {
+          tag: "0172_famous_the_santerians",
+          appliedRemote: true,
+          note: "Additive only (2 CREATE TABLE + 6 ADD COLUMN + 2 unique indexes, no rebuild). PRAGMA-verified on remote; 4 default phases seeded via INSERT OR IGNORE.",
+        },
+      ],
+    },
+  },
   "pascal-layout-studio": {
     slug: "pascal-layout-studio",
     branch: "codex/pascal-core-remodel-continuation",

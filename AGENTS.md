@@ -1,6 +1,15 @@
 # AGENTS.md — Grounding Profile & Architectural Alignment Map
 
 ## Repository Overview
+<<<<<<< Updated upstream
+<<<<<<< Updated upstream
+This repository (`jmbish04/core-remodel`) is a complex monorepo running on Cloudflare Workers featuring Astro, Tailwind CSS, shadcn/ui, D1 databases, MCP tools, and AI governance. It acts as the mission control and shared source of truth for contractors, designers, and homeowners to review existing conditions, inspiration, and in-progress remodel decisions.
+The default branch is `main`.
+=======
+This repository (`jmbish04/core-remodel`) is a complex monorepo running on Cloudflare Workers featuring Astro, Tailwind CSS, shadcn/ui, D1 databases, MCP tools, and AI governance. It acts as the mission control and shared source of truth for contractors, designers, and homeowners to review existing conditions, inspiration, and in-progress remodel decisions. The default branch is `main`.
+>>>>>>> Stashed changes
+
+=======
 This repository (`jmbish04/core-remodel`) is a complex monorepo running on Cloudflare Workers featuring Astro, Tailwind CSS, shadcn/ui, D1 databases, MCP tools, and AI governance. It acts as the mission control and shared source of truth for contractors, designers, and homeowners to review existing conditions, inspiration, and in-progress remodel decisions. The default branch is `main`.
 
 ## Build, Test, and Lint Commands
@@ -21,9 +30,15 @@ The project uses `pnpm` as the package manager. Use the following exact scripts 
 * **Durable Objects alarms:** The repository explicitly bans the use of the append-only `this.schedule()` in Cloudflare Durable Objects to prevent runaway billing. Use native `ctx.storage.setAlarm()` instead. This is enforced by `scripts/check-do-alarms.mjs` during `pnpm run check`.
 * **Documentation:** Never overwrite or delete any existing docstrings in the codebase; only add missing ones.
 * **Changelog:** Always update the changelog before opening a PR. The changelog is driven by D1 data, not a static file, and entries must be added via D1 upsert scripts as described below.
+<<<<<<< Updated upstream
+=======
+
+---
+>>>>>>> Stashed changes
 
 ---
 
+>>>>>>> Stashed changes
 # Verified on: 2026-05-20
 
 ## FIRST ACTION OF EVERY SESSION — verify the branch is fresh
@@ -932,12 +947,3 @@ This repository is a **complex monorepo running on Cloudflare Workers featuring 
 - **Durable Objects:** The repository explicitly bans the use of the append-only `this.schedule()` in Cloudflare Durable Objects to prevent runaway billing. Use native `ctx.storage.setAlarm()` instead. This is enforced by `scripts/check-do-alarms.mjs` during `pnpm run check`.
 - **Linting and Formatting:** The project uses `oxlint` and `oxfmt`. Run `pnpm run check` to ensure your code complies. **Warning**: Running `pnpm run fmt` globally can cause massive unintended formatting changes across thousands of files. When formatting, target only the specific files you have modified.
 - **Docstrings:** Never overwrite or delete any existing docstrings in the codebase; only add missing ones.
-## Commands
-
-Before submitting code, ensure everything is working by running the following commands:
-
-- `pnpm install` - Install dependencies
-- `pnpm run build` - Build the Astro project
-- `pnpm run lint` - Lint the code
-- `pnpm run fmt` - Format the code
-- `pnpm run check` - Run lint, format, and alarm checks
