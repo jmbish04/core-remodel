@@ -9,24 +9,36 @@
  * D1 (POST /api/changelog/branches + /entries) so the record persists forever.
  */
 
+/** Defines the types of changes that can occur in a changelog entry. */
 export type ChangeKind = "added" | "changed" | "removed" | "migration" | "fixed";
 
+/** Represents a single change within a changelog entry. */
 export interface ChangelogChange {
+  /** The type of change. */
   kind: ChangeKind;
+  /** The description of the change. */
   text: string;
 }
 
+/** Represents a branch or pull request that introduces changes. */
 export interface ChangelogBranch {
+  /** The name of the branch. */
   branch: string;
+  /** The title of the branch or pull request. */
   title: string;
+  /** An optional summary of the changes in the branch. */
   summary?: string;
   /** ISO date (YYYY-MM-DD). */
   date: string;
+  /** The status of the branch. */
   status: "shipped" | "staged" | "open";
+  /** The optional pull request number. */
   prNumber?: number;
+  /** The optional pull request URL. */
   prUrl?: string;
 }
 
+/** Represents a detailed changelog entry for a specific feature or fix. */
 export interface ChangelogEntry {
   /** Slug — the detail-page URL segment. Stable, author-chosen, human-readable. */
   id: string;
@@ -39,14 +51,23 @@ export interface ChangelogEntry {
    * when it is serving, the number is omitted rather than invented.
    */
   entryNo?: number;
+  /** The branch associated with this entry. */
   branch: string;
+  /** The date of the entry (YYYY-MM-DD). */
   date: string;
+  /** An optional tag for the entry. */
   tag?: string;
+  /** The functional area this entry affects. */
   area: string;
+  /** The title of the entry. */
   title: string;
+  /** A summary of the entry. */
   summary: string;
+  /** The list of changes included in this entry. */
   changes: ChangelogChange[];
+  /** Optional migration tags associated with this entry. */
   migrations?: string[];
+  /** The status of the entry. */
   status: "shipped" | "staged";
 }
 
