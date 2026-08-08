@@ -27,6 +27,7 @@ import {
 import { isGuestPortalRequest } from "./backend/utils/guest-access";
 import { getDeviceLandingPath } from "./backend/services/device-preferences";
 import { getActiveDriveLandingPath } from "./backend/services/drive-lists";
+import { withAbsoluteRegistrationUri } from "./backend/mcp/absolute-registration-uri";
 import { handleOAuthAuthorize } from "./backend/mcp/oauth-ui";
 import { RemodelMcpAgent } from "./backend/mcp/agent";
 import { withSseHeartbeat } from "./backend/mcp/sse-heartbeat";
@@ -504,7 +505,13 @@ const oauthProvider = new OAuthProvider({
 });
 
 const handler: ExportedHandler<Env> = {
-  fetch: (request, env, ctx) => oauthProvider.fetch(request, env, ctx),
+  // withAbsoluteRegistrationUri patches the one RFC 7591 violation in the
+  // provider's DCR response — a relative `registration_client_uri`, which is
+  // what makes claude.ai report "Couldn't register with core-remodel's sign-in
+  // service" even though the registration succeeded server-side.
+  fetch: withAbsoluteRegistrationUri((request, env, ctx) =>
+    oauthProvider.fetch(request, env, ctx),
+  ),
   scheduled: (event, env, ctx) => legacyHandler.scheduled!(event, env, ctx),
   email: (message, env, ctx) => legacyHandler.email!(message, env, ctx),
 };

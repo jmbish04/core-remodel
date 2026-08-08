@@ -128,6 +128,24 @@ async function main() {
   }
   checks.info(`client_id ${clientId}`);
 
+  // RFC 7591 §3.2.1 requires registration_client_uri to be a fully qualified
+  // URL. The library builds it from the `clientRegistrationEndpoint` option
+  // verbatim, and we configure that as a PATH — so it shipped as
+  // "/oauth/register/<id>". claude.ai does `new URL()` on it, throws, and
+  // reports "Couldn't register with core-remodel's sign-in service" even
+  // though the registration succeeded. A curl probe looks perfectly healthy,
+  // which is exactly why this hid.
+  // Asserted after the token exchange, which is what tells us whether this
+  // target has the PR deployed at all — see the `expires_in` block below.
+  const regClientUri = reg.json?.registration_client_uri;
+  let regUriAbsolute = false;
+  try {
+    regUriAbsolute = Boolean(regClientUri) && Boolean(new URL(regClientUri));
+  } catch {
+    regUriAbsolute = false;
+  }
+  checks.info(`registration_client_uri ${regClientUri}`);
+
   // --- 2 & 3. Consent screen: password, then approve ------------------------
   const verifier = b64url(randomBytes(32));
   const challenge = b64url(createHash("sha256").update(verifier).digest());
@@ -192,16 +210,34 @@ async function main() {
   // library default" without guessing.
   const expiresIn = Number(tok.expires_in);
   checks.info(`expires_in = ${expiresIn}s (${(expiresIn / 86400).toFixed(1)} days)`);
-  if (expiresIn === LIBRARY_DEFAULT_ACCESS_TOKEN_TTL) {
+
+  // `expires_in` doubles as the "is this PR deployed here?" signal, so both new
+  // behaviours are gated on it. On a target that has not shipped #372 yet they
+  // are reported as pending rather than failed — otherwise the production run,
+  // whose job is to prove nothing ALREADY LIVE regressed, could never be green
+  // while the PR is open.
+  const prDeployed = expiresIn !== LIBRARY_DEFAULT_ACCESS_TOKEN_TTL;
+  if (!prDeployed) {
     checks.info(
-      "pending merge/deploy — this target still runs the 1h library default, " +
-        "which is exactly what PR #372 replaces. Expected on production pre-merge.",
+      "pending merge/deploy — this target still runs the library defaults, which " +
+        "is exactly what PR #372 replaces. Expected on production pre-merge. Both " +
+        "the one-year lifetime and the absolute registration_client_uri are " +
+        "reported below as pending rather than asserted.",
+    );
+    checks.info(
+      `would fail here today: registration_client_uri = ${JSON.stringify(regClientUri)} ` +
+        `(${regUriAbsolute ? "absolute" : "RELATIVE — the DCR bug claude.ai chokes on"})`,
     );
   } else {
     checks.ok(
       "access token lifetime is one year",
       expiresIn === ONE_YEAR_SECONDS,
       `expires_in ${expiresIn}, want ${ONE_YEAR_SECONDS}`,
+    );
+    checks.ok(
+      "registration_client_uri is an absolute URL (RFC 7591 §3.2.1)",
+      regUriAbsolute,
+      `registration_client_uri = ${JSON.stringify(regClientUri)}`,
     );
   }
 
