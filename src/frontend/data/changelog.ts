@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "fix/mcp-oauth-one-year-ttls",
+    title: "MCP OAuth lifetimes pinned to one year",
+    summary:
+      "The claude.ai MCP connector kept dropping and sometimes could not be repaired by re-authorizing. The OAuthProvider in src/_worker.ts set no TTLs, so @cloudflare/workers-oauth-provider@0.8.1's defaults applied: 1h access tokens, 30d refresh tokens, and — the damaging one — a 90d clientRegistrationTTL that deletes the `client:<id>` record out of OAUTH_KV, leaving a connector holding that client_id unable to refresh its way back. OAUTH_KV showed the churn: 77 dead `client:` records and 70 `grant:` records for one operator, against another worker sharing that namespace whose grants run a year and stay connected. All three lifetimes are now pinned to 365 days. The OAuth flow itself was never broken — verified end to end against production before the change (register → authorize → code → token → MCP initialize → refresh → MCP initialize, all 200), so this changes lifetimes only.",
+    date: "2026-08-08",
+    status: "staged",
+    prNumber: 372,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/372",
+  },
+  {
     branch: "claude/multi-room-render",
     title: "Multi-room multi-angle render campaigns (0048)",
     summary:
@@ -370,6 +380,30 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "mcp-oauth-one-year-ttls",
+    branch: "fix/mcp-oauth-one-year-ttls",
+    date: "2026-08-08",
+    area: "MCP",
+    title: "MCP OAuth lifetimes pinned to one year",
+    summary:
+      "The MCP connector kept dropping, and a stale one could not always be repaired by re-authorizing — it had to be deleted and re-added. Cause was TTL, not breakage: the OAuthProvider set none, so the library defaults (1h access / 30d refresh / 90d client registration) applied, and the 90d clientRegistrationTTL deletes the client_id itself out of OAUTH_KV. All three are now 365 days.",
+    changes: [
+      {
+        kind: "fixed",
+        text: "clientRegistrationTTL was the connector-killer: at 90 days the provider deletes the `client:<id>` record from OAUTH_KV, so a claude.ai connector holding that client_id gets invalid_client on refresh AND on re-auth, and has to be removed and re-added by hand. Now 365 days.",
+      },
+      {
+        kind: "changed",
+        text: "accessTokenTTL 3600s → 31,536,000s (365d) and refreshTokenTTL 30d → 365d on the OAuthProvider in src/_worker.ts. Deliberate trade for a single-operator connector behind a password gate: no silent expiry; revocation is via the grant record in OAUTH_KV or the revocation endpoint.",
+      },
+      {
+        kind: "added",
+        text: "scripts/qc/pr_372.mjs — drives the whole connector dance (register → authorize → approve → code exchange → MCP initialize → refresh → MCP initialize) against a deployed worker and asserts the token endpoint's expires_in, which is the deployed accessTokenTTL verbatim.",
+      },
+    ],
+    status: "staged",
+  },
   {
     id: "multi-room-render",
     branch: "claude/multi-room-render",

@@ -113,6 +113,171 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "mcp-oauth-one-year-ttls": {
+    slug: "mcp-oauth-one-year-ttls",
+    branch: "fix/mcp-oauth-one-year-ttls",
+    prNumber: 372,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/372",
+    subtitle: "0015 · connector OAuth lifetimes: 1h/30d/90d → 365d across the board",
+    introduction:
+      "The claude.ai MCP connector kept going offline and could not always be brought back by re-authorizing. Nothing in the OAuth flow was broken — every lifetime was simply on a library default that was far too short for a single-operator connector. All three are now a year.",
+    problem:
+      "The connector would report itself as needing authorization, and re-authorizing did not reliably fix it — the connector had to be deleted and re-added.\n\nThe `OAuthProvider` in `src/_worker.ts` passed no TTL options, so every default from `@cloudflare/workers-oauth-provider@0.8.1` applied:\n\n| Option | Default in use | Consequence |\n| --- | --- | --- |\n| `accessTokenTTL` | 3600s (1 hour) | the access token dies hourly; the client must refresh to keep working |\n| `refreshTokenTTL` | 30 days | the grant dies after 30 days without a refresh |\n| `clientRegistrationTTL` | 90 days | **the `client:<id>` record is deleted from `OAUTH_KV`** |\n\nThe third one is the connector-killer, and it is not obvious from the symptom. It does not expire a token — it deletes the client registration itself. A connector still holding that `client_id` then gets `invalid_client` on refresh *and* on a fresh authorization attempt, because the client it is identifying as no longer exists. Re-authorizing cannot help; only deleting and re-adding the connector can, because that triggers a new dynamic client registration.\n\n`OAUTH_KV` carried the fingerprint of exactly this loop — 77 `client:` records and 70 `grant:` records for a single operator, the debris of repeated reconnects. The same namespace also holds grants from another worker that runs year-long lifetimes, and those stay connected:\n\n```\n364.58d  grant:mcp-user-a706e218-…    ← other worker, still connected\n 27.5d   grant:justin:…               ← core-remodel, 30d default\n```\n\nBefore changing anything, the whole flow was driven against production to establish that the server was healthy and this really was only about lifetimes — register → authorize → approve → code exchange → MCP `initialize` → refresh → MCP `initialize`, every step 200.",
+    approach:
+      "Three options on the existing `OAuthProvider`, plus a shared `ONE_YEAR_SECONDS` constant. No behavioural code changed and no schema moved — the diff is 12 lines.\n\nWhy a year for all three rather than only the client registration:\n\n- **`clientRegistrationTTL: 365d`** is the actual fix for the unrepairable state described above.\n- **`refreshTokenTTL: 365d`** stops a connector that sits unused for a month from silently losing its grant. The TTL is rolled forward on every refresh, so in practice this only matters for idle periods — which is exactly when the failure was landing.\n- **`accessTokenTTL: 365d`** removes the hourly refresh entirely. Refresh works correctly (the QC run proves rotation still issues a new pair), but every refresh is one more chance for a client to end up wedged, and this connector has no reason to churn tokens hourly.\n\nThe security trade is deliberate and worth stating plainly: a year-long bearer token with the full `remodel` scope is a long-lived credential. This is a single-operator connector whose consent screen is gated on `WORKER_API_KEY`, and revocation is still available two ways — delete the `grant:` record from `OAUTH_KV`, or use the revocation endpoint the provider already serves at `/oauth/token`. For a multi-user surface these numbers would be wrong.\n\n**One thing this does not do:** it cannot resurrect a connector that is already broken. An existing claude.ai connector whose `client:` record was already reaped still has to be removed and re-added once after this deploys; from then on the registration lives a year.\n\nOne thing worth following up separately — `OAUTH_KV` (namespace `859ea6b9…`) appears to be shared with at least one other worker, judging by the `mcp-user-*` grants sitting alongside the `justin` ones. Two OAuth issuers sharing one token store is not something this PR touches, but it deserves its own look.",
+    apiChanges: [
+      "No route added, removed or renamed. `POST /oauth/token` now returns `expires_in: 31536000` instead of `3600` for both the authorization_code and refresh_token grants.",
+      "`POST /oauth/register` — the issued `client:<id>` record in OAUTH_KV now carries a 365-day expiration instead of 90 days.",
+      "`/mcp` and `/mcp/sse` transports, `/oauth/authorize`, and the `.well-known` metadata documents are unchanged.",
+    ],
+    filesTouched: [
+      "src/_worker.ts — ONE_YEAR_SECONDS + accessTokenTTL / refreshTokenTTL / clientRegistrationTTL on the OAuthProvider",
+      "scripts/qc/pr_372.mjs (new) — end-to-end OAuth + MCP transport harness",
+      "src/frontend/data/changelog.ts, src/frontend/data/changelog-detail.ts",
+    ],
+    migrations: [],
+    code: [
+      {
+        title: "src/_worker.ts — the whole change",
+        lang: "ts",
+        code: `/** Every MCP OAuth lifetime (access, refresh, client registration). */
+const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60;
+
+const oauthProvider = new OAuthProvider({
+  apiHandlers: { /* …unchanged… */ },
+  defaultHandler: legacyHandler,
+  authorizeEndpoint: "/oauth/authorize",
+  tokenEndpoint: "/oauth/token",
+  clientRegistrationEndpoint: "/oauth/register",
+  scopesSupported: ["remodel"],
+  // Single-operator connector: every lifetime is one year. The library
+  // defaults (1h access / 30d refresh / 90d client registration) forced a
+  // reconnect roughly hourly-to-quarterly and left 77 dead \`client:\` records
+  // in OAUTH_KV. The 90d clientRegistrationTTL was the worst of them — it
+  // deletes the client_id itself, so a stale claude.ai connector cannot even
+  // refresh its way back and has to be removed and re-added by hand.
+  accessTokenTTL: ONE_YEAR_SECONDS,
+  refreshTokenTTL: ONE_YEAR_SECONDS,
+  clientRegistrationTTL: ONE_YEAR_SECONDS,
+});`,
+      },
+      {
+        title: "The KV evidence — one operator, 77 client registrations",
+        lang: "bash",
+        code: `npx wrangler kv key list --namespace-id 859ea6b96deb4140831a1d09a70ffcd4 --remote
+
+# grouped by prefix, expirations relative to now:
+#   client  77   soonest +56.4d  latest +87.6d     (90d default, constantly re-minted)
+#   grant   70   soonest  +0.1d  latest +364.6d    (30d default … except another worker's)
+#   token    4
+
+# after the change, on the branch preview:
+#   client:bpX-Yzh6YpgABvmG   365.0d`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "Why a reaped client registration cannot be repaired by re-authorizing",
+        title: "The 90-day clientRegistrationTTL failure",
+        description:
+          "The connector stores its `client_id` once, at first connect. When the registration record behind that id is deleted, every subsequent path — refresh and fresh authorization alike — identifies as a client the server no longer knows. Only deleting and re-adding the connector escapes it, because only that performs a new dynamic client registration.",
+        code: `sequenceDiagram
+    participant C as claude.ai connector
+    participant P as OAuthProvider
+    participant K as OAUTH_KV
+
+    Note over C,K: day 0 — first connect
+    C->>P: POST /oauth/register
+    P->>K: PUT client:abc (expirationTtl 90d)
+    P-->>C: client_id=abc
+    C->>P: authorize + token
+    P-->>C: access (1h) + refresh (30d)
+
+    Note over K: day 90 — KV evicts client:abc
+
+    Note over C,K: day 91 — connector still holds client_id=abc
+    C->>P: POST /oauth/token (refresh, client_id=abc)
+    P->>K: GET client:abc
+    K-->>P: (gone)
+    P-->>C: invalid_client
+    C->>P: retry: GET /oauth/authorize?client_id=abc
+    P->>K: GET client:abc
+    K-->>P: (gone)
+    P-->>C: invalid_client — re-auth cannot help
+    Note over C: only delete + re-add the connector recovers`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_372.mjs",
+      command: "node scripts/qc/pr_372.mjs --preview   (and without --preview for production)",
+      ranAt: "2026-08-08",
+      source: `// THE assertion this PR exists for. \`expires_in\` is the deployed
+// accessTokenTTL verbatim, so it distinguishes "shipped" from "still on the
+// library default" without guessing.
+const expiresIn = Number(tok.expires_in);
+checks.info(\`expires_in = \${expiresIn}s (\${(expiresIn / 86400).toFixed(1)} days)\`);
+if (expiresIn === LIBRARY_DEFAULT_ACCESS_TOKEN_TTL) {
+  checks.info(
+    "pending merge/deploy — this target still runs the 1h library default, " +
+      "which is exactly what PR #372 replaces. Expected on production pre-merge.",
+  );
+} else {
+  checks.ok(
+    "access token lifetime is one year",
+    expiresIn === ONE_YEAR_SECONDS,
+    \`expires_in \${expiresIn}, want \${ONE_YEAR_SECONDS}\`,
+  );
+}`,
+      output: `$ node scripts/qc/pr_372.mjs --preview
+
+PR #372 QC — MCP OAuth one-year lifetimes
+  target: https://wcrp-fix-mcp-oauth-one-year-ttls.hacolby.workers.dev
+
+  ✓ target reachable (https://wcrp-fix-mcp-oauth-one-year-ttls.hacolby.workers.dev)
+  ✓ authorization-server metadata advertises refresh_token
+  ✓ /mcp rejects an unauthenticated call with 401
+  ✓ DCR issues a client_id
+    client_id bpX-Yzh6YpgABvmG
+  ✓ consent screen accepts the access password
+  ✓ approve redirects back to the client with an authorization code
+  ✓ authorization_code exchange returns an access + refresh token
+    expires_in = 31536000s (365.0 days)
+  ✓ access token lifetime is one year
+  ✓ MCP initialize succeeds with the access token
+  ✓ refresh_token grant issues a rotated pair
+  ✓ MCP initialize succeeds with the refreshed access token
+
+11 passed, 0 failed
+
+
+$ node scripts/qc/pr_372.mjs      # production regression guard, pre-merge
+
+PR #372 QC — MCP OAuth one-year lifetimes
+  target: https://core-remodel.hacolby.workers.dev
+
+  ✓ target reachable (https://core-remodel.hacolby.workers.dev)
+  ✓ authorization-server metadata advertises refresh_token
+  ✓ /mcp rejects an unauthenticated call with 401
+  ✓ DCR issues a client_id
+    client_id MG4AA9R03_sxtDfP
+  ✓ consent screen accepts the access password
+  ✓ approve redirects back to the client with an authorization code
+  ✓ authorization_code exchange returns an access + refresh token
+    expires_in = 3600s (0.0 days)
+    pending merge/deploy — this target still runs the 1h library default, which is exactly what PR #372 replaces. Expected on production pre-merge.
+  ✓ MCP initialize succeeds with the access token
+  ✓ refresh_token grant issues a rotated pair
+  ✓ MCP initialize succeeds with the refreshed access token
+
+10 passed, 0 failed
+
+
+$ # KV confirmation of the other two lifetimes on the preview:
+client:bpX-Yzh6YpgABvmG 365.0d
+justin grants with >300d TTL: 1`,
+      migrations: [],
+    },
+  },
   "multi-room-render": {
     slug: "multi-room-render",
     branch: "claude/multi-room-render",
