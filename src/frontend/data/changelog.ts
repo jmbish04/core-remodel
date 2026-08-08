@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "fix/mcp-oauth-one-year-ttls",
+    title: "MCP connector fixed: absolute registration_client_uri + one-year OAuth lifetimes",
+    summary:
+      "Two defects. The connector kept dropping and sometimes could not be repaired by re-authorizing. The OAuthProvider in src/_worker.ts set no TTLs, so @cloudflare/workers-oauth-provider@0.8.1's defaults applied: 1h access tokens, 30d refresh tokens, and — the damaging one — a 90d clientRegistrationTTL that deletes the `client:<id>` record out of OAUTH_KV, leaving a connector holding that client_id unable to refresh its way back. OAUTH_KV showed the churn: 77 dead `client:` records and 70 `grant:` records for one operator, against another worker sharing that namespace whose grants run a year and stay connected. All three lifetimes are now pinned to 365 days. Re-adding the connector then surfaced the second defect: `registration_client_uri` shipped as a relative URI, violating RFC 7591 §3.2.1, so claude.ai's dynamic client registration threw on it and reported \"Couldn't register with core-remodel's sign-in service\" — even though the server returned 201 and wrote the record, which is why every server-side probe looked healthy. It is now rewritten per-request against the request's own origin.",
+    date: "2026-08-08",
+    status: "staged",
+    prNumber: 372,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/372",
+  },
+  {
     branch: "claude/multi-room-render",
     title: "Multi-room multi-angle render campaigns (0048)",
     summary:
@@ -370,6 +380,34 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "mcp-oauth-one-year-ttls",
+    branch: "fix/mcp-oauth-one-year-ttls",
+    date: "2026-08-08",
+    area: "MCP",
+    title: "MCP connector fixed: absolute registration_client_uri + one-year OAuth lifetimes",
+    summary:
+      "Two defects, found in that order. (1) Lifetimes: the OAuthProvider set no TTLs, so the library defaults applied and the 90-day clientRegistrationTTL deletes the client_id itself out of OAUTH_KV — leaving a connector that re-authorizing cannot repair. All three are now 365 days. (2) The reason re-adding the connector then failed too: `registration_client_uri` was a relative URI, which violates RFC 7591 §3.2.1, so claude.ai's dynamic client registration threw on it — \"Couldn't register with core-remodel's sign-in service\" — despite the server returning 201.",
+    changes: [
+      {
+        kind: "fixed",
+        text: "The blocker on re-connecting: `registration_client_uri` shipped as a RELATIVE URI (`/oauth/register/<id>`). RFC 7591 §3.2.1 requires a fully qualified URL, and claude.ai does `new URL()` on it — so dynamic client registration failed with \"Couldn't register with core-remodel's sign-in service\" even though the server returned 201 and wrote the record. The library builds the field from the `clientRegistrationEndpoint` option verbatim, and we pass a path so the endpoint works at any hostname. Now rewritten per-request against the request's own origin (withAbsoluteRegistrationUri), so branch previews keep working and it no-ops if the library is fixed upstream.",
+      },
+      {
+        kind: "fixed",
+        text: "clientRegistrationTTL was the connector-killer: at 90 days the provider deletes the `client:<id>` record from OAUTH_KV, so a claude.ai connector holding that client_id gets invalid_client on refresh AND on re-auth, and has to be removed and re-added by hand. Now 365 days.",
+      },
+      {
+        kind: "changed",
+        text: "accessTokenTTL 3600s → 31,536,000s (365d) and refreshTokenTTL 30d → 365d on the OAuthProvider in src/_worker.ts. Deliberate trade for a single-operator connector behind a password gate: no silent expiry; revocation is via the grant record in OAUTH_KV or the revocation endpoint.",
+      },
+      {
+        kind: "added",
+        text: "scripts/qc/pr_372.mjs — drives the whole connector dance (register → authorize → approve → code exchange → MCP initialize → refresh → MCP initialize) against a deployed worker and asserts the token endpoint's expires_in, which is the deployed accessTokenTTL verbatim.",
+      },
+    ],
+    status: "staged",
+  },
   {
     id: "multi-room-render",
     branch: "claude/multi-room-render",

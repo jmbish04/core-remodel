@@ -27,6 +27,7 @@ import {
 import { isGuestPortalRequest } from "./backend/utils/guest-access";
 import { getDeviceLandingPath } from "./backend/services/device-preferences";
 import { getActiveDriveLandingPath } from "./backend/services/drive-lists";
+import { withAbsoluteRegistrationUri } from "./backend/mcp/absolute-registration-uri";
 import { handleOAuthAuthorize } from "./backend/mcp/oauth-ui";
 import { RemodelMcpAgent } from "./backend/mcp/agent";
 import { withSseHeartbeat } from "./backend/mcp/sse-heartbeat";
@@ -474,6 +475,9 @@ const legacyHandler: ExportedHandler<Env> = {
  * dispatch, auto-heal, showroom monitor, Gmail ingest) and inbound email
  * routing keep working.
  */
+/** Every MCP OAuth lifetime (access, refresh, client registration). */
+const ONE_YEAR_SECONDS = 365 * 24 * 60 * 60;
+
 const oauthProvider = new OAuthProvider({
   apiHandlers: {
     // Wrap both MCP transports with the SSE keepalive (0032 K1) so a `: ping`
@@ -489,10 +493,25 @@ const oauthProvider = new OAuthProvider({
   tokenEndpoint: "/oauth/token",
   clientRegistrationEndpoint: "/oauth/register",
   scopesSupported: ["remodel"],
+  // Single-operator connector: every lifetime is one year. The library
+  // defaults (1h access / 30d refresh / 90d client registration) forced a
+  // reconnect roughly hourly-to-quarterly and left 77 dead `client:` records
+  // in OAUTH_KV. The 90d clientRegistrationTTL was the worst of them — it
+  // deletes the client_id itself, so a stale claude.ai connector cannot even
+  // refresh its way back and has to be removed and re-added by hand.
+  accessTokenTTL: ONE_YEAR_SECONDS,
+  refreshTokenTTL: ONE_YEAR_SECONDS,
+  clientRegistrationTTL: ONE_YEAR_SECONDS,
 });
 
 const handler: ExportedHandler<Env> = {
-  fetch: (request, env, ctx) => oauthProvider.fetch(request, env, ctx),
+  // withAbsoluteRegistrationUri patches the one RFC 7591 violation in the
+  // provider's DCR response — a relative `registration_client_uri`, which is
+  // what makes claude.ai report "Couldn't register with core-remodel's sign-in
+  // service" even though the registration succeeded server-side.
+  fetch: withAbsoluteRegistrationUri((request, env, ctx) =>
+    oauthProvider.fetch(request, env, ctx),
+  ),
   scheduled: (event, env, ctx) => legacyHandler.scheduled!(event, env, ctx),
   email: (message, env, ctx) => legacyHandler.email!(message, env, ctx),
 };
