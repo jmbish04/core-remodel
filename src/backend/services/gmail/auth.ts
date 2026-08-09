@@ -41,13 +41,24 @@ const TOKEN_URL = "https://oauth2.googleapis.com/token";
  * `gmail.modify` supersedes the `gmail.readonly` this previously requested, and
  * `gmail.compose` supersedes `gmail.send`; both of the old names were dropped
  * from the delegation list, which is why they had to go.
+ *
+ * `drive.readonly` was tried here for the Drive ingestion service (2026-08-08)
+ * and reverted: the preview probe (`/api/admin/drive-auth-probe`) got
+ * `unauthorized_client` from Google's token endpoint — the service account's
+ * domain-wide delegation does NOT currently list `drive.readonly`, so
+ * requesting it broke the *entire* JWT-bearer exchange, Gmail included. Do not
+ * re-add it until a Workspace Admin adds the scope to the SA's client id (or a
+ * second Drive-only service account is provisioned) — see
+ * `.superpowers/sdd/2026-08-08-drive-ingestion-service/task-1-report.md`.
  */
-const GMAIL_SCOPES = [
+export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/gmail.modify",
   "https://www.googleapis.com/auth/gmail.compose",
   "https://www.googleapis.com/auth/gmail.labels",
   "https://www.googleapis.com/auth/gmail.settings.basic",
-].join(" ");
+];
+
+const GMAIL_SCOPES = GOOGLE_SCOPES.join(" ");
 
 /** Refresh this many seconds before actual expiry to avoid edge-of-window 401s. */
 const REFRESH_SKEW_SECONDS = 5 * 60;
