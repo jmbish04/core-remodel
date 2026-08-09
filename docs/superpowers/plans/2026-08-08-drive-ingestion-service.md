@@ -35,7 +35,7 @@ Nothing else in this plan is safe to build until this passes. `src/backend/servi
 - Modify: `src/backend/api/index.ts` (mount the probe route)
 
 **Interfaces:**
-- Consumes: `getAccessToken(env, impersonate)` from `services/gmail/auth.ts` (existing).
+- Consumes: `getGmailAccessToken(env, impersonate = "justin@126colby.com")` from `services/gmail/auth.ts` (existing — note the name is `getGmailAccessToken`, NOT `getAccessToken`, and the impersonation arg has a default; there is no `GMAIL_IMPERSONATE_EMAIL` binding).
 - Produces: `GOOGLE_SCOPES: string[]` exported from `auth.ts`; `GET /api/admin/drive-auth-probe` returning `{ ok: boolean, scopeGranted: boolean, folder?: {id,name}, error?: string }`.
 
 - [ ] **Step 1: Add the Drive scope to the requested set**
@@ -83,16 +83,17 @@ Create `src/backend/api/routes/admin/drive-auth-probe.ts`:
  */
 import { Hono } from "hono";
 
-import { getAccessToken } from "../../../services/gmail/auth";
+import { getGmailAccessToken } from "../../../services/gmail/auth";
 
 const ONBOARDING_ROOT = "1ZUJ_taFjsdWUusVZtng8ZzUAX5BFVMxU";
 
 export const driveAuthProbeRouter = new Hono<{ Bindings: Env }>();
 
 driveAuthProbeRouter.get("/", async (c) => {
-  const impersonate = c.env.GMAIL_IMPERSONATE_EMAIL ?? "justin@126colby.com";
   try {
-    const token = await getAccessToken(c.env, impersonate);
+    // getGmailAccessToken defaults to justin@126colby.com; the SA impersonates
+    // that user via domain-wide delegation.
+    const token = await getGmailAccessToken(c.env);
     const res = await fetch(
       `https://www.googleapis.com/drive/v3/files/${ONBOARDING_ROOT}` +
         `?fields=id,name,mimeType&supportsAllDrives=true`,
@@ -167,7 +168,7 @@ meant to be run against a preview worker before production sees this."
 - Create: `src/backend/services/google/drive.test.ts`
 
 **Interfaces:**
-- Consumes: `getAccessToken(env, impersonate)` from `services/gmail/auth.ts`.
+- Consumes: `getGmailAccessToken(env)` from `services/gmail/auth.ts`.
 - Produces:
   - `type DriveSharing = "ANYONE" | "ANYONE_WITH_LINK" | "DOMAIN" | "DOMAIN_WITH_LINK" | "PRIVATE"`
   - `deriveSharing(permissions: DrivePermission[] | undefined): DriveSharing`
@@ -252,7 +253,7 @@ Create `src/backend/services/google/drive.ts`:
  * `drive.readonly` scope must be delegated to the SA's client id — see
  * `services/gmail/auth.ts` and the delegation probe route.
  */
-import { getAccessToken } from "../gmail/auth";
+import { getGmailAccessToken } from "../gmail/auth";
 
 const DRIVE_API = "https://www.googleapis.com/drive/v3";
 
@@ -330,8 +331,7 @@ const FIELDS =
   "modifiedTime,createdTime,webViewLink,trashed,permissions(type,role,allowFileDiscovery))";
 
 async function driveFetch(env: Env, path: string): Promise<Response> {
-  const impersonate = env.GMAIL_IMPERSONATE_EMAIL ?? "justin@126colby.com";
-  const token = await getAccessToken(env, impersonate);
+  const token = await getGmailAccessToken(env);
   const res = await fetch(`${DRIVE_API}${path}`, {
     headers: { authorization: `Bearer ${token}` },
   });
