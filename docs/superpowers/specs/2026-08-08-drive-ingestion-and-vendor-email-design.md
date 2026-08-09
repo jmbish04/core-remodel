@@ -1,7 +1,7 @@
 # Drive ingestion service + vendor email with attachments — design
 
 - **Date:** 2026-08-08
-- **Status:** design, awaiting approval
+- **Status:** design APPROVED 2026-08-08 — Option B (standalone `drive_documents`)
 - **Slug:** `drive-ingestion-vendor-email`
 - **Ships as:** three PRs — a reusable ingestion service, then the email feature, then research indexing
 
@@ -31,32 +31,40 @@ Both were walked in full before this design was written. This materially changed
 
 Named PDFs: `1971 Blueprints`, `23. Floor Plans with Measurements`, `126 Colby St Design Jul 16 2026`, `cabinets/v1`.
 
-**Deep research findings** — `1E-2gq4xYvKYp_svn13F1Er_PGJzXuuVC`, more than 5,000 nodes (the recursive walk caps at 5,000 and was still truncated), 17 folders:
+**Deep research findings** — `17R5yV2LnFpsYcjSacIdkHNwZDlpgdjs1`, 87 nodes, 12 folders:
 
-| Folder | Direct children |
+| Type | Count |
 | --- | --- |
-| `processing_json_logs` | **4,972** |
-| product research | 7 |
-| admin | 6 |
-| topics | 5 |
-| AI, Software & Workspace | 4 |
-| Business & Industry Research | 2 |
-| showroom research | 1 |
-| brand research | 1 |
+| Google Docs | ~46 |
+| HTML (generated dashboards / mini-apps) | 26 |
+| Folders | 12 |
+| Presentation / Spreadsheet / `.tsx` | 3 |
 
-Plus 5 Google Docs, 2 Sheets, 3 HTML.
+Topic folders: product research, brand research, showroom research, Bay Area Showrooms, Building Systems & Utilities, Remodel Strategy & Procurement, Surfaces Finishes & Materials, Sinks Plumbing & Bath Fixtures, Kitchen Appliances & Cooking, Las Vegas Procurement, Business & Industry Research, AI Software & Workspace.
+
+**This corrects an earlier draft**, which pointed at `1E-2gq4xYvKYp_svn13F1Er_PGJzXuuVC` — a different folder that is ~99% machine-generated `processing_json_logs`. That folder is NOT the research root. Per-root exclusions remain in the design (§8.0 `drive_root_exclusions`) because the hazard is real and cheap to guard, but they are no longer load-bearing for day one.
+
+**Live dedupe case:** `Luxury Workstation Sink Market Analysis` exists **6 times** as separate Google Docs in `Sinks, Plumbing & Bath Fixtures`. Google-native files return no `md5Checksum`, so collapsing these needs the exported-text hash — see §3.1.
 
 **Consequences that drive the design:**
 
 1. The onboarding folder has no text documents worth extracting. Its value is *sending photos and 4 PDFs*, so slice A needs a catalogue with **sizes and links**, not an extraction pipeline.
-2. The research folder is ~99% machine-generated logs. Ingesting it naively would put 5,000+ rows in D1, embed 5,000+ log files, and produce a RAG index whose top hits are our own debug output. **Per-root exclusions are not a nice-to-have; without them this feature is actively harmful.**
-3. Real research content today is roughly 26 files plus 5 Docs and 2 Sheets — small, cheap, fast to embed.
+2. The research folder is ~75 real documents — small, cheap and fast to embed. Its content is overwhelmingly Google Docs and generated HTML, so extraction is export-and-read, not OCR.
+3. Duplicate Docs are already present, so content hashing has to work for Google-native files, where Drive gives no checksum.
 
 ---
 
 ## 2. Decisions taken, with the alternatives rejected
 
-### 2.1 Drive documents live in `supporting_documents`, not a new parallel table
+### 2.0 DECIDED — Drive documents get their own table (Option B)
+
+**Chosen: Option B, a standalone `drive_documents` table plus a `drive_document_links` bridge.** Full schema in §8.2; the rejected alternative is in §8.1.
+
+Rationale: `supporting_documents` was built for **micro-level records** — owner's manuals and tech sheets for purchased products, signed contracts, drawings, per-room and per-scenario artifacts. Drive material is **high-level** and will not carry that granularity. Option A kept them apart with a `documentTier` column, which is a discipline every future query must remember rather than a boundary the schema enforces; the failure mode is two libraries blurring silently. Drive content also changes on a completely different clock from contracts and manuals.
+
+The price accepted: extraction/embedding plumbing is written once for `drive_documents` rather than inherited, and Drive files do not appear on `/docs` or in saved views without explicit wiring. The `drive_document_links` bridge covers the rare Drive file that genuinely IS a record.
+
+#### Why reuse was considered at all (the case FOR Option A — NOT taken)
 
 `supporting_documents` already models nearly everything asked for:
 
@@ -67,8 +75,7 @@ Plus 5 Google Docs, 2 Sheets, 3 HTML.
 
 Drive-specific provenance goes in a **1:1 sidecar**, `drive_file_sources`, so Drive concerns do not leak into a general-purpose table.
 
-- **Rejected:** a standalone `drive_files` table. Simpler to write, but creates a second document library that drifts from the first, and every downstream surface (`/docs`, saved views, entity associations) would need duplicate wiring. The question "why isn't my Drive PDF in the documents page?" would be a permanent bug.
-- **Cost of the chosen path:** ingestion must mint `supporting_documents` rows correctly, including `sourceType` mapping from Drive mime types.
+The counter-argument — that `supporting_documents` means *records about specific purchased things*, and high-level Drive material is a different kind of object — is what makes this an open decision rather than a settled one. Both are written out in §8.
 
 ### 2.2 Cron run stats reuse `agent_runs`
 
@@ -210,7 +217,7 @@ All relationships are integer FKs. No denormalized `folder_name` or `root_name` 
 
 ### 3.3 PR 3 — research indexing (slice B)
 
-Runs only on roots whose use case is `DEEP_RESEARCH_FINDINGS`, and only outside exclusions.
+Runs only on roots whose use case is `DEEP_RESEARCH_FINDINGS`, and only outside exclusions. Root: `17R5yV2LnFpsYcjSacIdkHNwZDlpgdjs1`.
 
 - **Extraction:** plain text and HTML read directly; Google Docs/Sheets via export; PDFs via `env.AI.toMarkdown()` (`@llamaindex/liteparse` cannot run on Workers — it is native-only).
 - Text lands in `supporting_documents.extractedText`, with `extractionStatus` tracking progress. A failed parse is logged, never silently degraded to `{}` or `null`.
@@ -242,6 +249,184 @@ Named so they are not silently dropped:
 - Pulling email attachments into the Drive folder
 - The multi-vendor bid blast, which should build on `bid_portfolios`
 - OCR of photos
+
+## 8. Schema options — pick one
+
+Both options share the same three tables and differ **only** in where the per-file document record lives. Both satisfy the stated requirement of one folder table and one document table reused across every use case; neither creates per-use-case tables.
+
+### 8.0 Shared by both options
+
+```ts
+// Definition table. Key drives a code-side processor registry —
+// a row alone cannot add a code path, so both are needed.
+drive_use_cases {
+  id            integer PK autoincrement
+  key           text NOT NULL UNIQUE   // EMAIL_ONBOARDING_MATERIALS | DEEP_RESEARCH_FINDINGS
+  name          text NOT NULL
+  description   text
+  isActive      integer bool NOT NULL DEFAULT true
+}
+
+drive_roots {
+  id             integer PK autoincrement
+  driveFolderId  text NOT NULL UNIQUE          // Drive's own id for the root
+  label          text NOT NULL
+  useCaseId      integer NOT NULL FK -> drive_use_cases.id
+  isActive       integer bool NOT NULL DEFAULT true
+  lastScannedAt  integer timestamp
+  createdAt / updatedAt
+}
+
+drive_root_exclusions {
+  id           integer PK autoincrement
+  rootId       integer NOT NULL FK -> drive_roots.id ON DELETE cascade
+  kind         text NOT NULL                   // 'folder' | 'mime'
+  value        text NOT NULL                   // drive folder id, or a mime pattern
+  reason       text                            // why, for the next reader
+  UNIQUE (rootId, kind, value)
+}
+
+// ONE folder table, every use case.
+drive_folders {
+  id              integer PK autoincrement
+  driveId         text NOT NULL                // Drive folder id
+  rootId          integer NOT NULL FK -> drive_roots.id
+  parentFolderId  integer FK -> drive_folders.id   // self-FK; NULL at root
+  name            text NOT NULL
+  webViewUrl      text NOT NULL
+  sharing         text NOT NULL                // ANYONE | ANYONE_WITH_LINK | DOMAIN | DOMAIN_WITH_LINK | PRIVATE
+  isActive        integer bool NOT NULL DEFAULT true   // false = superseded by a rename/move
+  isDeleted       integer bool NOT NULL DEFAULT false  // true  = gone from Drive
+  supersededById  integer FK -> drive_folders.id
+  driveModifiedAt integer timestamp
+  createdAt / updatedAt
+  INDEX (rootId, isActive), INDEX (driveId)
+}
+```
+
+No denormalized `folder_name` / `root_name` anywhere — display names come from joins.
+
+---
+
+### 8.1 Option A — reuse `supporting_documents` + a Drive sidecar
+
+The document record IS a `supporting_documents` row. Drive provenance lives 1:1 alongside it.
+
+```ts
+drive_file_sources {
+  id                     integer PK autoincrement
+  supportingDocumentId   text NOT NULL UNIQUE FK -> supporting_documents.id ON DELETE cascade
+  driveId                text NOT NULL
+  rootId                 integer NOT NULL FK -> drive_roots.id
+  folderId               integer NOT NULL FK -> drive_folders.id
+  sizeBytes              integer                    // NULL for Google-native files
+  contentHash            text NOT NULL              // md5Checksum, or sha256(exported text)
+  hashSource             text NOT NULL              // 'drive_md5' | 'exported_text'
+  webViewUrl             text NOT NULL
+  sharing                text NOT NULL
+  driveModifiedAt        integer timestamp
+  isDeleted              integer bool NOT NULL DEFAULT false
+  ragUuid                text                       // Vectorize id (<=64 bytes)
+  createdAt / updatedAt
+  INDEX (rootId), INDEX (folderId), INDEX (driveId), INDEX (contentHash)
+}
+```
+
+Revision semantics reuse the columns already on `supporting_documents`: `isActive`, `revisionNumber`, `revisionOfId`, `replacedById`. Extraction reuses `extractedText` + `extractionStatus`.
+
+**Keeping the two levels legible.** One added column on `supporting_documents`:
+
+```ts
+documentTier  text NOT NULL DEFAULT 'record'   // 'record' | 'reference'
+```
+
+- `record` — the existing meaning: manuals, tech sheets, contracts, drawings; tied to a product, room, or scenario.
+- `reference` — high-level Drive material; not expected to carry micro-level associations.
+
+Every existing row keeps its meaning via the default. Every list, view and API filters on it, so the manuals surface never fills up with onboarding photos and vice versa.
+
+**Gains**
+
+- Extraction + embedding columns already exist, so PR 3 is nearly free.
+- Drive content inherits `document_entity_associations`, `document_saved_views`, and the `/docs` surface immediately.
+- A Drive file that IS a micro-level record (a signed contract that lives in Drive) is one row, not two joined ones.
+- One document library. No "which table is this document in?" ambiguity, ever.
+
+**Costs**
+
+- `supporting_documents` takes on a second population with different semantics; the `documentTier` discipline must actually be honoured in every query, or the surfaces blur.
+- `supporting_documents.id` is a text UUID, so ingestion mints UUIDs rather than using Drive ids as keys.
+- Harder to reverse: unpicking later means migrating rows out.
+
+---
+
+### 8.2 Option B — a standalone `drive_documents` table
+
+Drive gets its own document table. `supporting_documents` is untouched.
+
+```ts
+drive_documents {
+  id               integer PK autoincrement
+  driveId          text NOT NULL
+  rootId           integer NOT NULL FK -> drive_roots.id
+  folderId         integer NOT NULL FK -> drive_folders.id
+  name             text NOT NULL
+  mimeType         text NOT NULL
+  sizeBytes        integer                     // NULL for Google-native files
+  contentHash      text NOT NULL
+  hashSource       text NOT NULL               // 'drive_md5' | 'exported_text'
+  webViewUrl       text NOT NULL
+  sharing          text NOT NULL
+  driveModifiedAt  integer timestamp
+  driveCreatedAt   integer timestamp
+
+  extractedText    text                        // NULL for images / skipped types
+  extractionStatus text NOT NULL DEFAULT 'pending'  // pending|processing|complete|failed|skipped
+  extractionError  text
+  ragUuid          text
+
+  isActive         integer bool NOT NULL DEFAULT true
+  isDeleted        integer bool NOT NULL DEFAULT false
+  supersededById   integer FK -> drive_documents.id
+  revisionNumber   integer NOT NULL DEFAULT 1
+
+  createdAt / updatedAt
+  INDEX (rootId, isActive), INDEX (folderId), INDEX (driveId), INDEX (contentHash)
+}
+
+// The bridge that stops this being a silo. Only for the rare Drive file
+// that IS a micro-level record — a signed contract, a tech sheet.
+drive_document_links {
+  id                    integer PK autoincrement
+  driveDocumentId       integer NOT NULL FK -> drive_documents.id ON DELETE cascade
+  supportingDocumentId  text NOT NULL FK -> supporting_documents.id ON DELETE cascade
+  UNIQUE (driveDocumentId, supportingDocumentId)
+}
+```
+
+**Gains**
+
+- Clean separation. `supporting_documents` keeps its exact current meaning; nothing about manuals/contracts changes.
+- Drive-shaped columns (`driveId`, `sharing`, `contentHash`) sit on the table that owns them, no sidecar join for the common read.
+- Trivially reversible — dropping the feature drops its tables.
+- The email feature's hot path (list files, sizes, links, sharing) is one table, no join.
+
+**Costs**
+
+- Two document libraries. A Drive PDF does not appear in `/docs`, saved views, or entity associations without new wiring.
+- PR 3 re-implements extraction status and embedding plumbing that `supporting_documents` already has.
+- The `drive_document_links` bridge is a second thing to maintain, and it will be forgotten sometimes — meaning a contract in Drive is sometimes linked and sometimes not.
+- Two places to look when answering "do we have a document about X?".
+
+---
+
+### 8.3 Decision
+
+**Option B — chosen 2026-08-08.** The stated concern is correct and decisive: `supporting_documents` means *records about specific purchased things*, and high-level onboarding material genuinely is a different kind of object. Option A's `documentTier` column works, but it is a discipline rather than a constraint — it holds only as long as every future query remembers to filter, and the failure mode is silent blurring of two libraries that were deliberately kept apart.
+
+Option B pays a real cost (duplicated extraction plumbing, a bridge table) to buy a boundary the schema enforces rather than a convention that must be remembered. Given Drive content will grow and change independently of the purchase/contract record set, the boundary is worth more than the reuse.
+
+Option A is retained above only as the record of what was rejected and why. Do not partially adopt it: `drive_documents` is the sole document table for Drive content, and `supporting_documents` keeps its exact current meaning, unmodified by this work. No `documentTier` column is added.
 
 ## 7. Open risk
 
