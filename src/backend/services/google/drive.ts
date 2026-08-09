@@ -191,3 +191,31 @@ export async function exportFileText(
   }
   return null;
 }
+
+/**
+ * Content hash for change detection, with its provenance.
+ *
+ * Binary files carry Drive's own md5. Google-native files (Docs/Sheets/Slides)
+ * carry NO md5Checksum at all, so they are hashed over their exported text —
+ * which is also what makes a pure-formatting edit a no-op. A file we can
+ * neither checksum nor export falls back to metadata, which is weaker but
+ * still detects the common case.
+ */
+export async function contentHashFor(
+  env: Env,
+  node: DriveNode,
+): Promise<{ hash: string; source: "drive_md5" | "exported_text" | "metadata" }> {
+  if (node.md5Checksum) return { hash: node.md5Checksum, source: "drive_md5" };
+
+  const text = await exportFileText(env, node.driveId, node.mimeType).catch(() => null);
+  if (text != null) {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    return { hash: hex, source: "exported_text" };
+  }
+
+  return {
+    hash: `${node.name}:${node.modifiedAt?.toISOString() ?? "?"}:${node.sizeBytes ?? "?"}`,
+    source: "metadata",
+  };
+}
