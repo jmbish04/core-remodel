@@ -53,6 +53,16 @@ export interface ChangelogEntry {
 /** Branches / PRs, newest first. */
 export const BRANCHES: ChangelogBranch[] = [
   {
+    branch: "feat/drive-ingestion-service",
+    title: "Drive ingestion service — catalogue any Google Drive folder into D1",
+    summary:
+      "A generic ingestDriveFolder(env, rootId) service: point it at a Drive folder with a use case and it walks the tree, hashes every file, and keeps D1 in step with Drive — new files created, renames and moves superseded into a revision chain, deletions marked rather than removed, and sharing state (ANYONE / ANYONE_WITH_LINK / DOMAIN / DOMAIN_WITH_LINK / PRIVATE) recorded per node. Adding another folder later is a row insert, not a code change. This is PR 1 of 3; PR 2 is vendor email with Drive attachments and PR 3 is research indexing. The blocker found first: drive.readonly was not in the service account's domain-wide delegation, and requesting it made Google reject the whole token exchange — taking every Gmail call down with it. That was caught on a preview worker before production ever saw it.",
+    date: "2026-08-08",
+    status: "staged",
+    prNumber: 374,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/374",
+  },
+  {
     branch: "fix/mcp-oauth-one-year-ttls",
     title: "MCP connector fixed: absolute registration_client_uri + one-year OAuth lifetimes",
     summary:
@@ -380,6 +390,43 @@ export const BRANCHES: ChangelogBranch[] = [
 
 /** Entries, newest first within a branch. */
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: "drive-ingestion-service",
+    branch: "feat/drive-ingestion-service",
+    date: "2026-08-08",
+    area: "Drive",
+    title: "Drive ingestion service — catalogue any folder into D1",
+    summary:
+      "One reusable service ingests any Google Drive folder into D1, keyed by what the content is for. Renames and moves supersede into a revision chain, deletions are marked not removed, and per-file sharing state is captured because it decides whether a Drive link can be emailed to an outside vendor at all. Verified against the real folder: 72 nodes catalogued, and a second scan is a genuine no-op.",
+    changes: [
+      {
+        kind: "migration",
+        text: "0174_nifty_miek: six new tables — drive_use_cases (definition table), drive_roots, drive_root_exclusions, drive_folders, drive_documents, drive_document_links. Additive; applied and verified on remote D1. drive_documents is deliberately separate from supporting_documents, which keeps its existing meaning (manuals, tech sheets, contracts tied to a purchased thing); drive_document_links bridges the rare file that is both.",
+      },
+      {
+        kind: "added",
+        text: "ingestDriveFolder(env, rootId) and ingestAllActiveRoots(env) — recursive Drive v3 walk with exclusions applied DURING descent (an excluded subtree is never traversed), content hashing that falls back to a hash of exported text for Google-native files because Drive returns no md5Checksum for those, and a pure diff classifier covering create / supersede / delete / unchanged.",
+      },
+      {
+        kind: "added",
+        text: "Admin API: GET+POST /api/admin/drive/roots, POST /api/admin/drive/ingest (400 on a malformed rootId, 404 on a well-shaped id that matches no row, 200 and ingest-all when omitted), GET /api/admin/drive/documents?rootId=&folderId= with the folder name resolved by JOIN rather than stored.",
+      },
+      {
+        kind: "added",
+        text: "Daily 11:00 UTC cron that records each scan in the existing agent_runs ledger — one run, one step per root, with per-root error isolation so one failing root cannot cost the night. No bespoke scan-run table; it shows up at /admin/system/agents for free.",
+      },
+      {
+        kind: "added",
+        text: "GET /api/admin/drive-auth-probe — mints a token AND performs a real Drive read, distinguishing a rejected token mint (a delegation problem) from a Drive call that failed after a good mint. This is the retest tool for any future scope change.",
+      },
+      {
+        kind: "changed",
+        text: "drive.readonly added to the Gmail service account's requested scopes, after the human granted it in domain-wide delegation. The first attempt proved it was NOT delegated: Google rejects the entire JWT-bearer exchange on one undelegated scope, so every Gmail call failed, not just Drive. Proven and reverted on a preview worker; production never exposed.",
+      },
+    ],
+    migrations: ["0174_nifty_miek"],
+    status: "staged",
+  },
   {
     id: "mcp-oauth-one-year-ttls",
     branch: "fix/mcp-oauth-one-year-ttls",

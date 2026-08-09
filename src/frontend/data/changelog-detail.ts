@@ -113,6 +113,147 @@ export interface PhaseDetail {
 }
 
 export const CHANGELOG_DETAIL: Record<string, PhaseDetail> = {
+  "drive-ingestion-service": {
+    slug: "drive-ingestion-service",
+    branch: "feat/drive-ingestion-service",
+    prNumber: 374,
+    prUrl: "https://github.com/jmbish04/core-remodel/pull/374",
+    subtitle: "PR 1 of 3 · the catalogue the vendor-email and research-indexing features both sit on",
+    introduction:
+      "Point this service at a Google Drive folder, tell it what the folder is FOR, and it keeps D1 in step with Drive every night. Adding another folder later is a row insert rather than a code change.",
+    problem:
+      "Two things happen constantly and the platform supported neither.\n\nEmailing a vendor project material went through the generic claude.ai Gmail connector, which knows nothing about the project, the boilerplate, or the files — this repo's MCP registry had **126 tools and not one of them could send email**. And a research corpus sitting in Drive was entirely invisible to the app.\n\nBoth need the same thing underneath: a service that ingests a Drive folder into D1, keyed by what the content is for.\n\n### What the folders actually contain\n\nBoth were walked in full before any code was written, and the measurements changed the design:\n\n| Root | Reality |\n| --- | --- |\n| Onboarding materials | 72 nodes — ~55 images, 4 PDFs, 1 `.skp`, **zero** Google Docs |\n| Deep research findings | 87 nodes — ~46 Google Docs, 26 generated HTML, 12 topic folders |\n\nThe onboarding folder is a photo library, not a document library, so its value is sending files — which needs **sizes and links**, not a text-extraction pipeline. That inverted the original plan.\n\nA near-miss worth recording: an earlier draft pointed at a different folder that turned out to be **~99% machine-generated processing logs** — 4,972 of 5,000 nodes in one subfolder. Ingesting that would have put thousands of debug files in D1 and, in PR 3, embedded all of them. The root was corrected, but per-root exclusions stayed in the schema, because the hazard is real and the guard is cheap.",
+    approach:
+      "### The service\n\n`ingestDriveFolder(env, rootId)` walks a root recursively, applying that root's exclusions **during descent** so an excluded subtree costs one membership check rather than thousands of API reads. The flat node list then goes through a **pure** classifier — no network, no database — that emits create / supersede / delete / unchanged, which is what makes the interesting cases unit-testable at all.\n\n### Change detection, and the asymmetry in it\n\nBinary files carry Drive's own md5. **Google-native files (Docs, Sheets, Slides) carry no `md5Checksum` at all**, so they are hashed over their exported text, and `hashSource` records which method was used so a hash is never compared across kinds. This is not academic: the research corpus contains six separate Docs sharing a title and near-identical content.\n\nEqual hashes deliberately do **not** merge two files. Identity is the Drive id. Collapsing those six would destroy real rows, and there is a test asserting it does not happen.\n\n### Two flags, not one\n\n`isActive = false` means superseded by a rename or move — a new row carries the current state and `supersededById` links them into a revision chain. `isDeleted = true` means gone from Drive. Nothing is ever hard-deleted. A file can be superseded without being deleted, and deleted without ever having been superseded; one flag would lose the difference between \"this moved\" and \"this is gone\".\n\n### Sharing state, and why it earns a column\n\nDrive v3 has no access-level field — it returns a `permissions[]` array and leaves the interpretation to you. The five Apps Script values are derived from it, and the derivation has one trap that has its own test: **Drive omits `allowFileDiscovery` when it is false**, so an absent key must read as false. Reading it as true would label a link-shared file as publicly discoverable, and that value decides whether a Drive link gets emailed to an outside vendor.\n\n### Reuse instead of new tables\n\nThe nightly scan records itself in the existing **`agent_runs`** ledger — one run, one step per root — so it appears at `/admin/system/agents` with timing and errors and no bespoke scan-run table. `drive_documents` is deliberately its own table rather than folded into `supporting_documents`: that table means records about specific purchased things, Drive material is high-level, and a schema boundary beats a `tier` column every future query has to remember to filter.",
+    apiChanges: [
+      "GET /api/admin/drive/roots — every configured root with its use-case key, active flag and last-scanned timestamp.",
+      "POST /api/admin/drive/roots — register a new root against a use case.",
+      "POST /api/admin/drive/ingest — { rootId? }. Omitted ingests every active root (200); a malformed rootId is 400; a well-shaped id matching no row is 404.",
+      "GET /api/admin/drive/documents?rootId=&folderId= — catalogue rows with the folder name resolved by JOIN, never stored.",
+      "GET /api/admin/drive-auth-probe — delegation retest: mints a token AND does a real Drive read, distinguishing a rejected mint from a failed call.",
+      "New cron 0 11 * * * — the nightly scan. No existing cron expression was changed.",
+    ],
+    filesTouched: [
+      "src/backend/services/google/drive.ts (+ drive.test.ts) — Drive v3 client, recursive walk, sharing derivation, content hashing",
+      "src/backend/services/google/drive-diff.ts (+ drive-diff.test.ts) — the pure change classifier",
+      "src/backend/services/google/drive-ingest.ts — the ingestion service",
+      "src/backend/db/schema/google-drive/ (6 tables) + schema/index.ts; drizzle/0174_nifty_miek.sql",
+      "src/backend/api/routes/admin-drive-ingest.ts, admin-drive-auth-probe.ts, api/index.ts",
+      "src/backend/services/gmail/auth.ts (drive.readonly scope), src/_worker.ts (cron branch), wrangler.jsonc (one line)",
+      "scripts/qc/pr_374.mjs",
+    ],
+    migrations: [
+      {
+        tag: "0174_nifty_miek",
+        sql: "CREATE TABLE drive_use_cases ( id INTEGER PRIMARY KEY AUTOINCREMENT, key text NOT NULL UNIQUE, name text NOT NULL, description text, is_active integer DEFAULT true NOT NULL, created_at integer DEFAULT (unixepoch()) NOT NULL );\nCREATE TABLE drive_roots ( id INTEGER PRIMARY KEY AUTOINCREMENT, drive_folder_id text NOT NULL UNIQUE, label text NOT NULL, use_case_id integer NOT NULL REFERENCES drive_use_cases(id), is_active integer DEFAULT true NOT NULL, last_scanned_at integer, created_at integer DEFAULT (unixepoch()) NOT NULL, updated_at integer DEFAULT (unixepoch()) NOT NULL );\nCREATE TABLE drive_root_exclusions ( id INTEGER PRIMARY KEY AUTOINCREMENT, root_id integer NOT NULL REFERENCES drive_roots(id) ON DELETE cascade, kind text NOT NULL, value text NOT NULL, reason text, created_at integer DEFAULT (unixepoch()) NOT NULL );\nCREATE TABLE drive_folders ( id INTEGER PRIMARY KEY AUTOINCREMENT, drive_id text NOT NULL, root_id integer NOT NULL REFERENCES drive_roots(id) ON DELETE cascade, parent_folder_id integer REFERENCES drive_folders(id) ON DELETE set null, name text NOT NULL, web_view_url text NOT NULL, sharing text DEFAULT 'PRIVATE' NOT NULL, is_active integer DEFAULT true NOT NULL, is_deleted integer DEFAULT false NOT NULL, superseded_by_id integer REFERENCES drive_folders(id) ON DELETE set null, drive_modified_at integer, created_at integer DEFAULT (unixepoch()) NOT NULL, updated_at integer DEFAULT (unixepoch()) NOT NULL );\nCREATE TABLE drive_documents ( id INTEGER PRIMARY KEY AUTOINCREMENT, drive_id text NOT NULL, root_id integer NOT NULL REFERENCES drive_roots(id) ON DELETE cascade, folder_id integer NOT NULL REFERENCES drive_folders(id) ON DELETE cascade, name text NOT NULL, mime_type text NOT NULL, size_bytes integer, content_hash text NOT NULL, hash_source text NOT NULL, web_view_url text NOT NULL, sharing text DEFAULT 'PRIVATE' NOT NULL, drive_modified_at integer, drive_created_at integer, extracted_text text, extraction_status text DEFAULT 'pending' NOT NULL, extraction_error text, rag_uuid text, is_active integer DEFAULT true NOT NULL, is_deleted integer DEFAULT false NOT NULL, superseded_by_id integer REFERENCES drive_documents(id) ON DELETE set null, revision_number integer DEFAULT 1 NOT NULL, created_at integer DEFAULT (unixepoch()) NOT NULL, updated_at integer DEFAULT (unixepoch()) NOT NULL );\nCREATE TABLE drive_document_links ( id INTEGER PRIMARY KEY AUTOINCREMENT, drive_document_id integer NOT NULL REFERENCES drive_documents(id) ON DELETE cascade, supporting_document_id text NOT NULL REFERENCES supporting_documents(id) ON DELETE cascade, created_at integer DEFAULT (unixepoch()) NOT NULL );",
+      },
+    ],
+    code: [
+      {
+        title: "The trap in Drive's permissions — an omitted key is not a missing value",
+        lang: "ts",
+        code: `/**
+ * Drive v3 has no single "access level" field \u2014 it returns the permission list
+ * and leaves the interpretation to the caller. \`anyone\` outranks \`domain\`
+ * because it is strictly more open, and a MISSING \`allowFileDiscovery\` means
+ * false (Drive omits false), so it must not be read as discoverable.
+ */
+export function deriveSharing(permissions: DrivePermission[] | undefined): DriveSharing {
+  if (!permissions?.length) return "PRIVATE";
+  const anyone = permissions.find((p) => p.type === "anyone");
+  if (anyone) return anyone.allowFileDiscovery === true ? "ANYONE" : "ANYONE_WITH_LINK";
+  const domain = permissions.find((p) => p.type === "domain");
+  if (domain) return domain.allowFileDiscovery === true ? "DOMAIN" : "DOMAIN_WITH_LINK";
+  return "PRIVATE";
+}`,
+      },
+      {
+        title: "Google-native files have no checksum — hash their exported text instead",
+        lang: "ts",
+        code: `/**
+ * Binary files carry Drive's own md5. Google-native files (Docs/Sheets/Slides)
+ * carry NO md5Checksum at all, so they are hashed over their exported text \u2014
+ * which is also what makes a pure-formatting edit a no-op.
+ */
+export async function contentHashFor(env: Env, node: DriveNode) {
+  if (node.md5Checksum) return { hash: node.md5Checksum, source: "drive_md5" };
+  const text = await exportFileText(env, node.driveId, node.mimeType).catch(() => null);
+  if (text != null) {
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+    const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+    return { hash: hex, source: "exported_text" };
+  }
+  return { hash: \`\${node.name}:\${node.modifiedAt?.toISOString() ?? "?"}\`, source: "metadata" };
+}`,
+      },
+    ],
+    diagrams: [
+      {
+        caption: "What a nightly scan does to each node",
+        title: "Create, supersede, delete — the three writes",
+        description:
+          "Identity is the Drive file id, never the content hash. A rename or move retires the old row and links it forward, so the history of a file surviving three renames is still walkable. Nothing is hard-deleted.",
+        code: `flowchart TD
+    A[Walk root recursively] --> B{Excluded?}
+    B -- yes --> Z[Never traversed]
+    B -- no --> C[Collect node]
+    C --> D{driveId in D1?}
+    D -- no --> E[create: new row]
+    D -- yes --> F{name, parent or hash changed?}
+    F -- no --> G[unchanged]
+    F -- yes --> H[supersede: old row isActive=false<br/>new row inserted<br/>supersededById links them]
+    I[Row in D1, absent from Drive] --> J[delete: isDeleted=true<br/>row is kept]`,
+      },
+    ],
+    verification: {
+      qcScript: "scripts/qc/pr_374.mjs",
+      command: "node scripts/qc/pr_374.mjs --preview   (and without --preview for production)",
+      ranAt: "2026-08-08",
+      source: `// The load-bearing assertion. A scan that created rows every night would
+// silently multiply the catalogue, and nothing else would catch it.
+const second = await client.post("/api/admin/drive/ingest", { rootId });
+const s2 = second.json?.summaries?.[0];
+checks.ok(
+  "second scan is a no-op (idempotent) — the load-bearing assertion",
+  s2?.created === 0 && s2?.superseded === 0 && s2?.deleted === 0,
+  \`created \${s2?.created}, superseded \${s2?.superseded}, deleted \${s2?.deleted}\`,
+);`,
+      output: `$ node scripts/qc/pr_374.mjs --preview
+
+  \u2713 target reachable (https://wcrp-feat-drive-ingestion-service.hacolby.workers.dev)
+  \u2713 both roots are seeded
+  \u2713 onboarding root maps to EMAIL_ONBOARDING_MATERIALS
+  \u2713 research root maps to DEEP_RESEARCH_FINDINGS
+  \u2713 POST /ingest with a wrong-typed rootId returns 400 (Zod), not a 500
+  \u2713 POST /ingest with a well-shaped but nonexistent rootId returns 404
+  \u2713 POST /ingest with an empty body ingests ALL active roots
+  \u2713 scan by real rootId ingests the onboarding folder: 72 nodes (61 docs + 11 folders)
+  \u2713 second scan is a no-op (idempotent) — the load-bearing assertion
+  \u2713 documents are listed with a joined folder name, count == 61
+  \u2713 the 1971 Blueprints PDF is catalogued with a non-zero size
+  \u2713 the Floor Plans with Measurements PDF is catalogued with a non-zero size
+  \u2713 sharing is recorded on every document from the allowed vocabulary
+  \u2713 GET /documents accepts a numeric folderId filter and narrows the result set
+  \u2713 GET /documents rejects a non-numeric folderId with 400
+
+15 passed, 0 failed
+
+
+$ node scripts/qc/pr_374.mjs      # production regression guard, pre-merge
+
+  \u2713 target reachable (https://core-remodel.hacolby.workers.dev)
+    new routes 404 on production — pending merge/deploy, reported rather than failed
+
+1 passed, 0 failed`,
+      migrations: [
+        {
+          tag: "0174_nifty_miek",
+          appliedRemote: true,
+          note: "Applied via pnpm run migrate:remote and verified: all six drive_* tables present on the remote DB, and the pre-existing drive_list* tables (driving routes, an unrelated feature) untouched.",
+        },
+      ],
+    },
+  },
   "mcp-oauth-one-year-ttls": {
     slug: "mcp-oauth-one-year-ttls",
     branch: "fix/mcp-oauth-one-year-ttls",
