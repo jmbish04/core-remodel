@@ -111,6 +111,9 @@ driveIngestRouter.get("/documents", async (c) => {
       sizeBytes: driveDocuments.sizeBytes,
       webViewUrl: driveDocuments.webViewUrl,
       sharing: driveDocuments.sharing,
+      // The document's own FK, not a copy of another table's data — fine to
+      // return alongside the joined folderName.
+      folderId: driveDocuments.folderId,
       folderName: driveFolders.name,
     })
     .from(driveDocuments)

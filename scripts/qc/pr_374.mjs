@@ -43,12 +43,25 @@ async function main() {
   await assertReachable(client, checks);
 
   const roots = await client.get("/api/admin/drive/roots");
-  const surfaceDeployed = roots.status === 200;
-  if (!surfaceDeployed) {
+  // 404 is the ONLY status that honestly means "this code isn't deployed
+  // here yet" — gate on that exact value, not on "anything but 200". A 500
+  // (broken route) or 401 (auth regression) on a target that's SUPPOSED to
+  // have this surface must fail loudly, not be swallowed as "pending".
+  if (roots.status === 404) {
     checks.info(
-      `pending merge/deploy — GET /api/admin/drive/roots returned ${roots.status}. ` +
-        "Expected on production pre-merge; every assertion below is skipped rather than failed.",
+      "pending merge/deploy — GET /api/admin/drive/roots returned 404. Expected on " +
+        "production pre-merge; every assertion below is skipped rather than failed.",
     );
+    checks.finish();
+    return;
+  }
+  if (
+    !checks.ok(
+      "GET /api/admin/drive/roots returns 200 (the surface is expected to exist on this target)",
+      roots.status === 200,
+      `status ${roots.status}, body ${JSON.stringify(roots.json)}`,
+    )
+  ) {
     checks.finish();
     return;
   }
@@ -135,19 +148,29 @@ async function main() {
   );
 
   // --- folderId filter on the documents endpoint ----------------------------
-  // ponytail: the route doesn't return folderId (only the joined folderName),
-  // and there's no folders-list endpoint, so a real folder id isn't
-  // discoverable via the API. Assert the shape we CAN verify: a syntactically
-  // valid filter narrows results to <= the unfiltered count, and a bad one 400s.
-  const filtered = await client.get(
-    `/api/admin/drive/documents?rootId=${onboarding?.id}&folderId=1`,
-  );
+  // Real narrowing check, not a tautology: a bare AND-on-rootId would ALWAYS
+  // satisfy "filtered <= unfiltered", so that alone proves nothing about
+  // whether the filter does anything. Get a genuine folder id from the
+  // unfiltered list (the route now selects driveDocuments.folderId — the
+  // document's own FK, not a denormalized copy), then require the filtered
+  // set to be a NON-EMPTY STRICT SUBSET: smaller than the total, and every
+  // returned row actually belongs to the requested folder.
+  const targetFolderId = list[0]?.folderId;
+  const filtered = targetFolderId
+    ? await client.get(
+        `/api/admin/drive/documents?rootId=${onboarding?.id}&folderId=${targetFolderId}`,
+      )
+    : null;
   checks.ok(
-    "GET /documents accepts a numeric folderId filter and narrows the result set",
-    filtered.status === 200 &&
+    "GET /documents?folderId= returns only that folder's rows, and fewer than the unfiltered total",
+    Boolean(targetFolderId) &&
+      filtered.status === 200 &&
       Array.isArray(filtered.json?.documents) &&
-      filtered.json.documents.length <= list.length,
-    `status ${filtered.status}, count ${filtered.json?.documents?.length}`,
+      filtered.json.documents.length > 0 &&
+      filtered.json.documents.length < list.length &&
+      filtered.json.documents.every((d) => d.folderId === targetFolderId),
+    `targetFolderId ${targetFolderId}, filtered ${filtered?.json?.documents?.length}/${list.length}, ` +
+      `distinct folderIds in filtered: ${[...new Set((filtered?.json?.documents ?? []).map((d) => d.folderId))].join(", ")}`,
   );
   const badFolderId = await client.get(
     `/api/admin/drive/documents?rootId=${onboarding?.id}&folderId=abc`,
