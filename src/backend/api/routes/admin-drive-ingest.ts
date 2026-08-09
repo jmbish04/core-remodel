@@ -18,6 +18,11 @@ const createRootSchema = z.object({
   useCaseKey: z.enum(["EMAIL_ONBOARDING_MATERIALS", "DEEP_RESEARCH_FINDINGS"]),
 });
 
+/** Omitted rootId means "ingest every active root" — see the handler below. */
+const ingestBodySchema = z.object({
+  rootId: z.number().int().positive().optional(),
+});
+
 driveIngestRouter.get("/roots", async (c) => {
   const db = drizzle(c.env.DB);
   const rows = await db
@@ -56,17 +61,47 @@ driveIngestRouter.post("/roots", async (c) => {
 });
 
 driveIngestRouter.post("/ingest", async (c) => {
-  const body = (await c.req.json().catch(() => ({}))) as { rootId?: number };
-  const summaries = body.rootId
-    ? [await ingestDriveFolder(c.env, body.rootId)]
-    : await ingestAllActiveRoots(c.env);
-  return c.json({ summaries });
+  const parsed = ingestBodySchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: parsed.error.message }, 400);
+  const { rootId } = parsed.data;
+
+  if (rootId === undefined) {
+    return c.json({ summaries: await ingestAllActiveRoots(c.env) });
+  }
+
+  // A syntactically valid id for a root that doesn't exist is a distinct
+  // failure from malformed input — check first so it 404s instead of letting
+  // ingestDriveFolder's throw fall through to the app's generic 500.
+  const db = drizzle(c.env.DB);
+  const [root] = await db
+    .select({ id: driveRoots.id })
+    .from(driveRoots)
+    .where(eq(driveRoots.id, rootId))
+    .limit(1);
+  if (!root) return c.json({ error: `no drive root with id ${rootId}` }, 404);
+
+  return c.json({ summaries: [await ingestDriveFolder(c.env, rootId)] });
 });
 
 driveIngestRouter.get("/documents", async (c) => {
   const db = drizzle(c.env.DB);
   const rootId = Number(c.req.query("rootId"));
   if (!Number.isFinite(rootId)) return c.json({ error: "rootId is required" }, 400);
+
+  const folderIdParam = c.req.query("folderId");
+  let folderId: number | undefined;
+  if (folderIdParam !== undefined) {
+    folderId = Number(folderIdParam);
+    if (!Number.isFinite(folderId)) return c.json({ error: "folderId must be numeric" }, 400);
+  }
+
+  const conditions = [
+    eq(driveDocuments.rootId, rootId),
+    eq(driveDocuments.isActive, true),
+    eq(driveDocuments.isDeleted, false),
+  ];
+  if (folderId !== undefined) conditions.push(eq(driveDocuments.folderId, folderId));
+
   // Folder NAME comes from a join — it is never denormalized onto the doc row.
   const rows = await db
     .select({
@@ -80,12 +115,6 @@ driveIngestRouter.get("/documents", async (c) => {
     })
     .from(driveDocuments)
     .innerJoin(driveFolders, eq(driveDocuments.folderId, driveFolders.id))
-    .where(
-      and(
-        eq(driveDocuments.rootId, rootId),
-        eq(driveDocuments.isActive, true),
-        eq(driveDocuments.isDeleted, false),
-      ),
-    );
+    .where(and(...conditions));
   return c.json({ documents: rows });
 });

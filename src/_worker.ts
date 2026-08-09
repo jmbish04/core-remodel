@@ -474,13 +474,37 @@ const legacyHandler: ExportedHandler<Env> = {
             triggeredBy: "cron",
           });
           try {
+            const roots = await listActiveRootsForCron(env);
             const summaries: IngestSummary[] = [];
-            for (const root of await listActiveRootsForCron(env)) {
-              summaries.push(
-                await run.step(`root:${root.label}`, () => ingestDriveFolder(env, root.id)),
-              );
+            let failures = 0;
+            for (const root of roots) {
+              // One root's failure must not stop the rest — mirrors the same
+              // guard in ingestAllActiveRoots. run.step already recorded the
+              // error against this root's own step; catch here so the loop
+              // keeps going instead of aborting the whole nightly run.
+              try {
+                summaries.push(
+                  await run.step(`root:${root.label}`, () => ingestDriveFolder(env, root.id)),
+                );
+              } catch (err) {
+                failures++;
+                summaries.push({
+                  rootId: root.id,
+                  label: root.label,
+                  seen: 0,
+                  created: 0,
+                  superseded: 0,
+                  deleted: 0,
+                  unchanged: 0,
+                  errors: [err instanceof Error ? err.message : String(err)],
+                });
+              }
             }
-            await run.succeed({ summaries });
+            if (roots.length > 0 && failures === roots.length) {
+              await run.fail(new Error(`all ${roots.length} drive root(s) failed to ingest`));
+            } else {
+              await run.succeed({ summaries });
+            }
           } catch (err) {
             await run.fail(err);
           }

@@ -10,7 +10,9 @@
   // pointed to. `custom_domain` provisions the DNS + TLS on the hacolby.app zone.
   // Stripped from preview workers by scripts/deploy-preview.mjs (workers.dev only).
   "routes": [{ "pattern": "remodel.hacolby.app", "custom_domain": true }],
-  "rules": [{ "type": "CompiledWasm", "globs": ["**/*.wasm"], "fallthrough": true }],
+  "rules": [
+    { "type": "CompiledWasm", "globs": ["**/*.wasm"], "fallthrough": true }
+  ],
   "observability": {
     "enabled": true,
     "head_sampling_rate": 1,
@@ -93,7 +95,7 @@
       "binding": "PHOTO_INDEX",
       "index_name": "core-remodel-photos",
       "remote": true,
-    },
+    },    
   ],
   "workflows": [
     {
@@ -174,8 +176,8 @@
     // how often showrooms actually change a clearance page, and the sweep skips
     // any page whose content hash is unchanged — so a quiet week is cheap.
     // 0 9 * * 1 — weekly provider price refresh (0029). Published list prices
-    // change without notice; without a refreshed catalog every cost number on
-    // /admin/system/agents/usage is a guess.
+// change without notice; without a refreshed catalog every cost number on
+// /admin/system/agents/usage is a guess.
     "crons": ["0 14 * * *", "* * * * *", "15 */4 * * *", "30 13 * * 1", "0 9 * * 1", "0 11 * * *"],
   },
   "kv_namespaces": [
@@ -198,14 +200,14 @@
       "remote": true,
     },
     // Ad-hoc agent memories from any endpoint including mcp tools
-    // this is intended to provide agents a place to park memories,
+    // this is intended to provide agents a place to park memories, 
     // notes, works in progress that either don't have a place in d1 yet,
     // d1 is blocked for some reason or outage, etc.
     {
       "binding": "AGENT_ADHOC_MEMORY_KV",
       "id": "d2c2b93046e742b88c24915e63c7f0ad",
       "remote": true,
-    },
+    }
   ],
   "d1_databases": [
     {
@@ -238,90 +240,90 @@
     {
       "binding": "GITHUB_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GH_TOKEN",
+      "secret_name": "GH_TOKEN"
     },
     {
       "binding": "CLOUDFLARE_ACCOUNT_ID",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_ACCOUNT_ID",
+      "secret_name": "CLOUDFLARE_ACCOUNT_ID"
     },
     {
       "binding": "CLOUDFLARE_IMAGES_STREAM_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_IMAGES_STREAM_TOKEN",
+      "secret_name": "CLOUDFLARE_IMAGES_STREAM_TOKEN"
     },
     {
       "binding": "CF_IMAGES_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_IMAGES_STREAM_TOKEN",
+      "secret_name": "CLOUDFLARE_IMAGES_STREAM_TOKEN"
     },
     {
       "binding": "CLOUDFLARE_WRANGLER_API_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_WRANGLER_API_TOKEN",
+      "secret_name": "CLOUDFLARE_WRANGLER_API_TOKEN"
     },
     {
       "binding": "WORKER_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "WORKER_API_KEY",
+      "secret_name": "WORKER_API_KEY"
     },
     {
       "binding": "AI_GATEWAY_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_AI_GATEWAY_TOKEN",
+      "secret_name": "CLOUDFLARE_AI_GATEWAY_TOKEN"
     },
     {
       "binding": "CF_BROWSER_RENDER_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLOUDFLARE_BROWSER_RENDER_TOKEN",
+      "secret_name": "CLOUDFLARE_BROWSER_RENDER_TOKEN"
     },
     {
       "binding": "JULES_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "JULES_API_KEY",
+      "secret_name": "JULES_API_KEY"
     },
     {
       "binding": "GEMINI_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_API_KEY",
+      "secret_name": "GOOGLE_API_KEY"
     },
     {
       "binding": "ANTHROPIC_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "ANTHROPIC_API_KEY",
+      "secret_name": "ANTHROPIC_API_KEY"
     },
     {
       "binding": "FAL_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "FAL_API_KEY",
+      "secret_name": "FAL_API_KEY"
     },
     {
       "binding": "REPLICATE_API_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "REPLICATE_API_TOKEN",
+      "secret_name": "REPLICATE_API_TOKEN"
     },
     {
       "binding": "GOOGLE_MAPS_API",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_MAPS_API",
+      "secret_name": "GOOGLE_MAPS_API"
     },
     {
       "binding": "GOOGLE_SEARCH_API_KEY",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_SEARCH_API_KEY",
+      "secret_name": "GOOGLE_SEARCH_API_KEY"
     },
     {
       // Tessie hosted Fleet API bearer token. Read via getTessieToken().
       "binding": "TESSIE_API_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "TESSIE_API_TOKEN",
+      "secret_name": "TESSIE_API_TOKEN"
     },
     {
       // VIN of the vehicle ("Betsy") Tessie commands are addressed to.
       // Read via getTeslaVin().
       "binding": "TESLA_BETSY_VIN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "TESLA_BETSY_VIN",
+      "secret_name": "TESLA_BETSY_VIN"
     },
     // Tesla webhook/telemetry auth reuses the existing WORKER_API_KEY binding
     // (above) — no dedicated webhook secret.
@@ -329,41 +331,41 @@
       // ClickUp task mirror (0009): consumed by RemodelOrchestrator + /api/clickup.
       "binding": "CLICKUP_TOKEN",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLICKUP_TOKEN",
+      "secret_name": "CLICKUP_TOKEN"
     },
     {
       "binding": "CLICKUP_TEAM_ID",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "CLICKUP_TEAM_ID",
+      "secret_name": "CLICKUP_TEAM_ID"
     },
     {
       // Gmail comms hub (P3-07): service-account DWD. The private key exceeds
       // the secrets-store value limit, so it is SPLIT — concatenate PT_1 + PT_2.
       "binding": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1",
+      "secret_name": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_1"
     },
     {
       "binding": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2",
+      "secret_name": "GOOGLE_CREDS_SA_PRIVATE_KEY_PT_2"
     },
     {
       "binding": "GOOGLE_CREDS_SA_CLIENT_EMAIL",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_CREDS_SA_CLIENT_EMAIL",
+      "secret_name": "GOOGLE_CREDS_SA_CLIENT_EMAIL"
     },
     {
       // Google Photos Picker API (0019): 3-legged OAuth client. Populate via
       // `pnpm run secrets:google-photos` (parses the downloaded client-secret JSON).
       "binding": "GOOGLE_PHOTOS_CLIENT_ID",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_PHOTOS_CLIENT_ID",
+      "secret_name": "GOOGLE_PHOTOS_CLIENT_ID"
     },
     {
       "binding": "GOOGLE_PHOTOS_CLIENT_SECRET",
       "store_id": "8c42fa70938644e0a8a109744467375f",
-      "secret_name": "GOOGLE_PHOTOS_CLIENT_SECRET",
+      "secret_name": "GOOGLE_PHOTOS_CLIENT_SECRET"
     },
   ],
   "durable_objects": {
