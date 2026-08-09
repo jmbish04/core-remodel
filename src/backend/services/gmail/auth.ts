@@ -42,20 +42,26 @@ const TOKEN_URL = "https://oauth2.googleapis.com/token";
  * `gmail.compose` supersedes `gmail.send`; both of the old names were dropped
  * from the delegation list, which is why they had to go.
  *
- * `drive.readonly` was tried here for the Drive ingestion service (2026-08-08)
- * and reverted: the preview probe (`/api/admin/drive-auth-probe`) got
- * `unauthorized_client` from Google's token endpoint — the service account's
- * domain-wide delegation does NOT currently list `drive.readonly`, so
- * requesting it broke the *entire* JWT-bearer exchange, Gmail included. Do not
- * re-add it until a Workspace Admin adds the scope to the SA's client id (or a
- * second Drive-only service account is provisioned) — see
- * `.superpowers/sdd/2026-08-08-drive-ingestion-service/task-1-report.md`.
+ * `drive.readonly` was added for the Drive ingestion service. First attempt
+ * (2026-08-08) got `unauthorized_client` from the preview probe
+ * (`/api/admin/drive-auth-probe`) — the service account's domain-wide
+ * delegation did not yet list `drive.readonly`, so requesting it broke the
+ * *entire* JWT-bearer exchange, Gmail included. A Workspace Admin has since
+ * added `drive.readonly` to the SA's client id delegation, and the same
+ * preview probe confirmed both the token mint and a real Drive read succeed
+ * with it — see
+ * `.superpowers/sdd/2026-08-08-drive-ingestion-service/task-1-report.md` for
+ * both runs. It covers file metadata, content download/export, AND the
+ * `permissions[]` array the sharing derivation needs. The full `drive` scope
+ * is deliberately NOT requested — the organize/rename tools that would need
+ * it are out of scope here.
  */
 export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/gmail.modify",
   "https://www.googleapis.com/auth/gmail.compose",
   "https://www.googleapis.com/auth/gmail.labels",
   "https://www.googleapis.com/auth/gmail.settings.basic",
+  "https://www.googleapis.com/auth/drive.readonly",
 ];
 
 const GMAIL_SCOPES = GOOGLE_SCOPES.join(" ");
