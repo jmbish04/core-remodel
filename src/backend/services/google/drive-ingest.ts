@@ -135,11 +135,11 @@ async function syncFolders(
   const byDriveId = new Map(existing.map((f) => [f.driveId, f]));
 
   for (const part of chunk(live)) {
-    const inserts: (typeof driveFolders.$inferInsert)[] = [];
+    const creates: (typeof driveFolders.$inferInsert)[] = [];
     for (const node of part) {
       const row = byDriveId.get(node.driveId);
       if (!row) {
-        inserts.push({
+        creates.push({
           driveId: node.driveId,
           rootId: root.id,
           parentFolderId: null, // linked in the reparent pass below
@@ -148,29 +148,51 @@ async function syncFolders(
           sharing: node.sharing,
           driveModifiedAt: node.modifiedAt,
         });
-        summary.created++;
       } else if (row.name !== node.name) {
+        // Rename: sequential write + compensating reactivation on failure —
+        // mirrors the document supersede path. db.batch() cannot feed the new
+        // row's generated id forward and db.transaction() does not work on D1
+        // (error 7500), so this cannot be one atomic unit; a read between the
+        // two writes below is outside any atomic unit, and that gap is real.
         await db
           .update(driveFolders)
           .set({ isActive: false, updatedAt: new Date() })
           .where(eq(driveFolders.id, row.id));
-        inserts.push({
-          driveId: node.driveId,
-          rootId: root.id,
-          parentFolderId: null,
-          name: node.name,
-          webViewUrl: node.webViewUrl,
-          sharing: node.sharing,
-          driveModifiedAt: node.modifiedAt,
-        });
-        summary.superseded++;
+        try {
+          const [inserted] = await db
+            .insert(driveFolders)
+            .values({
+              driveId: node.driveId,
+              rootId: root.id,
+              parentFolderId: null,
+              name: node.name,
+              webViewUrl: node.webViewUrl,
+              sharing: node.sharing,
+              driveModifiedAt: node.modifiedAt,
+            })
+            .returning({ id: driveFolders.id });
+          if (inserted) {
+            await db
+              .update(driveFolders)
+              .set({ supersededById: inserted.id })
+              .where(eq(driveFolders.id, row.id));
+          }
+          summary.superseded++;
+        } catch (err) {
+          // Compensating write: never leave a row deactivated with no replacement.
+          await db.update(driveFolders).set({ isActive: true }).where(eq(driveFolders.id, row.id));
+          summary.errors.push(
+            `rename ${node.name} (${node.driveId}): ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
       } else {
         summary.unchanged++;
       }
     }
-    if (inserts.length > 0) {
-      const stmts = inserts.map((v) => db.insert(driveFolders).values(v));
+    if (creates.length > 0) {
+      const stmts = creates.map((v) => db.insert(driveFolders).values(v));
       await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
+      summary.created += creates.length;
     }
   }
 
@@ -257,10 +279,17 @@ async function syncDocuments(
 
   const actions = diffNodes(hashable, existing, (n) => hashes.get(n.driveId)?.hash ?? "");
 
-  const rowFor = (node: DriveNode): typeof driveDocuments.$inferInsert => ({
+  // FK lookup, not cast: driveDocuments.folderId is NOT NULL, so a document
+  // whose parent folder didn't make it into the map (excluded, or any
+  // folder-sync edge case) must be rejected rather than written with a
+  // coerced/undefined value — see the repo's FK doctrine.
+  const folderIdFor = (node: DriveNode): number | undefined =>
+    folderIdByDriveId.get(node.parentDriveId ?? root.driveFolderId);
+
+  const rowFor = (node: DriveNode, folderId: number): typeof driveDocuments.$inferInsert => ({
     driveId: node.driveId,
     rootId: root.id,
-    folderId: folderIdByDriveId.get(node.parentDriveId ?? root.driveFolderId) as number,
+    folderId,
     name: node.name,
     mimeType: node.mimeType,
     sizeBytes: node.sizeBytes,
@@ -274,12 +303,22 @@ async function syncDocuments(
 
   const creates = actions.filter((a) => a.kind === "create");
   for (const part of chunk(creates)) {
-    const stmts = part.map((a) =>
-      db.insert(driveDocuments).values(rowFor((a as { node: DriveNode }).node)),
-    );
-    if (stmts.length === 0) continue;
+    const rows: (typeof driveDocuments.$inferInsert)[] = [];
+    for (const a of part) {
+      const node = (a as { node: DriveNode }).node;
+      const folderId = folderIdFor(node);
+      if (folderId == null) {
+        summary.errors.push(
+          `create ${node.name} (${node.driveId}): no folder row for parent ${node.parentDriveId ?? root.driveFolderId}`,
+        );
+        continue;
+      }
+      rows.push(rowFor(node, folderId));
+    }
+    if (rows.length === 0) continue;
+    const stmts = rows.map((v) => db.insert(driveDocuments).values(v));
     await db.batch(stmts as [(typeof stmts)[number], ...(typeof stmts)[number][]]);
-    summary.created += part.length;
+    summary.created += rows.length;
   }
 
   // Supersede: deactivate the old row, then insert the replacement. These
@@ -288,6 +327,13 @@ async function syncDocuments(
   // between the two writes is outside any atomic unit; that gap is real.
   for (const action of actions) {
     if (action.kind !== "supersede") continue;
+    const folderId = folderIdFor(action.node);
+    if (folderId == null) {
+      summary.errors.push(
+        `supersede ${action.node.name} (${action.node.driveId}): no folder row for parent ${action.node.parentDriveId ?? root.driveFolderId}`,
+      );
+      continue;
+    }
     await db
       .update(driveDocuments)
       .set({ isActive: false, updatedAt: new Date() })
@@ -295,7 +341,7 @@ async function syncDocuments(
     try {
       const [inserted] = await db
         .insert(driveDocuments)
-        .values({ ...rowFor(action.node), revisionNumber: 1 })
+        .values({ ...rowFor(action.node, folderId), revisionNumber: 1 })
         .returning({ id: driveDocuments.id });
       if (inserted) {
         await db
