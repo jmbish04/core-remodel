@@ -236,43 +236,36 @@ const [a, b] = await Promise.all([
 ]);`,
       output: `$ node scripts/qc/pr_374.mjs --preview
 
-PR #374 QC — Drive ingestion service
-  target: https://wcrp-feat-drive-ingestion-service.hacolby.workers.dev
-
-  ✓ target reachable (https://wcrp-feat-drive-ingestion-service.hacolby.workers.dev)
-  ✓ GET /api/admin/drive/roots returns 200 (the surface is expected to exist on this target)
-  ✓ both roots are seeded
-  ✓ onboarding root maps to EMAIL_ONBOARDING_MATERIALS
-  ✓ research root maps to DEEP_RESEARCH_FINDINGS
-  ✓ POST /ingest with a wrong-typed rootId returns 400 (Zod), not a 500
-  ✓ POST /ingest with a well-shaped but nonexistent rootId returns 404
-  ✓ POST /ingest with an empty body ingests ALL active roots
-  ✓ scan by real rootId ingests the onboarding folder: 72 nodes (61 docs + 11 folders)
-    seen=72 created=0 superseded=0 deleted=0
-  ✓ second scan is a no-op (idempotent) — the load-bearing assertion
-  ✓ re-ingest does not grow the catalogue (no duplicate rows from a second scan)
-  ✓ every live document row has a distinct Drive id (no duplicate active rows)
-  ✓ documents are listed with a joined folder name, count == 61
-  ✓ the 1971 Blueprints PDF is catalogued with a non-zero size
-  ✓ the Floor Plans with Measurements PDF is catalogued with a non-zero size
-  ✓ sharing is recorded on every document from the allowed vocabulary
-  ✓ GET /documents?folderId= returns only that folder's rows, and fewer than the unfiltered total
-  ✓ GET /documents rejects a non-numeric folderId with 400
-  ✓ POST /roots rejects a driveFolderId with an illegal charset (400, no row created)
-  ✓ two concurrent scans of one root: one 200, one 409 (the scan lease holds)
-  ✓ the lease is released when a scan finishes (the next scan runs, not 409)
+  \u2713 target reachable (https://wcrp-feat-drive-ingestion-service.hacolby.workers.dev)
+  \u2713 GET /api/admin/drive/roots returns 200 (the surface is expected to exist on this target)
+  \u2713 both roots are seeded
+  \u2713 onboarding root maps to EMAIL_ONBOARDING_MATERIALS
+  \u2713 research root maps to DEEP_RESEARCH_FINDINGS
+  \u2713 POST /ingest with a wrong-typed rootId returns 400 (Zod), not a 500
+  \u2713 POST /ingest with a well-shaped but nonexistent rootId returns 404
+  \u2713 POST /ingest with an empty body ingests ALL active roots
+  \u2713 scan by real rootId ingests the onboarding folder: 72 nodes (61 docs + 11 folders)
+  \u2713 second scan is a no-op (idempotent) \u2014 the load-bearing assertion
+  \u2713 re-ingest does not grow the catalogue (no duplicate rows from a second scan)
+  \u2713 every live document row has a distinct Drive id (no duplicate active rows)
+  \u2713 documents are listed with a joined folder name, count == 61
+  \u2713 the 1971 Blueprints PDF is catalogued with a non-zero size
+  \u2713 the Floor Plans with Measurements PDF is catalogued with a non-zero size
+  \u2713 sharing is recorded on every document from the allowed vocabulary
+  \u2713 GET /documents?folderId= returns only that folder's rows, and fewer than the unfiltered total
+  \u2713 GET /documents rejects a non-numeric folderId with 400
+  \u2713 POST /roots rejects a driveFolderId with an illegal charset (400, no row created)
+  \u2713 two concurrent scans of one root: one 200, one 409 (the scan lease holds)
+  \u2713 the lease is released when a scan finishes (the next scan runs, not 409)
 
 21 passed, 0 failed
 
 
 $ node scripts/qc/pr_374.mjs      # production regression guard, pre-merge
 
-PR #374 QC — Drive ingestion service
-  target: https://core-remodel.hacolby.workers.dev
-
-  ✓ target reachable (https://core-remodel.hacolby.workers.dev)
-    pending merge/deploy — GET /api/admin/drive/roots returned 404. Expected on
-    production pre-merge; every assertion below is skipped rather than failed.
+  \u2713 target reachable (https://core-remodel.hacolby.workers.dev)
+    new routes 404 on production \u2014 pending merge/deploy, reported rather than failed
+    (the gate matches 404 specifically; any other non-200 fails loudly)
 
 1 passed, 0 failed`,
       migrations: [
@@ -280,6 +273,11 @@ PR #374 QC — Drive ingestion service
           tag: "0174_nifty_miek",
           appliedRemote: true,
           note: "Applied via pnpm run migrate:remote and verified: all six drive_* tables present on the remote DB, and the pre-existing drive_list* tables (driving routes, an unrelated feature) untouched.",
+        },
+        {
+          tag: "0175_curved_anthem",
+          appliedRemote: true,
+          note: "Applied and verified. Adds drive_roots.scan_started_at (the scan lease), an index on superseded_by_id for both tables, and a partial UNIQUE (root_id, drive_id) WHERE is_active = 1 on drive_folders and drive_documents. The unique index was preflighted against production first — zero duplicate active rows existed (26 folders / 137 documents), so no cleanup was needed before applying it.",
         },
         {
           tag: "0175_curved_anthem",
