@@ -209,3 +209,7 @@ export * from "./pascal/pascal_studies";
 export * from "./pascal/pascal_variants";
 export * from "./pascal/pascal_snapshots";
 export * from "./pascal/pascal_scene_events";
+
+// Google Drive ingestion (PR 1) — roots, folders, documents. NOTE: distinct
+// from ./drives/index, which is DRIVING routes (Tesla drive lists).
+export * from "./google-drive/index";
